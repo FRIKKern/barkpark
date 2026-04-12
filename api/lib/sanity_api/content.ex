@@ -339,11 +339,26 @@ defmodule SanityApi.Content do
   defp tap_broadcast(result, dataset, type) do
     case result do
       {:ok, doc} ->
-        Phoenix.PubSub.broadcast(
-          SanityApi.PubSub,
-          "documents:#{dataset}",
-          {:document_changed, %{type: type, doc_id: doc.doc_id, action: :mutate}}
-        )
+        msg = %{
+          type: type,
+          doc_id: doc.doc_id,
+          action: :mutate,
+          doc: %{
+            doc_id: doc.doc_id,
+            title: doc.title,
+            status: doc.status,
+            content: doc.content,
+            updated_at: doc.updated_at
+          },
+          sender: self()
+        }
+
+        # Broadcast to global topic (for doc lists, dashboard counts)
+        Phoenix.PubSub.broadcast(SanityApi.PubSub, "documents:#{dataset}", {:document_changed, msg})
+
+        # Broadcast to doc-specific topic (for editors viewing this doc)
+        pub_id = published_id(doc.doc_id)
+        Phoenix.PubSub.broadcast(SanityApi.PubSub, "doc:#{dataset}:#{type}:#{pub_id}", {:doc_updated, msg})
 
         {:ok, doc}
 

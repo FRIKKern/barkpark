@@ -14,18 +14,77 @@ defmodule SanityApiWeb.Studio.StudioLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(SanityApi.PubSub, "documents:#{@dataset}")
     end
-    {:ok, assign(socket, page_title: "Studio")}
+    {:ok, assign(socket, page_title: "Studio", subscribed_doc: nil)}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     path = Map.get(params, "path", [])
-    {:noreply, socket |> assign(nav_path: path) |> rebuild_panes()}
+    socket = socket |> assign(nav_path: path) |> rebuild_panes() |> subscribe_to_doc()
+    {:noreply, socket}
   end
 
+  # Doc-specific update — just patch the editor form, no rebuild
   @impl true
-  def handle_info({:document_changed, _}, socket) do
-    {:noreply, rebuild_panes(socket)}
+  def handle_info({:doc_updated, %{sender: sender, doc: doc_data}}, socket) do
+    if sender != self() && socket.assigns[:editor_doc] do
+      # Another user edited this doc — update form values live
+      schema = socket.assigns[:editor_schema]
+      updated_form = doc_data_to_form(doc_data, schema)
+      {:noreply, assign(socket, editor_form: updated_form, save_status: "Updated by another user")}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Global doc change — only update doc list counts, not full rebuild
+  @impl true
+  def handle_info({:document_changed, %{sender: sender, type: type}}, socket) do
+    if sender != self() do
+      # Only rebuild if we're viewing this type's doc list
+      viewing_type = Enum.at(socket.assigns.nav_path, 0)
+      if viewing_type == type do
+        {:noreply, rebuild_panes(socket)}
+      else
+        {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Subscribe to the specific doc being edited
+  defp subscribe_to_doc(socket) do
+    old_sub = socket.assigns[:subscribed_doc]
+
+    # Unsubscribe from old doc
+    if old_sub do
+      Phoenix.PubSub.unsubscribe(SanityApi.PubSub, old_sub)
+    end
+
+    # Subscribe to new doc if editing
+    case socket.assigns do
+      %{editor_type: type, editor_doc: %{doc_id: doc_id}} when not is_nil(type) ->
+        topic = "doc:#{@dataset}:#{type}:#{Content.published_id(doc_id)}"
+        Phoenix.PubSub.subscribe(SanityApi.PubSub, topic)
+        assign(socket, subscribed_doc: topic)
+
+      _ ->
+        assign(socket, subscribed_doc: nil)
+    end
+  end
+
+  defp doc_data_to_form(doc_data, schema) do
+    base = %{"title" => doc_data.title || "", "status" => doc_data.status || "draft"}
+    if schema do
+      Enum.reduce(schema.fields, base, fn field, acc ->
+        key = field["name"]
+        val = if key in ["title", "status"], do: Map.get(acc, key), else: get_in(doc_data.content || %{}, [key]) || ""
+        Map.put(acc, key, val)
+      end)
+    else
+      base
+    end
   end
 
   @impl true
