@@ -1,187 +1,363 @@
-# sanity-tui
+# NextGen CMS
 
-A terminal recreation of the [Sanity Studio](https://www.sanity.io/studio) Structure experience — multi-pane, schema-driven, expanding-right navigation in your terminal.
-
-Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss).
+A headless CMS with a terminal-native Studio interface. Built with Go (TUI) and Elixir/Phoenix (API).
 
 ```
-▣ Studio  [Structure] Vision  Structure › Editorial › By Category › Technology › Getting Started…   ⌘K Search
-╭──────────────────────────┤╭──────────────────────────┤╭──────────────────────────┤╭──────────────────────────┤╭─────────────────────────────
-│ 📚 Structure             ││ 📚 Editorial             ││ 🏷 By Category           ││ Technology            3  ││ ● Getting Started… [published]
-│──────────────────────────││──────────────────────────││──────────────────────────││──────────────────────────││──────────────────────────────
-│ 📚 Editorial           › ││ 📄 Post                › ││ # Technology           › ││ ● Getting Started…      ││ ⚙ Post · 9 fields
-│ 💼 Project              › ││ 🔽 Posts by Status     › ││ # Design               › ││   2h ago                ││
-│ 🏷 Taxonomy             › ││ 🏷 Posts by Category   › ││ # Engineering          › ││ ● Why Headless CMS…     ││  TITLE
-│ ──────────────────────── ││ ──────────────────────── ││                          ││   26h ago               ││ ╭──────────────────────────╮
-│ ⚙ Settings              › ││ 📑 Page                › ││                          ││ ○ GROQ vs GraphQL…      ││ │Getting Started with…    │
-│                          ││                          ││                          ││   122h ago              ││ ╰──────────────────────────╯
+┌──────────────────────────────────────────────────────────────────┐
+│ ▣ Studio  [Structure]  Structure > Post > Getting Started...    │
+├──────────┬──────────┬──────────┬─────────────────────────────────┤
+│ Structure│ Post   8 │ ● Gettin │ ● Getting Started... [published]│
+│──────────│──────────│   2h ago │─────────────────────────────────│
+│ 📄 Post ›│ ● Gettin │ ● Why He │ 📄 Post · 9 fields              │
+│ 📑 Page ›│   2h ago │   26h ag │                                 │
+│ 👤 Author›│ ● Why He │ ○ Conten │  TITLE                         │
+│ 🏷 Categ ›│   26h ag │   50h ag │ ╭───────────────────────────╮  │
+│ 💼 Projec›│ ○ Conten │          │ │Getting Started with...    │  │
+│──────────│   50h ag │          │ ╰───────────────────────────╯  │
+│ ⚙ Settin›│          │          │                                 │
+└──────────┴──────────┴──────────┴─────────────────────────────────┘
+```
+
+## What is this
+
+- **Headless CMS** — content API for websites, apps, and services
+- **Terminal Studio** — manage content from your terminal with a Sanity-like multi-pane UI
+- **Developer-first** — edit source code on the server, rebuild instantly, connect from anywhere
+- **Sanity-compatible patterns** — draft/publish lifecycle, perspectives, mutations, schemas with visibility
+
+## Architecture
+
+```
+Your machine                    Server (Hetzner/any VPS)
+┌────────────┐                 ┌──────────────────────────┐
+│  Go TUI    │───HTTP/SSE────> │  Phoenix API  :4000      │
+│  (client)  │                 │  ├── Public queries       │
+└────────────┘                 │  ├── Authenticated CRUD   │
+                               │  ├── Media uploads        │
+Websites/Apps                  │  ├── SSE real-time         │
+┌────────────┐                 │  └── Schema management    │
+│  Frontend  │───HTTP GET────> │                            │
+└────────────┘                 │  PostgreSQL                │
+                               │  └── Documents, Schemas,  │
+                               │      Tokens, Media        │
+                               └──────────────────────────┘
 ```
 
 ## Quick Start
 
+### Prerequisites
+
+- **Go** 1.22+ — [go.dev/dl](https://go.dev/dl/)
+- **Elixir** 1.18+ — `brew install elixir`
+- **PostgreSQL** 17 — `brew install postgresql@17`
+
+### Setup
+
 ```bash
-git clone https://github.com/YOUR_USER/sanity-tui.git
-cd sanity-tui
-go mod tidy
-go run .
+git clone https://github.com/FRIKKern/nextgen-cms.git
+cd nextgen-cms
+
+# Start PostgreSQL
+brew services start postgresql@17
+
+# Setup Phoenix API
+cd api
+mix deps.get
+mix ecto.create
+mix ecto.migrate
+mix run priv/repo/seeds.exs
+cd ..
+
+# Run it
+make dev    # tmux: Claude Code + TUI + Phoenix
+# OR run separately:
+make api    # terminal 1: Phoenix on :4000
+make tui    # terminal 2: Go TUI
 ```
 
-Or build a binary:
+## Using the TUI
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move up/down |
+| `h` / `l` | Switch panes / drill in / go back |
+| `Enter` | Select / start editing a field |
+| `Esc` | Go back / cancel edit |
+| `Space` | Toggle boolean / cycle select options |
+| `Ctrl+S` | Save changes |
+| `Tab` | Next pane |
+| `q` | Quit |
+
+### Editing documents
+
+1. Navigate to a document type and select a document
+2. Press `Enter` on a field to edit it
+3. Type your changes, press `Enter` to confirm
+4. Press `Ctrl+S` to save to the API
+5. The `* Unsaved` indicator shows when you have pending changes
+
+## API
+
+Base URL: `http://localhost:4000`
+
+### Public (no auth, respects schema visibility)
 
 ```bash
-make build
-./sanity-tui
+# List published posts
+curl localhost:4000/v1/data/query/production/post
+
+# With perspective (published, drafts, raw)
+curl "localhost:4000/v1/data/query/production/post?perspective=drafts"
+
+# Single document
+curl localhost:4000/v1/data/doc/production/post/p1
+
+# Filter
+curl "localhost:4000/v1/data/query/production/post?filter=status=published"
 ```
 
-## Controls
+### Mutations (requires auth)
 
-| Key                    | Action                     |
-|------------------------|----------------------------|
-| `↑` / `k`             | Move up in current pane    |
-| `↓` / `j`             | Move down / scroll editor  |
-| `→` / `l` / `Tab`     | Switch to next pane        |
-| `←` / `h` / `Shift+Tab` | Switch to previous pane  |
-| `Enter`               | Drill into / select        |
-| `Esc` / `Backspace`   | Go back one level          |
-| `q` / `Ctrl+C`        | Quit                       |
+All writes go through one endpoint with a mutations array:
+
+```bash
+TOKEN="sanity-dev-token"
+AUTH="-H 'Authorization: Bearer $TOKEN'"
+
+# Create (always starts as draft)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"Hello World"}}]}'
+
+# Edit (patch fields)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"patch":{"id":"drafts.my-post","type":"post","set":{"title":"Updated"}}}]}'
+
+# Publish
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
+
+# Unpublish
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
+
+# Delete (both draft + published)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"delete":{"id":"my-post","type":"post"}}]}'
+```
+
+### Schemas (requires admin auth)
+
+```bash
+# List all schemas
+curl -H "Authorization: Bearer sanity-dev-token" \
+  localhost:4000/v1/schemas/production
+
+# Create a new document type
+curl -X POST localhost:4000/v1/schemas/production \
+  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "task",
+    "title": "Task",
+    "icon": "✅",
+    "visibility": "private",
+    "fields": [
+      {"name": "title", "title": "Title", "type": "string"},
+      {"name": "done", "title": "Done", "type": "boolean"},
+      {"name": "assignee", "title": "Assignee", "type": "reference", "refType": "author"}
+    ]
+  }'
+```
+
+### Media
+
+```bash
+# Upload
+curl -X POST localhost:4000/media/upload \
+  -H "Authorization: Bearer sanity-dev-token" \
+  -F "file=@photo.jpg"
+
+# List
+curl localhost:4000/media
+
+# Filter by type
+curl "localhost:4000/media?type=image"
+
+# Serve file
+curl localhost:4000/media/files/2026/04/photo-abc123.jpg
+
+# Delete
+curl -X DELETE localhost:4000/media/FILE_ID \
+  -H "Authorization: Bearer sanity-dev-token"
+```
+
+### Real-time (SSE)
+
+```bash
+curl -N -H "Authorization: Bearer sanity-dev-token" \
+  localhost:4000/v1/data/listen/production
+```
+
+The Go TUI uses this automatically — changes via API appear in the TUI instantly.
+
+## Draft/Published Model
+
+Follows Sanity's convention with separate document rows:
+
+| State | doc_id | Visible on public API |
+|-------|--------|-----------------------|
+| Draft | `drafts.my-post` | No |
+| Published | `my-post` | Yes |
+| Both (edited after publish) | `drafts.my-post` + `my-post` | Published version only |
+
+- `create` always makes a draft (`drafts.{id}`)
+- `publish` copies draft to published, removes draft
+- `unpublish` moves published back to draft
+- `discardDraft` deletes draft, keeps published
+
+**Perspectives** control what you see:
+- `published` (default on public API) — only published documents
+- `drafts` — prefers draft over published when both exist (studio view)
+- `raw` — everything, both versions
+
+## Schema Visibility
+
+Each document type has a visibility setting:
+
+- **`public`** — queryable via public API without auth (Post, Page, Author, etc.)
+- **`private`** — returns 404 on public API, requires auth token (Settings, Navigation, etc.)
+
+## Field Types
+
+| Type | Description | Extra options |
+|------|-------------|---------------|
+| `string` | Single-line text | |
+| `slug` | Auto-generated slug | |
+| `text` | Multi-line textarea | `rows` (default 3) |
+| `richText` | Block editor | |
+| `image` | Image upload | |
+| `select` | Dropdown | `options: ["a", "b"]` |
+| `boolean` | Toggle switch | |
+| `datetime` | Date + time | |
+| `color` | Color picker | |
+| `reference` | Link to another type | `refType: "author"` |
+| `array` | Repeatable list | |
+
+## Deploy to Hetzner
+
+### One-command setup
+
+From your local machine, deploy to a fresh Ubuntu VPS:
+
+```bash
+ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
+```
+
+This installs Elixir, Go, PostgreSQL natively (no Docker), builds everything, and starts the API as a systemd service.
+
+### Server workflow
+
+After setup, SSH in and work directly on the source:
+
+```bash
+ssh root@YOUR_VPS_IP
+cd /opt/nextgen-cms
+
+# Edit any file
+nano api/lib/sanity_api/content.ex
+
+# Rebuild and restart (one command)
+make rebuild
+
+# Check status
+make status
+make logs
+```
+
+### Available make commands
+
+| Command | Description |
+|---------|-------------|
+| `make rebuild` | Rebuild Phoenix + TUI, restart service |
+| `make restart` | Restart without rebuilding |
+| `make stop` | Stop the service |
+| `make status` | Show service status |
+| `make logs` | Tail service logs |
+| `make seed` | Re-seed the database |
+| `make migrate` | Run database migrations |
+| `make reset-db` | Drop, recreate, migrate, seed |
+
+### Connect your local TUI to the server
+
+```bash
+SANITY_API_URL=http://YOUR_VPS_IP:4000 go run .
+```
+
+### Update from GitHub
+
+```bash
+cd /opt/nextgen-cms && git pull && make rebuild
+```
+
+### Docker (alternative)
+
+If you prefer Docker over native install:
+
+```bash
+docker compose up -d
+```
 
 ## Project Structure
 
 ```
-sanity-tui/
-├── main.go          # Entry point
-├── schema.go        # Document type & field definitions
-├── structure.go     # Structure builder API + configuration
-├── store.go         # Document store / seed data
-├── tui.go           # Bubble Tea model, update, view
-├── styles.go        # Lip Gloss style definitions
-├── go.mod
-├── Makefile
-└── README.md
+nextgen-cms/
+├── main.go              # TUI entry point
+├── tui.go               # Bubble Tea model, panes, editor
+├── store.go             # API client (HTTP + SSE)
+├── schema.go            # Schema types, load from API
+├── structure.go         # Auto-generated nav tree
+├── styles.go            # Lip Gloss styles
+├── api/                 # Phoenix API server
+│   ├── lib/sanity_api/
+│   │   ├── content.ex       # Document + schema CRUD
+│   │   ├── media.ex         # File upload/storage
+│   │   └── auth.ex          # Token auth
+│   ├── lib/sanity_api_web/
+│   │   ├── router.ex        # All routes
+│   │   └── controllers/     # Query, Mutate, Schema, Media, Listen
+│   ├── priv/repo/
+│   │   ├── migrations/      # Database schema
+│   │   └── seeds.exs        # Seed data
+│   └── Dockerfile
+├── docker-compose.yml
+├── deploy.sh            # Hetzner VPS setup script
+├── dev.sh               # Tmux dev environment
+├── Makefile             # Server + dev commands
+└── CLAUDE.md            # AI agent documentation
 ```
 
-## Architecture
+## Tech Stack
 
-The code mirrors Sanity Studio's real three-layer architecture:
-
-### 1. Schemas → `schema.go`
-
-Define document types with typed fields. The editor auto-renders the right widget for each field type.
-
-```go
-var schemas = []Schema{
-    {
-        Name: "post", Title: "Post", Icon: "📄",
-        Fields: []Field{
-            {Name: "title", Title: "Title", Type: FieldString},
-            {Name: "slug",  Title: "Slug",  Type: FieldSlug},
-            {Name: "body",  Title: "Body",  Type: FieldRichText},
-            {Name: "author", Title: "Author", Type: FieldReference, RefType: "author"},
-            // ...
-        },
-    },
-}
-```
-
-**Supported field types:** `FieldString`, `FieldSlug`, `FieldText`, `FieldRichText`, `FieldImage`, `FieldSelect`, `FieldBoolean`, `FieldDatetime`, `FieldColor`, `FieldReference`, `FieldArray`
-
-### 2. Structure → `structure.go`
-
-Chainable builder API — identical pattern to Sanity's `S.list()` / `S.listItem()`:
-
-```go
-var rootStructure = List().ID("root").Title("Structure").Items(
-
-    ListItem().Title("Editorial").Icon("📚").Child(
-        List().ID("editorial").Title("Editorial").Items(
-            DocumentTypeListItem("post"),
-            DocumentTypeListItem("page"),
-        ).Build(),
-    ).Build(),
-
-    Divider(),
-
-    ListItem().Title("Settings").Icon("⚙").Child(
-        List().ID("settings").Title("Settings").Items(
-            ListItem().Title("Site Settings").Icon("⚙").Child(
-                Document().SchemaType("siteSettings").DocumentID("siteSettings").Build(),
-            ).Build(),
-        ).Build(),
-    ).Build(),
-
-).Build()
-```
-
-**Builder methods:**
-
-| Sanity JS              | Go equivalent                |
-|-------------------------|------------------------------|
-| `S.list()`             | `List()`                     |
-| `S.listItem()`         | `ListItem()`                 |
-| `S.documentTypeList()` | `DocumentTypeList()`         |
-| `S.documentTypeListItem()` | `DocumentTypeListItem()` |
-| `S.document()`         | `Document()`                 |
-| `S.divider()`          | `Divider()`                  |
-
-### 3. Store → `store.go`
-
-In-memory seed data with a simple query function. Replace with your own data source.
-
-```go
-queryDocs("post", "status=published")  // filter by status
-queryDocs("post", "category=Design")   // filter by field
-queryDocs("post", "")                  // all docs of type
-```
-
-## Try the deep navigation
-
-Drill into this path to see 5 panes + editor:
-
-**Structure → Editorial → Posts by Category → Technology → [pick a post]**
-
-## Customizing
-
-### Add a new document type
-
-1. Add a `Schema{}` to `schemas` in `schema.go`
-2. Add seed data to `store` in `store.go`
-3. Add `DocumentTypeListItem("yourType")` to the structure in `structure.go`
-
-### Add a nested group
-
-```go
-ListItem().Title("My Group").Icon("📁").Child(
-    List().ID("my-group").Title("My Group").Items(
-        DocumentTypeListItem("post"),
-        DocumentTypeListItem("page"),
-    ).Build(),
-).Build()
-```
-
-### Add a filtered list
-
-```go
-ListItem().Title("Published Only").Icon("✅").Child(
-    DocumentTypeList("post").
-        ID("published-posts").
-        Title("Published Posts").
-        Filter("status=published").
-        Build(),
-).Build()
-```
-
-### Add a singleton
-
-```go
-ListItem().Title("Site Config").Icon("⚙").Child(
-    Document().SchemaType("siteSettings").DocumentID("siteSettings").Build(),
-).Build()
-```
-
-## Requirements
-
-- Go 1.22+
-- A terminal with unicode support
+| Component | Technology |
+|-----------|-----------|
+| TUI | Go, Bubble Tea, Lip Gloss |
+| API | Elixir, Phoenix |
+| Database | PostgreSQL (JSONB documents) |
+| Real-time | Server-Sent Events |
+| Auth | Bearer tokens (SHA256 hashed) |
+| Media | Local disk + DB metadata |
 
 ## License
 

@@ -242,11 +242,77 @@ lib/sanity_api_web/plugs/require_token.ex — Auth middleware
 priv/repo/seeds.exs                      — Seed data
 ```
 
+## Media API
+
+```bash
+# Upload
+curl -X POST localhost:4000/media/upload \
+  -H "Authorization: Bearer sanity-dev-token" \
+  -F "file=@photo.jpg"
+
+# List (filter by type: image, video, application)
+curl localhost:4000/media
+curl "localhost:4000/media?type=image"
+
+# Serve file
+curl localhost:4000/media/files/2026/04/photo-abc123.jpg
+
+# Delete
+curl -X DELETE localhost:4000/media/FILE_ID \
+  -H "Authorization: Bearer sanity-dev-token"
+```
+
+Files stored on disk at `api/uploads/YYYY/MM/filename`. Metadata in PostgreSQL.
+
+## Deploy to Hetzner
+
+```bash
+# One-command deploy to a fresh Ubuntu VPS
+ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
+```
+
+Installs Elixir, Go, PostgreSQL natively. No Docker for the app.
+
+### Server workflow after deploy
+
+```bash
+ssh root@YOUR_VPS_IP
+cd /opt/nextgen-cms
+
+nano api/lib/sanity_api/content.ex   # edit code
+make rebuild                          # rebuild + restart
+make status                           # check service
+make logs                             # tail logs
+make seed                             # re-seed data
+```
+
+### Connect local TUI to remote server
+
+```bash
+SANITY_API_URL=http://YOUR_VPS_IP:4000 go run .
+```
+
+### Makefile commands
+
+| Command | Description |
+|---------|-------------|
+| `make rebuild` | Rebuild Phoenix + TUI, restart service |
+| `make restart` | Restart without rebuild |
+| `make status` | Service status |
+| `make logs` | Tail logs |
+| `make seed` | Re-seed database |
+| `make migrate` | Run migrations |
+| `make reset-db` | Full DB reset |
+| `make dev` | Local tmux dev session |
+| `make api` | Run Phoenix locally |
+| `make tui` | Run Go TUI locally |
+
 ## Database
 
-PostgreSQL with three tables:
+PostgreSQL with four tables:
 - `documents` — all content (JSONB `content` field for schema-specific data)
 - `schema_definitions` — document type definitions with visibility
 - `api_tokens` — authentication tokens
+- `media_files` — uploaded file metadata
 
 Reset and reseed: `cd ./api && mix ecto.reset`
