@@ -315,9 +315,9 @@ defmodule SanityApiWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="pane-layout" id="studio-panes" phx-hook="StudioPanes">
+    <div class="pane-layout" id="studio-panes" phx-hook="StudioPanes" phx-update="replace">
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
-        <div class="pane-column" id={"pane-#{idx}"}>
+        <div class="pane-column" id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}>
           <div class="pane-header">
             <span class="pane-header-title"><%= pane.title %></span>
             <%= if pane[:type_name] do %>
@@ -333,6 +333,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
                   <div class="pane-section-header"><i data-lucide={SanityApiWeb.Icons.icon_name(item.icon)} style="width:12px;height:12px;display:inline;"></i> <%= item.title %></div>
                 <% :doc -> %>
                   <div
+                    id={"doc-#{item.id}"}
                     class={"pane-doc-item #{if item.id == pane[:selected], do: "selected"}"}
                     phx-click="select" phx-value-pane={idx} phx-value-id={item.id}
                   >
@@ -344,6 +345,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
                   </div>
                 <% _ -> %>
                   <div
+                    id={"item-#{item.id}"}
                     class={"pane-item #{if item.id == pane[:selected], do: "selected"}"}
                     phx-click="select" phx-value-pane={idx} phx-value-id={item.id}
                   >

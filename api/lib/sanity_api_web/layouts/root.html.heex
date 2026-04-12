@@ -316,19 +316,14 @@
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
 
-    /* ── LiveView transitions (no flicker) ────────────────────────────── */
-    .phx-connected { opacity: 1; transition: opacity 0.1s ease-in; }
-    .phx-loading { opacity: 1; } /* Don't fade during patch navigation */
+    /* ── LiveView stability (zero layout shift) ─────────────────────────── */
+    .phx-connected { opacity: 1; }
+    .phx-loading { opacity: 1; cursor: default; } /* No visual change during patch */
     .phx-disconnected { opacity: 0.7; }
+    [data-phx-main] { min-height: 100%; }
 
-    /* Smooth pane transitions */
-    .pane-column, .editor-panel, .editor-empty {
-      animation: paneIn 0.15s ease-out;
-    }
-    @keyframes paneIn {
-      from { opacity: 0; transform: translateX(8px); }
-      to { opacity: 1; transform: translateX(0); }
-    }
+    /* Selected state transition (only the highlight animates, not the layout) */
+    .pane-item, .pane-doc-item { transition: background 0.1s, border-color 0.1s; }
 
     /* Prevent layout shift on LiveView patch */
     [data-phx-main] { min-height: 100%; }
