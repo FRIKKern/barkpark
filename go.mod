@@ -1,4 +1,4 @@
-module github.com/FRIKKern/barkpark-cms
+module github.com/FRIKKern/barkpark
 
 go 1.24.2
 

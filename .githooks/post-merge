@@ -38,10 +38,10 @@ go mod tidy 2>/dev/null
 go build -o bin/barkpark . 2>/dev/null
 
 # Restart service
-if systemctl is-active barkpark-cms > /dev/null 2>&1; then
+if systemctl is-active barkpark > /dev/null 2>&1; then
   echo "[post-merge] Restarting service..."
-  sudo systemctl restart barkpark-cms
+  sudo systemctl restart barkpark
   echo "[post-merge] Done. Service restarted."
 else
-  echo "[post-merge] Service not running. Start with: systemctl start barkpark-cms"
+  echo "[post-merge] Service not running. Start with: systemctl start barkpark"
 fi

@@ -1,4 +1,4 @@
-# Barkpark CMS — Agent Guide
+# Barkpark — Agent Guide
 
 > Everything an AI agent needs to work with this repo without making mistakes.
 
@@ -24,7 +24,7 @@ A headless CMS with three interfaces:
 - **IP:** 89.167.28.206
 - **Arch:** ARM64 (aarch64) — Hetzner cax11
 - **OS:** Ubuntu 22.04
-- **App dir:** /opt/barkpark-cms
+- **App dir:** /opt/barkpark
 - **Caddy:** reverse proxy on port 80 → localhost:4000
 - **URLs:**
   - http://89.167.28.206/studio (web Studio)
@@ -32,8 +32,8 @@ A headless CMS with three interfaces:
   - http://89.167.28.206:4000 (direct Phoenix)
 - **Erlang/Elixir:** via ASDF (not system packages — no ARM support in Erlang Solutions)
 - **Go:** /usr/local/go/bin/go (official ARM64 binary)
-- **Env file:** /opt/barkpark-cms/.env (DATABASE_URL, SECRET_KEY_BASE)
-- **Service:** systemd `barkpark-cms.service`
+- **Env file:** /opt/barkpark/.env (DATABASE_URL, SECRET_KEY_BASE)
+- **Service:** systemd `barkpark.service`
 - **Start script:** `api/start.sh` (sources ASDF + .env for systemd)
 
 ## Deploy to Server
@@ -41,14 +41,14 @@ A headless CMS with three interfaces:
 **Option 1: Auto-deploy (recommended)**
 ```bash
 ssh root@89.167.28.206
-cd /opt/barkpark-cms
+cd /opt/barkpark
 git pull    # post-merge hook auto-rebuilds and restarts
 ```
 
 **Option 2: Manual**
 ```bash
 ssh root@89.167.28.206
-cd /opt/barkpark-cms
+cd /opt/barkpark
 make deploy   # git pull + clean + compile + restart
 ```
 
@@ -139,7 +139,7 @@ string, slug, text (rows), richText, image, select (options), boolean, datetime,
 ## Project Structure
 
 ```
-barkpark-cms/
+barkpark/
 ├── main.go              # TUI entry, connects to Phoenix
 ├── tui.go               # Bubble Tea panes + editor
 ├── store.go             # HTTP + SSE client to Phoenix
@@ -214,13 +214,13 @@ PostgreSQL with tables: `documents`, `schema_definitions`, `api_tokens`, `media_
 1. **Partial _build clean** — Cleaned `_build/prod/lib/sanity_api` only. HEEx templates in Layouts module stayed stale. Old HTML served for hours.
 2. **Missing deps.compile --force** — `Plug.Exception` module undefined at runtime. Must force-recompile deps after nuking _build.
 3. **Forgot systemctl restart** — Compiled new code but old BEAM process still running in memory.
-4. **Wrong start.sh path** — systemd service pointed to `/opt/barkpark-cms/start.sh` but file was at `api/start.sh`. Process died silently.
+4. **Wrong start.sh path** — systemd service pointed to `/opt/barkpark/start.sh` but file was at `api/start.sh`. Process died silently.
 5. **force_ssl in prod.exs** — Caused 301 redirects to HTTPS when no HTTPS existed. All API calls returned empty.
 6. **Erlang Solutions has no ARM packages** — Must use ASDF on Hetzner cax* (ARM) servers.
 7. **Blocking script in head** — Lucide (400KB) loaded synchronously in `<head>`, page hung for seconds. Must use `async` at bottom.
 8. **LiveView JS not loaded** — `phx-click` events rendered in HTML but nothing worked. LiveView needs its JS client loaded.
 9. **Repo was private** — `git clone` failed on server. Made public for deployment.
-10. **Go binary committed** — `barkpark-cms` binary accidentally committed. Added to .gitignore.
+10. **Go binary committed** — `barkpark` binary accidentally committed. Added to .gitignore.
 
 ## Testing
 

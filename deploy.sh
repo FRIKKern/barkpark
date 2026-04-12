@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Barkpark CMS — Server deployment
+# Barkpark — Server deployment
 #
 # Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL directly on the server.
 # Works on both ARM64 (Hetzner cax*) and x86_64 (Hetzner cpx*/ccx*).
@@ -11,20 +11,20 @@ set -euo pipefail
 #
 # After setup:
 #   ssh root@YOUR_VPS_IP
-#   cd /opt/barkpark-cms
+#   cd /opt/barkpark
 #   make rebuild   # after code changes
 #   make logs      # tail service logs
 #   make status    # check health
 
-APP_DIR="/opt/barkpark-cms"
-REPO="https://github.com/FRIKKern/barkpark-cms.git"
+APP_DIR="/opt/barkpark"
+REPO="https://github.com/FRIKKern/barkpark.git"
 DB_NAME="barkpark_prod"
 DB_USER="barkpark"
 DB_PASS="$(openssl rand -hex 16)"
 ARCH=$(uname -m)
 
 echo "============================================"
-echo "  Barkpark CMS — Server Setup"
+echo "  Barkpark — Server Setup"
 echo "  Arch: $ARCH"
 echo "============================================"
 echo ""
@@ -148,9 +148,9 @@ echo "   Go TUI built"
 
 # ── 9. Systemd service ──────────────────────────────────────────────────────
 echo ">> Configuring systemd..."
-cat > /etc/systemd/system/barkpark-cms.service << SVCEOF
+cat > /etc/systemd/system/barkpark.service << SVCEOF
 [Unit]
-Description=Barkpark CMS
+Description=Barkpark
 After=network.target postgresql.service
 Requires=postgresql.service
 
@@ -166,8 +166,8 @@ WantedBy=multi-user.target
 SVCEOF
 
 systemctl daemon-reload
-systemctl enable barkpark-cms
-systemctl restart barkpark-cms
+systemctl enable barkpark
+systemctl restart barkpark
 
 # ── 10. Firewall ─────────────────────────────────────────────────────────────
 echo ">> Firewall..."
@@ -191,7 +191,7 @@ done
 IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "============================================"
-echo "  Barkpark CMS is running!"
+echo "  Barkpark is running!"
 echo "============================================"
 echo ""
 echo "  Studio: http://$IP:4000/studio"

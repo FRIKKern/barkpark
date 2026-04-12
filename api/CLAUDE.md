@@ -1,8 +1,8 @@
-# Barkpark CMS — Phoenix Backend
+# Barkpark — Phoenix Backend
 
 ## What this is
 
-Elixir/Phoenix API backend for Barkpark CMS. Serves the Go TUI client.
+Elixir/Phoenix API backend for Barkpark. Serves the Go TUI client.
 
 ## Running
 

@@ -1,4 +1,4 @@
-# Barkpark CMS
+# Barkpark
 
 A headless CMS with a terminal-native Studio interface. Built with Go (TUI) and Elixir/Phoenix (API).
 
@@ -54,8 +54,8 @@ Websites/Apps                  │  ├── SSE real-time         │
 ### Setup
 
 ```bash
-git clone https://github.com/FRIKKern/barkpark-cms.git
-cd barkpark-cms
+git clone https://github.com/FRIKKern/barkpark.git
+cd barkpark
 
 # Start PostgreSQL
 brew services start postgresql@17
@@ -260,7 +260,7 @@ First run takes 10-15 minutes (Erlang compiles from source on ARM). Subsequent d
 
 ```bash
 ssh root@YOUR_VPS_IP
-cd /opt/barkpark-cms
+cd /opt/barkpark
 
 # Edit code directly on the server
 nano api/lib/sanity_api/content.ex
@@ -282,7 +282,7 @@ BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
 ### Update from GitHub
 
 ```bash
-cd /opt/barkpark-cms && git pull && make rebuild
+cd /opt/barkpark && git pull && make rebuild
 ```
 
 ### Make commands
@@ -308,7 +308,7 @@ cd /opt/barkpark-cms && git pull && make rebuild
 ## Project Structure
 
 ```
-barkpark-cms/
+barkpark/
 ├── main.go              # TUI entry point
 ├── tui.go               # Bubble Tea model, panes, editor
 ├── store.go             # API client (HTTP + SSE)
