@@ -36,10 +36,11 @@ type Field struct {
 
 // Schema defines a document type.
 type Schema struct {
-	Name   string
-	Title  string
-	Icon   string
-	Fields []Field
+	Name       string
+	Title      string
+	Icon       string
+	Visibility string // "public" or "private"
+	Fields     []Field
 }
 
 // schemas is populated at startup by loadSchemas().
@@ -56,9 +57,18 @@ func findSchema(name string) *Schema {
 }
 
 // loadSchemas fetches schema definitions from the Phoenix API.
-func loadSchemas(baseURL string) error {
+func loadSchemas(baseURL, token string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(baseURL + "/api/schemas")
+
+	req, err := http.NewRequest("GET", baseURL+"/v1/schemas/production", nil)
+	if err != nil {
+		return fmt.Errorf("fetch schemas: %w", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch schemas: %w", err)
 	}
@@ -68,30 +78,34 @@ func loadSchemas(baseURL string) error {
 		return fmt.Errorf("fetch schemas: status %d", resp.StatusCode)
 	}
 
-	var apiSchemas []struct {
-		Name   string `json:"name"`
-		Title  string `json:"title"`
-		Icon   string `json:"icon"`
-		Fields []struct {
-			Name    string   `json:"name"`
-			Title   string   `json:"title"`
-			Type    string   `json:"type"`
-			Options []string `json:"options,omitempty"`
-			RefType string   `json:"refType,omitempty"`
-			Rows    int      `json:"rows,omitempty"`
-		} `json:"fields"`
+	var result struct {
+		Schemas []struct {
+			Name       string `json:"name"`
+			Title      string `json:"title"`
+			Icon       string `json:"icon"`
+			Visibility string `json:"visibility"`
+			Fields     []struct {
+				Name    string   `json:"name"`
+				Title   string   `json:"title"`
+				Type    string   `json:"type"`
+				Options []string `json:"options,omitempty"`
+				RefType string   `json:"refType,omitempty"`
+				Rows    int      `json:"rows,omitempty"`
+			} `json:"fields"`
+		} `json:"schemas"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&apiSchemas); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("parse schemas: %w", err)
 	}
 
-	schemas = make([]Schema, 0, len(apiSchemas))
-	for _, as := range apiSchemas {
+	schemas = make([]Schema, 0, len(result.Schemas))
+	for _, as := range result.Schemas {
 		s := Schema{
-			Name:  as.Name,
-			Title: as.Title,
-			Icon:  as.Icon,
+			Name:       as.Name,
+			Title:      as.Title,
+			Icon:       as.Icon,
+			Visibility: as.Visibility,
 		}
 		for _, af := range as.Fields {
 			s.Fields = append(s.Fields, Field{

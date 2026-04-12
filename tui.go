@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -69,6 +70,12 @@ type model struct {
 	vpReady      bool
 	width        int
 	height       int
+	// Editor field editing
+	fieldCursor int               // which field is highlighted in editor
+	editing     bool              // actively editing a field
+	textInput   textinput.Model   // text input for current field
+	dirtyValues map[string]string // unsaved field changes (fieldName -> value)
+	dirty       bool              // has unsaved changes
 }
 
 func initialModel(ds *DataStore) model {
@@ -262,7 +269,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	// ── Editing mode: all input goes to the text input ──
+	if m.editing {
+		switch key {
+		case "esc":
+			// Cancel edit, discard input
+			m.editing = false
+		case "enter":
+			// Commit edit to dirty values
+			m.commitFieldEdit()
+			m.editing = false
+		default:
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
+		}
+		m.refreshViewport()
+		return m, nil
+	}
+
+	// ── Save ──
+	if key == "ctrl+s" && m.focus.Target == FocusEditor && m.dirty {
+		m.saveDocument()
+		m.refreshViewport()
+		return m, nil
+	}
+
+	switch key {
 
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -274,6 +309,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focus.PaneIndex++
 			} else if m.showEditor {
 				m.focus.Target = FocusEditor
+				m.fieldCursor = 0
 			}
 		}
 
@@ -282,7 +318,6 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.focus.PaneIndex < len(m.panes)-1 {
 				m.focus.PaneIndex++
 			} else {
-				// On the last pane, drill in like Enter
 				return m.drillIn()
 			}
 		}
@@ -300,12 +335,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if m.focus.PaneIndex > 0 {
 			m.focus.PaneIndex--
 		} else if len(m.path) > 0 {
-			// On the first pane, go back like Esc
 			m.path = m.path[:len(m.path)-1]
 			m.rebuildPanes()
 		}
 
-	// ── Navigate within pane ──
+	// ── Navigate within pane / editor fields ──
 	case "j", "down":
 		if m.focus.Target == FocusPane {
 			pane := &m.panes[m.focus.PaneIndex]
@@ -318,8 +352,12 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					pane.Cursor = len(pane.Items) - 1
 				}
 			}
-		} else if m.focus.Target == FocusEditor {
-			m.viewport.LineDown(1)
+		} else if m.focus.Target == FocusEditor && m.editorSchema != nil {
+			if m.fieldCursor < len(m.editorSchema.Fields)-1 {
+				m.fieldCursor++
+			}
+			m.scrollToField()
+			m.refreshViewport()
 		}
 
 	case "k", "up":
@@ -332,12 +370,28 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		} else if m.focus.Target == FocusEditor {
-			m.viewport.LineUp(1)
+			if m.fieldCursor > 0 {
+				m.fieldCursor--
+			}
+			m.scrollToField()
+			m.refreshViewport()
 		}
 
-	// ── Drill in ──
+	// ── Drill in / start editing ──
 	case "enter":
+		if m.focus.Target == FocusEditor && m.editorSchema != nil {
+			m.startFieldEdit()
+			m.refreshViewport()
+			return m, textinput.Blink
+		}
 		return m.drillIn()
+
+	// ── Toggle for boolean/select ──
+	case " ":
+		if m.focus.Target == FocusEditor && m.editorSchema != nil {
+			m.toggleField()
+			m.refreshViewport()
+		}
 
 	// ── Go back ──
 	case "backspace", "esc":
@@ -350,6 +404,168 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// startFieldEdit begins editing the field at fieldCursor.
+func (m *model) startFieldEdit() {
+	if m.fieldCursor >= len(m.editorSchema.Fields) {
+		return
+	}
+	field := m.editorSchema.Fields[m.fieldCursor]
+
+	// Only string, text, slug, datetime, color fields are text-editable
+	switch field.Type {
+	case FieldString, FieldText, FieldSlug, FieldDatetime, FieldColor:
+		m.editing = true
+		m.textInput = textinput.New()
+		m.textInput.Focus()
+		m.textInput.CharLimit = 500
+		m.textInput.Width = m.calcEditorWidth() - 12
+		m.textInput.Prompt = ""
+
+		// Pre-fill with current value
+		val := m.getFieldValue(field.Name)
+		m.textInput.SetValue(val)
+	case FieldSelect:
+		m.toggleField()
+	case FieldBoolean:
+		m.toggleField()
+	}
+}
+
+// commitFieldEdit saves the text input value to dirtyValues.
+func (m *model) commitFieldEdit() {
+	if m.fieldCursor >= len(m.editorSchema.Fields) {
+		return
+	}
+	field := m.editorSchema.Fields[m.fieldCursor]
+	val := m.textInput.Value()
+
+	if m.dirtyValues == nil {
+		m.dirtyValues = make(map[string]string)
+	}
+	m.dirtyValues[field.Name] = val
+	m.dirty = true
+
+	// Also update the in-memory doc for immediate display
+	m.applyDirtyToDoc()
+}
+
+// toggleField cycles select options or toggles boolean.
+func (m *model) toggleField() {
+	if m.fieldCursor >= len(m.editorSchema.Fields) {
+		return
+	}
+	field := m.editorSchema.Fields[m.fieldCursor]
+
+	if m.dirtyValues == nil {
+		m.dirtyValues = make(map[string]string)
+	}
+
+	current := m.getFieldValue(field.Name)
+
+	switch field.Type {
+	case FieldBoolean:
+		if current == "true" {
+			m.dirtyValues[field.Name] = "false"
+		} else {
+			m.dirtyValues[field.Name] = "true"
+		}
+	case FieldSelect:
+		if len(field.Options) > 0 {
+			idx := 0
+			for i, opt := range field.Options {
+				if opt == current {
+					idx = (i + 1) % len(field.Options)
+					break
+				}
+			}
+			m.dirtyValues[field.Name] = field.Options[idx]
+		}
+	}
+	m.dirty = true
+	m.applyDirtyToDoc()
+}
+
+// getFieldValue gets the current value for a field, checking dirty values first.
+func (m model) getFieldValue(fieldName string) string {
+	if m.dirtyValues != nil {
+		if v, ok := m.dirtyValues[fieldName]; ok {
+			return v
+		}
+	}
+	if m.selectedDoc == nil {
+		return ""
+	}
+	switch fieldName {
+	case "title", "name":
+		return m.selectedDoc.Title
+	case "status":
+		return m.selectedDoc.Status
+	default:
+		if m.selectedDoc.Values != nil {
+			return m.selectedDoc.Values[fieldName]
+		}
+	}
+	return ""
+}
+
+// applyDirtyToDoc updates the in-memory doc with dirty values for display.
+func (m *model) applyDirtyToDoc() {
+	if m.selectedDoc == nil || m.dirtyValues == nil {
+		return
+	}
+	for k, v := range m.dirtyValues {
+		switch k {
+		case "title", "name":
+			m.selectedDoc.Title = v
+		case "status":
+			m.selectedDoc.Status = v
+		default:
+			if m.selectedDoc.Values == nil {
+				m.selectedDoc.Values = make(map[string]string)
+			}
+			m.selectedDoc.Values[k] = v
+		}
+	}
+}
+
+// saveDocument sends dirty values to the API as a patch mutation.
+func (m *model) saveDocument() {
+	if m.selectedDoc == nil || !m.dirty || len(m.dirtyValues) == 0 {
+		return
+	}
+
+	setFields := make(map[string]interface{})
+	for k, v := range m.dirtyValues {
+		setFields[k] = v
+	}
+
+	mutation := map[string]interface{}{
+		"patch": map[string]interface{}{
+			"id":   m.selectedDoc.ID,
+			"type": m.editorSchema.Name,
+			"set":  setFields,
+		},
+	}
+
+	if err := m.ds.Mutate([]map[string]interface{}{mutation}); err == nil {
+		m.dirtyValues = nil
+		m.dirty = false
+	}
+}
+
+// scrollToField adjusts viewport to keep the focused field visible.
+func (m *model) scrollToField() {
+	// Approximate: each field takes ~3 lines, header takes ~4
+	targetLine := 4 + m.fieldCursor*3
+	if m.vpReady {
+		if targetLine > m.viewport.YOffset+m.viewport.Height-3 {
+			m.viewport.SetYOffset(targetLine - m.viewport.Height + 5)
+		} else if targetLine < m.viewport.YOffset+2 {
+			m.viewport.SetYOffset(targetLine - 2)
+		}
+	}
 }
 
 // drillIn selects the highlighted item in the focused pane, same as Enter.
@@ -483,9 +699,15 @@ func (m model) renderToolbar() string {
 // ── Help bar ─────────────────────────────────────────────────────────────────
 
 func (m model) renderHelpBar() string {
-	return toolbarStyle.Width(m.width).Render(
-		dimStyle.Render(" j/k navigate  h/l switch pane  enter select  esc back  q quit"),
-	)
+	var help string
+	if m.editing {
+		help = " type to edit  enter confirm  esc cancel"
+	} else if m.focus.Target == FocusEditor {
+		help = " j/k fields  enter edit  space toggle  ctrl+s save  esc back"
+	} else {
+		help = " j/k navigate  h/l switch pane  enter select  esc back  q quit"
+	}
+	return toolbarStyle.Width(m.width).Render(dimStyle.Render(help))
 }
 
 // ── List / DocList pane ──────────────────────────────────────────────────────
@@ -635,8 +857,11 @@ func (m model) buildEditorContent(width int) string {
 	if fieldWidth < 20 {
 		fieldWidth = 20
 	}
+	isEditorFocused := m.focus.Target == FocusEditor
 	for i, field := range m.editorSchema.Fields {
-		lines = append(lines, m.renderField(field, fieldWidth)...)
+		isFocused := isEditorFocused && i == m.fieldCursor
+		isEditing := isFocused && m.editing
+		lines = append(lines, m.renderField(field, fieldWidth, isFocused, isEditing)...)
 		if i < len(m.editorSchema.Fields)-1 {
 			lines = append(lines, "")
 		}
@@ -645,35 +870,43 @@ func (m model) buildEditorContent(width int) string {
 	// Footer
 	lines = append(lines, "")
 	lines = append(lines, dividerStyle.Render(" "+strings.Repeat("─", width-4)))
+
 	footerLeft := dimStyle.Render(fmt.Sprintf("  Edited %s", timeAgo(m.selectedDoc.UpdatedAt)))
-	publishBtn := publishBtnStyle.Render("Publish")
-	gap := width - lipgloss.Width(footerLeft) - lipgloss.Width(publishBtn) - 4
+	var footerRight string
+	if m.dirty {
+		footerRight = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f59e0b")).Bold(true).
+			Render("* Unsaved") + "  " +
+			dimStyle.Render("Ctrl+S save") + "  " +
+			publishBtnStyle.Render("Publish")
+	} else {
+		footerRight = publishBtnStyle.Render("Publish")
+	}
+	gap := width - lipgloss.Width(footerLeft) - lipgloss.Width(footerRight) - 4
 	if gap < 0 {
 		gap = 0
 	}
-	lines = append(lines, footerLeft+strings.Repeat(" ", gap)+publishBtn)
+	lines = append(lines, footerLeft+strings.Repeat(" ", gap)+footerRight)
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // renderField generates the TUI lines for a single schema field.
-func (m model) renderField(field Field, width int) []string {
+func (m model) renderField(field Field, width int, isFocused, isEditing bool) []string {
 	var lines []string
-	lines = append(lines, editorLabelStyle.Render("  "+strings.ToUpper(field.Title)))
 
-	val := ""
-	if m.selectedDoc != nil {
-		switch field.Name {
-		case "title", "name":
-			val = m.selectedDoc.Title
-		case "status":
-			val = m.selectedDoc.Status
-		default:
-			if m.selectedDoc.Values != nil {
-				val = m.selectedDoc.Values[field.Name]
-			}
-		}
+	// Label — highlight when focused
+	label := "  " + strings.ToUpper(field.Title)
+	if isFocused {
+		lines = append(lines, lipgloss.NewStyle().
+			Bold(true).
+			Foreground(highlight).
+			Render(label))
+	} else {
+		lines = append(lines, editorLabelStyle.Render(label))
 	}
+
+	val := m.getFieldValue(field.Name)
 
 	placeholder := func(ph string) string {
 		if val != "" {
@@ -688,9 +921,22 @@ func (m model) renderField(field Field, width int) []string {
 		fieldContentWidth = 10
 	}
 
+	// Active field border style
+	activeFieldStyle := editorFieldStyle
+	if isFocused {
+		activeFieldStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(highlight).
+			Padding(0, 1)
+	}
+
 	switch field.Type {
 	case FieldString:
-		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(placeholder("Enter "+field.Title+"...")))
+		if isEditing {
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+		} else {
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(placeholder("Enter "+field.Title+"...")))
+		}
 
 	case FieldSlug:
 		slug := val
@@ -701,29 +947,46 @@ func (m model) renderField(field Field, width int) []string {
 		if slugWidth < 10 {
 			slugWidth = 10
 		}
-		box := editorFieldStyle.Width(slugWidth).Render(dimStyle.Render(slug))
-		lines = append(lines, "  "+box+" "+dimStyle.Render("[gen]"))
+		if isEditing {
+			lines = append(lines, "  "+activeFieldStyle.Width(slugWidth).Render(m.textInput.View())+" "+dimStyle.Render("[gen]"))
+		} else {
+			box := activeFieldStyle.Width(slugWidth).Render(dimStyle.Render(slug))
+			lines = append(lines, "  "+box+" "+dimStyle.Render("[gen]"))
+		}
 
 	case FieldText:
 		rows := field.Rows
 		if rows < 2 {
 			rows = 3
 		}
-		content := placeholder("Enter " + field.Title + "...")
-		for i := 1; i < rows; i++ {
-			content += "\n"
+		if isEditing {
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+		} else {
+			content := placeholder("Enter " + field.Title + "...")
+			for i := 1; i < rows; i++ {
+				content += "\n"
+			}
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(content))
 		}
-		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(content))
 
 	case FieldRichText:
 		lines = append(lines, dimStyle.Render("  B  I  U  H1  H2  \"  ~  #"))
 		content := dimStyle.Render("Start writing...")
 		content += "\n"
 		content += "\n"
-		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(content))
+		lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(content))
 
 	case FieldImage:
-		lines = append(lines, "  "+imageDropStyle.Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")))
+		if isFocused {
+			lines = append(lines, "  "+lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(highlight).
+				Align(lipgloss.Center).
+				Padding(1, 0).
+				Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")))
+		} else {
+			lines = append(lines, "  "+imageDropStyle.Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")))
+		}
 
 	case FieldSelect:
 		display := ""
@@ -748,8 +1011,12 @@ func (m model) renderField(field Field, width int) []string {
 		lines = append(lines, "  "+toggle)
 
 	case FieldDatetime:
-		dv := placeholder("YYYY-MM-DD HH:MM")
-		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(dv))
+		if isEditing {
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+		} else {
+			dv := placeholder("YYYY-MM-DD HH:MM")
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(dv))
+		}
 
 	case FieldColor:
 		cv := val
@@ -757,14 +1024,18 @@ func (m model) renderField(field Field, width int) []string {
 			cv = "#3b82f6"
 		}
 		swatch := lipgloss.NewStyle().Background(lipgloss.Color(cv)).Render("    ")
-		lines = append(lines, "  "+swatch+" "+editorFieldStyle.Render(cv))
+		if isEditing {
+			lines = append(lines, "  "+swatch+" "+activeFieldStyle.Render(m.textInput.View()))
+		} else {
+			lines = append(lines, "  "+swatch+" "+activeFieldStyle.Render(cv))
+		}
 
 	case FieldReference:
 		rv := val
 		if rv == "" {
 			rv = dimStyle.Render("Select " + field.RefType + "...")
 		}
-		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")))
+		lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")))
 
 	case FieldArray:
 		lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))

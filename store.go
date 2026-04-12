@@ -30,6 +30,7 @@ type DataStoreRefreshMsg struct{}
 // DataStore is an HTTP client that talks to the Phoenix API.
 type DataStore struct {
 	baseURL  string
+	token    string
 	client   *http.Client
 	program  *tea.Program
 	mu       sync.RWMutex
@@ -42,6 +43,41 @@ func NewDataStore(baseURL string) *DataStore {
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// SetToken sets the API token for authenticated requests.
+func (ds *DataStore) SetToken(token string) {
+	ds.token = token
+}
+
+// Mutate sends a mutation to the Phoenix API (Sanity format).
+func (ds *DataStore) Mutate(mutations []map[string]interface{}) error {
+	endpoint := fmt.Sprintf("%s/v1/data/mutate/production", ds.baseURL)
+	body, err := json.Marshal(map[string]interface{}{"mutations": mutations})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if ds.token != "" {
+		req.Header.Set("Authorization", "Bearer "+ds.token)
+	}
+
+	resp, err := ds.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mutation error %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
 }
 
 // SetProgram sets the tea.Program reference for sending refresh messages.
@@ -141,44 +177,96 @@ func (ds *DataStore) Delete(typeName, id string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// StartPolling checks for data changes every 2 seconds and notifies the TUI.
-func (ds *DataStore) StartPolling() {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
+// StartSSE connects to the Phoenix SSE listener for real-time updates.
+// Falls back to polling if SSE connection fails.
+func (ds *DataStore) StartSSE(token string) {
+	for {
 		if ds.program == nil {
+			time.Sleep(time.Second)
 			continue
 		}
-		if ds.hasChanged() {
-			ds.program.Send(DataStoreRefreshMsg{})
+		err := ds.listenSSE(token)
+		if err != nil {
+			// SSE failed, fall back to polling briefly then retry
+			ds.pollOnce()
+			time.Sleep(3 * time.Second)
 		}
 	}
 }
 
-// hasChanged does a lightweight check to see if data has changed since last poll.
-func (ds *DataStore) hasChanged() bool {
+func (ds *DataStore) listenSSE(token string) error {
+	sseURL := ds.baseURL + "/v1/data/listen/production"
+	req, err := http.NewRequest("GET", sseURL, nil)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Use a client without timeout for long-lived SSE
+	sseClient := &http.Client{Timeout: 0}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("SSE status %d", resp.StatusCode)
+	}
+
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			line := string(buf[:n])
+			// Any "event: mutation" line means data changed
+			if contains(line, "event: mutation") {
+				ds.program.Send(DataStoreRefreshMsg{})
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func (ds *DataStore) pollOnce() {
 	resp, err := ds.client.Get(ds.baseURL + "/api/documents/")
 	if err != nil {
-		return false
+		return
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false
+		return
 	}
 
 	hash := fmt.Sprintf("%x", body)
 
 	ds.mu.Lock()
-	defer ds.mu.Unlock()
+	changed := hash != ds.lastHash && ds.lastHash != ""
+	ds.lastHash = hash
+	ds.mu.Unlock()
 
-	if hash != ds.lastHash {
-		ds.lastHash = hash
-		return ds.lastHash != "" // don't trigger on first poll
+	if changed && ds.program != nil {
+		ds.program.Send(DataStoreRefreshMsg{})
 	}
-	return false
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

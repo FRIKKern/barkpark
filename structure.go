@@ -153,90 +153,45 @@ func Divider() *StructureNode {
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  STRUCTURE CONFIGURATION                                                ║
 // ║                                                                         ║
-// ║  Edit this to change the entire studio layout.                          ║
-// ║  This is the equivalent of sanity's structure.ts / deskStructure.ts.    ║
+// ║  Auto-generated from schema definitions fetched from the API.           ║
+// ║  Public schemas appear as top-level document lists.                     ║
+// ║  Private schemas go under a "Settings" group.                           ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 var rootStructure *StructureNode
 
+// initRootStructure builds the navigation tree from the loaded schemas.
+// Public schemas get their own top-level list item.
+// Private schemas are grouped under "Settings".
 func initRootStructure() {
-	rootStructure = List().ID("root").Title("Structure").Items(
+	var publicItems []*StructureNode
+	var privateItems []*StructureNode
 
-	// ── Editorial group ─────────────────────────────────────────────────
-	ListItem().Title("Editorial").Icon("📚").Child(
-		List().ID("editorial").Title("Editorial").Items(
-
-			// All posts
-			DocumentTypeListItem("post"),
-
-			// Posts filtered by status
-			ListItem().Title("Posts by Status").Icon("🔽").Child(
-				List().ID("by-status").Title("By Status").Items(
-					ListItem().Title("Published").Icon("✅").Child(
-						DocumentTypeList("post").
-							ID("posts-pub").
-							Title("Published Posts").
-							Filter("status=published").
-							Build(),
-					).Build(),
-					ListItem().Title("Drafts").Icon("📝").Child(
-						DocumentTypeList("post").
-							ID("posts-draft").
-							Title("Draft Posts").
-							Filter("status=draft").
-							Build(),
-					).Build(),
+	for _, s := range schemas {
+		if s.Visibility == "private" {
+			// Private: singleton-style (direct document editor)
+			privateItems = append(privateItems,
+				ListItem().Title(s.Title).Icon(s.Icon).Child(
+					Document().SchemaType(s.Name).DocumentID(s.Name).Build(),
 				).Build(),
+			)
+		} else {
+			// Public: document type list
+			publicItems = append(publicItems, DocumentTypeListItem(s.Name))
+		}
+	}
+
+	var items []*StructureNode
+	items = append(items, publicItems...)
+
+	if len(privateItems) > 0 {
+		items = append(items, Divider())
+		items = append(items,
+			ListItem().Title("Settings").Icon("⚙").Child(
+				List().ID("settings").Title("Settings").Items(privateItems...).Build(),
 			).Build(),
+		)
+	}
 
-			// Posts filtered by category
-			ListItem().Title("Posts by Category").Icon("🏷").Child(
-				List().ID("by-cat").Title("By Category").Items(
-					ListItem().Title("Technology").Icon("#").Child(
-						DocumentTypeList("post").ID("posts-tech").Title("Technology").Filter("category=Technology").Build(),
-					).Build(),
-					ListItem().Title("Design").Icon("#").Child(
-						DocumentTypeList("post").ID("posts-design").Title("Design").Filter("category=Design").Build(),
-					).Build(),
-					ListItem().Title("Engineering").Icon("#").Child(
-						DocumentTypeList("post").ID("posts-eng").Title("Engineering").Filter("category=Engineering").Build(),
-					).Build(),
-				).Build(),
-			).Build(),
-
-			Divider(),
-
-			// All pages
-			DocumentTypeListItem("page"),
-		).Build(),
-	).Build(),
-
-	// ── Projects ────────────────────────────────────────────────────────
-	DocumentTypeListItem("project"),
-
-	// ── Taxonomy group ──────────────────────────────────────────────────
-	ListItem().Title("Taxonomy").Icon("🏷").Child(
-		List().ID("taxonomy").Title("Taxonomy").Items(
-			DocumentTypeListItem("category"),
-			DocumentTypeListItem("author"),
-		).Build(),
-	).Build(),
-
-	Divider(),
-
-	// ── Settings (singletons) ───────────────────────────────────────────
-	ListItem().Title("Settings").Icon("⚙").Child(
-		List().ID("settings").Title("Settings").Items(
-			ListItem().Title("Site Settings").Icon("⚙").Child(
-				Document().SchemaType("siteSettings").DocumentID("siteSettings").Build(),
-			).Build(),
-			ListItem().Title("Navigation").Icon("🧭").Child(
-				Document().SchemaType("navigation").DocumentID("navigation").Build(),
-			).Build(),
-			ListItem().Title("Brand Colors").Icon("🎨").Child(
-				Document().SchemaType("colors").DocumentID("colors").Build(),
-			).Build(),
-		).Build(),
-	).Build(),
-).Build()
+	rootStructure = List().ID("root").Title("Structure").Items(items...).Build()
 }
