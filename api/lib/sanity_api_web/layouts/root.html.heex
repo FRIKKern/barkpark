@@ -320,18 +320,22 @@
 <body>
   {@inner_content}
   <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js" async></script>
-  <script src="https://cdn.jsdelivr.net/npm/phoenix@1.8.5/priv/static/phoenix.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/phoenix_live_view@1.1.28/priv/static/phoenix_live_view.min.js"></script>
-  <script>
+  <script type="module">
+    import {Socket} from "https://cdn.jsdelivr.net/npm/phoenix@1.8.5/+esm";
+    import {LiveSocket} from "https://cdn.jsdelivr.net/npm/phoenix_live_view@1.1.28/+esm";
+
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
-    let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
+    let liveSocket = new LiveSocket("/live", Socket, {
       params: {_csrf_token: csrfToken}
     });
     liveSocket.connect();
-    // Render Lucide icons after each LiveView update
-    document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
-    document.addEventListener("phx:update", () => lucide.createIcons());
-    new MutationObserver(() => lucide.createIcons()).observe(document.body, {childList: true, subtree: true});
+    window._liveSocket = liveSocket;
+  </script>
+  <script>
+    // Render Lucide icons on DOM changes
+    function renderIcons() { if (window.lucide) lucide.createIcons(); }
+    new MutationObserver(renderIcons).observe(document.documentElement, {childList: true, subtree: true});
+    document.addEventListener("DOMContentLoaded", renderIcons);
   </script>
 </body>
 </html>
