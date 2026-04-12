@@ -27,10 +27,9 @@ defmodule SanityApiWeb.Router do
   scope "/studio", SanityApiWeb.Studio do
     pipe_through :browser
 
-    live "/", DashboardLive
+    live "/", StudioLive
     live "/media", MediaLive
-    live "/:type", DocumentListLive
-    live "/:type/:doc_id", DocumentEditLive
+    live "/*path", StudioLive
   end
 
   # Redirect root to studio
