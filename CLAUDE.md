@@ -316,3 +316,24 @@ PostgreSQL with four tables:
 - `media_files` — uploaded file metadata
 
 Reset and reseed: `cd ./api && mix ecto.reset`
+
+## IMPORTANT: Stale BEAM Cache
+
+When Elixir modules are renamed, moved, or deleted, old compiled `.beam` files persist in `_build/prod/lib/sanity_api/` and Phoenix loads them instead of the new code. This causes:
+- Ghost modules serving old routes
+- 500 errors from undefined functions
+- New LiveViews not appearing
+
+**ALWAYS clean before recompiling after code changes:**
+```bash
+rm -rf api/_build/prod/lib/sanity_api
+```
+
+`make rebuild` does this automatically. The `.githooks/post-merge` hook also cleans on every `git pull`.
+
+To enable git hooks on a fresh clone:
+```bash
+git config core.hooksPath .githooks
+```
+
+**Never** do `mix compile` on the server without cleaning first. Always use `make rebuild`.

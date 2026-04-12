@@ -3,6 +3,8 @@
 # ── Server operations (run on Hetzner VPS) ───────────────────────────────────
 
 rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
+	@echo ">> Cleaning stale BEAM cache..."
+	rm -rf api/_build/prod/lib/sanity_api
 	@echo ">> Building Phoenix API..."
 	cd api && MIX_ENV=prod mix deps.get && mix deps.compile && mix compile
 	@echo ">> Building Go TUI..."

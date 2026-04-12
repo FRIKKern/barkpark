@@ -104,6 +104,9 @@ else
   cd "$APP_DIR"
 fi
 
+# Enable git hooks (auto-clean stale BEAM cache on pull)
+git config core.hooksPath .githooks
+
 # ── 6. Environment ──────────────────────────────────────────────────────────
 if [ ! -f "$APP_DIR/.env" ]; then
   echo ">> Generating .env..."
