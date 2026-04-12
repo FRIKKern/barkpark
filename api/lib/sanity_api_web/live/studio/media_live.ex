@@ -37,11 +37,10 @@ defmodule SanityApiWeb.Studio.MediaLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="main-header" style="margin: -24px -24px 24px; padding: 0 24px;">
-      <div class="main-header-left">
-        <h1 class="h1">Media Library</h1>
-        <span class="text-sm text-muted"><%= length(@files) %> files</span>
-      </div>
+    <div style="padding: 24px; overflow-y: auto; flex: 1;">
+    <div style="margin-bottom: 20px;">
+      <h1 class="h1">Media Library</h1>
+      <span class="text-sm text-muted"><%= length(@files) %> files</span>
     </div>
 
     <div class="card" style="margin-bottom: 20px;">
@@ -95,6 +94,7 @@ defmodule SanityApiWeb.Studio.MediaLive do
         <% end %>
       </div>
     <% end %>
+    </div>
     """
   end
 
