@@ -39,6 +39,22 @@ defmodule SanityApiWeb.Router do
     delete "/:dataset/:name", SchemaController, :delete
   end
 
+  # ── Media — upload requires token, serving is public ────────────────────
+  scope "/media", SanityApiWeb do
+    pipe_through :api
+
+    get "/", MediaController, :index
+    get "/:id/meta", MediaController, :show
+    get "/files/*path", MediaController, :serve
+  end
+
+  scope "/media", SanityApiWeb do
+    pipe_through [:api, :require_token]
+
+    post "/upload", MediaController, :upload
+    delete "/:id", MediaController, :delete
+  end
+
   # ── Legacy compat — matches Go TUI API (no auth for easy migration) ────
   scope "/api", SanityApiWeb do
     pipe_through :api

@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sanity_api_prod
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./api
+    ports:
+      - "${PORT:-4000}:4000"
+    environment:
+      DATABASE_URL: ecto://postgres:postgres@db/sanity_api_prod
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-$(openssl rand -base64 48)}
+      PHX_HOST: ${PHX_HOST:-localhost}
+      PORT: "4000"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:

@@ -15,6 +15,9 @@ tmp/
 # Data
 data.json
 
+# Secrets
+.env
+
 # Phoenix API (Elixir)
 api/_build/
 api/deps/
