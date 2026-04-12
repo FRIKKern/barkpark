@@ -315,13 +315,13 @@ defmodule SanityApiWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="pane-layout" id="studio-panes" phx-hook="StudioPanes" phx-update="replace">
+    <div class="pane-layout" id="studio-panes">
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
         <div class="pane-column" id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}>
           <div class="pane-header">
             <span class="pane-header-title"><%= pane.title %></span>
             <%= if pane[:type_name] do %>
-              <button class="pane-add-btn" phx-click="new-document" phx-value-type={pane.type_name}><i data-lucide="plus" style="width:14px;height:14px;"></i></button>
+              <button class="pane-add-btn" phx-click="new-document" phx-value-type={pane.type_name}><.icon name="plus" size={14} /></button>
             <% end %>
           </div>
           <div class="pane-body">
@@ -330,7 +330,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
                 <% :divider -> %>
                   <div class="pane-divider"></div>
                 <% :header -> %>
-                  <div class="pane-section-header"><i data-lucide={SanityApiWeb.Icons.icon_name(item.icon)} style="width:12px;height:12px;display:inline;"></i> <%= item.title %></div>
+                  <div class="pane-section-header"><.icon name={item.icon} size={12} /> <%= item.title %></div>
                 <% :doc -> %>
                   <div
                     id={"doc-#{item.id}"}
@@ -349,9 +349,9 @@ defmodule SanityApiWeb.Studio.StudioLive do
                     class={"pane-item #{if item.id == pane[:selected], do: "selected"}"}
                     phx-click="select" phx-value-pane={idx} phx-value-id={item.id}
                   >
-                    <span class="pane-item-icon"><i data-lucide={SanityApiWeb.Icons.icon_name(item.icon)} style="width:16px;height:16px;"></i></span>
+                    <span class="pane-item-icon"><.icon name={item.icon} size={16} /></span>
                     <span class="pane-item-label"><%= item.title %></span>
-                    <span class="pane-item-chevron"><i data-lucide="chevron-right" style="width:14px;height:14px;"></i></span>
+                    <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
                   </div>
               <% end %>
             <% end %>
@@ -381,7 +381,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
           <div class="editor-body">
             <%= if @editor_schema do %>
               <div class="editor-meta">
-                <i data-lucide={SanityApiWeb.Icons.icon_name(@editor_schema.icon)} style="width:14px;height:14px;"></i> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+                <.icon name={@editor_schema.icon} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
               </div>
             <% end %>
 
@@ -406,7 +406,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
       <% else %>
         <div class="editor-empty">
           <div style="color: var(--fg-dim); text-align: center;">
-            <div style="margin-bottom: 12px; opacity: 0.4;"><i data-lucide="file-text" style="width:40px;height:40px;"></i></div>
+            <div style="margin-bottom: 12px; opacity: 0.4;"><.icon name="file-text" size={40} /></div>
             <div class="text-sm">Select a document to edit</div>
           </div>
         </div>

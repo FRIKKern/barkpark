@@ -56,6 +56,7 @@ defmodule SanityApiWeb do
     quote do
       import Phoenix.HTML.Form
       import SanityApiWeb.StudioComponents
+      import SanityApiWeb.Icons
       use Gettext, backend: SanityApiWeb.Gettext
       unquote(verified_routes())
     end

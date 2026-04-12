@@ -335,20 +335,10 @@
   <script src="/assets/phoenix_live_view.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
-    let Hooks = {
-      StudioPanes: {
-        updated() {
-          // Re-render Lucide icons after LiveView patches the DOM
-          if (window.lucide) setTimeout(() => lucide.createIcons(), 5);
-        }
-      }
-    };
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-      params: {_csrf_token: csrfToken},
-      hooks: Hooks
+      params: {_csrf_token: csrfToken}
     });
     liveSocket.connect();
   </script>
-  <script src="/assets/lucide.js" async onload="lucide.createIcons()"></script>
 </body>
 </html>
