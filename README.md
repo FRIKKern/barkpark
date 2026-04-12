@@ -237,7 +237,9 @@ curl -N -H "Authorization: Bearer barkpark-dev-token" \
 | `reference` | Link to another type | `refType: "author"` |
 | `array` | Repeatable list | |
 
-## Deploy to Hetzner
+## Deploy to a Server
+
+Works on any Ubuntu 22.04+ VPS (Hetzner, DigitalOcean, etc.). Supports both ARM64 and x86_64.
 
 ### One-command setup
 
@@ -245,38 +247,63 @@ curl -N -H "Authorization: Bearer barkpark-dev-token" \
 ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
 ```
 
-Installs Elixir, Go, PostgreSQL natively. Edit source on the server, rebuild instantly.
+This installs everything natively (no Docker):
+- **PostgreSQL** — from apt
+- **Erlang + Elixir** — via ASDF (handles ARM/x86 automatically)
+- **Go** — official binary (detects architecture)
+- **Systemd service** — auto-starts on boot
+- **UFW firewall** — ports 22, 80, 443, 4000
 
-### Server workflow
+First run takes 10-15 minutes (Erlang compiles from source on ARM). Subsequent deploys are fast.
+
+### After setup
 
 ```bash
 ssh root@YOUR_VPS_IP
 cd /opt/barkpark-cms
 
-nano api/lib/sanity_api/content.ex   # edit code
-make rebuild                          # rebuild + restart
-make status                           # check service
-make logs                             # tail logs
+# Edit code directly on the server
+nano api/lib/sanity_api/content.ex
+
+# Rebuild and restart (one command)
+make rebuild
+
+# Check status
+make status
+make logs
 ```
 
-### Connect TUI to remote server
+### Connect TUI from your machine
 
 ```bash
 BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
+```
+
+### Update from GitHub
+
+```bash
+cd /opt/barkpark-cms && git pull && make rebuild
 ```
 
 ### Make commands
 
 | Command | Description |
 |---------|-------------|
-| `make rebuild` | Rebuild + restart service |
+| `make rebuild` | Rebuild Phoenix + TUI, restart service |
 | `make restart` | Restart without rebuild |
 | `make status` | Service status |
-| `make logs` | Tail logs |
+| `make logs` | Tail service logs |
 | `make seed` | Re-seed database |
-| `make migrate` | Run migrations |
-| `make reset-db` | Full DB reset |
+| `make migrate` | Run database migrations |
+| `make reset-db` | Full DB reset (drop + create + migrate + seed) |
 | `make dev` | Local tmux dev session |
+
+### Architecture notes
+
+- Phoenix runs via a `start.sh` wrapper that sources ASDF and `.env` for systemd
+- `.env` at project root holds secrets (DATABASE_URL, SECRET_KEY_BASE)
+- SSL/HTTPS: disabled by default — use Caddy or nginx as a reverse proxy for HTTPS
+- Media files stored at `api/uploads/` on disk
 
 ## Project Structure
 
@@ -299,6 +326,7 @@ barkpark-cms/
 │   ├── priv/repo/
 │   │   ├── migrations/      # Database schema
 │   │   └── seeds.exs        # Seed data
+│   ├── start.sh             # Systemd wrapper (sources ASDF + env)
 │   └── Dockerfile
 ├── docker-compose.yml
 ├── deploy.sh            # Hetzner VPS setup script

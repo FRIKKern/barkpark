@@ -4,9 +4,9 @@
 
 rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
 	@echo ">> Building Phoenix API..."
-	cd api && MIX_ENV=prod mix deps.get --only prod && mix compile
+	cd api && MIX_ENV=prod mix deps.get && mix deps.compile && mix compile
 	@echo ">> Building Go TUI..."
-	go build -o bin/barkpark .
+	go mod tidy && go build -o bin/barkpark .
 	@echo ">> Restarting service..."
 	sudo systemctl restart barkpark-cms
 	@echo ">> Done. Check: make status"
