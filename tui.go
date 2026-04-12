@@ -55,8 +55,12 @@ type focusState struct {
 // ║  MODEL                                                                  ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
-// borderCost is the number of terminal columns added by paneBorder's right border.
-const borderCost = 1
+const (
+	// borderCost is the number of terminal columns added by paneBorder's right border.
+	borderCost = 1
+	// minEditorWidth is the minimum interior content width for the editor column.
+	minEditorWidth = 40
+)
 
 type model struct {
 	ds           *DataStore
@@ -96,7 +100,7 @@ func (m model) paneWidth() int {
 func (m model) calcEditorWidth() int {
 	pw := m.paneWidth()
 	colWidth := pw + borderCost
-	minEditor := 40
+	minEditor := minEditorWidth
 
 	maxPanes := (m.width - minEditor - borderCost) / colWidth
 	if maxPanes < 1 {
@@ -220,7 +224,7 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 	return Pane{Node: node, Items: items, IsDocList: true}
 }
 
-// refreshViewport rebuilds editor content and resets the viewport.
+// refreshViewport rebuilds editor content without resetting scroll position.
 func (m *model) refreshViewport() {
 	if !m.vpReady {
 		return
@@ -229,7 +233,14 @@ func (m *model) refreshViewport() {
 	m.viewport.Width = ew
 	m.viewport.Height = m.paneHeight()
 	m.viewport.SetContent(m.buildEditorContent(ew))
-	m.viewport.GotoTop()
+}
+
+// resetViewport rebuilds editor content and scrolls to top (for new document selection).
+func (m *model) resetViewport() {
+	m.refreshViewport()
+	if m.vpReady {
+		m.viewport.GotoTop()
+	}
 }
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -586,14 +597,16 @@ func (m model) drillIn() (tea.Model, tea.Cmd) {
 		m.editorSchema = findSchema(pane.Node.TypeName)
 		m.showEditor = true
 		m.focus.Target = FocusEditor
-		m.refreshViewport()
+		m.fieldCursor = 0
+		m.resetViewport()
 	} else {
 		m.path = m.path[:m.focus.PaneIndex]
 		m.path = append(m.path, item.ID)
 		m.rebuildPanes()
 		if m.showEditor {
 			m.focus.Target = FocusEditor
-			m.refreshViewport()
+			m.fieldCursor = 0
+			m.resetViewport()
 		} else if m.focus.PaneIndex < len(m.panes)-1 {
 			m.focus.PaneIndex++
 		}
@@ -617,7 +630,7 @@ func (m model) View() string {
 	colWidth := pw + borderCost
 
 	// Determine visible panes
-	minEditor := 40
+	minEditor := minEditorWidth
 	maxPanes := (m.width - minEditor - borderCost) / colWidth
 	if maxPanes < 1 {
 		maxPanes = 1
@@ -776,12 +789,8 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 			line1 = selectedItemStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
 			line2 = selectedItemStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
 		} else if isCursor {
-			// Dim highlight for cursor in unfocused pane
-			cursorStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}).
-				Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"})
-			line1 = cursorStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
-			line2 = cursorStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
+			line1 = inactiveCursorStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
+			line2 = inactiveCursorStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
 		}
 		return []string{line1, line2}
 	}
@@ -800,10 +809,7 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 	}
 	line := style.Width(width).Render(inner + strings.Repeat(" ", gap) + chevron)
 	if isCursor && !selected {
-		cursorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}).
-			Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"})
-		line = cursorStyle.Width(width).Render(inner + strings.Repeat(" ", gap) + chevron)
+		line = inactiveCursorStyle.Width(width).Render(inner + strings.Repeat(" ", gap) + chevron)
 	}
 	return []string{line}
 }
@@ -924,10 +930,7 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 	// Active field border style
 	activeFieldStyle := editorFieldStyle
 	if isFocused {
-		activeFieldStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(highlight).
-			Padding(0, 1)
+		activeFieldStyle = focusedFieldStyle
 	}
 
 	switch field.Type {

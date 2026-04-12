@@ -83,8 +83,14 @@ var (
 				Bold(true).
 				Foreground(highlight)
 
-	scrollInfoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"})
+	inactiveCursorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}).
+				Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"})
+
+	focusedFieldStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(highlight).
+				Padding(0, 1)
 )
 
 func statusStyle(status string) lipgloss.Style {

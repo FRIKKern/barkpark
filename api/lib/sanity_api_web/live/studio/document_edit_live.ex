@@ -16,34 +16,11 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
       _ -> nil
     end
 
-    # Try draft first, then published
-    draft_id = Content.draft_id(doc_id)
     pub_id = Content.published_id(doc_id)
-
-    {doc, is_draft} =
-      case Content.get_document(draft_id, type, @dataset) do
-        {:ok, d} -> {d, true}
-        _ ->
-          case Content.get_document(pub_id, type, @dataset) do
-            {:ok, d} -> {d, false}
-            _ -> {nil, false}
-          end
-      end
-
-    form_data = doc_to_form(doc, schema)
-
     socket =
       socket
-      |> assign(
-        type: type,
-        doc_id: pub_id,
-        schema: schema,
-        doc: doc,
-        is_draft: is_draft,
-        has_published: Content.get_document(pub_id, type, @dataset) |> elem(0) == :ok,
-        form_data: form_data,
-        page_title: doc && doc.title || "New Document"
-      )
+      |> assign(type: type, doc_id: pub_id, schema: schema)
+      |> load_document()
 
     {:ok, socket}
   end
@@ -53,7 +30,7 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     pub_id = Content.published_id(changed_id)
     if type == socket.assigns.type && pub_id == socket.assigns.doc_id do
       # Reload the document
-      {:noreply, reload_doc(socket)}
+      {:noreply, load_document(socket)}
     else
       {:noreply, socket}
     end
@@ -85,7 +62,7 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
 
     case Content.upsert_document(type, attrs, @dataset) do
       {:ok, _doc} ->
-        {:noreply, socket |> put_flash(:info, "Saved") |> reload_doc()}
+        {:noreply, socket |> put_flash(:info, "Saved") |> load_document()}
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to save")}
     end
@@ -93,53 +70,54 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
 
   def handle_event("publish", _params, socket) do
     case Content.publish_document(socket.assigns.doc_id, socket.assigns.type, @dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Published") |> reload_doc()}
+      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Published") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to publish")}
     end
   end
 
   def handle_event("unpublish", _params, socket) do
     case Content.unpublish_document(socket.assigns.doc_id, socket.assigns.type, @dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Unpublished") |> reload_doc()}
+      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Unpublished") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unpublish")}
     end
   end
 
   def handle_event("discard-draft", _params, socket) do
     case Content.discard_draft(socket.assigns.doc_id, socket.assigns.type, @dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Draft discarded") |> reload_doc()}
+      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Draft discarded") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "No draft to discard")}
     end
   end
 
-  defp reload_doc(socket) do
+  defp load_document(socket) do
     type = socket.assigns.type
     doc_id = socket.assigns.doc_id
     schema = socket.assigns.schema
     draft_id = Content.draft_id(doc_id)
     pub_id = Content.published_id(doc_id)
 
+    # Fetch draft and published in two queries max (not three)
+    draft_result = Content.get_document(draft_id, type, @dataset)
+    pub_result = Content.get_document(pub_id, type, @dataset)
+
     {doc, is_draft} =
-      case Content.get_document(draft_id, type, @dataset) do
+      case draft_result do
         {:ok, d} -> {d, true}
         _ ->
-          case Content.get_document(pub_id, type, @dataset) do
+          case pub_result do
             {:ok, d} -> {d, false}
             _ -> {nil, false}
           end
       end
 
-    has_published = case Content.get_document(pub_id, type, @dataset) do
-      {:ok, _} -> true
-      _ -> false
-    end
+    has_published = match?({:ok, _}, pub_result)
 
     assign(socket,
       doc: doc,
       is_draft: is_draft,
       has_published: has_published,
       form_data: doc_to_form(doc, schema),
-      page_title: doc && doc.title || "Document"
+      page_title: (doc && doc.title) || "New Document"
     )
   end
 
@@ -222,19 +200,12 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     """
   end
 
-  defp render_field_input(%{"type" => "text", "name" => name}, form_data) do
+  defp render_field_input(%{"type" => type, "name" => name} = field, form_data) when type in ["text", "richText"] do
     val = Map.get(form_data, name, "")
-    assigns = %{name: name, val: val}
+    rows = Map.get(field, "rows") || if(type == "richText", do: 6, else: 3)
+    assigns = %{name: name, val: val, rows: rows}
     ~H"""
-    <textarea name={"doc[#{@name}]"} class="form-input" rows="3"><%= @val %></textarea>
-    """
-  end
-
-  defp render_field_input(%{"type" => "richText", "name" => name}, form_data) do
-    val = Map.get(form_data, name, "")
-    assigns = %{name: name, val: val}
-    ~H"""
-    <textarea name={"doc[#{@name}]"} class="form-input" rows="6"><%= @val %></textarea>
+    <textarea name={"doc[#{@name}]"} class="form-input" rows={@rows}><%= @val %></textarea>
     """
   end
 

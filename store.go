@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +37,7 @@ type DataStore struct {
 	client   *http.Client
 	program  *tea.Program
 	mu       sync.RWMutex
-	lastHash string // hash of last response to detect changes
+	lastHash string
 }
 
 // NewDataStore creates an API-backed DataStore.
@@ -48,6 +51,11 @@ func NewDataStore(baseURL string) *DataStore {
 // SetToken sets the API token for authenticated requests.
 func (ds *DataStore) SetToken(token string) {
 	ds.token = token
+}
+
+// SetProgram sets the tea.Program reference for sending refresh messages.
+func (ds *DataStore) SetProgram(p *tea.Program) {
+	ds.program = p
 }
 
 // Mutate sends a mutation to the Phoenix API (Sanity format).
@@ -77,16 +85,6 @@ func (ds *DataStore) Mutate(mutations []map[string]interface{}) error {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("mutation error %d: %s", resp.StatusCode, string(respBody))
 	}
-	return nil
-}
-
-// SetProgram sets the tea.Program reference for sending refresh messages.
-func (ds *DataStore) SetProgram(p *tea.Program) {
-	ds.program = p
-}
-
-// Load is a no-op for the API client (data lives in Phoenix/Postgres).
-func (ds *DataStore) Load() error {
 	return nil
 }
 
@@ -178,8 +176,11 @@ func (ds *DataStore) Delete(typeName, id string) bool {
 }
 
 // StartSSE connects to the Phoenix SSE listener for real-time updates.
-// Falls back to polling if SSE connection fails.
+// Falls back to a single poll on reconnect, with exponential backoff.
 func (ds *DataStore) StartSSE(token string) {
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+
 	for {
 		if ds.program == nil {
 			time.Sleep(time.Second)
@@ -187,9 +188,14 @@ func (ds *DataStore) StartSSE(token string) {
 		}
 		err := ds.listenSSE(token)
 		if err != nil {
-			// SSE failed, fall back to polling briefly then retry
 			ds.pollOnce()
-			time.Sleep(3 * time.Second)
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		} else {
+			backoff = time.Second
 		}
 	}
 }
@@ -204,7 +210,6 @@ func (ds *DataStore) listenSSE(token string) error {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	// Use a client without timeout for long-lived SSE
 	sseClient := &http.Client{Timeout: 0}
 	resp, err := sseClient.Do(req)
 	if err != nil {
@@ -216,33 +221,15 @@ func (ds *DataStore) listenSSE(token string) error {
 		return fmt.Errorf("SSE status %d", resp.StatusCode)
 	}
 
-	buf := make([]byte, 4096)
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			line := string(buf[:n])
-			// Any "event: mutation" line means data changed
-			if contains(line, "event: mutation") {
-				ds.program.Send(DataStoreRefreshMsg{})
-			}
-		}
-		if err != nil {
-			return err
+	// Use a line scanner instead of raw Read to handle SSE frames correctly
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event: mutation") {
+			ds.program.Send(DataStoreRefreshMsg{})
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return scanner.Err()
 }
 
 func (ds *DataStore) pollOnce() {
@@ -257,10 +244,10 @@ func (ds *DataStore) pollOnce() {
 		return
 	}
 
-	hash := fmt.Sprintf("%x", body)
+	hash := fmt.Sprintf("%x", sha256.Sum256(body))
 
 	ds.mu.Lock()
-	changed := hash != ds.lastHash && ds.lastHash != ""
+	changed := hash != ds.lastHash
 	ds.lastHash = hash
 	ds.mu.Unlock()
 
