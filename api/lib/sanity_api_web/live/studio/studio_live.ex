@@ -49,6 +49,18 @@ defmodule SanityApiWeb.Studio.StudioLive do
   end
 
   def handle_event("save", %{"doc" => params}, socket) do
+    save_doc(socket, params, "Saved")
+  end
+
+  def handle_event("autosave", %{"doc" => params}, socket) do
+    save_doc(socket, params, nil)
+  end
+
+  def handle_event("autosave", _params, socket) do
+    {:noreply, socket}
+  end
+
+  defp save_doc(socket, params, flash_msg) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
@@ -61,8 +73,12 @@ defmodule SanityApiWeb.Studio.StudioLive do
         "content" => content
       }
       case Content.upsert_document(type, attrs, @dataset) do
-        {:ok, _} -> {:noreply, socket |> put_flash(:info, "Saved") |> rebuild_panes()}
-        {:error, _} -> {:noreply, put_flash(socket, :error, "Save failed")}
+        {:ok, _} ->
+          socket = assign(socket, save_status: "Saved")
+          socket = if flash_msg, do: put_flash(socket, :info, flash_msg), else: socket
+          {:noreply, rebuild_panes(socket)}
+        {:error, _} ->
+          {:noreply, assign(socket, save_status: "Save failed")}
       end
     else
       {:noreply, socket}
@@ -167,7 +183,8 @@ defmodule SanityApiWeb.Studio.StudioLive do
       editor_type: editor && editor[:type],
       editor_is_draft: (editor && editor[:is_draft]) || false,
       editor_has_published: (editor && editor[:has_published]) || false,
-      editor_form: (editor && editor[:form]) || %{}
+      editor_form: (editor && editor[:form]) || %{},
+      save_status: socket.assigns[:save_status] || ""
     )
   end
 
@@ -287,7 +304,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
               </div>
             <% end %>
 
-            <form phx-submit="save">
+            <form phx-submit="save" phx-change="autosave" id="editor-form">
               <%= if @editor_schema do %>
                 <%= for field <- @editor_schema.fields do %>
                   <div class="editor-field">
@@ -300,7 +317,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
                 <% end %>
               <% end %>
               <div class="editor-actions">
-                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <span class="save-status"><%= @save_status %></span>
               </div>
             </form>
           </div>
@@ -384,7 +401,8 @@ defmodule SanityApiWeb.Studio.StudioLive do
         color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
       }
       .editor-field-type { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg-dim); margin-left: 6px; font-size: 11px; }
-      .editor-actions { padding-top: 16px; border-top: 1px solid var(--border-muted); }
+      .editor-actions { padding-top: 16px; border-top: 1px solid var(--border-muted); display: flex; align-items: center; gap: 12px; }
+      .save-status { font-size: 12px; color: var(--success); opacity: 0.8; transition: opacity 0.3s; }
       .editor-empty {
         flex: 1; display: flex; align-items: center; justify-content: center;
         background: var(--bg);
@@ -397,7 +415,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, opts: opts, v: val)
     ~H"""
-    <select name={"doc[#{@n}]"} class="form-input">
+    <select name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
       <%= for o <- @opts do %><option value={o} selected={o == @v}><%= o %></option><% end %>
     </select>
     """
@@ -408,7 +426,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
     rows = Map.get(f, "rows") || if(t == "richText", do: 6, else: 3)
     assigns = assign(assigns, n: name, v: val, rows: rows)
     ~H"""
-    <textarea name={"doc[#{@n}]"} class="form-input" rows={@rows}><%= @v %></textarea>
+    <textarea name={"doc[#{@n}]"} class="form-input" rows={@rows} phx-debounce="500"><%= @v %></textarea>
     """
   end
 
@@ -418,7 +436,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
     ~H"""
     <div class="form-checkbox">
       <input type="hidden" name={"doc[#{@n}]"} value="false" />
-      <input type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} />
+      <input type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
     </div>
     """
   end
@@ -428,7 +446,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
     assigns = assign(assigns, n: name, v: val)
     ~H"""
     <div style="display:flex;align-items:center;gap:10px;">
-      <input type="color" name={"doc[#{@n}]"} value={@v} style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
+      <input type="color" name={"doc[#{@n}]"} value={@v} phx-debounce="300" style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
       <span style="font-family:var(--font-mono);font-size:13px;"><%= @v %></span>
     </div>
     """
@@ -438,7 +456,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
     ~H"""
-    <input type="text" name={"doc[#{@n}]"} value={@v} class="form-input" />
+    <input type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
     """
   end
 end
