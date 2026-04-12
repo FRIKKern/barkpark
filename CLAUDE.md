@@ -24,31 +24,33 @@ A headless CMS with three interfaces:
 - **IP:** 89.167.28.206
 - **Arch:** ARM64 (aarch64) — Hetzner cax11
 - **OS:** Ubuntu 22.04
-- **App dir:** /opt/barkpark
-- **Caddy:** reverse proxy on port 80 → localhost:4000
+- **App dir:** /opt/barkpark-cms (NOTE: uses old name despite repo rename)
+- **Git clone:** /root/barkpark (where you edit code)
+- **Caddy:** reverse proxy on port 80 → localhost:4000 (Caddyfile at /etc/caddy/Caddyfile)
 - **URLs:**
   - http://89.167.28.206/studio (web Studio)
   - http://89.167.28.206/api/documents/post (API)
   - http://89.167.28.206:4000 (direct Phoenix)
 - **Erlang/Elixir:** via ASDF (not system packages — no ARM support in Erlang Solutions)
 - **Go:** /usr/local/go/bin/go (official ARM64 binary)
-- **Env file:** /opt/barkpark/.env (DATABASE_URL, SECRET_KEY_BASE)
-- **Service:** systemd `barkpark.service`
+- **Env file:** /opt/barkpark-cms/.env (DATABASE_URL, SECRET_KEY_BASE)
+- **Service:** systemd `barkpark-cms.service` (NOT barkpark.service)
 - **Start script:** `api/start.sh` (sources ASDF + .env for systemd)
+- **Logs:** `journalctl -u barkpark-cms -f`
 
 ## Deploy to Server
 
 **Option 1: Auto-deploy (recommended)**
 ```bash
 ssh root@89.167.28.206
-cd /opt/barkpark
+cd /opt/barkpark-cms
 git pull    # post-merge hook auto-rebuilds and restarts
 ```
 
 **Option 2: Manual**
 ```bash
 ssh root@89.167.28.206
-cd /opt/barkpark
+cd /opt/barkpark-cms
 make deploy   # git pull + clean + compile + restart
 ```
 
