@@ -53,7 +53,27 @@ defmodule SanityApiWeb.Studio.StudioLive do
   end
 
   def handle_event("autosave", %{"doc" => params}, socket) do
-    save_doc(socket, params, nil)
+    doc = socket.assigns[:editor_doc]
+    schema = socket.assigns[:editor_schema]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      content = build_content(params, schema)
+      attrs = %{
+        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
+        "title" => Map.get(params, "title", doc.title),
+        "status" => Map.get(params, "status", doc.status),
+        "content" => content
+      }
+      case Content.upsert_document(type, attrs, @dataset) do
+        {:ok, _} ->
+          # Only update form data + status — don't rebuild panes (no flicker)
+          {:noreply, assign(socket, editor_form: params, save_status: "Saved")}
+        {:error, _} ->
+          {:noreply, assign(socket, save_status: "Save failed")}
+      end
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("autosave", _params, socket) do
