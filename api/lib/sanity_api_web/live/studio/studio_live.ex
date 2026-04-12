@@ -219,17 +219,6 @@ defmodule SanityApiWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="studio-bar">
-      <div class="studio-bar-brand">
-        <div class="sidebar-brand-icon">B</div>
-        <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
-      </div>
-      <div class="studio-bar-tabs">
-        <a href="/studio" class="studio-tab active">Structure</a>
-        <a href="/studio/media" class="studio-tab">Media</a>
-      </div>
-    </div>
-
     <div class="pane-layout">
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
         <div class="pane-column">
@@ -327,24 +316,8 @@ defmodule SanityApiWeb.Studio.StudioLive do
     </div>
 
     <style>
-      /* Top bar */
-      .studio-bar {
-        height: 48px; display: flex; align-items: center; gap: 24px;
-        padding: 0 16px; background: var(--bg-card);
-        border-bottom: 1px solid var(--border-muted);
-      }
-      .studio-bar-brand { display: flex; align-items: center; gap: 8px; }
-      .studio-bar-tabs { display: flex; gap: 2px; }
-      .studio-tab {
-        padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500;
-        color: var(--fg-muted); transition: all 0.1s;
-      }
-      .studio-tab:hover { color: var(--fg); background: var(--bg-muted); }
-      .studio-tab.active { color: var(--fg); background: var(--bg-accent); }
-
-      /* Pane layout */
       .pane-layout {
-        display: flex; height: calc(100vh - 48px); overflow: hidden;
+        display: flex; flex: 1; overflow: hidden;
       }
       .pane-column {
         width: 260px; min-width: 200px; flex-shrink: 0;
