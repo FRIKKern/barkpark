@@ -69,6 +69,16 @@ docker-down: ## Stop Docker containers
 docker-logs: ## Tail Docker logs
 	docker compose logs -f
 
+deploy: ## Pull latest from GitHub, rebuild, restart (one command)
+	git pull
+	rm -rf api/_build/prod
+	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
+	go mod tidy && go build -o bin/barkpark .
+	sudo systemctl restart barkpark-cms
+	@echo ">> Deployed. Waiting for API..."
+	@sleep 10
+	@curl -s --max-time 5 http://localhost:4000/api/schemas > /dev/null && echo ">> API is live!" || echo ">> Still warming up, check: make logs"
+
 # ── Setup ────────────────────────────────────────────────────────────────────
 
 setup: ## First-time setup on a fresh server (run deploy.sh instead)

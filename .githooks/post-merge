@@ -1,15 +1,47 @@
 #!/bin/bash
-# Post-merge hook: nuke ALL compiled BEAM artifacts after git pull.
+# Post-merge hook: auto-rebuild and restart after every git pull.
 #
-# Problem: Elixir HEEx templates are embedded into modules at compile time.
-# When templates or modules change, old .beam files persist and Phoenix
-# serves stale content. Cleaning just lib/sanity_api is NOT enough —
-# template changes require a full _build/prod wipe.
-#
-# This is slow (recompiles deps ~60s) but prevents all stale artifacts.
+# This runs automatically when you do `git pull` on the server.
+# It nukes stale BEAM artifacts, recompiles, and restarts the service.
 
-if [ -d api/_build/prod ]; then
-  echo "[post-merge] Nuking api/_build/prod (prevents stale BEAM/templates)..."
-  rm -rf api/_build/prod
-  echo "[post-merge] Run 'make rebuild' to recompile."
+set -e
+
+echo "[post-merge] Auto-deploying..."
+
+# Source ASDF if available (needed on Hetzner)
+export PATH="/root/.asdf/bin:/root/.asdf/shims:/usr/local/go/bin:$PATH"
+if [ -f /root/.asdf/asdf.sh ]; then
+  . /root/.asdf/asdf.sh
+fi
+
+# Source env if available
+if [ -f .env ]; then
+  set -a; source .env; set +a
+fi
+export MIX_ENV=prod
+
+# Nuke stale BEAM (prevents ALL cached artifact issues)
+echo "[post-merge] Cleaning _build/prod..."
+rm -rf api/_build/prod
+
+# Rebuild Phoenix
+echo "[post-merge] Compiling Phoenix..."
+cd api
+mix deps.get
+mix deps.compile --force
+mix compile
+cd ..
+
+# Rebuild Go TUI
+echo "[post-merge] Building Go TUI..."
+go mod tidy 2>/dev/null
+go build -o bin/barkpark . 2>/dev/null
+
+# Restart service
+if systemctl is-active barkpark-cms > /dev/null 2>&1; then
+  echo "[post-merge] Restarting service..."
+  sudo systemctl restart barkpark-cms
+  echo "[post-merge] Done. Service restarted."
+else
+  echo "[post-merge] Service not running. Start with: systemctl start barkpark-cms"
 fi
