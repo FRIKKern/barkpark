@@ -1,55 +1,11 @@
-<% sidebar = SanityApi.Structure.sidebar_items("production") %>
 <div class="studio">
-  <nav class="sidebar">
-    <div class="sidebar-brand">
-      <div class="sidebar-brand-icon">B</div>
-      <span>Barkpark</span>
-    </div>
-
-    <div class="sidebar-nav">
-      <a href="/studio" class="sidebar-link">
-        <span class="sidebar-link-icon">&#9776;</span>
-        <span>Structure</span>
-      </a>
-    </div>
-
-    <div class="sidebar-section">Content</div>
-    <div class="sidebar-nav">
-      <%= for item <- sidebar.content do %>
-        <a href={"/studio/#{item.name}"} class="sidebar-link">
-          <span class="sidebar-link-icon"><%= item.icon %></span>
-          <span><%= item.title %></span>
-        </a>
-      <% end %>
-    </div>
-
-    <div class="sidebar-divider"></div>
-    <div class="sidebar-section">Settings</div>
-    <div class="sidebar-nav">
-      <%= for item <- sidebar.settings do %>
-        <a href={"/studio/#{item.name}"} class="sidebar-link">
-          <span class="sidebar-link-icon"><%= item.icon %></span>
-          <span><%= item.title %></span>
-        </a>
-      <% end %>
-    </div>
-
-    <div class="sidebar-divider"></div>
-    <div class="sidebar-nav">
-      <a href="/studio/media" class="sidebar-link">
-        <span class="sidebar-link-icon">&#128193;</span>
-        <span>Media Library</span>
-      </a>
-    </div>
-  </nav>
-
   <div class="main">
-    <div class="main-body">
+    <div class="main-body" style="padding: 0;">
       <%= if Phoenix.Flash.get(@flash, :info) do %>
-        <div class="flash flash-info"><%= Phoenix.Flash.get(@flash, :info) %></div>
+        <div class="flash flash-info" style="margin: 12px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
       <% end %>
       <%= if Phoenix.Flash.get(@flash, :error) do %>
-        <div class="flash flash-error"><%= Phoenix.Flash.get(@flash, :error) %></div>
+        <div class="flash flash-error" style="margin: 12px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
       <% end %>
       {@inner_content}
     </div>
