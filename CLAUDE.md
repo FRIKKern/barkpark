@@ -1,369 +1,232 @@
-# Barkpark CMS — Project Guide
+# Barkpark CMS — Agent Guide
 
-## Architecture
+> Everything an AI agent needs to work with this repo without making mistakes.
 
-Two projects work together:
+## What this is
 
-- **sanity-tui** (Go, Bubble Tea) — Terminal UI client at `./`
-- **sanity-api** (Elixir, Phoenix) — Backend API at `./api/`
-- **PostgreSQL** — Data store (managed by Ecto)
+A headless CMS with three interfaces:
+- **Go TUI** (root) — terminal Studio client, connects to the API
+- **Phoenix API** (`api/`) — Elixir backend, PostgreSQL, all CRUD + real-time
+- **Web Studio** (`api/` LiveView) — browser UI at `/studio`, multi-pane like Sanity
 
-The TUI connects to Phoenix on `http://localhost:4000` (configurable via `BARKPARK_API_URL`).
-Phoenix serves the API and stores everything in Postgres.
+## Golden Rules
 
-## Running
+1. **NEVER compile without cleaning first.** Always `rm -rf api/_build/prod` before `mix compile` on the server. Use `make rebuild`.
+2. **NEVER partially clean.** Cleaning just `lib/sanity_api` leaves stale HEEx templates. Nuke the entire `_build/prod`.
+3. **NEVER skip `systemctl restart`** after compiling. The old BEAM process stays in memory.
+4. **NEVER add blocking `<script>` in `<head>`** in root.html.heex. Use `async` at the bottom. (Lucide was 400KB blocking and killed page load.)
+5. **NEVER use `force_ssl` without HTTPS.** It causes 301 redirect loops. Currently disabled in prod.exs.
+6. **ALWAYS test after deploy.** At minimum: `curl http://localhost:4000/api/schemas`
+7. **ALWAYS use `make rebuild` or `make deploy`** on the server. Never raw `mix compile`.
+
+## Production Server
+
+- **IP:** 89.167.28.206
+- **Arch:** ARM64 (aarch64) — Hetzner cax11
+- **OS:** Ubuntu 22.04
+- **App dir:** /opt/barkpark-cms
+- **Caddy:** reverse proxy on port 80 → localhost:4000
+- **URLs:**
+  - http://89.167.28.206/studio (web Studio)
+  - http://89.167.28.206/api/documents/post (API)
+  - http://89.167.28.206:4000 (direct Phoenix)
+- **Erlang/Elixir:** via ASDF (not system packages — no ARM support in Erlang Solutions)
+- **Go:** /usr/local/go/bin/go (official ARM64 binary)
+- **Env file:** /opt/barkpark-cms/.env (DATABASE_URL, SECRET_KEY_BASE)
+- **Service:** systemd `barkpark-cms.service`
+- **Start script:** `api/start.sh` (sources ASDF + .env for systemd)
+
+## Deploy to Server
+
+**Option 1: Auto-deploy (recommended)**
+```bash
+ssh root@89.167.28.206
+cd /opt/barkpark-cms
+git pull    # post-merge hook auto-rebuilds and restarts
+```
+
+**Option 2: Manual**
+```bash
+ssh root@89.167.28.206
+cd /opt/barkpark-cms
+make deploy   # git pull + clean + compile + restart
+```
+
+**Option 3: Fresh server**
+```bash
+ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
+```
+
+## Running Locally
 
 ```bash
-# Start Phoenix API (terminal 1)
-cd ./api && mix phx.server
+# Both in tmux
+make dev
 
-# Start Go TUI (terminal 2)
-cd . && go run .
+# Or separately
+cd api && mix phx.server    # terminal 1
+go run .                     # terminal 2
 
-# Or use tmux dev script
-./dev.sh
+# Connect TUI to remote server
+BARKPARK_API_URL=http://89.167.28.206:4000 go run .
 ```
 
-## API Endpoints
+## Auth
 
-Base URL: `http://localhost:4000`
 Dev token: `barkpark-dev-token` (read + write + admin)
+Header: `Authorization: Bearer barkpark-dev-token`
+Tokens hashed with SHA256 in `api_tokens` table.
 
-### Public API (no auth, respects schema visibility)
+## API Quick Reference
 
-```
-GET /v1/data/query/:dataset/:type          — list documents
-GET /v1/data/query/:dataset/:type?perspective=drafts
-GET /v1/data/query/:dataset/:type?filter=status=published
-GET /v1/data/doc/:dataset/:type/:doc_id    — single document
-```
+```bash
+TOKEN="barkpark-dev-token"
 
-Perspectives: `published` (default), `drafts`, `raw`
+# Read (public, no auth)
+curl localhost:4000/v1/data/query/production/post
+curl localhost:4000/v1/data/query/production/post?perspective=drafts
+curl localhost:4000/v1/data/doc/production/post/p1
 
-### Private API (requires Bearer token)
+# Write (requires auth)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"mutations":[{"create":{"_type":"post","_id":"x","title":"New"}}]}'
 
-```
-POST /v1/data/mutate/:dataset              — mutations
-GET  /v1/data/listen/:dataset              — SSE real-time stream
-```
+# Publish/unpublish
+-d '{"mutations":[{"publish":{"id":"x","type":"post"}}]}'
+-d '{"mutations":[{"unpublish":{"id":"x","type":"post"}}]}'
 
-### Schema Management (requires admin token)
+# Schemas (requires admin)
+curl -H "Authorization: Bearer $TOKEN" localhost:4000/v1/schemas/production
 
-```
-GET    /v1/schemas/:dataset                — list all schemas
-GET    /v1/schemas/:dataset/:name          — single schema
-POST   /v1/schemas/:dataset                — create/update schema
-DELETE /v1/schemas/:dataset/:name          — delete schema
-```
-
-### Legacy API (no auth, for backward compat)
-
-```
-GET    /api/documents/:type                — list docs
-GET    /api/documents/:type/:id            — single doc
-POST   /api/documents/:type                — create/update
-DELETE /api/documents/:type/:id            — delete
-GET    /api/schemas                        — list schemas
+# Media
+curl -X POST localhost:4000/media/upload -H "Authorization: Bearer $TOKEN" -F "file=@photo.jpg"
+curl localhost:4000/media
 ```
 
 ## Draft/Published Model
 
-Follows Sanity's convention — drafts and published are separate rows:
+- Create → `drafts.{id}` (always a draft)
+- Publish → copies `drafts.{id}` to `{id}`, deletes draft
+- Unpublish → moves `{id}` back to `drafts.{id}`
+- Perspectives: `published` (default public), `drafts` (studio view), `raw` (everything)
 
-- **Published**: `doc_id = "p1"` — visible on public API
-- **Draft**: `doc_id = "drafts.p1"` — only visible with `perspective=drafts` or `raw`
-
-Creating always makes a draft. Publishing copies draft to published and removes the draft.
-
-## Common Operations
-
-### Create a document (always starts as draft)
-
-```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"My Post"}}]}'
-```
-
-### Edit a document (patch fields)
-
-```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"patch":{"id":"drafts.my-post","type":"post","set":{"title":"New Title","excerpt":"Updated"}}}]}'
-```
-
-### Publish a document
-
-```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
-```
-
-### Unpublish (back to draft)
-
-```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
-```
-
-### Discard draft (keep published)
-
-```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"discardDraft":{"id":"my-post","type":"post"}}]}'
-```
-
-### Delete entirely (both draft + published)
-
-```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"delete":{"id":"my-post","type":"post"}}]}'
-```
-
-### Add a new schema (document type)
-
-```bash
-curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "task",
-    "title": "Task",
-    "icon": "✅",
-    "visibility": "private",
-    "fields": [
-      {"name": "title", "title": "Title", "type": "string"},
-      {"name": "assignee", "title": "Assignee", "type": "reference", "refType": "author"},
-      {"name": "status", "title": "Status", "type": "select", "options": ["todo", "in_progress", "done"]},
-      {"name": "dueDate", "title": "Due Date", "type": "datetime"},
-      {"name": "description", "title": "Description", "type": "richText"}
-    ]
-  }'
-```
-
-### Update a schema
-
-Same endpoint as create — POST with the same `name` upserts:
-
-```bash
-curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "task", "title": "Task", "icon": "📋", "visibility": "private", "fields": [...]}'
-```
-
-### Delete a schema
-
-```bash
-curl -X DELETE localhost:4000/v1/schemas/production/task \
-  -H "Authorization: Bearer barkpark-dev-token"
-```
-
-### Schema visibility
-
-- `"public"` — accessible via public API without auth (for website content: post, page, author, category, project)
-- `"private"` — only accessible with auth token (for internal: siteSettings, navigation, colors)
-
-## Field Types
-
-Available types for schema fields:
-
-| Type | Description | Extra fields |
-|------|-------------|-------------|
-| `string` | Single-line text | |
-| `slug` | Auto-generated slug | |
-| `text` | Multi-line textarea | `rows` (default 3) |
-| `richText` | Block editor | |
-| `image` | Image upload | |
-| `select` | Dropdown | `options: ["a", "b"]` |
-| `boolean` | Toggle | |
-| `datetime` | Date + time | |
-| `color` | Color picker | |
-| `reference` | Link to another type | `refType: "author"` |
-| `array` | Repeatable list | |
-
-## Dataset
-
-All endpoints use `production` as the dataset. The dataset is part of every URL path.
-
-## Mutation Format
-
-All writes go through `POST /v1/data/mutate/:dataset` with body:
+## Document Shape
 
 ```json
 {
-  "mutations": [
-    {"create": {"_type": "post", "_id": "my-id", "title": "..."}},
-    {"createOrReplace": {"_type": "post", "_id": "my-id", "title": "..."}},
-    {"patch": {"id": "drafts.my-id", "type": "post", "set": {"title": "..."}}},
-    {"publish": {"id": "my-id", "type": "post"}},
-    {"unpublish": {"id": "my-id", "type": "post"}},
-    {"discardDraft": {"id": "my-id", "type": "post"}},
-    {"delete": {"id": "my-id", "type": "post"}}
-  ]
+  "_id": "p1",
+  "_type": "post",
+  "_draft": false,
+  "_publishedId": "p1",
+  "title": "My Post",
+  "status": "published",
+  "content": {"category": "Tech", "author": "Knut"},
+  "_createdAt": "2026-04-12T09:11:20Z",
+  "_updatedAt": "2026-04-12T09:11:20Z"
 }
 ```
 
-Multiple mutations can be batched in one request.
+## Schema Visibility
+
+- `"public"` — accessible on public API without auth
+- `"private"` — returns 404 on public API, requires token
+
+## Field Types
+
+string, slug, text (rows), richText, image, select (options), boolean, datetime, color, reference (refType), array
 
 ## Project Structure
 
-### Go TUI (`sanity-tui/`)
 ```
-main.go        — entry point, connects to Phoenix, starts TUI
-tui.go         — Bubble Tea model, view, update (panes + editor)
-store.go       — APIClient (HTTP calls to Phoenix)
-schema.go      — Schema/Field types, loadSchemas() from API
-structure.go   — Structure builder API (navigation tree)
-styles.go      — Lip Gloss style definitions
-```
-
-### Phoenix API (`sanity_api/`)
-```
-lib/sanity_api/content.ex                — Content context (CRUD, publish, perspectives)
-lib/sanity_api/content/document.ex       — Ecto Document schema
-lib/sanity_api/content/schema_definition.ex — Ecto SchemaDefinition schema
-lib/sanity_api/auth.ex                   — Auth context (token verification)
-lib/sanity_api/auth/api_token.ex         — Ecto ApiToken schema
-lib/sanity_api_web/router.ex             — All routes
-lib/sanity_api_web/controllers/          — Query, Mutate, Schema, Listen, Legacy controllers
-lib/sanity_api_web/plugs/require_token.ex — Auth middleware
-priv/repo/seeds.exs                      — Seed data
-```
-
-## Media API
-
-```bash
-# Upload
-curl -X POST localhost:4000/media/upload \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -F "file=@photo.jpg"
-
-# List (filter by type: image, video, application)
-curl localhost:4000/media
-curl "localhost:4000/media?type=image"
-
-# Serve file
-curl localhost:4000/media/files/2026/04/photo-abc123.jpg
-
-# Delete
-curl -X DELETE localhost:4000/media/FILE_ID \
-  -H "Authorization: Bearer barkpark-dev-token"
+barkpark-cms/
+├── main.go              # TUI entry, connects to Phoenix
+├── tui.go               # Bubble Tea panes + editor
+├── store.go             # HTTP + SSE client to Phoenix
+├── schema.go            # Load schemas from API
+├── structure.go         # Auto-generate nav tree from schemas
+├── styles.go            # Lip Gloss styles
+├── api/                 # Phoenix API + Web Studio
+│   ├── lib/sanity_api/
+│   │   ├── content.ex           # Document + schema CRUD, publish, perspectives
+│   │   ├── content/document.ex  # Ecto document schema
+│   │   ├── content/schema_definition.ex
+│   │   ├── structure.ex         # Navigation tree builder
+│   │   ├── media.ex             # File upload/storage
+│   │   └── auth.ex              # Token verification
+│   ├── lib/sanity_api_web/
+│   │   ├── router.ex            # All routes (API + Studio + Media)
+│   │   ├── layouts/root.html.heex  # HTML shell, CSS, CDN scripts
+│   │   ├── layouts/app.html.heex   # Top bar (permanent)
+│   │   ├── live/studio/studio_live.ex  # Multi-pane Studio (main)
+│   │   ├── live/studio/media_live.ex   # Media library
+│   │   ├── controllers/            # Query, Mutate, Schema, Listen, Media, Legacy
+│   │   ├── plugs/require_token.ex  # Auth middleware
+│   │   └── components/icons.ex     # Lucide icon mapping
+│   ├── config/
+│   │   ├── prod.exs        # NO force_ssl (disabled)
+│   │   └── runtime.exs     # HTTP scheme by default (PHX_SCHEME env)
+│   ├── start.sh            # Systemd wrapper (sources ASDF + .env)
+│   ├── priv/repo/seeds.exs # 8 schemas, 27 docs, dev token
+│   └── Dockerfile          # For Docker deployment (alternative)
+├── .githooks/post-merge    # Auto-rebuild on git pull
+├── deploy.sh              # Fresh server setup (ARM + x86)
+├── Makefile               # All operations
+├── docker-compose.yml     # Docker alternative
+└── CLAUDE.md              # This file
 ```
 
-Files stored on disk at `api/uploads/YYYY/MM/filename`. Metadata in PostgreSQL.
+## Web Studio (LiveView)
 
-## Deploy to Hetzner
-
-```bash
-# One-command deploy to a fresh Ubuntu VPS
-ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
-```
-
-Installs Elixir, Go, PostgreSQL natively. No Docker for the app.
-
-### Server workflow after deploy
-
-```bash
-ssh root@YOUR_VPS_IP
-cd /opt/nextgen-cms
-
-nano api/lib/sanity_api/content.ex   # edit code
-make rebuild                          # rebuild + restart
-make status                           # check service
-make logs                             # tail logs
-make seed                             # re-seed data
-```
-
-### Connect local TUI to remote server
-
-```bash
-BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
-```
-
-### Makefile commands
-
-| Command | Description |
-|---------|-------------|
-| `make rebuild` | Rebuild Phoenix + TUI, restart service |
-| `make restart` | Restart without rebuild |
-| `make status` | Service status |
-| `make logs` | Tail logs |
-| `make seed` | Re-seed database |
-| `make migrate` | Run migrations |
-| `make reset-db` | Full DB reset |
-| `make dev` | Local tmux dev session |
-| `make api` | Run Phoenix locally |
-| `make tui` | Run Go TUI locally |
+- **URL:** `/studio` (single LiveView manages multi-pane layout)
+- **JS dependencies loaded via CDN** (no asset pipeline, no Node.js):
+  - Phoenix JS: `cdn.jsdelivr.net/npm/phoenix@1.8.5`
+  - LiveView JS: `cdn.jsdelivr.net/npm/phoenix_live_view@1.1.28`
+  - Lucide icons: `unpkg.com/lucide@0.460.0` (async, bottom of body)
+- **MutationObserver** auto-renders Lucide icons on LiveView DOM updates
+- **PubSub** updates panes in real-time when documents change
 
 ## Database
 
-PostgreSQL with four tables:
-- `documents` — all content (JSONB `content` field for schema-specific data)
-- `schema_definitions` — document type definitions with visibility
-- `api_tokens` — authentication tokens
-- `media_files` — uploaded file metadata
+PostgreSQL with tables: `documents`, `schema_definitions`, `api_tokens`, `media_files`
+- Reset: `cd api && MIX_ENV=prod mix ecto.reset`
+- Migrate: `cd api && MIX_ENV=prod mix ecto.migrate`
+- Seed: `cd api && MIX_ENV=prod mix run priv/repo/seeds.exs`
 
-Reset and reseed: `cd ./api && mix ecto.reset`
+## Makefile Commands
 
-## IMPORTANT: Stale BEAM Cache
+| Command | What it does |
+|---------|-------------|
+| `make rebuild` | Nuke _build, compile deps+app, restart service |
+| `make deploy` | git pull + rebuild (one command) |
+| `make restart` | Restart without rebuild |
+| `make status` | systemctl status |
+| `make logs` | journalctl -f |
+| `make seed` | Re-seed database |
+| `make migrate` | Run migrations |
+| `make reset-db` | Drop + create + migrate + seed |
+| `make dev` | Local tmux dev session |
+| `make api` | Local Phoenix only |
+| `make tui` | Local Go TUI only |
 
-When Elixir modules are renamed, moved, or deleted, old compiled `.beam` files persist in `_build/prod/lib/sanity_api/` and Phoenix loads them instead of the new code. This causes:
-- Ghost modules serving old routes
-- 500 errors from undefined functions
-- New LiveViews not appearing
+## Past Mistakes (NEVER REPEAT)
 
-**ALWAYS nuke the entire _build/prod before recompiling after code changes:**
+1. **Partial _build clean** — Cleaned `_build/prod/lib/sanity_api` only. HEEx templates in Layouts module stayed stale. Old HTML served for hours.
+2. **Missing deps.compile --force** — `Plug.Exception` module undefined at runtime. Must force-recompile deps after nuking _build.
+3. **Forgot systemctl restart** — Compiled new code but old BEAM process still running in memory.
+4. **Wrong start.sh path** — systemd service pointed to `/opt/barkpark-cms/start.sh` but file was at `api/start.sh`. Process died silently.
+5. **force_ssl in prod.exs** — Caused 301 redirects to HTTPS when no HTTPS existed. All API calls returned empty.
+6. **Erlang Solutions has no ARM packages** — Must use ASDF on Hetzner cax* (ARM) servers.
+7. **Blocking script in head** — Lucide (400KB) loaded synchronously in `<head>`, page hung for seconds. Must use `async` at bottom.
+8. **LiveView JS not loaded** — `phx-click` events rendered in HTML but nothing worked. LiveView needs its JS client loaded.
+9. **Repo was private** — `git clone` failed on server. Made public for deployment.
+10. **Go binary committed** — `barkpark-cms` binary accidentally committed. Added to .gitignore.
+
+## Testing
+
+After any change, verify with:
 ```bash
-rm -rf api/_build/prod
+curl -s http://89.167.28.206/api/schemas | head -20    # API works
+curl -s http://89.167.28.206/studio | grep "pane-layout" # Studio renders
+curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Documents
 ```
-
-Cleaning just `lib/sanity_api` is NOT enough — HEEx templates are embedded at compile time into Layouts/LiveView modules. If a template changes but the parent module's .beam isn't invalidated, Phoenix serves stale HTML.
-
-`make rebuild` does this automatically. The `.githooks/post-merge` hook also cleans on every `git pull`.
-
-To enable git hooks on a fresh clone:
-```bash
-git config core.hooksPath .githooks
-```
-
-**Never** do `mix compile` on the server without cleaning first. Always use `make rebuild`.
-
-## Deploy Checklist (MUST FOLLOW)
-
-Every time you deploy to Hetzner, do exactly this:
-
-```bash
-ssh root@89.167.28.206
-cd /opt/barkpark-cms
-git pull
-rm -rf api/_build/prod          # MUST nuke entire _build/prod
-cd api
-set -a; source ../.env; set +a
-export MIX_ENV=prod
-mix deps.compile --force
-mix compile
-systemctl restart barkpark-cms
-sleep 10                         # MUST wait — first request compiles
-```
-
-Or just: `make rebuild` (which does all of the above).
-
-### Past mistakes (do not repeat)
-1. Cleaned only `_build/prod/lib/sanity_api` — HEEx templates in Layouts module stayed stale
-2. Ran `mix compile` without `--force` on deps — Plug.Exception module missing
-3. Forgot to `systemctl restart` after compile — old BEAM process still in memory
-4. Service file pointed to wrong `start.sh` path — process died silently
-5. Forgot `force_ssl` in prod.exs caused 301 redirects on HTTP
-6. Erlang Solutions repo has no ARM packages — must use ASDF on Hetzner cax* servers
