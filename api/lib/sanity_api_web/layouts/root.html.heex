@@ -319,20 +319,16 @@
 </head>
 <body>
   {@inner_content}
-  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js" async></script>
-  <script type="module">
-    import {Socket} from "https://cdn.jsdelivr.net/npm/phoenix@1.8.5/+esm";
-    import {LiveSocket} from "https://cdn.jsdelivr.net/npm/phoenix_live_view@1.1.28/+esm";
-
+  <script src="/assets/phoenix.js"></script>
+  <script src="/assets/phoenix_live_view.js"></script>
+  <script src="/assets/lucide.js" async></script>
+  <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
-    let liveSocket = new LiveSocket("/live", Socket, {
+    let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: {_csrf_token: csrfToken}
     });
     liveSocket.connect();
-    window._liveSocket = liveSocket;
-  </script>
-  <script>
-    // Render Lucide icons on DOM changes
+
     function renderIcons() { if (window.lucide) lucide.createIcons(); }
     new MutationObserver(renderIcons).observe(document.documentElement, {childList: true, subtree: true});
     document.addEventListener("DOMContentLoaded", renderIcons);
