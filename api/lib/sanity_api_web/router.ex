@@ -1,5 +1,15 @@
 defmodule SanityApiWeb.Router do
   use SanityApiWeb, :router
+
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {SanityApiWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
   end
@@ -11,6 +21,22 @@ defmodule SanityApiWeb.Router do
   pipeline :require_admin do
     plug SanityApiWeb.Plugs.RequireToken
     plug SanityApiWeb.Plugs.RequireAdmin
+  end
+
+  # ── Studio (LiveView) ─────────────────────────────────────────────────────
+  scope "/studio", SanityApiWeb.Studio do
+    pipe_through :browser
+
+    live "/", DashboardLive
+    live "/media", MediaLive
+    live "/:type", DocumentListLive
+    live "/:type/:doc_id", DocumentEditLive
+  end
+
+  # Redirect root to studio
+  scope "/", SanityApiWeb do
+    pipe_through :browser
+    get "/", PageController, :home
   end
 
   # ── Public API — read-only, respects schema visibility ──────────────────
@@ -55,7 +81,7 @@ defmodule SanityApiWeb.Router do
     delete "/:id", MediaController, :delete
   end
 
-  # ── Legacy compat — matches Go TUI API (no auth for easy migration) ────
+  # ── Legacy compat ──────────────────────────────────────────────────────
   scope "/api", SanityApiWeb do
     pipe_through :api
 
@@ -66,13 +92,11 @@ defmodule SanityApiWeb.Router do
     get "/schemas", LegacyController, :schemas
   end
 
-  # Enable LiveDashboard in development
   if Application.compile_env(:sanity_api, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
       pipe_through [:fetch_session, :protect_from_forgery]
-
       live_dashboard "/dashboard", metrics: SanityApiWeb.Telemetry
     end
   end

@@ -1,0 +1,41 @@
+<div class="studio-layout">
+  <nav class="sidebar">
+    <div class="sidebar-logo">Barkpark Studio</div>
+
+    <a href="/studio" class="sidebar-item">Dashboard</a>
+
+    <div class="sidebar-section">Content</div>
+    <%= for schema <- SanityApi.Content.list_schemas("production") do %>
+      <%= if schema.visibility == "public" do %>
+        <a href={"/studio/#{schema.name}"} class="sidebar-item">
+          <span><%= schema.icon %></span>
+          <span><%= schema.title %></span>
+        </a>
+      <% end %>
+    <% end %>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section">Settings</div>
+    <%= for schema <- SanityApi.Content.list_schemas("production") do %>
+      <%= if schema.visibility == "private" do %>
+        <a href={"/studio/#{schema.name}"} class="sidebar-item">
+          <span><%= schema.icon %></span>
+          <span><%= schema.title %></span>
+        </a>
+      <% end %>
+    <% end %>
+
+    <div class="sidebar-divider"></div>
+    <a href="/studio/media" class="sidebar-item">Media Library</a>
+  </nav>
+
+  <main class="main">
+    <%= if Phoenix.Flash.get(@flash, :info) do %>
+      <div class="flash flash-info"><%= Phoenix.Flash.get(@flash, :info) %></div>
+    <% end %>
+    <%= if Phoenix.Flash.get(@flash, :error) do %>
+      <div class="flash flash-error"><%= Phoenix.Flash.get(@flash, :error) %></div>
+    <% end %>
+    {@inner_content}
+  </main>
+</div>

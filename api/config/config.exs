@@ -16,7 +16,7 @@ config :sanity_api, SanityApiWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [json: SanityApiWeb.ErrorJSON],
+    formats: [html: SanityApiWeb.ErrorHTML, json: SanityApiWeb.ErrorJSON],
     layout: false
   ],
   pubsub_server: SanityApi.PubSub,
