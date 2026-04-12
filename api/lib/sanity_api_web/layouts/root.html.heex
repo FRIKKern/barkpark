@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest"></script>
   <style>
     /* ── shadcn/radix inspired design tokens ──────────────────────────── */
     :root {
@@ -327,6 +328,10 @@
       params: {_csrf_token: csrfToken}
     });
     liveSocket.connect();
+    // Render Lucide icons after each LiveView update
+    document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
+    document.addEventListener("phx:update", () => lucide.createIcons());
+    new MutationObserver(() => lucide.createIcons()).observe(document.body, {childList: true, subtree: true});
   </script>
 </body>
 </html>
