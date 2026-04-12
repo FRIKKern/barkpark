@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-API_DIR="$(cd ../sanity_api 2>/dev/null && pwd || echo "")"
+API_DIR="$(cd "$(dirname "$0")/api" 2>/dev/null && pwd || echo "")"
 API_URL="${SANITY_API_URL:-http://localhost:4000}"
 
 # Check if Phoenix is running
@@ -18,8 +18,8 @@ if ! curl -s "$API_URL/api/schemas" > /dev/null 2>&1; then
       sleep 1
     done
   else
-    echo "Error: Phoenix API not running and ../sanity_api not found."
-    echo "Start it manually: cd ../sanity_api && mix phx.server"
+    echo "Error: Phoenix API not running and ./api not found."
+    echo "Start it manually: cd api && mix phx.server"
     exit 1
   fi
 fi

@@ -17,7 +17,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Connecting to %s...\n", apiURL)
 	if err := loadSchemas(apiURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd ../sanity_api && mix phx.server\n")
+		fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "Loaded %d schemas\n", len(schemas))

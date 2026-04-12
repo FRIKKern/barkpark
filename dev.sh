@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TUI_DIR="$(cd "$(dirname "$0")" && pwd)"
-API_DIR="$(cd "$TUI_DIR/../sanity_api" 2>/dev/null && pwd || echo "")"
+API_DIR="$TUI_DIR/api"
 SESSION="sanity-dev"
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ tmux send-keys -t "$SESSION:0.1" "cd $TUI_DIR && ./watch.sh" Enter
 if [ -n "$API_DIR" ]; then
   tmux send-keys -t "$SESSION:0.2" "cd $API_DIR && mix phx.server" Enter
 else
-  tmux send-keys -t "$SESSION:0.2" "echo 'Phoenix API not found at ../sanity_api'" Enter
+  tmux send-keys -t "$SESSION:0.2" "echo 'Phoenix API not found at ./api'" Enter
 fi
 
 # Attach

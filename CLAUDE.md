@@ -5,7 +5,7 @@
 Two projects work together:
 
 - **sanity-tui** (Go, Bubble Tea) — Terminal UI client at `./`
-- **sanity-api** (Elixir, Phoenix) — Backend API at `../sanity_api/`
+- **sanity-api** (Elixir, Phoenix) — Backend API at `./api/`
 - **PostgreSQL** — Data store (managed by Ecto)
 
 The TUI connects to Phoenix on `http://localhost:4000` (configurable via `SANITY_API_URL`).
@@ -15,7 +15,7 @@ Phoenix serves the API and stores everything in Postgres.
 
 ```bash
 # Start Phoenix API (terminal 1)
-cd ../sanity_api && mix phx.server
+cd ./api && mix phx.server
 
 # Start Go TUI (terminal 2)
 cd . && go run .
@@ -249,4 +249,4 @@ PostgreSQL with three tables:
 - `schema_definitions` — document type definitions with visibility
 - `api_tokens` — authentication tokens
 
-Reset and reseed: `cd ../sanity_api && mix ecto.reset`
+Reset and reseed: `cd ./api && mix ecto.reset`
