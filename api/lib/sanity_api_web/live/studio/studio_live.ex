@@ -219,9 +219,9 @@ defmodule SanityApiWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="pane-layout">
+    <div class="pane-layout" id="studio-panes" phx-hook="StudioPanes">
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
-        <div class="pane-column">
+        <div class="pane-column" id={"pane-#{idx}"}>
           <div class="pane-header">
             <span class="pane-header-title"><%= pane.title %></span>
             <%= if pane[:type_name] do %>
