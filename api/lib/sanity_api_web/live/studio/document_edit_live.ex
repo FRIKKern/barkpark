@@ -27,9 +27,7 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
 
   @impl true
   def handle_info({:document_changed, %{type: type, doc_id: changed_id}}, socket) do
-    pub_id = Content.published_id(changed_id)
-    if type == socket.assigns.type && pub_id == socket.assigns.doc_id do
-      # Reload the document
+    if type == socket.assigns.type && Content.published_id(changed_id) == socket.assigns.doc_id do
       {:noreply, load_document(socket)}
     else
       {:noreply, socket}
@@ -42,16 +40,19 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     doc_id = socket.assigns.doc_id
     schema = socket.assigns.schema
 
-    # Build content map from non-standard fields
     content =
-      Enum.reduce(schema.fields, %{}, fn field, acc ->
-        key = field["name"]
-        val = Map.get(params, key, "")
-        case key do
-          k when k in ["title", "status"] -> acc
-          _ -> if val != "", do: Map.put(acc, key, val), else: acc
-        end
-      end)
+      if schema do
+        Enum.reduce(schema.fields, %{}, fn field, acc ->
+          key = field["name"]
+          val = Map.get(params, key, "")
+          case key do
+            k when k in ["title", "status"] -> acc
+            _ -> if val != "", do: Map.put(acc, key, val), else: acc
+          end
+        end)
+      else
+        %{}
+      end
 
     attrs = %{
       "doc_id" => Content.draft_id(doc_id),
@@ -61,23 +62,21 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     }
 
     case Content.upsert_document(type, attrs, @dataset) do
-      {:ok, _doc} ->
-        {:noreply, socket |> put_flash(:info, "Saved") |> load_document()}
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to save")}
+      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Changes saved") |> load_document()}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to save")}
     end
   end
 
   def handle_event("publish", _params, socket) do
     case Content.publish_document(socket.assigns.doc_id, socket.assigns.type, @dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Published") |> load_document()}
+      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document published") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to publish")}
     end
   end
 
   def handle_event("unpublish", _params, socket) do
     case Content.unpublish_document(socket.assigns.doc_id, socket.assigns.type, @dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Unpublished") |> load_document()}
+      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document unpublished") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unpublish")}
     end
   end
@@ -96,7 +95,6 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     draft_id = Content.draft_id(doc_id)
     pub_id = Content.published_id(doc_id)
 
-    # Fetch draft and published in two queries max (not three)
     draft_result = Content.get_document(draft_id, type, @dataset)
     pub_result = Content.get_document(pub_id, type, @dataset)
 
@@ -110,21 +108,18 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
           end
       end
 
-    has_published = match?({:ok, _}, pub_result)
-
     assign(socket,
       doc: doc,
       is_draft: is_draft,
-      has_published: has_published,
+      has_published: match?({:ok, _}, pub_result),
       form_data: doc_to_form(doc, schema),
       page_title: (doc && doc.title) || "New Document"
     )
   end
 
-  defp doc_to_form(nil, _schema), do: %{}
+  defp doc_to_form(nil, _), do: %{}
   defp doc_to_form(doc, schema) do
     base = %{"title" => doc.title || "", "status" => doc.status || "draft"}
-
     if schema do
       Enum.reduce(schema.fields, base, fn field, acc ->
         key = field["name"]
@@ -142,30 +137,35 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="page-header">
-      <div>
-        <h1 class="page-title"><%= @doc && @doc.title || "New Document" %></h1>
-        <p class="page-subtitle">
-          <%= if @schema, do: "#{@schema.icon} #{@schema.title}", else: @type %>
-          &middot;
-          <.status_badge status={if @is_draft, do: "draft", else: (@doc && @doc.status || "draft")} />
-        </p>
+    <div class="main-header" style="margin: -24px -24px 24px; padding: 0 24px;">
+      <div class="main-header-left">
+        <a href={"/studio/#{@type}"} class="btn btn-ghost btn-sm">&larr;</a>
+        <div>
+          <h1 class="h2"><%= (@doc && @doc.title) || "New Document" %></h1>
+          <div class="toolbar" style="gap: 6px; margin-top: 2px;">
+            <span class="text-xs text-muted">
+              <%= if @schema, do: "#{@schema.icon} #{@schema.title}", else: @type %>
+            </span>
+            <span class={"badge badge-#{if @is_draft, do: "draft", else: (@doc && @doc.status || "draft")}"}>
+              <%= if @is_draft, do: "draft", else: (@doc && @doc.status || "draft") %>
+            </span>
+          </div>
+        </div>
       </div>
-      <div class="toolbar">
+      <div class="main-header-right">
         <%= if @is_draft do %>
-          <button class="btn btn-primary" phx-click="publish">Publish</button>
+          <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
           <%= if @has_published do %>
-            <button class="btn btn-sm" phx-click="discard-draft" data-confirm="Discard this draft?">Discard Draft</button>
+            <button class="btn btn-ghost btn-sm" phx-click="discard-draft" data-confirm="Discard this draft?">Discard draft</button>
           <% end %>
         <% else %>
-          <button class="btn" phx-click="unpublish">Unpublish</button>
+          <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
         <% end %>
-        <a href={"/studio/#{@type}"} class="btn">Back to list</a>
       </div>
     </div>
 
-    <div class="card">
-      <form phx-submit="save">
+    <div class="card" style="max-width: 720px;">
+      <form phx-submit="save" style="padding: 24px;">
         <%= if @schema do %>
           <%= for field <- @schema.fields do %>
             <div class="form-group">
@@ -180,8 +180,9 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
           </div>
         <% end %>
 
-        <div style="margin-top:24px;">
-          <button type="submit" class="btn btn-primary">Save</button>
+        <div style="display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-muted);">
+          <button type="submit" class="btn btn-primary">Save changes</button>
+          <a href={"/studio/#{@type}"} class="btn">Cancel</a>
         </div>
       </form>
     </div>
@@ -213,9 +214,10 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     checked = Map.get(form_data, name, "") == "true"
     assigns = %{name: name, checked: checked}
     ~H"""
-    <div class="form-check">
+    <div class="form-checkbox">
       <input type="hidden" name={"doc[#{@name}]"} value="false" />
       <input type="checkbox" name={"doc[#{@name}]"} value="true" checked={@checked} />
+      <span class="text-sm text-muted">Enabled</span>
     </div>
     """
   end
@@ -224,9 +226,10 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     val = Map.get(form_data, name, "#3b82f6")
     assigns = %{name: name, val: val}
     ~H"""
-    <div style="display:flex; gap:8px; align-items:center;">
-      <input type="color" name={"doc[#{@name}]"} value={@val} style="width:40px;height:32px;border:none;cursor:pointer;" />
-      <input type="text" name={"doc[#{@name}_hex]"} value={@val} class="form-input" style="width:120px;" disabled />
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <input type="color" name={"doc[#{@name}]"} value={@val}
+        style="width: 36px; height: 36px; border: 1px solid var(--input); border-radius: var(--radius-sm); cursor: pointer; background: transparent;" />
+      <span class="text-sm" style="font-family: var(--font-mono);"><%= @val %></span>
     </div>
     """
   end

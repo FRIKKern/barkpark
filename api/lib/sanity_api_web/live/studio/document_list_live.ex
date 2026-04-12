@@ -19,7 +19,7 @@ defmodule SanityApiWeb.Studio.DocumentListLive do
     socket =
       socket
       |> assign(type: type, schema: schema, perspective: :drafts)
-      |> assign(page_title: schema && schema.title || type)
+      |> assign(page_title: (schema && schema.title) || type)
       |> load_documents()
 
     {:ok, socket}
@@ -65,53 +65,56 @@ defmodule SanityApiWeb.Studio.DocumentListLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">
+    <div class="main-header" style="margin: -24px -24px 24px; padding: 0 24px;">
+      <div class="main-header-left">
+        <h1 class="h1">
           <%= if @schema, do: "#{@schema.icon} #{@schema.title}", else: @type %>
         </h1>
-        <p class="page-subtitle"><%= length(@documents) %> documents</p>
+        <span class="text-sm text-muted"><%= length(@documents) %> documents</span>
       </div>
-      <div class="toolbar">
-        <div class="toolbar" style="margin-right:12px;">
+      <div class="main-header-right">
+        <div class="perspective-tabs">
           <%= for p <- [:published, :drafts, :raw] do %>
             <button
-              class={"btn btn-sm #{if @perspective == p, do: "btn-primary"}"}
+              class={"perspective-tab #{if @perspective == p, do: "active"}"}
               phx-click="set-perspective"
               phx-value-perspective={p}
             ><%= p %></button>
           <% end %>
         </div>
-        <button class="btn btn-primary" phx-click="new-document">+ New</button>
+        <div class="toolbar-sep"></div>
+        <button class="btn btn-primary btn-sm" phx-click="new-document">+ New document</button>
       </div>
     </div>
 
     <div class="card">
-      <ul class="doc-list">
-        <%= for doc <- @documents do %>
-          <li class="doc-item" style="justify-content:space-between;">
-            <a href={"/studio/#{@type}/#{Content.published_id(doc.doc_id)}"} style="display:flex; align-items:center; gap:12px; flex:1; color:var(--text);">
-              <.status_badge status={if Content.draft?(doc.doc_id), do: "draft", else: doc.status} />
-              <div>
-                <div class="doc-title"><%= doc.title || "Untitled" %></div>
-                <div class="doc-meta"><%= doc.doc_id %></div>
-              </div>
-            </a>
-            <button
-              class="btn btn-sm btn-danger"
-              phx-click="delete-doc"
-              phx-value-id={Content.published_id(doc.doc_id)}
-              phx-value-type={@type}
-              data-confirm="Delete this document?"
-            >Delete</button>
-          </li>
-        <% end %>
-        <%= if @documents == [] do %>
-          <li style="padding:32px; text-align:center; color:var(--text-dim);">
-            No documents yet. Click "+ New" to create one.
-          </li>
-        <% end %>
-      </ul>
+      <%= for doc <- @documents do %>
+        <div class="doc-list-item">
+          <a href={"/studio/#{@type}/#{Content.published_id(doc.doc_id)}"}>
+            <span class={"badge badge-#{if Content.draft?(doc.doc_id), do: "draft", else: doc.status}"}>
+              <%= if Content.draft?(doc.doc_id), do: "draft", else: doc.status %>
+            </span>
+            <div>
+              <div class="doc-title"><%= doc.title || "Untitled" %></div>
+              <div class="doc-id"><%= doc.doc_id %></div>
+            </div>
+          </a>
+          <button
+            class="btn btn-destructive btn-sm"
+            phx-click="delete-doc"
+            phx-value-id={Content.published_id(doc.doc_id)}
+            phx-value-type={@type}
+            data-confirm="Delete this document and all its versions?"
+          >Delete</button>
+        </div>
+      <% end %>
+      <%= if @documents == [] do %>
+        <div class="empty-state">
+          <div class="empty-state-icon">&#128196;</div>
+          <div class="empty-state-text">No documents yet</div>
+          <button class="btn btn-primary" phx-click="new-document">Create your first document</button>
+        </div>
+      <% end %>
     </div>
     """
   end

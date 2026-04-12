@@ -1,38 +1,57 @@
 <% schemas = SanityApi.Content.list_schemas("production") %>
-<div class="studio-layout">
+<div class="studio">
   <nav class="sidebar">
-    <div class="sidebar-logo">Barkpark Studio</div>
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">B</div>
+      <span>Barkpark</span>
+    </div>
 
-    <a href="/studio" class="sidebar-item">Dashboard</a>
+    <div class="sidebar-nav">
+      <a href="/studio" class="sidebar-link">
+        <span class="sidebar-link-icon">&#9776;</span>
+        <span>Dashboard</span>
+      </a>
+    </div>
 
     <div class="sidebar-section">Content</div>
-    <%= for schema <- Enum.filter(schemas, & &1.visibility == "public") do %>
-      <a href={"/studio/#{schema.name}"} class="sidebar-item">
-        <span><%= schema.icon %></span>
-        <span><%= schema.title %></span>
-      </a>
-    <% end %>
+    <div class="sidebar-nav">
+      <%= for schema <- Enum.filter(schemas, & &1.visibility == "public") do %>
+        <a href={"/studio/#{schema.name}"} class="sidebar-link">
+          <span class="sidebar-link-icon"><%= schema.icon %></span>
+          <span><%= schema.title %></span>
+        </a>
+      <% end %>
+    </div>
 
     <div class="sidebar-divider"></div>
     <div class="sidebar-section">Settings</div>
-    <%= for schema <- Enum.filter(schemas, & &1.visibility == "private") do %>
-      <a href={"/studio/#{schema.name}"} class="sidebar-item">
-        <span><%= schema.icon %></span>
-        <span><%= schema.title %></span>
-      </a>
-    <% end %>
+    <div class="sidebar-nav">
+      <%= for schema <- Enum.filter(schemas, & &1.visibility == "private") do %>
+        <a href={"/studio/#{schema.name}"} class="sidebar-link">
+          <span class="sidebar-link-icon"><%= schema.icon %></span>
+          <span><%= schema.title %></span>
+        </a>
+      <% end %>
+    </div>
 
     <div class="sidebar-divider"></div>
-    <a href="/studio/media" class="sidebar-item">Media Library</a>
+    <div class="sidebar-nav">
+      <a href="/studio/media" class="sidebar-link">
+        <span class="sidebar-link-icon">&#128193;</span>
+        <span>Media Library</span>
+      </a>
+    </div>
   </nav>
 
-  <main class="main">
-    <%= if Phoenix.Flash.get(@flash, :info) do %>
-      <div class="flash flash-info"><%= Phoenix.Flash.get(@flash, :info) %></div>
-    <% end %>
-    <%= if Phoenix.Flash.get(@flash, :error) do %>
-      <div class="flash flash-error"><%= Phoenix.Flash.get(@flash, :error) %></div>
-    <% end %>
-    {@inner_content}
-  </main>
+  <div class="main">
+    <div class="main-body">
+      <%= if Phoenix.Flash.get(@flash, :info) do %>
+        <div class="flash flash-info"><%= Phoenix.Flash.get(@flash, :info) %></div>
+      <% end %>
+      <%= if Phoenix.Flash.get(@flash, :error) do %>
+        <div class="flash flash-error"><%= Phoenix.Flash.get(@flash, :error) %></div>
+      <% end %>
+      {@inner_content}
+    </div>
+  </div>
 </div>

@@ -12,23 +12,20 @@ defmodule SanityApiWeb.Studio.DashboardLive do
     end
 
     schemas = Content.list_schemas(@dataset)
-
-    schema_counts =
+    counts =
       Enum.map(schemas, fn s ->
-        count = length(Content.list_documents(s.name, @dataset, perspective: :drafts))
-        {s.name, count}
+        {s.name, length(Content.list_documents(s.name, @dataset, perspective: :drafts))}
       end)
       |> Map.new()
 
-    {:ok, assign(socket, schemas: schemas, counts: schema_counts, page_title: "Dashboard")}
+    {:ok, assign(socket, schemas: schemas, counts: counts, page_title: "Dashboard")}
   end
 
   @impl true
   def handle_info({:document_changed, _}, socket) do
     counts =
       Enum.map(socket.assigns.schemas, fn s ->
-        count = length(Content.list_documents(s.name, @dataset, perspective: :drafts))
-        {s.name, count}
+        {s.name, length(Content.list_documents(s.name, @dataset, perspective: :drafts))}
       end)
       |> Map.new()
 
@@ -38,21 +35,19 @@ defmodule SanityApiWeb.Studio.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Dashboard</h1>
-        <p class="page-subtitle">Manage your content</p>
-      </div>
+    <div style="margin-bottom: 32px;">
+      <h1 class="h1">Dashboard</h1>
+      <p class="text-sm text-muted" style="margin-top: 4px;">Manage your content and settings</p>
     </div>
 
     <div class="schema-grid">
       <%= for schema <- @schemas do %>
         <a href={"/studio/#{schema.name}"} class="schema-card">
-          <div class="schema-icon"><%= schema.icon %></div>
-          <div class="schema-name"><%= schema.title %></div>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
+          <div class="schema-card-icon"><%= schema.icon %></div>
+          <div class="schema-card-name"><%= schema.title %></div>
+          <div class="schema-card-meta">
             <span class={"badge badge-#{schema.visibility}"}><%= schema.visibility %></span>
-            <span style="color:var(--text-dim); font-size:13px;"><%= Map.get(@counts, schema.name, 0) %> docs</span>
+            <span class="text-xs text-muted"><%= Map.get(@counts, schema.name, 0) %> documents</span>
           </div>
         </a>
       <% end %>
