@@ -157,7 +157,10 @@ func Divider() *StructureNode {
 // ║  This is the equivalent of sanity's structure.ts / deskStructure.ts.    ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
-var rootStructure = List().ID("root").Title("Structure").Items(
+var rootStructure *StructureNode
+
+func initRootStructure() {
+	rootStructure = List().ID("root").Title("Structure").Items(
 
 	// ── Editorial group ─────────────────────────────────────────────────
 	ListItem().Title("Editorial").Icon("📚").Child(
@@ -236,3 +239,4 @@ var rootStructure = List().ID("root").Title("Structure").Items(
 		).Build(),
 	).Build(),
 ).Build()
+}

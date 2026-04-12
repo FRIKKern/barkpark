@@ -1,108 +1,192 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"strings"
+	"io"
+	"net/http"
+	"net/url"
+	"sync"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Doc represents a single document in the store.
+// Doc represents a single document from the API.
 type Doc struct {
-	ID        string
-	Title     string
-	Status    string
-	Category  string
-	Author    string
-	UpdatedAt time.Time
-	Values    map[string]string // extra field values
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	Status    string            `json:"status"`
+	Category  string            `json:"category,omitempty"`
+	Author    string            `json:"author,omitempty"`
+	UpdatedAt time.Time         `json:"updatedAt"`
+	Values    map[string]string `json:"values,omitempty"`
 }
 
-// ── Seed data ────────────────────────────────────────────────────────────────
-// Replace this with an API client or database in production.
+// DataStoreRefreshMsg is sent to the TUI when the API data changes.
+type DataStoreRefreshMsg struct{}
 
-var store = map[string][]Doc{
-	"post": {
-		{ID: "p1", Title: "Getting Started with Structured Content", Status: "published", Category: "Technology", Author: "Knut Melvær", UpdatedAt: time.Now().Add(-2 * time.Hour)},
-		{ID: "p2", Title: "Why Headless CMS Changes Everything", Status: "published", Category: "Technology", Author: "Simeon Griggs", UpdatedAt: time.Now().Add(-26 * time.Hour)},
-		{ID: "p3", Title: "Content Modeling Best Practices", Status: "draft", Category: "Engineering", Author: "Knut Melvær", UpdatedAt: time.Now().Add(-50 * time.Hour)},
-		{ID: "p4", Title: "Building with Portable Text", Status: "draft", Category: "Engineering", Author: "Simeon Griggs", UpdatedAt: time.Now().Add(-74 * time.Hour)},
-		{ID: "p5", Title: "Real-time Collaboration in Practice", Status: "published", Category: "Design", Author: "Knut Melvær", UpdatedAt: time.Now().Add(-98 * time.Hour)},
-		{ID: "p6", Title: "GROQ vs GraphQL Deep Dive", Status: "draft", Category: "Technology", Author: "Simeon Griggs", UpdatedAt: time.Now().Add(-122 * time.Hour)},
-		{ID: "p7", Title: "Design Systems for Content Teams", Status: "published", Category: "Design", Author: "Knut Melvær", UpdatedAt: time.Now().Add(-146 * time.Hour)},
-		{ID: "p8", Title: "Deploying Studio to Production", Status: "published", Category: "Engineering", Author: "Simeon Griggs", UpdatedAt: time.Now().Add(-170 * time.Hour)},
-	},
-	"page": {
-		{ID: "pg1", Title: "Home", Status: "published", UpdatedAt: time.Now().Add(-4 * time.Hour)},
-		{ID: "pg2", Title: "About Us", Status: "published", UpdatedAt: time.Now().Add(-48 * time.Hour)},
-		{ID: "pg3", Title: "Pricing", Status: "draft", UpdatedAt: time.Now().Add(-120 * time.Hour)},
-		{ID: "pg4", Title: "Contact", Status: "published", UpdatedAt: time.Now().Add(-168 * time.Hour)},
-		{ID: "pg5", Title: "Terms of Service", Status: "published", UpdatedAt: time.Now().Add(-240 * time.Hour)},
-	},
-	"author": {
-		{ID: "a1", Title: "Knut Melvær", Status: "published", UpdatedAt: time.Now().Add(-300 * time.Hour), Values: map[string]string{"role": "admin", "email": "knut@sanity.io"}},
-		{ID: "a2", Title: "Simeon Griggs", Status: "published", UpdatedAt: time.Now().Add(-360 * time.Hour), Values: map[string]string{"role": "editor", "email": "simeon@sanity.io"}},
-		{ID: "a3", Title: "Espen Hovlandsdal", Status: "published", UpdatedAt: time.Now().Add(-420 * time.Hour), Values: map[string]string{"role": "writer", "email": "espen@sanity.io"}},
-	},
-	"category": {
-		{ID: "c1", Title: "Technology", Status: "published", UpdatedAt: time.Now().Add(-600 * time.Hour), Values: map[string]string{"color": "#3b82f6"}},
-		{ID: "c2", Title: "Design", Status: "published", UpdatedAt: time.Now().Add(-624 * time.Hour), Values: map[string]string{"color": "#ec4899"}},
-		{ID: "c3", Title: "Engineering", Status: "published", UpdatedAt: time.Now().Add(-648 * time.Hour), Values: map[string]string{"color": "#10b981"}},
-	},
-	"project": {
-		{ID: "pr1", Title: "Website Redesign", Status: "active", UpdatedAt: time.Now().Add(-8 * time.Hour), Values: map[string]string{"client": "Acme Corp"}},
-		{ID: "pr2", Title: "Mobile App v3", Status: "planning", UpdatedAt: time.Now().Add(-52 * time.Hour), Values: map[string]string{"client": "StartupX"}},
-		{ID: "pr3", Title: "API Migration", Status: "completed", UpdatedAt: time.Now().Add(-200 * time.Hour), Values: map[string]string{"client": "BigCo"}},
-		{ID: "pr4", Title: "Design System", Status: "active", UpdatedAt: time.Now().Add(-270 * time.Hour), Values: map[string]string{"client": "Internal"}},
-	},
-	"siteSettings": {
-		{ID: "siteSettings", Title: "My Studio Site", Status: "published", UpdatedAt: time.Now().Add(-240 * time.Hour), Values: map[string]string{"description": "A headless CMS powered site", "analyticsId": "G-XXXXXXXXXX"}},
-	},
-	"navigation": {
-		{ID: "navigation", Title: "Main Navigation", Status: "published", UpdatedAt: time.Now().Add(-300 * time.Hour)},
-	},
-	"colors": {
-		{ID: "colors", Title: "Brand Colors", Status: "published", UpdatedAt: time.Now().Add(-360 * time.Hour), Values: map[string]string{"primary": "#3b82f6", "secondary": "#6366f1", "accent": "#f59e0b"}},
-	},
+// DataStore is an HTTP client that talks to the Phoenix API.
+type DataStore struct {
+	baseURL  string
+	client   *http.Client
+	program  *tea.Program
+	mu       sync.RWMutex
+	lastHash string // hash of last response to detect changes
 }
 
-// queryDocs returns documents for a type, optionally filtered.
-// Filter format: "field=value" (e.g. "status=published", "category=Design").
-func queryDocs(typeName, filter string) []Doc {
-	docs := store[typeName]
-	if filter == "" {
-		return docs
+// NewDataStore creates an API-backed DataStore.
+func NewDataStore(baseURL string) *DataStore {
+	return &DataStore{
+		baseURL: baseURL,
+		client:  &http.Client{Timeout: 5 * time.Second},
+	}
+}
+
+// SetProgram sets the tea.Program reference for sending refresh messages.
+func (ds *DataStore) SetProgram(p *tea.Program) {
+	ds.program = p
+}
+
+// Load is a no-op for the API client (data lives in Phoenix/Postgres).
+func (ds *DataStore) Load() error {
+	return nil
+}
+
+// Query fetches documents from the API by type, with optional filter.
+func (ds *DataStore) Query(typeName, filter string) []Doc {
+	endpoint := fmt.Sprintf("%s/api/documents/%s", ds.baseURL, typeName)
+	if filter != "" {
+		endpoint += "?filter=" + url.QueryEscape(filter)
 	}
 
-	parts := strings.SplitN(filter, "=", 2)
-	if len(parts) != 2 {
-		return docs
+	resp, err := ds.client.Get(endpoint)
+	if err != nil {
+		return nil
 	}
-	field, value := parts[0], parts[1]
+	defer resp.Body.Close()
 
-	var result []Doc
-	for _, d := range docs {
-		match := false
-		switch field {
-		case "status":
-			match = d.Status == value
-		case "category":
-			match = d.Category == value
-		case "author":
-			match = d.Author == value
-		default:
-			if d.Values != nil {
-				match = d.Values[field] == value
-			}
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	var result struct {
+		Documents []Doc `json:"documents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+	return result.Documents
+}
+
+// Get fetches a single document by type and ID.
+func (ds *DataStore) Get(typeName, id string) (Doc, bool) {
+	endpoint := fmt.Sprintf("%s/api/documents/%s/%s", ds.baseURL, typeName, id)
+
+	resp, err := ds.client.Get(endpoint)
+	if err != nil {
+		return Doc{}, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return Doc{}, false
+	}
+
+	var doc Doc
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return Doc{}, false
+	}
+	return doc, true
+}
+
+// Upsert creates or updates a document via the API.
+func (ds *DataStore) Upsert(typeName string, doc Doc) error {
+	endpoint := fmt.Sprintf("%s/api/documents/%s", ds.baseURL, typeName)
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+
+	resp, err := ds.client.Post(endpoint, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// Delete removes a document via the API.
+func (ds *DataStore) Delete(typeName, id string) bool {
+	endpoint := fmt.Sprintf("%s/api/documents/%s/%s", ds.baseURL, typeName, id)
+
+	req, err := http.NewRequest(http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := ds.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+}
+
+// StartPolling checks for data changes every 2 seconds and notifies the TUI.
+func (ds *DataStore) StartPolling() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if ds.program == nil {
+			continue
 		}
-		if match {
-			result = append(result, d)
+		if ds.hasChanged() {
+			ds.program.Send(DataStoreRefreshMsg{})
 		}
 	}
-	return result
 }
 
-// timeAgo returns a human-readable relative time string.
+// hasChanged does a lightweight check to see if data has changed since last poll.
+func (ds *DataStore) hasChanged() bool {
+	resp, err := ds.client.Get(ds.baseURL + "/api/documents/")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+
+	hash := fmt.Sprintf("%x", body)
+
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+
+	if hash != ds.lastHash {
+		ds.lastHash = hash
+		return ds.lastHash != "" // don't trigger on first poll
+	}
+	return false
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 func timeAgo(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
 	d := time.Since(t)
 	if d.Minutes() < 60 {
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
@@ -113,7 +197,6 @@ func timeAgo(t time.Time) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
-// statusIcon returns a unicode indicator for a document status.
 func statusIcon(status string) string {
 	switch status {
 	case "published":

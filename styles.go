@@ -40,7 +40,7 @@ var (
 			Foreground(lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"})
 
 	editorLabelStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#52525b"}).
+				Foreground(lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"}).
 				Bold(true)
 
 	editorFieldStyle = lipgloss.NewStyle().
@@ -57,6 +57,34 @@ var (
 
 	breadcrumbActiveStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#d4d4d8"})
+
+	// Styles extracted from inline NewStyle() calls
+	logoStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(highlight)
+
+	activeTabStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"})
+
+	publishBtnStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2563eb")).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true).
+			Padding(0, 2)
+
+	imageDropStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}).
+			Align(lipgloss.Center).
+			Padding(1, 0)
+
+	selectActiveStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(highlight)
+
+	scrollInfoStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"})
 )
 
 func statusStyle(status string) lipgloss.Style {

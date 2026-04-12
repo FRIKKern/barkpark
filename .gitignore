@@ -9,6 +9,12 @@ sanity-tui
 go.sum
 vendor/
 
+# Air (hot reload)
+tmp/
+
+# Data
+data.json
+
 # IDE
 .idea/
 .vscode/

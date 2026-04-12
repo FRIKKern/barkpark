@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -34,25 +35,86 @@ type PaneItem struct {
 }
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  FOCUS                                                                  ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+type FocusTarget int
+
+const (
+	FocusPane   FocusTarget = iota // a list pane has focus
+	FocusEditor                    // the editor/inspect panel has focus
+)
+
+type focusState struct {
+	Target    FocusTarget
+	PaneIndex int // index into m.panes; only valid when Target == FocusPane
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  MODEL                                                                  ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
+// borderCost is the number of terminal columns added by paneBorder's right border.
+const borderCost = 1
+
 type model struct {
+	ds           *DataStore
 	panes        []Pane
-	activePane   int
+	focus        focusState
 	path         []string // selected structure item IDs at each depth
 	selectedDoc  *Doc
 	editorSchema *Schema
-	editorScroll int
+	showEditor   bool
+	viewport     viewport.Model
+	vpReady      bool
 	width        int
 	height       int
-	showEditor   bool
 }
 
-func initialModel() model {
-	m := model{width: 120, height: 40}
+func initialModel(ds *DataStore) model {
+	m := model{ds: ds, width: 120, height: 40}
 	m.rebuildPanes()
 	return m
+}
+
+// paneWidth returns the interior content width for list panes.
+func (m model) paneWidth() int {
+	if m.width > 160 {
+		return 32
+	}
+	return 28
+}
+
+// calcEditorWidth computes the interior content width for the editor column.
+func (m model) calcEditorWidth() int {
+	pw := m.paneWidth()
+	colWidth := pw + borderCost
+	minEditor := 40
+
+	maxPanes := (m.width - minEditor - borderCost) / colWidth
+	if maxPanes < 1 {
+		maxPanes = 1
+	}
+
+	visible := len(m.panes)
+	if visible > maxPanes {
+		visible = maxPanes
+	}
+
+	ew := m.width - visible*colWidth - borderCost
+	if ew < minEditor {
+		ew = minEditor
+	}
+	return ew
+}
+
+// paneHeight returns the available height for pane/editor content.
+func (m model) paneHeight() int {
+	h := m.height - 4 // toolbar + helpbar
+	if h < 4 {
+		h = 4
+	}
+	return h
 }
 
 // rebuildPanes resolves the current path against the structure tree
@@ -94,12 +156,10 @@ func (m *model) rebuildPanes() {
 				m.showEditor = true
 				m.editorSchema = findSchema(child.TypeName)
 			}
-			// Doc list is terminal for structure nav
 			goto done
 
 		case NodeDocument:
-			// Singleton — show editor directly
-			docs := store[child.TypeName]
+			docs := m.ds.Query(child.TypeName, "")
 			if len(docs) > 0 {
 				m.selectedDoc = &docs[0]
 			}
@@ -110,12 +170,13 @@ func (m *model) rebuildPanes() {
 	}
 done:
 
-	maxPane := len(m.panes) - 1
-	if m.showEditor {
-		maxPane++
+	// Clamp focus
+	if m.focus.Target == FocusPane && m.focus.PaneIndex >= len(m.panes) {
+		m.focus.PaneIndex = len(m.panes) - 1
 	}
-	if m.activePane > maxPane {
-		m.activePane = maxPane
+	if m.focus.Target == FocusEditor && !m.showEditor {
+		m.focus.Target = FocusPane
+		m.focus.PaneIndex = len(m.panes) - 1
 	}
 }
 
@@ -137,7 +198,7 @@ func (m *model) buildListPane(node *StructureNode) Pane {
 }
 
 func (m *model) buildDocListPane(node *StructureNode) Pane {
-	docs := queryDocs(node.TypeName, node.Filter)
+	docs := m.ds.Query(node.TypeName, node.Filter)
 	var items []PaneItem
 	for i := range docs {
 		items = append(items, PaneItem{
@@ -152,6 +213,18 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 	return Pane{Node: node, Items: items, IsDocList: true}
 }
 
+// refreshViewport rebuilds editor content and resets the viewport.
+func (m *model) refreshViewport() {
+	if !m.vpReady {
+		return
+	}
+	ew := m.calcEditorWidth()
+	m.viewport.Width = ew
+	m.viewport.Height = m.paneHeight()
+	m.viewport.SetContent(m.buildEditorContent(ew))
+	m.viewport.GotoTop()
+}
+
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  INIT / UPDATE                                                          ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
@@ -160,11 +233,30 @@ func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case DataStoreRefreshMsg:
+		m.rebuildPanes()
+		if m.showEditor && m.selectedDoc != nil {
+			m.refreshViewport()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		ew := m.calcEditorWidth()
+		ph := m.paneHeight()
+		if !m.vpReady {
+			m.viewport = viewport.New(ew, ph)
+			m.viewport.KeyMap = viewport.KeyMap{} // disable default bindings
+			m.vpReady = true
+		} else {
+			m.viewport.Width = ew
+			m.viewport.Height = ph
+		}
+		if m.showEditor && m.selectedDoc != nil {
+			m.viewport.SetContent(m.buildEditorContent(ew))
+		}
 	}
 	return m, nil
 }
@@ -175,28 +267,50 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
-	// ── Switch pane ──
-	case "tab", "l", "right":
-		maxPane := len(m.panes) - 1
-		if m.showEditor {
-			maxPane++
-		}
-		if m.activePane < maxPane {
-			m.activePane++
+	// ── Switch pane / drill ──
+	case "tab":
+		if m.focus.Target == FocusPane {
+			if m.focus.PaneIndex < len(m.panes)-1 {
+				m.focus.PaneIndex++
+			} else if m.showEditor {
+				m.focus.Target = FocusEditor
+			}
 		}
 
-	case "shift+tab", "h", "left":
-		if m.activePane > 0 {
-			m.activePane--
+	case "l", "right":
+		if m.focus.Target == FocusPane {
+			if m.focus.PaneIndex < len(m.panes)-1 {
+				m.focus.PaneIndex++
+			} else {
+				// On the last pane, drill in like Enter
+				return m.drillIn()
+			}
+		}
+
+	case "shift+tab":
+		if m.focus.Target == FocusEditor {
+			m.focus = focusState{Target: FocusPane, PaneIndex: len(m.panes) - 1}
+		} else if m.focus.PaneIndex > 0 {
+			m.focus.PaneIndex--
+		}
+
+	case "h", "left":
+		if m.focus.Target == FocusEditor {
+			m.focus = focusState{Target: FocusPane, PaneIndex: len(m.panes) - 1}
+		} else if m.focus.PaneIndex > 0 {
+			m.focus.PaneIndex--
+		} else if len(m.path) > 0 {
+			// On the first pane, go back like Esc
+			m.path = m.path[:len(m.path)-1]
+			m.rebuildPanes()
 		}
 
 	// ── Navigate within pane ──
 	case "j", "down":
-		if m.activePane < len(m.panes) {
-			pane := &m.panes[m.activePane]
+		if m.focus.Target == FocusPane {
+			pane := &m.panes[m.focus.PaneIndex]
 			if pane.Cursor < len(pane.Items)-1 {
 				pane.Cursor++
-				// Skip dividers
 				for pane.Cursor < len(pane.Items) && pane.Items[pane.Cursor].IsDivider {
 					pane.Cursor++
 				}
@@ -204,67 +318,70 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					pane.Cursor = len(pane.Items) - 1
 				}
 			}
-		} else if m.showEditor {
-			m.editorScroll++
+		} else if m.focus.Target == FocusEditor {
+			m.viewport.LineDown(1)
 		}
 
 	case "k", "up":
-		if m.activePane < len(m.panes) {
-			pane := &m.panes[m.activePane]
+		if m.focus.Target == FocusPane {
+			pane := &m.panes[m.focus.PaneIndex]
 			if pane.Cursor > 0 {
 				pane.Cursor--
 				for pane.Cursor > 0 && pane.Items[pane.Cursor].IsDivider {
 					pane.Cursor--
 				}
 			}
-		} else if m.showEditor && m.editorScroll > 0 {
-			m.editorScroll--
+		} else if m.focus.Target == FocusEditor {
+			m.viewport.LineUp(1)
 		}
 
 	// ── Drill in ──
 	case "enter":
-		if m.activePane < len(m.panes) {
-			pane := &m.panes[m.activePane]
-			if pane.Cursor < len(pane.Items) {
-				item := pane.Items[pane.Cursor]
-				if item.IsDivider {
-					break
-				}
-				if pane.IsDocList {
-					m.selectedDoc = item.Doc
-					m.editorSchema = findSchema(pane.Node.TypeName)
-					m.showEditor = true
-					m.editorScroll = 0
-					m.activePane = len(m.panes)
-				} else {
-					m.path = m.path[:m.activePane]
-					m.path = append(m.path, item.ID)
-					m.editorScroll = 0
-					m.rebuildPanes()
-					if m.activePane < len(m.panes)-1 {
-						m.activePane++
-					} else if m.showEditor {
-						m.activePane = len(m.panes)
-					}
-				}
-			}
-		}
+		return m.drillIn()
 
 	// ── Go back ──
 	case "backspace", "esc":
-		if m.showEditor && m.activePane >= len(m.panes) {
-			m.showEditor = false
-			m.selectedDoc = nil
-			m.activePane = len(m.panes) - 1
+		if m.focus.Target == FocusEditor {
+			m.focus = focusState{Target: FocusPane, PaneIndex: len(m.panes) - 1}
 		} else if len(m.path) > 0 {
 			m.path = m.path[:len(m.path)-1]
 			m.rebuildPanes()
-			if m.activePane >= len(m.panes) {
-				m.activePane = len(m.panes) - 1
-			}
 		}
 	}
 
+	return m, nil
+}
+
+// drillIn selects the highlighted item in the focused pane, same as Enter.
+func (m model) drillIn() (tea.Model, tea.Cmd) {
+	if m.focus.Target != FocusPane || m.focus.PaneIndex >= len(m.panes) {
+		return m, nil
+	}
+	pane := &m.panes[m.focus.PaneIndex]
+	if pane.Cursor >= len(pane.Items) {
+		return m, nil
+	}
+	item := pane.Items[pane.Cursor]
+	if item.IsDivider {
+		return m, nil
+	}
+	if pane.IsDocList {
+		m.selectedDoc = item.Doc
+		m.editorSchema = findSchema(pane.Node.TypeName)
+		m.showEditor = true
+		m.focus.Target = FocusEditor
+		m.refreshViewport()
+	} else {
+		m.path = m.path[:m.focus.PaneIndex]
+		m.path = append(m.path, item.ID)
+		m.rebuildPanes()
+		if m.showEditor {
+			m.focus.Target = FocusEditor
+			m.refreshViewport()
+		} else if m.focus.PaneIndex < len(m.panes)-1 {
+			m.focus.PaneIndex++
+		}
+	}
 	return m, nil
 }
 
@@ -274,36 +391,49 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if m.width == 0 {
-		return "Loading…"
+		return "Loading..."
 	}
 
 	toolbar := m.renderToolbar()
 	helpBar := m.renderHelpBar()
-	paneHeight := m.height - 4
+	ph := m.paneHeight()
+	pw := m.paneWidth()
+	colWidth := pw + borderCost
 
-	// Calculate widths
-	paneWidth := 28
-	if m.width > 160 {
-		paneWidth = 32
-	}
-	editorWidth := m.width - (len(m.panes) * (paneWidth + 1))
-	if editorWidth < 40 {
-		editorWidth = 40
+	// Determine visible panes
+	minEditor := 40
+	maxPanes := (m.width - minEditor - borderCost) / colWidth
+	if maxPanes < 1 {
+		maxPanes = 1
 	}
 
-	// Render panes
+	visiblePanes := len(m.panes)
+	startPane := 0
+	if visiblePanes > maxPanes {
+		visiblePanes = maxPanes
+		startPane = len(m.panes) - visiblePanes
+	}
+
+	editorWidth := m.width - visiblePanes*colWidth - borderCost
+	if editorWidth < minEditor {
+		editorWidth = minEditor
+	}
+
+	// Render visible panes
 	var columns []string
-	for i, pane := range m.panes {
-		isActive := i == m.activePane
-		columns = append(columns, m.renderPane(pane, paneWidth, paneHeight, isActive))
+	for i := startPane; i < len(m.panes); i++ {
+		isActive := m.focus.Target == FocusPane && i == m.focus.PaneIndex
+		columns = append(columns, m.renderPane(m.panes[i], pw, ph, isActive))
 	}
 
-	// Editor or empty state
+	// Editor, preview, or empty state
 	if m.showEditor {
-		isActive := m.activePane >= len(m.panes)
-		columns = append(columns, m.renderEditor(editorWidth, paneHeight, isActive))
+		isActive := m.focus.Target == FocusEditor
+		columns = append(columns, m.renderEditor(editorWidth, ph, isActive))
+	} else if preview := m.renderPreview(editorWidth, ph); preview != "" {
+		columns = append(columns, preview)
 	} else {
-		columns = append(columns, m.renderEmptyState(editorWidth, paneHeight))
+		columns = append(columns, m.renderEmptyState(editorWidth, ph))
 	}
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
@@ -313,11 +443,9 @@ func (m model) View() string {
 // ── Toolbar ──────────────────────────────────────────────────────────────────
 
 func (m model) renderToolbar() string {
-	logo := lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("▣ Studio")
+	logo := logoStyle.Render("▣ Studio")
 	tabs := dimStyle.Render("[") +
-		lipgloss.NewStyle().Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}).
-			Render("Structure") +
+		activeTabStyle.Render("Structure") +
 		dimStyle.Render("] ") +
 		dimStyle.Render("Vision")
 
@@ -333,7 +461,7 @@ func (m model) renderToolbar() string {
 	var bc string
 	for i, c := range crumbs {
 		if i > 0 {
-			bc += dimStyle.Render(" › ")
+			bc += dimStyle.Render(" > ")
 		}
 		if i == len(crumbs)-1 {
 			bc += breadcrumbActiveStyle.Render(truncate(c, 20))
@@ -343,7 +471,7 @@ func (m model) renderToolbar() string {
 	}
 
 	left := logo + "  " + tabs + "  " + bc
-	right := dimStyle.Render("⌘K Search")
+	right := dimStyle.Render("Ctrl+K Search")
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
@@ -356,7 +484,7 @@ func (m model) renderToolbar() string {
 
 func (m model) renderHelpBar() string {
 	return toolbarStyle.Width(m.width).Render(
-		dimStyle.Render(" ↑↓/jk navigate  ←→/hl switch pane  enter select  esc/bksp back  q quit"),
+		dimStyle.Render(" j/k navigate  h/l switch pane  enter select  esc back  q quit"),
 	)
 }
 
@@ -365,7 +493,7 @@ func (m model) renderHelpBar() string {
 func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	var lines []string
 
-	// Header
+	// Header — headerStyle has Padding(0,1) which is inside Width()
 	icon := ""
 	if pane.Node.Icon != "" {
 		icon = pane.Node.Icon + " "
@@ -374,8 +502,8 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	if pane.IsDocList {
 		headerText += dimStyle.Render(fmt.Sprintf(" %d", len(pane.Items)))
 	}
-	lines = append(lines, headerStyle.Width(width-2).Render(headerText))
-	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, headerStyle.Width(width).Render(headerText))
+	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width)))
 
 	// Visible area
 	visibleHeight := height - 3
@@ -387,17 +515,18 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	for i := scroll; i < len(pane.Items) && i-scroll < visibleHeight; i++ {
 		item := pane.Items[i]
 		if item.IsDivider {
-			lines = append(lines, dimStyle.Render("  "+strings.Repeat("─", width-6)))
+			lines = append(lines, dimStyle.Render("  "+strings.Repeat("─", width-4)))
 			continue
 		}
 
 		isSelected := i == pane.Cursor && isActive
-		lines = append(lines, m.renderPaneItem(item, width-2, isSelected, pane.IsDocList)...)
+		isCursor := i == pane.Cursor && !isActive // show dim cursor in inactive panes
+		lines = append(lines, m.renderPaneItem(item, width, isSelected, isCursor, pane.IsDocList)...)
 	}
 
 	// Pad
 	for len(lines) < height {
-		lines = append(lines, strings.Repeat(" ", width-2))
+		lines = append(lines, strings.Repeat(" ", width))
 	}
 	if len(lines) > height {
 		lines = lines[:height]
@@ -410,7 +539,7 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	return paneBorder.Width(width).Height(height).Render(content)
 }
 
-func (m model) renderPaneItem(item PaneItem, width int, selected, isDocList bool) []string {
+func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDocList bool) []string {
 	style := normalItemStyle
 	if selected {
 		style = selectedItemStyle
@@ -424,6 +553,13 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isDocList bool
 		if selected {
 			line1 = selectedItemStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
 			line2 = selectedItemStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
+		} else if isCursor {
+			// Dim highlight for cursor in unfocused pane
+			cursorStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}).
+				Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"})
+			line1 = cursorStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
+			line2 = cursorStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
 		}
 		return []string{line1, line2}
 	}
@@ -440,7 +576,14 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isDocList bool
 	if gap < 0 {
 		gap = 0
 	}
-	return []string{style.Width(width).Render(inner + strings.Repeat(" ", gap) + chevron)}
+	line := style.Width(width).Render(inner + strings.Repeat(" ", gap) + chevron)
+	if isCursor && !selected {
+		cursorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}).
+			Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"})
+		line = cursorStyle.Width(width).Render(inner + strings.Repeat(" ", gap) + chevron)
+	}
+	return []string{line}
 }
 
 // ── Editor pane ──────────────────────────────────────────────────────────────
@@ -448,6 +591,28 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isDocList bool
 func (m model) renderEditor(width, height int, isActive bool) string {
 	if m.selectedDoc == nil || m.editorSchema == nil {
 		return m.renderEmptyState(width, height)
+	}
+
+	// Use viewport for scrolling
+	var content string
+	if m.vpReady {
+		content = m.viewport.View()
+	} else {
+		// Fallback before first WindowSizeMsg
+		content = m.buildEditorContent(width)
+	}
+
+	if isActive {
+		return activePaneBorder.Width(width).Height(height).Render(content)
+	}
+	return paneBorder.Width(width).Height(height).Render(content)
+}
+
+// buildEditorContent renders the full editor content as a string.
+// The viewport handles scrolling and clipping.
+func (m model) buildEditorContent(width int) string {
+	if m.selectedDoc == nil || m.editorSchema == nil {
+		return ""
 	}
 
 	var lines []string
@@ -461,56 +626,34 @@ func (m model) renderEditor(width, height int, isActive bool) string {
 
 	// Schema info
 	lines = append(lines, dimStyle.Render(fmt.Sprintf(
-		" %s %s · %d fields", m.editorSchema.Icon, m.editorSchema.Title, len(m.editorSchema.Fields),
+		" %s %s  |  %d fields", m.editorSchema.Icon, m.editorSchema.Title, len(m.editorSchema.Fields),
 	)))
 	lines = append(lines, "")
 
-	// Render each field from schema
-	for _, field := range m.editorSchema.Fields {
-		lines = append(lines, m.renderField(field, width-4)...)
-		lines = append(lines, "")
+	// Fields
+	fieldWidth := width - 4
+	if fieldWidth < 20 {
+		fieldWidth = 20
+	}
+	for i, field := range m.editorSchema.Fields {
+		lines = append(lines, m.renderField(field, fieldWidth)...)
+		if i < len(m.editorSchema.Fields)-1 {
+			lines = append(lines, "")
+		}
 	}
 
 	// Footer
 	lines = append(lines, "")
+	lines = append(lines, dividerStyle.Render(" "+strings.Repeat("─", width-4)))
 	footerLeft := dimStyle.Render(fmt.Sprintf("  Edited %s", timeAgo(m.selectedDoc.UpdatedAt)))
-	publishBtn := lipgloss.NewStyle().
-		Background(lipgloss.Color("#2563eb")).
-		Foreground(lipgloss.Color("#ffffff")).
-		Bold(true).
-		Padding(0, 2).
-		Render("Publish")
+	publishBtn := publishBtnStyle.Render("Publish")
 	gap := width - lipgloss.Width(footerLeft) - lipgloss.Width(publishBtn) - 4
 	if gap < 0 {
 		gap = 0
 	}
 	lines = append(lines, footerLeft+strings.Repeat(" ", gap)+publishBtn)
 
-	// Scroll + clip
-	maxScroll := len(lines) - height + 2
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	scroll := m.editorScroll
-	if scroll > maxScroll {
-		scroll = maxScroll
-	}
-
-	end := scroll + height
-	if end > len(lines) {
-		end = len(lines)
-	}
-	visible := lines[scroll:end]
-
-	for len(visible) < height {
-		visible = append(visible, strings.Repeat(" ", width-2))
-	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left, visible...)
-	if isActive {
-		return activePaneBorder.Width(width).Height(height).Render(content)
-	}
-	return paneBorder.Width(width).Height(height).Render(content)
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // renderField generates the TUI lines for a single schema field.
@@ -518,7 +661,6 @@ func (m model) renderField(field Field, width int) []string {
 	var lines []string
 	lines = append(lines, editorLabelStyle.Render("  "+strings.ToUpper(field.Title)))
 
-	// Try to resolve a value from the doc
 	val := ""
 	if m.selectedDoc != nil {
 		switch field.Name {
@@ -540,16 +682,26 @@ func (m model) renderField(field Field, width int) []string {
 		return dimStyle.Render(ph)
 	}
 
+	// Interior width for editorFieldStyle: subtract border (2) + padding (2) + indent (2)
+	fieldContentWidth := width - 6
+	if fieldContentWidth < 10 {
+		fieldContentWidth = 10
+	}
+
 	switch field.Type {
 	case FieldString:
-		lines = append(lines, "  "+editorFieldStyle.Width(width-2).Render(placeholder("Enter "+field.Title+"…")))
+		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(placeholder("Enter "+field.Title+"...")))
 
 	case FieldSlug:
 		slug := val
 		if slug == "" && m.selectedDoc != nil {
 			slug = toSlug(m.selectedDoc.Title)
 		}
-		box := editorFieldStyle.Width(width - 8).Render(dimStyle.Render(slug))
+		slugWidth := fieldContentWidth - 6
+		if slugWidth < 10 {
+			slugWidth = 10
+		}
+		box := editorFieldStyle.Width(slugWidth).Render(dimStyle.Render(slug))
 		lines = append(lines, "  "+box+" "+dimStyle.Render("[gen]"))
 
 	case FieldText:
@@ -557,28 +709,21 @@ func (m model) renderField(field Field, width int) []string {
 		if rows < 2 {
 			rows = 3
 		}
-		content := placeholder("Enter " + field.Title + "…")
+		content := placeholder("Enter " + field.Title + "...")
 		for i := 1; i < rows; i++ {
-			content += "\n" + strings.Repeat(" ", width-6)
+			content += "\n"
 		}
-		lines = append(lines, "  "+editorFieldStyle.Width(width-2).Render(content))
+		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(content))
 
 	case FieldRichText:
-		lines = append(lines, dimStyle.Render("  B  I  U  H1  H2  ❝  🔗  📷"))
-		content := dimStyle.Render("Start writing…")
-		content += "\n" + strings.Repeat(" ", width-6)
-		content += "\n" + strings.Repeat(" ", width-6)
-		lines = append(lines, "  "+editorFieldStyle.Width(width-2).Render(content))
+		lines = append(lines, dimStyle.Render("  B  I  U  H1  H2  \"  ~  #"))
+		content := dimStyle.Render("Start writing...")
+		content += "\n"
+		content += "\n"
+		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(content))
 
 	case FieldImage:
-		box := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}).
-			Width(width - 2).
-			Align(lipgloss.Center).
-			Padding(1, 0).
-			Render(dimStyle.Render("🖼  Drop image or browse"))
-		lines = append(lines, "  "+box)
+		lines = append(lines, "  "+imageDropStyle.Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")))
 
 	case FieldSelect:
 		display := ""
@@ -588,7 +733,7 @@ func (m model) renderField(field Field, width int) []string {
 		}
 		for _, opt := range field.Options {
 			if opt == current {
-				display += lipgloss.NewStyle().Bold(true).Foreground(highlight).Render(" " + opt + " ")
+				display += selectActiveStyle.Render(" " + opt + " ")
 			} else {
 				display += dimStyle.Render(" " + opt + " ")
 			}
@@ -596,7 +741,7 @@ func (m model) renderField(field Field, width int) []string {
 		lines = append(lines, "  "+display)
 
 	case FieldBoolean:
-		toggle := "○───"
+		toggle := dimStyle.Render("○───")
 		if val == "true" {
 			toggle = statusPublished.Render("───●")
 		}
@@ -604,7 +749,7 @@ func (m model) renderField(field Field, width int) []string {
 
 	case FieldDatetime:
 		dv := placeholder("YYYY-MM-DD HH:MM")
-		lines = append(lines, "  "+editorFieldStyle.Width(width-2).Render(dv))
+		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(dv))
 
 	case FieldColor:
 		cv := val
@@ -617,18 +762,138 @@ func (m model) renderField(field Field, width int) []string {
 	case FieldReference:
 		rv := val
 		if rv == "" {
-			rv = dimStyle.Render("Select " + field.RefType + "…")
+			rv = dimStyle.Render("Select " + field.RefType + "...")
 		}
-		lines = append(lines, "  "+editorFieldStyle.Width(width-2).Render("👤 "+rv+"  "+dimStyle.Render("›")))
+		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")))
 
 	case FieldArray:
 		lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
 
 	default:
-		lines = append(lines, "  "+editorFieldStyle.Width(width-2).Render(placeholder("…")))
+		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(placeholder("...")))
 	}
 
 	return lines
+}
+
+// ── Preview pane ────────────────────────────────────────────────────────────
+
+// renderPreview shows a preview of the highlighted item's content in the right
+// pane — the same thing you'd see if you pressed Enter.
+func (m model) renderPreview(width, height int) string {
+	if m.focus.Target != FocusPane {
+		return ""
+	}
+	pane := m.panes[m.focus.PaneIndex]
+	if pane.Cursor >= len(pane.Items) {
+		return ""
+	}
+	item := pane.Items[pane.Cursor]
+	if item.IsDivider {
+		return ""
+	}
+
+	// Document list item → show document detail preview
+	if pane.IsDocList && item.Doc != nil {
+		schema := findSchema(pane.Node.TypeName)
+		if schema == nil {
+			return ""
+		}
+		content := m.buildDocPreview(item.Doc, schema, width)
+		return paneBorder.Width(width).Height(height).Render(content)
+	}
+
+	// Structure item → show what its child contains
+	if item.SourceNode == nil || item.SourceNode.Child == nil {
+		return ""
+	}
+	child := item.SourceNode.Child
+
+	switch child.Type {
+	case NodeDocumentTypeList:
+		content := m.buildDocListPreview(child, width)
+		return paneBorder.Width(width).Height(height).Render(content)
+	case NodeList:
+		content := m.buildListPreview(child, width)
+		return paneBorder.Width(width).Height(height).Render(content)
+	case NodeDocument:
+		docs := m.ds.Query(child.TypeName, "")
+		schema := findSchema(child.TypeName)
+		if len(docs) > 0 && schema != nil {
+			content := m.buildDocPreview(&docs[0], schema, width)
+			return paneBorder.Width(width).Height(height).Render(content)
+		}
+	}
+	return ""
+}
+
+// buildDocPreview renders a document's fields, same as the editor content.
+func (m model) buildDocPreview(doc *Doc, schema *Schema, width int) string {
+	// Value receiver — safe to mutate the copy to reuse buildEditorContent
+	m.selectedDoc = doc
+	m.editorSchema = schema
+	return m.buildEditorContent(width)
+}
+
+// buildDocListPreview renders a list of documents for a type, like the doc list pane.
+func (m model) buildDocListPreview(node *StructureNode, width int) string {
+	var lines []string
+
+	// Header
+	icon := ""
+	if node.Icon != "" {
+		icon = node.Icon + " "
+	}
+	docs := m.ds.Query(node.TypeName, node.Filter)
+	headerText := icon + node.Title + dimStyle.Render(fmt.Sprintf(" %d", len(docs)))
+	lines = append(lines, headerStyle.Width(width-2).Render(headerText))
+	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
+
+	if len(docs) == 0 {
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("   No documents yet"))
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	}
+
+	for _, doc := range docs {
+		dot := statusStyle(doc.Status).Render(statusIcon(doc.Status))
+		title := truncate(doc.Title, width-8)
+		lines = append(lines, fmt.Sprintf(" %s %s", dot, normalItemStyle.Render(title)))
+		lines = append(lines, fmt.Sprintf("     %s", dimStyle.Render(timeAgo(doc.UpdatedAt))))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// buildListPreview renders a structure list's children as a summary.
+func (m model) buildListPreview(node *StructureNode, width int) string {
+	var lines []string
+
+	icon := ""
+	if node.Icon != "" {
+		icon = node.Icon + " "
+	}
+	lines = append(lines, headerStyle.Width(width-2).Render(icon+node.Title))
+	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
+
+	for _, item := range node.Items {
+		if item.Type == NodeDivider {
+			lines = append(lines, dimStyle.Render("  "+strings.Repeat("─", width-6)))
+			continue
+		}
+		itemIcon := item.Icon
+		if itemIcon == "" {
+			itemIcon = " "
+		}
+		title := truncate(item.Title, width-8)
+		chevron := dimStyle.Render("›")
+		inner := fmt.Sprintf(" %s %s", itemIcon, title)
+		gap := width - 2 - lipgloss.Width(inner) - 2
+		if gap < 0 {
+			gap = 0
+		}
+		lines = append(lines, normalItemStyle.Render(inner+strings.Repeat(" ", gap)+chevron))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // ── Empty state ──────────────────────────────────────────────────────────────
@@ -643,8 +908,6 @@ func (m model) renderEmptyState(width, height int) string {
 	if len(m.path) > 0 {
 		msg = "Select a document to edit"
 	}
-	lines = append(lines, dimStyle.Render("   📂"))
-	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("   "+msg))
 
 	for len(lines) < height {
@@ -664,7 +927,7 @@ func truncate(s string, max int) string {
 	if max < 4 {
 		return s[:max]
 	}
-	return s[:max-1] + "…"
+	return s[:max-1] + "..."
 }
 
 func toSlug(s string) string {
