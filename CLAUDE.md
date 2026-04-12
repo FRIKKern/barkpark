@@ -324,10 +324,12 @@ When Elixir modules are renamed, moved, or deleted, old compiled `.beam` files p
 - 500 errors from undefined functions
 - New LiveViews not appearing
 
-**ALWAYS clean before recompiling after code changes:**
+**ALWAYS nuke the entire _build/prod before recompiling after code changes:**
 ```bash
-rm -rf api/_build/prod/lib/sanity_api
+rm -rf api/_build/prod
 ```
+
+Cleaning just `lib/sanity_api` is NOT enough — HEEx templates are embedded at compile time into Layouts/LiveView modules. If a template changes but the parent module's .beam isn't invalidated, Phoenix serves stale HTML.
 
 `make rebuild` does this automatically. The `.githooks/post-merge` hook also cleans on every `git pull`.
 
@@ -337,3 +339,31 @@ git config core.hooksPath .githooks
 ```
 
 **Never** do `mix compile` on the server without cleaning first. Always use `make rebuild`.
+
+## Deploy Checklist (MUST FOLLOW)
+
+Every time you deploy to Hetzner, do exactly this:
+
+```bash
+ssh root@89.167.28.206
+cd /opt/barkpark-cms
+git pull
+rm -rf api/_build/prod          # MUST nuke entire _build/prod
+cd api
+set -a; source ../.env; set +a
+export MIX_ENV=prod
+mix deps.compile --force
+mix compile
+systemctl restart barkpark-cms
+sleep 10                         # MUST wait — first request compiles
+```
+
+Or just: `make rebuild` (which does all of the above).
+
+### Past mistakes (do not repeat)
+1. Cleaned only `_build/prod/lib/sanity_api` — HEEx templates in Layouts module stayed stale
+2. Ran `mix compile` without `--force` on deps — Plug.Exception module missing
+3. Forgot to `systemctl restart` after compile — old BEAM process still in memory
+4. Service file pointed to wrong `start.sh` path — process died silently
+5. Forgot `force_ssl` in prod.exs caused 301 redirects on HTTP
+6. Erlang Solutions repo has no ARM packages — must use ASDF on Hetzner cax* servers

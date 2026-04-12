@@ -1,15 +1,15 @@
 #!/bin/bash
-# Post-merge hook: clean stale BEAM cache after git pull.
+# Post-merge hook: nuke ALL compiled BEAM artifacts after git pull.
 #
-# Problem: when Elixir modules are renamed/moved/deleted, old compiled
-# .beam files persist in _build and Phoenix loads them instead of the
-# new code. This causes ghost modules, 500 errors, and stale routes.
+# Problem: Elixir HEEx templates are embedded into modules at compile time.
+# When templates or modules change, old .beam files persist and Phoenix
+# serves stale content. Cleaning just lib/sanity_api is NOT enough —
+# template changes require a full _build/prod wipe.
 #
-# Fix: delete the app's compiled output after every pull. Deps stay
-# cached so recompile is fast (seconds, not minutes).
+# This is slow (recompiles deps ~60s) but prevents all stale artifacts.
 
-if [ -d api/_build/prod/lib/sanity_api ]; then
-  echo "[post-merge] Cleaning stale BEAM cache..."
-  rm -rf api/_build/prod/lib/sanity_api
+if [ -d api/_build/prod ]; then
+  echo "[post-merge] Nuking api/_build/prod (prevents stale BEAM/templates)..."
+  rm -rf api/_build/prod
   echo "[post-merge] Run 'make rebuild' to recompile."
 fi

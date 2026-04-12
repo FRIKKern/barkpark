@@ -3,10 +3,10 @@
 # ── Server operations (run on Hetzner VPS) ───────────────────────────────────
 
 rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
-	@echo ">> Cleaning stale BEAM cache..."
-	rm -rf api/_build/prod/lib/sanity_api
+	@echo ">> Cleaning ALL compiled artifacts (prevents stale BEAM)..."
+	rm -rf api/_build/prod
 	@echo ">> Building Phoenix API..."
-	cd api && MIX_ENV=prod mix deps.get && mix deps.compile && mix compile
+	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
 	@echo ">> Building Go TUI..."
 	go mod tidy && go build -o bin/barkpark .
 	@echo ">> Restarting service..."
