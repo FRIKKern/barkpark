@@ -1,4 +1,4 @@
-<% schemas = SanityApi.Content.list_schemas("production") %>
+<% sidebar = SanityApi.Structure.sidebar_items("production") %>
 <div class="studio">
   <nav class="sidebar">
     <div class="sidebar-brand">
@@ -9,16 +9,16 @@
     <div class="sidebar-nav">
       <a href="/studio" class="sidebar-link">
         <span class="sidebar-link-icon">&#9776;</span>
-        <span>Dashboard</span>
+        <span>Structure</span>
       </a>
     </div>
 
     <div class="sidebar-section">Content</div>
     <div class="sidebar-nav">
-      <%= for schema <- Enum.filter(schemas, & &1.visibility == "public") do %>
-        <a href={"/studio/#{schema.name}"} class="sidebar-link">
-          <span class="sidebar-link-icon"><%= schema.icon %></span>
-          <span><%= schema.title %></span>
+      <%= for item <- sidebar.content do %>
+        <a href={"/studio/#{item.name}"} class="sidebar-link">
+          <span class="sidebar-link-icon"><%= item.icon %></span>
+          <span><%= item.title %></span>
         </a>
       <% end %>
     </div>
@@ -26,10 +26,10 @@
     <div class="sidebar-divider"></div>
     <div class="sidebar-section">Settings</div>
     <div class="sidebar-nav">
-      <%= for schema <- Enum.filter(schemas, & &1.visibility == "private") do %>
-        <a href={"/studio/#{schema.name}"} class="sidebar-link">
-          <span class="sidebar-link-icon"><%= schema.icon %></span>
-          <span><%= schema.title %></span>
+      <%= for item <- sidebar.settings do %>
+        <a href={"/studio/#{item.name}"} class="sidebar-link">
+          <span class="sidebar-link-icon"><%= item.icon %></span>
+          <span><%= item.title %></span>
         </a>
       <% end %>
     </div>

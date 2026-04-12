@@ -165,11 +165,26 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
     </div>
 
     <div class="card" style="max-width: 720px;">
+      <!-- Schema info bar (matches TUI header) -->
+      <%= if @schema do %>
+        <div class="card-header">
+          <span class="text-sm text-muted">
+            <%= @schema.icon %> <%= @schema.title %> &middot; <%= length(@schema.fields) %> fields
+          </span>
+          <span class="text-xs text-dim" style="font-family: var(--font-mono);">
+            id: <%= @doc_id %>
+          </span>
+        </div>
+      <% end %>
+
       <form phx-submit="save" style="padding: 24px;">
         <%= if @schema do %>
           <%= for field <- @schema.fields do %>
             <div class="form-group">
-              <label class="form-label"><%= field["title"] || field["name"] %></label>
+              <label class="form-label">
+                <%= field["title"] || field["name"] %>
+                <span class="text-xs text-dim" style="font-weight: 400; margin-left: 6px;"><%= field["type"] %></span>
+              </label>
               <%= render_field_input(field, @form_data) %>
             </div>
           <% end %>
@@ -180,7 +195,7 @@ defmodule SanityApiWeb.Studio.DocumentEditLive do
           </div>
         <% end %>
 
-        <div style="display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-muted);">
+        <div style="display: flex; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border-muted);">
           <button type="submit" class="btn btn-primary">Save changes</button>
           <a href={"/studio/#{@type}"} class="btn">Cancel</a>
         </div>

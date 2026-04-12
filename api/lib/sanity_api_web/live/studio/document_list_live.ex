@@ -1,7 +1,7 @@
 defmodule SanityApiWeb.Studio.DocumentListLive do
   use SanityApiWeb, :live_view
 
-  alias SanityApi.Content
+  alias SanityApi.{Content, Structure}
 
   @dataset "production"
 
@@ -16,9 +16,17 @@ defmodule SanityApiWeb.Studio.DocumentListLive do
       _ -> nil
     end
 
+    type_node = Structure.type_node(type, @dataset)
+
     socket =
       socket
-      |> assign(type: type, schema: schema, perspective: :drafts)
+      |> assign(
+        type: type,
+        schema: schema,
+        type_node: type_node,
+        perspective: :drafts,
+        active_filter: nil
+      )
       |> assign(page_title: (schema && schema.title) || type)
       |> load_documents()
 
@@ -36,8 +44,12 @@ defmodule SanityApiWeb.Studio.DocumentListLive do
 
   @impl true
   def handle_event("set-perspective", %{"perspective" => p}, socket) do
-    perspective = String.to_existing_atom(p)
-    {:noreply, socket |> assign(perspective: perspective) |> load_documents()}
+    {:noreply, socket |> assign(perspective: String.to_existing_atom(p)) |> load_documents()}
+  end
+
+  def handle_event("set-filter", %{"filter" => filter}, socket) do
+    f = if filter == "", do: nil, else: filter
+    {:noreply, socket |> assign(active_filter: f) |> load_documents()}
   end
 
   def handle_event("new-document", _params, socket) do
@@ -58,19 +70,22 @@ defmodule SanityApiWeb.Studio.DocumentListLive do
   end
 
   defp load_documents(socket) do
-    docs = Content.list_documents(socket.assigns.type, @dataset, perspective: socket.assigns.perspective)
+    opts = [perspective: socket.assigns.perspective]
+    opts = if socket.assigns.active_filter, do: opts ++ [filter: socket.assigns.active_filter], else: opts
+    docs = Content.list_documents(socket.assigns.type, @dataset, opts)
     assign(socket, documents: docs)
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="main-header" style="margin: -24px -24px 24px; padding: 0 24px;">
+    <div class="main-header" style="margin: -24px -24px 0; padding: 0 24px;">
       <div class="main-header-left">
+        <a href="/studio" class="btn btn-ghost btn-sm">&larr;</a>
         <h1 class="h1">
           <%= if @schema, do: "#{@schema.icon} #{@schema.title}", else: @type %>
         </h1>
-        <span class="text-sm text-muted"><%= length(@documents) %> documents</span>
+        <span class="text-sm text-muted"><%= length(@documents) %></span>
       </div>
       <div class="main-header-right">
         <div class="perspective-tabs">
@@ -83,39 +98,70 @@ defmodule SanityApiWeb.Studio.DocumentListLive do
           <% end %>
         </div>
         <div class="toolbar-sep"></div>
-        <button class="btn btn-primary btn-sm" phx-click="new-document">+ New document</button>
+        <button class="btn btn-primary btn-sm" phx-click="new-document">+ New</button>
       </div>
     </div>
 
-    <div class="card">
-      <%= for doc <- @documents do %>
-        <div class="doc-list-item">
-          <a href={"/studio/#{@type}/#{Content.published_id(doc.doc_id)}"}>
-            <span class={"badge badge-#{if Content.draft?(doc.doc_id), do: "draft", else: doc.status}"}>
-              <%= if Content.draft?(doc.doc_id), do: "draft", else: doc.status %>
-            </span>
-            <div>
-              <div class="doc-title"><%= doc.title || "Untitled" %></div>
-              <div class="doc-id"><%= doc.doc_id %></div>
+    <div style="display: flex; gap: 16px; margin-top: 16px;">
+      <!-- Sub-navigation (like TUI's pane drill-down) -->
+      <%= if @type_node && length(@type_node.items) > 1 do %>
+        <div style="width: 200px; flex-shrink: 0;">
+          <div class="card">
+            <%= for node <- @type_node.items do %>
+              <%= if node.type == :divider do %>
+                <div style="border-top: 1px solid var(--border-muted);"></div>
+              <% else %>
+                <button
+                  class={"doc-list-item #{if match_filter?(node.filter, @active_filter), do: "active"}"}
+                  phx-click="set-filter"
+                  phx-value-filter={node.filter || ""}
+                  style={"padding: 8px 14px; width: 100%; text-align: left; border: none; background: #{if match_filter?(node.filter, @active_filter), do: "var(--bg-accent)", else: "transparent"}; cursor: pointer;"}
+                >
+                  <span style="font-size: 12px; width: 16px;"><%= node.icon %></span>
+                  <span class="text-sm"><%= node.title %></span>
+                </button>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Document list -->
+      <div style="flex: 1;">
+        <div class="card">
+          <%= for doc <- @documents do %>
+            <div class="doc-list-item">
+              <a href={"/studio/#{@type}/#{Content.published_id(doc.doc_id)}"}>
+                <span class={"badge badge-#{if Content.draft?(doc.doc_id), do: "draft", else: doc.status}"}>
+                  <%= if Content.draft?(doc.doc_id), do: "draft", else: doc.status %>
+                </span>
+                <div>
+                  <div class="doc-title"><%= doc.title || "Untitled" %></div>
+                  <div class="doc-id"><%= doc.doc_id %></div>
+                </div>
+              </a>
+              <button
+                class="btn btn-destructive btn-sm"
+                phx-click="delete-doc"
+                phx-value-id={Content.published_id(doc.doc_id)}
+                phx-value-type={@type}
+                data-confirm="Delete this document?"
+              >Delete</button>
             </div>
-          </a>
-          <button
-            class="btn btn-destructive btn-sm"
-            phx-click="delete-doc"
-            phx-value-id={Content.published_id(doc.doc_id)}
-            phx-value-type={@type}
-            data-confirm="Delete this document and all its versions?"
-          >Delete</button>
+          <% end %>
+          <%= if @documents == [] do %>
+            <div class="empty-state">
+              <div class="empty-state-icon">&#128196;</div>
+              <div class="empty-state-text">No documents found</div>
+              <button class="btn btn-primary" phx-click="new-document">Create document</button>
+            </div>
+          <% end %>
         </div>
-      <% end %>
-      <%= if @documents == [] do %>
-        <div class="empty-state">
-          <div class="empty-state-icon">&#128196;</div>
-          <div class="empty-state-text">No documents yet</div>
-          <button class="btn btn-primary" phx-click="new-document">Create your first document</button>
-        </div>
-      <% end %>
+      </div>
     </div>
     """
   end
+
+  defp match_filter?(nil, nil), do: true
+  defp match_filter?(node_filter, active_filter), do: node_filter == active_filter
 end
