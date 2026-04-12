@@ -1,4 +1,4 @@
-module github.com/user/sanity-tui
+module github.com/FRIKKern/barkpark-cms
 
 go 1.24.2
 

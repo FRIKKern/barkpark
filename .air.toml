@@ -2,8 +2,8 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  bin = "./tmp/sanity-tui"
-  cmd = "go build -o ./tmp/sanity-tui ."
+  bin = "./tmp/barkpark"
+  cmd = "go build -o ./tmp/barkpark ."
   delay = 200
   exclude_dir = ["tmp", "vendor", ".git"]
   exclude_file = ["data.json"]

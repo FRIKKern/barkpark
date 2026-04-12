@@ -6,22 +6,22 @@ rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
 	@echo ">> Building Phoenix API..."
 	cd api && MIX_ENV=prod mix deps.get --only prod && mix compile
 	@echo ">> Building Go TUI..."
-	go build -o bin/nextgen-tui .
+	go build -o bin/barkpark .
 	@echo ">> Restarting service..."
-	sudo systemctl restart nextgen-cms
+	sudo systemctl restart barkpark-cms
 	@echo ">> Done. Check: make status"
 
 restart: ## Restart the Phoenix service
-	sudo systemctl restart nextgen-cms
+	sudo systemctl restart barkpark-cms
 
 stop: ## Stop the Phoenix service
-	sudo systemctl stop nextgen-cms
+	sudo systemctl stop barkpark-cms
 
 status: ## Show service status
-	@systemctl status nextgen-cms --no-pager || true
+	@systemctl status barkpark-cms --no-pager || true
 
 logs: ## Tail Phoenix service logs
-	@journalctl -u nextgen-cms -f --no-pager
+	@journalctl -u barkpark-cms -f --no-pager
 
 seed: ## Re-seed the database
 	cd api && MIX_ENV=prod mix run priv/repo/seeds.exs
@@ -47,7 +47,7 @@ run: ## Start Phoenix (if needed) and run TUI
 	./run.sh
 
 build: ## Build Go TUI binary
-	go build -o bin/nextgen-tui .
+	go build -o bin/barkpark .
 
 clean: ## Remove build artifacts
 	rm -rf bin/ tmp/

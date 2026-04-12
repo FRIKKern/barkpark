@@ -3,7 +3,7 @@ set -euo pipefail
 
 TUI_DIR="$(cd "$(dirname "$0")" && pwd)"
 API_DIR="$TUI_DIR/api"
-SESSION="sanity-dev"
+SESSION="barkpark-dev"
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
 

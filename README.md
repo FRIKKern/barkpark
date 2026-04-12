@@ -1,4 +1,4 @@
-# NextGen CMS
+# Barkpark CMS
 
 A headless CMS with a terminal-native Studio interface. Built with Go (TUI) and Elixir/Phoenix (API).
 
@@ -21,9 +21,9 @@ A headless CMS with a terminal-native Studio interface. Built with Go (TUI) and 
 ## What is this
 
 - **Headless CMS** — content API for websites, apps, and services
-- **Terminal Studio** — manage content from your terminal with a Sanity-like multi-pane UI
+- **Terminal Studio** — manage content from your terminal with a multi-pane UI
 - **Developer-first** — edit source code on the server, rebuild instantly, connect from anywhere
-- **Sanity-compatible patterns** — draft/publish lifecycle, perspectives, mutations, schemas with visibility
+- **Draft/publish lifecycle** — drafts, publishing, perspectives, mutations, schemas with visibility
 
 ## Architecture
 
@@ -54,8 +54,8 @@ Websites/Apps                  │  ├── SSE real-time         │
 ### Setup
 
 ```bash
-git clone https://github.com/FRIKKern/nextgen-cms.git
-cd nextgen-cms
+git clone https://github.com/FRIKKern/barkpark-cms.git
+cd barkpark-cms
 
 # Start PostgreSQL
 brew services start postgresql@17
@@ -123,8 +123,7 @@ curl "localhost:4000/v1/data/query/production/post?filter=status=published"
 All writes go through one endpoint with a mutations array:
 
 ```bash
-TOKEN="sanity-dev-token"
-AUTH="-H 'Authorization: Bearer $TOKEN'"
+TOKEN="barkpark-dev-token"
 
 # Create (always starts as draft)
 curl -X POST localhost:4000/v1/data/mutate/production \
@@ -161,12 +160,12 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 # List all schemas
-curl -H "Authorization: Bearer sanity-dev-token" \
+curl -H "Authorization: Bearer barkpark-dev-token" \
   localhost:4000/v1/schemas/production
 
 # Create a new document type
 curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "task",
@@ -186,58 +185,41 @@ curl -X POST localhost:4000/v1/schemas/production \
 ```bash
 # Upload
 curl -X POST localhost:4000/media/upload \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -F "file=@photo.jpg"
 
 # List
 curl localhost:4000/media
-
-# Filter by type
-curl "localhost:4000/media?type=image"
 
 # Serve file
 curl localhost:4000/media/files/2026/04/photo-abc123.jpg
 
 # Delete
 curl -X DELETE localhost:4000/media/FILE_ID \
-  -H "Authorization: Bearer sanity-dev-token"
+  -H "Authorization: Bearer barkpark-dev-token"
 ```
 
 ### Real-time (SSE)
 
 ```bash
-curl -N -H "Authorization: Bearer sanity-dev-token" \
+curl -N -H "Authorization: Bearer barkpark-dev-token" \
   localhost:4000/v1/data/listen/production
 ```
 
-The Go TUI uses this automatically — changes via API appear in the TUI instantly.
-
 ## Draft/Published Model
-
-Follows Sanity's convention with separate document rows:
 
 | State | doc_id | Visible on public API |
 |-------|--------|-----------------------|
 | Draft | `drafts.my-post` | No |
 | Published | `my-post` | Yes |
-| Both (edited after publish) | `drafts.my-post` + `my-post` | Published version only |
+| Both | `drafts.my-post` + `my-post` | Published version only |
 
-- `create` always makes a draft (`drafts.{id}`)
-- `publish` copies draft to published, removes draft
-- `unpublish` moves published back to draft
-- `discardDraft` deletes draft, keeps published
-
-**Perspectives** control what you see:
-- `published` (default on public API) — only published documents
-- `drafts` — prefers draft over published when both exist (studio view)
-- `raw` — everything, both versions
+**Perspectives**: `published` (default), `drafts` (studio view), `raw` (everything)
 
 ## Schema Visibility
 
-Each document type has a visibility setting:
-
-- **`public`** — queryable via public API without auth (Post, Page, Author, etc.)
-- **`private`** — returns 404 on public API, requires auth token (Settings, Navigation, etc.)
+- **`public`** — queryable without auth (Post, Page, Author, etc.)
+- **`private`** — requires auth token (Settings, Navigation, etc.)
 
 ## Field Types
 
@@ -259,70 +241,47 @@ Each document type has a visibility setting:
 
 ### One-command setup
 
-From your local machine, deploy to a fresh Ubuntu VPS:
-
 ```bash
 ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
 ```
 
-This installs Elixir, Go, PostgreSQL natively (no Docker), builds everything, and starts the API as a systemd service.
+Installs Elixir, Go, PostgreSQL natively. Edit source on the server, rebuild instantly.
 
 ### Server workflow
 
-After setup, SSH in and work directly on the source:
-
 ```bash
 ssh root@YOUR_VPS_IP
-cd /opt/nextgen-cms
+cd /opt/barkpark-cms
 
-# Edit any file
-nano api/lib/sanity_api/content.ex
-
-# Rebuild and restart (one command)
-make rebuild
-
-# Check status
-make status
-make logs
+nano api/lib/sanity_api/content.ex   # edit code
+make rebuild                          # rebuild + restart
+make status                           # check service
+make logs                             # tail logs
 ```
 
-### Available make commands
+### Connect TUI to remote server
+
+```bash
+BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
+```
+
+### Make commands
 
 | Command | Description |
 |---------|-------------|
-| `make rebuild` | Rebuild Phoenix + TUI, restart service |
-| `make restart` | Restart without rebuilding |
-| `make stop` | Stop the service |
-| `make status` | Show service status |
-| `make logs` | Tail service logs |
-| `make seed` | Re-seed the database |
-| `make migrate` | Run database migrations |
-| `make reset-db` | Drop, recreate, migrate, seed |
-
-### Connect your local TUI to the server
-
-```bash
-SANITY_API_URL=http://YOUR_VPS_IP:4000 go run .
-```
-
-### Update from GitHub
-
-```bash
-cd /opt/nextgen-cms && git pull && make rebuild
-```
-
-### Docker (alternative)
-
-If you prefer Docker over native install:
-
-```bash
-docker compose up -d
-```
+| `make rebuild` | Rebuild + restart service |
+| `make restart` | Restart without rebuild |
+| `make status` | Service status |
+| `make logs` | Tail logs |
+| `make seed` | Re-seed database |
+| `make migrate` | Run migrations |
+| `make reset-db` | Full DB reset |
+| `make dev` | Local tmux dev session |
 
 ## Project Structure
 
 ```
-nextgen-cms/
+barkpark-cms/
 ├── main.go              # TUI entry point
 ├── tui.go               # Bubble Tea model, panes, editor
 ├── store.go             # API client (HTTP + SSE)

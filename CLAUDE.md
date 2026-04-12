@@ -1,4 +1,4 @@
-# Sanity TUI — Project Guide
+# Barkpark CMS — Project Guide
 
 ## Architecture
 
@@ -8,7 +8,7 @@ Two projects work together:
 - **sanity-api** (Elixir, Phoenix) — Backend API at `./api/`
 - **PostgreSQL** — Data store (managed by Ecto)
 
-The TUI connects to Phoenix on `http://localhost:4000` (configurable via `SANITY_API_URL`).
+The TUI connects to Phoenix on `http://localhost:4000` (configurable via `BARKPARK_API_URL`).
 Phoenix serves the API and stores everything in Postgres.
 
 ## Running
@@ -27,7 +27,7 @@ cd . && go run .
 ## API Endpoints
 
 Base URL: `http://localhost:4000`
-Dev token: `sanity-dev-token` (read + write + admin)
+Dev token: `barkpark-dev-token` (read + write + admin)
 
 ### Public API (no auth, respects schema visibility)
 
@@ -81,7 +81,7 @@ Creating always makes a draft. Publishing copies draft to published and removes 
 
 ```bash
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"My Post"}}]}'
 ```
@@ -90,7 +90,7 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"patch":{"id":"drafts.my-post","type":"post","set":{"title":"New Title","excerpt":"Updated"}}}]}'
 ```
@@ -99,7 +99,7 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
 ```
@@ -108,7 +108,7 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
 ```
@@ -117,7 +117,7 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"discardDraft":{"id":"my-post","type":"post"}}]}'
 ```
@@ -126,7 +126,7 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"delete":{"id":"my-post","type":"post"}}]}'
 ```
@@ -135,7 +135,7 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ```bash
 curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "task",
@@ -158,7 +158,7 @@ Same endpoint as create — POST with the same `name` upserts:
 
 ```bash
 curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"name": "task", "title": "Task", "icon": "📋", "visibility": "private", "fields": [...]}'
 ```
@@ -167,7 +167,7 @@ curl -X POST localhost:4000/v1/schemas/production \
 
 ```bash
 curl -X DELETE localhost:4000/v1/schemas/production/task \
-  -H "Authorization: Bearer sanity-dev-token"
+  -H "Authorization: Bearer barkpark-dev-token"
 ```
 
 ### Schema visibility
@@ -247,7 +247,7 @@ priv/repo/seeds.exs                      — Seed data
 ```bash
 # Upload
 curl -X POST localhost:4000/media/upload \
-  -H "Authorization: Bearer sanity-dev-token" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -F "file=@photo.jpg"
 
 # List (filter by type: image, video, application)
@@ -259,7 +259,7 @@ curl localhost:4000/media/files/2026/04/photo-abc123.jpg
 
 # Delete
 curl -X DELETE localhost:4000/media/FILE_ID \
-  -H "Authorization: Bearer sanity-dev-token"
+  -H "Authorization: Bearer barkpark-dev-token"
 ```
 
 Files stored on disk at `api/uploads/YYYY/MM/filename`. Metadata in PostgreSQL.
@@ -289,7 +289,7 @@ make seed                             # re-seed data
 ### Connect local TUI to remote server
 
 ```bash
-SANITY_API_URL=http://YOUR_VPS_IP:4000 go run .
+BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
 ```
 
 ### Makefile commands

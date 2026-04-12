@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# NextGen CMS — Hetzner VPS native deployment
+# Barkpark CMS — Hetzner VPS native deployment
 #
 # Installs everything directly on the server so you can
 # SSH in, edit source code, rebuild, and restart instantly.
@@ -10,19 +10,19 @@ set -euo pipefail
 #   ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
 #
 # After setup, SSH in and use:
-#   cd /opt/nextgen-cms
+#   cd /opt/barkpark-cms
 #   make rebuild   # rebuild + restart after code changes
 #   make logs      # tail logs
 #   make status    # check service status
 
-APP_DIR="/opt/nextgen-cms"
-REPO="https://github.com/FRIKKern/nextgen-cms.git"
-DB_NAME="sanity_api_prod"
-DB_USER="sanity"
+APP_DIR="/opt/barkpark-cms"
+REPO="https://github.com/FRIKKern/barkpark-cms.git"
+DB_NAME="barkpark_prod"
+DB_USER="barkpark"
 DB_PASS="$(openssl rand -hex 16)"
 
 echo "============================================"
-echo "  NextGen CMS — Native Server Setup"
+echo "  Barkpark CMS — Native Server Setup"
 echo "============================================"
 echo ""
 
@@ -97,7 +97,7 @@ if [ ! -f "$ENV_FILE" ]; then
   SECRET_KEY_BASE=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
   IP=$(hostname -I | awk '{print $1}')
   cat > "$ENV_FILE" << EOF
-# NextGen CMS Configuration
+# Barkpark CMS Configuration
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
 SECRET_KEY_BASE=$SECRET_KEY_BASE
 PHX_HOST=$IP
@@ -127,14 +127,14 @@ echo "   Phoenix built and migrated"
 # ── 8. Build Go TUI ─────────────────────────────────────────────────────────
 echo ">> Building Go TUI..."
 cd "$APP_DIR"
-go build -o bin/nextgen-tui .
-echo "   TUI built at bin/nextgen-tui"
+go build -o bin/barkpark .
+echo "   TUI built at bin/barkpark"
 
 # ── 9. Systemd service ──────────────────────────────────────────────────────
 echo ">> Creating systemd service..."
-cat > /etc/systemd/system/nextgen-cms.service << EOF
+cat > /etc/systemd/system/barkpark-cms.service << EOF
 [Unit]
-Description=NextGen CMS Phoenix API
+Description=Barkpark CMS Phoenix API
 After=network.target postgresql.service
 Requires=postgresql.service
 
@@ -155,8 +155,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable nextgen-cms
-systemctl restart nextgen-cms
+systemctl enable barkpark-cms
+systemctl restart barkpark-cms
 
 # ── 10. Firewall ─────────────────────────────────────────────────────────────
 echo ">> Configuring firewall..."
@@ -181,7 +181,7 @@ done
 IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "============================================"
-echo "  NextGen CMS is running!"
+echo "  Barkpark CMS is running!"
 echo "============================================"
 echo ""
 echo "  API:  http://$IP:4000"
@@ -199,7 +199,7 @@ echo "  Re-seed data:    make seed"
 echo ""
 echo "  === Connect TUI from your machine ==="
 echo ""
-echo "  SANITY_API_URL=http://$IP:4000 go run ."
+echo "  BARKPARK_API_URL=http://$IP:4000 go run ."
 echo ""
 echo "  === Update from GitHub ==="
 echo ""

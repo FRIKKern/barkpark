@@ -9,13 +9,13 @@ import (
 
 func main() {
 	apiURL := "http://localhost:4000"
-	if env := os.Getenv("SANITY_API_URL"); env != "" {
+	if env := os.Getenv("BARKPARK_API_URL"); env != "" {
 		apiURL = env
 	}
 
-	apiToken := os.Getenv("SANITY_API_TOKEN")
+	apiToken := os.Getenv("BARKPARK_API_TOKEN")
 	if apiToken == "" {
-		apiToken = "sanity-dev-token"
+		apiToken = "barkpark-dev-token"
 	}
 
 	// Load schemas from Phoenix API

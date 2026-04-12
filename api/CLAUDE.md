@@ -1,8 +1,8 @@
-# Sanity API — Phoenix Backend
+# Barkpark CMS — Phoenix Backend
 
 ## What this is
 
-Elixir/Phoenix API backend for a Sanity-like CMS. Serves the Go TUI at `../sanity-tui/`.
+Elixir/Phoenix API backend for Barkpark CMS. Serves the Go TUI client.
 
 ## Running
 
@@ -45,8 +45,8 @@ Documents use Sanity's `drafts.` prefix convention:
 
 ## Auth
 
-Dev token: `sanity-dev-token` (all permissions)
-Header: `Authorization: Bearer sanity-dev-token`
+Dev token: `barkpark-dev-token` (all permissions)
+Header: `Authorization: Bearer barkpark-dev-token`
 
 Tokens are SHA256 hashed in the DB. See `ApiToken.hash_token/1`.
 

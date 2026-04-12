@@ -1,5 +1,6 @@
 # Binaries
-sanity-tui
+barkpark
+bin/
 *.exe
 *.dll
 *.so

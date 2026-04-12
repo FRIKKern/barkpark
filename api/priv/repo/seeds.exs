@@ -157,7 +157,7 @@ IO.puts("Seeded #{length(documents)} documents")
 
 # ── Dev API Token ────────────────────────────────────────────────────────────
 
-dev_token = "sanity-dev-token"
+dev_token = "barkpark-dev-token"
 
 %ApiToken{}
 |> ApiToken.changeset(%{
