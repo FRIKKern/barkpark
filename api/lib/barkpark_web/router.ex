@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Router do
 
     live "/", StudioLive
     live "/media", MediaLive
+    live "/api-tester", ApiTesterLive
     live "/*path", StudioLive
   end
 
