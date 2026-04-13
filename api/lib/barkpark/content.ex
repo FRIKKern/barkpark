@@ -22,7 +22,7 @@ defmodule Barkpark.Content do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, Envelope, Revision, SchemaDefinition}
+  alias Barkpark.Content.{Document, Envelope, Revision, SchemaDefinition, Validation}
 
   @drafts_prefix "drafts."
 
@@ -118,6 +118,14 @@ defmodule Barkpark.Content do
     |> case do
       nil -> {:error, :not_found}
       doc -> {:ok, doc}
+    end
+  end
+
+  @doc "Validate document content against its schema. Returns {:ok, content} or {:error, errors_map}."
+  def validate_document(type, title, content, dataset) do
+    case get_schema(type, dataset) do
+      {:ok, schema} -> Validation.validate(content, title, schema)
+      _ -> {:ok, content}
     end
   end
 

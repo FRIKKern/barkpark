@@ -35,7 +35,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
        show_history: false, revisions: [],
        show_delete: false, delete_refs: [],
        user_id: user_id, user_name: user_name, user_color: user_color,
-       presences: [], show_profile: false)
+       presences: [], show_profile: false, validation_errors: %{})
      |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
@@ -210,16 +210,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
         "status" => Map.get(params, "status", doc.status),
         "content" => content
       }
+      # Run validation (informational — doesn't block draft saves)
+      validation_errors = case Content.validate_document(type, new_title, content, @dataset) do
+        {:error, errs} -> errs
+        _ -> %{}
+      end
+
       case Content.upsert_document(type, attrs, @dataset) do
         {:ok, saved_doc} ->
-          # Update doc list item title without full pane rebuild (avoids resetting inputs)
           panes = update_doc_title_in_panes(socket.assigns.panes, Content.published_id(saved_doc.doc_id), new_title)
           {:noreply, assign(socket,
             panes: panes,
             editor_doc: saved_doc,
             editor_is_draft: Content.draft?(saved_doc.doc_id),
             editor_form: params,
-            save_status: "Saved")}
+            save_status: "Saved",
+            validation_errors: validation_errors)}
         {:error, _} ->
           {:noreply, assign(socket, save_status: "Save failed")}
       end
@@ -454,9 +460,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   def handle_event("publish", _, socket) do
-    do_action(socket, fn doc, type ->
-      Content.publish_document(Content.published_id(doc.doc_id), type, @dataset)
-    end, "Published")
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      content = build_content(socket.assigns.editor_form, socket.assigns[:editor_schema])
+      title = Map.get(socket.assigns.editor_form, "title", doc.title)
+      case Content.validate_document(type, title, content, @dataset) do
+        {:error, errs} ->
+          {:noreply, socket
+           |> assign(validation_errors: errs)
+           |> put_flash(:error, "Fix validation errors before publishing")}
+        _ ->
+          do_action(socket, fn d, t ->
+            Content.publish_document(Content.published_id(d.doc_id), t, @dataset)
+          end, "Published")
+      end
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("unpublish", _, socket) do
@@ -841,18 +862,32 @@ defmodule BarkparkWeb.Studio.StudioLive do
             <% end %>
 
             <form phx-submit="save" phx-change="autosave" id="editor-form">
-              <div class="editor-field">
-                <label class="editor-field-label">Title</label>
+              <div class={"editor-field #{if @validation_errors["title"], do: "has-error"}"}>
+                <label class="editor-field-label">
+                  Title
+                  <%= if field_rules = get_title_validation(@editor_schema) do %>
+                    <%= if field_rules["required"] do %><span class="field-required">*</span><% end %>
+                  <% end %>
+                </label>
                 <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
+                <%= if errs = @validation_errors["title"] do %>
+                  <div class="field-errors"><%= Enum.join(errs, ", ") %></div>
+                <% end %>
               </div>
               <%= if @editor_schema do %>
                 <%= for field <- Enum.reject(@editor_schema.fields, & &1["name"] == "title") do %>
-                  <div class="editor-field">
+                  <% field_name = field["name"] %>
+                  <% rules = field["validation"] || %{} %>
+                  <div class={"editor-field #{if @validation_errors[field_name], do: "has-error"}"}>
                     <label class="editor-field-label">
-                      <%= field["title"] || field["name"] %>
+                      <%= field["title"] || field_name %>
+                      <%= if rules["required"] do %><span class="field-required">*</span><% end %>
                       <span class="editor-field-type"><%= field["type"] %></span>
                     </label>
                     <%= render_input(assigns, field) %>
+                    <%= if errs = @validation_errors[field_name] do %>
+                      <div class="field-errors"><%= Enum.join(errs, ", ") %></div>
+                    <% end %>
                   </div>
                 <% end %>
               <% end %>
@@ -1237,6 +1272,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
         border: 3px solid transparent; transition: all 0.1s;
       }
       .profile-color-swatch:hover { border-color: var(--fg-muted); }
+
+      /* Validation */
+      .field-required { color: var(--destructive); margin-left: 2px; }
+      .field-errors { font-size: 12px; color: var(--destructive); margin-top: 4px; }
+      .editor-field.has-error .form-input { border-color: var(--destructive); }
+      .editor-field.has-error .form-input:focus { box-shadow: 0 0 0 2px hsl(0 62.8% 50.6% / 0.15); }
     </style>
     """
   end
@@ -1415,6 +1456,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
       end
     else
       "browsing"
+    end
+  end
+
+  defp get_title_validation(nil), do: nil
+  defp get_title_validation(schema) do
+    case Enum.find(schema.fields, &(&1["name"] == "title")) do
+      %{"validation" => v} -> v
+      _ -> nil
     end
   end
 
