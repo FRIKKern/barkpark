@@ -248,17 +248,19 @@ defmodule SanityApiWeb.Studio.StudioLive do
         list_pane = %{title: node.title, items: build_list_items(node), selected: Enum.at(rest, 0)}
         walk_path(rest, depth + 1, node, panes ++ [list_pane], nil)
 
-      %{type: :document_type_list, type_name: type_name} ->
+      %{type: :document_type_list, type_name: type_name} = node ->
         # Document list — add doc list pane, then resolve doc editor if path continues
         schema = case Content.get_schema(type_name, @dataset) do
           {:ok, s} -> s
           _ -> nil
         end
 
-        docs = Content.list_documents(type_name, @dataset, perspective: :drafts)
+        opts = [perspective: :drafts]
+        opts = if node.filter, do: opts ++ [filter: node.filter], else: opts
+        docs = Content.list_documents(type_name, @dataset, opts)
         doc_pane = %{
-          title: (schema && schema.title) || type_name,
-          icon: schema && schema.icon,
+          title: node.title || (schema && schema.title) || type_name,
+          icon: node.icon || (schema && schema.icon),
           type_name: type_name,
           items: Enum.map(docs, fn doc ->
             pub_id = Content.published_id(doc.doc_id)

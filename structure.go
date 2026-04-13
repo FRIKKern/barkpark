@@ -151,47 +151,122 @@ func Divider() *StructureNode {
 }
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  STRUCTURE CONFIGURATION                                                ║
+// ║  DESK STRUCTURE                                                         ║
 // ║                                                                         ║
-// ║  Auto-generated from schema definitions fetched from the API.           ║
-// ║  Public schemas appear as top-level document lists.                     ║
-// ║  Private schemas go under a "Settings" group.                           ║
+// ║  This is the equivalent of Sanity's deskStructure export.               ║
+// ║  Auto-generated from schemas, with:                                     ║
+// ║   - Content types with status filter sub-views                          ║
+// ║   - Taxonomy types as simple lists                                      ║
+// ║   - Private types as singletons under Settings                          ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 var rootStructure *StructureNode
 
-// initRootStructure builds the navigation tree from the loaded schemas.
-// Public schemas get their own top-level list item.
-// Private schemas are grouped under "Settings".
+// initRootStructure builds the desk structure from the loaded schemas.
 func initRootStructure() {
-	var publicItems []*StructureNode
-	var privateItems []*StructureNode
+	var contentItems []*StructureNode
+	var taxonomyItems []*StructureNode
+	var settingsItems []*StructureNode
 
+	// Categorize schemas by their role in the desk structure
 	for _, s := range schemas {
 		if s.Visibility == "private" {
-			// Private: singleton-style (direct document editor)
-			privateItems = append(privateItems,
+			settingsItems = append(settingsItems,
 				ListItem().Title(s.Title).Icon(s.Icon).Child(
 					Document().SchemaType(s.Name).DocumentID(s.Name).Build(),
 				).Build(),
 			)
+			continue
+		}
+
+		// Types with a status field get filtered sub-views (like Sanity)
+		if hasStatusField(s) {
+			contentItems = append(contentItems, docTypeWithFilters(s))
 		} else {
-			// Public: document type list
-			publicItems = append(publicItems, DocumentTypeListItem(s.Name))
+			taxonomyItems = append(taxonomyItems, DocumentTypeListItem(s.Name))
 		}
 	}
 
 	var items []*StructureNode
-	items = append(items, publicItems...)
+	items = append(items, contentItems...)
 
-	if len(privateItems) > 0 {
+	if len(taxonomyItems) > 0 {
+		items = append(items, Divider())
+		items = append(items, taxonomyItems...)
+	}
+
+	if len(settingsItems) > 0 {
 		items = append(items, Divider())
 		items = append(items,
 			ListItem().Title("Settings").Icon("⚙").Child(
-				List().ID("settings").Title("Settings").Items(privateItems...).Build(),
+				List().ID("settings").Title("Settings").Items(settingsItems...).Build(),
 			).Build(),
 		)
 	}
 
 	rootStructure = List().ID("root").Title("Structure").Items(items...).Build()
+}
+
+// docTypeWithFilters creates a list item that opens a sub-list with
+// "All {Type}" plus filtered views for each status option.
+// This mirrors Sanity's pattern of having filtered document lists.
+func docTypeWithFilters(s Schema) *StructureNode {
+	field := findStatusField(s)
+	if field == nil {
+		return DocumentTypeListItem(s.Name)
+	}
+
+	var subItems []*StructureNode
+
+	// "All {Type}" — unfiltered
+	subItems = append(subItems, &StructureNode{
+		Type:     NodeDocumentTypeList,
+		ID:       s.Name + "-all",
+		Title:    "All " + s.Title,
+		Icon:     s.Icon,
+		TypeName: s.Name,
+	})
+
+	subItems = append(subItems, Divider())
+
+	// One filtered view per status option
+	for _, opt := range field.Options {
+		subItems = append(subItems, &StructureNode{
+			Type:     NodeDocumentTypeList,
+			ID:       s.Name + "-" + opt,
+			Title:    capitalize(opt),
+			Icon:     statusIcon(opt),
+			TypeName: s.Name,
+			Filter:   "status=" + opt,
+		})
+	}
+
+	return ListItem().
+		ID(s.Name).
+		Title(s.Title).
+		Icon(s.Icon).
+		Child(
+			List().ID(s.Name).Title(s.Title).Items(subItems...).Build(),
+		).
+		Build()
+}
+
+func hasStatusField(s Schema) bool {
+	return findStatusField(s) != nil
+}
+
+func findStatusField(s Schema) *Field {
+	for i, f := range s.Fields {
+		if f.Name == "status" && f.Type == FieldSelect && len(f.Options) > 0 {
+			return &s.Fields[i]
+		}
+	}
+	return nil
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
