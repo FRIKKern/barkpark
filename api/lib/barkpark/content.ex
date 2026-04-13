@@ -437,10 +437,12 @@ defmodule Barkpark.Content do
 
   def upsert_document(type, attrs, dataset) do
     attrs = from_envelope(attrs)
-    doc_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
+    raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
+    doc_id = raw_id && draft_id(raw_id)
 
     attrs =
       attrs
+      |> Map.put("doc_id", doc_id)
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
@@ -519,10 +521,16 @@ defmodule Barkpark.Content do
         # Save revision
         save_revision(doc, type, dataset, action)
 
+        ev = save_event(doc, type, dataset, action)
+
         msg = %{
+          event_id: ev.id,
           type: type,
-          doc_id: doc.doc_id,
+          mutation: action,
           action: :mutate,
+          doc_id: doc.doc_id,
+          rev: doc.rev,
+          document: Envelope.render(doc),
           doc: %{
             doc_id: doc.doc_id,
             title: doc.title,
@@ -545,6 +553,23 @@ defmodule Barkpark.Content do
       error ->
         error
     end
+  end
+
+  defp save_event(doc, type, dataset, action) do
+    alias Barkpark.Content.MutationEvent
+
+    %MutationEvent{}
+    |> Ecto.Changeset.change(%{
+      dataset: dataset,
+      type: type,
+      doc_id: doc.doc_id,
+      mutation: action,
+      rev: doc.rev,
+      previous_rev: nil,
+      document: Envelope.render(doc),
+      inserted_at: DateTime.utc_now()
+    })
+    |> Repo.insert!()
   end
 
   defp save_revision(doc, type, dataset, action) do
