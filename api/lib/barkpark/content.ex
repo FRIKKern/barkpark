@@ -48,18 +48,31 @@ defmodule Barkpark.Content do
   List documents by type and dataset.
 
   Options:
-    - `:perspective` — `:published`, `:drafts`, or `:raw` (default `:raw`)
-    - `:filter` — "field=value" filter string
+    - `:perspective`  — `:published`, `:drafts`, or `:raw` (default `:raw`)
+    - `:filter_map`   — map of field=>value filters, e.g. `%{"status" => "draft"}`
+    - `:limit`        — max rows returned (default 100, max 1000, min 1)
+    - `:offset`       — rows to skip (default 0)
+    - `:order`        — `:updated_at_desc` (default), `:updated_at_asc`,
+                        `:created_at_desc`, `:created_at_asc`
+
+  NOTE: `maybe_merge_drafts/2` runs after limit/offset, so the `:drafts`
+  perspective may return fewer rows than requested. This is a known limitation
+  (tracked for Phase 8).
   """
   def list_documents(type, dataset, opts \\ []) do
     perspective = Keyword.get(opts, :perspective, :raw)
-    filter = Keyword.get(opts, :filter)
+    filter_map = Keyword.get(opts, :filter_map, %{})
+    limit = opts |> Keyword.get(:limit, 100) |> min(1000) |> max(1)
+    offset = opts |> Keyword.get(:offset, 0) |> max(0)
+    order = Keyword.get(opts, :order, :updated_at_desc)
 
     Document
     |> where([d], d.type == ^type and d.dataset == ^dataset)
     |> apply_perspective(perspective)
-    |> maybe_filter(filter)
-    |> order_by([d], desc: d.updated_at)
+    |> apply_filter_map(filter_map)
+    |> apply_order(order)
+    |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
     |> maybe_merge_drafts(perspective)
   end
@@ -70,6 +83,21 @@ defmodule Barkpark.Content do
   end
 
   defp apply_perspective(query, _), do: query
+
+  defp apply_filter_map(query, map) when map_size(map) == 0, do: query
+  defp apply_filter_map(query, map) do
+    Enum.reduce(map, query, fn
+      {"title", v}, q -> where(q, [d], d.title == ^v)
+      {"status", v}, q -> where(q, [d], d.status == ^v)
+      {field, v}, q -> where(q, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+    end)
+  end
+
+  defp apply_order(q, :updated_at_desc), do: order_by(q, [d], desc: d.updated_at)
+  defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
+  defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)
+  defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
+  defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
   defp maybe_merge_drafts(docs, :drafts) do
     # Group by published_id, prefer draft over published
@@ -82,25 +110,6 @@ defmodule Barkpark.Content do
   end
 
   defp maybe_merge_drafts(docs, _), do: docs
-
-  defp maybe_filter(query, nil), do: query
-  defp maybe_filter(query, ""), do: query
-
-  defp maybe_filter(query, filter_string) do
-    case String.split(filter_string, "=", parts: 2) do
-      [field, value] ->
-        case field do
-          "status" ->
-            where(query, [d], d.status == ^value)
-
-          _ ->
-            where(query, [d], fragment("?->>? = ?", d.content, ^field, ^value))
-        end
-
-      _ ->
-        query
-    end
-  end
 
   def get_document(doc_id, type, dataset) do
     Document

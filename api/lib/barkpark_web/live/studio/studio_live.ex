@@ -544,7 +544,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         end
 
         opts = [perspective: :drafts]
-        opts = if node.filter, do: opts ++ [filter: node.filter], else: opts
+        opts = if node.filter, do: opts ++ [filter_map: parse_filter_string(node.filter)], else: opts
         docs = Content.list_documents(type_name, @dataset, opts)
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
@@ -604,6 +604,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
           [%{type: :item, id: child.id, title: child.title, icon: child.icon}]
       end
     end)
+  end
+
+  # Parse a "field=value" filter string (from Structure.Node.filter) into a map
+  # suitable for Content.list_documents/3's :filter_map option.
+  defp parse_filter_string(nil), do: %{}
+  defp parse_filter_string(""), do: %{}
+  defp parse_filter_string(s) do
+    case String.split(s, "=", parts: 2) do
+      [field, value] -> %{field => value}
+      _ -> %{}
+    end
   end
 
   defp filter_ref_candidates(candidates, ""), do: candidates
