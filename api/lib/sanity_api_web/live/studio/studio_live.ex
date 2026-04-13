@@ -123,10 +123,11 @@ defmodule SanityApiWeb.Studio.StudioLive do
       }
       case Content.upsert_document(type, attrs, @dataset) do
         {:ok, saved_doc} ->
+          # Rebuild panes first (updates doc list), then restore form to keep user input
           {:noreply, socket
-           |> assign(editor_form: params, save_status: "Saved",
-                     editor_doc: saved_doc, editor_is_draft: Content.draft?(saved_doc.doc_id))
-           |> rebuild_panes()}
+           |> assign(editor_doc: saved_doc, editor_is_draft: Content.draft?(saved_doc.doc_id))
+           |> rebuild_panes()
+           |> assign(editor_form: params, save_status: "Saved")}
         {:error, _} ->
           {:noreply, assign(socket, save_status: "Save failed")}
       end
@@ -420,7 +421,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
             <form phx-submit="save" phx-change="autosave" id="editor-form">
               <div class="editor-field">
                 <label class="editor-field-label">Title</label>
-                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="500" />
+                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
               </div>
               <%= if @editor_schema do %>
                 <%= for field <- @editor_schema.fields do %>
