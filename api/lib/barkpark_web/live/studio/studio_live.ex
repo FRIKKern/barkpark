@@ -389,6 +389,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, assign(socket, show_profile: false)}
   end
 
+  def handle_event("preview-profile", %{"name" => name, "color" => color}, socket) do
+    {:noreply, assign(socket, user_name: name, user_color: color)}
+  end
+
   def handle_event("save-profile", %{"name" => name, "color" => color}, socket) do
     socket = assign(socket, user_name: name, user_color: color, show_profile: false)
     # Save to client localStorage via JS hook
@@ -652,18 +656,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
     ~H"""
     <div class="presence-bar" id="presence-hook" phx-hook="PresenceIdentity">
       <div class="presence-bar-users">
-        <%= for p <- @presences do %>
+        <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
+        <%= for p <- others do %>
           <div class="presence-avatar" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} — #{if p.doc_id, do: "editing #{p.doc_id}", else: "browsing"}"}>
             <%= String.first(Map.get(p, :name, "U")) %>
           </div>
         <% end %>
-        <%= if @presences == [] do %>
-          <span class="text-xs text-muted">Just you</span>
-        <% end %>
       </div>
-      <button class="presence-me" phx-click="show-profile" style={"background: #{@user_color}"}>
-        <%= String.first(@user_name) %>
-      </button>
+      <div class="presence-me-group" phx-click="show-profile">
+        <div class="presence-me-info">
+          <span class="presence-me-name"><%= @user_name %></span>
+          <span class="presence-me-location"><%= if @editor_doc, do: "editing #{@editor_doc.title || "Untitled"}", else: "browsing" %></span>
+        </div>
+        <div class="presence-me" style={"background: #{@user_color}"}>
+          <%= String.first(@user_name) %>
+        </div>
+      </div>
     </div>
 
     <!-- Profile edit modal -->
@@ -674,10 +682,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <span style="font-weight: 600; font-size: 14px;">Your profile</span>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile">x</button>
         </div>
-        <form phx-submit="save-profile" style="padding: 20px;">
+        <form phx-submit="save-profile" phx-change="preview-profile" style="padding: 20px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+            <div class="presence-me" style={"background: #{@user_color}; width: 40px; height: 40px; font-size: 16px;"}>
+              <%= String.first(@user_name) %>
+            </div>
+            <div>
+              <div style="font-weight: 600;"><%= @user_name %></div>
+              <div class="text-xs text-muted">This is how others see you</div>
+            </div>
+          </div>
           <div class="form-group">
             <label class="form-label">Name</label>
-            <input type="text" name="name" value={@user_name} class="form-input" autofocus />
+            <input type="text" name="name" value={@user_name} class="form-input" autofocus phx-debounce="200" />
           </div>
           <div class="form-group">
             <label class="form-label">Color</label>
@@ -1135,14 +1152,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
         cursor: default; text-transform: uppercase;
       }
       .presence-avatar:first-child { margin-left: 0; }
+      .presence-me-group {
+        display: flex; align-items: center; gap: 8px; cursor: pointer;
+        padding: 2px 4px 2px 10px; border-radius: 20px;
+        transition: background 0.1s; margin-left: 4px;
+      }
+      .presence-me-group:hover { background: var(--bg-muted); }
+      .presence-me-info { text-align: right; }
+      .presence-me-name { font-size: 12px; font-weight: 600; display: block; line-height: 1.2; }
+      .presence-me-location { font-size: 10px; color: var(--fg-dim); display: block; line-height: 1.2; }
       .presence-me {
         width: 30px; height: 30px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
         font-size: 13px; font-weight: 600; color: white;
-        border: 2px solid var(--fg-muted); cursor: pointer;
-        text-transform: uppercase; transition: border-color 0.15s;
+        border: none; cursor: pointer;
+        text-transform: uppercase; flex-shrink: 0;
       }
-      .presence-me:hover { border-color: var(--fg); }
       .presence-dots { display: flex; gap: 4px; margin-left: 8px; }
       .presence-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); cursor: default; }
       .presence-dot-sm { width: 6px; height: 6px; border-radius: 50%; margin-left: 2px; flex-shrink: 0; }
