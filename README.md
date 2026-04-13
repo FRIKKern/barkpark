@@ -1,350 +1,236 @@
 # Barkpark
 
-A headless CMS with a terminal-native Studio interface. Built with Go (TUI) and Elixir/Phoenix (API).
+A headless CMS inspired by Sanity. Three ways to manage content: a web Studio, a terminal TUI, or the API directly.
+
+**Live demo:** http://89.167.28.206/studio
+
+## Interfaces
+
+### Web Studio (LiveView)
+
+Multi-pane desk structure at `/studio` — drill into content types, filter by status, edit documents with autosave, publish/unpublish. Real-time updates across tabs via PubSub.
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ ▣ Studio  [Structure]  Structure > Post > Getting Started...    │
-├──────────┬──────────┬──────────┬─────────────────────────────────┤
-│ Structure│ Post   8 │ ● Gettin │ ● Getting Started... [published]│
-│──────────│──────────│   2h ago │─────────────────────────────────│
-│ 📄 Post ›│ ● Gettin │ ● Why He │ 📄 Post · 9 fields              │
-│ 📑 Page ›│   2h ago │   26h ag │                                 │
-│ 👤 Author›│ ● Why He │ ○ Conten │  TITLE                         │
-│ 🏷 Categ ›│   26h ag │   50h ag │ ╭───────────────────────────╮  │
-│ 💼 Projec›│ ○ Conten │          │ │Getting Started with...    │  │
-│──────────│   50h ag │          │ ╰───────────────────────────╯  │
-│ ⚙ Settin›│          │          │                                 │
-└──────────┴──────────┴──────────┴─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ ▣ Barkpark Studio                                               │
+├───────────┬──────────────┬──────────────┬───────────────────────┤
+│ Structure │ Post         │ All Post     │ Title                 │
+│───────────│──────────────│──────────────│ ┌───────────────────┐ │
+│ 📄 Post  ▸│ All Post     │ ● Getting S. │ │Getting Started    │ │
+│ 📑 Page   │──────────────│ ● Why Headl. │ └───────────────────┘ │
+│ 💼 Project│ Draft        │ ○ Content M. │                       │
+│───────────│ Published    │              │ Slug        string    │
+│ 👤 Author │ Archived     │              │ ┌───────────────────┐ │
+│ 🏷 Categor│              │              │ │getting-started    │ │
+│───────────│              │              │ └───────────────────┘ │
+│ ⚙ Setting│              │              │                       │
+└───────────┴──────────────┴──────────────┴───────────────────────┘
 ```
 
-## What is this
+### Terminal TUI (Go + Bubble Tea)
 
-- **Headless CMS** — content API for websites, apps, and services
-- **Terminal Studio** — manage content from your terminal with a multi-pane UI
-- **Developer-first** — edit source code on the server, rebuild instantly, connect from anywhere
-- **Draft/publish lifecycle** — drafts, publishing, perspectives, mutations, schemas with visibility
+Same desk structure in the terminal. Keyboard-driven: `hjkl` navigation, `Enter` to edit, `Ctrl+S` to save. Connects to the Phoenix API over HTTP + SSE for real-time sync.
 
-## Architecture
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move up/down |
+| `h` / `l` | Switch panes / drill in |
+| `Enter` | Select / edit field |
+| `Space` | Toggle boolean / cycle select |
+| `Ctrl+S` | Save |
+| `Esc` | Back |
+| `q` | Quit |
+
+### API
+
+RESTful content API with Sanity-compatible mutation format. Public reads, authenticated writes.
+
+```bash
+# Read (public)
+curl localhost:4000/v1/data/query/production/post
+curl localhost:4000/v1/data/query/production/post?perspective=drafts
+curl localhost:4000/v1/data/doc/production/post/p1
+
+# Write (requires auth)
+TOKEN="barkpark-dev-token"
+
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"Hello"}}]}'
+
+# Publish / Unpublish
+-d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
+-d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
+
+# Real-time (SSE)
+curl -N -H "Authorization: Bearer $TOKEN" localhost:4000/v1/data/listen/production
+```
+
+## Desk Structure
+
+Content types with a `status` field (Post, Project) get filtered sub-views automatically — just like Sanity Studio's desk tool. Private schemas appear as singletons under Settings.
 
 ```
-Your machine                    Server (Hetzner/any VPS)
-┌────────────┐                 ┌──────────────────────────┐
-│  Go TUI    │───HTTP/SSE────> │  Phoenix API  :4000      │
-│  (client)  │                 │  ├── Public queries       │
-└────────────┘                 │  ├── Authenticated CRUD   │
-                               │  ├── Media uploads        │
-Websites/Apps                  │  ├── SSE real-time         │
-┌────────────┐                 │  └── Schema management    │
-│  Frontend  │───HTTP GET────> │                            │
-└────────────┘                 │  PostgreSQL                │
-                               │  └── Documents, Schemas,  │
-                               │      Tokens, Media        │
-                               └──────────────────────────┘
+Structure
+├── 📄 Post          → All Post / Draft / Published / Archived
+├── 📑 Page          → document list
+├── 💼 Project       → All Projects / Active / Planning / Completed
+├── ──────────
+├── 👤 Author        → document list
+├── 🏷 Category      → document list
+├── ──────────
+└── ⚙ Settings      → Site Settings / Navigation / Brand Colors (singletons)
 ```
+
+The desk structure is auto-generated from schemas. Add a new schema via the API and it appears in both the Web Studio and TUI.
+
+## Draft/Published Model
+
+| State | doc_id | Public API |
+|-------|--------|------------|
+| Draft | `drafts.my-post` | Hidden |
+| Published | `my-post` | Visible |
+
+Editing a published document creates a draft overlay. Publishing copies the draft to published and deletes the draft. Three perspectives: `published` (default), `drafts` (studio), `raw` (everything).
 
 ## Quick Start
 
-### Prerequisites
-
-- **Go** 1.22+ — [go.dev/dl](https://go.dev/dl/)
-- **Elixir** 1.18+ — `brew install elixir`
-- **PostgreSQL** 17 — `brew install postgresql@17`
-
-### Setup
+### Local development
 
 ```bash
 git clone https://github.com/FRIKKern/barkpark.git
 cd barkpark
 
-# Start PostgreSQL
-brew services start postgresql@17
+# Setup API
+cd api && mix deps.get && mix ecto.setup && cd ..
 
-# Setup Phoenix API
-cd api
-mix deps.get
-mix ecto.create
-mix ecto.migrate
-mix run priv/repo/seeds.exs
-cd ..
+# Run both
+make dev
 
-# Run it
-make dev    # tmux: Claude Code + TUI + Phoenix
-# OR run separately:
-make api    # terminal 1: Phoenix on :4000
-make tui    # terminal 2: Go TUI
+# Or separately
+make api    # Phoenix on :4000
+make tui    # Go TUI
 ```
 
-## Using the TUI
+Open http://localhost:4000/studio for the web interface.
 
-### Navigation
+### Deploy to a VPS
 
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Move up/down |
-| `h` / `l` | Switch panes / drill in / go back |
-| `Enter` | Select / start editing a field |
-| `Esc` | Go back / cancel edit |
-| `Space` | Toggle boolean / cycle select options |
-| `Ctrl+S` | Save changes |
-| `Tab` | Next pane |
-| `q` | Quit |
-
-### Editing documents
-
-1. Navigate to a document type and select a document
-2. Press `Enter` on a field to edit it
-3. Type your changes, press `Enter` to confirm
-4. Press `Ctrl+S` to save to the API
-5. The `* Unsaved` indicator shows when you have pending changes
-
-## API
-
-Base URL: `http://localhost:4000`
-
-### Public (no auth, respects schema visibility)
-
-```bash
-# List published posts
-curl localhost:4000/v1/data/query/production/post
-
-# With perspective (published, drafts, raw)
-curl "localhost:4000/v1/data/query/production/post?perspective=drafts"
-
-# Single document
-curl localhost:4000/v1/data/doc/production/post/p1
-
-# Filter
-curl "localhost:4000/v1/data/query/production/post?filter=status=published"
-```
-
-### Mutations (requires auth)
-
-All writes go through one endpoint with a mutations array:
-
-```bash
-TOKEN="barkpark-dev-token"
-
-# Create (always starts as draft)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"Hello World"}}]}'
-
-# Edit (patch fields)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"patch":{"id":"drafts.my-post","type":"post","set":{"title":"Updated"}}}]}'
-
-# Publish
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
-
-# Unpublish
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
-
-# Delete (both draft + published)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"delete":{"id":"my-post","type":"post"}}]}'
-```
-
-### Schemas (requires admin auth)
-
-```bash
-# List all schemas
-curl -H "Authorization: Bearer barkpark-dev-token" \
-  localhost:4000/v1/schemas/production
-
-# Create a new document type
-curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "task",
-    "title": "Task",
-    "icon": "✅",
-    "visibility": "private",
-    "fields": [
-      {"name": "title", "title": "Title", "type": "string"},
-      {"name": "done", "title": "Done", "type": "boolean"},
-      {"name": "assignee", "title": "Assignee", "type": "reference", "refType": "author"}
-    ]
-  }'
-```
-
-### Media
-
-```bash
-# Upload
-curl -X POST localhost:4000/media/upload \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -F "file=@photo.jpg"
-
-# List
-curl localhost:4000/media
-
-# Serve file
-curl localhost:4000/media/files/2026/04/photo-abc123.jpg
-
-# Delete
-curl -X DELETE localhost:4000/media/FILE_ID \
-  -H "Authorization: Bearer barkpark-dev-token"
-```
-
-### Real-time (SSE)
-
-```bash
-curl -N -H "Authorization: Bearer barkpark-dev-token" \
-  localhost:4000/v1/data/listen/production
-```
-
-## Draft/Published Model
-
-| State | doc_id | Visible on public API |
-|-------|--------|-----------------------|
-| Draft | `drafts.my-post` | No |
-| Published | `my-post` | Yes |
-| Both | `drafts.my-post` + `my-post` | Published version only |
-
-**Perspectives**: `published` (default), `drafts` (studio view), `raw` (everything)
-
-## Schema Visibility
-
-- **`public`** — queryable without auth (Post, Page, Author, etc.)
-- **`private`** — requires auth token (Settings, Navigation, etc.)
-
-## Field Types
-
-| Type | Description | Extra options |
-|------|-------------|---------------|
-| `string` | Single-line text | |
-| `slug` | Auto-generated slug | |
-| `text` | Multi-line textarea | `rows` (default 3) |
-| `richText` | Block editor | |
-| `image` | Image upload | |
-| `select` | Dropdown | `options: ["a", "b"]` |
-| `boolean` | Toggle switch | |
-| `datetime` | Date + time | |
-| `color` | Color picker | |
-| `reference` | Link to another type | `refType: "author"` |
-| `array` | Repeatable list | |
-
-## Deploy to a Server
-
-Works on any Ubuntu 22.04+ VPS (Hetzner, DigitalOcean, etc.). Supports both ARM64 and x86_64.
-
-### One-command setup
+One-command setup on any Ubuntu 22.04+ server (ARM64 or x86_64):
 
 ```bash
 ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
 ```
 
-This installs everything natively (no Docker):
-- **PostgreSQL** — from apt
-- **Erlang + Elixir** — via ASDF (handles ARM/x86 automatically)
-- **Go** — official binary (detects architecture)
-- **Systemd service** — auto-starts on boot
-- **UFW firewall** — ports 22, 80, 443, 4000
+Installs PostgreSQL, Erlang/Elixir (via ASDF), Go, Caddy, and a systemd service. First run takes 10-15 minutes on ARM (Erlang compiles from source).
 
-First run takes 10-15 minutes (Erlang compiles from source on ARM). Subsequent deploys are fast.
-
-### After setup
+After setup:
 
 ```bash
 ssh root@YOUR_VPS_IP
 cd /opt/barkpark
-
-# Edit code directly on the server
-nano api/lib/sanity_api/content.ex
-
-# Rebuild and restart (one command)
-make rebuild
-
-# Check status
-make status
-make logs
+make deploy    # git pull + rebuild + restart
+make status    # service health
+make logs      # tail logs
 ```
 
-### Connect TUI from your machine
+## Schema & Field Types
+
+Create schemas via API — they drive the Studio UI, TUI, and desk structure automatically.
 
 ```bash
-BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
+curl -X POST localhost:4000/v1/schemas/production \
+  -H "Authorization: Bearer barkpark-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "event",
+    "title": "Event",
+    "icon": "📅",
+    "visibility": "public",
+    "fields": [
+      {"name": "title", "title": "Title", "type": "string"},
+      {"name": "date", "title": "Date", "type": "datetime"},
+      {"name": "featured", "title": "Featured", "type": "boolean"}
+    ]
+  }'
 ```
 
-### Update from GitHub
+| Type | Description | Options |
+|------|-------------|---------|
+| `string` | Single-line text | |
+| `slug` | URL-safe identifier | |
+| `text` | Multi-line | `rows` |
+| `richText` | Block editor | |
+| `image` | Image upload | |
+| `select` | Dropdown | `options: ["a", "b"]` |
+| `boolean` | Toggle | |
+| `datetime` | Date + time | |
+| `color` | Color picker | |
+| `reference` | Link to type | `refType: "author"` |
+| `array` | Repeatable list | |
 
-```bash
-cd /opt/barkpark && git pull && make rebuild
+Schema visibility: `public` (queryable without auth) or `private` (requires token, appears under Settings as singleton).
+
+## Architecture
+
 ```
-
-### Make commands
-
-| Command | Description |
-|---------|-------------|
-| `make rebuild` | Rebuild Phoenix + TUI, restart service |
-| `make restart` | Restart without rebuild |
-| `make status` | Service status |
-| `make logs` | Tail service logs |
-| `make seed` | Re-seed database |
-| `make migrate` | Run database migrations |
-| `make reset-db` | Full DB reset (drop + create + migrate + seed) |
-| `make dev` | Local tmux dev session |
-
-### Architecture notes
-
-- Phoenix runs via a `start.sh` wrapper that sources ASDF and `.env` for systemd
-- `.env` at project root holds secrets (DATABASE_URL, SECRET_KEY_BASE)
-- SSL/HTTPS: disabled by default — use Caddy or nginx as a reverse proxy for HTTPS
-- Media files stored at `api/uploads/` on disk
+Browser / Apps              Server
+┌─────────────┐            ┌───────────────────────────┐
+│ Web Studio  │◄──WS/LV──►│ Phoenix      :4000        │
+│ (LiveView)  │            │ ├── LiveView Studio        │
+└─────────────┘            │ ├── REST API (CRUD)        │
+                           │ ├── SSE (real-time)         │
+┌─────────────┐            │ ├── Media uploads           │
+│ Go TUI      │◄──HTTP───►│ └── Schema management       │
+│ (Bubble Tea)│◄──SSE────►│                              │
+└─────────────┘            │ PostgreSQL                   │
+                           │ └── documents, schemas,      │
+┌─────────────┐            │     tokens, media            │
+│ Frontend /  │◄──HTTP───►│                              │
+│ Mobile App  │            │ Caddy (reverse proxy :80)    │
+└─────────────┘            └───────────────────────────────┘
+```
 
 ## Project Structure
 
 ```
 barkpark/
-├── main.go              # TUI entry point
-├── tui.go               # Bubble Tea model, panes, editor
-├── store.go             # API client (HTTP + SSE)
-├── schema.go            # Schema types, load from API
-├── structure.go         # Auto-generated nav tree
-├── styles.go            # Lip Gloss styles
-├── api/                 # Phoenix API server
+├── main.go                  # TUI entry point
+├── tui.go                   # Bubble Tea multi-pane UI + editor
+├── store.go                 # HTTP + SSE API client
+├── schema.go                # Schema types, loaded from API
+├── structure.go             # Desk structure builder (mirrors Sanity)
+├── styles.go                # Lip Gloss terminal styles
+├── api/                     # Phoenix backend
 │   ├── lib/sanity_api/
-│   │   ├── content.ex       # Document + schema CRUD
-│   │   ├── media.ex         # File upload/storage
-│   │   └── auth.ex          # Token auth
+│   │   ├── content.ex           # Document + schema CRUD, publish
+│   │   ├── structure.ex         # Desk structure (mirrors Go)
+│   │   ├── media.ex             # File uploads
+│   │   └── auth.ex              # Token auth (SHA256)
 │   ├── lib/sanity_api_web/
-│   │   ├── router.ex        # All routes
-│   │   └── controllers/     # Query, Mutate, Schema, Media, Listen
-│   ├── priv/repo/
-│   │   ├── migrations/      # Database schema
-│   │   └── seeds.exs        # Seed data
-│   ├── start.sh             # Systemd wrapper (sources ASDF + env)
-│   └── Dockerfile
-├── docker-compose.yml
-├── deploy.sh            # Hetzner VPS setup script
-├── dev.sh               # Tmux dev environment
-├── Makefile             # Server + dev commands
-└── CLAUDE.md            # AI agent documentation
+│   │   ├── router.ex            # Routes (API + Studio + Media)
+│   │   ├── live/studio/
+│   │   │   └── studio_live.ex   # Multi-pane desk (LiveView)
+│   │   └── controllers/         # Query, Mutate, Schema, Listen, Media
+│   ├── priv/repo/seeds.exs      # 8 schemas, sample docs, dev token
+│   └── start.sh                 # Systemd wrapper
+├── deploy.sh                # VPS setup script
+├── Makefile                 # All operations
+└── CLAUDE.md                # Agent guide
 ```
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
+| Web Studio | Phoenix LiveView |
 | TUI | Go, Bubble Tea, Lip Gloss |
 | API | Elixir, Phoenix |
-| Database | PostgreSQL (JSONB documents) |
-| Real-time | Server-Sent Events |
-| Auth | Bearer tokens (SHA256 hashed) |
-| Media | Local disk + DB metadata |
+| Database | PostgreSQL (JSONB) |
+| Real-time | PubSub (LiveView), SSE (TUI/API) |
+| Auth | Bearer tokens (SHA256) |
+| Proxy | Caddy |
 
 ## License
 
