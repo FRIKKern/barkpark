@@ -22,7 +22,7 @@ defmodule Barkpark.Content do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, SchemaDefinition}
+  alias Barkpark.Content.{Document, Revision, SchemaDefinition}
 
   @drafts_prefix "drafts."
 
@@ -129,13 +129,13 @@ defmodule Barkpark.Content do
         existing
         |> Document.changeset(attrs)
         |> Repo.update()
-        |> tap_broadcast(dataset, type)
+        |> tap_broadcast(dataset, type, "update")
 
       _ ->
         %Document{}
         |> Document.changeset(attrs)
         |> Repo.insert()
-        |> tap_broadcast(dataset, type)
+        |> tap_broadcast(dataset, type, "create")
     end
   end
 
@@ -172,7 +172,7 @@ defmodule Barkpark.Content do
           {:ok, published} ->
             # Delete the draft
             Repo.delete(draft)
-            tap_broadcast({:ok, published}, dataset, type)
+            tap_broadcast({:ok, published}, dataset, type, "publish")
 
           error ->
             error
@@ -212,7 +212,7 @@ defmodule Barkpark.Content do
         case draft_result do
           {:ok, draft} ->
             Repo.delete(pub)
-            tap_broadcast({:ok, draft}, dataset, type)
+            tap_broadcast({:ok, draft}, dataset, type, "unpublish")
 
           error ->
             error
@@ -336,9 +336,12 @@ defmodule Barkpark.Content do
 
   # ── PubSub ────────────────────────────────────────────────────────────────
 
-  defp tap_broadcast(result, dataset, type) do
+  defp tap_broadcast(result, dataset, type, action \\ "update") do
     case result do
       {:ok, doc} ->
+        # Save revision
+        save_revision(doc, type, dataset, action)
+
         msg = %{
           type: type,
           doc_id: doc.doc_id,
@@ -364,6 +367,54 @@ defmodule Barkpark.Content do
 
       error ->
         error
+    end
+  end
+
+  defp save_revision(doc, type, dataset, action) do
+    %Revision{}
+    |> Revision.changeset(%{
+      doc_id: published_id(doc.doc_id),
+      type: type,
+      dataset: dataset,
+      title: doc.title,
+      status: doc.status,
+      content: doc.content,
+      action: action
+    })
+    |> Repo.insert()
+  end
+
+  # ── Revision queries ──────────────────────────────────────────────────────
+
+  @doc "List revisions for a document, newest first."
+  def list_revisions(doc_id, type, dataset, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+
+    Revision
+    |> where([r], r.doc_id == ^published_id(doc_id) and r.type == ^type and r.dataset == ^dataset)
+    |> order_by([r], desc: r.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc "Get a single revision by ID."
+  def get_revision(id) do
+    case Repo.get(Revision, id) do
+      nil -> {:error, :not_found}
+      rev -> {:ok, rev}
+    end
+  end
+
+  @doc "Restore a document to a specific revision."
+  def restore_revision(revision_id, type, dataset) do
+    with {:ok, rev} <- get_revision(revision_id) do
+      attrs = %{
+        "doc_id" => draft_id(rev.doc_id),
+        "title" => rev.title,
+        "status" => rev.status,
+        "content" => rev.content
+      }
+      upsert_document(type, attrs, dataset)
     end
   end
 end

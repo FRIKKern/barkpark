@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
     end
     {:ok, socket
-     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [], ref_picker_field: nil, ref_candidates: [], ref_search: "")
+     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [], ref_picker_field: nil, ref_candidates: [], ref_search: "", show_history: false, revisions: [])
      |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
@@ -258,6 +258,36 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket = assign(socket, editor_form: form, ref_picker_field: nil, ref_candidates: [], ref_search: "")
     send(self(), {:autosave_form, form})
     {:noreply, socket}
+  end
+
+  # ── History events ──────────────────────────────────────────────────────────
+
+  def handle_event("show-history", _, socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      revisions = Content.list_revisions(doc.doc_id, type, @dataset, limit: 30)
+      {:noreply, assign(socket, show_history: true, revisions: revisions)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close-history", _, socket) do
+    {:noreply, assign(socket, show_history: false, revisions: [])}
+  end
+
+  def handle_event("restore-revision", %{"id" => rev_id}, socket) do
+    type = socket.assigns[:editor_type]
+    case Content.restore_revision(rev_id, type, @dataset) do
+      {:ok, doc} ->
+        {:noreply, socket
+         |> assign(show_history: false, revisions: [])
+         |> put_flash(:info, "Restored from history")
+         |> rebuild_panes()}
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to restore")}
+    end
   end
 
   def handle_event("clear-ref", %{"field" => field_name}, socket) do
@@ -555,6 +585,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
               <span class="pane-header-title"><%= @editor_doc.title || "Untitled" %></span>
             </div>
             <div style="display: flex; gap: 6px;">
+              <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
               <%= if @editor_is_draft do %>
                 <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
               <% else %>
@@ -655,6 +686,34 @@ defmodule BarkparkWeb.Studio.StudioLive do
             <% end %>
             <%= if filter_ref_candidates(@ref_candidates, @ref_search) == [] do %>
               <div class="text-sm text-muted" style="padding: 20px; text-align: center;">No documents found</div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- History modal -->
+      <%= if @show_history do %>
+        <div class="image-picker-overlay" phx-click="close-history"></div>
+        <div class="history-modal">
+          <div class="image-picker-header">
+            <span style="font-weight: 600; font-size: 14px;">Document history</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history">x</button>
+          </div>
+          <div class="history-list">
+            <%= if @revisions == [] do %>
+              <div class="text-sm text-muted" style="padding: 24px; text-align: center;">No history yet</div>
+            <% end %>
+            <%= for rev <- @revisions do %>
+              <div class="history-item">
+                <div class="history-item-info">
+                  <div class="history-item-action">
+                    <span class={"history-action-badge history-action-#{rev.action}"}><%= rev.action %></span>
+                    <span class="history-item-title"><%= rev.title || "Untitled" %></span>
+                  </div>
+                  <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
+                </div>
+                <button class="btn btn-sm" phx-click="restore-revision" phx-value-id={rev.id} data-confirm="Restore this version? Current changes will be overwritten.">Restore</button>
+              </div>
             <% end %>
           </div>
         </div>
@@ -786,6 +845,31 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .ref-candidate:last-child { border-bottom: none; }
       .ref-candidate-title { font-size: 14px; font-weight: 500; }
       .ref-candidate-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); }
+
+      /* History */
+      .history-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 520px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
+      }
+      .history-list { overflow-y: auto; flex: 1; }
+      .history-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 16px; border-bottom: 1px solid var(--border-muted);
+      }
+      .history-item:last-child { border-bottom: none; }
+      .history-item-info { display: flex; flex-direction: column; gap: 4px; }
+      .history-item-action { display: flex; align-items: center; gap: 8px; }
+      .history-item-title { font-size: 13px; font-weight: 500; }
+      .history-item-time { font-size: 11px; color: var(--fg-dim); }
+      .history-action-badge {
+        font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+        padding: 2px 6px; border-radius: 4px;
+      }
+      .history-action-create { background: hsl(217.2 91.2% 59.8% / 0.12); color: var(--primary); }
+      .history-action-update { background: hsl(240 3.7% 15.9%); color: var(--fg-muted); }
+      .history-action-publish { background: hsl(142 71% 45% / 0.12); color: var(--success); }
+      .history-action-unpublish { background: hsl(38 92% 50% / 0.12); color: var(--warning); }
     </style>
     """
   end
@@ -900,5 +984,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
     ~H"""
     <input type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
     """
+  end
+
+  defp format_history_time(dt) do
+    Calendar.strftime(dt, "%b %d, %Y at %H:%M:%S")
   end
 end
