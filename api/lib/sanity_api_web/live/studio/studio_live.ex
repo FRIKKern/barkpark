@@ -37,17 +37,13 @@ defmodule SanityApiWeb.Studio.StudioLive do
     end
   end
 
-  # Global doc change — only update doc list counts, not full rebuild
+  # Global doc change — rebuild if we're viewing this type
   @impl true
-  def handle_info({:document_changed, %{sender: sender, type: type}}, socket) do
-    if sender != self() do
-      # Only rebuild if we're viewing this type's doc list
-      viewing_type = Enum.at(socket.assigns.nav_path, 0)
-      if viewing_type == type do
-        {:noreply, rebuild_panes(socket)}
-      else
-        {:noreply, socket}
-      end
+  def handle_info({:document_changed, %{type: type}}, socket) do
+    # Find which type we're viewing (may be nested under settings)
+    viewing_type = socket.assigns[:editor_type] || Enum.at(socket.assigns.nav_path, 0)
+    if viewing_type == type do
+      {:noreply, rebuild_panes(socket)}
     else
       {:noreply, socket}
     end
@@ -126,9 +122,11 @@ defmodule SanityApiWeb.Studio.StudioLive do
         "content" => content
       }
       case Content.upsert_document(type, attrs, @dataset) do
-        {:ok, _} ->
-          # Only update form data + status — don't rebuild panes (no flicker)
-          {:noreply, assign(socket, editor_form: params, save_status: "Saved")}
+        {:ok, saved_doc} ->
+          {:noreply, socket
+           |> assign(editor_form: params, save_status: "Saved",
+                     editor_doc: saved_doc, editor_is_draft: Content.draft?(saved_doc.doc_id))
+           |> rebuild_panes()}
         {:error, _} ->
           {:noreply, assign(socket, save_status: "Save failed")}
       end
