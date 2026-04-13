@@ -22,7 +22,7 @@ defmodule Barkpark.Content do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, Revision, SchemaDefinition}
+  alias Barkpark.Content.{Document, Envelope, Revision, SchemaDefinition}
 
   @drafts_prefix "drafts."
 
@@ -257,6 +257,98 @@ defmodule Barkpark.Content do
       [first | _] -> tap_broadcast(first, dataset, type)
     end
   end
+
+  @doc """
+  Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
+  or `{:error, reason}` with rollback on any failure.
+
+  # TODO: move broadcasts out of transaction (Task 11 territory)
+  """
+  def apply_mutations(mutations, dataset) when is_list(mutations) do
+    Repo.transaction(fn ->
+      tx_id = generate_rev()
+
+      results =
+        Enum.map(mutations, fn m ->
+          case apply_one(m, dataset) do
+            {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end)
+
+      {tx_id, results}
+    end)
+  end
+
+  defp apply_one(%{"create" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+
+    # A create must NOT overwrite an existing draft
+    case id && get_document(draft_id(id), type, dataset) do
+      {:ok, _existing} ->
+        {:error, :conflict}
+
+      _ ->
+        with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
+    end
+  end
+
+  defp apply_one(%{"createOrReplace" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "createOrReplace"}
+  end
+
+  defp apply_one(%{"createIfNotExists" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+
+    case id && get_document(draft_id(id), type, dataset) do
+      {:ok, existing} -> {:ok, existing, "noop"}
+      _ ->
+        with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
+    end
+  end
+
+  defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- publish_document(id, type, dataset), do: {:ok, doc, "publish"}
+  end
+
+  defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- unpublish_document(id, type, dataset), do: {:ok, doc, "unpublish"}
+  end
+
+  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- discard_draft(id, type, dataset), do: {:ok, doc, "discardDraft"}
+  end
+
+  defp apply_one(%{"delete" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- delete_document(id, type, dataset), do: {:ok, doc, "delete"}
+  end
+
+  defp apply_one(%{"patch" => %{"id" => id, "type" => type, "set" => fields}}, dataset) do
+    case get_document(id, type, dataset) do
+      {:ok, existing} ->
+        merged =
+          Map.merge(
+            existing.content || %{},
+            Map.drop(fields, ~w(title status _id _type _rev))
+          )
+
+        attrs = %{
+          "doc_id" => id,
+          "title" => fields["title"] || existing.title,
+          "content" => merged
+        }
+
+        with {:ok, doc} <- upsert_document(type, attrs, dataset), do: {:ok, doc, "update"}
+
+      error ->
+        error
+    end
+  end
+
+  defp apply_one(_, _), do: {:error, :malformed}
 
   @doc "Find all documents that reference a given document ID."
   def find_referencing_docs(doc_id, dataset) do
