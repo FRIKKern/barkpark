@@ -420,6 +420,10 @@ defmodule SanityApiWeb.Studio.StudioLive do
             <% end %>
 
             <form phx-submit="save" phx-change="autosave" id="editor-form">
+              <div class="editor-field">
+                <label class="editor-field-label">Title</label>
+                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="500" />
+              </div>
               <%= if @editor_schema do %>
                 <%= for field <- @editor_schema.fields do %>
                   <div class="editor-field">
