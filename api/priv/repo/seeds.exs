@@ -148,6 +148,8 @@ documents = [
 ]
 
 for doc_attrs <- documents do
+  doc_attrs = Map.put(doc_attrs, :rev, :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
+
   %Document{}
   |> Document.changeset(doc_attrs)
   |> Repo.insert!(on_conflict: :nothing)

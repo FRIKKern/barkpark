@@ -12,9 +12,11 @@ defmodule BarkparkWeb.Plugs.RequireToken do
       assign(conn, :api_token, token)
     else
       _ ->
+        env = Barkpark.Content.Errors.to_envelope({:error, :unauthorized})
+
         conn
-        |> put_status(:unauthorized)
-        |> Phoenix.Controller.json(%{error: "unauthorized"})
+        |> put_status(env.status)
+        |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
         |> halt()
     end
   end
@@ -34,9 +36,11 @@ defmodule BarkparkWeb.Plugs.RequireAdmin do
       conn
     else
       _ ->
+        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden})
+
         conn
-        |> put_status(:forbidden)
-        |> Phoenix.Controller.json(%{error: "forbidden: admin required"})
+        |> put_status(env.status)
+        |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
         |> halt()
     end
   end
