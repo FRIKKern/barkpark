@@ -556,6 +556,40 @@ defmodule BarkparkWeb.Studio.StudioLive do
           </div>
         </div>
       <% end %>
+
+      <!-- Image picker modal (outside editor form to avoid nested forms) -->
+      <%= if @image_picker_field do %>
+        <div class="image-picker-overlay" phx-click="close-image-picker"></div>
+        <div class="image-picker">
+          <div class="image-picker-header">
+            <span style="font-weight: 600; font-size: 14px;">Select Image</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker">x</button>
+          </div>
+          <div class="image-picker-upload">
+            <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
+              <.live_file_input upload={@uploads.image} class="image-file-input" />
+              <%= for entry <- @uploads.image.entries do %>
+                <div class="image-upload-entry">
+                  <.live_img_preview entry={entry} width="60" height="60" />
+                  <span class="text-sm"><%= entry.client_name %></span>
+                  <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+                </div>
+              <% end %>
+            </form>
+          </div>
+          <div class="image-picker-grid">
+            <%= if @media_files == [] do %>
+              <div class="text-sm text-muted" style="padding: 16px; text-align: center;">No images yet. Upload one above.</div>
+            <% end %>
+            <%= for file <- @media_files do %>
+              <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@image_picker_field}>
+                <img src={"/media/files/#{file.path}"} alt={file.original_name} />
+                <div class="image-picker-name"><%= file.original_name %></div>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
     </div>
 
     <style>
@@ -711,8 +745,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp render_input(assigns, %{"type" => "image", "name" => name}) do
     val = Map.get(assigns.editor_form, name, "")
     has_image = val != "" and val != nil
-    picker_open = assigns.image_picker_field == name
-    assigns = assign(assigns, n: name, v: val, has_image: has_image, picker_open: picker_open)
+    assigns = assign(assigns, n: name, v: val, has_image: has_image)
     ~H"""
     <input type="hidden" name={"doc[#{@n}]"} value={@v} />
     <div class="image-field">
@@ -728,39 +761,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
         <div class="image-upload-zone" phx-click="open-image-picker" phx-value-field={@n}>
           <div class="image-upload-icon">+</div>
           <div class="image-upload-text">Select or upload image</div>
-        </div>
-      <% end %>
-
-      <%= if @picker_open do %>
-        <div class="image-picker-overlay" phx-click="close-image-picker"></div>
-        <div class="image-picker">
-          <div class="image-picker-header">
-            <span style="font-weight: 600; font-size: 14px;">Select Image</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker">x</button>
-          </div>
-          <div class="image-picker-upload">
-            <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@n} id={"upload-#{@n}"}>
-              <.live_file_input upload={@uploads.image} class="image-file-input" />
-              <%= for entry <- @uploads.image.entries do %>
-                <div class="image-upload-entry">
-                  <.live_img_preview entry={entry} width="60" height="60" />
-                  <span class="text-sm"><%= entry.client_name %></span>
-                  <button type="submit" class="btn btn-primary btn-sm">Upload</button>
-                </div>
-              <% end %>
-            </form>
-          </div>
-          <div class="image-picker-grid">
-            <%= if @media_files == [] do %>
-              <div class="text-sm text-muted" style="padding: 16px; text-align: center;">No images yet. Upload one above.</div>
-            <% end %>
-            <%= for file <- @media_files do %>
-              <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@n}>
-                <img src={"/media/files/#{file.path}"} alt={file.original_name} />
-                <div class="image-picker-name"><%= file.original_name %></div>
-              </div>
-            <% end %>
-          </div>
         </div>
       <% end %>
     </div>
