@@ -1,6 +1,6 @@
 defmodule Barkpark.ApiTester.Runner do
   @moduledoc """
-  Executes v1 API test cases server-side via `:httpc` (no extra deps).
+  Executes v1 API test cases server-side via `Req`.
 
   Hits `http://localhost:4000` by default — the running Phoenix endpoint.
   Returns the raw status/headers/body plus a timing measurement and a
@@ -37,49 +37,54 @@ defmodule Barkpark.ApiTester.Runner do
   def run(%{} = tc, opts) do
     base = Keyword.get(opts, :base, @default_base)
     body_override = Keyword.get(opts, :body_override)
-    :inets.start()
-    :ssl.start()
 
     body =
       cond do
-        is_binary(body_override) -> body_override
+        is_binary(body_override) and body_override != "" -> body_override
         tc.body == nil -> nil
         true -> Jason.encode!(tc.body)
       end
 
-    url = String.to_charlist(base <> tc.path)
-    headers = Enum.map(tc.headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+    url = base <> tc.path
+    headers = tc.headers
 
     started = System.monotonic_time(:millisecond)
 
-    request =
-      case tc.method do
-        "GET" -> {url, headers}
-        _ -> {url, headers, ~c"application/json", body || ""}
-      end
-
-    http_options = [timeout: 5_000, connect_timeout: 2_000]
-    options = [body_format: :binary]
-
-    result =
+    req_result =
       try do
-        :httpc.request(method_atom(tc.method), request, http_options, options)
+        Req.request(
+          method: method_atom(tc.method),
+          url: url,
+          headers: headers,
+          body: body,
+          decode_body: false,
+          receive_timeout: 5_000,
+          connect_options: [timeout: 2_000],
+          retry: false
+        )
       rescue
         e -> {:error, Exception.message(e)}
       end
 
     duration = System.monotonic_time(:millisecond) - started
 
-    case result do
-      {:ok, {{_proto, status, _reason}, resp_headers, resp_body}} ->
+    case req_result do
+      {:ok, %Req.Response{status: status, headers: resp_headers, body: resp_body}} ->
         body_text = to_string(resp_body)
         body_json = try_decode_json(body_text)
 
-        {verdict, reason} = check(tc, %{status: status, body_json: body_json, headers: resp_headers})
+        normalized_headers =
+          Enum.flat_map(resp_headers, fn
+            {k, v} when is_list(v) -> Enum.map(v, fn val -> {to_string(k), to_string(val)} end)
+            {k, v} -> [{to_string(k), to_string(v)}]
+          end)
+
+        {verdict, reason} =
+          check(tc, %{status: status, body_json: body_json, headers: normalized_headers})
 
         %{
           status: status,
-          headers: Enum.map(resp_headers, fn {k, v} -> {to_string(k), to_string(v)} end),
+          headers: normalized_headers,
           body_text: body_text,
           body_json: body_json,
           duration_ms: duration,
@@ -87,8 +92,8 @@ defmodule Barkpark.ApiTester.Runner do
           verdict_reason: reason,
           request: %{
             method: tc.method,
-            url: base <> tc.path,
-            headers: tc.headers,
+            url: url,
+            headers: headers,
             body_text: body || ""
           }
         }
@@ -101,8 +106,8 @@ defmodule Barkpark.ApiTester.Runner do
           body_json: nil,
           duration_ms: duration,
           verdict: :error,
-          verdict_reason: "httpc error: #{inspect(reason)}",
-          request: %{method: tc.method, url: base <> tc.path, headers: tc.headers, body_text: body || ""}
+          verdict_reason: "req error: #{inspect(reason)}",
+          request: %{method: tc.method, url: url, headers: headers, body_text: body || ""}
         }
     end
   end
@@ -110,16 +115,15 @@ defmodule Barkpark.ApiTester.Runner do
   # ── Predicate checks ──────────────────────────────────────────────────
 
   defp check(%{expect: nil}, _), do: {:pass, "no expectation — manual check"}
-  defp check(%{expect: {expected_status, predicate}}, %{status: status, body_json: body, headers: headers}) do
-    cond do
-      status != expected_status ->
-        {:fail, "expected HTTP #{expected_status}, got #{status}"}
 
-      true ->
-        case run_predicate(predicate, body, headers) do
-          :ok -> {:pass, "#{expected_status} OK"}
-          {:fail, why} -> {:fail, why}
-        end
+  defp check(%{expect: {expected_status, predicate}}, %{status: status, body_json: body, headers: headers}) do
+    if status != expected_status do
+      {:fail, "expected HTTP #{expected_status}, got #{status}"}
+    else
+      case run_predicate(predicate, body, headers) do
+        :ok -> {:pass, "#{expected_status} OK"}
+        {:fail, why} -> {:fail, why}
+      end
     end
   end
 
