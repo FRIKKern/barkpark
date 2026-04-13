@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   """
   use BarkparkWeb, :live_view
 
-  alias Barkpark.{Content, Structure}
+  alias Barkpark.{Content, Media, Structure}
 
   @dataset "production"
 
@@ -14,7 +14,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
     end
-    {:ok, assign(socket, page_title: "Studio", subscribed_doc: nil)}
+    {:ok, socket
+     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [])
+     |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
   @impl true
@@ -44,6 +46,37 @@ defmodule BarkparkWeb.Studio.StudioLive do
     viewing_type = socket.assigns[:editor_type] || Enum.at(socket.assigns.nav_path, 0)
     if viewing_type == type do
       {:noreply, rebuild_panes(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Autosave triggered programmatically (e.g. after image selection)
+  @impl true
+  def handle_info({:autosave_form, form}, socket) do
+    doc = socket.assigns[:editor_doc]
+    schema = socket.assigns[:editor_schema]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      content = build_content(form, schema)
+      attrs = %{
+        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
+        "title" => Map.get(form, "title", doc.title),
+        "status" => Map.get(form, "status", doc.status),
+        "content" => content
+      }
+      case Content.upsert_document(type, attrs, @dataset) do
+        {:ok, saved_doc} ->
+          panes = update_doc_title_in_panes(socket.assigns.panes, Content.published_id(saved_doc.doc_id), Map.get(form, "title", doc.title))
+          {:noreply, assign(socket,
+            panes: panes,
+            editor_doc: saved_doc,
+            editor_is_draft: Content.draft?(saved_doc.doc_id),
+            editor_form: form,
+            save_status: "Saved")}
+        {:error, _} ->
+          {:noreply, socket}
+      end
     else
       {:noreply, socket}
     end
@@ -142,6 +175,61 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("autosave", _params, socket) do
     {:noreply, socket}
+  end
+
+  # ── Image field events ──────────────────────────────────────────────────────
+
+  def handle_event("open-image-picker", %{"field" => field_name}, socket) do
+    files = Media.list_files(@dataset, mime_type: "image/")
+    {:noreply, assign(socket, image_picker_field: field_name, media_files: files)}
+  end
+
+  def handle_event("close-image-picker", _, socket) do
+    {:noreply, assign(socket, image_picker_field: nil, media_files: [])}
+  end
+
+  def handle_event("select-media", %{"url" => url, "field" => field_name}, socket) do
+    form = Map.put(socket.assigns.editor_form, field_name, url)
+    socket = assign(socket, editor_form: form, image_picker_field: nil, media_files: [])
+    # Trigger autosave with updated form
+    send(self(), {:autosave_form, form})
+    {:noreply, socket}
+  end
+
+  def handle_event("clear-image", %{"field" => field_name}, socket) do
+    form = Map.put(socket.assigns.editor_form, field_name, "")
+    socket = assign(socket, editor_form: form)
+    send(self(), {:autosave_form, form})
+    {:noreply, socket}
+  end
+
+  def handle_event("validate-upload", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("upload-image", %{"field" => field_name}, socket) do
+    uploaded_files =
+      consume_uploaded_entries(socket, :image, fn %{path: path}, entry ->
+        plug_upload = %Plug.Upload{
+          path: path,
+          filename: entry.client_name,
+          content_type: entry.client_type
+        }
+        case Media.upload(plug_upload, @dataset) do
+          {:ok, file} -> {:ok, "/media/files/#{file.path}"}
+          {:error, _} -> {:error, "upload failed"}
+        end
+      end)
+
+    case uploaded_files do
+      [url | _] ->
+        form = Map.put(socket.assigns.editor_form, field_name, url)
+        socket = assign(socket, editor_form: form, image_picker_field: nil, media_files: [])
+        send(self(), {:autosave_form, form})
+        {:noreply, socket}
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   defp save_doc(socket, params, flash_msg) do
@@ -545,6 +633,36 @@ defmodule BarkparkWeb.Studio.StudioLive do
         flex: 1; display: flex; align-items: center; justify-content: center;
         background: var(--bg);
       }
+
+      /* Image field */
+      .image-field { position: relative; }
+      .image-preview { position: relative; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-muted); }
+      .image-preview img { width: 100%; max-height: 200px; object-fit: cover; display: block; }
+      .image-preview-actions { display: flex; gap: 6px; padding: 8px; background: var(--bg-card); border-top: 1px solid var(--border-muted); }
+      .image-upload-zone {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-sm);
+        cursor: pointer; color: var(--fg-muted); transition: all 0.15s;
+      }
+      .image-upload-zone:hover { border-color: var(--primary); color: var(--fg); background: hsl(217.2 91.2% 59.8% / 0.03); }
+      .image-upload-icon { font-size: 24px; font-weight: 300; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
+      .image-upload-text { font-size: 13px; }
+      .image-picker-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; }
+      .image-picker {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 560px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
+      }
+      .image-picker-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border-muted); }
+      .image-picker-upload { padding: 12px 16px; border-bottom: 1px solid var(--border-muted); }
+      .image-file-input { font-size: 13px; color: var(--fg-muted); }
+      .image-upload-entry { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+      .image-upload-entry img { border-radius: 4px; object-fit: cover; }
+      .image-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 16px; overflow-y: auto; }
+      .image-picker-item { cursor: pointer; border: 2px solid transparent; border-radius: var(--radius-sm); overflow: hidden; transition: border-color 0.1s; }
+      .image-picker-item:hover { border-color: var(--primary); }
+      .image-picker-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
+      .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
     """
   end
@@ -586,6 +704,65 @@ defmodule BarkparkWeb.Studio.StudioLive do
     <div style="display:flex;align-items:center;gap:10px;">
       <input type="color" name={"doc[#{@n}]"} value={@v} phx-debounce="300" style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
       <span style="font-family:var(--font-mono);font-size:13px;"><%= @v %></span>
+    </div>
+    """
+  end
+
+  defp render_input(assigns, %{"type" => "image", "name" => name}) do
+    val = Map.get(assigns.editor_form, name, "")
+    has_image = val != "" and val != nil
+    picker_open = assigns.image_picker_field == name
+    assigns = assign(assigns, n: name, v: val, has_image: has_image, picker_open: picker_open)
+    ~H"""
+    <input type="hidden" name={"doc[#{@n}]"} value={@v} />
+    <div class="image-field">
+      <%= if @has_image do %>
+        <div class="image-preview">
+          <img src={@v} alt="" />
+          <div class="image-preview-actions">
+            <button type="button" class="btn btn-sm" phx-click="open-image-picker" phx-value-field={@n}>Change</button>
+            <button type="button" class="btn btn-destructive btn-sm" phx-click="clear-image" phx-value-field={@n}>Remove</button>
+          </div>
+        </div>
+      <% else %>
+        <div class="image-upload-zone" phx-click="open-image-picker" phx-value-field={@n}>
+          <div class="image-upload-icon">+</div>
+          <div class="image-upload-text">Select or upload image</div>
+        </div>
+      <% end %>
+
+      <%= if @picker_open do %>
+        <div class="image-picker-overlay" phx-click="close-image-picker"></div>
+        <div class="image-picker">
+          <div class="image-picker-header">
+            <span style="font-weight: 600; font-size: 14px;">Select Image</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker">x</button>
+          </div>
+          <div class="image-picker-upload">
+            <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@n} id={"upload-#{@n}"}>
+              <.live_file_input upload={@uploads.image} class="image-file-input" />
+              <%= for entry <- @uploads.image.entries do %>
+                <div class="image-upload-entry">
+                  <.live_img_preview entry={entry} width="60" height="60" />
+                  <span class="text-sm"><%= entry.client_name %></span>
+                  <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+                </div>
+              <% end %>
+            </form>
+          </div>
+          <div class="image-picker-grid">
+            <%= if @media_files == [] do %>
+              <div class="text-sm text-muted" style="padding: 16px; text-align: center;">No images yet. Upload one above.</div>
+            <% end %>
+            <%= for file <- @media_files do %>
+              <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@n}>
+                <img src={"/media/files/#{file.path}"} alt={file.original_name} />
+                <div class="image-picker-name"><%= file.original_name %></div>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end
