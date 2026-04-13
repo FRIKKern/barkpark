@@ -22,7 +22,7 @@ defmodule Barkpark.Content do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, Revision, SchemaDefinition}
+  alias Barkpark.Content.{Document, Envelope, Revision, SchemaDefinition}
 
   @drafts_prefix "drafts."
 
@@ -48,18 +48,31 @@ defmodule Barkpark.Content do
   List documents by type and dataset.
 
   Options:
-    - `:perspective` — `:published`, `:drafts`, or `:raw` (default `:raw`)
-    - `:filter` — "field=value" filter string
+    - `:perspective`  — `:published`, `:drafts`, or `:raw` (default `:raw`)
+    - `:filter_map`   — map of field=>value filters, e.g. `%{"status" => "draft"}`
+    - `:limit`        — max rows returned (default 100, max 1000, min 1)
+    - `:offset`       — rows to skip (default 0)
+    - `:order`        — `:updated_at_desc` (default), `:updated_at_asc`,
+                        `:created_at_desc`, `:created_at_asc`
+
+  NOTE: `maybe_merge_drafts/2` runs after limit/offset, so the `:drafts`
+  perspective may return fewer rows than requested. This is a known limitation
+  (tracked for Phase 8).
   """
   def list_documents(type, dataset, opts \\ []) do
     perspective = Keyword.get(opts, :perspective, :raw)
-    filter = Keyword.get(opts, :filter)
+    filter_map = Keyword.get(opts, :filter_map, %{})
+    limit = opts |> Keyword.get(:limit, 100) |> min(1000) |> max(1)
+    offset = opts |> Keyword.get(:offset, 0) |> max(0)
+    order = Keyword.get(opts, :order, :updated_at_desc)
 
     Document
     |> where([d], d.type == ^type and d.dataset == ^dataset)
     |> apply_perspective(perspective)
-    |> maybe_filter(filter)
-    |> order_by([d], desc: d.updated_at)
+    |> apply_filter_map(filter_map)
+    |> apply_order(order)
+    |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
     |> maybe_merge_drafts(perspective)
   end
@@ -70,6 +83,21 @@ defmodule Barkpark.Content do
   end
 
   defp apply_perspective(query, _), do: query
+
+  defp apply_filter_map(query, map) when map_size(map) == 0, do: query
+  defp apply_filter_map(query, map) do
+    Enum.reduce(map, query, fn
+      {"title", v}, q -> where(q, [d], d.title == ^v)
+      {"status", v}, q -> where(q, [d], d.status == ^v)
+      {field, v}, q -> where(q, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+    end)
+  end
+
+  defp apply_order(q, :updated_at_desc), do: order_by(q, [d], desc: d.updated_at)
+  defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
+  defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)
+  defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
+  defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
   defp maybe_merge_drafts(docs, :drafts) do
     # Group by published_id, prefer draft over published
@@ -83,25 +111,6 @@ defmodule Barkpark.Content do
 
   defp maybe_merge_drafts(docs, _), do: docs
 
-  defp maybe_filter(query, nil), do: query
-  defp maybe_filter(query, ""), do: query
-
-  defp maybe_filter(query, filter_string) do
-    case String.split(filter_string, "=", parts: 2) do
-      [field, value] ->
-        case field do
-          "status" ->
-            where(query, [d], d.status == ^value)
-
-          _ ->
-            where(query, [d], fragment("?->>? = ?", d.content, ^field, ^value))
-        end
-
-      _ ->
-        query
-    end
-  end
-
   def get_document(doc_id, type, dataset) do
     Document
     |> where([d], d.doc_id == ^doc_id and d.type == ^type and d.dataset == ^dataset)
@@ -114,6 +123,7 @@ defmodule Barkpark.Content do
 
   @doc "Create or update a document. New docs are always created as drafts."
   def create_document(type, attrs, dataset) do
+    attrs = from_envelope(attrs)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = draft_id(raw_id)
 
@@ -123,6 +133,7 @@ defmodule Barkpark.Content do
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
+      |> Map.put("rev", generate_rev())
 
     case get_document(doc_id, type, dataset) do
       {:ok, existing} ->
@@ -156,7 +167,8 @@ defmodule Barkpark.Content do
           "dataset" => dataset,
           "title" => draft.title,
           "status" => "published",
-          "content" => draft.content
+          "content" => draft.content,
+          "rev" => generate_rev()
         }
 
         pub_result =
@@ -197,7 +209,8 @@ defmodule Barkpark.Content do
           "dataset" => dataset,
           "title" => pub.title,
           "status" => "draft",
-          "content" => pub.content
+          "content" => pub.content,
+          "rev" => generate_rev()
         }
 
         draft_result =
@@ -254,6 +267,99 @@ defmodule Barkpark.Content do
     end
   end
 
+  @doc """
+  Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
+  or `{:error, reason}` with rollback on any failure.
+
+  # TODO: move broadcasts out of transaction (Task 11 territory)
+  """
+  def apply_mutations(mutations, dataset) when is_list(mutations) do
+    Repo.transaction(fn ->
+      tx_id = generate_rev()
+
+      results =
+        Enum.map(mutations, fn m ->
+          case apply_one(m, dataset) do
+            {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end)
+
+      {tx_id, results}
+    end)
+  end
+
+  defp apply_one(%{"create" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+
+    # A create must NOT overwrite an existing draft
+    case id && get_document(draft_id(id), type, dataset) do
+      {:ok, _existing} ->
+        {:error, :conflict}
+
+      _ ->
+        with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
+    end
+  end
+
+  defp apply_one(%{"createOrReplace" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "createOrReplace"}
+  end
+
+  defp apply_one(%{"createIfNotExists" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+
+    case id && get_document(draft_id(id), type, dataset) do
+      {:ok, existing} -> {:ok, existing, "noop"}
+      _ ->
+        with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
+    end
+  end
+
+  defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- publish_document(id, type, dataset), do: {:ok, doc, "publish"}
+  end
+
+  defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- unpublish_document(id, type, dataset), do: {:ok, doc, "unpublish"}
+  end
+
+  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- discard_draft(id, type, dataset), do: {:ok, doc, "discardDraft"}
+  end
+
+  defp apply_one(%{"delete" => %{"id" => id, "type" => type}}, dataset) do
+    with {:ok, doc} <- delete_document(id, type, dataset), do: {:ok, doc, "delete"}
+  end
+
+  defp apply_one(%{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch}, dataset) do
+    with {:ok, existing} <- get_document(id, type, dataset),
+         :ok <- ensure_rev(existing, patch["ifRevisionID"]) do
+      merged =
+        Map.merge(
+          existing.content || %{},
+          Map.drop(fields, ~w(title status _id _type _rev))
+        )
+
+      attrs = %{
+        "doc_id" => id,
+        "title" => fields["title"] || existing.title,
+        "content" => merged
+      }
+
+      with {:ok, doc} <- upsert_document(type, attrs, dataset), do: {:ok, doc, "update"}
+    end
+  end
+
+  defp apply_one(_, _), do: {:error, :malformed}
+
+  defp ensure_rev(_doc, nil), do: :ok
+  defp ensure_rev(%{rev: r}, r), do: :ok
+  defp ensure_rev(_, _), do: {:error, :rev_mismatch}
+
   @doc "Find all documents that reference a given document ID."
   def find_referencing_docs(doc_id, dataset) do
     pub_id = published_id(doc_id)
@@ -288,7 +394,7 @@ defmodule Barkpark.Content do
         {:ok, doc} ->
           updated_content = Map.delete(doc.content || %{}, field)
           doc
-          |> Document.changeset(%{"content" => updated_content})
+          |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
           |> Repo.update()
           |> tap_broadcast(dataset, type)
         _ -> :ok
@@ -296,20 +402,51 @@ defmodule Barkpark.Content do
     end)
   end
 
+  @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
+
+  defp from_envelope(attrs) do
+    cond do
+      # Already legacy shape — pass through unchanged
+      Map.has_key?(attrs, "content") and is_map(Map.get(attrs, "content")) ->
+        attrs
+
+      true ->
+        id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")
+        title = Map.get(attrs, "title")
+        status = Map.get(attrs, "status", "draft")
+        content = Map.drop(attrs, @reserved_in)
+
+        %{
+          "doc_id" => id,
+          "title" => title,
+          "status" => status,
+          "content" => content
+        }
+    end
+  end
+
   defp generate_id(type) do
     "#{type}-#{:rand.uniform(999_999)}"
+  end
+
+  defp generate_rev do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
 
   # ── Legacy upsert (for backward compat) ───────────────────────────────────
 
   def upsert_document(type, attrs, dataset) do
-    doc_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
+    attrs = from_envelope(attrs)
+    raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
+    doc_id = raw_id && draft_id(raw_id)
 
     attrs =
       attrs
+      |> Map.put("doc_id", doc_id)
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
+      |> Map.put("rev", generate_rev())
 
     case doc_id && get_document(doc_id, type, dataset) do
       {:ok, existing} ->
@@ -384,10 +521,16 @@ defmodule Barkpark.Content do
         # Save revision
         save_revision(doc, type, dataset, action)
 
+        ev = save_event(doc, type, dataset, action)
+
         msg = %{
+          event_id: ev.id,
           type: type,
-          doc_id: doc.doc_id,
+          mutation: action,
           action: :mutate,
+          doc_id: doc.doc_id,
+          rev: doc.rev,
+          document: Envelope.render(doc),
           doc: %{
             doc_id: doc.doc_id,
             title: doc.title,
@@ -410,6 +553,23 @@ defmodule Barkpark.Content do
       error ->
         error
     end
+  end
+
+  defp save_event(doc, type, dataset, action) do
+    alias Barkpark.Content.MutationEvent
+
+    %MutationEvent{}
+    |> Ecto.Changeset.change(%{
+      dataset: dataset,
+      type: type,
+      doc_id: doc.doc_id,
+      mutation: action,
+      rev: doc.rev,
+      previous_rev: nil,
+      document: Envelope.render(doc),
+      inserted_at: DateTime.utc_now()
+    })
+    |> Repo.insert!()
   end
 
   defp save_revision(doc, type, dataset, action) do

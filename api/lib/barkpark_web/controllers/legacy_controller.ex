@@ -10,8 +10,8 @@ defmodule BarkparkWeb.LegacyController do
   @dataset "production"
 
   def index(conn, %{"type" => type} = params) do
-    filter = Map.get(params, "filter")
-    documents = Content.list_documents(type, @dataset, filter: filter)
+    filter_map = parse_legacy_filter(Map.get(params, "filter"))
+    documents = Content.list_documents(type, @dataset, filter_map: filter_map, limit: 10_000)
 
     json(conn, %{
       type: type,
@@ -66,6 +66,16 @@ defmodule BarkparkWeb.LegacyController do
         fields: s.fields
       }
     end))
+  end
+
+  # Parse legacy "field=value" filter string into a map for list_documents/3.
+  defp parse_legacy_filter(nil), do: %{}
+  defp parse_legacy_filter(""), do: %{}
+  defp parse_legacy_filter(s) do
+    case String.split(s, "=", parts: 2) do
+      [field, value] -> %{field => value}
+      _ -> %{}
+    end
   end
 
   defp render_legacy_doc(doc) do

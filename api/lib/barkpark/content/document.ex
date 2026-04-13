@@ -11,13 +11,14 @@ defmodule Barkpark.Content.Document do
     field :title, :string
     field :status, :string, default: "draft"
     field :content, :map, default: %{}
+    field :rev, :string
 
     timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(document, attrs) do
     document
-    |> cast(attrs, [:doc_id, :type, :dataset, :title, :status, :content])
+    |> cast(attrs, [:doc_id, :type, :dataset, :title, :status, :content, :rev])
     |> validate_required([:doc_id, :type])
     |> validate_inclusion(:status, ~w(draft published archived active planning completed))
     |> unique_constraint([:doc_id, :type, :dataset])

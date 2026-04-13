@@ -7,12 +7,12 @@ defmodule BarkparkWeb.SchemaController do
 
   def index(conn, %{"dataset" => dataset}) do
     schemas = Content.list_schemas(dataset)
-    json(conn, %{schemas: Enum.map(schemas, &render_schema/1)})
+    json(conn, %{_schemaVersion: 1, schemas: Enum.map(schemas, &render_schema/1)})
   end
 
   def show(conn, %{"dataset" => dataset, "name" => name}) do
     with {:ok, schema} <- Content.get_schema(name, dataset) do
-      json(conn, render_schema(schema))
+      json(conn, %{_schemaVersion: 1, schema: render_schema(schema)})
     end
   end
 

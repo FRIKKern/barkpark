@@ -15,7 +15,7 @@ defmodule Barkpark.Structure do
       :icon,
       :type,        # :list, :document_type_list, :document, :divider
       :type_name,   # schema type name (for doc lists/singletons)
-      :filter,      # "field=value" filter string
+      :filter,      # "field=value" filter string (used for UI phx-value; converted to filter_map before querying)
       :visibility,  # :public or :private
       items: [],    # child nodes
       child: nil    # what opens when selected
