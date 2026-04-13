@@ -444,7 +444,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
                 <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
               </div>
               <%= if @editor_schema do %>
-                <%= for field <- @editor_schema.fields do %>
+                <%= for field <- Enum.reject(@editor_schema.fields, & &1["name"] == "title") do %>
                   <div class="editor-field">
                     <label class="editor-field-label">
                       <%= field["title"] || field["name"] %>
