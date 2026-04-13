@@ -10,20 +10,20 @@ rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
 	@echo ">> Building Go TUI..."
 	go mod tidy && go build -o bin/barkpark .
 	@echo ">> Restarting service..."
-	sudo systemctl restart barkpark
+	sudo systemctl restart barkpark-cms
 	@echo ">> Done. Check: make status"
 
 restart: ## Restart the Phoenix service
-	sudo systemctl restart barkpark
+	sudo systemctl restart barkpark-cms
 
 stop: ## Stop the Phoenix service
-	sudo systemctl stop barkpark
+	sudo systemctl stop barkpark-cms
 
 status: ## Show service status
-	@systemctl status barkpark --no-pager || true
+	@systemctl status barkpark-cms --no-pager || true
 
 logs: ## Tail Phoenix service logs
-	@journalctl -u barkpark -f --no-pager
+	@journalctl -u barkpark-cms -f --no-pager
 
 seed: ## Re-seed the database
 	cd api && MIX_ENV=prod mix run priv/repo/seeds.exs
@@ -74,7 +74,7 @@ deploy: ## Pull latest from GitHub, rebuild, restart (one command)
 	rm -rf api/_build/prod
 	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
 	go mod tidy && go build -o bin/barkpark .
-	sudo systemctl restart barkpark
+	sudo systemctl restart barkpark-cms
 	@echo ">> Deployed. Waiting for API..."
 	@sleep 10
 	@curl -s --max-time 5 http://localhost:4000/api/schemas > /dev/null && echo ">> API is live!" || echo ">> Still warming up, check: make logs"

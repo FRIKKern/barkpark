@@ -98,9 +98,11 @@ defmodule SanityApiWeb.Studio.StudioLive do
     id = "#{type}-#{:rand.uniform(999_999)}"
     case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, @dataset) do
       {:ok, doc} ->
-        # Navigate to the new doc
+        # Find the pane that owns this type and build path from there
         pub_id = Content.published_id(doc.doc_id)
-        new_path = [type, pub_id]
+        path = socket.assigns.nav_path
+        # The type pane is the last path segment before the doc
+        new_path = Enum.take_while(path, &(&1 != type)) ++ [type, pub_id]
         {:noreply, push_patch(socket, to: studio_path(new_path))}
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
@@ -209,51 +211,13 @@ defmodule SanityApiWeb.Studio.StudioLive do
   defp rebuild_panes(socket) do
     path = socket.assigns.nav_path
     structure = Structure.build(@dataset)
-    schemas = Content.list_schemas(@dataset)
 
-    # Pane 0: Structure list
-    root_items = build_root_items(structure)
-    root_pane = %{title: "Structure", items: root_items, selected: Enum.at(path, 0)}
+    # Pane 0: root structure list
+    root_pane = %{title: structure.title, items: build_list_items(structure), selected: Enum.at(path, 0)}
     panes = [root_pane]
-    editor = nil
 
-    # Walk path to build pane chain
-    {panes, editor} = case path do
-      [] ->
-        {panes, nil}
-
-      [type_name | rest] ->
-        schema = Enum.find(schemas, &(&1.name == type_name))
-        if schema do
-          docs = Content.list_documents(schema.name, @dataset, perspective: :drafts)
-          doc_pane = %{
-            title: schema.title,
-            icon: schema.icon,
-            type_name: schema.name,
-            items: Enum.map(docs, fn doc ->
-              pub_id = Content.published_id(doc.doc_id)
-              %{type: :doc, id: pub_id, title: doc.title || "Untitled",
-                is_draft: Content.draft?(doc.doc_id), status: doc.status}
-            end),
-            selected: Enum.at(rest, 0)
-          }
-
-          editor = case rest do
-            [doc_id | _] ->
-              {doc, is_draft, has_pub} = fetch_doc(schema.name, doc_id)
-              if doc do
-                %{doc: doc, schema: schema, type: schema.name,
-                  is_draft: is_draft, has_published: has_pub,
-                  form: doc_to_form(doc, schema)}
-              end
-            _ -> nil
-          end
-
-          {panes ++ [doc_pane], editor}
-        else
-          {panes, nil}
-        end
-    end
+    # Walk path through the structure tree, building panes at each depth
+    {panes, editor} = walk_path(path, 0, structure, panes, nil)
 
     assign(socket,
       panes: panes,
@@ -267,18 +231,88 @@ defmodule SanityApiWeb.Studio.StudioLive do
     )
   end
 
-  defp build_root_items(structure) do
-    Enum.flat_map(structure.items, fn node ->
-      case node.type do
-        :divider -> [%{type: :divider, id: node.id}]
-        :list ->
-          # Settings group — render as header + children
-          [%{type: :header, id: node.id, title: node.title, icon: node.icon}] ++
-          Enum.map(node.items, fn child ->
-            %{type: :item, id: child.type_name || child.id, title: child.title, icon: child.icon}
-          end)
+  # Recursively walk the path, resolving each segment against the current node's children.
+  # Mirrors the TUI's rebuildPanes() loop through path segments.
+  defp walk_path([], _depth, _current, panes, editor), do: {panes, editor}
+  defp walk_path([id | rest], depth, current, panes, _editor) do
+    # Find the matching child node
+    found = Enum.find(current.items, fn node ->
+      (node.type_name || node.id) == id
+    end)
+
+    case found do
+      nil ->
+        {panes, nil}
+
+      %{type: :list} = node ->
+        # Sub-list (e.g. Settings) — add a new list pane column, keep walking
+        list_pane = %{title: node.title, items: build_list_items(node), selected: Enum.at(rest, 0)}
+        walk_path(rest, depth + 1, node, panes ++ [list_pane], nil)
+
+      %{type: :document_type_list, type_name: type_name} ->
+        # Document list — add doc list pane, then resolve doc editor if path continues
+        schema = case Content.get_schema(type_name, @dataset) do
+          {:ok, s} -> s
+          _ -> nil
+        end
+
+        docs = Content.list_documents(type_name, @dataset, perspective: :drafts)
+        doc_pane = %{
+          title: (schema && schema.title) || type_name,
+          icon: schema && schema.icon,
+          type_name: type_name,
+          items: Enum.map(docs, fn doc ->
+            pub_id = Content.published_id(doc.doc_id)
+            %{type: :doc, id: pub_id, title: doc.title || "Untitled",
+              is_draft: Content.draft?(doc.doc_id), status: doc.status}
+          end),
+          selected: Enum.at(rest, 0)
+        }
+
+        editor = case rest do
+          [doc_id | _] ->
+            {doc, is_draft, has_pub} = fetch_doc(type_name, doc_id)
+            if doc && schema do
+              %{doc: doc, schema: schema, type: type_name,
+                is_draft: is_draft, has_published: has_pub,
+                form: doc_to_form(doc, schema)}
+            end
+          _ -> nil
+        end
+
+        {panes ++ [doc_pane], editor}
+
+      %{type: :document, type_name: type_name} ->
+        # Singleton — open editor directly
+        schema = case Content.get_schema(type_name, @dataset) do
+          {:ok, s} -> s
+          _ -> nil
+        end
+
+        if schema do
+          # Singletons use the type name as the doc ID
+          {doc, is_draft, has_pub} = fetch_doc(type_name, type_name)
+          editor = if doc do
+            %{doc: doc, schema: schema, type: type_name,
+              is_draft: is_draft, has_published: has_pub,
+              form: doc_to_form(doc, schema)}
+          end
+          {panes, editor}
+        else
+          {panes, nil}
+        end
+
+      _ ->
+        {panes, nil}
+    end
+  end
+
+  defp build_list_items(node) do
+    Enum.flat_map(node.items, fn child ->
+      case child.type do
+        :divider -> [%{type: :divider, id: child.id}]
         _ ->
-          [%{type: :item, id: node.type_name || node.id, title: node.title, icon: node.icon}]
+          [%{type: :item, id: child.type_name || child.id, title: child.title, icon: child.icon}]
       end
     end)
   end
