@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
     end
     {:ok, socket
-     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [])
+     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [], ref_picker_field: nil, ref_candidates: [], ref_search: "")
      |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
@@ -232,6 +232,41 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # ── Reference field events ─────────────────────────────────────────────────
+
+  def handle_event("open-ref-picker", %{"field" => field_name, "ref-type" => ref_type}, socket) do
+    docs = Content.list_documents(ref_type, @dataset, perspective: :drafts)
+    candidates = Enum.map(docs, fn doc ->
+      %{id: Content.published_id(doc.doc_id), title: doc.title || "Untitled"}
+    end)
+    {:noreply, assign(socket, ref_picker_field: field_name, ref_candidates: candidates, ref_search: "")}
+  end
+
+  def handle_event("close-ref-picker", _, socket) do
+    {:noreply, assign(socket, ref_picker_field: nil, ref_candidates: [], ref_search: "")}
+  end
+
+  def handle_event("ref-search", %{"value" => query}, socket) do
+    filtered = Enum.filter(socket.assigns.ref_candidates, fn c ->
+      String.contains?(String.downcase(c.title), String.downcase(query))
+    end)
+    {:noreply, assign(socket, ref_search: query, ref_filtered: filtered)}
+  end
+
+  def handle_event("select-ref", %{"id" => ref_id, "field" => field_name}, socket) do
+    form = Map.put(socket.assigns.editor_form, field_name, ref_id)
+    socket = assign(socket, editor_form: form, ref_picker_field: nil, ref_candidates: [], ref_search: "")
+    send(self(), {:autosave_form, form})
+    {:noreply, socket}
+  end
+
+  def handle_event("clear-ref", %{"field" => field_name}, socket) do
+    form = Map.put(socket.assigns.editor_form, field_name, "")
+    socket = assign(socket, editor_form: form)
+    send(self(), {:autosave_form, form})
+    {:noreply, socket}
+  end
+
   defp save_doc(socket, params, flash_msg) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
@@ -407,6 +442,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
         _ ->
           [%{type: :item, id: child.id, title: child.title, icon: child.icon}]
       end
+    end)
+  end
+
+  defp filter_ref_candidates(candidates, ""), do: candidates
+  defp filter_ref_candidates(candidates, nil), do: candidates
+  defp filter_ref_candidates(candidates, query) do
+    q = String.downcase(query)
+    Enum.filter(candidates, fn c ->
+      String.contains?(String.downcase(c.title), q) or String.contains?(String.downcase(c.id), q)
     end)
   end
 
@@ -590,6 +634,31 @@ defmodule BarkparkWeb.Studio.StudioLive do
           </div>
         </div>
       <% end %>
+
+      <!-- Reference picker modal -->
+      <%= if @ref_picker_field do %>
+        <div class="image-picker-overlay" phx-click="close-ref-picker"></div>
+        <div class="image-picker">
+          <div class="image-picker-header">
+            <span style="font-weight: 600; font-size: 14px;">Select reference</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker">x</button>
+          </div>
+          <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
+            <input type="text" placeholder="Search..." class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} />
+          </div>
+          <div style="max-height: 400px; overflow-y: auto;">
+            <%= for candidate <- filter_ref_candidates(@ref_candidates, @ref_search) do %>
+              <div class="ref-candidate" phx-click="select-ref" phx-value-id={candidate.id} phx-value-field={@ref_picker_field}>
+                <span class="ref-candidate-title"><%= candidate.title %></span>
+                <span class="ref-candidate-id"><%= candidate.id %></span>
+              </div>
+            <% end %>
+            <%= if filter_ref_candidates(@ref_candidates, @ref_search) == [] do %>
+              <div class="text-sm text-muted" style="padding: 20px; text-align: center;">No documents found</div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
     </div>
 
     <style>
@@ -697,6 +766,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .image-picker-item:hover { border-color: var(--primary); }
       .image-picker-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
       .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      /* Reference field */
+      .ref-field { position: relative; }
+      .ref-selected {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 12px; border: 1px solid var(--border-muted);
+        border-radius: var(--radius-sm); background: var(--bg-card);
+      }
+      .ref-selected-info { display: flex; flex-direction: column; gap: 2px; }
+      .ref-selected-title { font-size: 14px; font-weight: 500; }
+      .ref-selected-type { font-size: 11px; color: var(--fg-dim); }
+      .ref-candidate {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border-muted);
+        transition: background 0.1s;
+      }
+      .ref-candidate:hover { background: var(--bg-muted); }
+      .ref-candidate:last-child { border-bottom: none; }
+      .ref-candidate-title { font-size: 14px; font-weight: 500; }
+      .ref-candidate-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); }
     </style>
     """
   end
@@ -738,6 +827,44 @@ defmodule BarkparkWeb.Studio.StudioLive do
     <div style="display:flex;align-items:center;gap:10px;">
       <input type="color" name={"doc[#{@n}]"} value={@v} phx-debounce="300" style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
       <span style="font-family:var(--font-mono);font-size:13px;"><%= @v %></span>
+    </div>
+    """
+  end
+
+  defp render_input(assigns, %{"type" => "reference", "name" => name, "refType" => ref_type}) do
+    val = Map.get(assigns.editor_form, name, "")
+    has_ref = val != "" and val != nil
+    # Resolve the referenced doc title for display
+    ref_title = if has_ref do
+      case Content.get_document(val, ref_type, "production") do
+        {:ok, doc} -> doc.title || val
+        _ ->
+          case Content.get_document("drafts.#{val}", ref_type, "production") do
+            {:ok, doc} -> doc.title || val
+            _ -> val
+          end
+      end
+    end
+    assigns = assign(assigns, n: name, v: val, has_ref: has_ref, ref_title: ref_title, ref_type: ref_type)
+    ~H"""
+    <input type="hidden" name={"doc[#{@n}]"} value={@v} />
+    <div class="ref-field">
+      <%= if @has_ref do %>
+        <div class="ref-selected">
+          <div class="ref-selected-info">
+            <span class="ref-selected-title"><%= @ref_title %></span>
+            <span class="ref-selected-type"><%= @ref_type %></span>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button type="button" class="btn btn-sm" phx-click="open-ref-picker" phx-value-field={@n} phx-value-ref-type={@ref_type}>Change</button>
+            <button type="button" class="btn btn-destructive btn-sm" phx-click="clear-ref" phx-value-field={@n}>Remove</button>
+          </div>
+        </div>
+      <% else %>
+        <button type="button" class="btn btn-sm" phx-click="open-ref-picker" phx-value-field={@n} phx-value-ref-type={@ref_type} style="width: 100%; justify-content: flex-start; color: var(--fg-muted);">
+          Select <%= @ref_type %>...
+        </button>
+      <% end %>
     </div>
     """
   end
