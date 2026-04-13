@@ -137,13 +137,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
         _ -> nil
       end
 
-      # Update presence
-      Presence.track(self(), @presence_topic, socket.assigns.user_id, %{
+      meta = %{
         doc_id: doc_id,
         type: socket.assigns[:editor_type],
         color: socket.assigns.user_color,
         joined_at: System.system_time(:second)
-      })
+      }
+
+      # Use update if already tracked, track if new
+      case Presence.get_by_key(@presence_topic, socket.assigns.user_id) do
+        [] -> Presence.track(self(), @presence_topic, socket.assigns.user_id, meta)
+        _ -> Presence.update(self(), @presence_topic, socket.assigns.user_id, meta)
+      end
 
       # Get current presences
       presences = Presence.list(@presence_topic)
