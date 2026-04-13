@@ -13,8 +13,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    user_id = generate_user_id()
-    user_color = pick_color(user_id)
+    # Read identity from client localStorage via connect params
+    connect_params = get_connect_params(socket) || %{}
+    user_id = connect_params["user_id"] || generate_user_id()
+    stored_name = connect_params["user_name"]
+    stored_color = connect_params["user_color"]
+
+    user_name = if stored_name && stored_name != "", do: stored_name, else: "User #{String.slice(user_id, 0..3)}"
+    user_color = if stored_color && stored_color != "", do: stored_color, else: pick_color(user_id)
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
@@ -28,7 +34,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
        ref_picker_field: nil, ref_candidates: [], ref_search: "",
        show_history: false, revisions: [],
        show_delete: false, delete_refs: [],
-       user_id: user_id, user_color: user_color, presences: %{})
+       user_id: user_id, user_name: user_name, user_color: user_color,
+       presences: [], show_profile: false)
      |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
@@ -55,13 +62,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Presence updates
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
-    presences = Presence.list(@presence_topic)
-      |> Enum.flat_map(fn {uid, %{metas: metas}} ->
-        Enum.map(metas, &Map.put(&1, :user_id, uid))
-      end)
-      |> Enum.reject(&(&1.user_id == socket.assigns.user_id))
-
-    {:noreply, assign(socket, presences: presences)}
+    {:noreply, assign(socket, presences: build_presences_list(socket))}
   end
 
   # Global doc change — rebuild if we're viewing this type
@@ -140,6 +141,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       meta = %{
         doc_id: doc_id,
         type: socket.assigns[:editor_type],
+        name: socket.assigns.user_name,
         color: socket.assigns.user_color,
         joined_at: System.system_time(:second)
       }
@@ -150,14 +152,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         _ -> Presence.update(self(), @presence_topic, socket.assigns.user_id, meta)
       end
 
-      # Get current presences
-      presences = Presence.list(@presence_topic)
-        |> Enum.flat_map(fn {uid, %{metas: metas}} ->
-          Enum.map(metas, &Map.put(&1, :user_id, uid))
-        end)
-        |> Enum.reject(&(&1.user_id == socket.assigns.user_id))
-
-      assign(socket, presences: presences)
+      assign(socket, presences: build_presences_list(socket))
     else
       socket
     end
@@ -382,6 +377,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # ── Profile edit events ──────────────────────────────────────────────────────
+
+  def handle_event("show-profile", _, socket) do
+    {:noreply, assign(socket, show_profile: true)}
+  end
+
+  def handle_event("close-profile", _, socket) do
+    {:noreply, assign(socket, show_profile: false)}
+  end
+
+  def handle_event("save-profile", %{"name" => name, "color" => color}, socket) do
+    socket = assign(socket, user_name: name, user_color: color, show_profile: false)
+    # Save to client localStorage via JS hook
+    socket = push_event(socket, "save-identity", %{name: name, color: color})
+    # Update presence with new identity
+    {:noreply, track_presence(socket)}
   end
 
   def handle_event("restore-revision", %{"id" => rev_id}, socket) do
@@ -637,6 +650,54 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <div class="presence-bar" id="presence-hook" phx-hook="PresenceIdentity">
+      <div class="presence-bar-users">
+        <%= for p <- @presences do %>
+          <div class="presence-avatar" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} — #{if p.doc_id, do: "editing #{p.doc_id}", else: "browsing"}"}>
+            <%= String.first(Map.get(p, :name, "U")) %>
+          </div>
+        <% end %>
+        <%= if @presences == [] do %>
+          <span class="text-xs text-muted">Just you</span>
+        <% end %>
+      </div>
+      <button class="presence-me" phx-click="show-profile" style={"background: #{@user_color}"}>
+        <%= String.first(@user_name) %>
+      </button>
+    </div>
+
+    <!-- Profile edit modal -->
+    <%= if @show_profile do %>
+      <div class="image-picker-overlay" phx-click="close-profile"></div>
+      <div class="profile-modal">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Your profile</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile">x</button>
+        </div>
+        <form phx-submit="save-profile" style="padding: 20px;">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input type="text" name="name" value={@user_name} class="form-input" autofocus />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Color</label>
+            <div class="profile-colors">
+              <%= for c <- ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316) do %>
+                <label class={"profile-color-option #{if c == @user_color, do: "selected"}"}>
+                  <input type="radio" name="color" value={c} checked={c == @user_color} style="display:none" />
+                  <span class="profile-color-swatch" style={"background: #{c}"}></span>
+                </label>
+              <% end %>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+            <button type="button" class="btn btn-sm" phx-click="close-profile">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+          </div>
+        </form>
+      </div>
+    <% end %>
+
     <div class="pane-layout" id="studio-panes">
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
         <div class="pane-column" id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}>
@@ -701,7 +762,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                 <%= if doc_presences != [] do %>
                   <div class="presence-dots">
                     <%= for p <- doc_presences do %>
-                      <div class="presence-dot" style={"background: #{p.color}"} title={"User #{String.slice(p.user_id, 0..5)} is editing"}></div>
+                      <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
                     <% end %>
                   </div>
                 <% end %>
@@ -1060,9 +1121,46 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
 
       /* Presence */
+      .presence-bar {
+        display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+        height: 40px; min-height: 40px; padding: 0 12px;
+        border-bottom: 1px solid var(--border-muted); background: var(--bg-card);
+      }
+      .presence-bar-users { display: flex; align-items: center; gap: -4px; margin-right: 8px; }
+      .presence-avatar {
+        width: 28px; height: 28px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; font-weight: 600; color: white;
+        border: 2px solid var(--bg-card); margin-left: -4px;
+        cursor: default; text-transform: uppercase;
+      }
+      .presence-avatar:first-child { margin-left: 0; }
+      .presence-me {
+        width: 30px; height: 30px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; font-weight: 600; color: white;
+        border: 2px solid var(--fg-muted); cursor: pointer;
+        text-transform: uppercase; transition: border-color 0.15s;
+      }
+      .presence-me:hover { border-color: var(--fg); }
       .presence-dots { display: flex; gap: 4px; margin-left: 8px; }
       .presence-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); cursor: default; }
       .presence-dot-sm { width: 6px; height: 6px; border-radius: 50%; margin-left: 2px; flex-shrink: 0; }
+
+      /* Profile modal */
+      .profile-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 360px; background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
+      }
+      .profile-colors { display: flex; gap: 8px; flex-wrap: wrap; }
+      .profile-color-option { cursor: pointer; }
+      .profile-color-option.selected .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
+      .profile-color-swatch {
+        display: block; width: 28px; height: 28px; border-radius: 50%;
+        border: 3px solid transparent; transition: all 0.1s;
+      }
+      .profile-color-swatch:hover { border-color: var(--fg-muted); }
     </style>
     """
   end
@@ -1191,6 +1289,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp pick_color(user_id) do
     index = :erlang.phash2(user_id, length(@presence_colors))
     Enum.at(@presence_colors, index)
+  end
+
+  defp build_presences_list(socket) do
+    Presence.list(@presence_topic)
+    |> Enum.flat_map(fn {uid, %{metas: metas}} ->
+      Enum.map(metas, &Map.put(&1, :user_id, uid))
+    end)
   end
 
   defp presences_on_doc(presences, doc_id) do

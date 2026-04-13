@@ -335,8 +335,34 @@
   <script src="/assets/phoenix_live_view.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+
+    // Presence identity from localStorage
+    let userId = localStorage.getItem("barkpark_user_id");
+    if (!userId) {
+      userId = Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("barkpark_user_id", userId);
+    }
+    let userName = localStorage.getItem("barkpark_user_name") || "";
+    let userColor = localStorage.getItem("barkpark_user_color") || "";
+
+    let Hooks = {};
+    Hooks.PresenceIdentity = {
+      mounted() {
+        this.handleEvent("save-identity", ({name, color}) => {
+          localStorage.setItem("barkpark_user_name", name);
+          localStorage.setItem("barkpark_user_color", color);
+        });
+      }
+    };
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-      params: {_csrf_token: csrfToken}
+      params: {
+        _csrf_token: csrfToken,
+        user_id: userId,
+        user_name: userName,
+        user_color: userColor
+      },
+      hooks: Hooks
     });
     liveSocket.connect();
   </script>
