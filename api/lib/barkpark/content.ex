@@ -326,29 +326,30 @@ defmodule Barkpark.Content do
     with {:ok, doc} <- delete_document(id, type, dataset), do: {:ok, doc, "delete"}
   end
 
-  defp apply_one(%{"patch" => %{"id" => id, "type" => type, "set" => fields}}, dataset) do
-    case get_document(id, type, dataset) do
-      {:ok, existing} ->
-        merged =
-          Map.merge(
-            existing.content || %{},
-            Map.drop(fields, ~w(title status _id _type _rev))
-          )
+  defp apply_one(%{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch}, dataset) do
+    with {:ok, existing} <- get_document(id, type, dataset),
+         :ok <- ensure_rev(existing, patch["ifRevisionID"]) do
+      merged =
+        Map.merge(
+          existing.content || %{},
+          Map.drop(fields, ~w(title status _id _type _rev))
+        )
 
-        attrs = %{
-          "doc_id" => id,
-          "title" => fields["title"] || existing.title,
-          "content" => merged
-        }
+      attrs = %{
+        "doc_id" => id,
+        "title" => fields["title"] || existing.title,
+        "content" => merged
+      }
 
-        with {:ok, doc} <- upsert_document(type, attrs, dataset), do: {:ok, doc, "update"}
-
-      error ->
-        error
+      with {:ok, doc} <- upsert_document(type, attrs, dataset), do: {:ok, doc, "update"}
     end
   end
 
   defp apply_one(_, _), do: {:error, :malformed}
+
+  defp ensure_rev(_doc, nil), do: :ok
+  defp ensure_rev(%{rev: r}, r), do: :ok
+  defp ensure_rev(_, _), do: {:error, :rev_mismatch}
 
   @doc "Find all documents that reference a given document ID."
   def find_referencing_docs(doc_id, dataset) do

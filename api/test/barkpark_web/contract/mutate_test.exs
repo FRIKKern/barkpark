@@ -52,4 +52,55 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert [%{"id" => _, "operation" => "create", "document" => %{"_id" => _, "_type" => "post"}}] =
              body_json["results"]
   end
+
+  test "patch with stale ifRevisionID returns rev_mismatch", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-1", "title" => "v1"}, "test")
+
+    body = %{
+      "mutations" => [
+        %{
+          "patch" => %{
+            "id" => doc.doc_id,
+            "type" => "post",
+            "ifRevisionID" => "wrong-rev",
+            "set" => %{"title" => "v2"}
+          }
+        }
+      ]
+    }
+
+    resp =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/data/mutate/test", Jason.encode!(body))
+
+    assert resp.status == 409
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "rev_mismatch"
+  end
+
+  test "patch with matching ifRevisionID succeeds", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-2", "title" => "v1"}, "test")
+
+    body = %{
+      "mutations" => [
+        %{
+          "patch" => %{
+            "id" => doc.doc_id,
+            "type" => "post",
+            "ifRevisionID" => doc.rev,
+            "set" => %{"title" => "v2"}
+          }
+        }
+      ]
+    }
+
+    resp =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/data/mutate/test", Jason.encode!(body))
+
+    assert resp.status == 200
+  end
 end
