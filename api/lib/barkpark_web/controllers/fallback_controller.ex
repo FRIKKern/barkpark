@@ -1,28 +1,17 @@
 defmodule BarkparkWeb.FallbackController do
   use Phoenix.Controller, formats: [:json]
 
-  def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
-    errors =
-      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {key, value}, acc ->
-          String.replace(acc, "%{#{key}}", to_string(value))
-        end)
-      end)
+  alias Barkpark.Content.Errors
+
+  @doc """
+  Routes controller error tuples through the v1 structured error envelope.
+  See docs/api-v1.md § Error codes.
+  """
+  def call(conn, error) do
+    env = Errors.to_envelope(error)
 
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: "validation_failed", details: errors})
-  end
-
-  def call(conn, {:error, :not_found}) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{error: "not found"})
-  end
-
-  def call(conn, {:error, :unauthorized}) do
-    conn
-    |> put_status(:unauthorized)
-    |> json(%{error: "unauthorized"})
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 end

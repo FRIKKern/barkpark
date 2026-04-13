@@ -1,0 +1,12 @@
+{
+  "name": "barkpark-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm --workspaces run build",
+    "test": "npm --workspaces run test",
+    "typecheck": "npm --workspaces run typecheck"
+  }
+}

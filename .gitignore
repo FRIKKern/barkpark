@@ -23,6 +23,11 @@ data.json
 api/_build/
 api/deps/
 
+# JS monorepo
+node_modules/
+packages/**/dist/
+*.log
+
 # IDE
 .idea/
 .vscode/

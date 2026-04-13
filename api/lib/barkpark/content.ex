@@ -100,13 +100,24 @@ defmodule Barkpark.Content do
   defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
   defp maybe_merge_drafts(docs, :drafts) do
-    # Group by published_id, prefer draft over published
+    # Group by published_id, prefer draft, preserve SQL-level order.
+    # (Dropping the final Enum.sort_by would destabilize ordering across
+    # grouped pairs; we track the first index of each pid and re-sort by it.)
     docs
-    |> Enum.group_by(fn doc -> published_id(doc.doc_id) end)
-    |> Enum.map(fn {_pub_id, versions} ->
-      Enum.find(versions, fn d -> draft?(d.doc_id) end) || hd(versions)
+    |> Enum.with_index()
+    |> Enum.group_by(fn {doc, _} -> published_id(doc.doc_id) end)
+    |> Enum.map(fn {_pid, versions} ->
+      {_first_doc, first_idx} = hd(versions)
+      best =
+        case Enum.find(versions, fn {d, _} -> draft?(d.doc_id) end) do
+          {draft, _} -> draft
+          nil -> elem(hd(versions), 0)
+        end
+
+      {best, first_idx}
     end)
-    |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
+    |> Enum.sort_by(fn {_, i} -> i end)
+    |> Enum.map(fn {doc, _} -> doc end)
   end
 
   defp maybe_merge_drafts(docs, _), do: docs
