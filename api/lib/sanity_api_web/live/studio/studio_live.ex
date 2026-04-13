@@ -115,23 +115,24 @@ defmodule SanityApiWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
     if doc && type do
       content = build_content(params, schema)
+      new_title = Map.get(params, "title", doc.title)
       attrs = %{
         "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
-        "title" => Map.get(params, "title", doc.title),
+        "title" => new_title,
         "status" => Map.get(params, "status", doc.status),
         "content" => content
       }
-      IO.inspect(%{title_from_params: attrs["title"], doc_id: attrs["doc_id"]}, label: "AUTOSAVE")
       case Content.upsert_document(type, attrs, @dataset) do
         {:ok, saved_doc} ->
-          IO.inspect(%{saved_title: saved_doc.title, saved_id: saved_doc.doc_id}, label: "SAVED")
-          # Rebuild panes first (updates doc list), then restore form to keep user input
-          {:noreply, socket
-           |> assign(editor_doc: saved_doc, editor_is_draft: Content.draft?(saved_doc.doc_id))
-           |> rebuild_panes()
-           |> assign(editor_form: params, save_status: "Saved")}
-        {:error, cs} ->
-          IO.inspect(cs, label: "SAVE_ERROR")
+          # Update doc list item title without full pane rebuild (avoids resetting inputs)
+          panes = update_doc_title_in_panes(socket.assigns.panes, Content.published_id(saved_doc.doc_id), new_title)
+          {:noreply, assign(socket,
+            panes: panes,
+            editor_doc: saved_doc,
+            editor_is_draft: Content.draft?(saved_doc.doc_id),
+            editor_form: params,
+            save_status: "Saved")}
+        {:error, _} ->
           {:noreply, assign(socket, save_status: "Save failed")}
       end
     else
@@ -318,6 +319,20 @@ defmodule SanityApiWeb.Studio.StudioLive do
         _ ->
           [%{type: :item, id: child.id, title: child.title, icon: child.icon}]
       end
+    end)
+  end
+
+  # Update a doc's title in the pane items list without rebuilding from DB
+  defp update_doc_title_in_panes(panes, doc_id, new_title) do
+    Enum.map(panes, fn pane ->
+      updated_items = Enum.map(pane.items, fn item ->
+        if Map.get(item, :type) == :doc && Map.get(item, :id) == doc_id do
+          %{item | title: new_title}
+        else
+          item
+        end
+      end)
+      %{pane | items: updated_items}
     end)
   end
 
