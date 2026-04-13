@@ -254,6 +254,48 @@ defmodule Barkpark.Content do
     end
   end
 
+  @doc "Find all documents that reference a given document ID."
+  def find_referencing_docs(doc_id, dataset) do
+    pub_id = published_id(doc_id)
+    schemas = list_schemas(dataset)
+
+    # Find all schema fields that are references
+    ref_fields = for schema <- schemas,
+                     field <- schema.fields,
+                     field["type"] == "reference",
+                     do: {schema.name, field["name"]}
+
+    # Search each type for docs that reference this ID
+    Enum.flat_map(ref_fields, fn {type_name, field_name} ->
+      list_documents(type_name, dataset, perspective: :raw)
+      |> Enum.filter(fn doc ->
+        val = get_in(doc.content || %{}, [field_name])
+        val == pub_id
+      end)
+      |> Enum.map(fn doc ->
+        %{doc_id: doc.doc_id, type: type_name, title: doc.title, field: field_name}
+      end)
+    end)
+  end
+
+  @doc "Remove all references to a document ID from other documents."
+  def disconnect_references(doc_id, dataset) do
+    pub_id = published_id(doc_id)
+    refs = find_referencing_docs(doc_id, dataset)
+
+    Enum.each(refs, fn %{doc_id: ref_doc_id, type: type, field: field} ->
+      case get_document(ref_doc_id, type, dataset) do
+        {:ok, doc} ->
+          updated_content = Map.delete(doc.content || %{}, field)
+          doc
+          |> Document.changeset(%{"content" => updated_content})
+          |> Repo.update()
+          |> tap_broadcast(dataset, type)
+        _ -> :ok
+      end
+    end)
+  end
+
   defp generate_id(type) do
     "#{type}-#{:rand.uniform(999_999)}"
   end

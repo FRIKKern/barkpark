@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
     end
     {:ok, socket
-     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [], ref_picker_field: nil, ref_candidates: [], ref_search: "", show_history: false, revisions: [])
+     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [], ref_picker_field: nil, ref_candidates: [], ref_search: "", show_history: false, revisions: [], show_delete: false, delete_refs: [])
      |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
@@ -275,6 +275,53 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("close-history", _, socket) do
     {:noreply, assign(socket, show_history: false, revisions: [])}
+  end
+
+  # ── Delete with reference check ─────────────────────────────────────────────
+
+  def handle_event("delete-doc", _, socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      refs = Content.find_referencing_docs(doc.doc_id, @dataset)
+      {:noreply, assign(socket, show_delete: true, delete_refs: refs)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close-delete", _, socket) do
+    {:noreply, assign(socket, show_delete: false, delete_refs: [])}
+  end
+
+  def handle_event("confirm-delete", %{"disconnect" => "true"}, socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      Content.disconnect_references(doc.doc_id, @dataset)
+      Content.delete_document(doc.doc_id, type, @dataset)
+      # Navigate back to the type list
+      new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+      {:noreply, socket
+       |> assign(show_delete: false, delete_refs: [])
+       |> push_patch(to: studio_path(new_path))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("confirm-delete", _, socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      Content.delete_document(doc.doc_id, type, @dataset)
+      new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+      {:noreply, socket
+       |> assign(show_delete: false, delete_refs: [])
+       |> push_patch(to: studio_path(new_path))}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("restore-revision", %{"id" => rev_id}, socket) do
@@ -586,6 +633,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             </div>
             <div style="display: flex; gap: 6px;">
               <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
+              <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
               <%= if @editor_is_draft do %>
                 <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
               <% else %>
@@ -713,6 +761,45 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
                 </div>
                 <button class="btn btn-sm" phx-click="restore-revision" phx-value-id={rev.id} data-confirm="Restore this version? Current changes will be overwritten.">Restore</button>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Delete confirmation modal -->
+      <%= if @show_delete do %>
+        <div class="image-picker-overlay" phx-click="close-delete"></div>
+        <div class="delete-modal">
+          <div class="delete-modal-header">
+            <span style="font-weight: 600; font-size: 16px;">Delete document</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete">x</button>
+          </div>
+          <div class="delete-modal-body">
+            <%= if @delete_refs == [] do %>
+              <p class="text-sm">Are you sure you want to delete <strong><%= @editor_doc && @editor_doc.title %></strong>? This action cannot be undone.</p>
+              <div class="delete-modal-actions">
+                <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
+                <button class="btn btn-destructive btn-sm" phx-click="confirm-delete">Delete</button>
+              </div>
+            <% else %>
+              <div class="delete-warning">
+                <p class="text-sm" style="margin-bottom: 12px;">
+                  <strong><%= @editor_doc && @editor_doc.title %></strong> is referenced by
+                  <strong><%= length(@delete_refs) %></strong> document<%= if length(@delete_refs) != 1, do: "s" %>:
+                </p>
+                <div class="delete-ref-list">
+                  <%= for ref <- @delete_refs do %>
+                    <div class="delete-ref-item">
+                      <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                      <span class="delete-ref-meta"><%= ref.type %> / <%= ref.field %></span>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+              <div class="delete-modal-actions">
+                <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
+                <button class="btn btn-destructive btn-sm" phx-click="confirm-delete" phx-value-disconnect="true">Disconnect references and delete</button>
               </div>
             <% end %>
           </div>
@@ -870,6 +957,31 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .history-action-update { background: hsl(240 3.7% 15.9%); color: var(--fg-muted); }
       .history-action-publish { background: hsl(142 71% 45% / 0.12); color: var(--success); }
       .history-action-unpublish { background: hsl(38 92% 50% / 0.12); color: var(--warning); }
+
+      /* Delete modal */
+      .delete-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 480px; background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
+      }
+      .delete-modal-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 20px; border-bottom: 1px solid var(--border-muted);
+      }
+      .delete-modal-body { padding: 20px; }
+      .delete-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+      .delete-warning { margin-bottom: 8px; }
+      .delete-ref-list {
+        border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
+        max-height: 200px; overflow-y: auto;
+      }
+      .delete-ref-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
+      }
+      .delete-ref-item:last-child { border-bottom: none; }
+      .delete-ref-title { font-size: 13px; font-weight: 500; }
+      .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
     </style>
     """
   end
