@@ -389,6 +389,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, assign(socket, show_profile: false)}
   end
 
+  def handle_event("jump-to-user", %{"type" => type, "doc-id" => doc_id}, socket) do
+    # Build the path to that document — need to find it in the structure
+    structure = Structure.build(@dataset)
+    path = find_doc_path(structure, type, doc_id)
+    {:noreply, push_patch(socket, to: studio_path(path))}
+  end
+
   def handle_event("preview-profile", %{"name" => name, "color" => color}, socket) do
     {:noreply, assign(socket, user_name: name, user_color: color)}
   end
@@ -658,9 +665,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
       <div class="presence-bar-users">
         <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
         <%= for p <- others do %>
-          <div class="presence-avatar" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} — #{if p.doc_id, do: "editing #{p.doc_id}", else: "browsing"}"}>
-            <%= String.first(Map.get(p, :name, "U")) %>
-          </div>
+          <% p_doc_title = resolve_presence_doc_title(p) %>
+          <%= if p.doc_id && p.type do %>
+            <div class="presence-user-wrap"
+                 phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
+              <div class="presence-avatar clickable" style={"background: #{p.color}"}>
+                <%= String.first(Map.get(p, :name, "U")) %>
+              </div>
+              <div class="presence-tooltip">
+                <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+                <div class="presence-tooltip-location">editing <strong><%= p_doc_title %></strong></div>
+                <div class="presence-tooltip-hint">Click to jump there</div>
+              </div>
+            </div>
+          <% else %>
+            <div class="presence-user-wrap">
+              <div class="presence-avatar" style={"background: #{p.color}"}>
+                <%= String.first(Map.get(p, :name, "U")) %>
+              </div>
+              <div class="presence-tooltip">
+                <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+                <div class="presence-tooltip-location">browsing</div>
+              </div>
+            </div>
+          <% end %>
         <% end %>
       </div>
       <div class="presence-me-group" phx-click="show-profile">
@@ -1152,6 +1180,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
         cursor: default; text-transform: uppercase;
       }
       .presence-avatar:first-child { margin-left: 0; }
+      .presence-avatar.clickable { cursor: pointer; }
+      .presence-avatar.clickable:hover { transform: scale(1.1); border-color: var(--fg); }
+      .presence-user-wrap { position: relative; display: inline-flex; }
+      .presence-tooltip {
+        display: none; position: absolute; top: 100%; right: 0; margin-top: 8px;
+        background: var(--bg-popover); border: 1px solid var(--border);
+        border-radius: var(--radius-sm); padding: 8px 12px; min-width: 160px;
+        z-index: 60; pointer-events: none;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      }
+      .presence-user-wrap:hover .presence-tooltip { display: block; }
+      .presence-tooltip-name { font-size: 13px; font-weight: 600; }
+      .presence-tooltip-location { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+      .presence-tooltip-location strong { color: var(--fg); }
+      .presence-tooltip-hint { font-size: 10px; color: var(--fg-dim); margin-top: 6px; }
       .presence-me-group {
         display: flex; align-items: center; gap: 8px; cursor: pointer;
         padding: 2px 4px 2px 10px; border-radius: 20px;
@@ -1321,6 +1364,50 @@ defmodule BarkparkWeb.Studio.StudioLive do
     |> Enum.flat_map(fn {uid, %{metas: metas}} ->
       Enum.map(metas, &Map.put(&1, :user_id, uid))
     end)
+  end
+
+  # Find the URL path for a given type + doc_id in the structure tree
+  defp find_doc_path(structure, type, doc_id) do
+    # Check if the type is a direct child (simple doc list)
+    direct = Enum.find(structure.items, &(&1.id == type && &1.type == :document_type_list))
+    if direct do
+      [type, doc_id]
+    else
+      # Check if it's nested (e.g. post inside a sub-list with filters)
+      parent = Enum.find(structure.items, fn node ->
+        node.type == :list && Enum.any?(node.items || [], fn child ->
+          child.type == :document_type_list && child.type_name == type
+        end)
+      end)
+      if parent do
+        # Find the "all" sub-item
+        all_item = Enum.find(parent.items, fn child ->
+          child.type == :document_type_list && child.type_name == type && child.filter == nil
+        end)
+        sub_id = if all_item, do: all_item.id, else: "#{type}-all"
+        [parent.id, sub_id, doc_id]
+      else
+        # Settings singleton or fallback
+        [type, doc_id]
+      end
+    end
+  end
+
+  defp resolve_presence_doc_title(presence) do
+    type = presence.type
+    doc_id = presence.doc_id
+    if type && doc_id do
+      case Content.get_document(doc_id, type, "production") do
+        {:ok, doc} -> doc.title || doc_id
+        _ ->
+          case Content.get_document("drafts.#{doc_id}", type, "production") do
+            {:ok, doc} -> doc.title || doc_id
+            _ -> doc_id
+          end
+      end
+    else
+      "browsing"
+    end
   end
 
   defp presences_on_doc(presences, doc_id) do
