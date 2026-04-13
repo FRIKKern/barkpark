@@ -172,6 +172,230 @@ curl -X POST localhost:4000/v1/schemas/production \
 
 Schema visibility: `public` (queryable without auth) or `private` (requires token, appears under Settings as singleton).
 
+## Guides
+
+### Creating a new content type
+
+Create a schema and it appears in both Studio and TUI automatically.
+
+```bash
+curl -X POST localhost:4000/v1/schemas/production \
+  -H "Authorization: Bearer barkpark-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "recipe",
+    "title": "Recipe",
+    "icon": "🍳",
+    "visibility": "public",
+    "fields": [
+      {"name": "title", "title": "Title", "type": "string"},
+      {"name": "slug", "title": "Slug", "type": "slug"},
+      {"name": "difficulty", "title": "Difficulty", "type": "select", "options": ["easy", "medium", "hard"]},
+      {"name": "prepTime", "title": "Prep Time", "type": "string"},
+      {"name": "instructions", "title": "Instructions", "type": "richText"},
+      {"name": "image", "title": "Photo", "type": "image"},
+      {"name": "vegetarian", "title": "Vegetarian", "type": "boolean"},
+      {"name": "author", "title": "Author", "type": "reference", "refType": "author"}
+    ]
+  }'
+```
+
+Reload the Studio and "Recipe" appears in the structure. Since it has no `status` field, it shows as a simple document list. Add a `status` field with `options` to get automatic filtered sub-views.
+
+### Adding filtered sub-views to a type
+
+Any schema with a `status` field of type `select` automatically gets filtered sub-views in the desk structure. For example, adding status to the recipe schema:
+
+```json
+{"name": "status", "title": "Status", "type": "select", "options": ["draft", "published", "archived"]}
+```
+
+This produces:
+
+```
+🍳 Recipe
+├── All Recipe
+├── ──────────
+├── Draft
+├── Published
+└── Archived
+```
+
+Each sub-view only shows documents matching that status value.
+
+### Creating a singleton (settings-style type)
+
+Set `visibility: "private"` and the type appears under Settings as a singleton — one document, no list, direct editor.
+
+```bash
+curl -X POST localhost:4000/v1/schemas/production \
+  -H "Authorization: Bearer barkpark-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "footer",
+    "title": "Footer",
+    "icon": "📎",
+    "visibility": "private",
+    "fields": [
+      {"name": "copyright", "title": "Copyright Text", "type": "string"},
+      {"name": "showSocials", "title": "Show Social Links", "type": "boolean"},
+      {"name": "backgroundColor", "title": "Background Color", "type": "color"}
+    ]
+  }'
+```
+
+Result in desk structure:
+
+```
+⚙ Settings
+├── ⚙ Site Settings
+├── 🧭 Navigation
+├── 🎨 Brand Colors
+└── 📎 Footer          ← new singleton
+```
+
+### Customizing the desk structure
+
+The desk structure is defined in two files that should stay in sync:
+
+**Elixir** (Web Studio): `api/lib/sanity_api/structure.ex` — the `build_desk_items/1` function.
+
+**Go** (TUI): `structure.go` — the `initRootStructure()` function.
+
+Both use the same pattern: group schemas into content, taxonomy, and settings.
+
+To change the ordering or grouping, edit `build_desk_items/1` (Elixir) and `initRootStructure()` (Go). For example, to add a "Media" section:
+
+```elixir
+# In structure.ex, build_desk_items/1:
+content_items ++
+  [divider()] ++
+  taxonomy_items ++
+  [divider()] ++
+  [%Node{id: "media", title: "Media", icon: "📸", type: :list, items: [
+    doc_type_list_item(schemas["photo"]),
+    doc_type_list_item(schemas["video"])
+  ]}] ++
+  [divider()] ++
+  settings_items
+```
+
+```go
+// In structure.go, initRootStructure():
+items = append(items, Divider())
+items = append(items,
+    ListItem().Title("Media").Icon("📸").Child(
+        List().ID("media").Title("Media").Items(
+            DocumentTypeListItem("photo"),
+            DocumentTypeListItem("video"),
+        ).Build(),
+    ).Build(),
+)
+```
+
+### Managing documents via the API
+
+```bash
+TOKEN="barkpark-dev-token"
+
+# Create a document (always starts as draft)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"Hello World"}}]}'
+
+# Edit fields
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"patch":{"id":"drafts.my-post","type":"post","set":{"title":"Updated Title","body":"New content"}}}]}'
+
+# Publish (copies draft to published, deletes draft)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
+
+# Unpublish (moves published back to draft)
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
+
+# Delete
+curl -X POST localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"delete":{"id":"my-post","type":"post"}}]}'
+```
+
+### Querying content from a frontend
+
+```bash
+# All published posts (public, no auth needed)
+curl localhost:4000/v1/data/query/production/post
+
+# Filter by status
+curl "localhost:4000/v1/data/query/production/post?filter=status=published"
+
+# Single document
+curl localhost:4000/v1/data/doc/production/post/p1
+
+# Drafts perspective (for preview/studio)
+curl "localhost:4000/v1/data/query/production/post?perspective=drafts"
+```
+
+Response format:
+
+```json
+{
+  "count": 3,
+  "type": "post",
+  "documents": [
+    {
+      "_id": "p1",
+      "_type": "post",
+      "title": "Getting Started",
+      "status": "published",
+      "content": {"slug": "getting-started", "body": "..."},
+      "_createdAt": "2026-04-12T09:11:20Z",
+      "_updatedAt": "2026-04-12T09:11:20Z"
+    }
+  ]
+}
+```
+
+### Uploading media
+
+```bash
+# Upload a file
+curl -X POST localhost:4000/media/upload \
+  -H "Authorization: Bearer barkpark-dev-token" \
+  -F "file=@photo.jpg"
+
+# List all media
+curl localhost:4000/media
+
+# Serve a file
+curl localhost:4000/media/files/2026/04/photo-abc123.jpg
+
+# Delete
+curl -X DELETE localhost:4000/media/FILE_ID \
+  -H "Authorization: Bearer barkpark-dev-token"
+```
+
+### Connecting the TUI to a remote server
+
+```bash
+BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
+```
+
+Or with a custom token:
+
+```bash
+BARKPARK_API_URL=http://YOUR_VPS_IP:4000 BARKPARK_API_TOKEN=your-token go run .
+```
+
 ## Architecture
 
 ```
