@@ -71,7 +71,7 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
 
   defp load_documents(socket) do
     opts = [perspective: socket.assigns.perspective]
-    opts = if socket.assigns.active_filter, do: opts ++ [filter: socket.assigns.active_filter], else: opts
+    opts = if socket.assigns.active_filter, do: opts ++ [filter_map: parse_filter_string(socket.assigns.active_filter)], else: opts
     docs = Content.list_documents(socket.assigns.type, @dataset, opts)
     assign(socket, documents: docs)
   end
@@ -164,4 +164,14 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
 
   defp match_filter?(nil, nil), do: true
   defp match_filter?(node_filter, active_filter), do: node_filter == active_filter
+
+  # Parse a "field=value" filter string into a map for list_documents/3 :filter_map.
+  defp parse_filter_string(nil), do: %{}
+  defp parse_filter_string(""), do: %{}
+  defp parse_filter_string(s) do
+    case String.split(s, "=", parts: 2) do
+      [field, value] -> %{field => value}
+      _ -> %{}
+    end
+  end
 end

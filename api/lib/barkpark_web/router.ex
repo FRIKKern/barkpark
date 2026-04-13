@@ -82,7 +82,7 @@ defmodule BarkparkWeb.Router do
 
   # ── Legacy compat ──────────────────────────────────────────────────────
   scope "/api", BarkparkWeb do
-    pipe_through :api
+    pipe_through [:api, BarkparkWeb.Plugs.LegacyDeprecation]
 
     get "/documents/:type", LegacyController, :index
     get "/documents/:type/:id", LegacyController, :show
