@@ -114,6 +114,7 @@ defmodule Barkpark.Content do
 
   @doc "Create or update a document. New docs are always created as drafts."
   def create_document(type, attrs, dataset) do
+    attrs = from_envelope(attrs)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = draft_id(raw_id)
 
@@ -299,6 +300,29 @@ defmodule Barkpark.Content do
     end)
   end
 
+  @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
+
+  defp from_envelope(attrs) do
+    cond do
+      # Already legacy shape — pass through unchanged
+      Map.has_key?(attrs, "content") and is_map(Map.get(attrs, "content")) ->
+        attrs
+
+      true ->
+        id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")
+        title = Map.get(attrs, "title")
+        status = Map.get(attrs, "status", "draft")
+        content = Map.drop(attrs, @reserved_in)
+
+        %{
+          "doc_id" => id,
+          "title" => title,
+          "status" => status,
+          "content" => content
+        }
+    end
+  end
+
   defp generate_id(type) do
     "#{type}-#{:rand.uniform(999_999)}"
   end
@@ -310,6 +334,7 @@ defmodule Barkpark.Content do
   # ── Legacy upsert (for backward compat) ───────────────────────────────────
 
   def upsert_document(type, attrs, dataset) do
+    attrs = from_envelope(attrs)
     doc_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
 
     attrs =
