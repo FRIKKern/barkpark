@@ -234,9 +234,9 @@ defmodule SanityApiWeb.Studio.StudioLive do
   # Mirrors the TUI's rebuildPanes() loop through path segments.
   defp walk_path([], _depth, _current, panes, editor), do: {panes, editor}
   defp walk_path([id | rest], depth, current, panes, _editor) do
-    # Find the matching child node
+    # Find the matching child node (check id first, then type_name)
     found = Enum.find(current.items, fn node ->
-      (node.type_name || node.id) == id
+      node.id == id || node.type_name == id
     end)
 
     case found do
@@ -313,7 +313,7 @@ defmodule SanityApiWeb.Studio.StudioLive do
       case child.type do
         :divider -> [%{type: :divider, id: child.id}]
         _ ->
-          [%{type: :item, id: child.type_name || child.id, title: child.title, icon: child.icon}]
+          [%{type: :item, id: child.id, title: child.title, icon: child.icon}]
       end
     end)
   end
