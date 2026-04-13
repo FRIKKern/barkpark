@@ -6,23 +6,36 @@ defmodule BarkparkWeb.Studio.StudioLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.{Content, Media, Structure}
+  alias BarkparkWeb.Presence
 
   @dataset "production"
+  @presence_topic "studio:presence"
 
   @impl true
   def mount(_params, _session, socket) do
+    user_id = generate_user_id()
+    user_color = pick_color(user_id)
+
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, @presence_topic)
     end
+
     {:ok, socket
-     |> assign(page_title: "Studio", subscribed_doc: nil, image_picker_field: nil, media_files: [], ref_picker_field: nil, ref_candidates: [], ref_search: "", show_history: false, revisions: [], show_delete: false, delete_refs: [])
+     |> assign(
+       page_title: "Studio", subscribed_doc: nil,
+       image_picker_field: nil, media_files: [],
+       ref_picker_field: nil, ref_candidates: [], ref_search: "",
+       show_history: false, revisions: [],
+       show_delete: false, delete_refs: [],
+       user_id: user_id, user_color: user_color, presences: %{})
      |> allow_upload(:image, accept: ~w(.jpg .jpeg .png .gif .webp .svg), max_entries: 1, max_file_size: 10_000_000)}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     path = Map.get(params, "path", [])
-    socket = socket |> assign(nav_path: path) |> rebuild_panes() |> subscribe_to_doc()
+    socket = socket |> assign(nav_path: path) |> rebuild_panes() |> subscribe_to_doc() |> track_presence()
     {:noreply, socket}
   end
 
@@ -37,6 +50,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # Presence updates
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
+    presences = Presence.list(@presence_topic)
+      |> Enum.flat_map(fn {uid, %{metas: metas}} ->
+        Enum.map(metas, &Map.put(&1, :user_id, uid))
+      end)
+      |> Enum.reject(&(&1.user_id == socket.assigns.user_id))
+
+    {:noreply, assign(socket, presences: presences)}
   end
 
   # Global doc change — rebuild if we're viewing this type
@@ -100,6 +125,36 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       _ ->
         assign(socket, subscribed_doc: nil)
+    end
+  end
+
+  defp track_presence(socket) do
+    if connected?(socket) do
+      # Determine what doc we're viewing
+      doc_id = case socket.assigns do
+        %{editor_doc: %{doc_id: did}, editor_type: type} when not is_nil(type) ->
+          Content.published_id(did)
+        _ -> nil
+      end
+
+      # Update presence
+      Presence.track(self(), @presence_topic, socket.assigns.user_id, %{
+        doc_id: doc_id,
+        type: socket.assigns[:editor_type],
+        color: socket.assigns.user_color,
+        joined_at: System.system_time(:second)
+      })
+
+      # Get current presences
+      presences = Presence.list(@presence_topic)
+        |> Enum.flat_map(fn {uid, %{metas: metas}} ->
+          Enum.map(metas, &Map.put(&1, :user_id, uid))
+        end)
+        |> Enum.reject(&(&1.user_id == socket.assigns.user_id))
+
+      assign(socket, presences: presences)
+    else
+      socket
     end
   end
 
@@ -602,6 +657,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     <div class="pane-doc-title">
                       <span class={"pane-doc-dot #{if item.is_draft, do: "draft", else: item.status}"}></span>
                       <%= item.title %>
+                      <% item_presences = presences_on_doc(@presences, item.id) %>
+                      <%= if item_presences != [] do %>
+                        <%= for p <- item_presences do %>
+                          <span class="presence-dot-sm" style={"background: #{p.color}"}></span>
+                        <% end %>
+                      <% end %>
                     </div>
                     <div class="pane-doc-id"><%= item.id %></div>
                   </div>
@@ -630,6 +691,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
                 <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
               </span>
               <span class="pane-header-title"><%= @editor_doc.title || "Untitled" %></span>
+              <%= if @editor_doc do %>
+                <% doc_presences = presences_on_doc(@presences, Content.published_id(@editor_doc.doc_id)) %>
+                <%= if doc_presences != [] do %>
+                  <div class="presence-dots">
+                    <%= for p <- doc_presences do %>
+                      <div class="presence-dot" style={"background: #{p.color}"} title={"User #{String.slice(p.user_id, 0..5)} is editing"}></div>
+                    <% end %>
+                  </div>
+                <% end %>
+              <% end %>
             </div>
             <div style="display: flex; gap: 6px;">
               <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
@@ -982,6 +1053,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .delete-ref-item:last-child { border-bottom: none; }
       .delete-ref-title { font-size: 13px; font-weight: 500; }
       .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
+
+      /* Presence */
+      .presence-dots { display: flex; gap: 4px; margin-left: 8px; }
+      .presence-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); cursor: default; }
+      .presence-dot-sm { width: 6px; height: 6px; border-radius: 50%; margin-left: 2px; flex-shrink: 0; }
     </style>
     """
   end
@@ -1100,5 +1176,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp format_history_time(dt) do
     Calendar.strftime(dt, "%b %d, %Y at %H:%M:%S")
+  end
+
+  defp generate_user_id do
+    :crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower)
+  end
+
+  @presence_colors ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316)
+  defp pick_color(user_id) do
+    index = :erlang.phash2(user_id, length(@presence_colors))
+    Enum.at(@presence_colors, index)
+  end
+
+  defp presences_on_doc(presences, doc_id) do
+    Enum.filter(presences, &(&1.doc_id == doc_id))
   end
 end

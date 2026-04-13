@@ -14,6 +14,7 @@ defmodule Barkpark.Application do
       {Phoenix.PubSub, name: Barkpark.PubSub},
       # Start a worker by calling: Barkpark.Worker.start_link(arg)
       # {Barkpark.Worker, arg},
+      BarkparkWeb.Presence,
       # Start to serve requests, typically the last entry
       BarkparkWeb.Endpoint
     ]
