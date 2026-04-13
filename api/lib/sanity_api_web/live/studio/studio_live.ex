@@ -121,14 +121,17 @@ defmodule SanityApiWeb.Studio.StudioLive do
         "status" => Map.get(params, "status", doc.status),
         "content" => content
       }
+      IO.inspect(%{title_from_params: attrs["title"], doc_id: attrs["doc_id"]}, label: "AUTOSAVE")
       case Content.upsert_document(type, attrs, @dataset) do
         {:ok, saved_doc} ->
+          IO.inspect(%{saved_title: saved_doc.title, saved_id: saved_doc.doc_id}, label: "SAVED")
           # Rebuild panes first (updates doc list), then restore form to keep user input
           {:noreply, socket
            |> assign(editor_doc: saved_doc, editor_is_draft: Content.draft?(saved_doc.doc_id))
            |> rebuild_panes()
            |> assign(editor_form: params, save_status: "Saved")}
-        {:error, _} ->
+        {:error, cs} ->
+          IO.inspect(cs, label: "SAVE_ERROR")
           {:noreply, assign(socket, save_status: "Save failed")}
       end
     else
