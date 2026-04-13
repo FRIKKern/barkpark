@@ -77,14 +77,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   def render(assigns) do
     ~H"""
     <div class="tester-wrapper">
-      <div class="tester-topbar">
-        <div class="tester-title">API Tester — /v1 contract</div>
-        <div class="tester-actions">
-          <.link navigate={~p"/studio"} class="tester-btn-link">&larr; Back to Studio</.link>
-          <button phx-click="run-all" class="tester-btn-primary">Run all</button>
-        </div>
-      </div>
-
       <div class="tester-body">
         <aside class="tester-sidebar">
           <%= for category <- @categories do %>
@@ -103,6 +95,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         </aside>
 
         <main class="tester-main">
+          <div class="tester-main-header">
+            <div class="tester-main-title">API Tester — /v1 contract</div>
+            <button phx-click="run-all" class="tester-btn-primary">Run all</button>
+          </div>
+
           <%= if tc = TestCases.find(@selected_id) do %>
             <div class="tester-case-header">
               <div>
@@ -175,16 +172,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     </div>
 
     <style>
-      .tester-wrapper { display: flex; flex-direction: column; height: 100vh; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
-      .tester-topbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); }
-      .tester-title { font-weight: 600; font-size: 14px; }
-      .tester-actions { display: flex; gap: 12px; align-items: center; }
-      .tester-btn-link { color: var(--fg-muted); font-size: 13px; text-decoration: none; }
-      .tester-btn-link:hover { color: var(--fg); }
+      .tester-wrapper { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
       .tester-btn-primary { background: var(--primary); color: var(--primary-fg); border: none; padding: 6px 14px; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: 500; }
       .tester-btn-primary:hover { opacity: 0.9; }
 
-      .tester-body { display: flex; flex: 1; overflow: hidden; }
+      .tester-body { display: flex; min-height: calc(100vh - 60px); }
+      .tester-main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+      .tester-main-title { font-weight: 600; font-size: 16px; }
 
       .tester-sidebar { width: 300px; border-right: 1px solid var(--border); overflow-y: auto; padding: 8px 0; background: var(--bg-subtle); }
       .tester-category-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 16px 6px; }
