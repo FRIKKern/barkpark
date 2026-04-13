@@ -661,40 +661,38 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="presence-bar" id="presence-hook" phx-hook="PresenceIdentity">
-      <div class="presence-bar-users">
-        <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
-        <%= for p <- others do %>
-          <% p_doc_title = resolve_presence_doc_title(p) %>
-          <%= if p.doc_id && p.type do %>
-            <div class="presence-user-wrap"
-                 phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
-              <div class="presence-avatar clickable" style={"background: #{p.color}"}>
-                <%= String.first(Map.get(p, :name, "U")) %>
-              </div>
-              <div class="presence-tooltip">
-                <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
-                <div class="presence-tooltip-location">editing <strong><%= p_doc_title %></strong></div>
-                <div class="presence-tooltip-hint">Click to jump there</div>
-              </div>
+    <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
+      <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
+      <%= for p <- others do %>
+        <% p_doc_title = resolve_presence_doc_title(p) %>
+        <%= if p.doc_id && p.type do %>
+          <div class="presence-user-wrap"
+               phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
+            <div class="presence-avatar clickable" style={"background: #{p.color}"}>
+              <%= String.first(Map.get(p, :name, "U")) %>
             </div>
-          <% else %>
-            <div class="presence-user-wrap">
-              <div class="presence-avatar" style={"background: #{p.color}"}>
-                <%= String.first(Map.get(p, :name, "U")) %>
-              </div>
-              <div class="presence-tooltip">
-                <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
-                <div class="presence-tooltip-location">browsing</div>
-              </div>
+            <div class="presence-tooltip">
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+              <div class="presence-tooltip-location">editing <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
+              <div class="presence-tooltip-hint">Click to jump there</div>
             </div>
-          <% end %>
+          </div>
+        <% else %>
+          <div class="presence-user-wrap">
+            <div class="presence-avatar" style={"background: #{p.color}"}>
+              <%= String.first(Map.get(p, :name, "U")) %>
+            </div>
+            <div class="presence-tooltip">
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+              <div class="presence-tooltip-location">browsing</div>
+            </div>
+          </div>
         <% end %>
-      </div>
+      <% end %>
       <div class="presence-me-group" phx-click="show-profile">
         <div class="presence-me-info">
           <span class="presence-me-name"><%= @user_name %></span>
-          <span class="presence-me-location"><%= if @editor_doc, do: "editing #{@editor_doc.title || "Untitled"}", else: "browsing" %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
         </div>
         <div class="presence-me" style={"background: #{@user_color}"}>
           <%= String.first(@user_name) %>
@@ -1166,12 +1164,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
 
       /* Presence */
-      .presence-bar {
-        display: flex; align-items: center; justify-content: flex-end; gap: 8px;
-        height: 40px; min-height: 40px; padding: 0 12px;
-        border-bottom: 1px solid var(--border-muted); background: var(--bg-card);
+      .presence-nav {
+        position: fixed; top: 0; right: 0; z-index: 40;
+        display: flex; align-items: center; gap: 4px;
+        height: 48px; padding: 0 12px;
       }
-      .presence-bar-users { display: flex; align-items: center; gap: -4px; margin-right: 8px; }
       .presence-avatar {
         width: 28px; height: 28px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
@@ -1409,6 +1406,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
       "browsing"
     end
   end
+
+  defp truncate_text(nil, _max), do: ""
+  defp truncate_text(text, max) when byte_size(text) <= max, do: text
+  defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
 
   defp presences_on_doc(presences, doc_id) do
     Enum.filter(presences, &(&1.doc_id == doc_id))
