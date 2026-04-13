@@ -254,7 +254,7 @@ Settings
 
 The desk structure is defined in two files that should stay in sync:
 
-**Elixir** (Web Studio): `api/lib/sanity_api/structure.ex` — the `build_desk_items/1` function.
+**Elixir** (Web Studio): `api/lib/barkpark/structure.ex` — the `build_desk_items/1` function.
 
 **Go** (TUI): `structure.go` — the `initRootStructure()` function.
 
@@ -420,12 +420,12 @@ barkpark/
   structure.go               Desk structure builder (mirrors Sanity)
   styles.go                  Lip Gloss terminal styles
   api/                       Phoenix backend
-    lib/sanity_api/
+    lib/barkpark/
       content.ex             Document + schema CRUD, publish
       structure.ex           Desk structure (mirrors Go)
       media.ex               File uploads
       auth.ex                Token auth (SHA256)
-    lib/sanity_api_web/
+    lib/barkpark_web/
       router.ex              Routes (API + Studio + Media)
       live/studio/
         studio_live.ex       Multi-pane desk (LiveView)

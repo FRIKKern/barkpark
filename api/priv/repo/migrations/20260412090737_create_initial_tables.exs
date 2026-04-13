@@ -1,4 +1,4 @@
-defmodule SanityApi.Repo.Migrations.CreateInitialTables do
+defmodule Barkpark.Repo.Migrations.CreateInitialTables do
   use Ecto.Migration
 
   def change do

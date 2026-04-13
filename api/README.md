@@ -1,4 +1,4 @@
-# SanityApi
+# Barkpark
 
 To start your Phoenix server:
 

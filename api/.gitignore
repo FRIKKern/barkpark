@@ -26,5 +26,5 @@ erl_crash.dump
 /uploads/
 
 # Ignore package tarball (built via "mix hex.build").
-sanity_api-*.tar
+barkpark-*.tar
 

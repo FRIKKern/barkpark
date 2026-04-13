@@ -1,6 +1,6 @@
-alias SanityApi.Repo
-alias SanityApi.Content.{Document, SchemaDefinition}
-alias SanityApi.Auth.ApiToken
+alias Barkpark.Repo
+alias Barkpark.Content.{Document, SchemaDefinition}
+alias Barkpark.Auth.ApiToken
 
 dataset = "production"
 

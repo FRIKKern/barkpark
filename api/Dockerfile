@@ -26,14 +26,14 @@ RUN apk add --no-cache libstdc++ openssl ncurses-libs
 
 WORKDIR /app
 
-COPY --from=build /app/_build/prod/rel/sanity_api ./
+COPY --from=build /app/_build/prod/rel/barkpark ./
 
 RUN mkdir -p /app/uploads
 
 ENV PHX_SERVER=true
 ENV PHX_HOST=localhost
 ENV PORT=4000
-ENV DATABASE_URL=ecto://postgres:postgres@db/sanity_api_prod
+ENV DATABASE_URL=ecto://postgres:postgres@db/barkpark_prod
 ENV SECRET_KEY_BASE=placeholder_will_be_overridden
 
 EXPOSE 4000

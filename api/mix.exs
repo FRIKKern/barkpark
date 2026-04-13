@@ -1,9 +1,9 @@
-defmodule SanityApi.MixProject do
+defmodule Barkpark.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :sanity_api,
+      app: :barkpark,
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -19,7 +19,7 @@ defmodule SanityApi.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {SanityApi.Application, []},
+      mod: {Barkpark.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end

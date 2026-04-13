@@ -2,10 +2,10 @@
 set -e
 
 # Run migrations
-bin/sanity_api eval "SanityApi.Release.migrate()"
+bin/barkpark eval "Barkpark.Release.migrate()"
 
 # Run seeds (idempotent — uses ON CONFLICT DO NOTHING)
-bin/sanity_api eval "SanityApi.Release.seed()"
+bin/barkpark eval "Barkpark.Release.seed()"
 
 # Start the server
-exec bin/sanity_api start
+exec bin/barkpark start

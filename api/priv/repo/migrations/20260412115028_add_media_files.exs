@@ -1,4 +1,4 @@
-defmodule SanityApi.Repo.Migrations.AddMediaFiles do
+defmodule Barkpark.Repo.Migrations.AddMediaFiles do
   use Ecto.Migration
 
   def change do

@@ -1,11 +1,11 @@
 import Config
 
 # Configure your database
-config :sanity_api, SanityApi.Repo,
+config :barkpark, Barkpark.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "sanity_api_dev",
+  database: "barkpark_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -16,7 +16,7 @@ config :sanity_api, SanityApi.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :sanity_api, SanityApiWeb.Endpoint,
+config :barkpark, BarkparkWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
@@ -50,7 +50,7 @@ config :sanity_api, SanityApiWeb.Endpoint,
 # different ports.
 
 # Enable dev routes for dashboard and mailbox
-config :sanity_api, dev_routes: true
+config :barkpark, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

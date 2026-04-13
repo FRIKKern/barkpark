@@ -16,16 +16,16 @@ mix run priv/repo/seeds.exs  # just reseed
 
 | File | Purpose |
 |------|---------|
-| `lib/sanity_api/content.ex` | Content context — all document + schema CRUD |
-| `lib/sanity_api/content/document.ex` | Document Ecto schema |
-| `lib/sanity_api/content/schema_definition.ex` | SchemaDefinition Ecto schema |
-| `lib/sanity_api/auth.ex` | Token auth context |
-| `lib/sanity_api_web/router.ex` | All routes |
-| `lib/sanity_api_web/controllers/mutate_controller.ex` | Mutation endpoint (create/patch/publish/unpublish/delete) |
-| `lib/sanity_api_web/controllers/query_controller.ex` | Public read endpoint with perspectives |
-| `lib/sanity_api_web/controllers/schema_controller.ex` | Schema CRUD |
-| `lib/sanity_api_web/controllers/legacy_controller.ex` | Go TUI backward compat |
-| `lib/sanity_api_web/controllers/listen_controller.ex` | SSE real-time stream |
+| `lib/barkpark/content.ex` | Content context — all document + schema CRUD |
+| `lib/barkpark/content/document.ex` | Document Ecto schema |
+| `lib/barkpark/content/schema_definition.ex` | SchemaDefinition Ecto schema |
+| `lib/barkpark/auth.ex` | Token auth context |
+| `lib/barkpark_web/router.ex` | All routes |
+| `lib/barkpark_web/controllers/mutate_controller.ex` | Mutation endpoint (create/patch/publish/unpublish/delete) |
+| `lib/barkpark_web/controllers/query_controller.ex` | Public read endpoint with perspectives |
+| `lib/barkpark_web/controllers/schema_controller.ex` | Schema CRUD |
+| `lib/barkpark_web/controllers/legacy_controller.ex` | Go TUI backward compat |
+| `lib/barkpark_web/controllers/listen_controller.ex` | SSE real-time stream |
 | `priv/repo/seeds.exs` | Seed data (8 schemas, 27 docs, dev token) |
 
 ## Draft/Published model

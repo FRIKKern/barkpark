@@ -7,19 +7,19 @@
 # General application configuration
 import Config
 
-config :sanity_api,
-  ecto_repos: [SanityApi.Repo],
+config :barkpark,
+  ecto_repos: [Barkpark.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
 # Configure the endpoint
-config :sanity_api, SanityApiWeb.Endpoint,
+config :barkpark, BarkparkWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: SanityApiWeb.ErrorHTML, json: SanityApiWeb.ErrorJSON],
+    formats: [html: BarkparkWeb.ErrorHTML, json: BarkparkWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: SanityApi.PubSub,
+  pubsub_server: Barkpark.PubSub,
   live_view: [signing_salt: "MXGKAyTI"]
 
 # Configure Elixir's Logger

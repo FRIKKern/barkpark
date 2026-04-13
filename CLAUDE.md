@@ -12,7 +12,7 @@ A headless CMS with three interfaces:
 ## Golden Rules
 
 1. **NEVER compile without cleaning first.** Always `rm -rf api/_build/prod` before `mix compile` on the server. Use `make rebuild`.
-2. **NEVER partially clean.** Cleaning just `lib/sanity_api` leaves stale HEEx templates. Nuke the entire `_build/prod`.
+2. **NEVER partially clean.** Cleaning just `lib/barkpark` leaves stale HEEx templates. Nuke the entire `_build/prod`.
 3. **NEVER skip `systemctl restart`** after compiling. The old BEAM process stays in memory.
 4. **NEVER add blocking `<script>` in `<head>`** in root.html.heex. Use `async` at the bottom. (Lucide was 400KB blocking and killed page load.)
 5. **NEVER use `force_ssl` without HTTPS.** It causes 301 redirect loops. Currently disabled in prod.exs.
@@ -148,14 +148,14 @@ barkpark/
 ├── structure.go         # Auto-generate nav tree from schemas
 ├── styles.go            # Lip Gloss styles
 ├── api/                 # Phoenix API + Web Studio
-│   ├── lib/sanity_api/
+│   ├── lib/barkpark/
 │   │   ├── content.ex           # Document + schema CRUD, publish, perspectives
 │   │   ├── content/document.ex  # Ecto document schema
 │   │   ├── content/schema_definition.ex
 │   │   ├── structure.ex         # Navigation tree builder
 │   │   ├── media.ex             # File upload/storage
 │   │   └── auth.ex              # Token verification
-│   ├── lib/sanity_api_web/
+│   ├── lib/barkpark_web/
 │   │   ├── router.ex            # All routes (API + Studio + Media)
 │   │   ├── layouts/root.html.heex  # HTML shell, CSS, CDN scripts
 │   │   ├── layouts/app.html.heex   # Top bar (permanent)
@@ -212,7 +212,7 @@ PostgreSQL with tables: `documents`, `schema_definitions`, `api_tokens`, `media_
 
 ## Past Mistakes (NEVER REPEAT)
 
-1. **Partial _build clean** — Cleaned `_build/prod/lib/sanity_api` only. HEEx templates in Layouts module stayed stale. Old HTML served for hours.
+1. **Partial _build clean** — Cleaned `_build/prod/lib/barkpark` only. HEEx templates in Layouts module stayed stale. Old HTML served for hours.
 2. **Missing deps.compile --force** — `Plug.Exception` module undefined at runtime. Must force-recompile deps after nuking _build.
 3. **Forgot systemctl restart** — Compiled new code but old BEAM process still running in memory.
 4. **Wrong start.sh path** — systemd service pointed to `/opt/barkpark/start.sh` but file was at `api/start.sh`. Process died silently.
