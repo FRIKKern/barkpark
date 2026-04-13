@@ -123,6 +123,7 @@ defmodule Barkpark.Content do
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
+      |> Map.put("rev", generate_rev())
 
     case get_document(doc_id, type, dataset) do
       {:ok, existing} ->
@@ -156,7 +157,8 @@ defmodule Barkpark.Content do
           "dataset" => dataset,
           "title" => draft.title,
           "status" => "published",
-          "content" => draft.content
+          "content" => draft.content,
+          "rev" => generate_rev()
         }
 
         pub_result =
@@ -197,7 +199,8 @@ defmodule Barkpark.Content do
           "dataset" => dataset,
           "title" => pub.title,
           "status" => "draft",
-          "content" => pub.content
+          "content" => pub.content,
+          "rev" => generate_rev()
         }
 
         draft_result =
@@ -288,7 +291,7 @@ defmodule Barkpark.Content do
         {:ok, doc} ->
           updated_content = Map.delete(doc.content || %{}, field)
           doc
-          |> Document.changeset(%{"content" => updated_content})
+          |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
           |> Repo.update()
           |> tap_broadcast(dataset, type)
         _ -> :ok
@@ -298,6 +301,10 @@ defmodule Barkpark.Content do
 
   defp generate_id(type) do
     "#{type}-#{:rand.uniform(999_999)}"
+  end
+
+  defp generate_rev do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
 
   # ── Legacy upsert (for backward compat) ───────────────────────────────────
@@ -310,6 +317,7 @@ defmodule Barkpark.Content do
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
+      |> Map.put("rev", generate_rev())
 
     case doc_id && get_document(doc_id, type, dataset) do
       {:ok, existing} ->
