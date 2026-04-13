@@ -11,20 +11,16 @@ A headless CMS inspired by Sanity. Three ways to manage content: a web Studio, a
 Multi-pane desk structure at `/studio` — drill into content types, filter by status, edit documents with autosave, publish/unpublish. Real-time updates across tabs via PubSub.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ ▣ Barkpark Studio                                               │
-├───────────┬──────────────┬──────────────┬───────────────────────┤
-│ Structure │ Post         │ All Post     │ Title                 │
-│───────────│──────────────│──────────────│ ┌───────────────────┐ │
-│ 📄 Post  ▸│ All Post     │ ● Getting S. │ │Getting Started    │ │
-│ 📑 Page   │──────────────│ ● Why Headl. │ └───────────────────┘ │
-│ 💼 Project│ Draft        │ ○ Content M. │                       │
-│───────────│ Published    │              │ Slug        string    │
-│ 👤 Author │ Archived     │              │ ┌───────────────────┐ │
-│ 🏷 Categor│              │              │ │getting-started    │ │
-│───────────│              │              │ └───────────────────┘ │
-│ ⚙ Setting│              │              │                       │
-└───────────┴──────────────┴──────────────┴───────────────────────┘
+ Structure    | Post         | All Post       | Editor
+--------------+--------------+----------------+---------------------
+ Post       > | All Post     | * Getting S..  | Title
+ Page         |--------------| * Why Headl..  | [Getting Started   ]
+ Project      | Draft        | o Content M..  |
+--------------| Published    |                | Slug        string
+ Author       | Archived     |                | [getting-started   ]
+ Category     |              |                |
+--------------+              |                |
+ Settings   > |              |                |
 ```
 
 ### Terminal TUI (Go + Bubble Tea)
@@ -73,14 +69,14 @@ Content types with a `status` field (Post, Project) get filtered sub-views autom
 
 ```
 Structure
-├── 📄 Post          → All Post / Draft / Published / Archived
-├── 📑 Page          → document list
-├── 💼 Project       → All Projects / Active / Planning / Completed
-├── ──────────
-├── 👤 Author        → document list
-├── 🏷 Category      → document list
-├── ──────────
-└── ⚙ Settings      → Site Settings / Navigation / Brand Colors (singletons)
+  Post             -> All Post / Draft / Published / Archived
+  Page             -> document list
+  Project          -> All Projects / Active / Planning / Completed
+  --------
+  Author           -> document list
+  Category         -> document list
+  --------
+  Settings         -> Site Settings / Navigation / Brand Colors (singletons)
 ```
 
 The desk structure is auto-generated from schemas. Add a new schema via the API and it appears in both the Web Studio and TUI.
@@ -146,7 +142,7 @@ curl -X POST localhost:4000/v1/schemas/production \
   -d '{
     "name": "event",
     "title": "Event",
-    "icon": "📅",
+    "icon": "calendar",
     "visibility": "public",
     "fields": [
       {"name": "title", "title": "Title", "type": "string"},
@@ -185,7 +181,7 @@ curl -X POST localhost:4000/v1/schemas/production \
   -d '{
     "name": "recipe",
     "title": "Recipe",
-    "icon": "🍳",
+    "icon": "recipe",
     "visibility": "public",
     "fields": [
       {"name": "title", "title": "Title", "type": "string"},
@@ -213,12 +209,12 @@ Any schema with a `status` field of type `select` automatically gets filtered su
 This produces:
 
 ```
-🍳 Recipe
-├── All Recipe
-├── ──────────
-├── Draft
-├── Published
-└── Archived
+Recipe
+  All Recipe
+  --------
+  Draft
+  Published
+  Archived
 ```
 
 Each sub-view only shows documents matching that status value.
@@ -234,7 +230,7 @@ curl -X POST localhost:4000/v1/schemas/production \
   -d '{
     "name": "footer",
     "title": "Footer",
-    "icon": "📎",
+    "icon": "link",
     "visibility": "private",
     "fields": [
       {"name": "copyright", "title": "Copyright Text", "type": "string"},
@@ -247,11 +243,11 @@ curl -X POST localhost:4000/v1/schemas/production \
 Result in desk structure:
 
 ```
-⚙ Settings
-├── ⚙ Site Settings
-├── 🧭 Navigation
-├── 🎨 Brand Colors
-└── 📎 Footer          ← new singleton
+Settings
+  Site Settings
+  Navigation
+  Brand Colors
+  Footer            <-- new singleton
 ```
 
 ### Customizing the desk structure
@@ -272,7 +268,7 @@ content_items ++
   [divider()] ++
   taxonomy_items ++
   [divider()] ++
-  [%Node{id: "media", title: "Media", icon: "📸", type: :list, items: [
+  [%Node{id: "media", title: "Media", icon: "camera", type: :list, items: [
     doc_type_list_item(schemas["photo"]),
     doc_type_list_item(schemas["video"])
   ]}] ++
@@ -284,7 +280,7 @@ content_items ++
 // In structure.go, initRootStructure():
 items = append(items, Divider())
 items = append(items,
-    ListItem().Title("Media").Icon("📸").Child(
+    ListItem().Title("Media").Icon("camera").Child(
         List().ID("media").Title("Media").Items(
             DocumentTypeListItem("photo"),
             DocumentTypeListItem("video"),
@@ -399,49 +395,46 @@ BARKPARK_API_URL=http://YOUR_VPS_IP:4000 BARKPARK_API_TOKEN=your-token go run .
 ## Architecture
 
 ```
-Browser / Apps              Server
-┌─────────────┐            ┌───────────────────────────┐
-│ Web Studio  │◄──WS/LV──►│ Phoenix      :4000        │
-│ (LiveView)  │            │ ├── LiveView Studio        │
-└─────────────┘            │ ├── REST API (CRUD)        │
-                           │ ├── SSE (real-time)         │
-┌─────────────┐            │ ├── Media uploads           │
-│ Go TUI      │◄──HTTP───►│ └── Schema management       │
-│ (Bubble Tea)│◄──SSE────►│                              │
-└─────────────┘            │ PostgreSQL                   │
-                           │ └── documents, schemas,      │
-┌─────────────┐            │     tokens, media            │
-│ Frontend /  │◄──HTTP───►│                              │
-│ Mobile App  │            │ Caddy (reverse proxy :80)    │
-└─────────────┘            └───────────────────────────────┘
+Clients                        Server
+                               Phoenix :4000
+Web Studio  ---WebSocket--->     LiveView Studio
+Go TUI      ---HTTP/SSE---->     REST API (CRUD + SSE)
+Frontend    ---HTTP GET----->    Public query API
+                                 Media uploads
+                                 Schema management
+
+                               PostgreSQL
+                                 documents, schemas, tokens, media
+
+                               Caddy :80 -> localhost:4000
 ```
 
 ## Project Structure
 
 ```
 barkpark/
-├── main.go                  # TUI entry point
-├── tui.go                   # Bubble Tea multi-pane UI + editor
-├── store.go                 # HTTP + SSE API client
-├── schema.go                # Schema types, loaded from API
-├── structure.go             # Desk structure builder (mirrors Sanity)
-├── styles.go                # Lip Gloss terminal styles
-├── api/                     # Phoenix backend
-│   ├── lib/sanity_api/
-│   │   ├── content.ex           # Document + schema CRUD, publish
-│   │   ├── structure.ex         # Desk structure (mirrors Go)
-│   │   ├── media.ex             # File uploads
-│   │   └── auth.ex              # Token auth (SHA256)
-│   ├── lib/sanity_api_web/
-│   │   ├── router.ex            # Routes (API + Studio + Media)
-│   │   ├── live/studio/
-│   │   │   └── studio_live.ex   # Multi-pane desk (LiveView)
-│   │   └── controllers/         # Query, Mutate, Schema, Listen, Media
-│   ├── priv/repo/seeds.exs      # 8 schemas, sample docs, dev token
-│   └── start.sh                 # Systemd wrapper
-├── deploy.sh                # VPS setup script
-├── Makefile                 # All operations
-└── CLAUDE.md                # Agent guide
+  main.go                    TUI entry point
+  tui.go                     Bubble Tea multi-pane UI + editor
+  store.go                   HTTP + SSE API client
+  schema.go                  Schema types, loaded from API
+  structure.go               Desk structure builder (mirrors Sanity)
+  styles.go                  Lip Gloss terminal styles
+  api/                       Phoenix backend
+    lib/sanity_api/
+      content.ex             Document + schema CRUD, publish
+      structure.ex           Desk structure (mirrors Go)
+      media.ex               File uploads
+      auth.ex                Token auth (SHA256)
+    lib/sanity_api_web/
+      router.ex              Routes (API + Studio + Media)
+      live/studio/
+        studio_live.ex       Multi-pane desk (LiveView)
+      controllers/           Query, Mutate, Schema, Listen, Media
+    priv/repo/seeds.exs      8 schemas, sample docs, dev token
+    start.sh                 Systemd wrapper
+  deploy.sh                  VPS setup script
+  Makefile                   All operations
+  CLAUDE.md                  Agent guide
 ```
 
 ## Tech Stack
