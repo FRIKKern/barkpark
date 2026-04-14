@@ -202,6 +202,7 @@ defmodule BarkparkWeb.StudioComponents do
   """
   attr :phx_click, :string, required: true
   attr :phx_value_id, :string, required: true
+  attr :phx_value_pane, :string, default: nil
   attr :selected, :boolean, default: false
   attr :id, :string, default: nil
 
@@ -216,6 +217,7 @@ defmodule BarkparkWeb.StudioComponents do
       id={@id}
       phx-click={@phx_click}
       phx-value-id={@phx_value_id}
+      phx-value-pane={@phx_value_pane}
       class={["pane-item", @selected && "selected"] |> Enum.filter(& &1) |> Enum.join(" ")}
     >
       <%= if @icon != [] do %>

@@ -244,6 +244,29 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
 
       assert html =~ ~s(id="item-x")
     end
+
+    test "phx_value_pane is forwarded when provided" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          phx_value_pane: "2",
+          inner_block: [%{inner_block: fn _, _ -> "Label" end}]
+        })
+
+      assert html =~ ~s(phx-value-pane="2")
+    end
+
+    test "phx_value_pane is omitted when not provided" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          inner_block: [%{inner_block: fn _, _ -> "Label" end}]
+        })
+
+      refute html =~ ~s(phx-value-pane=")
+    end
   end
 
   describe "pane_doc_item/1" do
