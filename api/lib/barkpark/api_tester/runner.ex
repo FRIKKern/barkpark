@@ -7,8 +7,6 @@ defmodule Barkpark.ApiTester.Runner do
   predicate-based pass/fail verdict so the UI can colour results.
   """
 
-  alias Barkpark.ApiTester.TestCases
-
   @default_base "http://localhost:4000"
 
   @doc """
@@ -24,15 +22,8 @@ defmodule Barkpark.ApiTester.Runner do
     - `verdict_reason` — short human string
     - `request`     — echoed back for display (url/method/headers/body_text)
   """
-  @spec run(String.t() | map(), keyword()) :: map()
-  def run(id, opts \\ [])
-
-  def run(id, opts) when is_binary(id) do
-    case TestCases.find(id) do
-      nil -> %{verdict: :error, verdict_reason: "unknown test id: #{id}"}
-      tc -> run(tc, opts)
-    end
-  end
+  @spec run(map(), keyword()) :: map()
+  def run(tc, opts \\ [])
 
   def run(%{} = tc, opts) do
     base = Keyword.get(opts, :base, @default_base)
