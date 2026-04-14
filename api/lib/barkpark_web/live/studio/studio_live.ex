@@ -824,76 +824,86 @@ defmodule BarkparkWeb.Studio.StudioLive do
       </div>
     <% end %>
 
-    <div class="pane-layout" id="studio-panes">
+    <.pane_layout id="studio-panes">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
         <% collapsed = collapse_pane?(idx, num_panes, has_editor) %>
-        <%= if collapsed do %>
-          <div
-            class="pane-column pane-column--collapsed"
-            id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
-            phx-click="expand-pane"
-            phx-value-idx={idx}
-            title={"Back to #{pane.title}"}
-          >
-            <div class="pane-header">
-              <.icon name="chevron-right" size={12} />
-            </div>
-            <div class="pane-column-collapsed-label"><%= pane.title %></div>
-          </div>
-        <% else %>
-        <div class="pane-column" id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}>
-          <div class="pane-header">
-            <span class="pane-header-title"><%= pane.title %></span>
+        <.pane_column
+          id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
+          title={pane.title}
+          collapsed={collapsed}
+          phx_click={if collapsed, do: "expand-pane", else: nil}
+          phx_value_idx={if collapsed, do: "#{idx}", else: nil}
+        >
+          <:header_actions>
             <%= if pane[:type_name] do %>
-              <button class="pane-add-btn" phx-click="new-document" phx-value-type={pane.type_name}><.icon name="plus" size={14} /></button>
+              <button
+                class="pane-add-btn"
+                phx-click="new-document"
+                phx-value-type={pane.type_name}
+              ><.icon name="plus" size={14} /></button>
             <% end %>
-          </div>
+          </:header_actions>
+
           <div class="pane-body">
             <%= for item <- pane.items do %>
               <%= case item.type do %>
                 <% :divider -> %>
-                  <div class="pane-divider"></div>
+                  <.pane_divider />
+
                 <% :header -> %>
-                  <div class="pane-section-header"><.icon name={item.icon} size={12} /> <%= item.title %></div>
+                  <.pane_section_header>
+                    <.icon name={item.icon} size={12} /> <%= item.title %>
+                  </.pane_section_header>
+
                 <% :doc -> %>
-                  <div
+                  <% item_presences = presences_on_doc(@presences, item.id) %>
+                  <.pane_doc_item
                     id={"doc-#{item.id}"}
-                    class={"pane-doc-item #{if item.id == pane[:selected], do: "selected"}"}
-                    phx-click="select" phx-value-pane={idx} phx-value-id={item.id}
+                    phx_click="select"
+                    phx_value_pane={"#{idx}"}
+                    phx_value_id={item.id}
+                    title={item.title}
+                    doc_id={item.id}
+                    status={item.status || ""}
+                    is_draft={item.is_draft}
+                    selected={item.id == pane[:selected]}
                   >
-                    <div class="pane-doc-title">
-                      <span class={"pane-doc-dot #{if item.is_draft, do: "draft", else: item.status}"}></span>
-                      <%= item.title %>
-                      <% item_presences = presences_on_doc(@presences, item.id) %>
-                      <%= if item_presences != [] do %>
-                        <%= for p <- item_presences do %>
-                          <span class="presence-dot-sm" style={"background: #{p.color}"}></span>
-                        <% end %>
+                    <:trailing>
+                      <%= for p <- item_presences do %>
+                        <span class="presence-dot-sm" style={"background: #{p.color}"}></span>
                       <% end %>
-                    </div>
-                    <div class="pane-doc-id"><%= item.id %></div>
-                  </div>
+                    </:trailing>
+                  </.pane_doc_item>
+
                 <% _ -> %>
-                  <div
+                  <.pane_item
                     id={"item-#{item.id}"}
-                    class={"pane-item #{if item.id == pane[:selected], do: "selected"}"}
-                    phx-click="select" phx-value-pane={idx} phx-value-id={item.id}
+                    phx_click="select"
+                    phx_value_id={item.id}
+                    phx_value_pane={"#{idx}"}
+                    selected={item.id == pane[:selected]}
                   >
-                    <span class="pane-item-icon"><.icon name={item.icon} size={16} /></span>
-                    <span class="pane-item-label"><%= item.title %></span>
-                    <%= if item[:drillable] do %>
-                      <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
-                    <% end %>
-                  </div>
+                    <:icon><.icon name={item.icon} size={16} /></:icon>
+                    <%= item.title %>
+                    <:trailing>
+                      <%= if item[:drillable] do %>
+                        <.icon name="chevron-right" size={14} />
+                      <% end %>
+                    </:trailing>
+                  </.pane_item>
               <% end %>
             <% end %>
           </div>
-        </div>
-        <% end %>
+        </.pane_column>
       <% end %>
 
+      <!-- TODO: editor column is hand-rolled because its header merges
+           pane-header with editor-header and has presence dots + publish
+           buttons. Migrating cleanly requires a custom-header slot on
+           pane_column that fully replaces the default title row. See
+           docs/superpowers/plans/2026-04-14-unified-pane-components.md. -->
       <!-- Editor -->
       <%= if @editor_doc do %>
         <div class="editor-panel">
@@ -1102,7 +1112,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           </div>
         </div>
       <% end %>
-    </div>
+    </.pane_layout>
 
     <style>
       /* Pane layout classes (.pane-layout, .pane-column, .pane-header,
