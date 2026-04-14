@@ -196,11 +196,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     id = "#{type}-#{:rand.uniform(999_999)}"
     case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, socket.assigns.dataset) do
       {:ok, doc} ->
-        # Find the pane that owns this type and build path from there
+        # The + button lives on the doc-list pane (a :document_type_list
+        # node that carries type_name). We just append the new doc's
+        # published id to the current nav path — this keeps any parent
+        # filter view (e.g. "post/post-all") intact so walk_path can
+        # resolve the editor. The old take_while logic dropped the
+        # filter segment and produced a dead /post/<id> URL.
         pub_id = Content.published_id(doc.doc_id)
-        path = socket.assigns.nav_path
-        # The type pane is the last path segment before the doc
-        new_path = Enum.take_while(path, &(&1 != type)) ++ [type, pub_id]
+        new_path = socket.assigns.nav_path ++ [pub_id]
         {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
