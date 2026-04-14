@@ -1,11 +1,11 @@
 defmodule BarkparkWeb.Studio.ApiTesterLive do
   @moduledoc """
-  Studio pane: interactive v1 API contract tester.
+  Studio pane: interactive v1 API Docs + Playground.
 
-  Left column: endpoint list grouped by category, plus "Run all".
-  Right column: request preview (editable body), Run button, and the full
-  response (status, duration, headers, pretty JSON body) with a pass/fail
-  badge driven by `Barkpark.ApiTester.Runner`'s predicate checks.
+  Three-column layout:
+  - Left sidebar: endpoint list grouped by category
+  - Centre: docs (description, params, response shape) + form-driven playground
+  - Right: last response (status, duration, headers, pretty JSON body) with pass/fail badge
 
   Dispatch is server-side via :httpc — the requests hit the same Phoenix
   endpoint that is serving this LiveView, so network/TLS/CORS specifics
@@ -20,7 +20,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
     endpoints = Endpoints.all(dataset)
-    first = List.first(endpoints) || %{id: nil}
+    selected = List.first(endpoints) || %{id: nil}
+
+    form_state_by_id =
+      endpoints
+      |> Enum.filter(&(&1.kind == :endpoint))
+      |> Enum.into(%{}, fn ep -> {ep.id, initial_form_state(ep)} end)
 
     {:ok,
      assign(socket,
@@ -28,36 +33,86 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
-       selected_id: first.id,
-       custom_body: "",
-       last_result: nil,
-       running: false,
-       results_by_id: %{}
+       selected_id: selected.id,
+       token: "barkpark-dev-token",
+       form_state_by_id: form_state_by_id,
+       last_result_by_id: %{}
      )}
+  end
+
+  defp initial_form_state(%{kind: :reference}), do: %{}
+
+  defp initial_form_state(endpoint) do
+    body_text =
+      if endpoint[:body_example], do: Jason.encode!(endpoint.body_example, pretty: true), else: ""
+
+    path_values =
+      Enum.into(endpoint.path_params || [], %{}, fn %{name: name, default: default} ->
+        {name, to_string(default)}
+      end)
+
+    query_values =
+      Enum.into(endpoint.query_params || [], %{}, fn %{name: name, default: default} ->
+        {name, to_string(default)}
+      end)
+
+    path_values
+    |> Map.merge(query_values)
+    |> Map.put("_body_text", body_text)
   end
 
   @impl true
   def handle_event("select", %{"id" => id}, socket) do
-    ep = Endpoints.find(socket.assigns.dataset, id)
-    default_body = if ep && ep[:body_example], do: Jason.encode!(ep.body_example, pretty: true), else: ""
-    {:noreply, assign(socket, selected_id: id, custom_body: default_body, last_result: nil)}
+    endpoint = Endpoints.find(socket.assigns.dataset, id)
+
+    # Seed form state lazily if this is the first time selecting this endpoint
+    form_state =
+      Map.get_lazy(socket.assigns.form_state_by_id, id, fn ->
+        initial_form_state(endpoint)
+      end)
+
+    new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, form_state)
+
+    {:noreply, assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id)}
   end
 
-  def handle_event("body-edit", %{"custom_body" => body}, socket) do
-    {:noreply, assign(socket, custom_body: body)}
+  def handle_event("form-change", params, socket) do
+    id = socket.assigns.selected_id
+    current = Map.get(socket.assigns.form_state_by_id, id, %{})
+    # Merge new form params on top, keeping existing ones for fields not in this event
+    updated = Map.merge(current, Map.drop(params, ["_target"]))
+    new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, updated)
+    {:noreply, assign(socket, form_state_by_id: new_form_state_by_id)}
+  end
+
+  def handle_event("token-change", %{"token" => token}, socket) do
+    {:noreply, assign(socket, token: token)}
   end
 
   def handle_event("run", _, socket) do
-    ep = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
+    endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
 
-    result =
-      case ep_to_legacy_case(ep, socket.assigns.dataset, "barkpark-dev-token") do
-        nil -> %{verdict: :error, verdict_reason: "Reference pages can't be Run"}
-        legacy -> Runner.run(legacy)
+    new_results =
+      if endpoint.kind == :reference do
+        socket.assigns.last_result_by_id
+      else
+        form_state = Map.get(socket.assigns.form_state_by_id, endpoint.id, %{})
+        req = Runner.build_request(endpoint, form_state, %{token: socket.assigns.token, base: "http://localhost:4000"})
+
+        legacy = %{
+          id: endpoint.id,
+          method: req.method,
+          path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+          headers: req.headers,
+          body: decode_body(req.body_text),
+          expect: endpoint[:expect]
+        }
+
+        result = Runner.run(legacy)
+        Map.put(socket.assigns.last_result_by_id, endpoint.id, result)
       end
 
-    new_results = Map.put(socket.assigns.results_by_id, socket.assigns.selected_id, result)
-    {:noreply, assign(socket, last_result: result, results_by_id: new_results)}
+    {:noreply, assign(socket, last_result_by_id: new_results)}
   end
 
   def handle_event("run-all", _, socket) do
@@ -65,156 +120,272 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       socket.assigns.endpoints
       |> Enum.filter(&(&1.kind == :endpoint && &1[:expect] != nil))
       |> Enum.reduce(%{}, fn ep, acc ->
-        legacy = ep_to_legacy_case(ep, socket.assigns.dataset, "barkpark-dev-token")
+        form_state = Map.get(socket.assigns.form_state_by_id, ep.id, initial_form_state(ep))
+        req = Runner.build_request(ep, form_state, %{token: socket.assigns.token, base: "http://localhost:4000"})
+        legacy = %{
+          id: ep.id, method: req.method,
+          path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+          headers: req.headers, body: decode_body(req.body_text), expect: ep.expect
+        }
         Map.put(acc, ep.id, Runner.run(legacy))
       end)
 
-    {:noreply, assign(socket, results_by_id: results, last_result: results[socket.assigns.selected_id])}
+    {:noreply, assign(socket, last_result_by_id: results)}
+  end
+
+  defp decode_body(nil), do: nil
+  defp decode_body(""), do: nil
+  defp decode_body(text) do
+    case Jason.decode(text) do
+      {:ok, decoded} -> decoded
+      _ -> nil
+    end
   end
 
   # ── render ────────────────────────────────────────────────────────────
 
   @impl true
   def render(assigns) do
+    endpoint = Endpoints.find(assigns.dataset, assigns.selected_id)
+    form_state = Map.get(assigns.form_state_by_id, assigns.selected_id, %{})
+    last_result = Map.get(assigns.last_result_by_id, assigns.selected_id)
+
+    assigns =
+      assigns
+      |> assign(:endpoint, endpoint)
+      |> assign(:form_state, form_state)
+      |> assign(:last_result, last_result)
+
     ~H"""
     <div class="tester-wrapper">
+      <div class="tester-topbar">
+        <div class="tester-topbar-title">API Docs + Playground — /v1 contract</div>
+        <form phx-change="token-change" class="tester-token-form">
+          <label class="tester-token-label">Token</label>
+          <input type="text" name="token" value={@token} class="tester-token-input" phx-debounce="300" />
+        </form>
+        <button phx-click="run-all" class="tester-btn-primary">Run all</button>
+      </div>
+
       <div class="tester-body">
         <aside class="tester-sidebar">
           <%= for category <- @categories do %>
             <div class="tester-category-title"><%= category %></div>
-            <%= for tc <- Enum.filter(@endpoints, &(&1.category == category)) do %>
+            <%= for ep <- Enum.filter(@endpoints, &(&1.category == category)) do %>
               <button
                 phx-click="select"
-                phx-value-id={tc.id}
-                class={"tester-case-row #{if @selected_id == tc.id, do: "is-selected"}"}
+                phx-value-id={ep.id}
+                class={"tester-case-row #{if @selected_id == ep.id, do: "is-selected"}"}
               >
-                <span class="tester-case-row-label"><%= tc.label %></span>
-                <%= render_verdict_badge(Map.get(@results_by_id, tc.id)) %>
+                <span class="tester-case-row-label"><%= ep.label %></span>
+                <%= render_verdict_badge(Map.get(@last_result_by_id, ep.id)) %>
               </button>
             <% end %>
           <% end %>
         </aside>
 
-        <main class="tester-main">
-          <div class="tester-main-header">
-            <div class="tester-main-title">API Tester — /v1 contract</div>
-            <button phx-click="run-all" class="tester-btn-primary">Run all</button>
-          </div>
-
-          <%= if tc = Endpoints.find(@dataset, @selected_id) do %>
-            <div class="tester-case-header">
-              <div>
-                <%= if tc[:method] do %>
-                  <div class="tester-case-method-row">
-                    <span class={"tester-method tester-method-#{String.downcase(tc.method)}"}><%= tc.method %></span>
-                    <span class="tester-url"><%= tc.path_template %></span>
-                  </div>
-                <% end %>
-                <div class="tester-case-desc"><%= tc.description %></div>
-              </div>
-              <button phx-click="run" class="tester-btn-primary">Run</button>
-            </div>
-
-            <%= if tc[:body_example] do %>
-              <div class="tester-section-title">Body (editable)</div>
-              <form phx-change="body-edit">
-                <textarea
-                  name="custom_body"
-                  class="tester-body-editor"
-                  rows="8"
-                  spellcheck="false"
-                ><%= @custom_body %></textarea>
-              </form>
-            <% end %>
-
-            <%= if @last_result do %>
-              <div class="tester-divider"></div>
-              <div class="tester-result-header">
-                <div class="tester-result-title">Response</div>
-                <div class="tester-result-meta">
-                  <span class={"tester-badge tester-badge-#{@last_result.verdict}"}>
-                    <%= @last_result.verdict |> to_string() |> String.upcase() %>
-                  </span>
-                  <span class="tester-status">HTTP <%= @last_result.status %></span>
-                  <span class="tester-duration"><%= @last_result.duration_ms %>ms</span>
-                </div>
-              </div>
-
-              <div class="tester-verdict-reason"><%= @last_result.verdict_reason %></div>
-
-              <div class="tester-section-title">Response headers</div>
-              <div class="tester-headers">
-                <%= for {k, v} <- @last_result.headers do %>
-                  <div class="tester-header-row">
-                    <span class="tester-header-name"><%= k %></span>
-                    <span class="tester-header-value"><%= v %></span>
-                  </div>
-                <% end %>
-              </div>
-
-              <div class="tester-section-title">Response body</div>
-              <pre class="tester-body-view"><%= format_body(@last_result) %></pre>
-            <% end %>
-          <% else %>
-            <div class="tester-empty">Select an endpoint on the left.</div>
+        <section class="tester-docs">
+          <%= cond do %>
+            <% @endpoint == nil -> %>
+              <div class="tester-empty">Select an endpoint on the left.</div>
+            <% @endpoint.kind == :reference -> %>
+              <%= render_reference(assigns, @endpoint.render_key) %>
+            <% true -> %>
+              <.endpoint_docs endpoint={@endpoint} />
+              <.endpoint_playground endpoint={@endpoint} form_state={@form_state} />
           <% end %>
-        </main>
+        </section>
+
+        <section class="tester-response">
+          <%= if @last_result do %>
+            <.response_view result={@last_result} />
+          <% else %>
+            <div class="tester-empty">No response yet. Click <strong>Run</strong>.</div>
+          <% end %>
+        </section>
       </div>
     </div>
 
     <style>
       .tester-wrapper { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+      .tester-topbar { display: flex; gap: 16px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); }
+      .tester-topbar-title { font-weight: 600; font-size: 14px; flex: 1; }
+      .tester-token-form { display: flex; gap: 6px; align-items: center; }
+      .tester-token-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fg-muted); font-weight: 600; }
+      .tester-token-input { width: 260px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: "SF Mono", ui-monospace, monospace; }
       .tester-btn-primary { background: var(--primary); color: var(--primary-fg); border: none; padding: 6px 14px; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: 500; }
       .tester-btn-primary:hover { opacity: 0.9; }
 
-      .tester-body { display: flex; min-height: calc(100vh - 60px); }
-      .tester-main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-      .tester-main-title { font-weight: 600; font-size: 16px; }
-
-      .tester-sidebar { width: 300px; border-right: 1px solid var(--border); overflow-y: auto; padding: 8px 0; background: var(--bg-subtle); }
+      .tester-body { display: grid; grid-template-columns: 260px 1fr 1fr; min-height: calc(100vh - 110px); }
+      .tester-sidebar { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px 0; background: var(--bg-subtle); }
       .tester-category-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 16px 6px; }
       .tester-case-row { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: none; text-align: left; padding: 8px 16px; font-size: 13px; color: var(--fg); cursor: pointer; gap: 8px; }
       .tester-case-row:hover { background: var(--bg-hover); }
       .tester-case-row.is-selected { background: var(--bg-active); color: var(--fg); font-weight: 500; }
       .tester-case-row-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-      .tester-main { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 1000px; }
-      .tester-case-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
-      .tester-case-method-row { display: flex; align-items: center; gap: 10px; font-family: "SF Mono", ui-monospace, monospace; }
+      .tester-docs { border-right: 1px solid var(--border); padding: 24px 32px; overflow-y: auto; }
+      .tester-response { padding: 24px 32px; overflow-y: auto; }
+
+      .tester-method-row { display: flex; align-items: center; gap: 10px; font-family: "SF Mono", ui-monospace, monospace; margin-bottom: 10px; }
       .tester-method { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
       .tester-method-get { background: hsl(210 80% 90%); color: hsl(210 80% 30%); }
       .tester-method-post { background: hsl(140 60% 88%); color: hsl(140 60% 28%); }
-      .tester-method-put, .tester-method-patch { background: hsl(40 80% 88%); color: hsl(40 80% 28%); }
-      .tester-method-delete { background: hsl(0 80% 90%); color: hsl(0 80% 35%); }
       .tester-url { font-size: 13px; color: var(--fg); word-break: break-all; }
-      .tester-case-desc { font-size: 12px; color: var(--fg-muted); margin-top: 6px; }
+      .tester-auth-badge { display: inline-block; padding: 2px 8px; font-size: 10px; border-radius: 999px; letter-spacing: 0.4px; font-weight: 600; text-transform: uppercase; }
+      .tester-auth-public { background: hsl(140 60% 90%); color: hsl(140 70% 28%); }
+      .tester-auth-token { background: hsl(40 80% 88%); color: hsl(40 80% 30%); }
+      .tester-auth-admin { background: hsl(280 60% 90%); color: hsl(280 60% 35%); }
 
-      .tester-section-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 0 6px; }
-      .tester-headers { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; }
-      .tester-header-row { display: flex; gap: 12px; padding: 2px 0; }
-      .tester-header-name { color: var(--fg-muted); min-width: 160px; }
-      .tester-header-value { color: var(--fg); word-break: break-all; }
+      .tester-section-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 0 8px; }
 
-      .tester-body-editor { width: 100%; font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; background: var(--bg-subtle); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; resize: vertical; }
+      .tester-param-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .tester-param-table th, .tester-param-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+      .tester-param-table th { color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; }
+      .tester-param-table code { font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; }
 
-      .tester-divider { height: 1px; background: var(--border); margin: 24px 0; }
-      .tester-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-      .tester-result-title { font-weight: 600; font-size: 14px; }
-      .tester-result-meta { display: flex; gap: 10px; align-items: center; font-size: 12px; }
-      .tester-status { font-family: "SF Mono", ui-monospace, monospace; color: var(--fg-muted); }
-      .tester-duration { color: var(--fg-muted); }
+      .tester-playground { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 16px 0; }
+      .tester-playground-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+      .tester-playground-row label { width: 140px; font-size: 11px; color: var(--fg-muted); font-family: "SF Mono", ui-monospace, monospace; }
+      .tester-playground-row input, .tester-playground-row select { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; }
+      .tester-playground-body { width: 100%; min-height: 160px; font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 8px; resize: vertical; margin-top: 6px; box-sizing: border-box; }
+      .tester-playground-actions { display: flex; gap: 10px; margin-top: 12px; }
+
+      .tester-response-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
       .tester-badge { padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
       .tester-badge-pass { background: hsl(140 60% 90%); color: hsl(140 70% 25%); }
       .tester-badge-fail { background: hsl(0 70% 92%); color: hsl(0 70% 35%); }
       .tester-badge-error { background: hsl(40 80% 90%); color: hsl(40 70% 30%); }
-      .tester-verdict-reason { font-size: 12px; color: var(--fg-muted); margin-bottom: 8px; font-style: italic; }
 
-      .tester-body-view { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--fg); white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow: auto; }
+      .tester-json-pre, .tester-shape-pre { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--fg); white-space: pre-wrap; word-break: break-all; max-height: 500px; overflow: auto; }
 
       .tester-empty { color: var(--fg-muted); padding: 40px; text-align: center; }
     </style>
     """
   end
+
+  attr :endpoint, :map, required: true
+  defp endpoint_docs(assigns) do
+    ~H"""
+    <div class="tester-method-row">
+      <span class={"tester-method tester-method-#{String.downcase(@endpoint.method)}"}>
+        <%= @endpoint.method %>
+      </span>
+      <span class="tester-url"><%= @endpoint.path_template %></span>
+      <span class={"tester-auth-badge tester-auth-#{@endpoint.auth}"}><%= @endpoint.auth %></span>
+    </div>
+
+    <p><%= @endpoint.description %></p>
+
+    <%= if @endpoint.path_params != [] do %>
+      <div class="tester-section-title">Path params</div>
+      <table class="tester-param-table">
+        <thead><tr><th>Name</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody>
+          <%= for p <- @endpoint.path_params do %>
+            <tr><td><code><%= p.name %></code></td><td><%= p.type %></td><td><%= p[:notes] || "" %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+
+    <%= if @endpoint.query_params != [] do %>
+      <div class="tester-section-title">Query params</div>
+      <table class="tester-param-table">
+        <thead><tr><th>Name</th><th>Default</th><th>Notes</th></tr></thead>
+        <tbody>
+          <%= for p <- @endpoint.query_params do %>
+            <tr>
+              <td><code><%= p.name %></code></td>
+              <td><code><%= p.default %></code></td>
+              <td><%= p[:notes] || "" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+
+    <div class="tester-section-title">Response shape</div>
+    <pre class="tester-shape-pre"><%= @endpoint.response_shape %></pre>
+
+    <%= if @endpoint.possible_errors != [] do %>
+      <div class="tester-section-title">Possible errors</div>
+      <ul>
+        <%= for code <- @endpoint.possible_errors do %>
+          <li><code><%= code %></code></li>
+        <% end %>
+      </ul>
+    <% end %>
+    """
+  end
+
+  attr :endpoint, :map, required: true
+  attr :form_state, :map, required: true
+  defp endpoint_playground(assigns) do
+    ~H"""
+    <div class="tester-section-title">Playground</div>
+    <form phx-change="form-change" class="tester-playground">
+      <%= for p <- @endpoint.path_params do %>
+        <div class="tester-playground-row">
+          <label><%= p.name %></label>
+          <input type="text" name={p.name} value={Map.get(@form_state, p.name, to_string(p.default))} />
+        </div>
+      <% end %>
+
+      <%= for p <- @endpoint.query_params do %>
+        <div class="tester-playground-row">
+          <label><%= p.name %></label>
+          <%= if p.type == :select do %>
+            <select name={p.name}>
+              <%= for opt <- p[:options] || [] do %>
+                <option value={opt} selected={opt == Map.get(@form_state, p.name, to_string(p.default))}><%= opt %></option>
+              <% end %>
+            </select>
+          <% else %>
+            <input type="text" name={p.name} value={Map.get(@form_state, p.name, to_string(p.default))} />
+          <% end %>
+        </div>
+      <% end %>
+
+      <%= if @endpoint.method == "POST" do %>
+        <div class="tester-section-title">Request body (JSON)</div>
+        <textarea name="_body_text" class="tester-playground-body" spellcheck="false"><%= Map.get(@form_state, "_body_text", "") %></textarea>
+      <% end %>
+    </form>
+
+    <div class="tester-playground-actions">
+      <button phx-click="run" class="tester-btn-primary">Run</button>
+    </div>
+    """
+  end
+
+  attr :result, :map, required: true
+  defp response_view(assigns) do
+    ~H"""
+    <div class="tester-response-head">
+      <div class="tester-section-title" style="margin: 0;">Response</div>
+      <div>
+        <span class={"tester-badge tester-badge-#{@result.verdict}"}>
+          <%= @result.verdict |> to_string() |> String.upcase() %>
+        </span>
+        HTTP <%= @result.status %> • <%= @result.duration_ms %>ms
+      </div>
+    </div>
+    <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 8px; font-style: italic;">
+      <%= @result.verdict_reason %>
+    </div>
+
+    <div class="tester-section-title">Response headers</div>
+    <div class="tester-json-pre"><%= Enum.map_join(@result.headers, "\n", fn {k, v} -> "#{k}: #{v}" end) %></div>
+
+    <div class="tester-section-title">Response body</div>
+    <pre class="tester-json-pre"><%= format_body(@result) %></pre>
+    """
+  end
+
+  defp format_body(%{body_json: json}) when is_map(json) or is_list(json), do: Jason.encode!(json, pretty: true)
+  defp format_body(%{body_text: text}) when is_binary(text) and text != "", do: text
+  defp format_body(_), do: ""
 
   defp render_verdict_badge(nil), do: ""
 
@@ -234,42 +405,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     """
   end
 
-  defp format_body(%{body_json: json}) when is_map(json) or is_list(json) do
-    Jason.encode!(json, pretty: true)
-  end
-
-  defp format_body(%{body_text: text}), do: text
-
-  # Temporary bridge: turn an Endpoint spec into the legacy "case map" shape
-  # that Runner.run/2 expects. Task 6 replaces this with real form state.
-  defp ep_to_legacy_case(%{kind: :reference}, _dataset, _token), do: nil
-
-  defp ep_to_legacy_case(endpoint, dataset, token) do
-    form_state =
-      Enum.into(endpoint.path_params || [], %{}, fn %{name: name, default: default} ->
-        {name, to_string(default)}
-      end)
-      |> Map.merge(
-        Enum.into(endpoint.query_params || [], %{}, fn %{name: name, default: default} ->
-          {name, to_string(default)}
-        end)
-      )
-      |> Map.put("dataset", dataset)
-      |> Map.put("_body_text", if(endpoint.body_example, do: Jason.encode!(endpoint.body_example), else: ""))
-
-    req =
-      Runner.build_request(endpoint, form_state, %{
-        token: token,
-        base: "http://localhost:4000"
-      })
-
-    %{
-      id: endpoint.id,
-      method: req.method,
-      path: String.replace_prefix(req.url, "http://localhost:4000", ""),
-      headers: req.headers,
-      body: endpoint.body_example,
-      expect: endpoint[:expect]
-    }
+  defp render_reference(assigns, _render_key) do
+    ~H"""
+    <div class="tester-empty">Reference page coming in Task 7.</div>
+    """
   end
 end
