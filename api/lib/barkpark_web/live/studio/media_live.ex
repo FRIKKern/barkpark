@@ -9,7 +9,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
     socket =
       socket
-      |> assign(files: files, page_title: "Media Library", selected_file: nil)
+      |> assign(nav_section: :media, files: files, page_title: "Media Library", selected_file: nil)
       |> allow_upload(:media, accept: :any, max_entries: 5, max_file_size: 100_000_000)
 
     {:ok, socket}

@@ -5,9 +5,12 @@
       <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
     </div>
     <div class="studio-bar-tabs">
-      <a href="/studio" class="studio-tab active">Structure</a>
-      <a href="/studio/media" class="studio-tab">Media</a>
-      <a href="/studio/api-tester" class="studio-tab">API</a>
+      <%= for tab <- BarkparkWeb.Studio.Nav.tabs() do %>
+        <a
+          href={tab.path}
+          class={"studio-tab #{if assigns[:nav_section] == tab.id, do: "active"}"}
+        ><%= tab.label %></a>
+      <% end %>
     </div>
   </div>
 
