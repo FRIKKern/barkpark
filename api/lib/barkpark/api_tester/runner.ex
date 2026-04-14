@@ -10,6 +10,67 @@ defmodule Barkpark.ApiTester.Runner do
   @default_base "http://localhost:4000"
 
   @doc """
+  Build a concrete HTTP request from an endpoint spec + form state + config.
+
+  Returns a map: %{method, url, headers, body_text}. Pass this directly to
+  run/1 (wrapped as a pseudo test-case map) or use the fields to render a
+  curl command.
+
+  - Path params are interpolated into `path_template` via `{name}` tokens.
+  - Query params with non-empty values become URL-encoded query string.
+  - `:token` / `:admin` endpoints get an Authorization header when
+    `config.token` is non-empty.
+  - POST endpoints read `form_state["_body_text"]` (the raw JSON the
+    playground textarea holds) and attach it as the body with a
+    Content-Type: application/json header.
+  """
+  @spec build_request(map(), map(), %{token: String.t(), base: String.t()}) :: map()
+  def build_request(endpoint, form_state, config) do
+    base = Map.get(config, :base, @default_base)
+    token = Map.get(config, :token, "")
+
+    path = interpolate_path(endpoint.path_template, endpoint.path_params, form_state)
+    query = build_query_string(endpoint.query_params || [], form_state)
+    url = base <> path <> if(query == "", do: "", else: "?" <> query)
+
+    headers =
+      []
+      |> maybe_add_auth(endpoint.auth, token)
+      |> maybe_add_content_type(endpoint.method)
+
+    body_text =
+      if endpoint.method == "POST" do
+        Map.get(form_state, "_body_text", "")
+      else
+        nil
+      end
+
+    %{method: endpoint.method, url: url, headers: headers, body_text: body_text}
+  end
+
+  defp interpolate_path(template, path_params, form_state) do
+    Enum.reduce(path_params, template, fn %{name: name}, acc ->
+      value = Map.get(form_state, name, "")
+      String.replace(acc, "{#{name}}", URI.encode(value))
+    end)
+  end
+
+  defp build_query_string(query_params, form_state) do
+    query_params
+    |> Enum.map(fn %{name: name} -> {name, Map.get(form_state, name, "")} end)
+    |> Enum.reject(fn {_, v} -> v == "" end)
+    |> URI.encode_query()
+  end
+
+  defp maybe_add_auth(headers, auth, token) when auth in [:token, :admin] and token not in [nil, ""] do
+    [{"Authorization", "Bearer " <> token} | headers]
+  end
+  defp maybe_add_auth(headers, _, _), do: headers
+
+  defp maybe_add_content_type(headers, "POST"), do: [{"Content-Type", "application/json"} | headers]
+  defp maybe_add_content_type(headers, _), do: headers
+
+  @doc """
   Run a test case by id (or a test-case map) with an optional body override.
 
   Returns a map with:
