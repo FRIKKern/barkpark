@@ -217,64 +217,47 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         </div>
       </div>
 
-      <div class="pane-layout api-tester-panes">
-        <div class="pane-column api-col-nav">
-          <div class="pane-header">
-            <span class="pane-header-title">API</span>
-          </div>
+      <.pane_layout id="api-tester-panes">
+        <.pane_column title="API">
           <div class="pane-body">
             <%= for category <- @categories do %>
               <% collapsed = MapSet.member?(@collapsed_categories, category) %>
-              <button
-                type="button"
-                phx-click="toggle-category"
-                phx-value-category={category}
-                class="api-category-toggle"
+              <.pane_section_header
+                collapsible
+                collapsed={collapsed}
+                phx_click="toggle-category"
+                phx_value_category={category}
               >
-                <span class={"api-category-chevron #{if collapsed, do: "collapsed"}"}>
-                  <.icon name="chevron-right" size={10} />
-                </span>
-                <.icon name={category_icon(category)} size={12} />
-                <span class="api-category-label"><%= category %></span>
-              </button>
+                <.icon name={category_icon(category)} size={12} /> <%= category %>
+              </.pane_section_header>
               <%= unless collapsed do %>
                 <%= for ep <- Enum.filter(@endpoints, &(&1.category == category)) do %>
-                  <div
+                  <.pane_item
                     id={"api-ep-#{ep.id}"}
-                    phx-click="select"
-                    phx-value-id={ep.id}
-                    class={"pane-item #{if @selected_id == ep.id, do: "selected"}"}
+                    phx_click="select"
+                    phx_value_id={ep.id}
+                    selected={@selected_id == ep.id}
                   >
-                    <span class="pane-item-icon"><.icon name={endpoint_icon(ep)} size={16} /></span>
-                    <span class="pane-item-label"><%= ep.label %></span>
-                    <%= render_verdict_badge(Map.get(@last_result_by_id, ep.id)) %>
-                  </div>
+                    <:icon><.icon name={endpoint_icon(ep)} size={16} /></:icon>
+                    <%= ep.label %>
+                    <:badge><%= render_verdict_badge(Map.get(@last_result_by_id, ep.id)) %></:badge>
+                  </.pane_item>
                 <% end %>
               <% end %>
             <% end %>
           </div>
-        </div>
+        </.pane_column>
 
-        <div class="pane-column api-col-docs">
-          <div class="pane-header">
-            <%= if @endpoint do %>
-              <%= if @endpoint.kind == :reference do %>
-                <span class="pane-header-title"><%= @endpoint.label %></span>
-              <% else %>
-                <span class="pane-header-title">
-                  <span class={"api-method api-method-#{String.downcase(@endpoint.method)}"}><%= @endpoint.method %></span>
-                  <span class="api-url"><%= @endpoint.path_template %></span>
-                </span>
-                <span class={"badge #{auth_badge_class(@endpoint.auth)}"}><%= @endpoint.auth %></span>
-              <% end %>
-            <% else %>
-              <span class="pane-header-title">—</span>
+        <.pane_column title={docs_column_title(@endpoint)} flex="1.1">
+          <:header_actions>
+            <%= if @endpoint && @endpoint.kind == :endpoint do %>
+              <span class={"badge #{auth_badge_class(@endpoint.auth)}"}><%= @endpoint.auth %></span>
             <% end %>
-          </div>
+          </:header_actions>
           <div class="api-col-body">
             <%= cond do %>
               <% @endpoint == nil -> %>
-                <div class="empty-state"><div class="empty-state-text">Select an endpoint on the left.</div></div>
+                <.pane_empty message="Select an endpoint on the left." />
               <% @endpoint.kind == :reference -> %>
                 <%= render_reference(assigns, @endpoint.render_key) %>
               <% true -> %>
@@ -282,27 +265,26 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                 <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} />
             <% end %>
           </div>
-        </div>
+        </.pane_column>
 
-        <div class="pane-column api-col-response">
-          <div class="pane-header">
-            <span class="pane-header-title">Response</span>
+        <.pane_column title="Response" flex="1" last>
+          <:header_actions>
             <%= if @last_result do %>
               <div class="api-response-meta">
                 <%= render_verdict_badge(@last_result) %>
                 <span class="text-xs text-dim api-response-timing">HTTP <%= @last_result.status %> · <%= @last_result.duration_ms %>ms</span>
               </div>
             <% end %>
-          </div>
+          </:header_actions>
           <div class="api-col-body">
             <%= if @last_result do %>
               <.response_view result={@last_result} />
             <% else %>
-              <div class="empty-state"><div class="empty-state-text">No response yet. Click <strong>Run</strong>.</div></div>
+              <.pane_empty message="No response yet. Click Run." />
             <% end %>
           </div>
-        </div>
-      </div>
+        </.pane_column>
+      </.pane_layout>
     </div>
 
     <style>
@@ -429,25 +411,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
       .pane-item .badge::before { display: none; }
 
-      /* Collapsible category header — echoes .pane-section-header typography */
-      .api-category-toggle {
-        display: flex; align-items: center; gap: 6px;
-        width: 100%; padding: 14px 14px 6px;
-        background: none; border: 0; cursor: pointer; text-align: left;
-        font-size: 11px; font-weight: 600; color: var(--fg-dim);
-        text-transform: uppercase; letter-spacing: 0.05em;
-        font-family: inherit;
-      }
-      .api-category-toggle:hover { color: var(--fg-muted); }
-      .api-category-chevron {
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 12px; height: 12px;
-        transition: transform 0.1s;
-        transform: rotate(90deg);
-      }
-      .api-category-chevron.collapsed { transform: rotate(0deg); }
-      .api-category-label { flex: 1; }
-
       .api-runnable-note {
         margin-top: 12px; padding: 10px 14px;
         background: var(--bg-muted); border: 1px solid var(--border-muted);
@@ -461,6 +424,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     </style>
     """
   end
+
+  defp docs_column_title(nil), do: "—"
+  defp docs_column_title(%{kind: :reference, label: label}), do: label
+  defp docs_column_title(%{kind: :endpoint, method: method, path_template: path}), do: "#{method} #{path}"
 
   # Auth level → existing design-system badge variant
   defp auth_badge_class(:public), do: "badge-public"
