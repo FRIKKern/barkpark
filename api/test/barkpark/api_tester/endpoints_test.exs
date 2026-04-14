@@ -59,4 +59,36 @@ defmodule Barkpark.ApiTester.EndpointsTest do
     assert Map.has_key?(pub, "publish")
     assert pub["publish"]["type"] == "post"
   end
+
+  test "listen-sse is docs-only (no playground, still :endpoint kind)" do
+    ep = Endpoints.find("production", "listen-sse")
+    assert ep.category == "Real-time"
+    assert ep.auth == :token
+    assert ep.method == "GET"
+    assert ep.kind == :endpoint
+    assert ep.expect == nil, "listen has no verdict predicate"
+  end
+
+  test "schemas-list and schemas-show both require admin auth" do
+    list_ep = Endpoints.find("production", "schemas-list")
+    show_ep = Endpoints.find("production", "schemas-show")
+    assert list_ep.auth == :admin
+    assert show_ep.auth == :admin
+  end
+
+  test "reference pages use :reference kind with a render_key" do
+    envelope = Endpoints.find("production", "ref-envelope")
+    errors = Endpoints.find("production", "ref-errors")
+    limits = Endpoints.find("production", "ref-limits")
+
+    for ep <- [envelope, errors, limits] do
+      assert ep.kind == :reference
+      assert is_atom(ep.render_key)
+      assert ep.category == "Reference"
+    end
+
+    assert envelope.render_key == :envelope
+    assert errors.render_key == :error_codes
+    assert limits.render_key == :known_limitations
+  end
 end

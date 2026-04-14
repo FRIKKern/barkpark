@@ -46,6 +46,9 @@ defmodule Barkpark.ApiTester.Endpoints do
   @spec all(String.t()) :: [map()]
   def all(dataset) when is_binary(dataset) do
     [
+      ref_envelope(),
+      ref_error_codes(),
+      ref_known_limitations(),
       query_list(dataset),
       query_single(dataset),
       mutate_create(dataset),
@@ -55,7 +58,10 @@ defmodule Barkpark.ApiTester.Endpoints do
       mutate_publish(dataset),
       mutate_unpublish(dataset),
       mutate_discard_draft(dataset),
-      mutate_delete(dataset)
+      mutate_delete(dataset),
+      listen_sse(dataset),
+      schemas_list(dataset),
+      schemas_show(dataset)
     ]
   end
 
@@ -427,6 +433,131 @@ defmodule Barkpark.ApiTester.Endpoints do
       """,
       possible_errors: [:not_found, :unauthorized, :malformed],
       expect: {200, :mutate_result_has_envelope}
+    }
+  end
+
+  # ── Real-time ────────────────────────────────────────────────────────
+
+  defp listen_sse(dataset) do
+    %{
+      id: "listen-sse",
+      category: "Real-time",
+      label: "SSE listen",
+      kind: :endpoint,
+      auth: :token,
+      method: "GET",
+      path_template: "/v1/data/listen/{dataset}",
+      description:
+        "Server-Sent Events stream of mutations. Supply Last-Event-ID for resume. Docs-only here — the playground does not stream; use curl -N to try it from the command line.",
+      path_params: [%{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}],
+      query_params: [
+        %{name: "lastEventId", type: :integer, default: "", notes: "Resume cursor (or use Last-Event-ID header)"}
+      ],
+      body_example: nil,
+      response_shape: """
+      event: welcome
+      data: {"type":"welcome"}
+
+      id: 42
+      event: mutation
+      data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello","rev":"...","previousRev":null,"result":{...envelope...}}
+      """,
+      possible_errors: [:unauthorized],
+      expect: nil
+    }
+  end
+
+  # ── Schemas ──────────────────────────────────────────────────────────
+
+  defp schemas_list(dataset) do
+    %{
+      id: "schemas-list",
+      category: "Schemas",
+      label: "List schemas",
+      kind: :endpoint,
+      auth: :admin,
+      method: "GET",
+      path_template: "/v1/schemas/{dataset}",
+      description:
+        "Admin list of every schema in the dataset. Response carries _schemaVersion: 1.",
+      path_params: [%{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}],
+      query_params: [],
+      body_example: nil,
+      response_shape: """
+      {
+        "_schemaVersion": 1,
+        "schemas": [
+          { "name": "post", "title": "Post", "icon": "file-text", "visibility": "public", "fields": [ ... ] }
+        ]
+      }
+      """,
+      possible_errors: [:unauthorized, :forbidden],
+      expect: {200, :schema_version_1}
+    }
+  end
+
+  defp schemas_show(dataset) do
+    %{
+      id: "schemas-show",
+      category: "Schemas",
+      label: "Show schema",
+      kind: :endpoint,
+      auth: :admin,
+      method: "GET",
+      path_template: "/v1/schemas/{dataset}/{name}",
+      description: "Admin fetch of a single schema by name.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
+        %{name: "name", type: :string, default: "post", notes: "Schema name"}
+      ],
+      query_params: [],
+      body_example: nil,
+      response_shape: """
+      {
+        "_schemaVersion": 1,
+        "schema": {
+          "name": "post", "title": "Post", "icon": "file-text",
+          "visibility": "public", "fields": [ ... ]
+        }
+      }
+      """,
+      possible_errors: [:not_found, :unauthorized, :forbidden],
+      expect: {200, :schema_version_1_show}
+    }
+  end
+
+  # ── Reference pages (docs-only) ──────────────────────────────────────
+
+  defp ref_envelope do
+    %{
+      id: "ref-envelope",
+      category: "Reference",
+      label: "Document envelope",
+      kind: :reference,
+      render_key: :envelope,
+      description: "Every document is returned as a flat JSON object with 7 reserved _-prefixed keys plus arbitrary user fields."
+    }
+  end
+
+  defp ref_error_codes do
+    %{
+      id: "ref-errors",
+      category: "Reference",
+      label: "Error codes",
+      kind: :reference,
+      render_key: :error_codes,
+      description: "All errors return {\"error\": {\"code\": \"...\", \"message\": \"...\"}} — 9 codes total."
+    }
+  end
+
+  defp ref_known_limitations do
+    %{
+      id: "ref-limits",
+      category: "Reference",
+      label: "Known limitations",
+      kind: :reference,
+      render_key: :known_limitations,
+      description: "6 quirks of v1 that may bite real clients."
     }
   end
 end
