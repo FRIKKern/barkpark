@@ -192,6 +192,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
   end
 
+  def handle_event("expand-pane", %{"idx" => idx_str}, socket) do
+    # "Expand" a collapsed pane = truncate the nav path so this pane
+    # becomes the active focus. Deeper drill-down (and the editor) drop
+    # away, matching Sanity's breadcrumb-jump behavior.
+    idx = String.to_integer(idx_str)
+    new_path = Enum.take(socket.assigns.nav_path, idx)
+    {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
+  end
+
   def handle_event("new-document", %{"type" => type}, socket) do
     id = "#{type}-#{:rand.uniform(999_999)}"
     case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, socket.assigns.dataset) do
@@ -635,6 +644,23 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # Decide whether a nav pane should render as a narrow collapsed strip.
+  #
+  # Rule (matches Sanity's "breadcrumb collapse"): the two right-most
+  # columns stay full width. "Column" includes the editor panel if an
+  # editor is currently open — so:
+  #
+  #   - No editor, 1 or 2 panes  → no collapse
+  #   - No editor, 3+ panes      → collapse all panes except the last 2
+  #   - Editor open, 1 or 2 panes → no collapse (editor is the 2nd full column)
+  #   - Editor open, 3+ panes    → collapse all panes except the last one
+  #
+  # Gives the rightmost focus (editor or deepest nav) room to breathe.
+  defp collapse_pane?(idx, num_panes, has_editor?) do
+    keep_full_nav_count = if has_editor?, do: 1, else: 2
+    idx < num_panes - keep_full_nav_count
+  end
+
   defp build_list_items(node) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
@@ -799,7 +825,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
     <% end %>
 
     <div class="pane-layout" id="studio-panes">
+      <% has_editor = @editor_doc != nil %>
+      <% num_panes = length(@panes) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
+        <% collapsed = collapse_pane?(idx, num_panes, has_editor) %>
+        <%= if collapsed do %>
+          <div
+            class="pane-column pane-column--collapsed"
+            id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
+            phx-click="expand-pane"
+            phx-value-idx={idx}
+            title={"Back to #{pane.title}"}
+          >
+            <div class="pane-header">
+              <.icon name="chevron-right" size={12} />
+            </div>
+            <div class="pane-column-collapsed-label"><%= pane.title %></div>
+          </div>
+        <% else %>
         <div class="pane-column" id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}>
           <div class="pane-header">
             <span class="pane-header-title"><%= pane.title %></span>
@@ -848,6 +891,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             <% end %>
           </div>
         </div>
+        <% end %>
       <% end %>
 
       <!-- Editor -->

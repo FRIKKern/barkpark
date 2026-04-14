@@ -366,6 +366,34 @@
     .pane-doc-dot.planning { background: var(--fg-dim); }
     .pane-doc-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); margin-top: 2px; margin-left: 15px; }
 
+    /* Collapsed pane: narrow strip shown when the user has drilled past
+       this pane and needs the viewport for the rightmost focus pane.
+       Click the strip to jump back to that pane's level. */
+    .pane-column--collapsed {
+      width: 44px; min-width: 44px; max-width: 44px;
+      flex-shrink: 0; cursor: pointer;
+      transition: background 0.1s;
+    }
+    .pane-column--collapsed:hover { background: var(--bg-muted); }
+    .pane-column--collapsed .pane-header {
+      justify-content: center;
+      padding: 0;
+      color: var(--fg-dim);
+    }
+    .pane-column-collapsed-label {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 12px 6px;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 11px; font-weight: 600;
+      color: var(--fg-muted);
+      letter-spacing: 0.02em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-height: 100%;
+    }
+    .pane-column--collapsed:hover .pane-column-collapsed-label { color: var(--fg); }
+
     /* ── Scrollbar ─────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
