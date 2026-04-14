@@ -204,20 +204,29 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       <div class="pane-layout api-tester-panes">
         <div class="pane-column api-col-nav">
           <div class="pane-header">
-            <span class="pane-header-title">Endpoints</span>
+            <span class="pane-header-title">API</span>
           </div>
-          <div class="api-nav-body">
+          <div class="pane-body">
             <%= for category <- @categories do %>
-              <div class="pane-section-header"><%= category %></div>
+              <div class="pane-section-header">
+                <.icon name={category_icon(category)} size={12} /> <%= category %>
+              </div>
               <%= for ep <- Enum.filter(@endpoints, &(&1.category == category)) do %>
-                <button
+                <div
+                  id={"api-ep-#{ep.id}"}
                   phx-click="select"
                   phx-value-id={ep.id}
-                  class={"pane-item api-nav-item #{if @selected_id == ep.id, do: "selected"}"}
+                  class={"pane-item #{if @selected_id == ep.id, do: "selected"}"}
                 >
-                  <span class="api-nav-item-label"><%= ep.label %></span>
-                  <%= render_verdict_badge(Map.get(@last_result_by_id, ep.id)) %>
-                </button>
+                  <span class="pane-item-icon"><.icon name={endpoint_icon(ep)} size={16} /></span>
+                  <span class="pane-item-label"><%= ep.label %></span>
+                  <%= case render_verdict_badge(Map.get(@last_result_by_id, ep.id)) do %>
+                    <% "" -> %>
+                      <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
+                    <% badge -> %>
+                      <%= badge %>
+                  <% end %>
+                </div>
               <% end %>
             <% end %>
           </div>
@@ -296,8 +305,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
 
       .api-tester-panes { flex: 1; min-height: 0; }
-      /* Nav column inherits .pane-column's 260px; docs/response override it. */
-      .api-col-nav { }
+      /* Nav column inherits .pane-column's 260px default. Docs and response
+         columns override width + min-width so they actually flex instead of
+         staying pinned. */
       .api-col-docs {
         width: auto; min-width: 0; flex: 1.1 1 0;
       }
@@ -305,10 +315,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         width: auto; min-width: 0; flex: 1 1 0; border-right: none;
       }
       .api-col-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
-      .api-nav-body { flex: 1; overflow-y: auto; padding: 4px 0 12px; }
-
-      .api-nav-item { justify-content: space-between; gap: 8px; }
-      .api-nav-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
       /* HTTP method pill — echoes shadcn badge shape */
       .api-method {
@@ -394,10 +400,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       .badge-verdict-fail { background: hsl(0 62.8% 50.6% / 0.12); color: var(--destructive); }
       .badge-verdict-error { background: hsl(38 92% 50% / 0.12); color: var(--warning); }
 
-      .api-nav-item .badge {
-        height: 18px; padding: 0 6px; font-size: 10px;
+      /* Slim the verdict badge when it sits in place of a chevron in a pane-item row */
+      .pane-item .badge {
+        height: 18px; padding: 0 6px; font-size: 10px; margin-left: auto;
       }
-      .api-nav-item .badge::before { display: none; }
+      .pane-item .badge::before { display: none; }
     </style>
     """
   end
@@ -407,6 +414,28 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp auth_badge_class(:token), do: "badge-draft"
   defp auth_badge_class(:admin), do: "badge-active"
   defp auth_badge_class(_), do: "badge-active"
+
+  # Icons for the left-pane nav, reusing the small set already in
+  # BarkparkWeb.Icons so the API pane renders the same look as Structure.
+  defp category_icon("Reference"), do: "file-text"
+  defp category_icon("Query"), do: "layout-list"
+  defp category_icon("Mutate"), do: "settings"
+  defp category_icon("Real-time"), do: "compass"
+  defp category_icon("Schemas"), do: "folder"
+  defp category_icon(_), do: "file"
+
+  # Per-endpoint icon. Uses only icons that exist in Icons.@icons;
+  # unknown names fall back to "file" via the Icons component.
+  defp endpoint_icon(%{id: "ref-envelope"}), do: "file-text"
+  defp endpoint_icon(%{id: "ref-errors"}), do: "file"
+  defp endpoint_icon(%{id: "ref-limits"}), do: "settings"
+  defp endpoint_icon(%{id: "query-list"}), do: "layout-list"
+  defp endpoint_icon(%{id: "query-single"}), do: "file"
+  defp endpoint_icon(%{category: "Mutate"}), do: "settings"
+  defp endpoint_icon(%{id: "listen-sse"}), do: "compass"
+  defp endpoint_icon(%{id: "schemas-list"}), do: "layout-list"
+  defp endpoint_icon(%{id: "schemas-show"}), do: "file-text"
+  defp endpoint_icon(_), do: "file"
 
   attr :endpoint, :map, required: true
   defp endpoint_docs(assigns) do
