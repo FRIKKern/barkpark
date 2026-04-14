@@ -3,13 +3,21 @@
     <div class="studio-bar-brand">
       <div class="sidebar-brand-icon">B</div>
       <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
+      <%= if assigns[:dataset] do %>
+        <BarkparkWeb.Studio.DatasetSwitcher.switcher
+          current={@dataset}
+          current_section={assigns[:nav_section] || :structure}
+        />
+      <% end %>
     </div>
     <div class="studio-bar-tabs">
-      <%= for tab <- BarkparkWeb.Studio.Nav.tabs() do %>
-        <a
-          href={tab.path}
-          class={"studio-tab #{if assigns[:nav_section] == tab.id, do: "active"}"}
-        ><%= tab.label %></a>
+      <%= if assigns[:dataset] do %>
+        <%= for tab <- BarkparkWeb.Studio.Nav.tabs(@dataset) do %>
+          <a
+            href={tab.path}
+            class={"studio-tab #{if assigns[:nav_section] == tab.id, do: "active"}"}
+          ><%= tab.label %></a>
+        <% end %>
       <% end %>
     </div>
   </div>
