@@ -3,15 +3,13 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
 
   alias Barkpark.Content
 
-  @dataset "production"
-
   @impl true
-  def mount(%{"type" => type, "doc_id" => doc_id}, _session, socket) do
+  def mount(%{"type" => type, "doc_id" => doc_id, "dataset" => dataset}, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
     end
 
-    schema = case Content.get_schema(type, @dataset) do
+    schema = case Content.get_schema(type, dataset) do
       {:ok, s} -> s
       _ -> nil
     end
@@ -19,7 +17,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     pub_id = Content.published_id(doc_id)
     socket =
       socket
-      |> assign(type: type, doc_id: pub_id, schema: schema)
+      |> assign(type: type, doc_id: pub_id, schema: schema, dataset: dataset)
       |> load_document()
 
     {:ok, socket}
@@ -39,6 +37,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     type = socket.assigns.type
     doc_id = socket.assigns.doc_id
     schema = socket.assigns.schema
+    dataset = socket.assigns.dataset
 
     content =
       if schema do
@@ -61,28 +60,28 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
       "content" => content
     }
 
-    case Content.upsert_document(type, attrs, @dataset) do
+    case Content.upsert_document(type, attrs, dataset) do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Changes saved") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to save")}
     end
   end
 
   def handle_event("publish", _params, socket) do
-    case Content.publish_document(socket.assigns.doc_id, socket.assigns.type, @dataset) do
+    case Content.publish_document(socket.assigns.doc_id, socket.assigns.type, socket.assigns.dataset) do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document published") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to publish")}
     end
   end
 
   def handle_event("unpublish", _params, socket) do
-    case Content.unpublish_document(socket.assigns.doc_id, socket.assigns.type, @dataset) do
+    case Content.unpublish_document(socket.assigns.doc_id, socket.assigns.type, socket.assigns.dataset) do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document unpublished") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unpublish")}
     end
   end
 
   def handle_event("discard-draft", _params, socket) do
-    case Content.discard_draft(socket.assigns.doc_id, socket.assigns.type, @dataset) do
+    case Content.discard_draft(socket.assigns.doc_id, socket.assigns.type, socket.assigns.dataset) do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Draft discarded") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "No draft to discard")}
     end
@@ -92,11 +91,12 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     type = socket.assigns.type
     doc_id = socket.assigns.doc_id
     schema = socket.assigns.schema
+    dataset = socket.assigns.dataset
     draft_id = Content.draft_id(doc_id)
     pub_id = Content.published_id(doc_id)
 
-    draft_result = Content.get_document(draft_id, type, @dataset)
-    pub_result = Content.get_document(pub_id, type, @dataset)
+    draft_result = Content.get_document(draft_id, type, dataset)
+    pub_result = Content.get_document(pub_id, type, dataset)
 
     {doc, is_draft} =
       case draft_result do
