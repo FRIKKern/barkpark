@@ -10,7 +10,7 @@ defmodule Barkpark.Media do
   def upload_dir, do: @upload_dir
 
   @doc "Save an uploaded file to disk and create a DB record."
-  def upload(plug_upload, dataset \\ "production") do
+  def upload(plug_upload, dataset) when is_binary(dataset) do
     %Plug.Upload{filename: original_name, path: temp_path, content_type: content_type} = plug_upload
 
     # Generate date-based path: uploads/2026/04/filename
@@ -47,7 +47,7 @@ defmodule Barkpark.Media do
   end
 
   @doc "List all media files for a dataset."
-  def list_files(dataset \\ "production", opts \\ []) do
+  def list_files(dataset, opts \\ []) when is_binary(dataset) do
     mime_filter = Keyword.get(opts, :mime_type)
 
     MediaFile
