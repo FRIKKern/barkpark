@@ -19,10 +19,6 @@ defmodule BarkparkWeb.Studio.Nav do
     ]
   end
 
-  @doc "Deprecated: use tabs/1. Retained as a temporary shim so the layout still compiles."
-  @spec tabs() :: [tab()]
-  def tabs, do: tabs("production")
-
   @doc "Fallback nav section when a LiveView hasn't set one."
   @spec default() :: atom()
   def default, do: :structure
