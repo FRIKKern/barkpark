@@ -245,4 +245,77 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ ~s(id="item-x")
     end
   end
+
+  describe "pane_doc_item/1" do
+    test "renders title, id, and status dot" do
+      html =
+        render_component(&StudioComponents.pane_doc_item/1, %{
+          phx_click: "select",
+          phx_value_pane: "1",
+          phx_value_id: "p1",
+          title: "Hello World",
+          doc_id: "p1",
+          status: "published",
+          is_draft: false
+        })
+
+      assert html =~ ~s(class="pane-doc-item)
+      assert html =~ ~s(class="pane-doc-title")
+      assert html =~ ~s(class="pane-doc-id")
+      assert html =~ ~s(class="pane-doc-dot published")
+      assert html =~ "Hello World"
+      assert html =~ "p1"
+      assert html =~ ~s(phx-click="select")
+      assert html =~ ~s(phx-value-pane="1")
+      assert html =~ ~s(phx-value-id="p1")
+    end
+
+    test "is_draft=true overrides the status dot class to draft" do
+      html =
+        render_component(&StudioComponents.pane_doc_item/1, %{
+          phx_click: "select",
+          phx_value_pane: "0",
+          phx_value_id: "p1",
+          title: "Hello",
+          doc_id: "p1",
+          status: "published",
+          is_draft: true
+        })
+
+      assert html =~ ~s(class="pane-doc-dot draft")
+      refute html =~ ~s(class="pane-doc-dot published")
+    end
+
+    test "selected=true adds selected modifier" do
+      html =
+        render_component(&StudioComponents.pane_doc_item/1, %{
+          phx_click: "select",
+          phx_value_pane: "1",
+          phx_value_id: "p1",
+          title: "Hello",
+          doc_id: "p1",
+          status: "published",
+          is_draft: false,
+          selected: true
+        })
+
+      assert html =~ ~s(class="pane-doc-item selected")
+    end
+
+    test "trailing slot allows presence dots or other inline content" do
+      html =
+        render_component(&StudioComponents.pane_doc_item/1, %{
+          phx_click: "select",
+          phx_value_pane: "1",
+          phx_value_id: "p1",
+          title: "Hello",
+          doc_id: "p1",
+          status: "published",
+          is_draft: false,
+          trailing: [%{inner_block: fn _, _ -> ~s(<span class="presence-dot-sm"></span>) end}]
+        })
+
+      assert html =~ "presence-dot-sm"
+    end
+  end
 end
