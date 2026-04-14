@@ -502,7 +502,8 @@ defmodule Barkpark.ApiTester.Endpoints do
       data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello","rev":"...","previousRev":null,"result":{...envelope...}}
       """,
       possible_errors: [:unauthorized],
-      expect: nil
+      expect: nil,
+      runnable: false
     }
   end
 
