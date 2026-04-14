@@ -27,12 +27,15 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       |> Enum.filter(&(&1.kind == :endpoint))
       |> Enum.into(%{}, fn ep -> {ep.id, initial_form_state(ep)} end)
 
+    # Collapsible categories: empty MapSet == all expanded. Flipping a
+    # category name into the set hides its items in the nav.
     {:ok,
      assign(socket,
        nav_section: :api_tester,
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
+       collapsed_categories: MapSet.new(),
        selected_id: selected.id,
        token: "barkpark-dev-token",
        form_state_by_id: form_state_by_id,
@@ -87,6 +90,19 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   def handle_event("token-change", %{"token" => token}, socket) do
     {:noreply, assign(socket, token: token)}
+  end
+
+  def handle_event("toggle-category", %{"category" => category}, socket) do
+    collapsed = socket.assigns.collapsed_categories
+
+    new_collapsed =
+      if MapSet.member?(collapsed, category) do
+        MapSet.delete(collapsed, category)
+      else
+        MapSet.put(collapsed, category)
+      end
+
+    {:noreply, assign(socket, collapsed_categories: new_collapsed)}
   end
 
   def handle_event("run", _, socket) do
@@ -208,25 +224,32 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
           <div class="pane-body">
             <%= for category <- @categories do %>
-              <div class="pane-section-header">
-                <.icon name={category_icon(category)} size={12} /> <%= category %>
-              </div>
-              <%= for ep <- Enum.filter(@endpoints, &(&1.category == category)) do %>
-                <div
-                  id={"api-ep-#{ep.id}"}
-                  phx-click="select"
-                  phx-value-id={ep.id}
-                  class={"pane-item #{if @selected_id == ep.id, do: "selected"}"}
-                >
-                  <span class="pane-item-icon"><.icon name={endpoint_icon(ep)} size={16} /></span>
-                  <span class="pane-item-label"><%= ep.label %></span>
-                  <%= case render_verdict_badge(Map.get(@last_result_by_id, ep.id)) do %>
-                    <% "" -> %>
-                      <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
-                    <% badge -> %>
-                      <%= badge %>
-                  <% end %>
-                </div>
+              <% collapsed = MapSet.member?(@collapsed_categories, category) %>
+              <button
+                type="button"
+                phx-click="toggle-category"
+                phx-value-category={category}
+                class="api-category-toggle"
+              >
+                <span class={"api-category-chevron #{if collapsed, do: "collapsed"}"}>
+                  <.icon name="chevron-right" size={10} />
+                </span>
+                <.icon name={category_icon(category)} size={12} />
+                <span class="api-category-label"><%= category %></span>
+              </button>
+              <%= unless collapsed do %>
+                <%= for ep <- Enum.filter(@endpoints, &(&1.category == category)) do %>
+                  <div
+                    id={"api-ep-#{ep.id}"}
+                    phx-click="select"
+                    phx-value-id={ep.id}
+                    class={"pane-item #{if @selected_id == ep.id, do: "selected"}"}
+                  >
+                    <span class="pane-item-icon"><.icon name={endpoint_icon(ep)} size={16} /></span>
+                    <span class="pane-item-label"><%= ep.label %></span>
+                    <%= render_verdict_badge(Map.get(@last_result_by_id, ep.id)) %>
+                  </div>
+                <% end %>
               <% end %>
             <% end %>
           </div>
@@ -405,6 +428,25 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         height: 18px; padding: 0 6px; font-size: 10px; margin-left: auto;
       }
       .pane-item .badge::before { display: none; }
+
+      /* Collapsible category header — echoes .pane-section-header typography */
+      .api-category-toggle {
+        display: flex; align-items: center; gap: 6px;
+        width: 100%; padding: 14px 14px 6px;
+        background: none; border: 0; cursor: pointer; text-align: left;
+        font-size: 11px; font-weight: 600; color: var(--fg-dim);
+        text-transform: uppercase; letter-spacing: 0.05em;
+        font-family: inherit;
+      }
+      .api-category-toggle:hover { color: var(--fg-muted); }
+      .api-category-chevron {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 12px; height: 12px;
+        transition: transform 0.1s;
+        transform: rotate(90deg);
+      }
+      .api-category-chevron.collapsed { transform: rotate(0deg); }
+      .api-category-label { flex: 1; }
     </style>
     """
   end
