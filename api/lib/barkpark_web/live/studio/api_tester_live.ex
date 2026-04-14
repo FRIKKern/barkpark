@@ -259,6 +259,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
       .tester-json-pre, .tester-shape-pre { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--fg); white-space: pre-wrap; word-break: break-all; max-height: 500px; overflow: auto; }
 
+      .tester-ref-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+      .tester-ref-table th, .tester-ref-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+      .tester-ref-table th { font-size: 10px; text-transform: uppercase; color: var(--fg-muted); }
+      .tester-ref-table code { font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; background: var(--bg-subtle); padding: 1px 4px; border-radius: 3px; }
+
       .tester-empty { color: var(--fg-muted); padding: 40px; text-align: center; }
     </style>
     """
@@ -405,9 +410,71 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     """
   end
 
-  defp render_reference(assigns, _render_key) do
+  defp render_reference(assigns, :envelope) do
     ~H"""
-    <div class="tester-empty">Reference page coming in Task 7.</div>
+    <div class="tester-method-row">
+      <span class="tester-url" style="font-weight: 600;">Document Envelope</span>
+    </div>
+    <p>Every document is returned as a flat JSON object. Reserved keys are always present; user content adds additional flat fields. User content cannot override reserved keys — they are silently dropped on write.</p>
+
+    <div class="tester-section-title">Reserved keys</div>
+    <table class="tester-ref-table">
+      <thead><tr><th>Key</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>_id</code></td><td>string</td><td>Full document id, including <code>drafts.</code> prefix when a draft</td></tr>
+        <tr><td><code>_type</code></td><td>string</td><td>Document type (matches schema name)</td></tr>
+        <tr><td><code>_rev</code></td><td>string</td><td>32-char hex; changes on every write</td></tr>
+        <tr><td><code>_draft</code></td><td>boolean</td><td><code>true</code> when <code>_id</code> starts with <code>drafts.</code></td></tr>
+        <tr><td><code>_publishedId</code></td><td>string</td><td>Id with <code>drafts.</code> prefix stripped</td></tr>
+        <tr><td><code>_createdAt</code></td><td>string</td><td>ISO 8601 UTC, <code>Z</code> suffix</td></tr>
+        <tr><td><code>_updatedAt</code></td><td>string</td><td>ISO 8601 UTC, <code>Z</code> suffix</td></tr>
+      </tbody>
+    </table>
+
+    <div class="tester-section-title">Example</div>
+    <pre class="tester-shape-pre"><%= ~s({\n  "_id": "p1",\n  "_type": "post",\n  "_rev": "a3f8c2d1e9b04567f2a1c3e5d7890abc",\n  "_draft": false,\n  "_publishedId": "p1",\n  "_createdAt": "2026-04-12T09:11:20Z",\n  "_updatedAt": "2026-04-12T10:03:45Z",\n  "title": "Hello World",\n  "category": "Tech"\n}) %></pre>
+    """
+  end
+
+  defp render_reference(assigns, :error_codes) do
+    ~H"""
+    <div class="tester-method-row">
+      <span class="tester-url" style="font-weight: 600;">Error Codes</span>
+    </div>
+    <p>All errors return <code><%= ~s({"error": {"code": "...", "message": "..."}}) %></code>. For <code>validation_failed</code>, a <code>details</code> map of field-level errors is included.</p>
+
+    <table class="tester-ref-table">
+      <thead><tr><th>Code</th><th>HTTP</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>not_found</code></td><td>404</td><td>Document or schema not found</td></tr>
+        <tr><td><code>unauthorized</code></td><td>401</td><td>Missing or invalid token</td></tr>
+        <tr><td><code>forbidden</code></td><td>403</td><td>Token lacks required permission</td></tr>
+        <tr><td><code>schema_unknown</code></td><td>404</td><td>No schema registered for this type</td></tr>
+        <tr><td><code>rev_mismatch</code></td><td>409</td><td><code>ifRevisionID</code> did not match current rev</td></tr>
+        <tr><td><code>conflict</code></td><td>409</td><td>Document already exists (on <code>create</code>)</td></tr>
+        <tr><td><code>malformed</code></td><td>400</td><td>Request body is malformed or missing <code>mutations</code> key</td></tr>
+        <tr><td><code>validation_failed</code></td><td>422</td><td>Document failed validation; <code>details</code> map contains per-field errors</td></tr>
+        <tr><td><code>internal_error</code></td><td>500</td><td>Unexpected server error</td></tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  defp render_reference(assigns, :known_limitations) do
+    ~H"""
+    <div class="tester-method-row">
+      <span class="tester-url" style="font-weight: 600;">Known Limitations (v1.0)</span>
+    </div>
+    <p>Quirks of the v1 contract you should be aware of when building clients:</p>
+
+    <ul>
+      <li>Reference expansion (<code>?expand=</code>) is not implemented.</li>
+      <li>Filter only supports exact-match on single values.</li>
+      <li><code>previousRev</code> in SSE events is always <code>null</code>; full rev history lives in a separate revisions table that is not part of the v1 HTTP contract.</li>
+      <li>Draft/published merging (<code>perspective=drafts</code>) happens after <code>LIMIT</code>/<code>OFFSET</code>, so a page can return fewer than <code>limit</code> rows.</li>
+      <li>PubSub broadcasts fire even when a mutation transaction rolls back; the persistent events table is consistent, but the SSE stream may emit ghost events.</li>
+      <li>Rate limiting is not enforced at the HTTP layer.</li>
+    </ul>
     """
   end
 end
