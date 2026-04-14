@@ -484,6 +484,24 @@ defmodule Barkpark.Content do
 
   # ── Schema Definitions ────────────────────────────────────────────────────
 
+  @doc """
+  Return all datasets known to the system, sorted alphabetically.
+  Always includes `"production"` so a brand-new DB still has something to show.
+  """
+  def list_datasets do
+    from_schemas =
+      from(s in SchemaDefinition, select: s.dataset, distinct: true)
+      |> Repo.all()
+
+    from_docs =
+      from(d in Document, select: d.dataset, distinct: true)
+      |> Repo.all()
+
+    (from_schemas ++ from_docs ++ ["production"])
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
   def list_schemas(dataset) do
     SchemaDefinition
     |> where([s], s.dataset == ^dataset)
