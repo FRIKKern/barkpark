@@ -638,9 +638,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp build_list_items(node) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
-        :divider -> [%{type: :divider, id: child.id}]
+        :divider ->
+          [%{type: :divider, id: child.id}]
+
         _ ->
-          [%{type: :item, id: child.id, title: child.title, icon: child.icon}]
+          # `drillable` == this item opens a new pane to the right when
+          # clicked (a sub-list or a document list). Singletons (`:document`)
+          # open the editor directly, so they should NOT carry the chevron
+          # — the chevron is the visual promise of a new pane to the right.
+          drillable = child.type in [:list, :document_type_list]
+          [%{type: :item, id: child.id, title: child.title, icon: child.icon, drillable: drillable}]
       end
     end)
   end
@@ -833,7 +840,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   >
                     <span class="pane-item-icon"><.icon name={item.icon} size={16} /></span>
                     <span class="pane-item-label"><%= item.title %></span>
-                    <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
+                    <%= if item[:drillable] do %>
+                      <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
+                    <% end %>
                   </div>
               <% end %>
             <% end %>
