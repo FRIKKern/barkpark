@@ -2,21 +2,26 @@ defmodule BarkparkWeb.Studio.Nav do
   @moduledoc """
   Single source of truth for Studio top-level navigation tabs.
 
-  Each tab is `{id, label, path}` where `id` matches the `:nav_section`
-  assign set by the corresponding LiveView in its `mount/3`. The layout
-  (`app.html.heex`) loops this list and marks the matching tab active.
+  Tabs are dataset-aware: `tabs/1` takes the current dataset and returns
+  a list of `%{id, label, path}` maps with dataset-prefixed paths.
   """
 
   @type tab :: %{id: atom(), label: String.t(), path: String.t()}
 
-  @spec tabs() :: [tab()]
-  def tabs do
+  @spec tabs(String.t()) :: [tab()]
+  def tabs(dataset) when is_binary(dataset) do
+    ds = URI.encode(dataset)
+
     [
-      %{id: :structure, label: "Structure", path: "/studio"},
-      %{id: :media, label: "Media", path: "/studio/media"},
-      %{id: :api_tester, label: "API", path: "/studio/api-tester"}
+      %{id: :structure, label: "Structure", path: "/studio/#{ds}"},
+      %{id: :media, label: "Media", path: "/studio/#{ds}/media"},
+      %{id: :api_tester, label: "API", path: "/studio/#{ds}/api-tester"}
     ]
   end
+
+  @doc "Deprecated: use tabs/1. Retained as a temporary shim so the layout still compiles."
+  @spec tabs() :: [tab()]
+  def tabs, do: tabs("production")
 
   @doc "Fallback nav section when a LiveView hasn't set one."
   @spec default() :: atom()
