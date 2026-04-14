@@ -45,18 +45,23 @@ defmodule Barkpark.ApiTester.EndpointsTest do
     end
   end
 
-  test "mutate-patch body example includes ifRevisionID reserved slot" do
+  test "mutate-patch body example carries a patch mutation with `set` fields" do
     ep = Endpoints.find("production", "mutate-patch")
-    [patch_mutation] = ep.body_example["mutations"]
+    # Body is a setup-then-test batch: createOrReplace + patch.
+    patch_mutation = Enum.find(ep.body_example["mutations"], &Map.has_key?(&1, "patch"))
+    assert patch_mutation, "missing patch mutation in body"
     patch_body = patch_mutation["patch"]
-    assert Map.has_key?(patch_body, "ifRevisionID")
     assert Map.has_key?(patch_body, "set")
+    # ifRevisionID is intentionally absent from the default example so
+    # Run all succeeds without optimistic-concurrency gotchas. The user
+    # can paste a rev into the textarea to test rev_mismatch manually.
+    refute Map.has_key?(patch_body, "ifRevisionID")
   end
 
-  test "mutate-publish expects operation publish" do
+  test "mutate-publish body example includes a publish mutation on post" do
     ep = Endpoints.find("production", "mutate-publish")
-    [pub] = ep.body_example["mutations"]
-    assert Map.has_key?(pub, "publish")
+    pub = Enum.find(ep.body_example["mutations"], &Map.has_key?(&1, "publish"))
+    assert pub, "missing publish mutation in body"
     assert pub["publish"]["type"] == "post"
   end
 

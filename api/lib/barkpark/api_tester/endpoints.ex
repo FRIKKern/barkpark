@@ -183,7 +183,9 @@ defmodule Barkpark.ApiTester.Endpoints do
           %{
             "create" => %{
               "_type" => "post",
-              "_id" => "playground-create-1",
+              # Fresh id per call so Run all stays idempotent across sessions.
+              # Edit the id in the playground textarea to trigger a conflict.
+              "_id" => "playground-create-#{:erlang.unique_integer([:positive])}",
               "title" => "From the playground",
               "body" => "Hello from docs + playground"
             }
@@ -194,7 +196,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       {
         "transactionId": "d4e5f6a7...",
         "results": [
-          { "id": "drafts.playground-create-1", "operation": "create", "document": { /* envelope */ } }
+          { "id": "drafts.playground-create-<n>", "operation": "create", "document": { /* envelope */ } }
         ]
       }
       """,
@@ -294,10 +296,16 @@ defmodule Barkpark.ApiTester.Endpoints do
       body_example: %{
         "mutations" => [
           %{
+            "createOrReplace" => %{
+              "_type" => "post",
+              "_id" => "playground-patch-1",
+              "title" => "Before patch"
+            }
+          },
+          %{
             "patch" => %{
-              "id" => "drafts.playground-upsert-1",
+              "id" => "drafts.playground-patch-1",
               "type" => "post",
-              "ifRevisionID" => "",
               "set" => %{"title" => "Revised title", "status" => "draft"}
             }
           }
@@ -330,14 +338,22 @@ defmodule Barkpark.ApiTester.Endpoints do
       query_params: [],
       body_example: %{
         "mutations" => [
-          %{"publish" => %{"id" => "playground-upsert-1", "type" => "post"}}
+          %{
+            "createOrReplace" => %{
+              "_type" => "post",
+              "_id" => "playground-publish-1",
+              "title" => "Publish me"
+            }
+          },
+          %{"publish" => %{"id" => "playground-publish-1", "type" => "post"}}
         ]
       },
       response_shape: """
       {
         "transactionId": "...",
         "results": [
-          { "id": "playground-upsert-1", "operation": "publish", "document": { /* envelope, _draft=false */ } }
+          { "id": "drafts.playground-publish-1", "operation": "createOrReplace", "document": { /* envelope */ } },
+          { "id": "playground-publish-1", "operation": "publish", "document": { /* envelope, _draft=false */ } }
         ]
       }
       """,
@@ -360,7 +376,15 @@ defmodule Barkpark.ApiTester.Endpoints do
       query_params: [],
       body_example: %{
         "mutations" => [
-          %{"unpublish" => %{"id" => "playground-upsert-1", "type" => "post"}}
+          %{
+            "createOrReplace" => %{
+              "_type" => "post",
+              "_id" => "playground-unpublish-1",
+              "title" => "Unpublish me"
+            }
+          },
+          %{"publish" => %{"id" => "playground-unpublish-1", "type" => "post"}},
+          %{"unpublish" => %{"id" => "playground-unpublish-1", "type" => "post"}}
         ]
       },
       response_shape: """
@@ -390,14 +414,22 @@ defmodule Barkpark.ApiTester.Endpoints do
       query_params: [],
       body_example: %{
         "mutations" => [
-          %{"discardDraft" => %{"id" => "playground-upsert-1", "type" => "post"}}
+          %{
+            "createOrReplace" => %{
+              "_type" => "post",
+              "_id" => "playground-discard-1",
+              "title" => "Discard this draft"
+            }
+          },
+          %{"discardDraft" => %{"id" => "playground-discard-1", "type" => "post"}}
         ]
       },
       response_shape: """
       {
         "transactionId": "...",
         "results": [
-          { "id": "drafts.playground-upsert-1", "operation": "discardDraft", "document": { /* envelope of deleted draft */ } }
+          { "id": "drafts.playground-discard-1", "operation": "createOrReplace", "document": { /* envelope */ } },
+          { "id": "drafts.playground-discard-1", "operation": "discardDraft", "document": { /* envelope of deleted draft */ } }
         ]
       }
       """,
@@ -420,7 +452,14 @@ defmodule Barkpark.ApiTester.Endpoints do
       query_params: [],
       body_example: %{
         "mutations" => [
-          %{"delete" => %{"id" => "playground-upsert-1", "type" => "post"}}
+          %{
+            "createOrReplace" => %{
+              "_type" => "post",
+              "_id" => "playground-delete-1",
+              "title" => "To be deleted"
+            }
+          },
+          %{"delete" => %{"id" => "playground-delete-1", "type" => "post"}}
         ]
       },
       response_shape: """

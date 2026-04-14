@@ -191,6 +191,16 @@ defmodule Barkpark.ApiTester.Runner do
 
   defp run_predicate(:envelope_has_reserved_keys, _, _), do: {:fail, "no documents in response"}
 
+  # Single-doc response (GET /v1/data/doc/:ds/:type/:id) returns the envelope
+  # at the top level, not wrapped in a `documents` array.
+  defp run_predicate(:envelope_top_level, body, _) when is_map(body) do
+    required = ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
+    missing = Enum.reject(required, &Map.has_key?(body, &1))
+    if missing == [], do: :ok, else: {:fail, "missing keys: #{inspect(missing)}"}
+  end
+
+  defp run_predicate(:envelope_top_level, _, _), do: {:fail, "expected a flat envelope object"}
+
   defp run_predicate(:order_ascending, %{"documents" => docs}, _) when length(docs) >= 2 do
     dates = Enum.map(docs, & &1["_createdAt"])
     if dates == Enum.sort(dates), do: :ok, else: {:fail, "not ascending: #{inspect(dates)}"}
@@ -209,6 +219,10 @@ defmodule Barkpark.ApiTester.Runner do
 
   defp run_predicate(:schema_version_1, %{"_schemaVersion" => 1, "schemas" => schemas}, _) when is_list(schemas), do: :ok
   defp run_predicate(:schema_version_1, body, _), do: {:fail, "missing _schemaVersion/schemas: #{inspect(body)}"}
+
+  # Single-schema response wraps under a singular `schema` key, not `schemas`.
+  defp run_predicate(:schema_version_1_show, %{"_schemaVersion" => 1, "schema" => %{"name" => _}}, _), do: :ok
+  defp run_predicate(:schema_version_1_show, body, _), do: {:fail, "missing _schemaVersion/schema: #{inspect(body)}"}
 
   defp run_predicate(:mutate_result_has_envelope, %{"transactionId" => tx, "results" => [r | _]}, _) when is_binary(tx) do
     doc = r["document"]
