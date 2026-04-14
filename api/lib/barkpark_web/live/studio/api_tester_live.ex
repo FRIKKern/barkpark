@@ -2,7 +2,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   @moduledoc """
   Studio pane: interactive v1 API contract tester.
 
-  Left column: pre-canned test cases grouped by category, plus "Run all".
+  Left column: endpoint list grouped by category, plus "Run all".
   Right column: request preview (editable body), Run button, and the full
   response (status, duration, headers, pretty JSON body) with a pass/fail
   badge driven by `Barkpark.ApiTester.Runner`'s predicate checks.
@@ -15,19 +15,20 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   use BarkparkWeb, :live_view
 
-  alias Barkpark.ApiTester.{Runner, TestCases}
+  alias Barkpark.ApiTester.{Endpoints, Runner}
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
-    cases = TestCases.all(dataset)
+    endpoints = Endpoints.all(dataset)
+    first = List.first(endpoints) || %{id: nil}
 
     {:ok,
      assign(socket,
        nav_section: :api_tester,
        dataset: dataset,
-       cases: cases,
-       categories: cases |> Enum.map(& &1.category) |> Enum.uniq(),
-       selected_id: (List.first(cases) || %{id: nil}).id,
+       endpoints: endpoints,
+       categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
+       selected_id: first.id,
        custom_body: "",
        last_result: nil,
        running: false,
@@ -37,8 +38,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   @impl true
   def handle_event("select", %{"id" => id}, socket) do
-    tc = TestCases.find(socket.assigns.dataset, id)
-    default_body = if tc && tc.body, do: Jason.encode!(tc.body, pretty: true), else: ""
+    ep = Endpoints.find(socket.assigns.dataset, id)
+    default_body = if ep && ep[:body_example], do: Jason.encode!(ep.body_example, pretty: true), else: ""
     {:noreply, assign(socket, selected_id: id, custom_body: default_body, last_result: nil)}
   end
 
@@ -47,18 +48,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   def handle_event("run", _, socket) do
-    tc = TestCases.find(socket.assigns.dataset, socket.assigns.selected_id)
+    ep = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
 
     result =
-      cond do
-        tc == nil ->
-          %{verdict: :error, verdict_reason: "no test selected"}
-
-        socket.assigns.custom_body == "" ->
-          Runner.run(tc)
-
-        true ->
-          Runner.run(tc, body_override: socket.assigns.custom_body)
+      case ep_to_legacy_case(ep, socket.assigns.dataset, "barkpark-dev-token") do
+        nil -> %{verdict: :error, verdict_reason: "Reference pages can't be Run"}
+        legacy -> Runner.run(legacy)
       end
 
     new_results = Map.put(socket.assigns.results_by_id, socket.assigns.selected_id, result)
@@ -67,8 +62,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   def handle_event("run-all", _, socket) do
     results =
-      socket.assigns.cases
-      |> Enum.reduce(%{}, fn tc, acc -> Map.put(acc, tc.id, Runner.run(tc)) end)
+      socket.assigns.endpoints
+      |> Enum.filter(&(&1.kind == :endpoint && &1[:expect] != nil))
+      |> Enum.reduce(%{}, fn ep, acc ->
+        legacy = ep_to_legacy_case(ep, socket.assigns.dataset, "barkpark-dev-token")
+        Map.put(acc, ep.id, Runner.run(legacy))
+      end)
 
     {:noreply, assign(socket, results_by_id: results, last_result: results[socket.assigns.selected_id])}
   end
@@ -83,7 +82,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         <aside class="tester-sidebar">
           <%= for category <- @categories do %>
             <div class="tester-category-title"><%= category %></div>
-            <%= for tc <- Enum.filter(@cases, &(&1.category == category)) do %>
+            <%= for tc <- Enum.filter(@endpoints, &(&1.category == category)) do %>
               <button
                 phx-click="select"
                 phx-value-id={tc.id}
@@ -102,31 +101,21 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
             <button phx-click="run-all" class="tester-btn-primary">Run all</button>
           </div>
 
-          <%= if tc = TestCases.find(@dataset, @selected_id) do %>
+          <%= if tc = Endpoints.find(@dataset, @selected_id) do %>
             <div class="tester-case-header">
               <div>
-                <div class="tester-case-method-row">
-                  <span class={"tester-method tester-method-#{String.downcase(tc.method)}"}><%= tc.method %></span>
-                  <span class="tester-url"><%= tc.path %></span>
-                </div>
+                <%= if tc[:method] do %>
+                  <div class="tester-case-method-row">
+                    <span class={"tester-method tester-method-#{String.downcase(tc.method)}"}><%= tc.method %></span>
+                    <span class="tester-url"><%= tc.path_template %></span>
+                  </div>
+                <% end %>
                 <div class="tester-case-desc"><%= tc.description %></div>
               </div>
               <button phx-click="run" class="tester-btn-primary">Run</button>
             </div>
 
-            <%= if tc.headers != [] do %>
-              <div class="tester-section-title">Headers</div>
-              <div class="tester-headers">
-                <%= for {k, v} <- tc.headers do %>
-                  <div class="tester-header-row">
-                    <span class="tester-header-name"><%= k %></span>
-                    <span class="tester-header-value"><%= mask_header(k, v) %></span>
-                  </div>
-                <% end %>
-              </div>
-            <% end %>
-
-            <%= if tc.body do %>
+            <%= if tc[:body_example] do %>
               <div class="tester-section-title">Body (editable)</div>
               <form phx-change="body-edit">
                 <textarea
@@ -167,7 +156,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
               <pre class="tester-body-view"><%= format_body(@last_result) %></pre>
             <% end %>
           <% else %>
-            <div class="tester-empty">Select a test case on the left.</div>
+            <div class="tester-empty">Select an endpoint on the left.</div>
           <% end %>
         </main>
       </div>
@@ -251,6 +240,36 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   defp format_body(%{body_text: text}), do: text
 
-  defp mask_header("Authorization", _), do: "Bearer *****"
-  defp mask_header(_, v), do: v
+  # Temporary bridge: turn an Endpoint spec into the legacy "case map" shape
+  # that Runner.run/2 expects. Task 6 replaces this with real form state.
+  defp ep_to_legacy_case(%{kind: :reference}, _dataset, _token), do: nil
+
+  defp ep_to_legacy_case(endpoint, dataset, token) do
+    form_state =
+      Enum.into(endpoint.path_params || [], %{}, fn %{name: name, default: default} ->
+        {name, to_string(default)}
+      end)
+      |> Map.merge(
+        Enum.into(endpoint.query_params || [], %{}, fn %{name: name, default: default} ->
+          {name, to_string(default)}
+        end)
+      )
+      |> Map.put("dataset", dataset)
+      |> Map.put("_body_text", if(endpoint.body_example, do: Jason.encode!(endpoint.body_example), else: ""))
+
+    req =
+      Runner.build_request(endpoint, form_state, %{
+        token: token,
+        base: "http://localhost:4000"
+      })
+
+    %{
+      id: endpoint.id,
+      method: req.method,
+      path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+      headers: req.headers,
+      body: endpoint.body_example,
+      expect: endpoint[:expect]
+    }
+  end
 end
