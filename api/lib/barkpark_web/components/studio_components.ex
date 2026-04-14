@@ -176,4 +176,59 @@ defmodule BarkparkWeb.StudioComponents do
     <div class="pane-divider"></div>
     """
   end
+
+  @doc """
+  Clickable row inside a pane column.
+
+  Renders a `<div class="pane-item">` (NOT a `<button>` — matches the
+  Studio convention). The `:inner_block` goes inside a
+  `.pane-item-label` span. Optional `:icon`, `:badge`, and `:trailing`
+  slots fill their respective positions. Source order in the rendered
+  HTML: icon → label → badge → trailing.
+
+  ## Attributes
+
+    * `:phx_click`    — (required) LiveView event name
+    * `:phx_value_id` — (required) stable id forwarded to the handler
+    * `:selected`     — optional boolean, adds `.selected` modifier
+    * `:id`           — optional HTML id
+
+  ## Slots
+
+    * `:inner_block` — (required) label contents
+    * `:icon`        — optional leading icon
+    * `:badge`       — optional right-aligned inline content
+    * `:trailing`    — optional terminal element (usually a chevron)
+  """
+  attr :phx_click, :string, required: true
+  attr :phx_value_id, :string, required: true
+  attr :selected, :boolean, default: false
+  attr :id, :string, default: nil
+
+  slot :inner_block, required: true
+  slot :icon
+  slot :badge
+  slot :trailing
+
+  def pane_item(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      phx-click={@phx_click}
+      phx-value-id={@phx_value_id}
+      class={["pane-item", @selected && "selected"] |> Enum.filter(& &1) |> Enum.join(" ")}
+    >
+      <%= if @icon != [] do %>
+        <span class="pane-item-icon"><%= render_slot(@icon) %></span>
+      <% end %>
+      <span class="pane-item-label"><%= render_slot(@inner_block) %></span>
+      <%= if @badge != [] do %>
+        <%= render_slot(@badge) %>
+      <% end %>
+      <%= if @trailing != [] do %>
+        <span class="pane-item-chevron"><%= render_slot(@trailing) %></span>
+      <% end %>
+    </div>
+    """
+  end
 end

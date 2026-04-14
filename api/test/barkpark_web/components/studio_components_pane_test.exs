@@ -155,4 +155,94 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ ~s(class="pane-divider")
     end
   end
+
+  describe "pane_item/1" do
+    test "renders as a clickable div with label" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "query-list",
+          inner_block: [%{inner_block: fn _, _ -> "List documents" end}]
+        })
+
+      assert html =~ ~s(phx-click="select")
+      assert html =~ ~s(phx-value-id="query-list")
+      assert html =~ ~s(class="pane-item)
+      assert html =~ ~s(class="pane-item-label")
+      assert html =~ "List documents"
+      refute html =~ "selected"
+      assert html =~ ~s(<div)
+    end
+
+    test "selected=true adds the selected class" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          selected: true,
+          inner_block: [%{inner_block: fn _, _ -> "X" end}]
+        })
+
+      assert html =~ ~s(class="pane-item selected")
+    end
+
+    test "icon slot renders in a leading .pane-item-icon span" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          inner_block: [%{inner_block: fn _, _ -> "Label" end}],
+          icon: [%{inner_block: fn _, _ -> "ICON" end}]
+        })
+
+      assert html =~ ~s(class="pane-item-icon")
+      assert html =~ "ICON"
+      icon_pos = :binary.match(html, "pane-item-icon") |> elem(0)
+      label_pos = :binary.match(html, "pane-item-label") |> elem(0)
+      assert icon_pos < label_pos
+    end
+
+    test "trailing slot renders in .pane-item-chevron after the label" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          inner_block: [%{inner_block: fn _, _ -> "Label" end}],
+          trailing: [%{inner_block: fn _, _ -> "CHEV" end}]
+        })
+
+      assert html =~ ~s(class="pane-item-chevron")
+      assert html =~ "CHEV"
+      label_pos = :binary.match(html, "pane-item-label") |> elem(0)
+      chev_pos = :binary.match(html, "pane-item-chevron") |> elem(0)
+      assert label_pos < chev_pos
+    end
+
+    test "badge slot renders right-aligned, after label" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          inner_block: [%{inner_block: fn _, _ -> "Label" end}],
+          badge: [%{inner_block: fn _, _ -> "BADGE" end}]
+        })
+
+      assert html =~ "BADGE"
+      label_pos = :binary.match(html, "pane-item-label") |> elem(0)
+      badge_pos = :binary.match(html, "BADGE") |> elem(0)
+      assert label_pos < badge_pos
+    end
+
+    test "id attr is forwarded to the rendered element" do
+      html =
+        render_component(&StudioComponents.pane_item/1, %{
+          phx_click: "select",
+          phx_value_id: "x",
+          id: "item-x",
+          inner_block: [%{inner_block: fn _, _ -> "Label" end}]
+        })
+
+      assert html =~ ~s(id="item-x")
+    end
+  end
 end
