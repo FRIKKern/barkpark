@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
 
     new_results =
-      if endpoint.kind == :reference do
+      if endpoint.kind == :reference || endpoint[:runnable] == false do
         socket.assigns.last_result_by_id
       else
         form_state = Map.get(socket.assigns.form_state_by_id, endpoint.id, %{})
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   def handle_event("run-all", _, socket) do
     results =
       socket.assigns.endpoints
-      |> Enum.filter(&(&1.kind == :endpoint && &1[:expect] != nil))
+      |> Enum.filter(&(&1.kind == :endpoint && &1[:runnable] != false && &1[:expect] != nil))
       |> Enum.reduce(%{}, fn ep, acc ->
         form_state = Map.get(socket.assigns.form_state_by_id, ep.id, initial_form_state(ep))
         req = Runner.build_request(ep, form_state, %{token: socket.assigns.token, base: "http://localhost:4000"})
@@ -447,6 +447,17 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
       .api-category-chevron.collapsed { transform: rotate(0deg); }
       .api-category-label { flex: 1; }
+
+      .api-runnable-note {
+        margin-top: 12px; padding: 10px 14px;
+        background: var(--bg-muted); border: 1px solid var(--border-muted);
+        border-radius: var(--radius-sm);
+        font-size: 12px; color: var(--fg-muted); line-height: 1.5;
+      }
+      .api-runnable-note code {
+        font-family: var(--font-mono); font-size: 11px;
+        background: var(--bg); padding: 1px 5px; border-radius: 3px;
+      }
     </style>
     """
   end
@@ -570,15 +581,22 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     <div class="api-section">Copy as curl</div>
     <pre class="api-code-block api-curl-block" id="tester-curl"><%= @curl %></pre>
 
-    <div class="api-actions">
-      <button phx-click="run" class="btn btn-primary btn-sm">Run</button>
-      <button
-        type="button"
-        onclick={~s|navigator.clipboard.writeText(document.getElementById('tester-curl').textContent); this.textContent='Copied \u2713'; setTimeout(() => this.textContent='Copy curl', 1500)|
-        }
-        class="btn btn-sm"
-      >Copy curl</button>
-    </div>
+    <%= if @endpoint[:runnable] == false do %>
+      <div class="api-runnable-note">
+        Streaming endpoint — the playground does not support SSE. Use <code>curl -N</code>
+        from the command line to tail this stream.
+      </div>
+    <% else %>
+      <div class="api-actions">
+        <button phx-click="run" class="btn btn-primary btn-sm">Run</button>
+        <button
+          type="button"
+          onclick={~s|navigator.clipboard.writeText(document.getElementById('tester-curl').textContent); this.textContent='Copied \u2713'; setTimeout(() => this.textContent='Copy curl', 1500)|
+          }
+          class="btn btn-sm"
+        >Copy curl</button>
+      </div>
+    <% end %>
     """
   end
 

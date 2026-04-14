@@ -72,6 +72,7 @@ defmodule Barkpark.ApiTester.EndpointsTest do
     assert ep.method == "GET"
     assert ep.kind == :endpoint
     assert ep.expect == nil, "listen has no verdict predicate"
+    assert ep[:runnable] == false, "listen-sse should be marked non-runnable so Run all skips it"
   end
 
   test "schemas-list and schemas-show both require admin auth" do
