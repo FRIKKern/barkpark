@@ -3,31 +3,31 @@ defmodule BarkparkWeb.Studio.DashboardLive do
 
   alias Barkpark.{Content, Structure}
 
-  @dataset "production"
-
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
+    dataset = params["dataset"] || "production"
+
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
     end
 
-    structure = Structure.build(@dataset)
-    counts = build_counts(structure)
+    structure = Structure.build(dataset)
+    counts = build_counts(structure, dataset)
 
-    {:ok, assign(socket, structure: structure, counts: counts, page_title: "Structure")}
+    {:ok, assign(socket, structure: structure, counts: counts, page_title: "Structure", dataset: dataset)}
   end
 
   @impl true
   def handle_info({:document_changed, _}, socket) do
-    counts = build_counts(socket.assigns.structure)
+    counts = build_counts(socket.assigns.structure, socket.assigns.dataset)
     {:noreply, assign(socket, counts: counts)}
   end
 
-  defp build_counts(structure) do
+  defp build_counts(structure, dataset) do
     structure.items
     |> Enum.filter(&(&1.type_name))
     |> Enum.map(fn node ->
-      count = length(Content.list_documents(node.type_name, @dataset, perspective: :drafts))
+      count = length(Content.list_documents(node.type_name, dataset, perspective: :drafts))
       {node.type_name, count}
     end)
     |> Map.new()
