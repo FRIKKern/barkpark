@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     {:ok, socket
      |> assign(
+       nav_section: :structure,
        page_title: "Studio", subscribed_doc: nil,
        image_picker_field: nil, media_files: [],
        ref_picker_field: nil, ref_candidates: [], ref_search: "",

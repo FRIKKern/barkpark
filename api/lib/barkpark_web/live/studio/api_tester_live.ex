@@ -23,6 +23,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
     {:ok,
      assign(socket,
+       nav_section: :api_tester,
        cases: cases,
        categories: cases |> Enum.map(& &1.category) |> Enum.uniq(),
        selected_id: (List.first(cases) || %{id: nil}).id,
