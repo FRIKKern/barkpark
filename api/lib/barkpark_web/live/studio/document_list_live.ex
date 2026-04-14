@@ -3,25 +3,24 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
 
   alias Barkpark.{Content, Structure}
 
-  @dataset "production"
-
   @impl true
-  def mount(%{"type" => type}, _session, socket) do
+  def mount(%{"type" => type, "dataset" => dataset}, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
     end
 
-    schema = case Content.get_schema(type, @dataset) do
+    schema = case Content.get_schema(type, dataset) do
       {:ok, s} -> s
       _ -> nil
     end
 
-    type_node = Structure.type_node(type, @dataset)
+    type_node = Structure.type_node(type, dataset)
 
     socket =
       socket
       |> assign(
         type: type,
+        dataset: dataset,
         schema: schema,
         type_node: type_node,
         perspective: :drafts,
@@ -56,7 +55,7 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
     type = socket.assigns.type
     id = "#{type}-#{:rand.uniform(999_999)}"
 
-    case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, @dataset) do
+    case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, socket.assigns.dataset) do
       {:ok, doc} ->
         {:noreply, push_navigate(socket, to: "/studio/#{type}/#{Content.published_id(doc.doc_id)}")}
       {:error, _} ->
@@ -65,14 +64,14 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
   end
 
   def handle_event("delete-doc", %{"id" => doc_id, "type" => type}, socket) do
-    Content.delete_document(doc_id, type, @dataset)
+    Content.delete_document(doc_id, type, socket.assigns.dataset)
     {:noreply, load_documents(socket)}
   end
 
   defp load_documents(socket) do
     opts = [perspective: socket.assigns.perspective]
     opts = if socket.assigns.active_filter, do: opts ++ [filter_map: parse_filter_string(socket.assigns.active_filter)], else: opts
-    docs = Content.list_documents(socket.assigns.type, @dataset, opts)
+    docs = Content.list_documents(socket.assigns.type, socket.assigns.dataset, opts)
     assign(socket, documents: docs)
   end
 
