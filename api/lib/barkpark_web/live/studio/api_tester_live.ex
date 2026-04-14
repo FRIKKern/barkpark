@@ -18,12 +18,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   alias Barkpark.ApiTester.{Runner, TestCases}
 
   @impl true
-  def mount(_params, _session, socket) do
-    cases = TestCases.all()
+  def mount(%{"dataset" => dataset}, _session, socket) do
+    cases = TestCases.all(dataset)
 
     {:ok,
      assign(socket,
        nav_section: :api_tester,
+       dataset: dataset,
        cases: cases,
        categories: cases |> Enum.map(& &1.category) |> Enum.uniq(),
        selected_id: (List.first(cases) || %{id: nil}).id,
@@ -36,7 +37,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   @impl true
   def handle_event("select", %{"id" => id}, socket) do
-    tc = TestCases.find(id)
+    tc = TestCases.find(socket.assigns.dataset, id)
     default_body = if tc && tc.body, do: Jason.encode!(tc.body, pretty: true), else: ""
     {:noreply, assign(socket, selected_id: id, custom_body: default_body, last_result: nil)}
   end
@@ -46,7 +47,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   def handle_event("run", _, socket) do
-    tc = TestCases.find(socket.assigns.selected_id)
+    tc = TestCases.find(socket.assigns.dataset, socket.assigns.selected_id)
 
     result =
       cond do
@@ -101,7 +102,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
             <button phx-click="run-all" class="tester-btn-primary">Run all</button>
           </div>
 
-          <%= if tc = TestCases.find(@selected_id) do %>
+          <%= if tc = TestCases.find(@dataset, @selected_id) do %>
             <div class="tester-case-header">
               <div>
                 <div class="tester-case-method-row">
