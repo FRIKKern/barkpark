@@ -376,6 +376,7 @@ defmodule Barkpark.Content do
   defp apply_one(_, _), do: {:error, :malformed}
 
   defp ensure_rev(_doc, nil), do: :ok
+  defp ensure_rev(_doc, ""), do: :ok
   defp ensure_rev(%{rev: r}, r), do: :ok
   defp ensure_rev(_, _), do: {:error, :rev_mismatch}
 
