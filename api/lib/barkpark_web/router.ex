@@ -23,20 +23,21 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.RequireAdmin
   end
 
+  # Bare /studio and / redirect to the default dataset.
+  scope "/", BarkparkWeb do
+    pipe_through :browser
+    get "/", PageController, :redirect_to_studio
+    get "/studio", PageController, :redirect_to_studio
+  end
+
   # ── Studio (LiveView) ─────────────────────────────────────────────────────
-  scope "/studio", BarkparkWeb.Studio do
+  scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser
 
     live "/", StudioLive
     live "/media", MediaLive
     live "/api-tester", ApiTesterLive
     live "/*path", StudioLive
-  end
-
-  # Redirect root to studio
-  scope "/", BarkparkWeb do
-    pipe_through :browser
-    get "/", PageController, :home
   end
 
   # ── Public API — read-only, respects schema visibility ──────────────────
