@@ -231,4 +231,65 @@ defmodule BarkparkWeb.StudioComponents do
     </div>
     """
   end
+
+  @doc """
+  Rich row for a document inside a pane's doc list.
+
+  Two visual lines: title with leading status dot, below it the doc id
+  in mono font. Optional trailing slot for inline content (e.g. presence
+  dots). `is_draft: true` overrides the status dot's class to `"draft"`
+  regardless of the `status` string.
+
+  ## Attributes
+
+    * `:phx_click`      — (required) LiveView event name
+    * `:phx_value_pane` — (required) pane index forwarded to the handler
+    * `:phx_value_id`   — (required) document id forwarded to the handler
+    * `:title`          — (required) document title
+    * `:doc_id`         — (required) published document id
+    * `:status`         — (required) document status string; used as
+                          the dot's modifier class (unless is_draft)
+    * `:is_draft`       — optional boolean; when true, the dot shows
+                          "draft" regardless of status
+    * `:selected`       — optional boolean, adds `.selected` modifier
+    * `:id`             — optional HTML id
+
+  ## Slots
+
+    * `:trailing` — optional inline content appended after the title
+                    (e.g. presence dots). Rendered inside the
+                    `.pane-doc-title` div, right after the title text.
+  """
+  attr :phx_click, :string, required: true
+  attr :phx_value_pane, :string, required: true
+  attr :phx_value_id, :string, required: true
+  attr :title, :string, required: true
+  attr :doc_id, :string, required: true
+  attr :status, :string, required: true
+  attr :is_draft, :boolean, default: false
+  attr :selected, :boolean, default: false
+  attr :id, :string, default: nil
+
+  slot :trailing
+
+  def pane_doc_item(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={["pane-doc-item", @selected && "selected"] |> Enum.filter(& &1) |> Enum.join(" ")}
+      phx-click={@phx_click}
+      phx-value-pane={@phx_value_pane}
+      phx-value-id={@phx_value_id}
+    >
+      <div class="pane-doc-title">
+        <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
+        <%= @title %>
+        <%= if @trailing != [] do %>
+          <%= render_slot(@trailing) %>
+        <% end %>
+      </div>
+      <div class="pane-doc-id"><%= @doc_id %></div>
+    </div>
+    """
+  end
 end
