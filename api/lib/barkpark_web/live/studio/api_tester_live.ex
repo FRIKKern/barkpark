@@ -208,7 +208,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
           <div class="api-nav-body">
             <%= for category <- @categories do %>
-              <div class="pane-section"><%= category %></div>
+              <div class="pane-section-header"><%= category %></div>
               <%= for ep <- Enum.filter(@endpoints, &(&1.category == category)) do %>
                 <button
                   phx-click="select"
@@ -296,9 +296,14 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
 
       .api-tester-panes { flex: 1; min-height: 0; }
-      .api-col-nav { width: 260px; flex-shrink: 0; }
-      .api-col-docs { flex: 1.1; }
-      .api-col-response { flex: 1; border-right: none; }
+      /* Nav column inherits .pane-column's 260px; docs/response override it. */
+      .api-col-nav { }
+      .api-col-docs {
+        width: auto; min-width: 0; flex: 1.1 1 0;
+      }
+      .api-col-response {
+        width: auto; min-width: 0; flex: 1 1 0; border-right: none;
+      }
       .api-col-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
       .api-nav-body { flex: 1; overflow-y: auto; padding: 4px 0 12px; }
 
