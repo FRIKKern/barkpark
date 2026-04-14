@@ -127,4 +127,53 @@ defmodule BarkparkWeb.StudioComponents do
     </div>
     """
   end
+
+  @doc """
+  Uppercase category heading inside a pane column. Two modes:
+
+  * Static (default): `<div class="pane-section-header">` wrapping the
+    inner block.
+  * Collapsible: `collapsible: true`, `phx_click: "event"`, and
+    `phx_value_category: "Cat"` make it a clickable button with a
+    rotating chevron. `collapsed: true` shows the collapsed state.
+  """
+  attr :collapsible, :boolean, default: false
+  attr :collapsed, :boolean, default: false
+  attr :phx_click, :string, default: nil
+  attr :phx_value_category, :string, default: nil
+
+  slot :inner_block, required: true
+
+  def pane_section_header(assigns) do
+    ~H"""
+    <%= if @collapsible do %>
+      <button
+        type="button"
+        class="pane-section-header"
+        phx-click={@phx_click}
+        phx-value-category={@phx_value_category}
+      >
+        <span class={"pane-section-header-chevron #{if @collapsed, do: "collapsed"}"}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="display:inline-block;vertical-align:middle;flex-shrink:0;">
+            <path d="m9 18 6-6-6-6"/>
+          </svg>
+        </span>
+        <%= render_slot(@inner_block) %>
+      </button>
+    <% else %>
+      <div class="pane-section-header"><%= render_slot(@inner_block) %></div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Thin horizontal divider between groups inside a pane body.
+  """
+  def pane_divider(assigns) do
+    ~H"""
+    <div class="pane-divider"></div>
+    """
+  end
 end

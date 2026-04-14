@@ -105,4 +105,54 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ "Nothing selected"
     end
   end
+
+  describe "pane_section_header/1" do
+    test "renders label in a .pane-section-header div" do
+      html =
+        render_component(&StudioComponents.pane_section_header/1, %{
+          inner_block: [%{inner_block: fn _, _ -> "Query" end}]
+        })
+
+      assert html =~ ~s(class="pane-section-header")
+      assert html =~ "Query"
+      refute html =~ "button"
+    end
+
+    test "collapsible=true renders as a button with a rotating chevron" do
+      html =
+        render_component(&StudioComponents.pane_section_header/1, %{
+          collapsible: true,
+          collapsed: false,
+          phx_click: "toggle-category",
+          phx_value_category: "Query",
+          inner_block: [%{inner_block: fn _, _ -> "Query" end}]
+        })
+
+      assert html =~ ~s(phx-click="toggle-category")
+      assert html =~ ~s(phx-value-category="Query")
+      assert html =~ "pane-section-header"
+      assert html =~ "pane-section-header-chevron"
+      refute html =~ "pane-section-header-chevron collapsed"
+    end
+
+    test "collapsible=true + collapsed=true flags the chevron as collapsed" do
+      html =
+        render_component(&StudioComponents.pane_section_header/1, %{
+          collapsible: true,
+          collapsed: true,
+          phx_click: "toggle-category",
+          phx_value_category: "Query",
+          inner_block: [%{inner_block: fn _, _ -> "Query" end}]
+        })
+
+      assert html =~ "pane-section-header-chevron collapsed"
+    end
+  end
+
+  describe "pane_divider/0" do
+    test "renders an empty .pane-divider" do
+      html = render_component(&StudioComponents.pane_divider/1, %{})
+      assert html =~ ~s(class="pane-divider")
+    end
+  end
 end
