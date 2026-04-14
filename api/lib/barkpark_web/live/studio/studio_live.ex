@@ -8,7 +8,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias Barkpark.{Content, Media, Structure}
   alias BarkparkWeb.Presence
 
-  @dataset "production"
   @presence_topic "studio:presence"
 
   @impl true
@@ -23,7 +22,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
     user_color = if stored_color && stored_color != "", do: stored_color, else: pick_color(user_id)
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
       Phoenix.PubSub.subscribe(Barkpark.PubSub, @presence_topic)
     end
 
@@ -42,8 +40,23 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    dataset = params["dataset"] || "production"
     path = Map.get(params, "path", [])
-    socket = socket |> assign(nav_path: path) |> rebuild_panes() |> subscribe_to_doc() |> track_presence()
+
+    if connected?(socket) and socket.assigns[:dataset] != dataset do
+      if old = socket.assigns[:dataset] do
+        Phoenix.PubSub.unsubscribe(Barkpark.PubSub, "documents:#{old}")
+      end
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
+    end
+
+    socket =
+      socket
+      |> assign(dataset: dataset, nav_path: path)
+      |> rebuild_panes()
+      |> subscribe_to_doc()
+      |> track_presence()
+
     {:noreply, socket}
   end
 
@@ -92,7 +105,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         "status" => Map.get(form, "status", doc.status),
         "content" => content
       }
-      case Content.upsert_document(type, attrs, @dataset) do
+      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
         {:ok, saved_doc} ->
           panes = update_doc_title_in_panes(socket.assigns.panes, Content.published_id(saved_doc.doc_id), Map.get(form, "title", doc.title))
           {:noreply, assign(socket,
@@ -121,7 +134,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # Subscribe to new doc if editing
     case socket.assigns do
       %{editor_type: type, editor_doc: %{doc_id: doc_id}} when not is_nil(type) ->
-        topic = "doc:#{@dataset}:#{type}:#{Content.published_id(doc_id)}"
+        topic = "doc:#{socket.assigns.dataset}:#{type}:#{Content.published_id(doc_id)}"
         Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
         assign(socket, subscribed_doc: topic)
 
@@ -176,19 +189,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("select", %{"pane" => pane_str, "id" => id}, socket) do
     pane_idx = String.to_integer(pane_str)
     new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
-    {:noreply, push_patch(socket, to: studio_path(new_path))}
+    {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
   end
 
   def handle_event("new-document", %{"type" => type}, socket) do
     id = "#{type}-#{:rand.uniform(999_999)}"
-    case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, @dataset) do
+    case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, socket.assigns.dataset) do
       {:ok, doc} ->
         # Find the pane that owns this type and build path from there
         pub_id = Content.published_id(doc.doc_id)
         path = socket.assigns.nav_path
         # The type pane is the last path segment before the doc
         new_path = Enum.take_while(path, &(&1 != type)) ++ [type, pub_id]
-        {:noreply, push_patch(socket, to: studio_path(new_path))}
+        {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
     end
@@ -212,12 +225,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
         "content" => content
       }
       # Run validation (informational — doesn't block draft saves)
-      validation_errors = case Content.validate_document(type, new_title, content, @dataset) do
+      validation_errors = case Content.validate_document(type, new_title, content, socket.assigns.dataset) do
         {:error, errs} -> errs
         _ -> %{}
       end
 
-      case Content.upsert_document(type, attrs, @dataset) do
+      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
         {:ok, saved_doc} ->
           panes = update_doc_title_in_panes(socket.assigns.panes, Content.published_id(saved_doc.doc_id), new_title)
           {:noreply, assign(socket,
@@ -242,7 +255,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── Image field events ──────────────────────────────────────────────────────
 
   def handle_event("open-image-picker", %{"field" => field_name}, socket) do
-    files = Media.list_files(@dataset, mime_type: "image/")
+    files = Media.list_files(socket.assigns.dataset, mime_type: "image/")
     {:noreply, assign(socket, image_picker_field: field_name, media_files: files)}
   end
 
@@ -277,7 +290,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           filename: entry.client_name,
           content_type: entry.client_type
         }
-        case Media.upload(plug_upload, @dataset) do
+        case Media.upload(plug_upload, socket.assigns.dataset) do
           {:ok, file} -> {:ok, "/media/files/#{file.path}"}
           {:error, _} -> {:error, "upload failed"}
         end
@@ -297,7 +310,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── Reference field events ─────────────────────────────────────────────────
 
   def handle_event("open-ref-picker", %{"field" => field_name, "ref-type" => ref_type}, socket) do
-    docs = Content.list_documents(ref_type, @dataset, perspective: :drafts)
+    docs = Content.list_documents(ref_type, socket.assigns.dataset, perspective: :drafts)
     candidates = Enum.map(docs, fn doc ->
       %{id: Content.published_id(doc.doc_id), title: doc.title || "Untitled"}
     end)
@@ -328,7 +341,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     if doc && type do
-      revisions = Content.list_revisions(doc.doc_id, type, @dataset, limit: 30)
+      revisions = Content.list_revisions(doc.doc_id, type, socket.assigns.dataset, limit: 30)
       {:noreply, assign(socket, show_history: true, revisions: revisions)}
     else
       {:noreply, socket}
@@ -345,7 +358,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     if doc && type do
-      refs = Content.find_referencing_docs(doc.doc_id, @dataset)
+      refs = Content.find_referencing_docs(doc.doc_id, socket.assigns.dataset)
       {:noreply, assign(socket, show_delete: true, delete_refs: refs)}
     else
       {:noreply, socket}
@@ -360,13 +373,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     if doc && type do
-      Content.disconnect_references(doc.doc_id, @dataset)
-      Content.delete_document(doc.doc_id, type, @dataset)
+      Content.disconnect_references(doc.doc_id, socket.assigns.dataset)
+      Content.delete_document(doc.doc_id, type, socket.assigns.dataset)
       # Navigate back to the type list
       new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
       {:noreply, socket
        |> assign(show_delete: false, delete_refs: [])
-       |> push_patch(to: studio_path(new_path))}
+       |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
     else
       {:noreply, socket}
     end
@@ -376,11 +389,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     if doc && type do
-      Content.delete_document(doc.doc_id, type, @dataset)
+      Content.delete_document(doc.doc_id, type, socket.assigns.dataset)
       new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
       {:noreply, socket
        |> assign(show_delete: false, delete_refs: [])
-       |> push_patch(to: studio_path(new_path))}
+       |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
     else
       {:noreply, socket}
     end
@@ -398,9 +411,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("jump-to-user", %{"type" => type, "doc-id" => doc_id}, socket) do
     # Build the path to that document — need to find it in the structure
-    structure = Structure.build(@dataset)
+    structure = Structure.build(socket.assigns.dataset)
     path = find_doc_path(structure, type, doc_id)
-    {:noreply, push_patch(socket, to: studio_path(path))}
+    {:noreply, push_patch(socket, to: studio_path(path, socket.assigns.dataset))}
   end
 
   def handle_event("preview-profile", %{"name" => name, "color" => color}, socket) do
@@ -417,7 +430,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("restore-revision", %{"id" => rev_id}, socket) do
     type = socket.assigns[:editor_type]
-    case Content.restore_revision(rev_id, type, @dataset) do
+    case Content.restore_revision(rev_id, type, socket.assigns.dataset) do
       {:ok, doc} ->
         {:noreply, socket
          |> assign(show_history: false, revisions: [])
@@ -447,7 +460,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         "status" => Map.get(params, "status", doc.status),
         "content" => content
       }
-      case Content.upsert_document(type, attrs, @dataset) do
+      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
         {:ok, _} ->
           socket = assign(socket, save_status: "Saved")
           socket = if flash_msg, do: put_flash(socket, :info, flash_msg), else: socket
@@ -466,14 +479,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     if doc && type do
       content = build_content(socket.assigns.editor_form, socket.assigns[:editor_schema])
       title = Map.get(socket.assigns.editor_form, "title", doc.title)
-      case Content.validate_document(type, title, content, @dataset) do
+      case Content.validate_document(type, title, content, socket.assigns.dataset) do
         {:error, errs} ->
           {:noreply, socket
            |> assign(validation_errors: errs)
            |> put_flash(:error, "Fix validation errors before publishing")}
         _ ->
           do_action(socket, fn d, t ->
-            Content.publish_document(Content.published_id(d.doc_id), t, @dataset)
+            Content.publish_document(Content.published_id(d.doc_id), t, socket.assigns.dataset)
           end, "Published")
       end
     else
@@ -483,7 +496,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("unpublish", _, socket) do
     do_action(socket, fn doc, type ->
-      Content.unpublish_document(Content.published_id(doc.doc_id), type, @dataset)
+      Content.unpublish_document(Content.published_id(doc.doc_id), type, socket.assigns.dataset)
     end, "Unpublished")
   end
 
@@ -500,8 +513,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp studio_path([]), do: "/studio"
-  defp studio_path(segments), do: "/studio/" <> Enum.join(segments, "/")
+  defp studio_path(path, dataset), do: studio_path_for(path, dataset)
+  defp studio_path_for([], dataset), do: "/studio/#{dataset}"
+  defp studio_path_for(segments, dataset), do: "/studio/#{dataset}/" <> Enum.join(segments, "/")
 
   defp build_content(params, schema) do
     if schema do
@@ -519,14 +533,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp rebuild_panes(socket) do
     path = socket.assigns.nav_path
-    structure = Structure.build(@dataset)
+    structure = Structure.build(socket.assigns.dataset)
 
     # Pane 0: root structure list
     root_pane = %{title: structure.title, items: build_list_items(structure), selected: Enum.at(path, 0)}
     panes = [root_pane]
 
     # Walk path through the structure tree, building panes at each depth
-    {panes, editor} = walk_path(path, 0, structure, panes, nil)
+    {panes, editor} = walk_path(path, 0, structure, panes, nil, socket.assigns.dataset)
 
     assign(socket,
       panes: panes,
@@ -542,8 +556,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Recursively walk the path, resolving each segment against the current node's children.
   # Mirrors the TUI's rebuildPanes() loop through path segments.
-  defp walk_path([], _depth, _current, panes, editor), do: {panes, editor}
-  defp walk_path([id | rest], depth, current, panes, _editor) do
+  defp walk_path([], _depth, _current, panes, editor, _dataset), do: {panes, editor}
+  defp walk_path([id | rest], depth, current, panes, _editor, dataset) do
     # Find the matching child node (check id first, then type_name)
     found = Enum.find(current.items, fn node ->
       node.id == id || node.type_name == id
@@ -556,18 +570,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
       %{type: :list} = node ->
         # Sub-list (e.g. Settings) — add a new list pane column, keep walking
         list_pane = %{title: node.title, items: build_list_items(node), selected: Enum.at(rest, 0)}
-        walk_path(rest, depth + 1, node, panes ++ [list_pane], nil)
+        walk_path(rest, depth + 1, node, panes ++ [list_pane], nil, dataset)
 
       %{type: :document_type_list, type_name: type_name} = node ->
         # Document list — add doc list pane, then resolve doc editor if path continues
-        schema = case Content.get_schema(type_name, @dataset) do
+        schema = case Content.get_schema(type_name, dataset) do
           {:ok, s} -> s
           _ -> nil
         end
 
         opts = [perspective: :drafts]
         opts = if node.filter, do: opts ++ [filter_map: parse_filter_string(node.filter)], else: opts
-        docs = Content.list_documents(type_name, @dataset, opts)
+        docs = Content.list_documents(type_name, dataset, opts)
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
@@ -582,7 +596,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
         editor = case rest do
           [doc_id | _] ->
-            {doc, is_draft, has_pub} = fetch_doc(type_name, doc_id)
+            {doc, is_draft, has_pub} = fetch_doc(type_name, doc_id, dataset)
             if doc && schema do
               %{doc: doc, schema: schema, type: type_name,
                 is_draft: is_draft, has_published: has_pub,
@@ -595,14 +609,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       %{type: :document, type_name: type_name} ->
         # Singleton — open editor directly
-        schema = case Content.get_schema(type_name, @dataset) do
+        schema = case Content.get_schema(type_name, dataset) do
           {:ok, s} -> s
           _ -> nil
         end
 
         if schema do
           # Singletons use the type name as the doc ID
-          {doc, is_draft, has_pub} = fetch_doc(type_name, type_name)
+          {doc, is_draft, has_pub} = fetch_doc(type_name, type_name, dataset)
           editor = if doc do
             %{doc: doc, schema: schema, type: type_name,
               is_draft: is_draft, has_published: has_pub,
@@ -662,9 +676,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end)
   end
 
-  defp fetch_doc(type, doc_id) do
-    draft_r = Content.get_document(Content.draft_id(doc_id), type, @dataset)
-    pub_r = Content.get_document(Content.published_id(doc_id), type, @dataset)
+  defp fetch_doc(type, doc_id, dataset) do
+    draft_r = Content.get_document(Content.draft_id(doc_id), type, dataset)
+    pub_r = Content.get_document(Content.published_id(doc_id), type, dataset)
     {doc, is_draft} = case draft_r do
       {:ok, d} -> {d, true}
       _ -> case pub_r do
@@ -697,7 +711,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
       <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
       <%= for p <- others do %>
-        <% p_doc_title = resolve_presence_doc_title(p) %>
+        <% p_doc_title = resolve_presence_doc_title(p, @dataset) %>
         <%= if p.doc_id && p.type do %>
           <div class="presence-user-wrap"
                phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
@@ -1443,14 +1457,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp resolve_presence_doc_title(presence) do
+  defp resolve_presence_doc_title(presence, dataset \\ "production") do
     type = presence.type
     doc_id = presence.doc_id
     if type && doc_id do
-      case Content.get_document(doc_id, type, "production") do
+      case Content.get_document(doc_id, type, dataset) do
         {:ok, doc} -> doc.title || doc_id
         _ ->
-          case Content.get_document("drafts.#{doc_id}", type, "production") do
+          case Content.get_document("drafts.#{doc_id}", type, dataset) do
             {:ok, doc} -> doc.title || doc_id
             _ -> doc_id
           end
