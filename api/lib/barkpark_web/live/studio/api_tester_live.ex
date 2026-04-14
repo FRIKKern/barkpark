@@ -142,6 +142,35 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     end
   end
 
+  defp build_curl(%{kind: :reference}, _form_state, _token), do: ""
+
+  defp build_curl(endpoint, form_state, token) do
+    req = Runner.build_request(endpoint, form_state, %{token: token, base: "http://localhost:4000"})
+
+    parts = ["curl -sS"]
+    parts = if req.method == "GET", do: parts, else: parts ++ ["-X", req.method]
+
+    header_parts =
+      Enum.flat_map(req.headers, fn {k, v} -> ["-H", shell_escape("#{k}: #{v}")] end)
+
+    parts = parts ++ header_parts
+
+    parts =
+      if is_binary(req.body_text) and req.body_text != "" do
+        parts ++ ["-d", shell_escape(req.body_text)]
+      else
+        parts
+      end
+
+    parts = parts ++ [shell_escape(req.url)]
+
+    Enum.join(parts, " ")
+  end
+
+  defp shell_escape(str) do
+    "'" <> String.replace(str, "'", "'\\''") <> "'"
+  end
+
   # ── render ────────────────────────────────────────────────────────────
 
   @impl true
@@ -192,7 +221,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
               <%= render_reference(assigns, @endpoint.render_key) %>
             <% true -> %>
               <.endpoint_docs endpoint={@endpoint} />
-              <.endpoint_playground endpoint={@endpoint} form_state={@form_state} />
+              <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} />
           <% end %>
         </section>
 
@@ -265,6 +294,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       .tester-ref-table code { font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; background: var(--bg-subtle); padding: 1px 4px; border-radius: 3px; }
 
       .tester-empty { color: var(--fg-muted); padding: 40px; text-align: center; }
+      .tester-curl-pre { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; color: var(--fg); white-space: pre-wrap; word-break: break-all; margin-top: 4px; max-height: 140px; overflow: auto; }
+      .tester-btn-secondary { background: var(--bg); color: var(--fg); border: 1px solid var(--border); padding: 6px 14px; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: 500; font-family: inherit; }
+      .tester-btn-secondary:hover { background: var(--bg-hover); }
     </style>
     """
   end
@@ -326,7 +358,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   attr :endpoint, :map, required: true
   attr :form_state, :map, required: true
+  attr :token, :string, required: true
   defp endpoint_playground(assigns) do
+    assigns = assign(assigns, :curl, build_curl(assigns.endpoint, assigns.form_state, assigns.token))
+
     ~H"""
     <div class="tester-section-title">Playground</div>
     <form phx-change="form-change" class="tester-playground">
@@ -358,8 +393,17 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       <% end %>
     </form>
 
+    <div class="tester-section-title">Copy as curl</div>
+    <pre class="tester-curl-pre" id="tester-curl"><%= @curl %></pre>
+
     <div class="tester-playground-actions">
       <button phx-click="run" class="tester-btn-primary">Run</button>
+      <button
+        type="button"
+        onclick={~s|navigator.clipboard.writeText(document.getElementById('tester-curl').textContent); this.textContent='Copied \u2713'; setTimeout(() => this.textContent='Copy curl', 1500)|
+        }
+        class="tester-btn-secondary"
+      >Copy curl</button>
     </div>
     """
   end
