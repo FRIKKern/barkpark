@@ -4,12 +4,12 @@ defmodule BarkparkWeb.Studio.MediaLive do
   alias Barkpark.Media
 
   @impl true
-  def mount(_params, _session, socket) do
-    files = Media.list_files()
+  def mount(%{"dataset" => dataset}, _session, socket) do
+    files = Media.list_files(dataset)
 
     socket =
       socket
-      |> assign(nav_section: :media, files: files, page_title: "Media Library", selected_file: nil)
+      |> assign(nav_section: :media, dataset: dataset, files: files, page_title: "Media Library", selected_file: nil)
       |> allow_upload(:media, accept: :any, max_entries: 5, max_file_size: 100_000_000)
 
     {:ok, socket}
@@ -23,10 +23,10 @@ defmodule BarkparkWeb.Studio.MediaLive do
       consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
         dest = Path.join(System.tmp_dir!(), entry.client_name)
         File.cp!(path, dest)
-        Media.upload(%Plug.Upload{path: dest, filename: entry.client_name, content_type: entry.client_type})
+        Media.upload(%Plug.Upload{path: dest, filename: entry.client_name, content_type: entry.client_type}, socket.assigns.dataset)
       end)
 
-    {:noreply, assign(socket, files: Media.list_files())}
+    {:noreply, assign(socket, files: Media.list_files(socket.assigns.dataset))}
   end
 
   def handle_event("select-file", %{"id" => id}, socket) do
@@ -42,7 +42,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   def handle_event("delete-file", %{"id" => id}, socket) do
     Media.delete_file(id)
-    {:noreply, assign(socket, files: Media.list_files(), selected_file: nil)}
+    {:noreply, assign(socket, files: Media.list_files(socket.assigns.dataset), selected_file: nil)}
   end
 
   @impl true
