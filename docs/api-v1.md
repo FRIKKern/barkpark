@@ -402,6 +402,7 @@ All errors return `{"error": {"code": "...", "message": "..."}}` (plus `details`
 | `malformed` | 400 | Request body is malformed or missing `mutations` key |
 | `validation_failed` | 422 | Document failed validation; `details` map contains per-field errors |
 | `internal_error` | 500 | Unexpected server error |
+| `rate_limited` | 429 | Too many requests from this token/IP. Retry after the `Retry-After` header's value |
 
 ---
 
@@ -435,8 +436,26 @@ Any breaking change to the shapes documented above requires bumping the URL pref
 
 ---
 
-## 12. Known Limitations (v1.0)
+## 12. Rate Limiting
+
+All `/v1/*` endpoints are rate-limited per token (when present) or per IP. Default limit: **200 requests per minute** with a token-bucket replenishment model. When a client exceeds the limit, the response is:
+
+    HTTP/1.1 429 Too Many Requests
+    Content-Type: application/json
+    Retry-After: 60
+
+    {
+      "error": {
+        "code": "rate_limited",
+        "message": "rate limit exceeded"
+      }
+    }
+
+Clients should honor the `Retry-After` header and back off.
+
+---
+
+## 13. Known Limitations (v1.0)
 
 - `previousRev` is always `null`; full rev history is in a separate revisions table (not part of v1 HTTP contract).
 - PubSub broadcasts fire even on transaction rollback (events table is consistent; stream may see ghost events).
-- Rate limiting is not enforced.

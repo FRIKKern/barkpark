@@ -652,16 +652,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   defp render_reference(assigns, :known_limitations) do
     ~H"""
-    <p class="api-description">Quirks of the v1 contract you should be aware of when building clients:</p>
+    <p class="api-description">The v1 contract as shipped. Future limitations may be added to this list as they're discovered.</p>
 
     <div class="api-section">v1.0 quirks</div>
     <ul class="api-quirks-list">
-      <li>Reference expansion (<code class="api-inline-code">?expand=</code>) is not implemented.</li>
-      <li>Filter only supports exact-match on single values.</li>
-      <li><code class="api-inline-code">previousRev</code> in SSE events is always <code class="api-inline-code">null</code>; full rev history lives in a separate revisions table that is not part of the v1 HTTP contract.</li>
-      <li>Draft/published merging (<code class="api-inline-code">perspective=drafts</code>) happens after <code class="api-inline-code">LIMIT</code>/<code class="api-inline-code">OFFSET</code>, so a page can return fewer than <code class="api-inline-code">limit</code> rows.</li>
-      <li>PubSub broadcasts fire even when a mutation transaction rolls back; the persistent events table is consistent, but the SSE stream may emit ghost events.</li>
-      <li>Rate limiting is not enforced at the HTTP layer.</li>
+      <li>Reference expansion is <strong>depth 1 only</strong>: a referenced doc's own reference fields stay as raw id strings. Issue multiple queries for deeper chains.</li>
     </ul>
     <style>
       .api-quirks-list {
