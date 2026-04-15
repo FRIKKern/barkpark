@@ -82,13 +82,19 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
     end
 
     test "header_actions slot renders inside the header" do
+      # Slot content must be safe markup (a Phoenix.HTML `{:safe, iodata}`
+      # tuple or a Rendered struct) — that's what HEEx produces at real
+      # call sites. A plain binary would get HTML-escaped by render_slot.
+      safe_button = {:safe, ~s(<button class="pane-add-btn">+</button>)}
+
       html =
         render_component(&StudioComponents.pane_column/1, %{
           title: "Post",
           inner_block: [%{inner_block: fn _, _ -> "" end}],
-          header_actions: [%{inner_block: fn _, _ -> ~s(<button class="pane-add-btn">+</button>) end}]
+          header_actions: [%{inner_block: fn _, _ -> safe_button end}]
         })
 
+      assert html =~ ~s(class="pane-header-actions")
       assert html =~ ~s(<button class="pane-add-btn">+</button>)
     end
   end
