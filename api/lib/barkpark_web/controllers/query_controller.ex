@@ -26,7 +26,7 @@ defmodule BarkparkWeb.QueryController do
       limit = parse_int(params["limit"], 100)
       offset = parse_int(params["offset"], 0)
       order = parse_order(params["order"])
-      filter_map = Map.get(params, "filter") || %{}
+      filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
       expand_spec = parse_expand(params["expand"])
 
       docs =
@@ -97,4 +97,19 @@ defmodule BarkparkWeb.QueryController do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
   end
+
+  defp normalize_filter_map(map) when is_map(map) do
+    Enum.into(map, %{}, fn
+      {field, %{} = ops} -> {field, Enum.into(ops, %{}, &normalize_filter_op/1)}
+      {field, value} -> {field, value}
+    end)
+  end
+
+  defp normalize_filter_map(_), do: %{}
+
+  defp normalize_filter_op({"in", csv}) when is_binary(csv) do
+    {"in", csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)}
+  end
+
+  defp normalize_filter_op(pair), do: pair
 end
