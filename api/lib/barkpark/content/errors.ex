@@ -33,6 +33,9 @@ defmodule Barkpark.Content.Errors do
     %{code: "validation_failed", message: "document failed validation", status: 422, details: details}
   end
 
+  def to_envelope({:error, :rate_limited}),
+    do: %{code: "rate_limited", message: "rate limit exceeded", status: 429}
+
   def to_envelope({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
 
