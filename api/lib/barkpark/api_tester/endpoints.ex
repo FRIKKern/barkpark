@@ -50,6 +50,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       ref_error_codes(),
       ref_known_limitations(),
       query_list(dataset),
+      query_filter_ops(dataset),
       query_single(dataset),
       query_expand(dataset),
       mutate_create(dataset),
@@ -124,6 +125,37 @@ defmodule Barkpark.ApiTester.Endpoints do
       """,
       possible_errors: [:not_found],
       expect: {200, :envelope_has_reserved_keys}
+    }
+  end
+
+  defp query_filter_ops(dataset) do
+    %{
+      id: "query-filter-ops",
+      category: "Query",
+      label: "Filter operators",
+      kind: :endpoint,
+      auth: :public,
+      method: "GET",
+      path_template: "/v1/data/query/{dataset}/{type}",
+      description:
+        "Operator-form filters: filter[title][eq]=, filter[title][in]=a,b, filter[title][contains]=. Top-level shorthand filter[title]=x is equivalent to [eq].",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset},
+        %{name: "type", type: :string, default: "post"}
+      ],
+      query_params: [
+        %{name: "filter[title][contains]", type: :string, default: "smoke", notes: "Substring match, case-insensitive"},
+        %{name: "limit", type: :integer, default: "5"}
+      ],
+      body_example: nil,
+      response_shape: """
+      {
+        "documents": [ /* envelopes whose title contains the substring */ ],
+        "count": N
+      }
+      """,
+      possible_errors: [:not_found],
+      expect: {200, :ok}
     }
   end
 

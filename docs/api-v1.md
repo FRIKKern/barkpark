@@ -65,7 +65,8 @@ List documents. Returns 404 if the schema's `visibility` is `"private"`.
 | `limit` | `100` | Integer, min 1, max 1000 |
 | `offset` | `0` | Integer |
 | `order` | `_updatedAt:desc` | `_updatedAt:desc` \| `_updatedAt:asc` \| `_createdAt:desc` \| `_createdAt:asc` |
-| `filter[<field>]` | — | Exact-match filter. Matches `title`, `status`, or any top-level content field |
+| `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
+| `filter[<field>][<op>]` | — | Operator form. `op` is one of `eq`, `in`, `contains`, `gt`, `gte`, `lt`, `lte`. `in` takes a comma-separated list: `filter[title][in]=A,B,C` |
 | `expand` | — | `true` (expand all refs) \| comma list `field1,field2` (expand named fields). Depth 1 only. |
 
 **Response body:**
@@ -436,7 +437,6 @@ Any breaking change to the shapes documented above requires bumping the URL pref
 
 ## 12. Known Limitations (v1.0)
 
-- Filter only supports exact-match on single values.
 - `previousRev` is always `null`; full rev history is in a separate revisions table (not part of v1 HTTP contract).
 - Draft/published merging (`perspective=drafts`) happens after LIMIT/OFFSET, so a page can return fewer than `limit` rows.
 - PubSub broadcasts fire even on transaction rollback (events table is consistent; stream may see ghost events).
