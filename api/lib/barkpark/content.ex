@@ -55,9 +55,8 @@ defmodule Barkpark.Content do
     - `:order`        — `:updated_at_desc` (default), `:updated_at_asc`,
                         `:created_at_desc`, `:created_at_asc`
 
-  NOTE: `maybe_merge_drafts/2` runs after limit/offset, so the `:drafts`
-  perspective may return fewer rows than requested. This is a known limitation
-  (tracked for Phase 8).
+  The `:drafts` perspective merges draft/published pairs at SQL level via
+  `DISTINCT ON`, so `limit` and `offset` are applied after the merge.
   """
   def list_documents(type, dataset, opts \\ []) do
     perspective = Keyword.get(opts, :perspective, :raw)
@@ -66,15 +65,42 @@ defmodule Barkpark.Content do
     offset = opts |> Keyword.get(:offset, 0) |> max(0)
     order = Keyword.get(opts, :order, :updated_at_desc)
 
-    Document
-    |> where([d], d.type == ^type and d.dataset == ^dataset)
+    base =
+      Document
+      |> where([d], d.type == ^type and d.dataset == ^dataset)
+      |> apply_filter_map(filter_map)
+
+    case perspective do
+      :drafts -> list_with_drafts_merged(base, order, limit, offset)
+      other -> list_linear(base, other, order, limit, offset)
+    end
+  end
+
+  defp list_linear(query, perspective, order, limit, offset) do
+    query
     |> apply_perspective(perspective)
-    |> apply_filter_map(filter_map)
     |> apply_order(order)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
-    |> maybe_merge_drafts(perspective)
+  end
+
+  defp list_with_drafts_merged(query, order, limit, offset) do
+    inner =
+      from(d in query,
+        distinct:
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        order_by: [
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+        ]
+      )
+
+    from(d in subquery(inner))
+    |> apply_order(order)
+    |> limit(^limit)
+    |> offset(^offset)
+    |> Repo.all()
   end
 
   defp apply_perspective(query, :published) do
@@ -137,29 +163,6 @@ defmodule Barkpark.Content do
   defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)
   defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
   defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
-
-  defp maybe_merge_drafts(docs, :drafts) do
-    # Group by published_id, prefer draft, preserve SQL-level order.
-    # (Dropping the final Enum.sort_by would destabilize ordering across
-    # grouped pairs; we track the first index of each pid and re-sort by it.)
-    docs
-    |> Enum.with_index()
-    |> Enum.group_by(fn {doc, _} -> published_id(doc.doc_id) end)
-    |> Enum.map(fn {_pid, versions} ->
-      {_first_doc, first_idx} = hd(versions)
-      best =
-        case Enum.find(versions, fn {d, _} -> draft?(d.doc_id) end) do
-          {draft, _} -> draft
-          nil -> elem(hd(versions), 0)
-        end
-
-      {best, first_idx}
-    end)
-    |> Enum.sort_by(fn {_, i} -> i end)
-    |> Enum.map(fn {doc, _} -> doc end)
-  end
-
-  defp maybe_merge_drafts(docs, _), do: docs
 
   def get_document(doc_id, type, dataset) do
     Document
