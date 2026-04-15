@@ -8,6 +8,7 @@ defmodule Barkpark.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      Barkpark.RateLimiter,
       BarkparkWeb.Telemetry,
       Barkpark.Repo,
       {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
