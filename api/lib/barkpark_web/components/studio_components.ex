@@ -104,7 +104,7 @@ defmodule BarkparkWeb.StudioComponents do
         <div class="pane-header">
           <span class="pane-header-title"><%= @title %></span>
           <%= if @header_actions != [] do %>
-            <div class="pane-header-actions"><%= Phoenix.HTML.raw(render_slot(@header_actions)) %></div>
+            <div class="pane-header-actions"><%= render_slot(@header_actions) %></div>
           <% end %>
         </div>
         <%= render_slot(@inner_block) %>
