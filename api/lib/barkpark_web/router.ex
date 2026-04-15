@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.RateLimit
   end
 
   pipeline :require_token do
