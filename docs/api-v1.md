@@ -66,6 +66,7 @@ List documents. Returns 404 if the schema's `visibility` is `"private"`.
 | `offset` | `0` | Integer |
 | `order` | `_updatedAt:desc` | `_updatedAt:desc` \| `_updatedAt:asc` \| `_createdAt:desc` \| `_createdAt:asc` |
 | `filter[<field>]` | — | Exact-match filter. Matches `title`, `status`, or any top-level content field |
+| `expand` | — | `true` (expand all refs) \| comma list `field1,field2` (expand named fields). Depth 1 only. |
 
 **Response body:**
 
@@ -131,6 +132,38 @@ curl localhost:4000/v1/data/doc/production/post/p1
 ```
 
 Response: a single envelope object (see Section 3).
+
+---
+
+### 5a. Reference Expansion
+
+When a query or doc request carries `?expand=true` (or `?expand=author,category`), reference fields in the returned envelope are inlined with the full referenced document. Expansion is always **depth 1** — a referenced doc's own reference fields stay as raw id strings.
+
+**Example request:**
+
+    curl "localhost:4000/v1/data/query/production/post?limit=1&expand=true"
+
+**Example response (abbreviated):**
+
+```json
+{
+  "documents": [
+    {
+      "_id": "p1",
+      "_type": "post",
+      "title": "Hello",
+      "author": {
+        "_id": "a1",
+        "_type": "author",
+        "title": "Jane",
+        "category": "c1"
+      }
+    }
+  ]
+}
+```
+
+Missing references (the referenced document does not exist in the dataset) stay as the raw id string so clients can tell them apart from expanded refs: maps vs. strings.
 
 ---
 
@@ -403,7 +436,6 @@ Any breaking change to the shapes documented above requires bumping the URL pref
 
 ## 12. Known Limitations (v1.0)
 
-- Reference expansion (`?expand=`) is not implemented.
 - Filter only supports exact-match on single values.
 - `previousRev` is always `null`; full rev history is in a separate revisions table (not part of v1 HTTP contract).
 - Draft/published merging (`perspective=drafts`) happens after LIMIT/OFFSET, so a page can return fewer than `limit` rows.

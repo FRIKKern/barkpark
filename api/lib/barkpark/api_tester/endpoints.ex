@@ -51,6 +51,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       ref_known_limitations(),
       query_list(dataset),
       query_single(dataset),
+      query_expand(dataset),
       mutate_create(dataset),
       mutate_create_or_replace(dataset),
       mutate_create_if_not_exists(dataset),
@@ -158,6 +159,45 @@ defmodule Barkpark.ApiTester.Endpoints do
       """,
       possible_errors: [:not_found],
       expect: {200, :envelope_top_level}
+    }
+  end
+
+  defp query_expand(dataset) do
+    %{
+      id: "query-expand",
+      category: "Query",
+      label: "Expand references",
+      kind: :endpoint,
+      auth: :public,
+      method: "GET",
+      path_template: "/v1/data/query/{dataset}/{type}",
+      description:
+        "Depth-1 reference expansion. Pass ?expand=true to inline all reference fields, or ?expand=field1,field2 for a named subset.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
+        %{name: "type", type: :string, default: "post", notes: "Document type"}
+      ],
+      query_params: [
+        %{name: "limit", type: :integer, default: "3", notes: "How many docs to fetch"},
+        %{name: "expand", type: :string, default: "true", notes: "true | comma-list of field names"}
+      ],
+      body_example: nil,
+      response_shape: """
+      {
+        "documents": [
+          {
+            "_id": "p1",
+            "author": {
+              "_id": "a1",
+              "_type": "author",
+              "title": "Jane"
+            }
+          }
+        ]
+      }
+      """,
+      possible_errors: [:not_found],
+      expect: {200, :envelope_has_reserved_keys}
     }
   end
 
