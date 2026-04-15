@@ -870,7 +870,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     is_draft={item.is_draft}
                     selected={item.id == pane[:selected]}
                   >
-                    <:trailing>
+                    <:trailing :if={item_presences != []}>
                       <%= for p <- item_presences do %>
                         <span class="presence-dot-sm" style={"background: #{p.color}"}></span>
                       <% end %>
@@ -887,10 +887,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   >
                     <:icon><.icon name={item.icon} size={16} /></:icon>
                     <%= item.title %>
-                    <:trailing>
-                      <%= if item[:drillable] do %>
-                        <.icon name="chevron-right" size={14} />
-                      <% end %>
+                    <:trailing :if={item[:drillable]}>
+                      <.icon name="chevron-right" size={14} />
                     </:trailing>
                   </.pane_item>
               <% end %>
