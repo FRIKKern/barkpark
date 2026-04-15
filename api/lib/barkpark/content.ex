@@ -87,11 +87,50 @@ defmodule Barkpark.Content do
   defp apply_filter_map(query, map) when map_size(map) == 0, do: query
   defp apply_filter_map(query, map) do
     Enum.reduce(map, query, fn
-      {"title", v}, q -> where(q, [d], d.title == ^v)
-      {"status", v}, q -> where(q, [d], d.status == ^v)
-      {field, v}, q -> where(q, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+      {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
+      {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
   end
+
+  defp apply_field_ops(query, field, ops) do
+    Enum.reduce(ops, query, fn {op, value}, q ->
+      apply_field_op(q, field, op, value)
+    end)
+  end
+
+  defp apply_field_op(query, "title", "eq", v), do: where(query, [d], d.title == ^v)
+  defp apply_field_op(query, "title", "in", vs) when is_list(vs), do: where(query, [d], d.title in ^vs)
+  defp apply_field_op(query, "title", "contains", v), do: where(query, [d], ilike(d.title, ^"%#{v}%"))
+  defp apply_field_op(query, "title", "gt", v), do: where(query, [d], d.title > ^v)
+  defp apply_field_op(query, "title", "gte", v), do: where(query, [d], d.title >= ^v)
+  defp apply_field_op(query, "title", "lt", v), do: where(query, [d], d.title < ^v)
+  defp apply_field_op(query, "title", "lte", v), do: where(query, [d], d.title <= ^v)
+
+  defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
+  defp apply_field_op(query, "status", "in", vs) when is_list(vs), do: where(query, [d], d.status in ^vs)
+
+  defp apply_field_op(query, field, "eq", v),
+    do: where(query, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+
+  defp apply_field_op(query, field, "in", vs) when is_list(vs),
+    do: where(query, [d], fragment("?->>? = ANY(?)", d.content, ^field, ^vs))
+
+  defp apply_field_op(query, field, "contains", v),
+    do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^"%#{v}%"))
+
+  defp apply_field_op(query, field, "gt", v),
+    do: where(query, [d], fragment("?->>? > ?", d.content, ^field, ^v))
+
+  defp apply_field_op(query, field, "gte", v),
+    do: where(query, [d], fragment("?->>? >= ?", d.content, ^field, ^v))
+
+  defp apply_field_op(query, field, "lt", v),
+    do: where(query, [d], fragment("?->>? < ?", d.content, ^field, ^v))
+
+  defp apply_field_op(query, field, "lte", v),
+    do: where(query, [d], fragment("?->>? <= ?", d.content, ^field, ^v))
+
+  defp apply_field_op(query, _field, _op, _value), do: query
 
   defp apply_order(q, :updated_at_desc), do: order_by(q, [d], desc: d.updated_at)
   defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
