@@ -33,6 +33,7 @@ defmodule BarkparkWeb.ConnCase do
 
   setup tags do
     Barkpark.DataCase.setup_sandbox(tags)
+    :ets.delete_all_objects(:barkpark_rate_limiter)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

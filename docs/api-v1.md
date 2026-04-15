@@ -457,5 +457,4 @@ Clients should honor the `Retry-After` header and back off.
 
 ## 13. Known Limitations (v1.0)
 
-- `previousRev` is always `null`; full rev history is in a separate revisions table (not part of v1 HTTP contract).
-- PubSub broadcasts fire even on transaction rollback (events table is consistent; stream may see ghost events).
+- Reference expansion is **depth 1 only**: a referenced doc's own reference fields stay as raw id strings. Clients that need deeper chains issue multiple queries.
