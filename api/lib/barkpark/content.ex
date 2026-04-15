@@ -159,13 +159,13 @@ defmodule Barkpark.Content do
         existing
         |> Document.changeset(attrs)
         |> Repo.update()
-        |> tap_broadcast(dataset, type, "update")
+        |> tap_broadcast(dataset, type, "update", existing.rev)
 
       _ ->
         %Document{}
         |> Document.changeset(attrs)
         |> Repo.insert()
-        |> tap_broadcast(dataset, type, "create")
+        |> tap_broadcast(dataset, type, "create", nil)
     end
   end
 
@@ -190,20 +190,20 @@ defmodule Barkpark.Content do
           "rev" => generate_rev()
         }
 
-        pub_result =
+        {pub_result, prev_pub_rev} =
           case get_document(pid, type, dataset) do
             {:ok, existing} ->
-              existing |> Document.changeset(pub_attrs) |> Repo.update()
+              {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
             _ ->
-              %Document{} |> Document.changeset(pub_attrs) |> Repo.insert()
+              {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
           end
 
         case pub_result do
           {:ok, published} ->
             # Delete the draft
             Repo.delete(draft)
-            tap_broadcast({:ok, published}, dataset, type, "publish")
+            tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
 
           error ->
             error
@@ -232,19 +232,19 @@ defmodule Barkpark.Content do
           "rev" => generate_rev()
         }
 
-        draft_result =
+        {draft_result, prev_draft_rev} =
           case get_document(did, type, dataset) do
             {:ok, existing} ->
-              existing |> Document.changeset(draft_attrs) |> Repo.update()
+              {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
 
             _ ->
-              %Document{} |> Document.changeset(draft_attrs) |> Repo.insert()
+              {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
           end
 
         case draft_result do
           {:ok, draft} ->
             Repo.delete(pub)
-            tap_broadcast({:ok, draft}, dataset, type, "unpublish")
+            tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
 
           error ->
             error
@@ -261,8 +261,9 @@ defmodule Barkpark.Content do
 
     case get_document(did, type, dataset) do
       {:ok, draft} ->
+        prev_rev = draft.rev
         Repo.delete(draft)
-        |> tap_broadcast(dataset, type)
+        |> tap_broadcast(dataset, type, "discardDraft", prev_rev)
 
       error ->
         error
@@ -278,11 +279,14 @@ defmodule Barkpark.Content do
       [pid, did]
       |> Enum.map(fn id -> get_document(id, type, dataset) end)
       |> Enum.filter(&match?({:ok, _}, &1))
-      |> Enum.map(fn {:ok, doc} -> Repo.delete(doc) end)
+      |> Enum.map(fn {:ok, doc} -> {Repo.delete(doc), doc.rev} end)
 
     case results do
-      [] -> {:error, :not_found}
-      [first | _] -> tap_broadcast(first, dataset, type)
+      [] ->
+        {:error, :not_found}
+
+      [{first_result, prev_rev} | _] ->
+        tap_broadcast(first_result, dataset, type, "delete", prev_rev)
     end
   end
 
@@ -290,22 +294,45 @@ defmodule Barkpark.Content do
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
   or `{:error, reason}` with rollback on any failure.
 
-  # TODO: move broadcasts out of transaction (Task 11 territory)
+  PubSub broadcasts queued inside the transaction are flushed AFTER a
+  successful commit, and discarded on rollback — no ghost events on
+  the SSE stream when a batch fails partway through.
   """
   def apply_mutations(mutations, dataset) when is_list(mutations) do
-    Repo.transaction(fn ->
-      tx_id = generate_rev()
+    # Initialise the deferred-broadcast queue for this process so
+    # tap_broadcast/5 knows to queue instead of broadcast immediately.
+    Process.put(:barkpark_deferred_broadcasts, [])
 
-      results =
-        Enum.map(mutations, fn m ->
-          case apply_one(m, dataset) do
-            {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
-            {:error, reason} -> Repo.rollback(reason)
-          end
+    try do
+      result =
+        Repo.transaction(fn ->
+          tx_id = generate_rev()
+
+          results =
+            Enum.map(mutations, fn m ->
+              case apply_one(m, dataset) do
+                {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
+                {:error, reason} -> Repo.rollback(reason)
+              end
+            end)
+
+          {tx_id, results}
         end)
 
-      {tx_id, results}
-    end)
+      case result do
+        {:ok, _} ->
+          flush_deferred_broadcasts()
+          result
+
+        _ ->
+          clear_deferred_broadcasts()
+          result
+      end
+    rescue
+      e ->
+        clear_deferred_broadcasts()
+        reraise(e, __STACKTRACE__)
+    end
   end
 
   defp apply_one(%{"create" => attrs}, dataset) do
@@ -413,10 +440,11 @@ defmodule Barkpark.Content do
       case get_document(ref_doc_id, type, dataset) do
         {:ok, doc} ->
           updated_content = Map.delete(doc.content || %{}, field)
+          prev_rev = doc.rev
           doc
           |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
           |> Repo.update()
-          |> tap_broadcast(dataset, type)
+          |> tap_broadcast(dataset, type, "update", prev_rev)
         _ -> :ok
       end
     end)
@@ -473,13 +501,13 @@ defmodule Barkpark.Content do
         existing
         |> Document.changeset(attrs)
         |> Repo.update()
-        |> tap_broadcast(dataset, type)
+        |> tap_broadcast(dataset, type, "update", existing.rev)
 
       _ ->
         %Document{}
         |> Document.changeset(attrs)
         |> Repo.insert()
-        |> tap_broadcast(dataset, type)
+        |> tap_broadcast(dataset, type, "create", nil)
     end
   end
 
@@ -552,14 +580,19 @@ defmodule Barkpark.Content do
   end
 
   # ── PubSub ────────────────────────────────────────────────────────────────
+  #
+  # Broadcasts are DEFERRED when we're inside an Ecto transaction (e.g.
+  # apply_mutations/2). They land in the process dict and are flushed by
+  # flush_deferred_broadcasts/0 after the transaction commits. If the
+  # transaction rolls back, clear_deferred_broadcasts/0 discards them
+  # (no ghost events on the SSE stream). Direct writes outside a
+  # transaction broadcast immediately — same behaviour as before.
 
-  defp tap_broadcast(result, dataset, type, action \\ "update") do
+  defp tap_broadcast(result, dataset, type, action, prev_rev \\ nil) do
     case result do
       {:ok, doc} ->
-        # Save revision
         save_revision(doc, type, dataset, action)
-
-        ev = save_event(doc, type, dataset, action)
+        ev = save_event(doc, type, dataset, action, prev_rev)
 
         msg = %{
           event_id: ev.id,
@@ -568,6 +601,7 @@ defmodule Barkpark.Content do
           action: :mutate,
           doc_id: doc.doc_id,
           rev: doc.rev,
+          previous_rev: prev_rev,
           document: Envelope.render(doc),
           doc: %{
             doc_id: doc.doc_id,
@@ -579,12 +613,11 @@ defmodule Barkpark.Content do
           sender: self()
         }
 
-        # Broadcast to global topic (for doc lists, dashboard counts)
-        Phoenix.PubSub.broadcast(Barkpark.PubSub, "documents:#{dataset}", {:document_changed, msg})
+        global_topic = "documents:#{dataset}"
+        doc_topic = "doc:#{dataset}:#{type}:#{published_id(doc.doc_id)}"
 
-        # Broadcast to doc-specific topic (for editors viewing this doc)
-        pub_id = published_id(doc.doc_id)
-        Phoenix.PubSub.broadcast(Barkpark.PubSub, "doc:#{dataset}:#{type}:#{pub_id}", {:doc_updated, msg})
+        maybe_broadcast(global_topic, {:document_changed, msg})
+        maybe_broadcast(doc_topic, {:doc_updated, msg})
 
         {:ok, doc}
 
@@ -593,7 +626,34 @@ defmodule Barkpark.Content do
     end
   end
 
-  defp save_event(doc, type, dataset, action) do
+  # Defer if we're inside a transaction; broadcast immediately otherwise.
+  defp maybe_broadcast(topic, msg) do
+    if Repo.in_transaction?() do
+      queue = Process.get(:barkpark_deferred_broadcasts, [])
+      Process.put(:barkpark_deferred_broadcasts, [{topic, msg} | queue])
+    else
+      Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, msg)
+    end
+  end
+
+  # Flush broadcasts queued during a successful transaction, preserving
+  # their original order (the queue is built by prepending).
+  defp flush_deferred_broadcasts do
+    queue = Process.delete(:barkpark_deferred_broadcasts) || []
+
+    queue
+    |> Enum.reverse()
+    |> Enum.each(fn {topic, msg} ->
+      Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, msg)
+    end)
+  end
+
+  defp clear_deferred_broadcasts do
+    Process.delete(:barkpark_deferred_broadcasts)
+    :ok
+  end
+
+  defp save_event(doc, type, dataset, action, prev_rev) do
     alias Barkpark.Content.MutationEvent
 
     %MutationEvent{}
@@ -603,7 +663,7 @@ defmodule Barkpark.Content do
       doc_id: doc.doc_id,
       mutation: action,
       rev: doc.rev,
-      previous_rev: nil,
+      previous_rev: prev_rev,
       document: Envelope.render(doc),
       inserted_at: DateTime.utc_now()
     })
