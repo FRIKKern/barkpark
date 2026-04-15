@@ -3,6 +3,7 @@ defmodule BarkparkWeb.QueryController do
 
   alias Barkpark.Content
   alias Barkpark.Content.Envelope
+  alias Barkpark.Content.Expand
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -26,6 +27,7 @@ defmodule BarkparkWeb.QueryController do
       offset = parse_int(params["offset"], 0)
       order = parse_order(params["order"])
       filter_map = Map.get(params, "filter") || %{}
+      expand_spec = parse_expand(params["expand"])
 
       docs =
         Content.list_documents(type, dataset,
@@ -36,9 +38,11 @@ defmodule BarkparkWeb.QueryController do
           order: order
         )
 
+      rendered = Envelope.render_many(docs) |> Expand.expand(expand_spec, dataset)
+
       json(conn, %{
         perspective: to_string(perspective),
-        documents: Envelope.render_many(docs),
+        documents: rendered,
         count: length(docs),
         limit: limit,
         offset: offset
@@ -46,12 +50,19 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id}) do
+  def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     unless Content.schema_public?(type, dataset) do
       {:error, :not_found}
     else
+      expand_spec = parse_expand(params["expand"])
+
       with {:ok, doc} <- Content.get_document(doc_id, type, dataset) do
-        json(conn, Envelope.render(doc))
+        rendered =
+          [Envelope.render(doc)]
+          |> Expand.expand(expand_spec, dataset)
+          |> hd()
+
+        json(conn, rendered)
       end
     end
   end
@@ -74,4 +85,16 @@ defmodule BarkparkWeb.QueryController do
   defp parse_perspective("drafts"), do: :drafts
   defp parse_perspective("raw"), do: :raw
   defp parse_perspective(_), do: :published
+
+  defp parse_expand(nil), do: []
+  defp parse_expand(""), do: []
+  defp parse_expand("false"), do: []
+  defp parse_expand("true"), do: :all
+
+  defp parse_expand(fields) when is_binary(fields) do
+    fields
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
 end
