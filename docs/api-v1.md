@@ -438,6 +438,5 @@ Any breaking change to the shapes documented above requires bumping the URL pref
 ## 12. Known Limitations (v1.0)
 
 - `previousRev` is always `null`; full rev history is in a separate revisions table (not part of v1 HTTP contract).
-- Draft/published merging (`perspective=drafts`) happens after LIMIT/OFFSET, so a page can return fewer than `limit` rows.
 - PubSub broadcasts fire even on transaction rollback (events table is consistent; stream may see ghost events).
 - Rate limiting is not enforced.
