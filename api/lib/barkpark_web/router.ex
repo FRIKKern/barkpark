@@ -45,6 +45,7 @@ defmodule BarkparkWeb.Router do
   scope "/v1/data", BarkparkWeb do
     pipe_through :api
 
+    get "/search/:dataset", SearchController, :search
     get "/query/:dataset/:type", QueryController, :index
     get "/doc/:dataset/:type/:doc_id", QueryController, :show
   end

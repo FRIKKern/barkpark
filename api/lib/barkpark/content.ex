@@ -726,6 +726,43 @@ defmodule Barkpark.Content do
     |> Repo.insert()
   end
 
+  # ── Search ──────────────────────────────────────────────────────────────
+
+  @doc "Search documents by title using ILIKE. Returns published docs by default."
+  def search_documents(query, dataset, opts \\ []) do
+    type = Keyword.get(opts, :type)
+    perspective = Keyword.get(opts, :perspective, :published)
+    limit = Keyword.get(opts, :limit, 50) |> min(200)
+    offset = Keyword.get(opts, :offset, 0)
+
+    pattern = "%" <> String.replace(query, "%", "\\%") <> "%"
+
+    base =
+      Document
+      |> where([d], d.dataset == ^dataset)
+      |> where([d], ilike(d.title, ^pattern))
+
+    base =
+      if type, do: where(base, [d], d.type == ^type), else: base
+
+    base = search_perspective_filter(base, perspective)
+
+    docs = base |> order_by([d], desc: d.updated_at) |> limit(^limit) |> offset(^offset) |> Repo.all()
+    count = base |> select([d], count(d.id)) |> Repo.one()
+
+    {docs, count}
+  end
+
+  defp search_perspective_filter(query, :published) do
+    where(query, [d], not like(d.doc_id, "drafts.%"))
+  end
+
+  defp search_perspective_filter(query, :drafts) do
+    where(query, [d], like(d.doc_id, "drafts.%"))
+  end
+
+  defp search_perspective_filter(query, _raw), do: query
+
   # ── Export ──────────────────────────────────────────────────────────────
 
   @doc "Stream all documents for a dataset as envelope maps. Optionally filter by type."
