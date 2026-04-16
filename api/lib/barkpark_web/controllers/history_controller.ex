@@ -15,33 +15,36 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   def show(conn, %{"dataset" => _dataset, "id" => id}) do
-    case Content.get_revision(id) do
-      {:ok, rev} ->
-        json(conn, %{revision: render_revision_full(rev)})
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(404)
-        |> json(%{error: %{code: "not_found", message: "revision not found"}})
+    with :ok <- validate_uuid(id),
+         {:ok, rev} <- Content.get_revision(id) do
+      json(conn, %{revision: render_revision_full(rev)})
+    else
+      {:error, :invalid_uuid} -> not_found(conn, "revision not found")
+      {:error, :not_found} -> not_found(conn, "revision not found")
     end
   end
 
   def restore(conn, %{"dataset" => dataset, "id" => id} = params) do
     type = get_type(conn, params)
 
-    case Content.restore_revision(id, type, dataset) do
-      {:ok, doc} ->
-        json(conn, %{restored: true, document: Envelope.render(doc)})
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(404)
-        |> json(%{error: %{code: "not_found", message: "revision not found"}})
+    with :ok <- validate_uuid(id),
+         {:ok, doc} <- Content.restore_revision(id, type, dataset) do
+      json(conn, %{restored: true, document: Envelope.render(doc)})
+    else
+      {:error, :invalid_uuid} -> not_found(conn, "revision not found")
+      {:error, :not_found} -> not_found(conn, "revision not found")
     end
   end
 
-  defp get_type(_conn, params) do
-    params["type"]
+  defp get_type(_conn, params), do: params["type"]
+
+  @uuid_regex ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  defp validate_uuid(id) when is_binary(id) do
+    if Regex.match?(@uuid_regex, id), do: :ok, else: {:error, :invalid_uuid}
+  end
+
+  defp not_found(conn, message) do
+    conn |> put_status(404) |> json(%{error: %{code: "not_found", message: message}})
   end
 
   defp render_revision(rev) do
