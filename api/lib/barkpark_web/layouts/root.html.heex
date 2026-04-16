@@ -309,6 +309,13 @@
     }
     .studio-tab:hover { color: var(--fg); background: var(--bg-muted); text-decoration: none; }
     .studio-tab.active { color: var(--fg); background: var(--bg-accent); }
+    .studio-bar-actions {
+      display: flex; align-items: center; gap: 8px; margin-left: auto;
+    }
+    .studio-bar-actions-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--fg-dim);
+    }
 
     /* ── Pane layout (shared across all Studio panes) ──────────────────── */
     .pane-layout { display: flex; flex: 1; overflow: hidden; }
