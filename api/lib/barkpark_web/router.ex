@@ -55,6 +55,7 @@ defmodule BarkparkWeb.Router do
 
     post "/mutate/:dataset", MutateController, :mutate
     get "/listen/:dataset", ListenController, :listen
+    get "/export/:dataset", ExportController, :export
   end
 
   # ── Schema management — requires admin token ────────────────────────────
