@@ -141,7 +141,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       |> Enum.flat_map(fn ep ->
         scenarios = Map.get(ep, :scenarios, [])
 
-        # Skip endpoints with no scenarios defined
+        scenarios =
+          if scenarios == [] && ep[:expect] do
+            [%{label: "default", path_overrides: %{}, query_overrides: %{}, body: nil, expect: ep.expect}]
+          else
+            scenarios
+          end
+
         if scenarios == [] do
           []
         else
