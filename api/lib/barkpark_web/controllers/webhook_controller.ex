@@ -9,10 +9,11 @@ defmodule BarkparkWeb.WebhookController do
   end
 
   def show(conn, %{"id" => id}) do
-    case Webhooks.get_webhook(id) do
-      {:ok, wh} -> json(conn, %{webhook: render_webhook(wh)})
-      {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
+    with :ok <- validate_uuid(id),
+         {:ok, wh} <- Webhooks.get_webhook(id) do
+      json(conn, %{webhook: render_webhook(wh)})
+    else
+      _ -> conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
     end
   end
 
@@ -29,10 +30,14 @@ defmodule BarkparkWeb.WebhookController do
   end
 
   def update(conn, %{"id" => id} = params) do
-    with {:ok, wh} <- Webhooks.get_webhook(id),
+    with :ok <- validate_uuid(id),
+         {:ok, wh} <- Webhooks.get_webhook(id),
          {:ok, updated} <- Webhooks.update_webhook(wh, params) do
       json(conn, %{webhook: render_webhook(updated)})
     else
+      {:error, :invalid_uuid} ->
+        conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
+
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
 
@@ -42,13 +47,18 @@ defmodule BarkparkWeb.WebhookController do
   end
 
   def delete(conn, %{"id" => id}) do
-    with {:ok, wh} <- Webhooks.get_webhook(id),
+    with :ok <- validate_uuid(id),
+         {:ok, wh} <- Webhooks.get_webhook(id),
          {:ok, _} <- Webhooks.delete_webhook(wh) do
       json(conn, %{deleted: id})
     else
-      {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
+      _ -> conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
     end
+  end
+
+  @uuid_regex ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  defp validate_uuid(id) when is_binary(id) do
+    if Regex.match?(@uuid_regex, id), do: :ok, else: {:error, :invalid_uuid}
   end
 
   defp render_webhook(wh) do
