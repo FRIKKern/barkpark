@@ -264,24 +264,15 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       |> assign(:last_result, last_result)
 
     ~H"""
-    <div class="api-tester">
-      <div class="api-tester-header">
-        <div class="api-tester-header-left">
-          <span class="h2">API Playground</span>
-          <span class="text-sm text-dim">/v1 contract</span>
-        </div>
-        <div class="api-tester-header-right">
-          <form phx-change="token-change" class="api-token-form">
-            <label class="api-token-label">Token</label>
-            <input type="text" name="token" value={@token} class="form-input api-token-input" phx-debounce="300" />
+    <.pane_layout id="api-tester-panes">
+      <.pane_column title="API">
+        <:header_actions>
+          <form phx-change="token-change" style="display:flex;align-items:center;gap:6px;">
+            <input type="text" name="token" value={@token} class="form-input" placeholder="Token" style="width:140px;height:24px;font-size:11px;font-family:var(--font-mono);padding:0 8px;" phx-debounce="300" />
           </form>
-          <button phx-click="run-all" class="btn btn-primary btn-sm">Run all</button>
-        </div>
-      </div>
-
-      <.pane_layout id="api-tester-panes">
-        <.pane_column title="API">
-          <div class="pane-body">
+          <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:24px;font-size:11px;padding:0 10px;">Run all</button>
+        </:header_actions>
+        <div class="pane-body">
             <%= for category <- @categories do %>
               <% collapsed = MapSet.member?(@collapsed_categories, category) %>
               <.pane_section_header
@@ -388,32 +379,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
             <% end %>
           </div>
         </.pane_column>
-      </.pane_layout>
-    </div>
+    </.pane_layout>
 
     <style>
-      /* Shell */
-      .api-tester { display: flex; flex-direction: column; height: calc(100vh - 48px); background: var(--bg); color: var(--fg); }
-      .api-tester-header {
-        display: flex; justify-content: space-between; align-items: center; gap: 16px;
-        height: var(--header-h); min-height: var(--header-h);
-        padding: 0 24px; background: var(--bg-card);
-        border-bottom: 1px solid var(--border-muted);
-      }
-      .api-tester-header-left { display: flex; align-items: baseline; gap: 10px; }
-      .api-tester-header-right { display: flex; align-items: center; gap: 12px; }
-
-      .api-token-form { display: flex; align-items: center; gap: 8px; }
-      .api-token-label {
-        font-size: 11px; font-weight: 600; text-transform: uppercase;
-        letter-spacing: 0.06em; color: var(--fg-dim);
-      }
-      .api-token-input {
-        width: 260px; height: 28px; font-family: var(--font-mono);
-        font-size: 12px; padding: 0 10px;
-      }
-
-      .api-tester-panes { flex: 1; min-height: 0; }
+      /* Full-height pane layout (48px = top nav bar from app.html.heex) */
+      #api-tester-panes { height: calc(100vh - 48px); }
       /* Nav column inherits .pane-column's 260px default. Docs and response
          columns override width + min-width so they actually flex instead of
          staying pinned. */
