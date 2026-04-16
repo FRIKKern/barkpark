@@ -754,7 +754,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         <tr><td><code>schema_unknown</code></td><td class="text-dim">404</td><td class="text-muted">No schema registered for this type</td></tr>
         <tr><td><code>rev_mismatch</code></td><td class="text-dim">409</td><td class="text-muted"><code class="api-inline-code">ifRevisionID</code> did not match current rev</td></tr>
         <tr><td><code>conflict</code></td><td class="text-dim">409</td><td class="text-muted">Document already exists (on <code class="api-inline-code">create</code>)</td></tr>
-        <tr><td><code>malformed</code></td><td class="text-dim">400</td><td class="text-muted">Request body is malformed or missing <code class="api-inline-code">mutations</code> key</td></tr>
+        <tr><td><code>malformed</code></td><td class="text-dim">400</td><td class="text-muted">Request body is malformed, missing required key (e.g., <code class="api-inline-code">mutations</code>), or missing required parameter (e.g., <code class="api-inline-code">q</code> for search)</td></tr>
         <tr><td><code>validation_failed</code></td><td class="text-dim">422</td><td class="text-muted">Document failed validation; <code class="api-inline-code">details</code> map contains per-field errors</td></tr>
         <tr><td><code>internal_error</code></td><td class="text-dim">500</td><td class="text-muted">Unexpected server error</td></tr>
       </tbody>
@@ -764,11 +764,39 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   defp render_reference(assigns, :known_limitations) do
     ~H"""
-    <p class="api-description">The v1 contract as shipped. Future limitations may be added to this list as they're discovered.</p>
+    <p class="api-description">The v1 contract as shipped. Quirks listed here are known, not bugs — they may be addressed in future versions.</p>
 
-    <div class="api-section">v1.0 quirks</div>
+    <div class="api-section">Query &amp; Search</div>
     <ul class="api-quirks-list">
-      <li>Reference expansion is <strong>depth 1 only</strong>: a referenced doc's own reference fields stay as raw id strings. Issue multiple queries for deeper chains.</li>
+      <li>Reference expansion is <strong>depth 1 only</strong>: a referenced doc's own reference fields stay as raw id strings.</li>
+      <li>Search matches <strong>title only</strong> via case-insensitive ILIKE. Content field search is not yet supported.</li>
+      <li>No full-text indexing (GIN/tsvector). Search performance degrades on very large datasets.</li>
+    </ul>
+
+    <div class="api-section">History &amp; Revisions</div>
+    <ul class="api-quirks-list">
+      <li>Revisions are only recorded for mutations <strong>after the history feature was deployed</strong>. Pre-existing documents have no revision history.</li>
+      <li>Restore always creates/updates a <strong>draft</strong>. You must explicitly publish to make the restored content live.</li>
+      <li>The <code class="api-inline-code">action</code> field on revisions reflects the underlying storage operation, not the API mutation. A <code class="api-inline-code">patch</code> that creates a new draft shows action <code class="api-inline-code">"create"</code>, not <code class="api-inline-code">"patch"</code>.</li>
+    </ul>
+
+    <div class="api-section">Export</div>
+    <ul class="api-quirks-list">
+      <li>Export streams all documents including drafts. There is no perspective filter on export — use the <code class="api-inline-code">type</code> param to narrow scope.</li>
+      <li>NDJSON response is not valid JSON as a whole — each line is a separate JSON object.</li>
+    </ul>
+
+    <div class="api-section">Webhooks</div>
+    <ul class="api-quirks-list">
+      <li>Webhook delivery is <strong>fire-and-forget</strong> with no retry. Failed deliveries are logged but not retried.</li>
+      <li>Delivery timeout is 10 seconds. Slow receivers will see timeouts logged as errors.</li>
+      <li>HMAC signatures use SHA-256: <code class="api-inline-code"><%= "sha256={hex}" %></code> in the <code class="api-inline-code">X-Webhook-Signature</code> header.</li>
+    </ul>
+
+    <div class="api-section">General</div>
+    <ul class="api-quirks-list">
+      <li>All timestamps are UTC with <code class="api-inline-code">Z</code> suffix (ISO 8601). No timezone support.</li>
+      <li>Rate limiting is configured but thresholds are not yet published. Expect <code class="api-inline-code">429</code> under heavy load.</li>
     </ul>
     <style>
       .api-quirks-list {
