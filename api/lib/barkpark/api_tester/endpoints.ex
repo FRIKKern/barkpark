@@ -53,6 +53,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       query_filter_ops(dataset),
       query_single(dataset),
       query_expand(dataset),
+      search_documents(dataset),
       mutate_create(dataset),
       mutate_create_or_replace(dataset),
       mutate_create_if_not_exists(dataset),
@@ -61,9 +62,17 @@ defmodule Barkpark.ApiTester.Endpoints do
       mutate_unpublish(dataset),
       mutate_discard_draft(dataset),
       mutate_delete(dataset),
+      export_dataset(dataset),
+      history_list(dataset),
+      history_show(dataset),
+      history_restore(dataset),
+      analytics_overview(dataset),
       listen_sse(dataset),
       schemas_list(dataset),
-      schemas_show(dataset)
+      schemas_show(dataset),
+      webhooks_list(dataset),
+      webhooks_create(dataset),
+      webhooks_delete(dataset)
     ]
   end
 
@@ -544,6 +553,234 @@ defmodule Barkpark.ApiTester.Endpoints do
       """,
       possible_errors: [:not_found, :unauthorized, :malformed],
       expect: {200, :mutate_result_has_envelope}
+    }
+  end
+
+  # ── Export endpoints ─────────────────────────────────────────────────
+
+  defp export_dataset(dataset) do
+    %{
+      id: "export-dataset",
+      category: "Export",
+      label: "Export dataset",
+      kind: :endpoint,
+      auth: :token,
+      method: "GET",
+      path_template: "/v1/data/export/{dataset}",
+      description: "Export all documents as newline-delimited JSON (NDJSON). Streams the response.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
+      ],
+      query_params: [
+        %{name: "type", type: :string, default: "", notes: "Optional: filter by document type"}
+      ],
+      body_example: nil,
+      response_shape: "{\"_id\":\"p1\",\"_type\":\"post\",\"title\":\"Hello\",...}\n{\"_id\":\"p2\",\"_type\":\"post\",\"title\":\"World\",...}",
+      possible_errors: [:unauthorized],
+      expect: {200, :ok},
+      runnable: true
+    }
+  end
+
+  # ── Search endpoints ─────────────────────────────────────────────────
+
+  defp search_documents(dataset) do
+    %{
+      id: "search-documents",
+      category: "Query",
+      label: "Search",
+      kind: :endpoint,
+      auth: :public,
+      method: "GET",
+      path_template: "/v1/data/search/{dataset}",
+      description: "Full-text search across document titles. Returns published docs by default.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
+      ],
+      query_params: [
+        %{name: "q", type: :string, default: "", notes: "Search query (required)"},
+        %{name: "type", type: :string, default: "", notes: "Filter by document type"},
+        %{name: "perspective", type: :select, default: "published", options: ["published", "drafts", "raw"], notes: "Which documents to search"},
+        %{name: "limit", type: :string, default: "50", notes: "Max results (1-200)"},
+        %{name: "offset", type: :string, default: "0", notes: "Pagination offset"}
+      ],
+      body_example: nil,
+      response_shape: "{\n  \"documents\": [{\"_id\": \"p1\", \"_type\": \"post\", \"title\": \"...\"}],\n  \"count\": 12,\n  \"query\": \"phoenix\"\n}",
+      possible_errors: [:malformed],
+      expect: nil,
+      runnable: true
+    }
+  end
+
+  # ── History endpoints ────────────────────────────────────────────────
+
+  defp history_list(dataset) do
+    %{
+      id: "history-list",
+      category: "History",
+      label: "List revisions",
+      kind: :endpoint,
+      auth: :token,
+      method: "GET",
+      path_template: "/v1/data/history/{dataset}/{type}/{doc_id}",
+      description: "List revision history for a document, newest first.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
+        %{name: "type", type: :string, default: "post", notes: "Document type"},
+        %{name: "doc_id", type: :string, default: "", notes: "Document ID (published, no drafts. prefix)"}
+      ],
+      query_params: [
+        %{name: "limit", type: :string, default: "50", notes: "Max revisions (1-200)"}
+      ],
+      body_example: nil,
+      response_shape: "{\n  \"revisions\": [\n    {\"id\": \"uuid\", \"action\": \"publish\", \"title\": \"...\", \"timestamp\": \"...\"}\n  ],\n  \"count\": 5\n}",
+      possible_errors: [:unauthorized],
+      expect: {200, :ok},
+      runnable: true
+    }
+  end
+
+  defp history_show(dataset) do
+    %{
+      id: "history-show",
+      category: "History",
+      label: "Get revision",
+      kind: :endpoint,
+      auth: :token,
+      method: "GET",
+      path_template: "/v1/data/revision/{dataset}/{id}",
+      description: "Get a single revision by ID, including full content snapshot.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
+        %{name: "id", type: :string, default: "", notes: "Revision UUID"}
+      ],
+      query_params: [],
+      body_example: nil,
+      response_shape: "{\n  \"revision\": {\n    \"id\": \"uuid\", \"doc_id\": \"p1\", \"type\": \"post\",\n    \"action\": \"publish\", \"content\": {...}, \"timestamp\": \"...\"\n  }\n}",
+      possible_errors: [:unauthorized, :not_found],
+      expect: nil,
+      runnable: true
+    }
+  end
+
+  defp history_restore(dataset) do
+    %{
+      id: "history-restore",
+      category: "History",
+      label: "Restore revision",
+      kind: :endpoint,
+      auth: :token,
+      method: "POST",
+      path_template: "/v1/data/revision/{dataset}/{id}/restore",
+      description: "Restore a document to a specific revision. Creates or updates the draft.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
+        %{name: "id", type: :string, default: "", notes: "Revision UUID to restore"}
+      ],
+      query_params: [],
+      body_example: %{"type" => "post"},
+      response_shape: "{\n  \"restored\": true,\n  \"document\": {\"_id\": \"drafts.p1\", \"_type\": \"post\", ...}\n}",
+      possible_errors: [:unauthorized, :not_found],
+      expect: nil,
+      runnable: true
+    }
+  end
+
+  # ── Analytics endpoints ──────────────────────────────────────────────
+
+  defp analytics_overview(dataset) do
+    %{
+      id: "analytics-overview",
+      category: "Analytics",
+      label: "Dataset stats",
+      kind: :endpoint,
+      auth: :token,
+      method: "GET",
+      path_template: "/v1/data/analytics/{dataset}",
+      description: "Aggregate stats: document counts by type with published/draft breakdown, recent mutation activity.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
+      ],
+      query_params: [],
+      body_example: nil,
+      response_shape: "{\n  \"dataset\": \"production\",\n  \"total_documents\": 42,\n  \"types\": [{\"type\": \"post\", \"total\": 20, \"published\": 15, \"drafts\": 5}],\n  \"recent_activity\": [{\"mutation\": \"publish\", \"doc_id\": \"p1\", ...}]\n}",
+      possible_errors: [:unauthorized],
+      expect: {200, :ok},
+      runnable: true
+    }
+  end
+
+  # ── Webhook endpoints ────────────────────────────────────────────────
+
+  defp webhooks_list(dataset) do
+    %{
+      id: "webhooks-list",
+      category: "Webhooks",
+      label: "List webhooks",
+      kind: :endpoint,
+      auth: :admin,
+      method: "GET",
+      path_template: "/v1/webhooks/{dataset}",
+      description: "List all webhooks configured for this dataset.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
+      ],
+      query_params: [],
+      body_example: nil,
+      response_shape: "{\n  \"webhooks\": [\n    {\"id\": \"uuid\", \"name\": \"My Hook\", \"url\": \"https://...\", \"active\": true}\n  ]\n}",
+      possible_errors: [:unauthorized, :forbidden],
+      expect: {200, :ok},
+      runnable: true
+    }
+  end
+
+  defp webhooks_create(dataset) do
+    %{
+      id: "webhooks-create",
+      category: "Webhooks",
+      label: "Create webhook",
+      kind: :endpoint,
+      auth: :admin,
+      method: "POST",
+      path_template: "/v1/webhooks/{dataset}",
+      description: "Create a new webhook. Empty events/types arrays match all.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
+      ],
+      query_params: [],
+      body_example: %{
+        "name" => "Notify Slack",
+        "url" => "https://hooks.slack.com/services/...",
+        "events" => ["publish"],
+        "types" => ["post"]
+      },
+      response_shape: "{\n  \"webhook\": {\"id\": \"uuid\", \"name\": \"Notify Slack\", \"active\": true}\n}",
+      possible_errors: [:unauthorized, :forbidden, :validation_failed],
+      expect: nil,
+      runnable: true
+    }
+  end
+
+  defp webhooks_delete(dataset) do
+    %{
+      id: "webhooks-delete",
+      category: "Webhooks",
+      label: "Delete webhook",
+      kind: :endpoint,
+      auth: :admin,
+      method: "DELETE",
+      path_template: "/v1/webhooks/{dataset}/{id}",
+      description: "Delete a webhook by ID.",
+      path_params: [
+        %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
+        %{name: "id", type: :string, default: "", notes: "Webhook UUID"}
+      ],
+      query_params: [],
+      body_example: nil,
+      response_shape: "{\"deleted\": \"uuid\"}",
+      possible_errors: [:unauthorized, :forbidden, :not_found],
+      expect: nil,
+      runnable: true
     }
   end
 

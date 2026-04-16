@@ -442,6 +442,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp category_icon("Mutate"), do: "settings"
   defp category_icon("Real-time"), do: "compass"
   defp category_icon("Schemas"), do: "folder"
+  defp category_icon("Export"), do: "file"
+  defp category_icon("History"), do: "file-text"
+  defp category_icon("Analytics"), do: "tag"
+  defp category_icon("Webhooks"), do: "compass"
   defp category_icon(_), do: "file"
 
   # Per-endpoint icon. Uses only icons that exist in Icons.@icons;
