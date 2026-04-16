@@ -75,6 +75,17 @@ defmodule BarkparkWeb.Router do
     delete "/:dataset/:name", SchemaController, :delete
   end
 
+  # ── Webhooks — requires admin token ────────────────────────────────────
+  scope "/v1/webhooks", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/:dataset", WebhookController, :index
+    get "/:dataset/:id", WebhookController, :show
+    post "/:dataset", WebhookController, :create
+    put "/:dataset/:id", WebhookController, :update
+    delete "/:dataset/:id", WebhookController, :delete
+  end
+
   # ── Media — upload requires token, serving is public ────────────────────
   scope "/media", BarkparkWeb do
     pipe_through :api
