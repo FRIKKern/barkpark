@@ -726,6 +726,22 @@ defmodule Barkpark.Content do
     |> Repo.insert()
   end
 
+  # ── Export ──────────────────────────────────────────────────────────────
+
+  @doc "Stream all documents for a dataset as envelope maps. Optionally filter by type."
+  def export_stream(dataset, opts \\ []) do
+    type = Keyword.get(opts, :type)
+
+    Document
+    |> where([d], d.dataset == ^dataset)
+    |> then(fn q ->
+      if type, do: where(q, [d], d.type == ^type), else: q
+    end)
+    |> order_by([d], asc: d.inserted_at)
+    |> Repo.stream()
+    |> Stream.map(&Envelope.render/1)
+  end
+
   # ── Revision queries ──────────────────────────────────────────────────────
 
   @doc "List revisions for a document, newest first."
