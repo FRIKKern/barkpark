@@ -267,10 +267,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     <.pane_layout id="api-tester-panes">
       <.pane_column title="API">
         <:header_actions>
-          <form phx-change="token-change" style="display:flex;align-items:center;gap:6px;">
-            <input type="text" name="token" value={@token} class="form-input" placeholder="Token" style="width:140px;height:24px;font-size:11px;font-family:var(--font-mono);padding:0 8px;" phx-debounce="300" />
+          <form phx-change="token-change" style="display:contents;">
+            <input type="text" name="token" value={@token} class="form-input" placeholder="Token" style="width:100px;height:22px;font-size:10px;font-family:var(--font-mono);padding:0 6px;" phx-debounce="300" />
           </form>
-          <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:24px;font-size:11px;padding:0 10px;">Run all</button>
+          <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:22px;font-size:10px;padding:0 8px;">Run all</button>
         </:header_actions>
         <div class="pane-body">
             <%= for category <- @categories do %>
