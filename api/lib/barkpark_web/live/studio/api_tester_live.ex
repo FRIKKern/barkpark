@@ -39,7 +39,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
        selected_id: selected.id,
        token: "barkpark-dev-token",
        form_state_by_id: form_state_by_id,
-       last_result_by_id: %{}
+       last_result_by_id: %{},
+       scenario_results: []
      )}
   end
 
@@ -76,7 +77,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
     new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, form_state)
 
-    {:noreply, assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id)}
+    {:noreply, assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id, scenario_results: [])}
   end
 
   def handle_event("form-change", params, socket) do
@@ -128,25 +129,86 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         Map.put(socket.assigns.last_result_by_id, endpoint.id, result)
       end
 
-    {:noreply, assign(socket, last_result_by_id: new_results)}
+    {:noreply, assign(socket, last_result_by_id: new_results, scenario_results: [])}
   end
 
   def handle_event("run-all", _, socket) do
-    results =
+    config = %{token: socket.assigns.token, base: "http://localhost:4000"}
+
+    scenario_results =
       socket.assigns.endpoints
-      |> Enum.filter(&(&1.kind == :endpoint && &1[:runnable] != false && &1[:expect] != nil))
-      |> Enum.reduce(%{}, fn ep, acc ->
-        form_state = Map.get(socket.assigns.form_state_by_id, ep.id, initial_form_state(ep))
-        req = Runner.build_request(ep, form_state, %{token: socket.assigns.token, base: "http://localhost:4000"})
-        legacy = %{
-          id: ep.id, method: req.method,
-          path: String.replace_prefix(req.url, "http://localhost:4000", ""),
-          headers: req.headers, body: decode_body(req.body_text), expect: ep.expect
-        }
-        Map.put(acc, ep.id, Runner.run(legacy))
+      |> Enum.filter(&(&1.kind == :endpoint && &1[:runnable] != false))
+      |> Enum.flat_map(fn ep ->
+        scenarios = Map.get(ep, :scenarios, [])
+
+        # Skip endpoints with no scenarios defined
+        if scenarios == [] do
+          []
+        else
+          Enum.map(scenarios, fn scenario ->
+            # Build form state from defaults + overrides
+            base_form = initial_form_state(ep)
+
+            form_state =
+              base_form
+              |> Map.merge(scenario[:path_overrides] || %{})
+              |> Map.merge(scenario[:query_overrides] || %{})
+
+            # Handle body
+            form_state =
+              if scenario[:body] do
+                Map.put(form_state, "_body_text", Jason.encode!(scenario[:body]))
+              else
+                form_state
+              end
+
+            # Handle auth override (for "no auth" scenarios)
+            test_config = if scenario[:no_auth], do: Map.put(config, :token, ""), else: config
+
+            req = Runner.build_request(ep, form_state, test_config)
+
+            legacy = %{
+              id: ep.id,
+              method: req.method,
+              path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+              headers: req.headers,
+              body: decode_body(req.body_text),
+              expect: scenario.expect
+            }
+
+            result = Runner.run(legacy)
+
+            %{
+              endpoint_id: ep.id,
+              endpoint_label: ep.label,
+              category: ep.category,
+              label: scenario.label,
+              result: result
+            }
+          end)
+        end
       end)
 
-    {:noreply, assign(socket, last_result_by_id: results)}
+    # Also populate last_result_by_id with the first scenario result per endpoint for sidebar badges
+    last_results =
+      scenario_results
+      |> Enum.group_by(& &1.endpoint_id)
+      |> Enum.into(%{}, fn {ep_id, srs} ->
+        # Composite: if any fail, show fail; else if any error, show error; else pass
+        worst =
+          cond do
+            Enum.any?(srs, &(&1.result.verdict == :fail)) ->
+              Enum.find(srs, &(&1.result.verdict == :fail)).result
+            Enum.any?(srs, &(&1.result.verdict == :error)) ->
+              Enum.find(srs, &(&1.result.verdict == :error)).result
+            true ->
+              List.first(srs).result
+          end
+
+        {ep_id, worst}
+      end)
+
+    {:noreply, assign(socket, scenario_results: scenario_results, last_result_by_id: last_results)}
   end
 
   defp decode_body(nil), do: nil
@@ -269,18 +331,60 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
         <.pane_column title="Response" flex="1" last>
           <:header_actions>
-            <%= if @last_result do %>
+            <%= if @scenario_results != [] do %>
               <div class="api-response-meta">
-                <%= render_verdict_badge(@last_result) %>
-                <span class="text-xs text-dim api-response-timing">HTTP <%= @last_result.status %> · <%= @last_result.duration_ms %>ms</span>
+                <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> pass</span>
+                <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> fail</span>
+                <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> error</span>
               </div>
+            <% else %>
+              <%= if @last_result do %>
+                <div class="api-response-meta">
+                  <%= render_verdict_badge(@last_result) %>
+                  <span class="text-xs text-dim api-response-timing">HTTP <%= @last_result.status %> · <%= @last_result.duration_ms %>ms</span>
+                </div>
+              <% end %>
             <% end %>
           </:header_actions>
           <div class="api-col-body">
-            <%= if @last_result do %>
-              <.response_view result={@last_result} />
+            <%= if @scenario_results != [] do %>
+              <div class="scenario-results">
+                <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-muted); display: flex; justify-content: space-between; align-items: center;">
+                  <strong>Run All Results</strong>
+                  <span style="display: flex; gap: 6px;">
+                    <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> pass</span>
+                    <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> fail</span>
+                    <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> error</span>
+                  </span>
+                </div>
+                <div style="overflow-y: auto; max-height: calc(100vh - 200px);">
+                  <%= for {category, cat_scenarios} <- @scenario_results |> Enum.group_by(& &1.category) |> Enum.sort_by(&elem(&1, 0)) do %>
+                    <div style="padding: 4px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--fg-dim); border-bottom: 1px solid var(--border-muted); background: var(--bg-muted);">
+                      <%= category %>
+                    </div>
+                    <%= for sr <- cat_scenarios do %>
+                      <div style={"padding: 6px 12px; border-bottom: 1px solid var(--border-muted); display: flex; justify-content: space-between; align-items: center; font-size: 13px; #{if sr.result.verdict == :fail, do: "background: hsl(0 62.8% 50.6% / 0.05);", else: ""}"}>
+                        <div>
+                          <span style="color: var(--fg-dim);"><%= sr.endpoint_label %></span>
+                          <span style="margin-left: 6px;"><%= sr.label %></span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <span style="font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono);"><%= sr.result.duration_ms %>ms</span>
+                          <span class={"badge #{verdict_badge_class(sr.result.verdict)}"}>
+                            <%= if sr.result.verdict == :pass, do: "PASS", else: if(sr.result.verdict == :fail, do: "FAIL", else: "ERR") %>
+                          </span>
+                        </div>
+                      </div>
+                    <% end %>
+                  <% end %>
+                </div>
+              </div>
             <% else %>
-              <.pane_empty message="No response yet. Click Run." />
+              <%= if @last_result do %>
+                <.response_view result={@last_result} />
+              <% else %>
+                <.pane_empty message="No response yet. Click Run." />
+              <% end %>
             <% end %>
           </div>
         </.pane_column>
@@ -587,6 +691,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp format_body(%{body_json: json}) when is_map(json) or is_list(json), do: Jason.encode!(json, pretty: true)
   defp format_body(%{body_text: text}) when is_binary(text) and text != "", do: text
   defp format_body(_), do: ""
+
+  defp verdict_badge_class(:pass), do: "badge-verdict-pass"
+  defp verdict_badge_class(:fail), do: "badge-verdict-fail"
+  defp verdict_badge_class(_), do: "badge-verdict-error"
 
   defp render_verdict_badge(nil), do: ""
 

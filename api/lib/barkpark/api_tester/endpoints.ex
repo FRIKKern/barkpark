@@ -133,7 +133,11 @@ defmodule Barkpark.ApiTester.Endpoints do
       }
       """,
       possible_errors: [:not_found],
-      expect: {200, :envelope_has_reserved_keys}
+      expect: {200, :envelope_has_reserved_keys},
+      scenarios: [
+        %{label: "lists published docs", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :envelope_has_reserved_keys}},
+        %{label: "nonexistent type → 404", path_overrides: %{"type" => "zzzzz"}, query_overrides: %{}, body: nil, expect: {404, :error_code_not_found}}
+      ]
     }
   end
 
@@ -199,7 +203,11 @@ defmodule Barkpark.ApiTester.Endpoints do
       }
       """,
       possible_errors: [:not_found],
-      expect: {200, :envelope_top_level}
+      expect: {200, :envelope_top_level},
+      scenarios: [
+        %{label: "gets document p1", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :envelope_top_level}},
+        %{label: "missing doc → 404", path_overrides: %{"doc_id" => "nonexistent"}, query_overrides: %{}, body: nil, expect: {404, :error_code_not_found}}
+      ]
     }
   end
 
@@ -578,7 +586,12 @@ defmodule Barkpark.ApiTester.Endpoints do
       response_shape: "{\"_id\":\"p1\",\"_type\":\"post\",\"title\":\"Hello\",...}\n{\"_id\":\"p2\",\"_type\":\"post\",\"title\":\"World\",...}",
       possible_errors: [:unauthorized],
       expect: {200, :ok},
-      runnable: true
+      runnable: true,
+      scenarios: [
+        %{label: "exports NDJSON", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :ndjson_response}},
+        %{label: "export with type filter", path_overrides: %{}, query_overrides: %{"type" => "post"}, body: nil, expect: {200, :ndjson_response}},
+        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+      ]
     }
   end
 
@@ -608,7 +621,13 @@ defmodule Barkpark.ApiTester.Endpoints do
       response_shape: "{\n  \"documents\": [{\"_id\": \"p1\", \"_type\": \"post\", \"title\": \"...\"}],\n  \"count\": 12,\n  \"query\": \"phoenix\"\n}",
       possible_errors: [:malformed],
       expect: nil,
-      runnable: true
+      runnable: true,
+      scenarios: [
+        %{label: "search with results", path_overrides: %{}, query_overrides: %{"q" => "post"}, body: nil, expect: {200, :search_has_results}},
+        %{label: "search no matches", path_overrides: %{}, query_overrides: %{"q" => "zzzzzznoexist"}, body: nil, expect: {200, :search_empty}},
+        %{label: "missing q → 400", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {400, :error_code_malformed}},
+        %{label: "search with type filter", path_overrides: %{}, query_overrides: %{"q" => "a", "type" => "post"}, body: nil, expect: {200, :search_type_match}}
+      ]
     }
   end
 
@@ -636,7 +655,11 @@ defmodule Barkpark.ApiTester.Endpoints do
       response_shape: "{\n  \"revisions\": [\n    {\"id\": \"uuid\", \"action\": \"publish\", \"title\": \"...\", \"timestamp\": \"...\"}\n  ],\n  \"count\": 5\n}",
       possible_errors: [:unauthorized],
       expect: {200, :ok},
-      runnable: true
+      runnable: true,
+      scenarios: [
+        %{label: "lists revisions", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :has_revisions_list}},
+        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+      ]
     }
   end
 
@@ -706,7 +729,12 @@ defmodule Barkpark.ApiTester.Endpoints do
       response_shape: "{\n  \"dataset\": \"production\",\n  \"total_documents\": 42,\n  \"types\": [{\"type\": \"post\", \"total\": 20, \"published\": 15, \"drafts\": 5}],\n  \"recent_activity\": [{\"mutation\": \"publish\", \"doc_id\": \"p1\", ...}]\n}",
       possible_errors: [:unauthorized],
       expect: {200, :ok},
-      runnable: true
+      runnable: true,
+      scenarios: [
+        %{label: "returns stats", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :analytics_has_types}},
+        %{label: "empty dataset", path_overrides: %{"dataset" => "nonexistent"}, query_overrides: %{}, body: nil, expect: {200, :analytics_empty}},
+        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+      ]
     }
   end
 
@@ -730,7 +758,11 @@ defmodule Barkpark.ApiTester.Endpoints do
       response_shape: "{\n  \"webhooks\": [\n    {\"id\": \"uuid\", \"name\": \"My Hook\", \"url\": \"https://...\", \"active\": true}\n  ]\n}",
       possible_errors: [:unauthorized, :forbidden],
       expect: {200, :ok},
-      runnable: true
+      runnable: true,
+      scenarios: [
+        %{label: "lists webhooks", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :has_webhooks_list}},
+        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+      ]
     }
   end
 
@@ -841,7 +873,10 @@ defmodule Barkpark.ApiTester.Endpoints do
       }
       """,
       possible_errors: [:unauthorized, :forbidden],
-      expect: {200, :schema_version_1}
+      expect: {200, :schema_version_1},
+      scenarios: [
+        %{label: "lists schemas", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :schema_version_1}}
+      ]
     }
   end
 
@@ -871,7 +906,10 @@ defmodule Barkpark.ApiTester.Endpoints do
       }
       """,
       possible_errors: [:not_found, :unauthorized, :forbidden],
-      expect: {200, :schema_version_1_show}
+      expect: {200, :schema_version_1_show},
+      scenarios: [
+        %{label: "shows post schema", path_overrides: %{"name" => "post"}, query_overrides: %{}, body: nil, expect: {200, :schema_version_1_show}}
+      ]
     }
   end
 

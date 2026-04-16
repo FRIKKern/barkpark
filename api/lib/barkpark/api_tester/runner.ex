@@ -248,6 +248,29 @@ defmodule Barkpark.ApiTester.Runner do
     end
   end
 
+  defp run_predicate(:search_has_results, %{"documents" => docs, "count" => c}, _) when is_list(docs) and c > 0, do: :ok
+  defp run_predicate(:search_has_results, _, _), do: {:fail, "expected documents with count > 0"}
+
+  defp run_predicate(:search_empty, %{"documents" => [], "count" => 0}, _), do: :ok
+  defp run_predicate(:search_empty, _, _), do: {:fail, "expected empty results"}
+
+  defp run_predicate(:search_type_match, %{"documents" => docs}, _) when is_list(docs) and length(docs) > 0, do: :ok
+  defp run_predicate(:search_type_match, _, _), do: {:fail, "expected documents"}
+
+  defp run_predicate(:analytics_has_types, %{"types" => types, "total_documents" => total}, _) when is_list(types) and is_integer(total), do: :ok
+  defp run_predicate(:analytics_has_types, _, _), do: {:fail, "expected types array and total_documents"}
+
+  defp run_predicate(:analytics_empty, %{"total_documents" => 0, "types" => []}, _), do: :ok
+  defp run_predicate(:analytics_empty, _, _), do: {:fail, "expected zero documents"}
+
+  defp run_predicate(:has_revisions_list, %{"revisions" => revs}, _) when is_list(revs), do: :ok
+  defp run_predicate(:has_revisions_list, _, _), do: {:fail, "expected revisions list"}
+
+  defp run_predicate(:has_webhooks_list, %{"webhooks" => whs}, _) when is_list(whs), do: :ok
+  defp run_predicate(:has_webhooks_list, _, _), do: {:fail, "expected webhooks list"}
+
+  defp run_predicate(:ndjson_response, _, _), do: :ok
+
   defp run_predicate(other, _, _), do: {:fail, "unknown predicate: #{inspect(other)}"}
 
   # ── Helpers ───────────────────────────────────────────────────────────
