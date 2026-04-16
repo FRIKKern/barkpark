@@ -22,7 +22,7 @@ defmodule Barkpark.Content do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, Envelope, Revision, SchemaDefinition, Validation}
+  alias Barkpark.Content.{Document, Envelope, MutationEvent, Revision, SchemaDefinition, Validation}
 
   @drafts_prefix "drafts."
 
@@ -621,6 +621,49 @@ defmodule Barkpark.Content do
     end
   end
 
+  # ── Analytics ───────────────────────────────────────────────────────────
+
+  @doc "Count documents grouped by type, with published/draft breakdown."
+  def document_stats(dataset) do
+    Document
+    |> where([d], d.dataset == ^dataset)
+    |> group_by([d], d.type)
+    |> select([d], %{
+      type: d.type,
+      total: count(d.id),
+      published: count(fragment("CASE WHEN ? NOT LIKE 'drafts.%' THEN 1 END", d.doc_id)),
+      drafts: count(fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 END", d.doc_id))
+    })
+    |> order_by([d], asc: d.type)
+    |> Repo.all()
+  end
+
+  @doc "Count total documents in a dataset."
+  def total_documents(dataset) do
+    Document
+    |> where([d], d.dataset == ^dataset)
+    |> select([d], count(d.id))
+    |> Repo.one()
+  end
+
+  @doc "Recent mutation activity — last N events."
+  def recent_activity(dataset, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+
+    MutationEvent
+    |> where([e], e.dataset == ^dataset)
+    |> order_by([e], desc: e.inserted_at)
+    |> limit(^limit)
+    |> select([e], %{
+      id: e.id,
+      type: e.type,
+      doc_id: e.doc_id,
+      mutation: e.mutation,
+      timestamp: e.inserted_at
+    })
+    |> Repo.all()
+  end
+
   # ── PubSub ────────────────────────────────────────────────────────────────
   #
   # Broadcasts are DEFERRED when we're inside an Ecto transaction (e.g.
@@ -696,8 +739,6 @@ defmodule Barkpark.Content do
   end
 
   defp save_event(doc, type, dataset, action, prev_rev) do
-    alias Barkpark.Content.MutationEvent
-
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: dataset,

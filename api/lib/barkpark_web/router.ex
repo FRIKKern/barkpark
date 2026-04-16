@@ -58,6 +58,8 @@ defmodule BarkparkWeb.Router do
     get "/listen/:dataset", ListenController, :listen
     get "/export/:dataset", ExportController, :export
 
+    get "/analytics/:dataset", AnalyticsController, :index
+
     get "/history/:dataset/:type/:doc_id", HistoryController, :index
     get "/revision/:dataset/:id", HistoryController, :show
     post "/revision/:dataset/:id/restore", HistoryController, :restore
