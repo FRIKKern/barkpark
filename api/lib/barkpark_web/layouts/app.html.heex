@@ -20,6 +20,15 @@
         <% end %>
       <% end %>
     </div>
+    <%= if assigns[:nav_section] == :api_tester do %>
+      <div class="studio-bar-actions">
+        <form phx-change="token-change" style="display:contents;">
+          <label class="studio-bar-actions-label">Token</label>
+          <input type="text" name="token" value={assigns[:token] || ""} class="form-input" style="width:180px;height:26px;font-size:11px;font-family:var(--font-mono);padding:0 8px;" phx-debounce="300" />
+        </form>
+        <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
+      </div>
+    <% end %>
   </div>
 
   <%= if Phoenix.Flash.get(@flash, :info) do %>
