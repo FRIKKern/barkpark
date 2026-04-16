@@ -93,7 +93,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       method: "GET",
       path_template: "/v1/data/query/{dataset}/{type}",
       description:
-        "List documents of a given type. Returns 404 if the schema's visibility is \"private\".",
+        "List documents of a given type with pagination, ordering, and optional filters. Perspective controls draft visibility: 'published' (default) shows only published documents, 'drafts' shows the most recent version (draft overlay if exists, published otherwise), 'raw' shows all rows including both draft and published versions. Returns 404 if the schema's visibility is 'private' and no auth token is provided.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "type", type: :string, default: "post", notes: "Document type name"}
@@ -106,7 +106,7 @@ defmodule Barkpark.ApiTester.Endpoints do
           options: ["published", "drafts", "raw"],
           notes: "published (default) / drafts / raw"
         },
-        %{name: "limit", type: :integer, default: "10", notes: "Integer, min 1, max 1000"},
+        %{name: "limit", type: :integer, default: "10", notes: "1–1000, default 100 (server)"},
         %{name: "offset", type: :integer, default: "0", notes: "Integer, min 0"},
         %{
           name: "order",
@@ -120,7 +120,7 @@ defmodule Barkpark.ApiTester.Endpoints do
           ],
           notes: "Sort key and direction"
         },
-        %{name: "filter[title]", type: :string, default: "", notes: "Optional exact-match on title"}
+        %{name: "filter[title]", type: :string, default: "", notes: "Exact-match filter. Also supports operator form: filter[field][eq], filter[field][in]=a,b, filter[field][contains], filter[field][gt], filter[field][gte], filter[field][lt], filter[field][lte]"}
       ],
       body_example: nil,
       response_shape: """
@@ -575,15 +575,19 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/export/{dataset}",
-      description: "Export all documents as newline-delimited JSON (NDJSON). Streams the response.",
+      description: "Stream all documents as newline-delimited JSON (NDJSON). Each line is a complete document envelope. Response uses Content-Type: application/x-ndjson and chunked transfer encoding. Memory-efficient for large datasets.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
       query_params: [
-        %{name: "type", type: :string, default: "", notes: "Optional: filter by document type"}
+        %{name: "type", type: :string, default: "", notes: "Exact match by document type (e.g., 'post'). Omit to export all types."}
       ],
       body_example: nil,
-      response_shape: "{\"_id\":\"p1\",\"_type\":\"post\",\"title\":\"Hello\",...}\n{\"_id\":\"p2\",\"_type\":\"post\",\"title\":\"World\",...}",
+      response_shape: """
+      {"_id":"p1","_type":"post","_rev":"a3f8...","_draft":false,"title":"Hello"}
+      {"_id":"drafts.p2","_type":"post","_rev":"b4c9...","_draft":true,"title":"World"}
+      {"_id":"a1","_type":"author","_rev":"c5d0...","_draft":false,"title":"Jane"}
+      """,
       possible_errors: [:unauthorized],
       expect: {200, :ok},
       runnable: true,
@@ -606,19 +610,36 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :public,
       method: "GET",
       path_template: "/v1/data/search/{dataset}",
-      description: "Full-text search across document titles. Returns published docs by default.",
+      description: "Case-insensitive title search using ILIKE. Defaults to published perspective. Returns matched documents with total count. Public — no auth required.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
       query_params: [
-        %{name: "q", type: :string, default: "", notes: "Search query (required)"},
-        %{name: "type", type: :string, default: "", notes: "Filter by document type"},
-        %{name: "perspective", type: :select, default: "published", options: ["published", "drafts", "raw"], notes: "Which documents to search"},
-        %{name: "limit", type: :string, default: "50", notes: "Max results (1-200)"},
-        %{name: "offset", type: :string, default: "0", notes: "Pagination offset"}
+        %{name: "q", type: :string, default: "", notes: "Required. Case-insensitive substring match on title. Empty or missing returns 400 malformed."},
+        %{name: "type", type: :string, default: "", notes: "Exact match filter by document type (e.g., 'post', 'author')"},
+        %{name: "perspective", type: :select, default: "published", options: ["published", "drafts", "raw"], notes: "published = no drafts. prefix; drafts = only drafts.; raw = all documents"},
+        %{name: "limit", type: :integer, default: "50", notes: "1–200, default 50"},
+        %{name: "offset", type: :integer, default: "0", notes: "Pagination offset, default 0"}
       ],
       body_example: nil,
-      response_shape: "{\n  \"documents\": [{\"_id\": \"p1\", \"_type\": \"post\", \"title\": \"...\"}],\n  \"count\": 12,\n  \"query\": \"phoenix\"\n}",
+      response_shape: """
+      {
+        "documents": [
+          {
+            "_id": "p1",
+            "_type": "post",
+            "_rev": "a3f8...",
+            "_draft": false,
+            "_publishedId": "p1",
+            "_createdAt": "2026-04-12T09:11:20Z",
+            "_updatedAt": "2026-04-13T10:03:45Z",
+            "title": "Getting Started with Content"
+          }
+        ],
+        "count": 12,
+        "query": "content"
+      }
+      """,
       possible_errors: [:malformed],
       expect: nil,
       runnable: true,
@@ -642,18 +663,31 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/history/{dataset}/{type}/{doc_id}",
-      description: "List revision history for a document, newest first.",
+      description: "List revision snapshots for a document, newest first. Each mutation (create, update, publish, unpublish, delete, patch) creates a revision. Returns the published document ID — do not include the drafts. prefix.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "type", type: :string, default: "post", notes: "Document type"},
-        %{name: "doc_id", type: :string, default: "p1", notes: "Document ID (published, no drafts. prefix)"}
+        %{name: "doc_id", type: :string, default: "p1", notes: "Published document ID (without drafts. prefix). Each revision is stored under the published ID."}
       ],
       query_params: [
-        %{name: "limit", type: :string, default: "50", notes: "Max revisions (1-200)"}
+        %{name: "limit", type: :integer, default: "50", notes: "1–200, default 50"}
       ],
       body_example: nil,
-      response_shape: "{\n  \"revisions\": [\n    {\"id\": \"uuid\", \"action\": \"publish\", \"title\": \"...\", \"timestamp\": \"...\"}\n  ],\n  \"count\": 5\n}",
-      possible_errors: [:unauthorized],
+      response_shape: """
+      {
+        "revisions": [
+          {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "action": "publish",
+            "title": "My Post Title",
+            "status": "published",
+            "timestamp": "2026-04-16T12:00:00Z"
+          }
+        ],
+        "count": 3
+      }
+      """,
+      possible_errors: [:unauthorized, :not_found],
       expect: {200, :ok},
       runnable: true,
       scenarios: [
@@ -672,14 +706,28 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/revision/{dataset}/{id}",
-      description: "Get a single revision by ID, including full content snapshot.",
+      description: "Fetch a single revision by UUID. Returns the full content snapshot as it existed at that point in time. Use this to inspect what changed between revisions.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
-        %{name: "id", type: :string, default: "", notes: "Revision UUID"}
+        %{name: "id", type: :string, default: "", notes: "Revision UUID (from the list revisions endpoint)"}
       ],
       query_params: [],
       body_example: nil,
-      response_shape: "{\n  \"revision\": {\n    \"id\": \"uuid\", \"doc_id\": \"p1\", \"type\": \"post\",\n    \"action\": \"publish\", \"content\": {...}, \"timestamp\": \"...\"\n  }\n}",
+      response_shape: """
+      {
+        "revision": {
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "doc_id": "p1",
+          "type": "post",
+          "dataset": "production",
+          "action": "publish",
+          "title": "My Post Title",
+          "status": "published",
+          "content": {"category": "Tech", "body": "..."},
+          "timestamp": "2026-04-16T12:00:00Z"
+        }
+      }
+      """,
       possible_errors: [:unauthorized, :not_found],
       expect: nil,
       runnable: true
@@ -695,14 +743,28 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "POST",
       path_template: "/v1/data/revision/{dataset}/{id}/restore",
-      description: "Restore a document to a specific revision. Creates or updates the draft.",
+      description: "Restore a document to a previous revision. Creates or updates the draft at drafts.{doc_id} with the revision's content. The published version is not affected — you must publish separately.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "id", type: :string, default: "", notes: "Revision UUID to restore"}
       ],
       query_params: [],
       body_example: %{"type" => "post"},
-      response_shape: "{\n  \"restored\": true,\n  \"document\": {\"_id\": \"drafts.p1\", \"_type\": \"post\", ...}\n}",
+      response_shape: """
+      {
+        "restored": true,
+        "document": {
+          "_id": "drafts.p1",
+          "_type": "post",
+          "_rev": "new-rev-hash...",
+          "_draft": true,
+          "_publishedId": "p1",
+          "_createdAt": "2026-04-16T12:30:00Z",
+          "_updatedAt": "2026-04-16T12:30:00Z",
+          "title": "Restored Title"
+        }
+      }
+      """,
       possible_errors: [:unauthorized, :not_found],
       expect: nil,
       runnable: true
@@ -720,13 +782,31 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/analytics/{dataset}",
-      description: "Aggregate stats: document counts by type with published/draft breakdown, recent mutation activity.",
+      description: "Dataset overview: total document count, per-type breakdown (total/published/drafts), and the 50 most recent mutation events. Counts include both published and draft documents.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
       query_params: [],
       body_example: nil,
-      response_shape: "{\n  \"dataset\": \"production\",\n  \"total_documents\": 42,\n  \"types\": [{\"type\": \"post\", \"total\": 20, \"published\": 15, \"drafts\": 5}],\n  \"recent_activity\": [{\"mutation\": \"publish\", \"doc_id\": \"p1\", ...}]\n}",
+      response_shape: """
+      {
+        "dataset": "production",
+        "total_documents": 121,
+        "types": [
+          {"type": "post", "total": 65, "published": 19, "drafts": 46},
+          {"type": "author", "total": 8, "published": 4, "drafts": 4}
+        ],
+        "recent_activity": [
+          {
+            "id": 1561,
+            "type": "post",
+            "doc_id": "drafts.my-post",
+            "mutation": "create",
+            "timestamp": "2026-04-16T22:52:27Z"
+          }
+        ]
+      }
+      """,
       possible_errors: [:unauthorized],
       expect: {200, :ok},
       runnable: true,
@@ -749,13 +829,29 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :admin,
       method: "GET",
       path_template: "/v1/webhooks/{dataset}",
-      description: "List all webhooks configured for this dataset.",
+      description: "List all webhook subscriptions for a dataset. Requires admin token.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
       query_params: [],
       body_example: nil,
-      response_shape: "{\n  \"webhooks\": [\n    {\"id\": \"uuid\", \"name\": \"My Hook\", \"url\": \"https://...\", \"active\": true}\n  ]\n}",
+      response_shape: """
+      {
+        "webhooks": [
+          {
+            "id": "550e8400-...",
+            "name": "Notify Slack",
+            "url": "https://hooks.slack.com/...",
+            "dataset": "production",
+            "events": ["publish"],
+            "types": ["post"],
+            "active": true,
+            "created_at": "2026-04-16T12:00:00Z",
+            "updated_at": "2026-04-16T12:00:00Z"
+          }
+        ]
+      }
+      """,
       possible_errors: [:unauthorized, :forbidden],
       expect: {200, :ok},
       runnable: true,
@@ -775,7 +871,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :admin,
       method: "POST",
       path_template: "/v1/webhooks/{dataset}",
-      description: "Create a new webhook. Empty events/types arrays match all.",
+      description: "Register a webhook subscription. The webhook fires asynchronously on matching mutations. Empty events array matches ALL mutation types. Empty types array matches ALL document types. Requires admin token. Returns 201 on success. Valid events: create, update, publish, unpublish, delete, discardDraft, patch.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
@@ -784,9 +880,24 @@ defmodule Barkpark.ApiTester.Endpoints do
         "name" => "Notify Slack",
         "url" => "https://hooks.slack.com/services/...",
         "events" => ["publish"],
-        "types" => ["post"]
+        "types" => ["post"],
+        "secret" => "optional-hmac-secret"
       },
-      response_shape: "{\n  \"webhook\": {\"id\": \"uuid\", \"name\": \"Notify Slack\", \"active\": true}\n}",
+      response_shape: """
+      {
+        "webhook": {
+          "id": "550e8400-...",
+          "name": "Notify Slack",
+          "url": "https://hooks.slack.com/...",
+          "dataset": "production",
+          "events": ["publish"],
+          "types": ["post"],
+          "active": true,
+          "created_at": "2026-04-16T12:00:00Z",
+          "updated_at": "2026-04-16T12:00:00Z"
+        }
+      }
+      """,
       possible_errors: [:unauthorized, :forbidden, :validation_failed],
       expect: nil,
       runnable: true
@@ -802,10 +913,10 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :admin,
       method: "DELETE",
       path_template: "/v1/webhooks/{dataset}/{id}",
-      description: "Delete a webhook by ID.",
+      description: "Permanently remove a webhook subscription. Pending deliveries for this webhook are cancelled. Requires admin token.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
-        %{name: "id", type: :string, default: "", notes: "Webhook UUID"}
+        %{name: "id", type: :string, default: "", notes: "Webhook UUID (from the list webhooks endpoint)"}
       ],
       query_params: [],
       body_example: nil,
