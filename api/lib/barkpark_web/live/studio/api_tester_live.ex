@@ -334,15 +334,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           <div class="api-col-body">
             <%= if @scenario_results != [] do %>
               <div class="scenario-results">
-                <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-muted); display: flex; justify-content: space-between; align-items: center;">
-                  <strong>Run All Results</strong>
-                  <span style="display: flex; gap: 6px;">
-                    <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> pass</span>
-                    <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> fail</span>
-                    <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> error</span>
-                  </span>
-                </div>
-                <div style="overflow-y: auto; max-height: calc(100vh - 200px);">
+                <div style="overflow-y: auto; max-height: calc(100vh - 140px);">
                   <%= for {category, cat_scenarios} <- @scenario_results |> Enum.group_by(& &1.category) |> Enum.sort_by(&elem(&1, 0)) do %>
                     <div style="padding: 4px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--fg-dim); border-bottom: 1px solid var(--border-muted); background: var(--bg-muted);">
                       <%= category %>
