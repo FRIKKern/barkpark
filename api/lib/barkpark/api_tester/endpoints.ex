@@ -627,7 +627,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "type", type: :string, default: "post", notes: "Document type"},
-        %{name: "doc_id", type: :string, default: "", notes: "Document ID (published, no drafts. prefix)"}
+        %{name: "doc_id", type: :string, default: "p1", notes: "Document ID (published, no drafts. prefix)"}
       ],
       query_params: [
         %{name: "limit", type: :string, default: "50", notes: "Max revisions (1-200)"}
