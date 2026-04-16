@@ -82,6 +82,25 @@ defmodule Barkpark.ApiTester.EndpointsTest do
     assert show_ep.auth == :admin
   end
 
+  test "new API expansion endpoints have valid specs" do
+    new_ids = ~w(export-dataset history-list history-show history-restore search-documents analytics-overview webhooks-list webhooks-create webhooks-delete)
+
+    for id <- new_ids do
+      endpoint = Endpoints.find("test", id)
+      assert endpoint != nil, "Missing endpoint: #{id}"
+      assert endpoint.id == id
+      assert endpoint.kind == :endpoint
+    end
+  end
+
+  test "search-documents is public, webhooks require admin" do
+    search = Endpoints.find("test", "search-documents")
+    assert search.auth == :public
+
+    wh_list = Endpoints.find("test", "webhooks-list")
+    assert wh_list.auth == :admin
+  end
+
   test "reference pages use :reference kind with a render_key" do
     envelope = Endpoints.find("production", "ref-envelope")
     errors = Endpoints.find("production", "ref-errors")
