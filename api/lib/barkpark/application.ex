@@ -16,6 +16,7 @@ defmodule Barkpark.Application do
       # Start a worker by calling: Barkpark.Worker.start_link(arg)
       # {Barkpark.Worker, arg},
       BarkparkWeb.Presence,
+      {Task.Supervisor, name: Barkpark.TaskSupervisor},
       # Start to serve requests, typically the last entry
       BarkparkWeb.Endpoint
     ]

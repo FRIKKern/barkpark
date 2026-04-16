@@ -703,6 +703,7 @@ defmodule Barkpark.Content do
 
         maybe_broadcast(global_topic, {:document_changed, msg})
         maybe_broadcast(doc_topic, {:doc_updated, msg})
+        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document)
 
         {:ok, doc}
 
@@ -721,6 +722,16 @@ defmodule Barkpark.Content do
     end
   end
 
+  # Defer webhook dispatch when inside a transaction, fire immediately otherwise.
+  defp maybe_dispatch_webhook(dataset, action, type, doc_id, document) do
+    if Repo.in_transaction?() do
+      queue = Process.get(:barkpark_deferred_webhooks, [])
+      Process.put(:barkpark_deferred_webhooks, [{dataset, action, type, doc_id, document} | queue])
+    else
+      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document)
+    end
+  end
+
   # Flush broadcasts queued during a successful transaction, preserving
   # their original order (the queue is built by prepending).
   defp flush_deferred_broadcasts do
@@ -731,10 +742,19 @@ defmodule Barkpark.Content do
     |> Enum.each(fn {topic, msg} ->
       Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, msg)
     end)
+
+    webhook_queue = Process.delete(:barkpark_deferred_webhooks) || []
+
+    webhook_queue
+    |> Enum.reverse()
+    |> Enum.each(fn {dataset, action, type, doc_id, document} ->
+      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document)
+    end)
   end
 
   defp clear_deferred_broadcasts do
     Process.delete(:barkpark_deferred_broadcasts)
+    Process.delete(:barkpark_deferred_webhooks)
     :ok
   end
 
