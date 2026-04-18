@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly Barkpark public-read token rotation
+Documentation=file:///opt/barkpark/deploy/systemd/README.md
+
+[Timer]
+OnCalendar=Mon 03:00:00
+Persistent=true
+RandomizedDelaySec=600
+Unit=barkpark-rotate-public-token.service
+
+[Install]
+WantedBy=timers.target
