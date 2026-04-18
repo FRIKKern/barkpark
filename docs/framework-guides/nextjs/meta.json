@@ -1,0 +1,16 @@
+{
+  "title": "Next.js",
+  "description": "App Router + RSC integration for Barkpark.",
+  "icon": "Triangle",
+  "pages": [
+    "index",
+    "setup",
+    "server-components",
+    "server-actions",
+    "draft-mode",
+    "revalidation",
+    "preload-pattern",
+    "image-loader",
+    "portable-text"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "extends": "../../js/tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "typeRoots": [
+      "../../js/packages/nextjs/node_modules/@types",
+      "../../js/node_modules/@types"
+    ],
+    "types": ["node", "react", "react-dom"],
+    "verbatimModuleSyntax": false,
+    "paths": {
+      "@barkpark/core": ["../../js/packages/core/src/index.ts"],
+      "@barkpark/nextjs": ["../../js/packages/nextjs/src/index.ts"],
+      "@barkpark/nextjs/server": ["../../js/packages/nextjs/src/server/index.ts"],
+      "@barkpark/nextjs/client": ["../../js/packages/nextjs/src/client/index.ts"],
+      "@barkpark/nextjs/actions": ["../../js/packages/nextjs/src/actions/index.ts"],
+      "@barkpark/nextjs/draft-mode": ["../../js/packages/nextjs/src/draft-mode/index.ts"],
+      "@barkpark/nextjs/revalidate": ["../../js/packages/nextjs/src/revalidate/index.ts"],
+      "@barkpark/nextjs/webhook": ["../../js/packages/nextjs/src/webhook/index.ts"],
+      "@barkpark/nextjs/preload": ["../../js/packages/nextjs/src/preload/index.ts"],
+      "@barkpark/react": ["../../js/packages/react/src/index.ts"]
+    }
+  },
+  "include": ["*.ts", "*.tsx"]
+}

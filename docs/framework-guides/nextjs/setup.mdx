@@ -1,0 +1,134 @@
+---
+title: Setup
+description: Install @barkpark/nextjs and make your first server-component fetch.
+icon: Rocket
+package: nextjs
+---
+
+## Install
+
+```bash
+pnpm add @barkpark/core @barkpark/nextjs
+# or: npm install / yarn add
+```
+
+The `@barkpark/core` dependency is the runtime-agnostic client. Everything in
+`@barkpark/nextjs` composes on top of it, so you always pair the two.
+
+For React-component renderers (`PortableText`, `BarkparkImage`,
+`BarkparkReference`), also install:
+
+```bash
+pnpm add @barkpark/react
+```
+
+## Environment variables
+
+The server surface reads two tokens:
+
+```
+# .env.local
+BARKPARK_PROJECT_URL=https://cms.example.com
+BARKPARK_DATASET=production
+BARKPARK_SERVER_TOKEN=sk_live_********      # used on the draft branch only
+BARKPARK_PREVIEW_SECRET=***********         # signs draft-mode URLs
+```
+
+`BARKPARK_SERVER_TOKEN` **must never reach the browser bundle**. The
+`/server` entrypoint is guarded by `import 'server-only'`, so importing it
+from a Client Component is a compile-time error — that check is the safety
+net; keep the variable name prefixed with `BARKPARK_` (not `NEXT_PUBLIC_`)
+to keep it out of the client bundle.
+
+## Create the server client
+
+Create a single `barkpark.ts` at the root of your app:
+
+```ts twoslash
+// app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+
+const client = createClient({
+  projectUrl: process.env.BARKPARK_PROJECT_URL!,
+  dataset: process.env.BARKPARK_DATASET ?? 'production',
+  apiVersion: '2026-04-12',
+})
+
+export const barkpark = createBarkparkServer({
+  client,
+  serverToken: process.env.BARKPARK_SERVER_TOKEN!,
+})
+
+export const { barkparkFetch, BarkparkLive, BarkparkLiveProvider } = barkpark
+//                ^?
+```
+
+`apiVersion` is required and must be a `YYYY-MM-DD` string — pick the date
+you are pinning your app to, and bump it only when you are ready to adopt
+contract changes. Omitting it throws a `BarkparkValidationError`.
+
+## First Server Component fetch
+
+```tsx twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const barkpark = createBarkparkServer({ client, serverToken: 'sk_live' })
+export const { barkparkFetch } = barkpark
+
+// @filename: app/posts/[slug]/page.tsx
+import { barkparkFetch } from '@/app/lib/barkpark'
+import type { BarkparkDocument } from '@barkpark/core'
+
+interface Post extends BarkparkDocument {
+  title: string
+  slug: string
+}
+
+export default async function PostPage({ params }: { params: { slug: string } }) {
+  const posts = await barkparkFetch<Post[]>({ type: 'post' })
+  const post = posts.find((p) => p.slug === params.slug)
+  if (!post) return <div>Not found</div>
+  return <h1>{post.title}</h1>
+}
+```
+
+That is a complete, cacheable Server Component fetch. Because
+`barkparkFetch` attaches the `bp:ds:production:_all` tag by default,
+a single `revalidateTag('bp:ds:production:_all')` call will invalidate this
+page — see [Revalidation](./revalidation) for the narrower tag shapes.
+
+## Project layout
+
+A typical App Router app with Barkpark looks like this:
+
+```
+app/
+├── lib/
+│   └── barkpark.ts           # createBarkparkServer + exports
+├── posts/
+│   └── [slug]/page.tsx       # RSC consuming barkparkFetch
+├── api/
+│   ├── draft/route.ts        # createDraftModeRoutes → GET + DELETE
+│   └── barkpark/webhook/
+│       └── route.ts          # createWebhookHandler
+└── actions/
+    └── posts.ts              # 'use server' — defineActions
+```
+
+The rest of this guide walks each of those files.
+
+## What's next
+
+- [Server Components](./server-components) — the `'server-only'` boundary
+  and how to compose client islands on top.
+- [Server Actions](./server-actions) — mutations with optimistic updates.
+- [Draft Mode](./draft-mode) — preview routes with signed URLs.

@@ -6,13 +6,23 @@ import { cache } from 'react'
 import type { BarkparkFetchOptions } from '../server/types'
 
 /**
- * Minimal server shape the preloader needs. Matches the barkparkFetch factory
- * returned by createBarkparkServer / defineLive in src/server/core.ts.
+ * Minimal server shape the preloader needs. Matches the `barkparkFetch` factory
+ * returned by {@link createBarkparkServer} / `defineLive` in `src/server/core.ts`.
+ *
+ * Any object exposing a compatible `barkparkFetch` satisfies this contract.
  */
 export interface PreloadableServer {
   barkparkFetch: <T = unknown>(opts?: BarkparkFetchOptions) => Promise<T>
 }
 
+/**
+ * Per-request preloader returned by {@link createPreloader}.
+ *
+ * Lets a layout start a document request eagerly (`preloadDocument`) while the
+ * downstream Server Component awaits it (`loadDocument`) without issuing a
+ * second round-trip — duplicate `(id, opts)` tuples dedupe to a single
+ * in-flight request.
+ */
 export interface Preloader {
   /** Fire-and-forget. Kicks off the request; the later loadDocument call reuses it. */
   preloadDocument(id: string, opts?: BarkparkFetchOptions): void
@@ -25,10 +35,32 @@ function stableKey(id: string, opts?: BarkparkFetchOptions): string {
 }
 
 /**
- * Factory. Wraps a server's barkparkFetch so repeat (id, opts) pairs within the
- * same preloader instance dedupe to a single in-flight request. Intended to be
- * instantiated per request in App Router pages/layouts. Wrapped additionally in
- * React's cache() for per-render isolation inside Server Components.
+ * Factory. Wraps a server's `barkparkFetch` so repeat `(id, opts)` pairs within
+ * the same preloader instance dedupe to a single in-flight request. Intended to
+ * be instantiated per request in App Router pages/layouts. Wrapped additionally
+ * in React's `cache()` for per-render isolation inside Server Components.
+ *
+ * @param server — Object exposing `barkparkFetch`; typically the result of
+ *                 {@link createBarkparkServer}.
+ * @returns A {@link Preloader} with `preloadDocument` + `loadDocument`.
+ *
+ * @example
+ * // app/posts/[id]/page.tsx
+ * import { createPreloader } from '@barkpark/nextjs/preload'
+ * import { server } from '@/lib/barkpark'
+ *
+ * const loader = createPreloader(server)
+ *
+ * export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+ *   const { id } = await params
+ *   loader.preloadDocument(id, { type: 'post' })
+ *   return <PostView id={id} />
+ * }
+ *
+ * async function PostView({ id }: { id: string }) {
+ *   const post = await loader.loadDocument<{ title: string }>(id, { type: 'post' })
+ *   return <h1>{post.title}</h1>
+ * }
  */
 export function createPreloader(server: PreloadableServer): Preloader {
   const inflight = new Map<string, Promise<unknown>>()
@@ -56,7 +88,16 @@ export function createPreloader(server: PreloadableServer): Preloader {
 
 /**
  * One-shot convenience. Kicks off a preload without establishing a reusable
- * preloader. For dedupe with a later load, prefer createPreloader.
+ * preloader. For dedupe with a later `loadDocument` call, prefer
+ * {@link createPreloader}.
+ *
+ * @param server — Object exposing `barkparkFetch`.
+ * @param id     — Document id to preload.
+ * @param opts   — Optional fetch options; merged with `{ id }`.
+ *
+ * @example
+ * import { preloadDocument } from '@barkpark/nextjs/preload'
+ * preloadDocument(server, 'p1', { type: 'post' })
  */
 export function preloadDocument(
   server: PreloadableServer,

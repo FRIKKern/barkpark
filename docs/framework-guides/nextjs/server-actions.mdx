@@ -1,0 +1,215 @@
+---
+title: Server Actions
+description: defineActions + useOptimisticDocument for mutations with conflict handling.
+icon: Zap
+package: nextjs
+---
+
+`defineActions()` binds a tiny, typed set of Server Actions to a `@barkpark/core`
+client. The four actions — `createDoc`, `patchDoc`, `publish`, `unpublish` —
+fan out the canonical revalidation tags (`bp:ds:$ds:doc:$id` and
+`bp:ds:$ds:type:$type`) so the RSC tree re-reads cleanly after every
+mutation.
+
+## Create the action bundle
+
+```ts twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+  token: 'sk_live',
+})
+export { client }
+export const { barkparkFetch } = createBarkparkServer({ client, serverToken: 'sk_live' })
+
+// @filename: app/actions/posts.ts
+'use server'
+import { defineActions } from '@barkpark/nextjs/actions'
+import { client } from '@/app/lib/barkpark'
+
+const actions = defineActions({ client })
+
+export async function createPost(formData: FormData) {
+  return actions.createDoc({
+    _type: 'post',
+    title: String(formData.get('title')),
+  })
+}
+
+export async function publishPost(id: string) {
+  return actions.publish(id, 'post')
+}
+```
+
+Every `defineActions()` bundle reads `dataset` from the client config, so
+the revalidate tags always match the dataset the client is pointed at.
+Override it explicitly when you're doing cross-dataset work:
+
+```ts twoslash
+import { createClient } from '@barkpark/core'
+import { defineActions } from '@barkpark/nextjs/actions'
+
+const client  = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'staging',
+  apiVersion: '2026-04-12',
+  token: 'sk_live',
+})
+const actions = defineActions({ client, dataset: 'production' })
+//    ^?
+```
+
+## Input validation
+
+`defineActions()` accepts an optional `schemas` map keyed by `_type`.
+Anything with a `.parse(input)` method fits — Zod schemas drop in unchanged,
+and so do schemas emitted by `@barkpark/codegen`.
+
+```ts twoslash
+import { z } from 'zod'
+import { createClient } from '@barkpark/core'
+import { defineActions } from '@barkpark/nextjs/actions'
+
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+  token: 'sk_live',
+})
+
+const PostSchema = z.object({
+  _type: z.literal('post'),
+  title: z.string().min(1).max(200),
+})
+
+const actions = defineActions({
+  client,
+  schemas: { post: PostSchema },
+})
+```
+
+If `.parse()` throws, `createDoc()` rejects before any network request.
+
+## Optimistic updates with conflict handling
+
+The React-facing companion is `useOptimisticDocument()`. It wraps
+`useOptimistic` + `useTransition` and, crucially, unpacks
+`BarkparkConflictError` into a structured `conflict` value you can render a
+reconciliation UI from:
+
+```tsx twoslash
+// @filename: app/actions/posts.ts
+'use server'
+import { createClient, type BarkparkDocument } from '@barkpark/core'
+import { defineActions } from '@barkpark/nextjs/actions'
+const client  = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+  token: 'sk_live',
+})
+const actions = defineActions({ client })
+
+interface Post extends BarkparkDocument { title: string }
+
+export async function patchPostTitle(doc: Post): Promise<Post> {
+  const result = await actions.patchDoc(doc._id, { set: { title: doc.title } })
+  return result.document as Post
+}
+
+// @filename: app/components/PostEditor.tsx
+'use client'
+import { useOptimisticDocument } from '@barkpark/nextjs/actions'
+import { patchPostTitle } from '@/app/actions/posts'
+import type { BarkparkDocument } from '@barkpark/core'
+
+interface Post extends BarkparkDocument { title: string }
+
+export function PostEditor({ post }: { post: Post }) {
+  const { data, pending, conflict, mutate, clearConflict } =
+    useOptimisticDocument<Post>(post, patchPostTitle)
+
+  return (
+    <form action={() => mutate({ title: data.title + '!' })}>
+      <input defaultValue={data.title} name="title" />
+      <button type="submit" disabled={pending}>Save</button>
+      {conflict ? (
+        <div role="alert">
+          Someone else saved first.
+          <button type="button" onClick={clearConflict}>Dismiss</button>
+        </div>
+      ) : null}
+    </form>
+  )
+}
+```
+
+The key safety detail: `BarkparkConflictError` is matched both by
+`instanceof` **and** by `err.code === 'BarkparkConflictError'`. pnpm hoist
+can ship duplicate copies of an error class across bundles, making
+`instanceof` unreliable. Every Barkpark error carries a `code` literal equal
+to its class name for this reason — use it directly when you catch errors
+outside `useOptimisticDocument`:
+
+```ts twoslash
+import { BarkparkConflictError, createClient } from '@barkpark/core'
+
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+  token: 'sk_live',
+})
+
+async function safePatch(id: string, etag: string) {
+  try {
+    await client.patch(id).set({ title: 'hi' }).commit({ ifMatch: etag })
+  } catch (e) {
+    const isConflict =
+      e instanceof BarkparkConflictError ||
+      (typeof e === 'object' && e !== null && 'code' in e &&
+        (e as { code: string }).code === 'BarkparkConflictError')
+    if (isConflict) {
+      // prompt user to merge / discard
+    } else {
+      throw e
+    }
+  }
+}
+```
+
+## Publish / unpublish
+
+`publish()` copies `drafts.<id>` to `<id>` and deletes the draft.
+`unpublish()` is the reverse. Both revalidate the same two tags and return
+a `MutateResult` you can flash a toast from.
+
+```ts twoslash
+import { createClient } from '@barkpark/core'
+import { defineActions } from '@barkpark/nextjs/actions'
+
+const client  = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+  token: 'sk_live',
+})
+const actions = defineActions({ client })
+
+await actions.publish('p1', 'post')
+await actions.unpublish('p1', 'post')
+```
+
+See [snippet 05-publish-unpublish.ts](../../snippets/05-publish-unpublish) for
+a full round-trip against the Phoenix contract.
+
+## Next
+
+- [Revalidation](./revalidation) — if you need narrower tags or
+  path-based invalidation.
+- [Draft Mode](./draft-mode) — to pair mutations with a live preview.

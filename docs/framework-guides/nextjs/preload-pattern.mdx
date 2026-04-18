@@ -1,0 +1,160 @@
+---
+title: Preload Pattern
+description: React cache() + Next.js preload for warmed-up RSC fetches.
+icon: Wind
+package: nextjs
+---
+
+In App Router, a layout and its child pages run in parallel on the server.
+If a child component awaits a document, the request only starts when that
+component runs. You can start it earlier — from the layout — using the
+preload pattern. Barkpark ships a ready-made helper for this:
+`createPreloader()` from `@barkpark/nextjs/preload`.
+
+## Why preload
+
+```tsx
+// without preload — serial
+export default async function Page() {
+  const post = await getPost('p1')  // starts here
+  return <Article post={post} />
+}
+```
+
+```tsx
+// with preload — parallel
+export default function Layout({ children }) {
+  preloader.preloadDocument('p1', { type: 'post' })  // starts here
+  return <>{children}</>
+}
+```
+
+The preload fires at layout render, the page then awaits the same request,
+and React's `cache()` guarantees the call dedupes to the single in-flight
+fetch.
+
+## Create a preloader
+
+```ts twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+import { createPreloader } from '@barkpark/nextjs/preload'
+
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+
+export const barkpark = createBarkparkServer({ client, serverToken: 's' })
+export const preloader = createPreloader(barkpark)
+//           ^?
+```
+
+`createPreloader()` accepts anything with a `barkparkFetch` method, so the
+server bundle returned by `createBarkparkServer()` drops in directly.
+
+## Preload from the layout
+
+```tsx twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+import { createPreloader } from '@barkpark/nextjs/preload'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const barkpark  = createBarkparkServer({ client, serverToken: 's' })
+export const preloader = createPreloader(barkpark)
+
+// @filename: app/posts/[slug]/layout.tsx
+import { preloader } from '@/app/lib/barkpark'
+
+export default function PostLayout(
+  { children, params }: { children: React.ReactNode; params: { slug: string } },
+) {
+  preloader.preloadDocument(params.slug, { type: 'post' })
+  return <>{children}</>
+}
+```
+
+## Await in the page
+
+Use `loadDocument` — it shares the in-flight request started by the
+layout. The second call does not fire a second fetch.
+
+```tsx twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+import { createPreloader } from '@barkpark/nextjs/preload'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const barkpark  = createBarkparkServer({ client, serverToken: 's' })
+export const preloader = createPreloader(barkpark)
+
+// @filename: app/posts/[slug]/page.tsx
+import { preloader } from '@/app/lib/barkpark'
+import type { BarkparkDocument } from '@barkpark/core'
+
+interface Post extends BarkparkDocument { title: string }
+
+export default async function PostPage(
+  { params }: { params: { slug: string } },
+) {
+  const post = await preloader.loadDocument<Post>(params.slug, { type: 'post' })
+  return <h1>{post.title}</h1>
+}
+```
+
+## One-shot preload
+
+If you only need to warm a single request and aren't planning to reuse the
+preloader, the `preloadDocument()` export is a one-liner:
+
+```ts twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const barkpark = createBarkparkServer({ client, serverToken: 's' })
+
+// @filename: app/warm.ts
+import { preloadDocument } from '@barkpark/nextjs/preload'
+import { barkpark } from '@/app/lib/barkpark'
+
+preloadDocument(barkpark, 'p1', { type: 'post' })
+```
+
+Prefer `createPreloader()` when you want dedup guarantees across multiple
+calls in the same request.
+
+## Caveats
+
+- Preloaders are **per-request**. Create one per RSC request (typically
+  instantiated once at module scope — React's `cache()` resets between
+  requests for you).
+- Don't preload inside client components; the module is server-only.
+- Draft mode affects both preload and load: both will switch to
+  `cache: 'no-store'` when draft mode is enabled.
+
+## Next
+
+- [Server Components](./server-components) — the patterns this helper
+  layers on top of.
+- [Image loader](./image-loader) — similar "preload at layout" trick for
+  images.

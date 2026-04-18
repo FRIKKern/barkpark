@@ -54,7 +54,21 @@ export interface BarkparkLiveProps {
  * triggers a debounced `router.refresh()` on each event. Renders nothing.
  *
  * Edge guard: throws synchronously in render AND inside the subscription on detection
- * (ADR-005 — three-layer detector).
+ * (ADR-005 — three-layer detector). Pair with `createBarkparkServer().defineLive`
+ * so the client prop is pre-bound, or wrap in {@link BarkparkLiveProvider}.
+ *
+ * @param props — Optional overrides; the client must be provided here or via provider.
+ * @returns `null` — this component renders nothing.
+ * @throws {@link BarkparkEdgeRuntimeError} when mounted in an edge runtime.
+ *
+ * @example
+ * // app/layout.tsx
+ * import { BarkparkLive } from '@barkpark/nextjs/client'
+ * import { client } from '@/lib/barkpark-client'
+ *
+ * export default function RootLayout({ children }) {
+ *   return <html><body>{children}<BarkparkLive client={client} /></body></html>
+ * }
  */
 export function BarkparkLive(props: BarkparkLiveProps = {}): null {
   // Layer 1 of edge guard — fires synchronously during render so misuse fails loudly.
@@ -89,8 +103,26 @@ export interface BarkparkLiveProviderProps {
 }
 
 /**
- * Wraps the tree in a BarkparkClient context and mounts a single <BarkparkLive />.
- * useEffect cleanup tears down the SSE subscription so HMR / route changes do not leak.
+ * Wraps the tree in a BarkparkClient context and mounts a single
+ * `<BarkparkLive />`. `useEffect` cleanup tears down the SSE subscription so
+ * HMR / route changes do not leak connections.
+ *
+ * @param props — {@link BarkparkLiveProviderProps}; `client` required.
+ *
+ * @example
+ * // app/layout.tsx
+ * import { BarkparkLiveProvider } from '@barkpark/nextjs/client'
+ * import { client } from '@/lib/barkpark-client'
+ *
+ * export default function RootLayout({ children }) {
+ *   return (
+ *     <html><body>
+ *       <BarkparkLiveProvider client={client} debounceMs={750}>
+ *         {children}
+ *       </BarkparkLiveProvider>
+ *     </body></html>
+ *   )
+ * }
  */
 export function BarkparkLiveProvider(props: BarkparkLiveProviderProps): JSX.Element {
   const liveProps: BarkparkLiveProps = { client: props.client }

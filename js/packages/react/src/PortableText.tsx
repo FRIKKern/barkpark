@@ -4,19 +4,29 @@
 import { createElement, Fragment } from 'react'
 import type { ComponentType, ReactElement, ReactNode } from 'react'
 
+/** A single inline text run within a {@link PortableTextBlock}. */
 export interface PortableTextSpan {
   _type: 'span'
   _key?: string
   text: string
+  /** Mark keys — may be either a built-in style (e.g. `'strong'`) or a {@link PortableTextMarkDef} key. */
   marks?: string[]
 }
 
+/**
+ * Definition for a custom mark (e.g. a link). Referenced by `span.marks`
+ * via `_key`; the concrete mark type + attributes live on this record.
+ */
 export interface PortableTextMarkDef {
   _type: string
   _key: string
   [k: string]: unknown
 }
 
+/**
+ * A block-level node. Standard styles (`normal`, `h1`…`h6`, `blockquote`) map
+ * to default HTML tags; override via {@link PortableTextComponents}.`block`.
+ */
 export interface PortableTextBlock {
   _type: 'block'
   _key?: string
@@ -27,6 +37,7 @@ export interface PortableTextBlock {
   level?: number
 }
 
+/** Any non-`'block'` node — rendered via {@link PortableTextComponents}.`types`. */
 export interface CustomBlock {
   _type: string
   _key?: string
@@ -35,6 +46,11 @@ export interface CustomBlock {
 
 export type PortableTextNode = PortableTextBlock | CustomBlock
 
+/**
+ * Component overrides for {@link PortableText}. Each section is optional; any
+ * node/mark type without a matching component falls back to `unknownBlockStyle`
+ * / `unknownMark` / `unknownType`, or a default HTML tag.
+ */
 export interface PortableTextComponents {
   block?: Partial<Record<string, ComponentType<{ children: ReactNode; value: PortableTextBlock }>>>
   mark?: Partial<Record<string, ComponentType<{ children: ReactNode; value?: unknown; markType: string }>>>
@@ -46,9 +62,13 @@ export interface PortableTextComponents {
   unknownType?: ComponentType<{ value: CustomBlock }>
 }
 
+/** Props for {@link PortableText}. */
 export interface PortableTextProps {
+  /** A single Portable Text node or an array of them. */
   value: PortableTextNode[] | PortableTextNode
+  /** Component overrides for blocks, marks, lists, and custom types. */
   components?: PortableTextComponents
+  /** Called once per unknown block style / mark type / custom `_type` encountered during render. */
   onMissingComponent?: (nodeOrMark: { _type: string; markType?: string }) => void
 }
 
@@ -180,6 +200,34 @@ function renderType(
   return null
 }
 
+/**
+ * Renders a Portable Text value to React elements.
+ *
+ * Consecutive `block` nodes with the same `listItem` value are grouped into
+ * a single `<ul>` / `<ol>`. Unknown block styles, mark types, and custom
+ * `_type`s fall back to optional `unknownBlockStyle` / `unknownMark` /
+ * `unknownType` components, or sensible default HTML.
+ *
+ * @param props — {@link PortableTextProps}
+ * @returns A React fragment wrapping the rendered nodes.
+ *
+ * @example
+ * import { PortableText } from '@barkpark/react'
+ *
+ * <PortableText
+ *   value={post.body}
+ *   components={{
+ *     mark: {
+ *       link: ({ value, children }) => (
+ *         <a href={(value as { href: string }).href}>{children}</a>
+ *       ),
+ *     },
+ *     types: {
+ *       image: ({ value }) => <img src={(value as { url: string }).url} />,
+ *     },
+ *   }}
+ * />
+ */
 export function PortableText(props: PortableTextProps): ReactElement {
   const value = Array.isArray(props.value) ? props.value : [props.value]
   const components = props.components ?? {}

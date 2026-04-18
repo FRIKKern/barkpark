@@ -1,0 +1,145 @@
+---
+title: Portable Text
+description: Render rich-text content with a custom component map.
+icon: FileText
+package: nextjs
+---
+
+`PortableText` from `@barkpark/react` is a framework-free renderer for
+Barkpark's Portable Text content. It has no Next.js-specific behaviour, so
+it works identically in Server and Client Components — you pick where to
+render based on whether your overrides are interactive.
+
+## Render a field
+
+```tsx twoslash
+import { PortableText } from '@barkpark/react'
+
+interface Props { body: unknown[] }
+
+export function Article({ body }: Props) {
+  return <PortableText value={body as never} />
+}
+```
+
+With no `components` prop, `PortableText` renders sensible defaults for
+the built-in block styles (`normal`, `h1`…`h6`, `blockquote`) and marks
+(`strong`, `em`, `code`, `underline`, `strike-through`).
+
+## Custom component map
+
+The `components` prop lets you override any block style, mark, list, or
+custom `_type`:
+
+```tsx twoslash
+import { PortableText, type PortableTextComponents } from '@barkpark/react'
+
+const components: PortableTextComponents = {
+  block: {
+    h1: ({ children }) => <h1 className="mt-8 text-3xl">{children}</h1>,
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-4 pl-4 italic">{children}</blockquote>
+    ),
+  },
+  mark: {
+    em: ({ children }) => <em className="text-accent">{children}</em>,
+    link: ({ children, value }) => (
+      <a href={(value as { href?: string })?.href}>{children}</a>
+    ),
+  },
+}
+
+export function Article({ body }: { body: unknown[] }) {
+  return <PortableText value={body as never} components={components} />
+}
+```
+
+## Custom block types
+
+Barkpark schemas often include custom block types — images, callouts,
+code blocks. Register them in `components.types`:
+
+```tsx twoslash
+import { PortableText, type PortableTextComponents, BarkparkImage } from '@barkpark/react'
+
+const components: PortableTextComponents = {
+  types: {
+    image: ({ value }) => (
+      <BarkparkImage
+        asset={value as never}
+        alt={(value as { alt?: string }).alt ?? ''}
+        baseUrl="https://cms.example.com/media"
+      />
+    ),
+    callout: ({ value }) => {
+      const { tone = 'info', text = '' } = value as { tone?: string; text?: string }
+      return <aside data-tone={tone}>{text}</aside>
+    },
+  },
+}
+
+export function Article({ body }: { body: unknown[] }) {
+  return <PortableText value={body as never} components={components} />
+}
+```
+
+## Track missing components
+
+Portable Text fields evolve over time. Pass `onMissingComponent` to log
+when content reaches the renderer without a matching override:
+
+```tsx twoslash
+import { PortableText } from '@barkpark/react'
+
+export function Article({ body }: { body: unknown[] }) {
+  return (
+    <PortableText
+      value={body as never}
+      onMissingComponent={(node) => {
+        console.warn('[portable-text] unmapped node:', node._type, node.markType)
+      }}
+    />
+  )
+}
+```
+
+In production you can send these to telemetry — when the callback fires a
+lot after a content migration, add the missing entries to your map.
+
+## Rendering references inline
+
+Portable Text blocks may contain references to other documents (e.g. a
+"linked post" callout). Use `BarkparkReference` with a `fetcher` to resolve
+them:
+
+```tsx twoslash
+import { BarkparkReference } from '@barkpark/react'
+import { createClient } from '@barkpark/core'
+
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+
+export function LinkedPost({ id }: { id: string }) {
+  return (
+    <BarkparkReference
+      ref={{ _ref: id, _type: 'reference' }}
+      fetcher={async (i) => client.doc('post', i)}
+    >
+      {(doc) => <a href={`/posts/${doc._id}`}>{String(doc.title ?? doc._id)}</a>}
+    </BarkparkReference>
+  )
+}
+```
+
+See the `BarkparkReference` TypeDoc for the full set of resolution options
+(including `client`-based resolution, `maxDepth`, and Suspense-friendly
+usage).
+
+## Next
+
+- Back to the [Guide index](./) for the rest of the Next.js surface.
+- [Image loader](./image-loader) for media rendering paired with
+  `next/image`.

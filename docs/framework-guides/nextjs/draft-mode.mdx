@@ -1,0 +1,118 @@
+---
+title: Draft Mode
+description: Signed preview URLs + createDraftModeRoutes + perspective=drafts.
+icon: Eye
+package: nextjs
+---
+
+Barkpark previews use Next.js draft mode. `createDraftModeRoutes()` mounts a
+GET + DELETE handler that verifies an HMAC-signed URL and flips
+`draftMode().enable()` so every subsequent `barkparkFetch` call reads from
+the `drafts` perspective.
+
+## Mount the route
+
+```ts twoslash
+// @filename: app/api/draft/route.ts
+import { createDraftModeRoutes } from '@barkpark/nextjs/draft-mode'
+
+export const { GET, DELETE } = createDraftModeRoutes({
+  previewSecret: process.env.BARKPARK_PREVIEW_SECRET!,
+  resolvePath: (path) => `/preview${path}`,
+})
+```
+
+- `previewSecret` verifies the `sign` query parameter (HMAC-SHA256 of
+  `path + '\n' + expiry`, with a 10-minute default TTL).
+- `resolvePath` (optional) rewrites the verified path before the 307
+  redirect — handy when your preview pages live under `/preview/...` while
+  the URL from the CMS points at the canonical route.
+- `reissuePreviewToken` (optional) is called after a verify failure to get
+  an alternate secret; this is how you support key rotation without a
+  downtime window. Same pattern as `createWebhookHandler`'s
+  `previousSecret`.
+
+## Build a signed preview URL
+
+`signDraftModeToken()` is exported from `@barkpark/nextjs/draft-mode` for
+admin tools that produce preview links. Given the same secret, the handler
+verifies deterministically:
+
+```ts twoslash
+import { signDraftModeToken } from '@barkpark/nextjs/draft-mode'
+
+const { path, expiry, sign } = signDraftModeToken({
+  path: '/posts/p1',
+  secret: process.env.BARKPARK_PREVIEW_SECRET!,
+  ttlMs: 10 * 60 * 1000,
+})
+
+const previewUrl =
+  `/api/draft?path=${encodeURIComponent(path)}&expiry=${expiry}&sign=${sign}`
+//     ^?
+```
+
+## Exiting draft mode
+
+`DELETE /api/draft` calls `draftMode().disable()` and returns 200 — bind it
+to a "leave preview" link in your site chrome:
+
+```tsx twoslash
+// @filename: app/components/PreviewBanner.tsx
+'use client'
+export function PreviewBanner() {
+  return (
+    <div role="status">
+      You are viewing drafts.
+      <button
+        type="button"
+        onClick={async () => {
+          await fetch('/api/draft', { method: 'DELETE' })
+          location.reload()
+        }}
+      >
+        Exit preview
+      </button>
+    </div>
+  )
+}
+```
+
+## What happens on the draft branch
+
+When draft mode is enabled, `barkparkFetch()` flips three things at once:
+
+1. `cache: 'no-store'` (Next 15.5 would silently ignore `next.tags` on
+   `no-store` calls, so Barkpark drops them entirely).
+2. `Authorization: Bearer <serverToken>` is attached so Phoenix allows the
+   `drafts` perspective.
+3. `?perspective=drafts` is appended to the URL.
+
+On a 401, the handler calls your `reissuePreviewToken()` hook (if provided)
+and retries once. A second 401 throws `BarkparkAuthError`.
+
+## Key rotation
+
+Because secrets are symmetric, rotating `BARKPARK_PREVIEW_SECRET` while a
+draft link is already in flight would normally invalidate the link. The
+`reissuePreviewToken` hook closes that gap:
+
+```ts twoslash
+// @filename: app/api/draft/route.ts
+import { createDraftModeRoutes } from '@barkpark/nextjs/draft-mode'
+
+export const { GET, DELETE } = createDraftModeRoutes({
+  previewSecret: process.env.BARKPARK_PREVIEW_SECRET!,
+  async reissuePreviewToken() {
+    // e.g. fetch the previous-generation secret from a rotation store
+    return process.env.BARKPARK_PREVIEW_SECRET_PREVIOUS ?? ''
+  },
+})
+```
+
+## Next
+
+- Pair draft mode with [Server Components](./server-components) to see how
+  the perspective flip is wired.
+- [Revalidation](./revalidation) for the webhook that rewarms the cache
+  when the editor publishes.

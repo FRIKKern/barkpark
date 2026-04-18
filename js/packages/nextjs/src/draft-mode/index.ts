@@ -53,6 +53,20 @@ function verifySignature(input: VerifyInput): VerifyResult {
  * produce `{ path, expiry, sign }` then redirects the editor to
  * `/api/draft?path=<path>&expiry=<expiry>&sign=<sign>` — whichever route the consumer
  * mounted the returned GET handler at.
+ *
+ * @param opts.path    — Path to enter draft mode for (e.g. `/posts/my-post`).
+ * @param opts.secret  — Preview secret shared with {@link createDraftModeRoutes}.
+ * @param opts.ttlMs   — Signature lifetime. Defaults to 10 minutes.
+ * @param opts.now     — Override current time (testing).
+ * @returns `{ path, expiry, sign }` suitable for URL query parameters.
+ * @throws TypeError when `path` or `secret` are missing/empty.
+ *
+ * @example
+ * const { path, expiry, sign } = signDraftModeToken({
+ *   path: '/posts/hello',
+ *   secret: process.env.BARKPARK_PREVIEW_SECRET!,
+ * })
+ * const url = `/api/draft?path=${encodeURIComponent(path)}&expiry=${expiry}&sign=${sign}`
  */
 export function signDraftModeToken(opts: {
   path: string
@@ -85,6 +99,21 @@ export function signDraftModeToken(opts: {
  *
  * Server-only (node:crypto + next/headers). No React. No runtime deps beyond Next 15.
  * `draftMode()` is async in Next 15 (next/headers returns a Promise).
+ *
+ * @param cfg — {@link DraftModeConfig}; at minimum `previewSecret`.
+ * @returns `{ GET, DELETE }` — re-export from an App Router `route.ts`.
+ * @throws TypeError at factory time when `cfg` is malformed.
+ *
+ * @example
+ * // app/api/draft/route.ts
+ * import { createDraftModeRoutes } from '@barkpark/nextjs/draft-mode'
+ *
+ * export const { GET, DELETE } = createDraftModeRoutes({
+ *   previewSecret: process.env.BARKPARK_PREVIEW_SECRET!,
+ *   resolvePath: (p) => p.startsWith('/') ? p : `/${p}`,
+ * })
+ *
+ * @see {@link signDraftModeToken}
  */
 export function createDraftModeRoutes(cfg: DraftModeConfig): DraftModeHandlers {
   validateConfig(cfg)

@@ -1,0 +1,66 @@
+{
+  "snippets": [
+    {
+      "slug": "01-create-document",
+      "title": "Create a document",
+      "description": "Open a transaction, create a draft post, then publish it.",
+      "expectedOutput": "MutateEnvelope { transactionId, results: [{ id, operation: 'create', document }] } followed by MutateResult { operation: 'publish' }",
+      "includedFrom": [
+        "framework-guides/nextjs/setup",
+        "framework-guides/nextjs/server-actions"
+      ]
+    },
+    {
+      "slug": "02-query-with-filters",
+      "title": "Query with filters",
+      "description": "DocsBuilder: where/order/limit/offset + findOne.",
+      "expectedOutput": "{ list: Post[], first: Post | null }",
+      "includedFrom": ["framework-guides/nextjs/server-components"]
+    },
+    {
+      "slug": "03-listen-for-updates",
+      "title": "Listen for updates",
+      "description": "Async-iterate the listen() SSE stream; unsubscribe after 30s.",
+      "expectedOutput": "Log line per mutation event: [mutation] <type>:<id> <op> rev=<rev>",
+      "includedFrom": ["framework-guides/nextjs/index"]
+    },
+    {
+      "slug": "04-mutate-optimistic",
+      "title": "Optimistic mutation with conflict handling",
+      "description": "useOptimisticDocument wrapping a Server Action; shows a conflict banner when a BarkparkConflictError is returned.",
+      "expectedOutput": "Immediate UI update → committed state replaces optimistic on success → conflict populated on BarkparkConflictError.",
+      "includedFrom": ["framework-guides/nextjs/server-actions"]
+    },
+    {
+      "slug": "05-publish-unpublish",
+      "title": "Publish / unpublish",
+      "description": "defineActions round-trip publishing and unpublishing a single post id.",
+      "expectedOutput": "{ published: MutateResult (publish), unpublished: MutateResult (unpublish) }",
+      "includedFrom": ["framework-guides/nextjs/server-actions"]
+    },
+    {
+      "slug": "06-server-component-fetch",
+      "title": "Server Component fetch",
+      "description": "App Router RSC reading a document type via barkparkFetch with a type-scoped tag.",
+      "expectedOutput": "RSC renders <ul> of posts; server fetch attaches next.tags = ['bp:ds:production:_all', 'bp:ds:production:type:post'].",
+      "includedFrom": [
+        "framework-guides/nextjs/setup",
+        "framework-guides/nextjs/server-components"
+      ]
+    },
+    {
+      "slug": "07-server-action-mutate",
+      "title": "Server Action mutation",
+      "description": "'use server' module exporting createPostAction; creates + patches a post and fans out revalidate tags.",
+      "expectedOutput": "Post created then patched; revalidateTag called for doc:<id> and type:post.",
+      "includedFrom": ["framework-guides/nextjs/server-actions"]
+    },
+    {
+      "slug": "08-revalidate-on-webhook",
+      "title": "Revalidate from webhook",
+      "description": "Webhook route that verifies HMAC (with rotation window), dedupes retries, and fires revalidateBarkpark.",
+      "expectedOutput": "200 {ok:true} | 200 {deduped:true} | 401 {error:'bad_signature'|'stale'} | 405 on GET.",
+      "includedFrom": ["framework-guides/nextjs/revalidation"]
+    }
+  ]
+}
