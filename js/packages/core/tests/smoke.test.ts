@@ -6,8 +6,9 @@ describe('@barkpark/core scaffold', () => {
     expect(typeof mod.createClient).toBe('function')
   })
   it('exports error classes', () => {
-    expect(new mod.BarkparkError('x')).toBeInstanceOf(Error)
+    expect(new mod.BarkparkNetworkError('x')).toBeInstanceOf(Error)
     expect(new mod.BarkparkSchemaMismatchError('x').name).toBe('BarkparkSchemaMismatchError')
+    expect(new mod.BarkparkAuthError('x').code).toBe('BarkparkAuthError')
   })
   it('typedClient is identity', () => {
     const c = { a: 1 }

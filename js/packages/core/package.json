@@ -25,7 +25,10 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
-    "test": "vitest run",
+    "test": "vitest run -c vitest.config.ts",
+    "test:workerd": "vitest run -c vitest.workerd.config.ts",
+    "test:browser": "vitest run -c vitest.browser.config.ts",
+    "test:all": "pnpm test && pnpm test:workerd && pnpm test:browser",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "size": "size-limit"
@@ -40,6 +43,11 @@
     "vitest": "^2.1.0",
     "msw": "^2.4.0",
     "size-limit": "^11.1.0",
-    "@size-limit/preset-small-lib": "^11.1.0"
+    "@size-limit/preset-small-lib": "^11.1.0",
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "miniflare": "^3.20240909.0",
+    "@vitest/browser": "^2.1.0",
+    "playwright": "^1.48.0",
+    "happy-dom": "^15.11.0"
   }
 }
