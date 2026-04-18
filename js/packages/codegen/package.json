@@ -1,0 +1,51 @@
+{
+  "name": "@barkpark/codegen",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "description": "CLI for the Barkpark headless CMS — schema introspection and TypeScript codegen.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "barkpark": "./dist/cli.mjs"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup && node ../../scripts/post-build-dts.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "size": "size-limit"
+  },
+  "dependencies": {
+    "@barkpark/core": "workspace:^",
+    "cac": "^6",
+    "chokidar": "^4",
+    "zod": "^3",
+    "prettier": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "size-limit": "^11.1.0",
+    "@size-limit/preset-small-lib": "^11.1.0"
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "name": "@barkpark/nextjs",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "description": "Next.js App Router integration for the Barkpark headless CMS.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server.d.mts",
+        "default": "./dist/server.mjs"
+      },
+      "require": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.cjs"
+      }
+    },
+    "./client": {
+      "import": {
+        "types": "./dist/client.d.mts",
+        "default": "./dist/client.mjs"
+      },
+      "require": {
+        "types": "./dist/client.d.ts",
+        "default": "./dist/client.cjs"
+      }
+    },
+    "./actions": {
+      "import": {
+        "types": "./dist/actions.d.mts",
+        "default": "./dist/actions.mjs"
+      },
+      "require": {
+        "types": "./dist/actions.d.ts",
+        "default": "./dist/actions.cjs"
+      }
+    },
+    "./webhook": {
+      "import": {
+        "types": "./dist/webhook.d.mts",
+        "default": "./dist/webhook.mjs"
+      },
+      "require": {
+        "types": "./dist/webhook.d.ts",
+        "default": "./dist/webhook.cjs"
+      }
+    },
+    "./draft-mode": {
+      "import": {
+        "types": "./dist/draft-mode.d.mts",
+        "default": "./dist/draft-mode.mjs"
+      },
+      "require": {
+        "types": "./dist/draft-mode.d.ts",
+        "default": "./dist/draft-mode.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup && node ../../scripts/post-build-dts.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "size": "size-limit"
+  },
+  "dependencies": {
+    "@barkpark/core": "workspace:^"
+  },
+  "peerDependencies": {
+    "next": ">=15 <17",
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "size-limit": "^11.1.0",
+    "@size-limit/preset-small-lib": "^11.1.0"
+  }
+}
