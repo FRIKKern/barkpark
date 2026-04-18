@@ -16,31 +16,44 @@ import type { ReactElement, ReactNode } from 'react'
 
 type DocId = string
 
+/** Minimal unresolved reference — the shape stored in documents. */
 export interface RefInput {
   _ref: string
   _type?: string
 }
 
+/** Expanded document returned by the fetcher. Extra fields pass through. */
 export interface ResolvedDoc {
   _id: string
   _type: string
   [key: string]: unknown
 }
 
+/** Structural client shape {@link BarkparkReference} can auto-derive a fetcher from. */
 export interface BarkparkReferenceClient {
   doc?: <T = ResolvedDoc>(type: string, id: DocId) => Promise<T | null>
   fetchRaw?: <T = ResolvedDoc>(path: string, init?: unknown) => Promise<T>
 }
 
+/** Props for {@link BarkparkReference}. */
 export interface BarkparkReferenceProps {
+  /** Reference or already-resolved document; plain string = id only. */
   ref: RefInput | ResolvedDoc | string
+  /** Custom loader. Takes precedence over `client`. */
   fetcher?: (id: DocId) => Promise<ResolvedDoc | null>
+  /** Client to derive a default fetcher from (uses `fetchRaw`). */
   client?: BarkparkReferenceClient
+  /** Cycle-depth cap, defaulting to 5. Captured at the root; nested instances cannot widen. */
   maxDepth?: number
+  /** Render-prop receiving the resolved document. */
   children: (doc: ResolvedDoc) => ReactNode
+  /** Rendered under `<Suspense>` while the fetcher resolves. */
   fallback?: ReactNode
+  /** Rendered when the fetcher returns `null` or when depth is exceeded. */
   notFound?: ReactNode
+  /** Invoked when an id is re-entered via a parent chain. */
   onCycle?: (id: DocId) => void
+  /** Invoked when the depth cap is reached. */
   onMaxDepth?: (id: DocId, depth: number) => void
 }
 
@@ -110,6 +123,24 @@ function AsyncResolve(props: {
   )
 }
 
+/**
+ * Resolves a Barkpark reference (by id or `{ _ref }`) to its target document
+ * via `use()` under `<Suspense>`. Guards against cycles by tracking visited
+ * ids through context and caps recursion at `maxDepth`.
+ *
+ * If `ref` is already an expanded document, no fetch is issued.
+ *
+ * @param props — {@link BarkparkReferenceProps}
+ * @returns The rendered children or `null` when `ref` is unusable.
+ * @throws When neither `fetcher` nor a `client` with `fetchRaw` is provided for an unresolved reference.
+ *
+ * @example
+ * import { BarkparkReference } from '@barkpark/react'
+ *
+ * <BarkparkReference ref={post.author} fetcher={loadAuthor} fallback={<Skeleton />}>
+ *   {(author) => <AuthorCard author={author} />}
+ * </BarkparkReference>
+ */
 export function BarkparkReference(
   props: BarkparkReferenceProps,
 ): ReactElement | null {

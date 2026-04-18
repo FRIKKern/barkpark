@@ -1,0 +1,8 @@
+# TypeDoc reference output target.
+#
+# This directory is populated by `npm run docs:reference` (see
+# tooling/typedoc/typedoc.json). Track A's docs app (apps/docs/**) reads the
+# generated HTML and surfaces it under /reference/<package>/.
+#
+# Generated HTML is not committed to main — CI uploads it as an artifact.
+# The initial PR ships one sample package tree so the layout is visible.

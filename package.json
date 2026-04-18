@@ -1,12 +1,18 @@
 {
   "name": "barkpark-monorepo",
   "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
-    "build": "npm --workspaces run build",
-    "test": "npm --workspaces run test",
-    "typecheck": "npm --workspaces run typecheck"
+    "build": "echo 'root build not used'",
+    "test": "echo 'root tests not used'",
+    "typecheck": "echo 'root typecheck not used'",
+    "docs:mocks:check": "tsc --noEmit --project tooling/twoslash-mocks/tsconfig.json",
+    "docs:reference": "typedoc --options tooling/typedoc/typedoc.json",
+    "docs:reference:check": "typedoc --options tooling/typedoc/typedoc.json --emit none --logLevel Verbose"
+  },
+  "devDependencies": {
+    "shiki-twoslash": "^3.1.2",
+    "twoslash": "^0.3.8",
+    "typedoc": "^0.28.0",
+    "typescript": "^5.6.0"
   }
 }

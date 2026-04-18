@@ -196,7 +196,27 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
 type BoundBarkparkLiveProps = Omit<BarkparkLiveProps, 'client'>
 type BoundBarkparkLiveProviderProps = Omit<BarkparkLiveProviderProps, 'client'> & { children?: ReactNode }
 
-/** Inner factory — returns the per-config bundle. createBarkparkServer delegates here. */
+/**
+ * Inner factory — returns the per-config bundle. {@link createBarkparkServer}
+ * delegates here.
+ *
+ * Pre-binds `BarkparkLive` / `BarkparkLiveProvider` to `cfg.client` so callers
+ * don't thread `client` through each render. The pre-bound components still
+ * live behind the `'use client'` boundary in `client/live.tsx`.
+ *
+ * @param cfg — {@link BarkparkServerConfig}; `client` + `serverToken` required.
+ * @returns `{ barkparkFetch, BarkparkLive, BarkparkLiveProvider }`.
+ * @throws {@link BarkparkValidationError} when `cfg` is malformed.
+ *
+ * @example
+ * // lib/barkpark.ts — server-only
+ * import 'server-only'
+ * import { defineLive } from '@barkpark/nextjs/server'
+ * import { client } from './barkpark-client'
+ *
+ * export const { barkparkFetch, BarkparkLive, BarkparkLiveProvider } =
+ *   defineLive({ client, serverToken: process.env.BARKPARK_SERVER_TOKEN! })
+ */
 export function defineLive(cfg: BarkparkServerConfig): {
   barkparkFetch: <T>(opts?: BarkparkFetchOptions) => Promise<T>
   BarkparkLive: (props?: BoundBarkparkLiveProps) => JSX.Element | null
@@ -223,7 +243,32 @@ export function defineLive(cfg: BarkparkServerConfig): {
   }
 }
 
-/** Top-level convenience factory. Returns barkparkFetch + the bound Live components + defineLive. */
+/**
+ * Top-level convenience factory. Returns `barkparkFetch` + the bound
+ * `BarkparkLive` components, plus {@link defineLive} re-exposed for cases
+ * where callers want to build extra per-config bundles.
+ *
+ * @param cfg — {@link BarkparkServerConfig}; `client` + `serverToken` required.
+ * @returns `{ barkparkFetch, BarkparkLive, BarkparkLiveProvider, defineLive }`.
+ * @throws {@link BarkparkValidationError} when `cfg` is malformed.
+ *
+ * @example
+ * // lib/barkpark.ts
+ * import 'server-only'
+ * import { createBarkparkServer } from '@barkpark/nextjs/server'
+ * import { client } from './barkpark-client'
+ *
+ * export const server = createBarkparkServer({
+ *   client,
+ *   serverToken: process.env.BARKPARK_SERVER_TOKEN!,
+ * })
+ *
+ * // app/page.tsx
+ * export default async function Page() {
+ *   const posts = await server.barkparkFetch({ type: 'post' })
+ *   return <PostList posts={posts} />
+ * }
+ */
 export function createBarkparkServer(cfg: BarkparkServerConfig): {
   barkparkFetch: <T>(opts?: BarkparkFetchOptions) => Promise<T>
   BarkparkLive: (props?: BoundBarkparkLiveProps) => JSX.Element | null

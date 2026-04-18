@@ -1,0 +1,41 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPointStrategy": "packages",
+  "entryPoints": [
+    "../../js/packages/core",
+    "../../js/packages/codegen",
+    "../../js/packages/nextjs",
+    "../../js/packages/react",
+    "../../js/packages/groq",
+    "../../js/packages/nextjs-query"
+  ],
+  "out": "../../docs-site/reference",
+  "name": "Barkpark JavaScript Reference",
+  "readme": "none",
+  "includeVersion": true,
+  "hideGenerator": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "exclude": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/tests/**",
+    "**/test/**",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ],
+  "skipErrorChecking": true,
+  "validation": {
+    "notExported": false,
+    "invalidLink": true,
+    "notDocumented": false
+  },
+  "navigationLinks": {
+    "Docs": "https://barkpark.dev/docs",
+    "GitHub": "https://github.com/FRIKKern/barkpark"
+  },
+  "sidebarLinks": {},
+  "darkHighlightTheme": "github-dark",
+  "lightHighlightTheme": "github-light"
+}

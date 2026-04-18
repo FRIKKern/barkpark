@@ -1,0 +1,180 @@
+---
+title: Server Components
+description: The server-only boundary, streaming, and client islands.
+icon: Server
+package: nextjs
+---
+
+`@barkpark/nextjs/server` is a **server-only** module. Trying to import it
+from a Client Component is a compile-time error, and that error is the
+point: it prevents your `serverToken` from landing in the browser bundle.
+
+## The boundary
+
+```ts twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const barkpark = createBarkparkServer({ client, serverToken: 'sk_live' })
+```
+
+A Client Component that accidentally imports the server module fails at
+build time:
+
+```tsx twoslash
+// @errors: 2307
+'use client'
+// BarkparkImage is a client-safe component from @barkpark/react
+import { BarkparkImage } from '@barkpark/react'
+
+// Importing the server module from a client file is a build-time error,
+// because @barkpark/nextjs/server is marked server-only.
+import { barkparkFetch } from '@barkpark/nextjs/unresolvable-from-client'
+```
+
+Keep the split clean: one module per boundary. Server code lives in
+`app/lib/barkpark.ts` (re-exports `barkpark.ts` helpers). Client components
+import only from `@barkpark/nextjs/client` and `@barkpark/react`.
+
+## Fetching in an RSC
+
+`barkparkFetch` is the only entry point you need in RSCs. It accepts a
+document-type query, a single-document lookup, or both:
+
+```ts twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const { barkparkFetch } = createBarkparkServer({ client, serverToken: 's' })
+
+// @filename: app/posts/page.tsx
+import { barkparkFetch } from '@/app/lib/barkpark'
+import type { BarkparkDocument } from '@barkpark/core'
+
+interface Post extends BarkparkDocument { title: string }
+
+const allPosts  = await barkparkFetch<Post[]>({ type: 'post' })
+const onlyOne   = await barkparkFetch<Post>({ type: 'post', id: 'p1' })
+const taggedGet = await barkparkFetch<Post[]>({
+  type: 'post',
+  tags: ['bp:ds:production:type:post'],
+  revalidate: 3600,
+})
+```
+
+`tags` are merged with the dataset-wide tag (`bp:ds:<dataset>:_all`) and
+fed into Next.js's `fetch` `next.tags`. `revalidate` forwards to
+`next.revalidate`.
+
+> **Draft mode changes the cache.** When `draftMode().isEnabled === true`,
+> `barkparkFetch` switches to `cache: 'no-store'` and drops all tags — this
+> is intentional, because Next 15.5 silently ignores tags on `no-store` and
+> the SWR contract would be broken otherwise. Draft branch calls also
+> attach `Authorization: Bearer <serverToken>` and flip the query to
+> `?perspective=drafts`.
+
+## Streaming with Suspense
+
+Barkpark fetches are async/await-friendly, so standard App Router
+streaming works out of the box:
+
+```tsx twoslash
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const { barkparkFetch } = createBarkparkServer({ client, serverToken: 's' })
+
+// @filename: app/page.tsx
+import { Suspense } from 'react'
+import { barkparkFetch } from '@/app/lib/barkpark'
+import type { BarkparkDocument } from '@barkpark/core'
+
+interface Post extends BarkparkDocument { title: string }
+
+async function RecentPosts() {
+  const posts = await barkparkFetch<Post[]>({ type: 'post' })
+  return (
+    <ul>
+      {posts.map((p) => <li key={p._id}>{p.title}</li>)}
+    </ul>
+  )
+}
+
+export default function Home() {
+  return (
+    <main>
+      <h1>Blog</h1>
+      <Suspense fallback={<p>Loading posts…</p>}>
+        <RecentPosts />
+      </Suspense>
+    </main>
+  )
+}
+```
+
+## Client islands
+
+Pass raw data from a Server Component to a Client Component via props.
+Client-side interactive pieces can live inside an island that renders
+PortableText or images from `@barkpark/react`:
+
+```tsx twoslash
+// @filename: app/components/PostBody.tsx
+'use client'
+import { PortableText, type PortableTextProps } from '@barkpark/react'
+export function PostBody({ value }: { value: PortableTextProps['value'] }) {
+  return <article><PortableText value={value} /></article>
+}
+
+// @filename: app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+const client = createClient({
+  projectUrl: 'https://cms.example.com',
+  dataset: 'production',
+  apiVersion: '2026-04-12',
+})
+export const { barkparkFetch } = createBarkparkServer({ client, serverToken: 's' })
+
+// @filename: app/posts/[slug]/page.tsx
+import { barkparkFetch } from '@/app/lib/barkpark'
+import { PostBody } from '@/app/components/PostBody'
+import type { BarkparkDocument } from '@barkpark/core'
+
+interface Post extends BarkparkDocument { title: string; body: unknown[] }
+
+export default async function PostPage({ params }: { params: { slug: string } }) {
+  const posts = await barkparkFetch<Post[]>({ type: 'post' })
+  const post  = posts[0]
+  if (!post) return null
+  return <PostBody value={post.body as never} />
+}
+```
+
+The Server Component owns the token and the fetch; the Client Component
+gets only the data. You get to mix and match freely.
+
+## Next
+
+- [Server Actions](./server-actions) for mutations.
+- [Revalidation](./revalidation) to understand which tags to attach.
+- [Preload pattern](./preload-pattern) to warm caches at the layout level.
