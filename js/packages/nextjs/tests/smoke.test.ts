@@ -3,9 +3,7 @@ import * as root from '../src/index'
 import * as actions from '../src/actions/index'
 import * as webhook from '../src/webhook/index'
 import * as draftMode from '../src/draft-mode/index'
-
-// TODO: add server/client tests in Phase 3 (server-only and 'use client' directives
-// crash under the plain node vitest environment).
+import * as server from '../src/server/index'
 
 describe('@barkpark/nextjs scaffold', () => {
   it('root exports revalidateBarkpark', () => {
@@ -21,5 +19,9 @@ describe('@barkpark/nextjs scaffold', () => {
   })
   it('draft-mode exports createDraftModeRoutes', () => {
     expect(typeof draftMode.createDraftModeRoutes).toBe('function')
+  })
+  it('server exports createBarkparkServer + defineLive (server-only mocked via setup.server.ts)', () => {
+    expect(typeof server.createBarkparkServer).toBe('function')
+    expect(typeof server.defineLive).toBe('function')
   })
 })
