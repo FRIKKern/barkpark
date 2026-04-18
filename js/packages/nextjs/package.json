@@ -108,7 +108,11 @@
   "peerDependencies": {
     "next": ">=15 <17",
     "react": ">=19",
-    "react-dom": ">=19"
+    "react-dom": ">=19",
+    "zod": "^3.23.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -120,6 +124,8 @@
     "react-dom": "^19.0.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@testing-library/react": "^16.1.0",
+    "happy-dom": "^15.11.0",
     "size-limit": "^11.1.0",
     "@size-limit/preset-small-lib": "^11.1.0",
     "jsdom": "^25.0.0",

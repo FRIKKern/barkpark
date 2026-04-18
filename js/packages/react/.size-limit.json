@@ -1,3 +1,15 @@
 [
-  { "path": "dist/index.mjs", "limit": "8 KB" }
+  {
+    "name": "PortableText",
+    "path": "dist/index.mjs",
+    "import": "{ PortableText }",
+    "limit": "8 KB",
+    "gzip": true
+  },
+  {
+    "name": "@barkpark/react (total)",
+    "path": "dist/index.mjs",
+    "limit": "15 KB",
+    "gzip": true
+  }
 ]
