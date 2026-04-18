@@ -68,6 +68,36 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  preview_secret =
+    System.get_env("PREVIEW_JWT_SECRET") ||
+      raise "environment variable PREVIEW_JWT_SECRET is missing. Generate with: mix phx.gen.secret"
+
+  config :barkpark, :preview,
+    secret: preview_secret,
+    ttl_seconds: String.to_integer(System.get_env("PREVIEW_JWT_TTL_SECONDS") || "600"),
+    issuer: "barkpark"
+
+  base_rate_limits = Application.get_env(:barkpark, :rate_limits, [])
+
+  rate_limits =
+    base_rate_limits
+    |> Keyword.put(
+      :read_per_minute,
+      String.to_integer(
+        System.get_env("BARKPARK_RATE_LIMIT_READ") ||
+          Integer.to_string(Keyword.get(base_rate_limits, :read_per_minute, 300))
+      )
+    )
+    |> Keyword.put(
+      :write_per_minute,
+      String.to_integer(
+        System.get_env("BARKPARK_RATE_LIMIT_WRITE") ||
+          Integer.to_string(Keyword.get(base_rate_limits, :write_per_minute, 60))
+      )
+    )
+
+  config :barkpark, :rate_limits, rate_limits
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

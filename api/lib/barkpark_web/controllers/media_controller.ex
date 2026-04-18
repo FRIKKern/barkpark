@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.MediaController do
   use BarkparkWeb, :controller
 
+  alias Barkpark.Content.Errors
   alias Barkpark.Media
 
   action_fallback BarkparkWeb.FallbackController
@@ -21,9 +22,14 @@ defmodule BarkparkWeb.MediaController do
   end
 
   def upload(conn, _params) do
+    env =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, "missing 'file' field in multipart upload")
+
     conn
     |> put_status(:bad_request)
-    |> json(%{error: "missing 'file' field in multipart upload"})
+    |> json(%{error: Map.delete(env, :status)})
   end
 
   @doc "List all media files."
@@ -57,9 +63,14 @@ defmodule BarkparkWeb.MediaController do
       |> put_resp_content_type(mime)
       |> send_file(200, full_path)
     else
+      env =
+        {:error, :not_found}
+        |> Errors.to_envelope(conn)
+        |> Map.put(:message, "file not found")
+
       conn
       |> put_status(:not_found)
-      |> json(%{error: "file not found"})
+      |> json(%{error: Map.delete(env, :status)})
     end
   end
 

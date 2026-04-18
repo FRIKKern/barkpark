@@ -4,6 +4,7 @@ defmodule BarkparkWeb.ListenController do
   use BarkparkWeb, :controller
   import Ecto.Query
   alias Barkpark.Repo
+  alias Barkpark.Content
   alias Barkpark.Content.MutationEvent
 
   def listen(conn, %{"dataset" => dataset} = params) do
@@ -27,7 +28,7 @@ defmodule BarkparkWeb.ListenController do
     conn =
       if since do
         Enum.reduce(replay_since(dataset, since), conn, fn ev, c ->
-          case chunk(c, format_event(ev)) do
+          case chunk(c, format_event(ev, dataset)) do
             {:ok, c2} -> c2
             _ -> c
           end
@@ -36,7 +37,7 @@ defmodule BarkparkWeb.ListenController do
         conn
       end
 
-    listen_loop(conn)
+    listen_loop(conn, dataset)
   end
 
   @doc "Return mutation_events for dataset with id > since, oldest first."
@@ -47,7 +48,15 @@ defmodule BarkparkWeb.ListenController do
 
   def replay_since(_dataset, _), do: []
 
-  defp format_event(ev) do
+  @doc false
+  def format_event(ev, dataset) do
+    pub_id = Content.published_id(ev.doc_id)
+
+    sync_tags = [
+      "bp:ds:#{dataset}:doc:#{pub_id}",
+      "bp:ds:#{dataset}:type:#{ev.type}"
+    ]
+
     data =
       Jason.encode!(%{
         eventId: ev.id,
@@ -56,13 +65,14 @@ defmodule BarkparkWeb.ListenController do
         documentId: ev.doc_id,
         rev: ev.rev,
         previousRev: ev.previous_rev,
-        result: ev.document
+        result: ev.document,
+        syncTags: sync_tags
       })
 
     "id: #{ev.id}\nevent: mutation\ndata: #{data}\n\n"
   end
 
-  defp listen_loop(conn) do
+  defp listen_loop(conn, dataset) do
     receive do
       {:document_changed, %{event_id: eid} = msg} ->
         ev = %{
@@ -75,18 +85,18 @@ defmodule BarkparkWeb.ListenController do
           document: msg.document
         }
 
-        case chunk(conn, format_event(ev)) do
-          {:ok, c} -> listen_loop(c)
+        case chunk(conn, format_event(ev, dataset)) do
+          {:ok, c} -> listen_loop(c, dataset)
           _ -> conn
         end
 
       # Ignore legacy messages without event_id (defensive)
       {:document_changed, _} ->
-        listen_loop(conn)
+        listen_loop(conn, dataset)
     after
       30_000 ->
         case chunk(conn, ": keepalive\n\n") do
-          {:ok, c} -> listen_loop(c)
+          {:ok, c} -> listen_loop(c, dataset)
           _ -> conn
         end
     end

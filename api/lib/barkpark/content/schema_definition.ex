@@ -11,13 +11,14 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :visibility, :string, default: "public"
     field :fields, {:array, :map}, default: []
     field :dataset, :string, default: "production"
+    field :cors_origins, {:array, :string}, default: []
 
     timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(schema_def, attrs) do
     schema_def
-    |> cast(attrs, [:name, :title, :icon, :visibility, :fields, :dataset])
+    |> cast(attrs, [:name, :title, :icon, :visibility, :fields, :dataset, :cors_origins])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
     |> unique_constraint([:name, :dataset])

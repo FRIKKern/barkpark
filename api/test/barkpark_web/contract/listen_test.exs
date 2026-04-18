@@ -34,4 +34,29 @@ defmodule BarkparkWeb.Contract.ListenTest do
     refute "drafts.r3" in ids
     assert "drafts.r4" in ids
   end
+
+  test "formatted mutation event carries syncTags targeting the published id" do
+    {:ok, _} = Content.create_document("post", %{"_id" => "s1", "title" => "a"}, "rep")
+
+    ev =
+      BarkparkWeb.ListenController.replay_since("rep", 0)
+      |> Enum.find(&(&1.doc_id == "drafts.s1"))
+
+    assert ev
+
+    frame = BarkparkWeb.ListenController.format_event(ev, "rep")
+    ["id: " <> _, "event: mutation", "data: " <> json | _] = String.split(frame, "\n")
+    payload = Jason.decode!(json)
+
+    assert is_list(payload["syncTags"])
+    assert length(payload["syncTags"]) == 2
+
+    Enum.each(payload["syncTags"], fn tag ->
+      assert is_binary(tag)
+      assert Regex.match?(~r/^bp:ds:rep:(doc:|type:)/, tag)
+    end)
+
+    assert "bp:ds:rep:doc:s1" in payload["syncTags"]
+    assert "bp:ds:rep:type:post" in payload["syncTags"]
+  end
 end

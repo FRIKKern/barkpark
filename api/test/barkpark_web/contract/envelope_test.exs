@@ -10,7 +10,7 @@ defmodule BarkparkWeb.Contract.EnvelopeTest do
   end
 
   test "GET query/:ds/:type returns flat envelopes", %{conn: conn} do
-    %{"documents" => [d | _]} =
+    %{"result" => %{"documents" => [d | _]}} =
       conn |> get("/v1/data/query/test/post") |> json_response(200)
 
     assert d["_id"] == "e1"

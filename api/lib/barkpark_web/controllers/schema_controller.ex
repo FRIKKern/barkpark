@@ -6,13 +6,13 @@ defmodule BarkparkWeb.SchemaController do
   action_fallback BarkparkWeb.FallbackController
 
   def index(conn, %{"dataset" => dataset}) do
-    schemas = Content.list_schemas(dataset)
-    json(conn, %{_schemaVersion: 1, schemas: Enum.map(schemas, &render_schema/1)})
+    envelope = Content.list_schemas_for_sdk(dataset)
+    json(conn, Map.put(envelope, :_schemaVersion, 1))
   end
 
   def show(conn, %{"dataset" => dataset, "name" => name}) do
     with {:ok, schema} <- Content.get_schema(name, dataset) do
-      json(conn, %{_schemaVersion: 1, schema: render_schema(schema)})
+      json(conn, %{_schemaVersion: 1, schema: Content.serialize_schema_for_sdk(schema)})
     end
   end
 

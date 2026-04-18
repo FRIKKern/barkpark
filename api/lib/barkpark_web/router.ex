@@ -11,8 +11,22 @@ defmodule BarkparkWeb.Router do
   end
 
   pipeline :api do
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
     plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.DatasetCors
     plug BarkparkWeb.Plugs.RateLimit
+  end
+
+  pipeline :api_unlimited do
+    plug :accepts, ["json"]
+  end
+
+  pipeline :api_preview do
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.DatasetCors
+    plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.PreviewToken
   end
 
   pipeline :require_token do
@@ -22,6 +36,10 @@ defmodule BarkparkWeb.Router do
   pipeline :require_admin do
     plug BarkparkWeb.Plugs.RequireToken
     plug BarkparkWeb.Plugs.RequireAdmin
+  end
+
+  pipeline :idempotent do
+    plug BarkparkWeb.Plugs.Idempotency
   end
 
   # Bare /studio and / redirect to the default dataset.
@@ -41,6 +59,13 @@ defmodule BarkparkWeb.Router do
     live "/*path", StudioLive
   end
 
+  # ── Meta (SDK handshake) — no auth, no rate limit ───────────────────────
+  scope "/v1", BarkparkWeb do
+    pipe_through :api_unlimited
+
+    get "/meta", MetaController, :index
+  end
+
   # ── Public API — read-only, respects schema visibility ──────────────────
   scope "/v1/data", BarkparkWeb do
     pipe_through :api
@@ -50,11 +75,18 @@ defmodule BarkparkWeb.Router do
     get "/doc/:dataset/:type/:doc_id", QueryController, :show
   end
 
+  # ── Preview — same reads, forces perspective=drafts via preview JWT ─────
+  scope "/v1/preview", BarkparkWeb do
+    pipe_through :api_preview
+
+    get "/query/:dataset/:type", QueryController, :index
+    get "/doc/:dataset/:type/:doc_id", QueryController, :show
+  end
+
   # ── Private API — full CRUD, requires token ─────────────────────────────
   scope "/v1/data", BarkparkWeb do
     pipe_through [:api, :require_token]
 
-    post "/mutate/:dataset", MutateController, :mutate
     get "/listen/:dataset", ListenController, :listen
     get "/export/:dataset", ExportController, :export
 
@@ -63,6 +95,13 @@ defmodule BarkparkWeb.Router do
     get "/history/:dataset/:type/:doc_id", HistoryController, :index
     get "/revision/:dataset/:id", HistoryController, :show
     post "/revision/:dataset/:id/restore", HistoryController, :restore
+  end
+
+  # ── Mutations — token + idempotency dedup ──────────────────────────────
+  scope "/v1/data", BarkparkWeb do
+    pipe_through [:api, :require_token, :idempotent]
+
+    post "/mutate/:dataset", MutateController, :mutate
   end
 
   # ── Schema management — requires admin token ────────────────────────────

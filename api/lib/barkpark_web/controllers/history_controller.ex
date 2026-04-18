@@ -2,7 +2,7 @@ defmodule BarkparkWeb.HistoryController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.Envelope
+  alias Barkpark.Content.{Envelope, Errors}
 
   def index(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     limit = parse_int(params["limit"], 50)
@@ -44,7 +44,14 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   defp not_found(conn, message) do
-    conn |> put_status(404) |> json(%{error: %{code: "not_found", message: message}})
+    env =
+      {:error, :not_found}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, message)
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 
   defp render_revision(rev) do

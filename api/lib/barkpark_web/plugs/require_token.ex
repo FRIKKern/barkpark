@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Plugs.RequireToken do
       assign(conn, :api_token, token)
     else
       _ ->
-        env = Barkpark.Content.Errors.to_envelope({:error, :unauthorized})
+        env = Barkpark.Content.Errors.to_envelope({:error, :unauthorized}, conn)
 
         conn
         |> put_status(env.status)
@@ -36,7 +36,7 @@ defmodule BarkparkWeb.Plugs.RequireAdmin do
       conn
     else
       _ ->
-        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden})
+        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
 
         conn
         |> put_status(env.status)

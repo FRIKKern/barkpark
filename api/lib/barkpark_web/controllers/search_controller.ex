@@ -2,19 +2,15 @@ defmodule BarkparkWeb.SearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.Envelope
+  alias Barkpark.Content.{Envelope, Errors}
 
   def search(conn, %{"dataset" => dataset} = params) do
     case params["q"] do
       nil ->
-        conn
-        |> put_status(400)
-        |> json(%{error: %{code: "malformed", message: "missing required parameter: q"}})
+        missing_q(conn)
 
       "" ->
-        conn
-        |> put_status(400)
-        |> json(%{error: %{code: "malformed", message: "missing required parameter: q"}})
+        missing_q(conn)
 
       query ->
         opts = [
@@ -32,6 +28,17 @@ defmodule BarkparkWeb.SearchController do
           query: query
         })
     end
+  end
+
+  defp missing_q(conn) do
+    env =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, "missing required parameter: q")
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 
   defp parse_perspective("drafts"), do: :drafts

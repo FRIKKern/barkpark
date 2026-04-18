@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
   end
 
   test "filter[title][eq]=Alpha matches one", %{conn: conn} do
-    body =
+    %{"result" => body} =
       conn
       |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5Beq%5D=Alpha")
       |> json_response(200)
@@ -27,7 +27,7 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
   end
 
   test "filter[title][in]=Alpha,Gamma matches two", %{conn: conn} do
-    body =
+    %{"result" => body} =
       conn
       |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bin%5D=Alpha,Gamma")
       |> json_response(200)
@@ -38,7 +38,7 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
   end
 
   test "filter[title][contains]=a is case-insensitive", %{conn: conn} do
-    body =
+    %{"result" => body} =
       conn
       |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bcontains%5D=a")
       |> json_response(200)
@@ -47,7 +47,7 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
   end
 
   test "bare filter[title]=Alpha still works (sugar for eq)", %{conn: conn} do
-    body =
+    %{"result" => body} =
       conn
       |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D=Alpha")
       |> json_response(200)

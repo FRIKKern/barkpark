@@ -8,7 +8,7 @@ defmodule BarkparkWeb.FallbackController do
   See docs/api-v1.md § Error codes.
   """
   def call(conn, error) do
-    env = Errors.to_envelope(error)
+    env = Errors.to_envelope(error, conn)
 
     conn
     |> put_status(env.status)
