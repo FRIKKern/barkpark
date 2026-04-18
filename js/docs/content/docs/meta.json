@@ -1,0 +1,14 @@
+{
+  "title": "Docs",
+  "pages": [
+    "getting-started",
+    "concepts",
+    "studio",
+    "content-modeling",
+    "apis-and-sdks",
+    "framework-guides",
+    "task-guides",
+    "reference",
+    "templates"
+  ]
+}
