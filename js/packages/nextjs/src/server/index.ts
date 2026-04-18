@@ -3,10 +3,12 @@
 
 import 'server-only'
 
-export function createBarkparkServer(_config: unknown): never {
-  throw new Error('createBarkparkServer not implemented in scaffold (Phase 3)')
-}
+export {
+  createBarkparkServer,
+  defineLive,
+  barkparkFetchInner as barkparkFetch,
+  BarkparkLive,
+  BarkparkLiveProvider,
+} from './core'
 
-export function defineLive(_config: unknown): never {
-  throw new Error('defineLive not implemented in scaffold (Phase 3)')
-}
+export type { BarkparkServerConfig, BarkparkFetchOptions } from './types'
