@@ -1,0 +1,13 @@
+[Unit]
+Description=Rotate Barkpark public-read API token
+Documentation=file:///opt/barkpark/deploy/systemd/README.md
+After=network-online.target barkpark.service
+Wants=network-online.target
+Requires=barkpark.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/barkpark/api
+EnvironmentFile=/opt/barkpark/.env
+ExecStart=/opt/barkpark/api/start.sh rotate-public-read
