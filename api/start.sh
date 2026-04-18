@@ -17,6 +17,13 @@ if [ -f ../.env ]; then
 fi
 
 export MIX_ENV=prod
-export PHX_SERVER=true
 
-exec mix phx.server
+case "${1:-}" in
+  rotate-public-read)
+    exec mix barkpark.rotate_public_read
+    ;;
+  *)
+    export PHX_SERVER=true
+    exec mix phx.server
+    ;;
+esac
