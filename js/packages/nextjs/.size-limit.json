@@ -1,0 +1,4 @@
+[
+  { "path": "dist/server.mjs", "limit": "20 KB" },
+  { "path": "dist/client.mjs", "limit": "15 KB" }
+]

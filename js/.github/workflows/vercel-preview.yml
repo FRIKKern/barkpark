@@ -1,0 +1,26 @@
+name: vercel-preview
+on:
+  pull_request:
+    paths: ['js/packages/nextjs/**']
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy preview app to Vercel
+        id: deploy
+        # TODO(Phase-3): `js/examples/vercel-preview-harness` is a Phase 3
+        # deliverable; skip gracefully until it exists and secrets are wired.
+        if: ${{ secrets.VERCEL_TOKEN != '' }}
+        continue-on-error: true
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: js/examples/vercel-preview-harness
+      - name: Smoke (one RSC page + one edge route + listen-throws)
+        if: ${{ secrets.VERCEL_TOKEN != '' && steps.deploy.outputs.preview-url != '' }}
+        continue-on-error: true
+        run: bash js/scripts/vercel-preview-smoke.sh "${{ steps.deploy.outputs.preview-url }}"

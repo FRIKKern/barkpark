@@ -1,0 +1,27 @@
+name: promote-latest
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact version to promote to @latest (e.g. 1.0.0)'
+        required: true
+      packages:
+        description: 'Space-separated package names; default = all four real packages'
+        required: false
+        default: '@barkpark/core @barkpark/codegen @barkpark/nextjs @barkpark/react'
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - name: Coordinated retag to @latest (ADR-012 rollback protocol)
+        run: |
+          for pkg in ${{ github.event.inputs.packages }}; do
+            npm dist-tag add "${pkg}@${{ github.event.inputs.version }}" latest
+          done
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
