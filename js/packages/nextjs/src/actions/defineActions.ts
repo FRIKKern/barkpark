@@ -4,15 +4,19 @@
 import type { BarkparkClient, MutateResult } from '@barkpark/core'
 import { revalidateTag } from 'next/cache'
 
-// Structural schema type — any object exposing `.parse(input)` that throws on
-// invalid input. Zod schemas satisfy this shape, so codegen-emitted `z.object(...)`
-// definitions drop in without adapter code. Per ADR-008 zod is an *optional*
-// peer dep, so we avoid a hard type import from 'zod' here.
+/**
+ * Structural schema — any object with `.parse(input)` that throws on invalid
+ * input. Zod schemas satisfy this shape, so codegen-emitted `z.object(...)`
+ * definitions drop in without adapter code. Per ADR-008, zod is an *optional*
+ * peer dep, so we avoid a hard type import from 'zod' here.
+ */
 export interface ActionSchema {
   parse(input: unknown): unknown
 }
 
+/** Configuration for {@link defineActions}. */
 export interface DefineActionsConfig {
+  /** The authoring client used to execute mutations. */
   client: BarkparkClient
   /** Per-`_type` input schemas (e.g. codegen-emitted Zod schemas). */
   schemas?: Record<string, ActionSchema>
@@ -20,20 +24,29 @@ export interface DefineActionsConfig {
   dataset?: string
 }
 
+/** Payload for {@link BarkparkActions.patchDoc}. */
 export interface PatchInput {
+  /** Fields to set on the target document. */
   set?: Record<string, unknown>
+  /** Optional ETag precondition — throws {@link BarkparkConflictError} on mismatch. */
   ifMatch?: string
 }
 
+/** Payload for {@link BarkparkActions.createDoc}. `_type` is required; any other fields are document data. */
 export interface CreateDocInput {
   _type: string
   [field: string]: unknown
 }
 
+/** Server Actions bundle returned by {@link defineActions}. */
 export interface BarkparkActions {
+  /** Validates via schema (if registered), creates the document, and fans out revalidate tags. */
   createDoc(input: CreateDocInput): Promise<MutateResult>
+  /** Patches (set-only) a document and fans out revalidate tags. Honors `ifMatch`. */
   patchDoc(id: string, patch: PatchInput): Promise<MutateResult>
+  /** Publishes the draft for `id` and fans out tags. */
   publish(id: string, type: string): Promise<MutateResult>
+  /** Unpublishes `id` back to draft and fans out tags. */
   unpublish(id: string, type: string): Promise<MutateResult>
 }
 
@@ -46,6 +59,34 @@ function fanOutTags(dataset: string, id: string, type: string): void {
   revalidateTag(`bp:ds:${dataset}:type:${type}`)
 }
 
+/**
+ * Builds a {@link BarkparkActions} bundle suitable for use as Server Actions.
+ *
+ * Each mutation:
+ *  1. Validates input against a registered schema (if any) via `.parse()`.
+ *  2. Executes the mutation through the authoring client.
+ *  3. Fans out canonical revalidate tags (`bp:ds:<dataset>:doc:<id>` and `:type:<type>`).
+ *
+ * @param config — {@link DefineActionsConfig}; at minimum `client`.
+ * @returns A {@link BarkparkActions} bundle of server-executable mutations.
+ *
+ * @example
+ * // app/actions.ts
+ * 'use server'
+ * import { defineActions } from '@barkpark/nextjs/actions'
+ * import { client } from '@/lib/barkpark'
+ * import { schemas } from '@/lib/generated'
+ *
+ * export const actions = defineActions({ client, schemas })
+ *
+ * // app/posts/new/page.tsx
+ * import { actions } from '@/app/actions'
+ *
+ * <form action={async (fd) => {
+ *   'use server'
+ *   await actions.createDoc({ _type: 'post', title: String(fd.get('title')) })
+ * }}>…</form>
+ */
 export function defineActions(config: DefineActionsConfig): BarkparkActions {
   const { client, schemas } = config
   const dataset = config.dataset ?? client.config.dataset

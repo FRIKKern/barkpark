@@ -41,11 +41,22 @@ export {
 } from './errors'
 
 // --- Typed-pass-through helpers (identity functions) -----------------------
-/** Typed identity — lets callers attach types to an existing client value. */
+/**
+ * Typed identity — lets callers attach types to an existing client value.
+ *
+ * @internal — intended as a codegen hook. Application code should rely on the
+ * generic parameter of {@link createClient} instead of wrapping the result.
+ */
 export function typedClient<C>(client: C): C {
   return client
 }
-/** Typed identity — reserved for a future action-binding helper; currently a no-op. */
+/**
+ * Typed identity — reserved for a future action-binding helper; currently a no-op.
+ *
+ * @internal — the canonical Server Actions factory lives at
+ * `@barkpark/nextjs/actions`'s `defineActions`. This placeholder exists only
+ * to preserve the export shape for 1.x codegen clients; do not use in app code.
+ */
 export function defineActions<C>(client: C): C {
   return client
 }

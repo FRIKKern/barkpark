@@ -96,6 +96,10 @@ function validateConfig(cfg: WebhookConfig): void {
 /**
  * Creates an App Router-compatible webhook handler.
  *
+ * Verifies an HMAC-SHA256 signature over `t.body`, enforces a ±5-minute
+ * freshness window, dedupes replays via an in-memory delivery-id LRU, and
+ * invokes `cfg.onMutation` exactly once per unique delivery.
+ *
  * Contract:
  *   POST /your/route
  *     Header  x-barkpark-signature: t=<unix>,v1=<hex>      (HMAC-SHA256 of `t.body`)
@@ -110,6 +114,23 @@ function validateConfig(cfg: WebhookConfig): void {
  *     500 { error: 'handler_failed' } onMutation threw
  *
  *   GET → 405 { error: 'method_not_allowed' }
+ *
+ * @param cfg — {@link WebhookConfig} with at minimum `secret` + `onMutation`.
+ * @returns `{ POST, GET }` handlers — re-export from an App Router `route.ts`.
+ * @throws TypeError at factory time when `cfg` is malformed.
+ *
+ * @example
+ * // app/api/barkpark/webhook/route.ts
+ * import { createWebhookHandler } from '@barkpark/nextjs/webhook'
+ * import { revalidateBarkpark } from '@barkpark/nextjs/revalidate'
+ *
+ * export const { POST, GET } = createWebhookHandler({
+ *   secret: process.env.BARKPARK_WEBHOOK_SECRET!,
+ *   onMutation: (payload) => revalidateBarkpark(payload),
+ * })
+ *
+ * @see {@link WebhookConfig}
+ * @see {@link WebhookPayload}
  */
 export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
   validateConfig(cfg)
