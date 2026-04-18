@@ -1,0 +1,48 @@
+name: contract
+on:
+  push:
+    paths:
+      - 'api/lib/**'
+      - 'js/packages/**'
+  pull_request:
+    paths:
+      - 'api/lib/**'
+      - 'js/packages/**'
+  schedule:
+    - cron: '17 3 * * *'   # nightly 03:17 UTC
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - '5432:5432'
+        options: --health-cmd pg_isready --health-interval 5s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.x'
+          elixir-version: '1.17.x'
+      - name: Bring up Phoenix (placeholder)
+        # TODO(Phase-3): replace with `docker compose -f api/docker-compose.test.yml up -d`
+        # when the compose file lands in Phase 3.
+        run: echo "contract test placeholder — wired in Phase 3"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+      - name: Install and build js workspace
+        run: cd js && pnpm install --frozen-lockfile && pnpm build
+      - name: Contract tests (placeholder)
+        # TODO(Phase-3): run `pnpm --filter @barkpark/core test:contract` once the
+        # Phoenix compose stack above is live.
+        run: echo "contract suite placeholder — wired in Phase 3"
+        env:
+          BARKPARK_API_URL: http://localhost:4000

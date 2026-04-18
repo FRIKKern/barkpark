@@ -1,0 +1,10 @@
+*                              @barkpark-maintainers
+js/packages/core/**            @barkpark-maintainers
+js/packages/codegen/**         @barkpark-maintainers
+js/packages/nextjs/**          @barkpark-maintainers
+js/packages/react/**           @barkpark-maintainers
+js/packages/groq/**            @barkpark-maintainers
+js/packages/nextjs-query/**    @barkpark-maintainers
+js/.github/**                  @barkpark-maintainers
+js/.changeset/**               @barkpark-maintainers
+api/**                         @barkpark-maintainers
