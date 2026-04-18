@@ -1,0 +1,14 @@
+# Copy this file to `docker-compose.override.yml` to build the API from a local
+# checkout of the barkpark repo instead of pulling the published image.
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   docker compose up -d --build
+#
+# Requires the barkpark repo to be checked out at the path below.
+
+services:
+  api:
+    image: ""
+    build:
+      context: ../../../../../api
+      dockerfile: Dockerfile

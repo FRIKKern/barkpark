@@ -1,0 +1,34 @@
+{
+  "name": "create-barkpark-app",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "description": "Interactive scaffolder for Barkpark-powered apps. Run `pnpm create barkpark-app my-site`.",
+  "type": "module",
+  "bin": {
+    "create-barkpark-app": "./dist/index.js",
+    "cba": "./dist/index.js"
+  },
+  "files": ["dist", "templates", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "commander": "^12.1.0",
+    "cross-spawn": "^7.0.3",
+    "execa": "^9.5.0",
+    "picocolors": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^20",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0"
+  }
+}
