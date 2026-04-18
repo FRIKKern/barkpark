@@ -53,7 +53,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
              body_json["results"]
   end
 
-  test "patch with stale ifRevisionID returns rev_mismatch", %{conn: conn} do
+  test "patch with stale ifRevisionID returns 412 precondition_failed with details", %{conn: conn} do
     {:ok, doc} = Content.create_document("post", %{"_id" => "rm-1", "title" => "v1"}, "test")
 
     body = %{
@@ -69,14 +69,13 @@ defmodule BarkparkWeb.Contract.MutateTest do
       ]
     }
 
-    resp =
-      conn
-      |> put_req_header("authorization", "Bearer barkpark-dev-token")
-      |> put_req_header("content-type", "application/json")
-      |> post("/v1/data/mutate/test", Jason.encode!(body))
+    resp = do_mutate(conn, body)
 
-    assert resp.status == 409
-    assert Jason.decode!(resp.resp_body)["error"]["code"] == "rev_mismatch"
+    assert resp.status == 412
+    parsed = Jason.decode!(resp.resp_body)
+    assert parsed["error"]["code"] == "precondition_failed"
+    assert parsed["error"]["details"]["expected"] == "wrong-rev"
+    assert parsed["error"]["details"]["actual"] == doc.rev
   end
 
   test "patch with matching ifRevisionID succeeds", %{conn: conn} do
@@ -95,12 +94,57 @@ defmodule BarkparkWeb.Contract.MutateTest do
       ]
     }
 
-    resp =
+    resp = do_mutate(conn, body)
+
+    assert resp.status == 200
+  end
+
+  test "delete with stale ifRevisionID returns 412", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-3", "title" => "v1"}, "test")
+
+    body = %{
+      "mutations" => [
+        %{"delete" => %{"id" => doc.doc_id, "type" => "post", "ifRevisionID" => "nope"}}
+      ]
+    }
+
+    resp = do_mutate(conn, body)
+
+    assert resp.status == 412
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "precondition_failed"
+  end
+
+  test "If-Match HTTP header applies as ifRevisionID for single-doc mutation", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-4", "title" => "v1"}, "test")
+
+    body = %{
+      "mutations" => [
+        %{
+          "patch" => %{
+            "id" => doc.doc_id,
+            "type" => "post",
+            "set" => %{"title" => "v2"}
+          }
+        }
+      ]
+    }
+
+    stale =
       conn
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> put_req_header("content-type", "application/json")
+      |> put_req_header("if-match", ~s("not-the-rev"))
       |> post("/v1/data/mutate/test", Jason.encode!(body))
 
-    assert resp.status == 200
+    assert stale.status == 412
+
+    fresh =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("if-match", ~s("#{doc.rev}"))
+      |> post("/v1/data/mutate/test", Jason.encode!(body))
+
+    assert fresh.status == 200
   end
 end

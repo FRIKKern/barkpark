@@ -30,6 +30,18 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+config :barkpark, :idempotency, ttl_seconds: 86_400
+
+config :barkpark, :rate_limits,
+  read_per_minute: 300,
+  write_per_minute: 60,
+  datasets: %{}
+
+config :barkpark, :preview,
+  secret: "dev-preview-secret-change-in-prod-please-32-chars",
+  ttl_seconds: 600,
+  issuer: "barkpark"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

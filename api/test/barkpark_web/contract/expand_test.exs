@@ -41,7 +41,7 @@ defmodule BarkparkWeb.Contract.ExpandTest do
   end
 
   test "GET /v1/data/query/:ds/:type without expand returns raw ref ids", %{conn: conn} do
-    %{"documents" => [post | _]} =
+    %{"result" => %{"documents" => [post | _]}} =
       conn
       |> get("/v1/data/query/ctest/post?filter[title]=Hi")
       |> json_response(200)
@@ -50,7 +50,7 @@ defmodule BarkparkWeb.Contract.ExpandTest do
   end
 
   test "GET /v1/data/query/:ds/:type?expand=true expands all reference fields", %{conn: conn} do
-    %{"documents" => [post | _]} =
+    %{"result" => %{"documents" => [post | _]}} =
       conn
       |> get("/v1/data/query/ctest/post?filter[title]=Hi&expand=true")
       |> json_response(200)
@@ -61,7 +61,7 @@ defmodule BarkparkWeb.Contract.ExpandTest do
   end
 
   test "GET /v1/data/query/:ds/:type?expand=author expands only that field", %{conn: conn} do
-    %{"documents" => [post | _]} =
+    %{"result" => %{"documents" => [post | _]}} =
       conn
       |> get("/v1/data/query/ctest/post?filter[title]=Hi&expand=author")
       |> json_response(200)
@@ -71,7 +71,7 @@ defmodule BarkparkWeb.Contract.ExpandTest do
   end
 
   test "GET /v1/data/doc/:ds/:type/:id?expand=true expands refs on single doc", %{conn: conn} do
-    post =
+    %{"result" => post} =
       conn
       |> get("/v1/data/doc/ctest/post/ct-p1?expand=true")
       |> json_response(200)

@@ -1,6 +1,8 @@
 defmodule BarkparkWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :barkpark
 
+  require Logger
+
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
@@ -48,9 +50,28 @@ defmodule BarkparkWeb.Endpoint do
   plug Plug.Session, @session_options
   plug Corsica,
     origins: "*",
-    allow_headers: ["authorization", "content-type", "last-event-id"],
-    expose_headers: ["etag"],
-    max_age: 600
+    allow_methods: ~w(GET POST PUT PATCH DELETE OPTIONS),
+    allow_headers: ~w(
+      authorization
+      accept
+      content-type
+      if-match
+      if-none-match
+      idempotency-key
+      x-barkpark-api-version
+      x-barkpark-preview-token
+      last-event-id
+    ),
+    expose_headers: ~w(
+      etag
+      x-request-id
+      retry-after
+      x-barkpark-signature
+      x-barkpark-timestamp
+      x-barkpark-event-id
+    ),
+    max_age: 600,
+    log: [rejected: :warn]
 
   plug BarkparkWeb.Router
 
@@ -66,9 +87,17 @@ defmodule BarkparkWeb.Endpoint do
       )
     rescue
       Plug.Parsers.ParseError ->
+        err = %{code: "malformed", message: "invalid request body"}
+
+        err =
+          case Logger.metadata()[:request_id] do
+            id when is_binary(id) and id != "" -> Map.put(err, :request_id, id)
+            _ -> err
+          end
+
         conn
         |> Plug.Conn.put_status(400)
-        |> Phoenix.Controller.json(%{error: "invalid request body"})
+        |> Phoenix.Controller.json(%{error: err})
         |> Plug.Conn.halt()
     end
   end
