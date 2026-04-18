@@ -1,0 +1,203 @@
+---
+title: Error catalog
+description: Every Barkpark API error code, when it's raised, and how to fix it.
+---
+
+Every non-2xx response from the Barkpark API is a JSON envelope produced by `Barkpark.Content.Errors.to_envelope/2`. Envelopes always carry `code`, `message`, and `status`. They may also carry `details` (structured context) and `request_id` (echoed from the `x-request-id` header when present). The sections below list every envelope shape the server can emit, grouped by class.
+
+An envelope looks like this:
+
+```json
+{
+  "code": "rate_limited",
+  "message": "too many requests",
+  "status": 429,
+  "details": { "retry_after": 30 },
+  "request_id": "F6l2m..."
+}
+```
+
+## Validation errors
+
+### `malformed`
+
+**HTTP status:** 400
+
+**Raised when:** The request body is not parseable JSON, omits required top-level keys (for example a mutation envelope without `mutations`), or contains a mutation shape the server does not recognise.
+
+**How to fix:**
+- Send `Content-Type: application/json` and a valid JSON body.
+- For mutations, wrap them in `{"mutations":[ ... ]}` with one of the recognised verbs (`create`, `createOrReplace`, `createIfNotExists`, `replace`, `patch`, `publish`, `unpublish`, `discardDraft`, `delete`).
+- Check for typos in mutation verbs; unknown verbs fall through to `malformed`.
+
+### `validation_failed`
+
+**HTTP status:** 422
+
+**Raised when:** A write touched an Ecto changeset (document or schema) and it failed type casts, required-field checks, or the `status` inclusion constraint (`draft | published | archived | active | planning | completed`).
+
+**How to fix:**
+- Read the `details` map — it mirrors the changeset error tree, one key per field.
+- Include `doc_id` and `_type` on every create; they are required.
+- Keep `status` within the allowed enum; default to `"draft"` if unsure.
+
+Example body:
+
+```json
+{
+  "code": "validation_failed",
+  "message": "document failed validation",
+  "status": 422,
+  "details": { "status": ["is invalid"] }
+}
+```
+
+## Authentication and authorization
+
+### `unauthorized`
+
+**HTTP status:** 401
+
+**Raised when:** A write or admin endpoint received a request with no `Authorization` header, a malformed header, or a token that does not hash to a row in `api_tokens`.
+
+**How to fix:**
+- Send `Authorization: Bearer <token>`.
+- In dev, use `barkpark-dev-token`.
+- In production, provision a token via the admin UI or seed script; Barkpark stores SHA-256 hashes only.
+
+### `forbidden`
+
+**HTTP status:** 403
+
+**Raised when:** The token is valid but lacks the scope required by the endpoint — for example, a `read`-only token hitting `POST /v1/data/mutate/{dataset}`, or a non-admin token hitting `/v1/schemas/{dataset}`.
+
+**How to fix:**
+- Mint a token with the scopes you need (`read`, `write`, `admin`).
+- Check the endpoint's documented scope; schema CRUD requires `admin`, mutations require `write`.
+
+### `cors_forbidden`
+
+**HTTP status:** 403
+
+**Raised when:** The request carried an `Origin` header that is not in the dataset's union of schema-level `cors_origins` allow-lists. Returned as `code: "cors_forbidden"` despite the reason tuple being `:forbidden_origin`.
+
+**How to fix:**
+- Add the origin to at least one schema's `cors_origins` list in the dataset.
+- Use `"*"` in a schema's `cors_origins` to allow any origin (public schemas).
+- An empty union across the dataset means "no policy" and allows all origins by default.
+
+## Not found
+
+### `not_found`
+
+**HTTP status:** 404
+
+**Raised when:** The requested document does not exist at the given `doc_id`, `type`, and `dataset`. Also raised by `publish`, `unpublish`, `discardDraft`, and `delete` when their target document is absent.
+
+**How to fix:**
+- Verify the document ID and whether you need to address the draft (`drafts.{id}`) or published (`{id}`) row.
+- For `publish`, confirm a draft exists before calling.
+- For `delete`, Barkpark returns `not_found` only if neither draft nor published row exists.
+
+### `schema_unknown`
+
+**HTTP status:** 404
+
+**Raised when:** The query or mutation named a `_type` that has no schema definition in the dataset, or the schema exists but is `visibility: "private"` and the caller is unauthenticated.
+
+**How to fix:**
+- Confirm the `_type` matches a schema name exactly (case-sensitive).
+- If the schema is private, send a valid bearer token with `read` scope.
+- Use `GET /v1/schemas/{dataset}` (with an admin token) to list available schemas.
+
+## Conflict and concurrency
+
+### `conflict`
+
+**HTTP status:** 409
+
+**Raised when:** A `create` mutation targeted a `doc_id` that already has a draft and no `ifRevisionID` was supplied to express intent.
+
+**How to fix:**
+- Use `createOrReplace` if you want to overwrite.
+- Use `createIfNotExists` if you want idempotent insert.
+- Supply `ifRevisionID` on `create` to get a `precondition_failed` envelope with the actual rev instead of this coarse 409.
+
+### `rev_mismatch`
+
+**HTTP status:** 409
+
+**Raised when:** The server computed a rev mismatch without structured expected/actual context — the older path in the Content module. Most clients see the richer `precondition_failed` variant instead.
+
+**How to fix:**
+- Re-read the document to get a fresh `rev`.
+- Retry the write with the latest `rev` as `ifRevisionID`.
+
+### `precondition_failed`
+
+**HTTP status:** 412
+
+**Raised when:** A mutation passed `ifRevisionID` (or `ifMatch`) and it did not match the stored `rev` of the target document. Applies to `create`, `createOrReplace`, `createIfNotExists`, `replace`, `patch`, and `delete`.
+
+**How to fix:**
+- Read `details.expected` (the rev you sent) and `details.actual` (the server's current rev).
+- Fetch the document, reconcile, and retry with the current `rev`.
+- Omit `ifRevisionID` if you intentionally want last-writer-wins semantics.
+
+Example body:
+
+```json
+{
+  "code": "precondition_failed",
+  "message": "document revision mismatch",
+  "status": 412,
+  "details": {
+    "expected": "a1b2c3",
+    "actual": "d4e5f6"
+  }
+}
+```
+
+## Throttling
+
+### `rate_limited` (bare)
+
+**HTTP status:** 429
+
+**Raised when:** A caller exceeded the configured rate limit and the limiter produced no structured context. Message: `rate limit exceeded`.
+
+**How to fix:**
+- Back off; retry with exponential backoff.
+- Batch multiple writes into a single `POST /v1/data/mutate/{dataset}` — mutations inside one envelope count as one request.
+
+### `rate_limited` (with retry context)
+
+**HTTP status:** 429
+
+**Raised when:** A caller exceeded the configured rate limit and the limiter supplied a retry window. Message: `too many requests`. Carries `details.retry_after` (seconds).
+
+**How to fix:**
+- Wait `details.retry_after` seconds before retrying.
+- Honour the value as a minimum; real traffic shaping may take longer.
+
+## Server errors
+
+### `internal_error` (reason-carrying)
+
+**HTTP status:** 500
+
+**Raised when:** An unexpected error tuple `{:error, reason}` with a string reason propagated up from a lower layer. The message is the raw reason string.
+
+**How to fix:**
+- These are server-side bugs. Capture the `request_id` from the envelope or the `x-request-id` header and file an issue with it.
+- Do not retry aggressively — the condition is unlikely to clear without a fix.
+
+### `internal_error` (unknown)
+
+**HTTP status:** 500
+
+**Raised when:** Any error the Content module did not explicitly map. The envelope is `{ "code": "internal_error", "message": "unknown error", "status": 500 }`.
+
+**How to fix:**
+- Same as above: capture `request_id`, file an issue, do not hot-loop retries.
+- If you hit this reliably, your client is probably sending a shape the server is not yet handling — check server logs for the original reason tuple.

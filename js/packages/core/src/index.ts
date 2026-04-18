@@ -41,11 +41,22 @@ export {
 } from './errors'
 
 // --- Typed-pass-through helpers (identity functions) -----------------------
-/** Typed identity — lets callers attach types to an existing client value. */
+/**
+ * @internal
+ *
+ * This API is internal to @barkpark/core and may change without notice.
+ * External users should use the return type of `createClient()` instead of
+ * naming this helper directly.
+ */
 export function typedClient<C>(client: C): C {
   return client
 }
-/** Typed identity — reserved for a future action-binding helper; currently a no-op. */
+/**
+ * @internal
+ *
+ * This API is internal to @barkpark/core and may change without notice.
+ * External users should import `defineActions` from `@barkpark/nextjs`.
+ */
 export function defineActions<C>(client: C): C {
   return client
 }
@@ -73,7 +84,13 @@ export type {
   Perspective,
   QueryOptions,
   ReadEnvelope,
-  RequestContext,
-  ResponseContext,
   TransactionBuilder,
 } from './types'
+
+/**
+ * @internal
+ *
+ * These types are internal to @barkpark/core and may change without notice.
+ * Use the public client API. These types describe transport internals.
+ */
+export type { RequestContext, ResponseContext } from './types'
