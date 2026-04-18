@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-barkpark}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-barkpark}
+      POSTGRES_DB: ${POSTGRES_DB:-barkpark_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - barkpark_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-barkpark}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    # Build from ../../../../../api or use the published image
+    image: ghcr.io/barkpark/api:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-barkpark}:${POSTGRES_PASSWORD:-barkpark}@postgres:5432/${POSTGRES_DB:-barkpark_dev}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-change-me-to-a-64-char-random-string-for-local-dev-only-not-for-prod}
+      PHX_HOST: ${PHX_HOST:-localhost}
+      PORT: "4000"
+      MIX_ENV: prod
+    ports:
+      - "4000:4000"
+
+volumes:
+  barkpark_pgdata:
