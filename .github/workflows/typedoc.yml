@@ -1,0 +1,54 @@
+name: typedoc
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "js/packages/**"
+      - "tooling/typedoc/**"
+      - "package.json"
+      - ".github/workflows/typedoc.yml"
+  pull_request:
+    paths:
+      - "js/packages/**"
+      - "tooling/typedoc/**"
+      - "package.json"
+      - ".github/workflows/typedoc.yml"
+
+jobs:
+  generate:
+    name: Generate reference
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install JS workspace deps
+        working-directory: js
+        run: pnpm install --frozen-lockfile
+
+      - name: Install root devDeps
+        run: npm install --no-audit --no-fund
+
+      - name: Validate config (no emit)
+        run: npm run docs:reference:check
+
+      - name: Generate HTML reference
+        run: npm run docs:reference
+
+      - name: Upload reference artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: typedoc-reference
+          path: docs-site/reference/
+          retention-days: 30
+          if-no-files-found: error
