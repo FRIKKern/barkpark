@@ -1,0 +1,26 @@
+{
+  "name": "@barkpark/demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only Vercel-hosted demo of the Barkpark headless CMS.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^15.1.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@9.15.9"
+}
