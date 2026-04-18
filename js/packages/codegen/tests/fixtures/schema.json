@@ -1,0 +1,297 @@
+{
+  "schemas": [
+    {
+      "name": "author",
+      "title": "Author",
+      "fields": [
+        {
+          "name": "name",
+          "title": "Name",
+          "type": "string"
+        },
+        {
+          "name": "slug",
+          "title": "Slug",
+          "type": "slug"
+        },
+        {
+          "name": "bio",
+          "rows": 4,
+          "title": "Bio",
+          "type": "text"
+        },
+        {
+          "name": "avatar",
+          "title": "Avatar",
+          "type": "image"
+        },
+        {
+          "name": "email",
+          "title": "Email",
+          "type": "string"
+        },
+        {
+          "name": "role",
+          "options": [
+            "editor",
+            "writer",
+            "contributor",
+            "admin"
+          ],
+          "title": "Role",
+          "type": "select"
+        }
+      ],
+      "visibility": "public",
+      "icon": "👤"
+    },
+    {
+      "name": "category",
+      "title": "Category",
+      "fields": [
+        {
+          "name": "title",
+          "title": "Title",
+          "type": "string"
+        },
+        {
+          "name": "slug",
+          "title": "Slug",
+          "type": "slug"
+        },
+        {
+          "name": "description",
+          "rows": 2,
+          "title": "Description",
+          "type": "text"
+        },
+        {
+          "name": "color",
+          "title": "Color",
+          "type": "color"
+        }
+      ],
+      "visibility": "public",
+      "icon": "🏷"
+    },
+    {
+      "name": "colors",
+      "title": "Brand Colors",
+      "fields": [
+        {
+          "name": "primary",
+          "title": "Primary",
+          "type": "color"
+        },
+        {
+          "name": "secondary",
+          "title": "Secondary",
+          "type": "color"
+        },
+        {
+          "name": "accent",
+          "title": "Accent",
+          "type": "color"
+        }
+      ],
+      "visibility": "private",
+      "icon": "🎨"
+    },
+    {
+      "name": "navigation",
+      "title": "Navigation",
+      "fields": [
+        {
+          "name": "title",
+          "title": "Menu Title",
+          "type": "string"
+        }
+      ],
+      "visibility": "private",
+      "icon": "🧭"
+    },
+    {
+      "name": "page",
+      "title": "Page",
+      "fields": [
+        {
+          "name": "title",
+          "title": "Title",
+          "type": "string"
+        },
+        {
+          "name": "slug",
+          "title": "Slug",
+          "type": "slug"
+        },
+        {
+          "name": "body",
+          "title": "Page Content",
+          "type": "richText"
+        },
+        {
+          "name": "seoTitle",
+          "title": "SEO Title",
+          "type": "string"
+        },
+        {
+          "name": "seoDescription",
+          "rows": 2,
+          "title": "SEO Description",
+          "type": "text"
+        },
+        {
+          "name": "heroImage",
+          "title": "Hero Image",
+          "type": "image"
+        }
+      ],
+      "visibility": "public",
+      "icon": "📑"
+    },
+    {
+      "name": "post",
+      "title": "Post",
+      "fields": [
+        {
+          "name": "title",
+          "title": "Title",
+          "type": "string"
+        },
+        {
+          "name": "slug",
+          "title": "Slug",
+          "type": "slug"
+        },
+        {
+          "name": "status",
+          "options": [
+            "draft",
+            "published",
+            "archived"
+          ],
+          "title": "Status",
+          "type": "select"
+        },
+        {
+          "name": "publishedAt",
+          "title": "Published At",
+          "type": "datetime"
+        },
+        {
+          "name": "excerpt",
+          "rows": 3,
+          "title": "Excerpt",
+          "type": "text"
+        },
+        {
+          "name": "body",
+          "title": "Body",
+          "type": "richText"
+        },
+        {
+          "name": "featuredImage",
+          "title": "Featured Image",
+          "type": "image"
+        },
+        {
+          "name": "author",
+          "refType": "author",
+          "title": "Author",
+          "type": "reference"
+        },
+        {
+          "name": "featured",
+          "title": "Featured Post",
+          "type": "boolean"
+        }
+      ],
+      "visibility": "public",
+      "icon": "📄"
+    },
+    {
+      "name": "project",
+      "title": "Project",
+      "fields": [
+        {
+          "name": "title",
+          "title": "Title",
+          "type": "string"
+        },
+        {
+          "name": "slug",
+          "title": "Slug",
+          "type": "slug"
+        },
+        {
+          "name": "client",
+          "title": "Client",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "options": [
+            "planning",
+            "active",
+            "completed",
+            "archived"
+          ],
+          "title": "Status",
+          "type": "select"
+        },
+        {
+          "name": "description",
+          "title": "Description",
+          "type": "richText"
+        },
+        {
+          "name": "coverImage",
+          "title": "Cover Image",
+          "type": "image"
+        },
+        {
+          "name": "startDate",
+          "title": "Start Date",
+          "type": "datetime"
+        },
+        {
+          "name": "featured",
+          "title": "Featured",
+          "type": "boolean"
+        }
+      ],
+      "visibility": "public",
+      "icon": "💼"
+    },
+    {
+      "name": "siteSettings",
+      "title": "Site Settings",
+      "fields": [
+        {
+          "name": "title",
+          "title": "Site Title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "rows": 2,
+          "title": "Site Description",
+          "type": "text"
+        },
+        {
+          "name": "logo",
+          "title": "Logo",
+          "type": "image"
+        },
+        {
+          "name": "analyticsId",
+          "title": "Analytics ID",
+          "type": "string"
+        }
+      ],
+      "visibility": "private",
+      "icon": "⚙"
+    }
+  ],
+  "_schemaVersion": 1
+}
