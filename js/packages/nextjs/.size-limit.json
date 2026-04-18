@@ -1,5 +1,5 @@
 [
-  { "path": "dist/server.mjs", "limit": "20 KB" },
+  { "path": "dist/server.mjs", "limit": "20 KB", "ignore": ["server-only"] },
   { "path": "dist/client.mjs", "limit": "15 KB" },
   { "path": "dist/revalidate.mjs", "limit": "2 KB" },
   { "path": "dist/preload.mjs", "limit": "2 KB" }
