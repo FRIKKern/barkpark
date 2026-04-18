@@ -1,0 +1,20 @@
+# Uptime Kuma — single-host status board colocated on the cax11 VPS.
+#
+# Bound to 127.0.0.1:3001 only. The dashboard is local-only until the
+# operator adds a TLS domain + Caddy reverse_proxy entry (e.g.
+# `status.barkpark.dev { reverse_proxy 127.0.0.1:3001 }`). Reach the
+# UI over SSH tunnel in the meantime: `ssh -L 3001:127.0.0.1:3001 ...`.
+#
+# Start with `docker compose up -d` from this directory. Persistent
+# state lives in ./data (created on first run, chowned to the Kuma
+# container user). Do NOT commit ./data.
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./data:/app/data
