@@ -9,9 +9,8 @@ describe('@barkpark/nextjs scaffold', () => {
   it('root exports revalidateBarkpark', () => {
     expect(typeof root.revalidateBarkpark).toBe('function')
   })
-  it('actions exports defineActions (identity) and useOptimisticDocument', () => {
-    const c = { ok: true }
-    expect(actions.defineActions(c)).toBe(c)
+  it('actions exports defineActions factory and useOptimisticDocument', () => {
+    expect(typeof actions.defineActions).toBe('function')
     expect(typeof actions.useOptimisticDocument).toBe('function')
   })
   it('webhook exports createWebhookHandler', () => {
