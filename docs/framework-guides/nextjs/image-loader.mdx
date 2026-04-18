@@ -1,0 +1,134 @@
+---
+title: Image Loader
+description: Custom next/image loader + BarkparkImage renderer.
+icon: Image
+package: nextjs
+---
+
+Barkpark stores media as assets with ids; rendering one is typically a
+two-step process:
+
+1. Render `BarkparkImage` from `@barkpark/react` to normalise the asset
+   shape (`_ref`, `url`, or the expanded form).
+2. Configure `next/image` with a loader that points at your Barkpark
+   media endpoint so Next.js can handle responsive sizes.
+
+## Simple case — `BarkparkImage`
+
+When you don't need responsive sizing, `BarkparkImage` is all you need:
+
+```tsx twoslash
+import { BarkparkImage } from '@barkpark/react'
+
+export function Avatar({ asset }: { asset: { _ref: string; _type: 'image' } }) {
+  return (
+    <BarkparkImage
+      asset={asset}
+      alt="User avatar"
+      baseUrl="https://cms.example.com/media"
+      width={64}
+      height={64}
+    />
+  )
+}
+```
+
+`BarkparkImage` accepts either `{ _ref, _type }` (a reference) or an
+expanded asset object (`{ _id, url, metadata }`). If neither shape has a
+URL and no `baseUrl` is provided, it warns once in dev via
+`onMissingBaseUrl`.
+
+## Swap in `next/image`
+
+Pass `as={NextImage}` to delegate to Next.js's `<Image>`:
+
+```tsx twoslash
+import { BarkparkImage } from '@barkpark/react'
+import NextImage from 'next/image'
+
+export function Hero({ asset }: { asset: { _ref: string; _type: 'image' } }) {
+  return (
+    <BarkparkImage
+      as={NextImage}
+      asset={asset}
+      alt="Hero image"
+      baseUrl="https://cms.example.com/media"
+      width={1200}
+      height={630}
+    />
+  )
+}
+```
+
+Props unknown to `BarkparkImage` (here `width`, `height`) pass through to
+the wrapped component via `[key: string]: unknown`.
+
+## Custom loader for dynamic sizing
+
+For responsive images, configure a custom loader at the Next.js level.
+Barkpark doesn't prescribe a transformation service — you plug in whatever
+your media endpoint supports:
+
+```ts twoslash
+// @filename: app/lib/imageLoader.ts
+import type { ImageLoader } from 'next/image'
+
+const MEDIA_BASE = 'https://cms.example.com/media'
+
+export const barkparkLoader: ImageLoader = ({ src, width, quality }) => {
+  const q = quality ?? 75
+  return `${MEDIA_BASE}/${src}?w=${width}&q=${q}`
+}
+```
+
+Then:
+
+```tsx twoslash
+// @filename: app/lib/imageLoader.ts
+import type { ImageLoader } from 'next/image'
+export const barkparkLoader: ImageLoader = ({ src, width, quality }) =>
+  `https://cms.example.com/media/${src}?w=${width}&q=${quality ?? 75}`
+
+// @filename: app/components/ResponsiveImage.tsx
+import Image from 'next/image'
+import { barkparkLoader } from '@/app/lib/imageLoader'
+
+export function ResponsiveImage(props: { src: string; alt: string }) {
+  return (
+    <Image
+      loader={barkparkLoader}
+      src={props.src}
+      alt={props.alt}
+      width={1200}
+      height={630}
+      sizes="(min-width: 768px) 50vw, 100vw"
+    />
+  )
+}
+```
+
+Use `next.config.mjs` to set the loader globally for `next/image` —
+Next.js's docs cover the config shape; Barkpark's only responsibility is
+producing the `src` string.
+
+## Getting the asset id
+
+For an image reference `{ _ref: 'image-abc', _type: 'image' }`, the `_ref`
+is what you pass to your media endpoint as `src`:
+
+```ts twoslash
+import type { ImageAssetRef } from '@barkpark/react'
+
+function assetIdFromRef(ref: ImageAssetRef): string {
+  // _ref is the asset id; your media endpoint turns it into a file.
+  return ref._ref
+}
+```
+
+For an expanded asset the `url` field is already absolute and `baseUrl`
+is ignored.
+
+## Next
+
+- [Portable Text](./portable-text) for the other half of common content
+  rendering.

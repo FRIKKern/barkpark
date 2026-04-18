@@ -1,0 +1,79 @@
+---
+title: Next.js
+description: App Router + React Server Components integration for Barkpark.
+icon: Triangle
+package: nextjs
+---
+
+`@barkpark/nextjs` is the flagship integration. It is designed around the App
+Router, React Server Components (RSC), and the Next.js caching model. Every
+surface in this guide assumes you are writing App Router code; there is no
+Pages Router support in v0.1.
+
+## What you get
+
+- **`/server`** — `createBarkparkServer()` plus a `barkparkFetch` helper that
+  threads the dataset-scoped cache tag onto every request and flips to
+  `cache: 'no-store'` when `draftMode()` is enabled.
+- **`/client`** — `BarkparkLive` and `BarkparkLiveProvider`, a streaming
+  client subscription that hydrates draft-mode previews without a refresh.
+- **`/actions`** — `defineActions(config)` binds a typed set of Server
+  Actions (`createDoc`, `patchDoc`, `publish`, `unpublish`) and fans out the
+  canonical `bp:ds:$ds:doc:$id` + `bp:ds:$ds:type:$type` revalidate tags.
+  `useOptimisticDocument()` is the client-side companion.
+- **`/draft-mode`** — `createDraftModeRoutes()` mounts a GET/DELETE handler
+  pair verifying HMAC-signed preview URLs and toggling Next.js draft mode.
+- **`/revalidate`** — `revalidateBarkpark()` translates a mutation payload
+  (doc id, type, or full webhook body) into `revalidateTag()` calls.
+- **`/webhook`** — `createWebhookHandler()` verifies the `x-barkpark-signature`
+  header, deduplicates retries, and hands the payload to your own callback.
+- **`/preload`** — `createPreloader()` wraps `barkparkFetch` in React's
+  `cache()` so a layout can warm a request that a child RSC will await.
+
+## When to use which surface
+
+| Surface         | Runs in      | Typical call site                          |
+| --------------- | ------------ | ------------------------------------------ |
+| `/server`       | RSC / route  | `app/**/page.tsx`, `app/api/**/route.ts`   |
+| `/client`       | Browser      | `"use client"` components — Live updates   |
+| `/actions`      | RSC + form   | Server Actions exported from a module      |
+| `/draft-mode`   | Route        | `app/api/draft/route.ts`                   |
+| `/revalidate`   | Route / act. | Inside a webhook handler or action         |
+| `/webhook`      | Route        | `app/api/barkpark/webhook/route.ts`        |
+| `/preload`      | RSC layout   | `app/**/layout.tsx` warming child fetches  |
+
+Each page in this section walks one surface end-to-end, with type-checked
+examples cross-referenced to runnable snippets under
+[`docs/snippets/`](../../snippets).
+
+## Shape of a Barkpark document
+
+Every read returns the standard `BarkparkDocument` envelope:
+
+```ts twoslash
+import type { BarkparkDocument } from '@barkpark/core'
+
+const doc: BarkparkDocument = {
+  _id: 'p1',
+  _type: 'post',
+  _rev: 'r-abc',
+  _draft: false,
+  _publishedId: 'p1',
+  _createdAt: '2026-04-12T09:11:20Z',
+  _updatedAt: '2026-04-12T09:11:20Z',
+  title: 'My Post',
+}
+//     ^?
+```
+
+`_draft` and `_publishedId` encode the draft-vs-published split (see the
+Barkpark API reference for the full perspective model). The rest of this
+guide assumes you are comfortable with the `published` / `drafts` / `raw`
+perspectives.
+
+## Next steps
+
+Start with [Setup](./setup) to install the package and wire the first
+server-component fetch. Then read
+[Server Components](./server-components) to understand the client boundary,
+and [Server Actions](./server-actions) for mutations.
