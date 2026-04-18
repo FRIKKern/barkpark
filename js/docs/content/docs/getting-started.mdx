@@ -1,6 +1,103 @@
 ---
 title: Getting Started
-description: Install Barkpark and ship your first query.
+description: Install, create your first document, run your first query — under 5 minutes.
 ---
 
-This page is coming in a follow-up commit.
+Barkpark is a headless CMS with a typed document API, draft/published workflow, and real-time updates over SSE. It ships three interfaces on the same backend: a Phoenix JSON API, a LiveView web Studio at `/studio`, and a Go terminal TUI.
+
+This page takes you from zero to a queried document. You will run the API locally, create a draft via `POST /v1/data/mutate/production`, and read it back via `GET /v1/data/query/production/post`.
+
+## Prerequisites
+
+Pick one:
+
+- **Docker** — Docker Engine 24+ with `docker compose`. Fastest path.
+- **Local toolchain** — Elixir 1.17+, Erlang/OTP 27+, PostgreSQL 14+, and Node 20+ if you plan to use the JavaScript SDK.
+
+The Barkpark source tree provides both a `docker-compose.yml` at the repo root and a Mix project under `api/`.
+
+## Spin up in 60 seconds
+
+Clone the repo, then start Postgres and the API container:
+
+```bash
+git clone https://github.com/frikkb/barkpark.git
+cd barkpark
+docker compose up -d
+```
+
+The API binds to `http://localhost:4000`. On first boot the container runs migrations and seeds eight example schemas, 27 documents, and the dev token `barkpark-dev-token`. Verify the API is up:
+
+```bash
+curl -s http://localhost:4000/v1/data/query/production/post | head
+```
+
+If you prefer running Elixir directly without Docker:
+
+```bash
+cd api
+mix deps.get
+mix ecto.reset
+mix phx.server
+```
+
+## Create your first document
+
+Writes require a bearer token. The seed data installs `barkpark-dev-token`, which has read, write, and admin scopes. Use it everywhere below.
+
+Every create produces a draft at `drafts.{id}`. The published ID stays empty until you publish.
+
+```bash
+TOKEN="barkpark-dev-token"
+
+curl -X POST http://localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mutations": [
+      {
+        "create": {
+          "_type": "post",
+          "_id": "hello",
+          "title": "Hello Barkpark",
+          "status": "draft",
+          "content": { "category": "Tech", "author": "You" }
+        }
+      }
+    ]
+  }'
+```
+
+The response echoes the persisted envelope with `_id: "drafts.hello"`, `_draft: true`, and a generated `rev`.
+
+## Query it back
+
+Reads are public for schemas marked `visibility: "public"`. The `perspective` query parameter selects which projection to return.
+
+```bash
+curl -s "http://localhost:4000/v1/data/query/production/post?perspective=drafts"
+```
+
+`perspective=drafts` returns the draft you just created. `perspective=published` (the default) would omit it, because the document has not been published yet. `perspective=raw` returns both draft and published rows side-by-side.
+
+Publish the draft to make it visible to the public perspective:
+
+```bash
+TOKEN="barkpark-dev-token"
+
+curl -X POST http://localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"publish":{"id":"hello","type":"post"}}]}'
+```
+
+Now `curl http://localhost:4000/v1/data/query/production/post` returns the published copy.
+
+## View it in Studio
+
+Open `http://localhost:4000/studio` in your browser. The Studio is a LiveView application with a multi-pane desk: structure on the left, document lists in the middle, and a field editor on the right. Changes made in Studio, the API, or any other client broadcast over PubSub and appear in other open Studio tabs within a few hundred milliseconds.
+
+## Next steps
+
+- [Concepts](/docs/concepts) — documents, drafts, perspectives, and schemas explained.
+- [Framework Guides — Next.js](/docs/framework-guides/nextjs) — wire Barkpark into an App Router project with `@barkpark/nextjs`.
