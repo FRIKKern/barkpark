@@ -1,0 +1,20 @@
+{
+  "name": "@barkpark/twoslash-mocks",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Ambient Next.js declarations for shiki-twoslash in Barkpark docs — types only, no runtime.",
+  "types": "./next-stubs.d.ts",
+  "exports": {
+    "./next-stubs.d.ts": "./next-stubs.d.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "next-stubs.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

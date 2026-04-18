@@ -1,0 +1,56 @@
+name: twoslash
+
+on:
+  pull_request:
+    paths:
+      - "apps/docs/**"
+      - "tooling/twoslash-mocks/**"
+      - "js/packages/**"
+      - ".github/workflows/twoslash.yml"
+
+jobs:
+  gate:
+    name: Twoslash type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect docs app
+        id: detect
+        run: |
+          if [ -d apps/docs ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip — Track A docs app not present yet
+        if: steps.detect.outputs.present != 'true'
+        run: echo "Track A docs app (apps/docs/) not scaffolded yet — twoslash gate skipped."
+
+      - name: Setup Node
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        if: steps.detect.outputs.present == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install JS workspace deps
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: pnpm install --frozen-lockfile
+
+      - name: Build docs app (fails on twoslash type errors)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: pnpm --filter docs build
+
+      - name: Always-run sanity — mocks compile standalone
+        run: |
+          npm install --no-audit --no-fund --silent
+          npx --no-install tsc --noEmit --project tooling/twoslash-mocks/tsconfig.json
