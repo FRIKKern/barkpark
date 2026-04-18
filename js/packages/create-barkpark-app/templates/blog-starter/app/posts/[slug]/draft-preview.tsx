@@ -10,7 +10,7 @@ interface Author {
 
 interface Tag {
   _id: string
-  name: string
+  title: string
   slug?: { current: string }
 }
 
@@ -76,7 +76,7 @@ export function DraftModePreview({ initialPost, author, tags }: Props) {
           <p className="flex flex-wrap gap-2 text-xs">
             {tags.map((t) => (
               <span key={t._id} className="rounded bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-                #{t.name}
+                #{t.title}
               </span>
             ))}
           </p>

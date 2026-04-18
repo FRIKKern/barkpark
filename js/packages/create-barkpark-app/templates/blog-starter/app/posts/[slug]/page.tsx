@@ -13,7 +13,7 @@ interface Author {
 
 interface Tag {
   _id: string
-  name: string
+  title: string
   slug?: { current: string }
 }
 
@@ -60,7 +60,7 @@ export default async function PostPage({
           {author ? (
             <>
               {' · '}
-              <Link href={`/author/${author._id}`}>{author.name}</Link>
+              <Link href={`/authors/${author._id}`}>{author.name}</Link>
             </>
           ) : null}
         </p>
@@ -70,10 +70,10 @@ export default async function PostPage({
           {tags.map((t) => (
             <Link
               key={t._id}
-              href={`/tag/${t.slug?.current ?? t._id}`}
+              href={`/tags/${t.slug?.current ?? t._id}`}
               className="rounded bg-slate-100 px-2 py-0.5 dark:bg-slate-800"
             >
-              #{t.name}
+              #{t.title}
             </Link>
           ))}
         </p>

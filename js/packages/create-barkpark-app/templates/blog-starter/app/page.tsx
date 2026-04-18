@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getDocs } from '../lib/barkpark'
 import { POSTS_PER_PAGE } from '../lib/queries'
+import { Pagination } from './components/Pagination'
 
 interface Post {
   _id: string
@@ -64,22 +65,11 @@ export default async function HomePage({ searchParams }: HomeProps) {
         </ul>
       )}
 
-      <nav className="flex justify-between text-sm">
-        {pageNum > 1 ? (
-          <Link href={`/?page=${pageNum - 1}`} className="underline">
-            ← Newer
-          </Link>
-        ) : (
-          <span />
-        )}
-        {hasNext ? (
-          <Link href={`/?page=${pageNum + 1}`} className="underline">
-            Older →
-          </Link>
-        ) : (
-          <span />
-        )}
-      </nav>
+      <Pagination
+        currentPage={pageNum}
+        totalPages={hasNext ? pageNum + 1 : pageNum}
+        basePath="/"
+      />
     </div>
   )
 }

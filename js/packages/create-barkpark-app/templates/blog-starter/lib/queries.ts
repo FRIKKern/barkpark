@@ -13,4 +13,4 @@ export const postsByTag = `*[_type == "post" && $tagId in tags[]._ref] | order(p
 export const allAuthors = `*[_type == "author"] | order(name asc)`
 export const allTags = `*[_type == "tag"] | order(name asc)`
 
-export const POSTS_PER_PAGE = 9
+export const POSTS_PER_PAGE = 5
