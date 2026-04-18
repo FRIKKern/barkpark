@@ -383,8 +383,11 @@ defmodule Barkpark.Content do
 
     # A create must NOT overwrite an existing draft
     case id && get_document(draft_id(id), type, dataset) do
-      {:ok, _existing} ->
-        {:error, :conflict}
+      {:ok, existing} ->
+        case if_rev(attrs) do
+          nil -> {:error, :conflict}
+          expected -> {:error, {:rev_mismatch, %{expected: expected, actual: existing.rev}}}
+        end
 
       _ ->
         with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
@@ -393,7 +396,19 @@ defmodule Barkpark.Content do
 
   defp apply_one(%{"createOrReplace" => attrs}, dataset) do
     type = attrs["_type"] || attrs["type"]
-    with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "createOrReplace"}
+    id = attrs["_id"] || attrs["doc_id"]
+    expected = if_rev(attrs)
+
+    existing =
+      case id && get_document(draft_id(id), type, dataset) do
+        {:ok, doc} -> doc
+        _ -> nil
+      end
+
+    with :ok <- ensure_rev(existing, expected),
+         {:ok, doc} <- create_document(type, attrs, dataset) do
+      {:ok, doc, "createOrReplace"}
+    end
   end
 
   defp apply_one(%{"createIfNotExists" => attrs}, dataset) do
@@ -401,7 +416,12 @@ defmodule Barkpark.Content do
     id = attrs["_id"] || attrs["doc_id"]
 
     case id && get_document(draft_id(id), type, dataset) do
-      {:ok, existing} -> {:ok, existing, "noop"}
+      {:ok, existing} ->
+        case ensure_rev(existing, if_rev(attrs)) do
+          :ok -> {:ok, existing, "noop"}
+          err -> err
+        end
+
       _ ->
         with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
     end
@@ -419,13 +439,34 @@ defmodule Barkpark.Content do
     with {:ok, doc} <- discard_draft(id, type, dataset), do: {:ok, doc, "discardDraft"}
   end
 
-  defp apply_one(%{"delete" => %{"id" => id, "type" => type}}, dataset) do
-    with {:ok, doc} <- delete_document(id, type, dataset), do: {:ok, doc, "delete"}
+  defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset) do
+    case if_rev(op) do
+      nil ->
+        with {:ok, doc} <- delete_document(id, type, dataset), do: {:ok, doc, "delete"}
+
+      expected ->
+        with {:ok, existing} <- get_document(id, type, dataset),
+             :ok <- ensure_rev(existing, expected),
+             {:ok, doc} <- delete_document(id, type, dataset) do
+          {:ok, doc, "delete"}
+        end
+    end
+  end
+
+  defp apply_one(%{"replace" => attrs}, dataset) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+
+    with {:ok, existing} <- get_document(id && draft_id(id), type, dataset),
+         :ok <- ensure_rev(existing, if_rev(attrs)),
+         {:ok, doc} <- create_document(type, attrs, dataset) do
+      {:ok, doc, "replace"}
+    end
   end
 
   defp apply_one(%{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch}, dataset) do
     with {:ok, existing} <- get_document(id, type, dataset),
-         :ok <- ensure_rev(existing, patch["ifRevisionID"]) do
+         :ok <- ensure_rev(existing, if_rev(patch)) do
       merged =
         Map.merge(
           existing.content || %{},
@@ -444,10 +485,15 @@ defmodule Barkpark.Content do
 
   defp apply_one(_, _), do: {:error, :malformed}
 
+  defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
+  defp if_rev(_), do: nil
+
   defp ensure_rev(_doc, nil), do: :ok
   defp ensure_rev(_doc, ""), do: :ok
+  defp ensure_rev(nil, expected), do: {:error, {:rev_mismatch, %{expected: expected, actual: nil}}}
   defp ensure_rev(%{rev: r}, r), do: :ok
-  defp ensure_rev(_, _), do: {:error, :rev_mismatch}
+  defp ensure_rev(%{rev: actual}, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
 
   @doc "Find all documents that reference a given document ID."
   def find_referencing_docs(doc_id, dataset) do
@@ -621,6 +667,155 @@ defmodule Barkpark.Content do
     end
   end
 
+  @doc """
+  Returns the union of CORS origin allow-lists across all schemas in the dataset.
+
+  An empty list means "no dataset-level policy" (default-allow).
+  A list containing `"*"` means "public, any origin".
+  Otherwise the list is an explicit allow-list of origin strings.
+  """
+  @spec allowed_origins_for_dataset(String.t()) :: [String.t()]
+  def allowed_origins_for_dataset(dataset) when is_binary(dataset) do
+    SchemaDefinition
+    |> where([s], s.dataset == ^dataset)
+    |> select([s], s.cors_origins)
+    |> Repo.all()
+    |> List.flatten()
+    |> Enum.uniq()
+  end
+
+  def schema_hash_for_dataset(dataset) when is_binary(dataset) do
+    from(s in SchemaDefinition,
+      where: s.dataset == ^dataset,
+      select: {count(s.id), max(s.updated_at)}
+    )
+    |> Repo.one()
+    |> hash_schema_tuple()
+  end
+
+  @doc """
+  Deterministic 16-char hex content hash of a single schema definition.
+  Derived from `{name, fields sorted by name}` so it changes iff the schema
+  body changes, regardless of row metadata (updated_at, id).
+  """
+  def schema_hash_for_schema(%SchemaDefinition{} = schema) do
+    normalized_fields =
+      (schema.fields || [])
+      |> Enum.map(&stringify_keys/1)
+      |> Enum.sort_by(& &1["name"])
+
+    payload = :erlang.term_to_binary({schema.name, normalized_fields})
+
+    :crypto.hash(:sha256, payload)
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
+
+  @doc """
+  Render a single schema in SDK envelope shape, with `schemaHash`,
+  per-field `required?`, and `of`/`to` specs where applicable.
+  """
+  def serialize_schema_for_sdk(%SchemaDefinition{} = schema) do
+    %{
+      id: schema.name,
+      name: schema.name,
+      title: schema.title,
+      icon: schema.icon,
+      visibility: schema.visibility,
+      schemaHash: schema_hash_for_schema(schema),
+      fields: Enum.map(schema.fields || [], &serialize_field/1)
+    }
+  end
+
+  @doc """
+  List every schema in a dataset in SDK envelope shape, plus a
+  top-level `datasetSchemaHash` mirroring `schema_hash_for_dataset/1`.
+  """
+  def list_schemas_for_sdk(dataset) when is_binary(dataset) do
+    schemas = list_schemas(dataset)
+
+    %{
+      schemas: Enum.map(schemas, &serialize_schema_for_sdk/1),
+      datasetSchemaHash: schema_hash_for_dataset(dataset)
+    }
+  end
+
+  defp serialize_field(field) do
+    f = stringify_keys(field)
+    type = f["type"]
+
+    base = Map.put(f, "required?", truthy?(f["required"]))
+
+    base
+    |> maybe_put_of(type, f)
+    |> maybe_put_to(type, f)
+  end
+
+  defp maybe_put_of(out, "array", f) do
+    of =
+      cond do
+        is_list(f["of"]) -> Enum.map(f["of"], &element_spec/1)
+        is_list(get_in(f, ["options", "list"])) ->
+          Enum.map(f["options"]["list"], &element_spec/1)
+        true ->
+          [%{"type" => "string"}]
+      end
+
+    Map.put(out, "of", of)
+  end
+
+  defp maybe_put_of(out, _type, _f), do: out
+
+  defp maybe_put_to(out, "reference", f) do
+    to =
+      cond do
+        is_list(f["to"]) -> Enum.map(f["to"], &element_spec/1)
+        is_list(get_in(f, ["options", "references"])) ->
+          Enum.map(f["options"]["references"], &element_spec/1)
+        is_binary(f["refType"]) -> [%{"type" => f["refType"]}]
+        true -> []
+      end
+
+    Map.put(out, "to", to)
+  end
+
+  defp maybe_put_to(out, _type, _f), do: out
+
+  defp element_spec(%{} = spec) do
+    spec
+    |> stringify_keys()
+    |> Map.take(["type", "to", "name"])
+  end
+
+  defp element_spec(type) when is_binary(type), do: %{"type" => type}
+  defp element_spec(_), do: %{"type" => "string"}
+
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?(_), do: false
+
+  defp stringify_keys(%{} = m) do
+    Map.new(m, fn {k, v} -> {to_string(k), stringify_keys(v)} end)
+  end
+
+  defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
+  defp stringify_keys(other), do: other
+
+  def schema_hash_for_all_datasets do
+    from(s in SchemaDefinition,
+      group_by: s.dataset,
+      select: {s.dataset, count(s.id), max(s.updated_at)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {ds, n, t} -> {ds, hash_schema_tuple({n, t})} end)
+  end
+
+  defp hash_schema_tuple({nil, nil}), do: "0000000000000000"
+  defp hash_schema_tuple({n, t}) do
+    payload = "#{n}|#{inspect(t)}"
+    :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+  end
+
   # ── Analytics ───────────────────────────────────────────────────────────
 
   @doc "Count documents grouped by type, with published/draft breakdown."
@@ -703,7 +898,7 @@ defmodule Barkpark.Content do
 
         maybe_broadcast(global_topic, {:document_changed, msg})
         maybe_broadcast(doc_topic, {:doc_updated, msg})
-        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document)
+        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id)
 
         {:ok, doc}
 
@@ -723,12 +918,16 @@ defmodule Barkpark.Content do
   end
 
   # Defer webhook dispatch when inside a transaction, fire immediately otherwise.
-  defp maybe_dispatch_webhook(dataset, action, type, doc_id, document) do
+  defp maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id) do
     if Repo.in_transaction?() do
       queue = Process.get(:barkpark_deferred_webhooks, [])
-      Process.put(:barkpark_deferred_webhooks, [{dataset, action, type, doc_id, document} | queue])
+
+      Process.put(
+        :barkpark_deferred_webhooks,
+        [{dataset, action, type, doc_id, document, event_id} | queue]
+      )
     else
-      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document)
+      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document, event_id)
     end
   end
 
@@ -747,8 +946,8 @@ defmodule Barkpark.Content do
 
     webhook_queue
     |> Enum.reverse()
-    |> Enum.each(fn {dataset, action, type, doc_id, document} ->
-      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document)
+    |> Enum.each(fn {dataset, action, type, doc_id, document, event_id} ->
+      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document, event_id)
     end)
   end
 

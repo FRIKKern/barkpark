@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.WebhookController do
   use BarkparkWeb, :controller
 
+  alias Barkpark.Content.Errors
   alias Barkpark.Webhooks
 
   def index(conn, %{"dataset" => dataset}) do
@@ -13,7 +14,7 @@ defmodule BarkparkWeb.WebhookController do
          {:ok, wh} <- Webhooks.get_webhook(id) do
       json(conn, %{webhook: render_webhook(wh)})
     else
-      _ -> conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
+      _ -> webhook_not_found(conn)
     end
   end
 
@@ -25,7 +26,7 @@ defmodule BarkparkWeb.WebhookController do
         conn |> put_status(201) |> json(%{webhook: render_webhook(wh)})
 
       {:error, changeset} ->
-        conn |> put_status(422) |> json(%{error: %{code: "validation_failed", details: format_errors(changeset)}})
+        validation_failed(conn, changeset)
     end
   end
 
@@ -35,14 +36,9 @@ defmodule BarkparkWeb.WebhookController do
          {:ok, updated} <- Webhooks.update_webhook(wh, params) do
       json(conn, %{webhook: render_webhook(updated)})
     else
-      {:error, :invalid_uuid} ->
-        conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
-
-      {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
-
-      {:error, changeset} ->
-        conn |> put_status(422) |> json(%{error: %{code: "validation_failed", details: format_errors(changeset)}})
+      {:error, :invalid_uuid} -> webhook_not_found(conn)
+      {:error, :not_found} -> webhook_not_found(conn)
+      {:error, changeset} -> validation_failed(conn, changeset)
     end
   end
 
@@ -52,8 +48,34 @@ defmodule BarkparkWeb.WebhookController do
          {:ok, _} <- Webhooks.delete_webhook(wh) do
       json(conn, %{deleted: id})
     else
-      _ -> conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "webhook not found"}})
+      _ -> webhook_not_found(conn)
     end
+  end
+
+  defp webhook_not_found(conn) do
+    env =
+      {:error, :not_found}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, "webhook not found")
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  defp validation_failed(conn, changeset) do
+    base = Errors.to_envelope({:error, :malformed}, conn)
+
+    err =
+      base
+      |> Map.put(:code, "validation_failed")
+      |> Map.put(:message, "document failed validation")
+      |> Map.put(:details, format_errors(changeset))
+      |> Map.delete(:status)
+
+    conn
+    |> put_status(422)
+    |> json(%{error: err})
   end
 
   @uuid_regex ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
