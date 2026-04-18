@@ -18,7 +18,13 @@ export type OrderSpec = `${OrderField}:${OrderDirection}`
 /** Filter operators Phoenix supports (content.ex:121-159). Phase 1A set. */
 export type FilterOp = 'eq' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'
 
-/** Log / observability hook surfaces (ADR-010). */
+/**
+ * @internal
+ *
+ * This API is internal to @barkpark/core and may change without notice.
+ * Use the public client API. These types describe transport internals and
+ * may change. (Observability hook surfaces — ADR-010.)
+ */
 export interface RequestContext {
   method: string
   url: string
@@ -29,6 +35,13 @@ export interface RequestContext {
   requestId?: string             // X-Request-ID echoed to caller
 }
 
+/**
+ * @internal
+ *
+ * This API is internal to @barkpark/core and may change without notice.
+ * Use the public client API. These types describe transport internals and
+ * may change.
+ */
 export interface ResponseContext {
   status: number
   ok: boolean

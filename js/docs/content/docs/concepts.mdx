@@ -1,0 +1,115 @@
+---
+title: Concepts
+description: CMS vs database, documents, drafts, perspectives, schemas.
+---
+
+## CMS vs database
+
+Barkpark is an API-first structured-content store. A document is a JSON object with a `_type`, a set of user-defined fields, and a lifecycle — draft, published, or both. That's more structure than a key-value store and less structure than a relational schema.
+
+If you already have Postgres, use Postgres. Reach for Barkpark when your data is content authored by humans who need drafts, previews, and publish workflows, and when that content is consumed by multiple frontends (a marketing site, a mobile app, a docs site) that all want the same shape.
+
+Barkpark is not a CMS that generates HTML. It stores and serves content; rendering is your application's job.
+
+## Documents
+
+Every document carries these top-level fields when returned from the API:
+
+- `_id` — the document's stable identifier. Drafts are prefixed with `drafts.`; published documents are not.
+- `_type` — the schema name this document conforms to, for example `post`.
+- `_draft` — boolean; `true` when `_id` starts with `drafts.`.
+- `_publishedId` — the document's identity stripped of the `drafts.` prefix. Use this when linking documents across perspectives.
+- `_createdAt`, `_updatedAt` — ISO 8601 timestamps in UTC.
+
+User-defined fields from the schema are merged at the top level. The `status` field is reserved and constrained to `draft | published | archived | active | planning | completed`.
+
+A representative envelope:
+
+```json
+{
+  "_id": "p1",
+  "_type": "post",
+  "_draft": false,
+  "_publishedId": "p1",
+  "title": "My Post",
+  "status": "published",
+  "content": { "category": "Tech", "author": "Knut" },
+  "_createdAt": "2026-04-12T09:11:20Z",
+  "_updatedAt": "2026-04-12T09:11:20Z"
+}
+```
+
+Each document also carries an opaque `rev` string. Pass it back as `ifRevisionID` on a mutation to get optimistic-concurrency protection; mismatches return `precondition_failed` (HTTP 412). See [Error catalog](/docs/reference/errors).
+
+## Drafts and publishing
+
+Barkpark stores drafts and published documents as separate rows, following Sanity's convention. A document with `doc_id = "p1"` is published; `doc_id = "drafts.p1"` is the draft of the same logical document.
+
+There are three observable states:
+
+1. **Draft-only** — `drafts.p1` exists, `p1` does not. The document has never been published.
+2. **Published** — `p1` exists, `drafts.p1` does not. No pending edits.
+3. **Published with edits** — both `p1` and `drafts.p1` exist. The draft is the in-progress next version.
+
+Transitions are driven by three mutation verbs:
+
+- `create` creates `drafts.{id}`. If a draft already exists you get `conflict` (HTTP 409) unless `ifRevisionID` matches.
+- `publish` copies `drafts.{id}` to `{id}`, then deletes the draft.
+- `unpublish` moves `{id}` back to `drafts.{id}` and deletes the published row.
+- `discardDraft` deletes `drafts.{id}` and leaves the published row untouched.
+
+Every mutation — including `publish` and `unpublish` — goes through the same `POST /v1/data/mutate/{dataset}` endpoint:
+
+```bash
+curl -X POST http://localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer barkpark-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"publish":{"id":"p1","type":"post"}}]}'
+```
+
+Mutations in a single request apply inside one Postgres transaction. If any mutation fails, all rollback and no SSE events are emitted.
+
+## Perspectives
+
+A perspective is a read-time projection over the draft/published pair. Three are defined:
+
+- `published` — only documents whose `_id` does not start with `drafts.`. This is the default on the public query endpoint and the one your production website should use.
+- `drafts` — prefers the draft when both exist, otherwise returns the published row. This is the Studio's view: editors see their in-progress work.
+- `raw` — returns both drafts and published rows, unmerged. Use this for exports, migrations, or debugging.
+
+Select a perspective via query string:
+
+```bash
+curl "http://localhost:4000/v1/data/query/production/post?perspective=drafts"
+```
+
+There is no mutation perspective. Writes always target the draft (`drafts.{id}`); the `publish` and `unpublish` verbs move documents between states.
+
+## Schemas
+
+A schema definition describes a document type. Each schema has a `name`, a list of `fields`, and a `visibility` flag.
+
+- `visibility: "public"` — the schema and its documents are readable on the public query endpoint without an auth token.
+- `visibility: "private"` — unauthenticated reads return `404 not_found` with `code: "schema_unknown"`. Authenticated reads with a token that has the `read` scope succeed.
+
+Field types supported today:
+
+- `string` — single-line text.
+- `slug` — URL-safe identifier derived from another field.
+- `text` — multi-line text; takes a `rows` option for rendering.
+- `richText` — Portable Text blocks.
+- `image` — reference to a `media_files` row.
+- `select` — enumerated; takes an `options` list.
+- `boolean` — true/false.
+- `datetime` — ISO 8601 timestamp.
+- `color` — hex color.
+- `reference` — typed pointer to another document; takes `refType` or `to`.
+- `array` — list of a given inner type; takes `of`.
+
+Schemas live in Postgres and are editable at runtime via `POST /v1/schemas/{dataset}` (admin scope required). Clients see schema changes immediately; the Go TUI reloads schemas on restart.
+
+## Where to go next
+
+- [Getting Started](/docs/getting-started) — if you haven't run Barkpark locally yet.
+- [Error catalog](/docs/reference/errors) — every error code the API can emit.
+- [Framework Guides — Next.js](/docs/framework-guides/nextjs) — wiring Barkpark into an App Router project.
