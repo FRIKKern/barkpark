@@ -8,6 +8,8 @@ export default defineConfig({
     actions: 'src/actions/index.ts',
     webhook: 'src/webhook/index.ts',
     'draft-mode': 'src/draft-mode/index.ts',
+    revalidate: 'src/revalidate/index.ts',
+    preload: 'src/preload/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,

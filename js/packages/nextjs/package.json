@@ -1,6 +1,6 @@
 {
   "name": "@barkpark/nextjs",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "description": "Next.js App Router integration for the Barkpark headless CMS.",
   "type": "module",
@@ -68,6 +68,26 @@
         "default": "./dist/draft-mode.cjs"
       }
     },
+    "./revalidate": {
+      "import": {
+        "types": "./dist/revalidate.d.mts",
+        "default": "./dist/revalidate.mjs"
+      },
+      "require": {
+        "types": "./dist/revalidate.d.ts",
+        "default": "./dist/revalidate.cjs"
+      }
+    },
+    "./preload": {
+      "import": {
+        "types": "./dist/preload.d.mts",
+        "default": "./dist/preload.mjs"
+      },
+      "require": {
+        "types": "./dist/preload.d.ts",
+        "default": "./dist/preload.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md", "LICENSE"],
@@ -76,6 +96,8 @@
   "scripts": {
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
     "test": "vitest run",
+    "test:server": "vitest run --project=server",
+    "test:client": "vitest run --project=client --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "size": "size-limit"
@@ -99,6 +121,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "size-limit": "^11.1.0",
-    "@size-limit/preset-small-lib": "^11.1.0"
+    "@size-limit/preset-small-lib": "^11.1.0",
+    "jsdom": "^25.0.0",
+    "server-only": "^0.0.1"
   }
 }
