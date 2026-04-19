@@ -1,6 +1,11 @@
 {
   "name": "@barkpark/codegen",
   "version": "1.0.0-preview.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRIKKern/barkpark.git",
+    "directory": "js/packages/codegen"
+  },
   "license": "Apache-2.0",
   "description": "CLI for the Barkpark headless CMS — schema introspection and TypeScript codegen.",
   "type": "module",

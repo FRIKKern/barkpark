@@ -1,6 +1,11 @@
 {
   "name": "@barkpark/react",
   "version": "1.0.0-preview.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRIKKern/barkpark.git",
+    "directory": "js/packages/react"
+  },
   "license": "Apache-2.0",
   "description": "Framework-free React renderers for Barkpark documents (PortableText, Image, Reference).",
   "type": "module",
