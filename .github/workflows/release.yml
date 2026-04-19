@@ -1,0 +1,156 @@
+name: release
+
+# Phase 8 slice 8.0 preflight — Changesets publish pipeline.
+#
+# CRITICAL: `dry_run` input defaults to `true`. Until slice 8.2 opens the first
+# real @preview publish, every run of this workflow MUST go through the dry-run
+# path. The operator must explicitly flip `dry_run=false` via workflow_dispatch
+# to produce a real npm publish.
+#
+# Reference: .doey/plans/masterplan-phase8-20260418-190403-refined.v2.md §8.0
+# (deliverable 3 — wire release.yml default tag to `preview`) and §13.C B4
+# (OIDC provenance + unscoped `create-barkpark-app` compatibility concern).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: "npm dist-tag to publish under"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - next
+          - latest
+      dry_run:
+        description: "If true, run `changeset publish --dry-run` only (no npm writes)"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  push:
+    tags:
+      # Auto-trigger only on 1.x semver tags produced by the release cycle.
+      # Slice 8.0 does not push any tags, so this branch is dormant until 8.2.
+      - "v1.*"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Changesets publish
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Required for npm provenance via OIDC (Sigstore).
+      id-token: write
+      # Read-only on source; changesets itself may open version PRs via a
+      # separate job in a follow-up slice (not this slice).
+      contents: read
+
+    # The publish command runs inside js/; that's where pnpm-workspace.yaml +
+    # .changeset/ live.
+    defaults:
+      run:
+        working-directory: js
+
+    steps:
+      - name: Resolve effective dist-tag + dry-run
+        id: mode
+        working-directory: ${{ github.workspace }}
+        run: |
+          # push-tag triggers use slice 8.10 semantics (latest, real publish).
+          # workflow_dispatch uses operator-supplied inputs.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=${{ github.event.inputs.dist_tag }}" >> "$GITHUB_OUTPUT"
+            echo "dry_run=${{ github.event.inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail loudly if NPM_TOKEN is missing
+        working-directory: ${{ github.workspace }}
+        env:
+          # Intentionally reference the secret here — GitHub masks it in logs;
+          # we only test whether the env var is non-empty, never echo it.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error title=Missing NPM_TOKEN::repository secret NPM_TOKEN is not set — release cannot proceed"
+            exit 1
+          fi
+          echo "NPM_TOKEN present ($(printf %s "${NPM_TOKEN}" | wc -c) bytes)."
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Changesets status (pre-publish check)
+        run: pnpm changeset status --verbose
+
+      - name: Publish (dry-run)
+        if: steps.mode.outputs.dry_run == 'true'
+        env:
+          # Provide auth even for dry-run so the auth path itself is exercised.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          echo "::notice title=Dry-run mode::no npm writes will occur"
+          # --dry-run flag on changeset publish prints the plan and exits 0.
+          # We thread --tag through to exercise the full arg shape.
+          pnpm changeset publish --dry-run --tag "${{ steps.mode.outputs.dist_tag }}"
+
+      - name: Publish (REAL — emits to npm)
+        if: steps.mode.outputs.dry_run != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # NPM_CONFIG_PROVENANCE enables --provenance on every internal
+          # `npm publish` invoked by changesets. Equivalent to passing
+          # --provenance as a flag; per npm docs both forms are accepted.
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          echo "::warning title=Real publish::dist-tag=${{ steps.mode.outputs.dist_tag }} — writes to npm"
+          # TODO(B4): npm provenance for unscoped `create-barkpark-app` has
+          # historically been less well-tested than for scoped packages.
+          # If this step fails specifically on `create-barkpark-app` while
+          # `@barkpark/*` packages succeed, fall back to publishing that one
+          # package without provenance (documented rescue path in
+          # .doey/plans/masterplan-phase8-20260418-190403-refined.v2.md §13.C B4).
+          pnpm changeset publish --tag "${{ steps.mode.outputs.dist_tag }}"
+
+      - name: Summary
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          {
+            echo "## Release run summary"
+            echo ""
+            echo "- trigger: \`${{ github.event_name }}\`"
+            echo "- dist-tag: \`${{ steps.mode.outputs.dist_tag }}\`"
+            echo "- dry_run: \`${{ steps.mode.outputs.dry_run }}\`"
+            echo "- commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
