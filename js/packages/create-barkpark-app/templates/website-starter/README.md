@@ -105,6 +105,23 @@ Content editing happens in the Barkpark Studio that ships with the API:
 
 See the [Barkpark deployment guide](https://github.com/barkpark/barkpark#deploy-to-server).
 
+## Realtime revalidation
+
+This app ships with a Barkpark webhook handler at `app/api/barkpark/webhook/route.ts`.
+
+1. Set `BARKPARK_WEBHOOK_SECRET` in your environment (Vercel/Netlify/etc.):
+   ```bash
+   BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
+   ```
+2. In Barkpark Studio, register a webhook pointing at:
+   ```
+   https://<your-app>/api/barkpark/webhook
+   ```
+   with the same secret. HMAC signing is `v1=<hex>` over the raw request body.
+3. When a doc is created, published, unpublished, updated, or deleted in Studio, the handler calls `revalidateTag` for the canonical tags `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`, invalidating SDK-issued `barkparkFetch` caches automatically.
+
+See `docs/ops/realtime-webhook-setup.md` at the repo root for the full flow.
+
 ## License
 
 Apache-2.0

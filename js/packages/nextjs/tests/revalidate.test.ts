@@ -24,32 +24,85 @@ describe('revalidateBarkpark', () => {
     else process.env.BARKPARK_ALLOW_ALL_REVALIDATE = originalEnv
   })
 
-  it('string input → revalidateTag called with barkpark:doc:<id>', () => {
+  it('sync_tags present → revalidateTag called with each sync_tag exactly once', () => {
+    revalidateBarkpark({
+      event: 'publish',
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      sync_tags: [
+        'bp:ds:production:doc:p1',
+        'bp:ds:production:type:post',
+      ],
+    })
+
+    const calls = mockedRevalidateTag.mock.calls.map((c) => c[0])
+    expect(calls).toContain('bp:ds:production:doc:p1')
+    expect(calls).toContain('bp:ds:production:type:post')
+    expect(calls).toContain('bp:ds:production:_all')
+
+    // Dedup: sync_tags overlap with derived tags should not double-fire.
+    expect(new Set(calls).size).toBe(calls.length)
+  })
+
+  it('no sync_tags → canonical tags constructed from {dataset, type, doc_id}', () => {
+    revalidateBarkpark({
+      event: 'publish',
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+    })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:_all')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(3)
+  })
+
+  it('regression guard: never emits legacy barkpark:doc:* or barkpark:type:* tags', () => {
+    revalidateBarkpark({
+      event: 'publish',
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      sync_tags: ['bp:ds:production:doc:p1', 'bp:ds:production:type:post'],
+    })
+
+    // String input (historical footgun)
     revalidateBarkpark('p1')
-    expect(mockedRevalidateTag).toHaveBeenCalledTimes(1)
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:doc:p1')
+
+    // Legacy shape still accepted — but only produces canonical tags (not the old literals).
+    revalidateBarkpark({ _id: 'p2', _type: 'post', dataset: 'production' })
+
+    const calls = mockedRevalidateTag.mock.calls.map((c) => String(c[0]))
+    for (const tag of calls) {
+      expect(tag.startsWith('barkpark:doc:')).toBe(false)
+      expect(tag.startsWith('barkpark:type:')).toBe(false)
+    }
+  })
+
+  it('legacy {_id, _type, dataset} → canonical bp:ds:* tags', () => {
+    revalidateBarkpark({ _id: 'p1', _type: 'post', dataset: 'production' })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:_all')
+  })
+
+  it('legacy {ids, types, dataset} → fans out canonical tags', () => {
+    revalidateBarkpark({ ids: ['a', 'b'], types: ['t1', 't2'], dataset: 'production' })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:a')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:b')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:t1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:t2')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:_all')
+  })
+
+  it('string input → no-op (no dataset context)', () => {
+    revalidateBarkpark('p1')
+    expect(mockedRevalidateTag).not.toHaveBeenCalled()
     expect(mockedRevalidatePath).not.toHaveBeenCalled()
-  })
-
-  it('{_id, _type} → both tags revalidated', () => {
-    revalidateBarkpark({ _id: 'p1', _type: 'post' })
-    expect(mockedRevalidateTag).toHaveBeenCalledTimes(2)
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:doc:p1')
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:type:post')
-  })
-
-  it('{ids: [a,b]} → two tag calls', () => {
-    revalidateBarkpark({ ids: ['a', 'b'] })
-    expect(mockedRevalidateTag).toHaveBeenCalledTimes(2)
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:doc:a')
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:doc:b')
-  })
-
-  it('{types: [t1,t2]} → two tag calls', () => {
-    revalidateBarkpark({ types: ['t1', 't2'] })
-    expect(mockedRevalidateTag).toHaveBeenCalledTimes(2)
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:type:t1')
-    expect(mockedRevalidateTag).toHaveBeenCalledWith('barkpark:type:t2')
   })
 
   it("{path: '/'} WITHOUT env → throws", () => {
