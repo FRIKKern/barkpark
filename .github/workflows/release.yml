@@ -140,9 +140,12 @@ jobs:
           NPM_CONFIG_PROVENANCE: "true"
         run: |
           echo "::notice title=Dry-run mode::no npm writes will occur"
-          # --dry-run flag on changeset publish prints the plan and exits 0.
-          # We thread --tag through to exercise the full arg shape.
-          pnpm changeset publish --dry-run --tag "${{ steps.mode.outputs.dist_tag }}"
+          # `changeset publish` does not support --dry-run. pnpm's recursive
+          # publish does: it resolves workspace:* / workspace:^ protocols in
+          # the published tarball and walks each publishable package exactly
+          # as the real publish would. --no-git-checks skips the "must be on
+          # clean main" gate (we're on a feature branch by design).
+          pnpm publish -r --dry-run --tag "${{ steps.mode.outputs.dist_tag }}" --access public --no-git-checks
 
       - name: Publish (REAL — emits to npm)
         if: steps.mode.outputs.dry_run != 'true'
