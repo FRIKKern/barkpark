@@ -53,12 +53,54 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  host =
+    case System.get_env("PHX_HOST") do
+      nil ->
+        raise """
+        environment variable PHX_HOST is missing.
+
+        PHX_HOST must be the public DNS hostname (e.g., api.barkpark.cloud),
+        not an IP. Phoenix's Endpoint.check_origin whitelists exactly one
+        host+scheme pair; a mismatch returns 403 on /live/websocket and
+        silently breaks LiveView (Studio becomes click-dead).
+
+        See docs/ops/studio-nav-bug-2026-04-19.md (task #11) for the incident
+        and `make domain-cutover DOMAIN=...` for the remediation workflow.
+        """
+
+      "" ->
+        raise """
+        environment variable PHX_HOST is empty.
+        Set PHX_HOST to the public DNS hostname. See
+        docs/ops/studio-nav-bug-2026-04-19.md (task #11).
+        """
+
+      value ->
+        value
+    end
+
+  scheme = System.get_env("PHX_SCHEME", "http")
+
+  if scheme == "https" and Regex.match?(~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, host) do
+    raise """
+    PHX_HOST is a literal IPv4 address (#{host}) but PHX_SCHEME=https.
+
+    Phoenix Endpoint.check_origin will whitelist https://#{host}, but browsers
+    reaching the site via a DNS name will send a different Origin header and
+    receive 403 on /live/websocket — LiveView (Studio) will silently fail.
+
+    Fix: set PHX_HOST to the DNS hostname served by your TLS terminator
+    (Caddy, nginx, Cloudflare, etc.). If you truly need IP-only access, set
+    PHX_SCHEME=http and terminate TLS elsewhere.
+
+    See docs/ops/studio-nav-bug-2026-04-19.md (task #11).
+    """
+  end
 
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :barkpark, BarkparkWeb.Endpoint,
-    url: [host: host, port: String.to_integer(System.get_env("PORT", "4000")), scheme: System.get_env("PHX_SCHEME", "http")],
+    url: [host: host, port: String.to_integer(System.get_env("PORT", "4000")), scheme: scheme],
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
