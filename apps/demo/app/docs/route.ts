@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
 
 export function GET() {
-  return NextResponse.redirect("https://docs.barkpark.cloud/", 308);
+  return NextResponse.redirect("https://github.com/FRIKKern/barkpark#readme", 307);
 }
