@@ -1,5 +1,16 @@
 # @barkpark/react
 
+## 1.0.0-preview.1
+
+### Minor Changes
+
+- [`c7b9f54`](https://github.com/FRIKKern/barkpark/commit/c7b9f54047a51a134cfec1a047061fe0f9679011) Thanks [@FRIKKern](https://github.com/FRIKKern)! - BREAKING: defineLive now returns {barkparkFetch, defineLive} only; import BarkparkLive/BarkparkLiveProvider from @barkpark/nextjs/client. RSC-safe react-server export. Closes #1.
+
+### Patch Changes
+
+- Updated dependencies [[`47b96c8`](https://github.com/FRIKKern/barkpark/commit/47b96c8b28ab8901be5fe971ba7762dcfdffd662)]:
+  - @barkpark/core@1.0.0-preview.2
+
 ## preview.1
 
 ### Patch Changes
