@@ -1,0 +1,124 @@
+name: retag
+
+# Manual npm dist-tag remediation workflow.
+#
+# Why this exists: release.yml's `dist_tag` workflow input is informational only
+# — it is never wired to a `--tag` flag on `pnpm changeset publish`, and in
+# pre-mode the published dist-tag is governed entirely by `.changeset/pre.json`.
+# When that wiring assumption breaks (e.g. pre-mode not active on the published
+# commit), packages can land on the wrong dist-tag and `npm dist-tag` calls from
+# a developer machine return HTTP 403 — only the CI NPM_TOKEN holds scope rights.
+#
+# This workflow performs a SAFE, reusable retag from CI:
+#   1. Add `add_tag` -> version  (idempotent on npm).
+#   2. Optionally remove `remove_tag` from the package — but ONLY if it is not
+#      a protected channel (`preview`, `next`). Removing those channels would
+#      break installs for everyone tracking them; the guard skips (does not
+#      fail) in that case so the operator gets a warning instead of an alarm.
+#
+# Reference: docs/adr/0002-npm-dist-tag-publish.md
+# Incident:  release.yml run 24627335562 (2026-04-19) published
+#            @barkpark/core@1.0.0-preview.1 + @barkpark/nextjs@1.0.0-preview.1
+#            to `latest` instead of `preview`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: "Fully-qualified npm package name (e.g. @barkpark/core)"
+        required: true
+        type: string
+      version:
+        description: "Exact version to point the dist-tag at (e.g. 1.0.0-preview.1)"
+        required: true
+        type: string
+      add_tag:
+        description: "dist-tag to add/move onto <version> (e.g. preview)"
+        required: true
+        type: string
+      remove_tag:
+        description: "dist-tag to remove from the package (optional; never 'preview' or 'next')"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  # Serialize retag operations on the same package to avoid races on the
+  # npm dist-tag table.
+  group: retag-${{ github.event.inputs.package_name }}
+  cancel-in-progress: false
+
+jobs:
+  retag:
+    name: npm dist-tag remediation
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Configure npm auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error title=Missing NPM_TOKEN::repository secret NPM_TOKEN is not set — retag cannot proceed"
+            exit 1
+          fi
+          npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
+
+      - name: Pre-state (informational)
+        run: npm view "${{ inputs.package_name }}" dist-tags
+
+      - name: Add dist-tag
+        run: |
+          echo "::notice title=Adding dist-tag::${{ inputs.package_name }}@${{ inputs.version }} -> ${{ inputs.add_tag }}"
+          npm dist-tag add "${{ inputs.package_name }}@${{ inputs.version }}" "${{ inputs.add_tag }}"
+
+      - name: Remove dist-tag (guarded)
+        # Guard rationale: protected channels `preview` and `next` are how
+        # downstream installs subscribe to the pre-release stream. Removing
+        # them — even momentarily — yanks the channel for every consumer
+        # tracking it. We refuse to do it from this workflow; if such a
+        # change is genuinely needed, it must be a deliberate, separately
+        # reviewed action. The step is SKIPPED (not failed) so that an
+        # operator who supplied the wrong tag sees a warning rather than a
+        # red CI run.
+        env:
+          REMOVE_TAG: ${{ inputs.remove_tag }}
+          PACKAGE: ${{ inputs.package_name }}
+        run: |
+          if [ -z "${REMOVE_TAG}" ]; then
+            echo "::notice title=No remove_tag::nothing to remove — skipping"
+            exit 0
+          fi
+          if [ "${REMOVE_TAG}" = "preview" ] || [ "${REMOVE_TAG}" = "next" ]; then
+            echo "::warning title=Protected dist-tag::refusing to remove '${REMOVE_TAG}' from ${PACKAGE} — protected channel; skipping"
+            exit 0
+          fi
+          echo "::notice title=Removing dist-tag::${PACKAGE} -> ${REMOVE_TAG}"
+          npm dist-tag rm "${PACKAGE}" "${REMOVE_TAG}"
+
+      - name: Verify post-state
+        run: npm view "${{ inputs.package_name }}" dist-tags
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Retag run"
+            echo ""
+            echo "- package: \`${{ inputs.package_name }}\`"
+            echo "- version: \`${{ inputs.version }}\`"
+            echo "- add_tag: \`${{ inputs.add_tag }}\`"
+            echo "- remove_tag: \`${{ inputs.remove_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
