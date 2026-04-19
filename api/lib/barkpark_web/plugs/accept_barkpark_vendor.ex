@@ -16,15 +16,20 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
   def init(opts), do: opts
 
   def call(conn, _opts) do
+    conn = fetch_query_params(conn)
+    accept_header = conn |> get_req_header("accept") |> List.first() || ""
+
+    qp_suppress = conn.query_params["filterresponse"] == "false"
+    accept_suppress = String.contains?(accept_header, "+filterresponse=false")
+
+    conn = assign(conn, :barkpark_filterresponse, not (qp_suppress or accept_suppress))
+
     case get_req_header(conn, "accept") do
       [] ->
         conn
 
       [header | _] ->
         if vendor?(header) do
-          # TODO(P2): honor `+filterresponse=false` by suppressing the filter-aware
-          # envelope wrapper. For Phase 1A the modifier is cosmetic — we acknowledge
-          # the header, forward the current envelope, and let clients flip it later.
           conn
           |> assign(:barkpark_vendor_accept, true)
           |> put_req_header("accept", header <> ", application/json")

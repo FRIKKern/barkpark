@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Contract.AcceptVendorTest do
   test "query with vendor Accept returns envelope + vendor content-type", %{conn: conn} do
     resp =
       conn
-      |> put_req_header("accept", "application/vnd.barkpark+filterresponse=false")
+      |> put_req_header("accept", "application/vnd.barkpark+json")
       |> get("/v1/data/query/test/post")
 
     assert resp.status == 200

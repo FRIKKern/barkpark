@@ -75,11 +75,19 @@ defmodule BarkparkWeb.QueryController do
         if etag_matches?(hv, etag) do
           conn |> send_resp(304, "") |> halt()
         else
-          json(conn, envelope(inner, sync_tags, etag, elapsed_ms, dataset))
+          respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
         end
 
       _ ->
-        json(conn, envelope(inner, sync_tags, etag, elapsed_ms, dataset))
+        respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
+    end
+  end
+
+  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset) do
+    if Map.get(conn.assigns, :barkpark_filterresponse, true) do
+      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, dataset))
+    else
+      json(conn, inner)
     end
   end
 
