@@ -15,6 +15,14 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :unauthorized}),
     do: %{code: "unauthorized", message: "missing or invalid token", status: 401}
 
+  defp build({:error, :replay}),
+    do: %{
+      code: "unauthorized",
+      message: "preview token replay detected",
+      status: 401,
+      reason: "replay"
+    }
+
   defp build({:error, :forbidden}),
     do: %{code: "forbidden", message: "token lacks required permission", status: 403}
 
