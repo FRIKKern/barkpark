@@ -92,6 +92,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Ensure main ref exists locally
+        # changesets CLI (config.baseBranch = "main") requires a local `main`
+        # ref to diff against on feature-branch runs. actions/checkout leaves
+        # only `origin/main`; materialize a local branch pointing at it.
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ! git rev-parse --verify main >/dev/null 2>&1; then
+            git branch main origin/main
+          fi
+          git rev-parse --short main
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -109,7 +120,16 @@ jobs:
       - name: Build all packages
         run: pnpm -r build
 
-      - name: Changesets status (pre-publish check)
+      - name: Changesets status (informational)
+        # In pre-mode, after `changeset version` has consumed a changeset into
+        # pre.json.changesets, the local tree shows version-bumped packages
+        # with no pending .changeset/*.md — which makes `status` exit 1 with
+        # "Some packages have been changed but no changesets were found."
+        # This is expected for a publish-only run: the real gate is the
+        # `changeset publish` invocation below (which prints "No unreleased
+        # changesets found" and exits 0 when there is nothing to publish).
+        # Run as informational only.
+        continue-on-error: true
         run: pnpm changeset status --verbose
 
       - name: Publish (dry-run)
@@ -120,9 +140,12 @@ jobs:
           NPM_CONFIG_PROVENANCE: "true"
         run: |
           echo "::notice title=Dry-run mode::no npm writes will occur"
-          # --dry-run flag on changeset publish prints the plan and exits 0.
-          # We thread --tag through to exercise the full arg shape.
-          pnpm changeset publish --dry-run --tag "${{ steps.mode.outputs.dist_tag }}"
+          # `changeset publish` does not support --dry-run. pnpm's recursive
+          # publish does: it resolves workspace:* / workspace:^ protocols in
+          # the published tarball and walks each publishable package exactly
+          # as the real publish would. --no-git-checks skips the "must be on
+          # clean main" gate (we're on a feature branch by design).
+          pnpm publish -r --dry-run --tag "${{ steps.mode.outputs.dist_tag }}" --access public --no-git-checks
 
       - name: Publish (REAL — emits to npm)
         if: steps.mode.outputs.dry_run != 'true'
