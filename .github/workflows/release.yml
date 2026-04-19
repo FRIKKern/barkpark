@@ -145,7 +145,12 @@ jobs:
           # the published tarball and walks each publishable package exactly
           # as the real publish would. --no-git-checks skips the "must be on
           # clean main" gate (we're on a feature branch by design).
-          pnpm publish -r --dry-run --tag "${{ steps.mode.outputs.dist_tag }}" --access public --no-git-checks
+          # NOTE: no --tag here. In pre-mode, .changeset/pre.json auto-applies
+          # the pre-tag ("preview"); both `changeset publish` and the pnpm
+          # dry-run equivalent must not pass an explicit --tag or pre-mode
+          # rejects with "Releasing under custom tag is not allowed in pre
+          # mode". The dist_tag workflow input is reserved for post-pre-exit.
+          pnpm publish -r --dry-run --access public --no-git-checks
 
       - name: Publish (REAL — emits to npm)
         if: steps.mode.outputs.dry_run != 'true'
@@ -163,7 +168,11 @@ jobs:
           # `@barkpark/*` packages succeed, fall back to publishing that one
           # package without provenance (documented rescue path in
           # .doey/plans/masterplan-phase8-20260418-190403-refined.v2.md §13.C B4).
-          pnpm changeset publish --tag "${{ steps.mode.outputs.dist_tag }}"
+          # NOTE: no --tag here. Pre-mode (.changeset/pre.json tag="preview")
+          # auto-applies the dist-tag; passing --tag explicitly fails with
+          # "Releasing under custom tag is not allowed in pre mode". When
+          # pre-mode is exited, restore --tag "${{ steps.mode.outputs.dist_tag }}".
+          pnpm changeset publish
 
       - name: Summary
         if: always()
