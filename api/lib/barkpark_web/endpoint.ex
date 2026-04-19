@@ -48,30 +48,7 @@ defmodule BarkparkWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
-  plug Corsica,
-    origins: "*",
-    allow_methods: ~w(GET POST PUT PATCH DELETE OPTIONS),
-    allow_headers: ~w(
-      authorization
-      accept
-      content-type
-      if-match
-      if-none-match
-      idempotency-key
-      x-barkpark-api-version
-      x-barkpark-preview-token
-      last-event-id
-    ),
-    expose_headers: ~w(
-      etag
-      x-request-id
-      retry-after
-      x-barkpark-signature
-      x-barkpark-timestamp
-      x-barkpark-event-id
-    ),
-    max_age: 600,
-    log: [rejected: :warn]
+  plug BarkparkWeb.Plugs.DatasetCors
 
   plug BarkparkWeb.Router
 

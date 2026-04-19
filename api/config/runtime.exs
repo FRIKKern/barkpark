@@ -140,6 +140,11 @@ if config_env() == :prod do
 
   config :barkpark, :rate_limits, rate_limits
 
+  if origins = System.get_env("DEFAULT_CORS_ORIGINS") do
+    parsed = origins |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    config :barkpark, :default_cors_origins, parsed
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
