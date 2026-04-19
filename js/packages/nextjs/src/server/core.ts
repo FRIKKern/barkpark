@@ -15,16 +15,7 @@ import {
   buildQueryString,
 } from '@barkpark/core'
 
-import {
-  BarkparkLive as BarkparkLiveComponent,
-  BarkparkLiveProvider as BarkparkLiveProviderComponent,
-  type BarkparkLiveProps,
-  type BarkparkLiveProviderProps,
-} from '../client/live'
-
 import type { BarkparkFetchOptions, BarkparkServerConfig } from './types'
-
-import type { JSX, ReactNode } from 'react'
 
 const VENDOR_ACCEPT = 'application/vnd.barkpark+json'
 
@@ -191,19 +182,19 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
   return (await resp.json()) as T
 }
 
-type BoundBarkparkLiveProps = Omit<BarkparkLiveProps, 'client'>
-type BoundBarkparkLiveProviderProps = Omit<BarkparkLiveProviderProps, 'client'> & { children?: ReactNode }
-
 /**
  * Inner factory — returns the per-config bundle. {@link createBarkparkServer}
  * delegates here.
  *
- * Pre-binds `BarkparkLive` / `BarkparkLiveProvider` to `cfg.client` so callers
- * don't thread `client` through each render. The pre-bound components still
- * live behind the `'use client'` boundary in `client/live.tsx`.
+ * Returns only the server-safe `barkparkFetch` bound to `cfg`. `BarkparkLive` /
+ * `BarkparkLiveProvider` are intentionally NOT returned here: importing the
+ * client component module from the server graph would pull `React.createContext`
+ * into a `react-server` context (Next 15 RSC), which crashes with
+ * `TypeError: (0, react.createContext) is not a function`. Import them directly
+ * from `@barkpark/nextjs/client` instead, and thread `cfg.client` as a prop.
  *
  * @param cfg — {@link BarkparkServerConfig}; `client` + `serverToken` required.
- * @returns `{ barkparkFetch, BarkparkLive, BarkparkLiveProvider }`.
+ * @returns `{ barkparkFetch }`.
  * @throws {@link BarkparkValidationError} when `cfg` is malformed.
  *
  * @example
@@ -212,42 +203,30 @@ type BoundBarkparkLiveProviderProps = Omit<BarkparkLiveProviderProps, 'client'> 
  * import { defineLive } from '@barkpark/nextjs/server'
  * import { client } from './barkpark-client'
  *
- * export const { barkparkFetch, BarkparkLive, BarkparkLiveProvider } =
+ * export const { barkparkFetch } =
  *   defineLive({ client, serverToken: process.env.BARKPARK_SERVER_TOKEN! })
+ *
+ * // In a client component:
+ * // import { BarkparkLive, BarkparkLiveProvider } from '@barkpark/nextjs/client'
  */
 export function defineLive(cfg: BarkparkServerConfig): {
   barkparkFetch: <T>(opts?: BarkparkFetchOptions) => Promise<T>
-  BarkparkLive: (props?: BoundBarkparkLiveProps) => JSX.Element | null
-  BarkparkLiveProvider: (props: BoundBarkparkLiveProviderProps) => JSX.Element
 } {
   validateConfig(cfg)
   const barkparkFetch = <T>(opts?: BarkparkFetchOptions) => barkparkFetchInner<T>(cfg, opts)
-
-  // Pre-bind the underlying client component to cfg.client so consumers can render
-  // <BarkparkLive /> without threading the client prop. The wrapper preserves the
-  // 'use client' boundary because BarkparkLiveComponent originates from a 'use client' file.
-  const BoundBarkparkLive = (props: BoundBarkparkLiveProps = {}): JSX.Element | null => {
-    const merged: BarkparkLiveProps = { client: cfg.client, ...props }
-    return BarkparkLiveComponent(merged)
-  }
-  const BoundBarkparkLiveProvider = (props: BoundBarkparkLiveProviderProps): JSX.Element => {
-    return BarkparkLiveProviderComponent({ client: cfg.client, ...props })
-  }
-
-  return {
-    barkparkFetch,
-    BarkparkLive: BoundBarkparkLive,
-    BarkparkLiveProvider: BoundBarkparkLiveProvider,
-  }
+  return { barkparkFetch }
 }
 
 /**
- * Top-level convenience factory. Returns `barkparkFetch` + the bound
- * `BarkparkLive` components, plus {@link defineLive} re-exposed for cases
- * where callers want to build extra per-config bundles.
+ * Top-level convenience factory. Returns `barkparkFetch` plus {@link defineLive}
+ * re-exposed for callers who want to build extra per-config bundles.
+ *
+ * `BarkparkLive` / `BarkparkLiveProvider` are intentionally NOT returned —
+ * import them from `@barkpark/nextjs/client` to keep the server graph free of
+ * `React.createContext` under Next 15's `react-server` condition.
  *
  * @param cfg — {@link BarkparkServerConfig}; `client` + `serverToken` required.
- * @returns `{ barkparkFetch, BarkparkLive, BarkparkLiveProvider, defineLive }`.
+ * @returns `{ barkparkFetch, defineLive }`.
  * @throws {@link BarkparkValidationError} when `cfg` is malformed.
  *
  * @example
@@ -269,8 +248,6 @@ export function defineLive(cfg: BarkparkServerConfig): {
  */
 export function createBarkparkServer(cfg: BarkparkServerConfig): {
   barkparkFetch: <T>(opts?: BarkparkFetchOptions) => Promise<T>
-  BarkparkLive: (props?: BoundBarkparkLiveProps) => JSX.Element | null
-  BarkparkLiveProvider: (props: BoundBarkparkLiveProviderProps) => JSX.Element
   defineLive: typeof defineLive
 } {
   const inner = defineLive(cfg)
@@ -290,13 +267,8 @@ function validateConfig(cfg: BarkparkServerConfig): void {
 }
 
 // ---------------------------------------------------------------------------
-// Direct re-exports of the real client components for `@barkpark/nextjs/server`
-// consumers who'd rather use their own Provider wiring. These reference the
-// 'use client' source file in src/client/live.tsx; tsup splitting plus that
-// directive keeps Next's client/server boundary intact.
+// BarkparkLive / BarkparkLiveProvider are NOT re-exported from the server entry.
+// They live in a `'use client'` module (`src/client/live.tsx`) and would pull
+// `React.createContext` into the Next 15 `react-server` graph if imported here.
+// Consumers: `import { BarkparkLive, BarkparkLiveProvider } from '@barkpark/nextjs/client'`.
 // ---------------------------------------------------------------------------
-
-export {
-  BarkparkLive,
-  BarkparkLiveProvider,
-} from '../client/live'
