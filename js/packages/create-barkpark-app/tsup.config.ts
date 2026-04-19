@@ -1,6 +1,6 @@
 import { defineConfig } from 'tsup'
 
-const BARKPARK_VERSION = '0.1.0'
+const BARKPARK_VERSION = '1.0.0-preview.0'
 
 export default defineConfig({
   entry: { index: 'src/index.ts' },
