@@ -1,0 +1,29 @@
+
+> smoke-w2@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3000
+   - Network:      http://204.168.223.106:3000
+   - Experiments (use with caution):
+     · serverActions
+
+ ✓ Starting...
+ ✓ Ready in 1609ms
+ ○ Compiling / ...
+ ✓ Compiled / in 3.6s (614 modules)
+ ⨯ TypeError: (0 , react__WEBPACK_IMPORTED_MODULE_0__.createContext) is not a function
+    at eval (webpack-internal:///(rsc)/./lib/barkpark.ts:10:81)
+    at <unknown> (rsc)/./lib/barkpark.ts (/tmp/bp-cli-test-w2/smoke-w2/.next/server/app/page.js:77:1)
+    at eval (webpack-internal:///(rsc)/./app/page.tsx:9:71)
+    at <unknown> (rsc)/./app/page.tsx (/tmp/bp-cli-test-w2/smoke-w2/.next/server/app/page.js:55:1)
+ ⨯ TypeError: (0 , react__WEBPACK_IMPORTED_MODULE_0__.createContext) is not a function
+    at eval (webpack-internal:///(rsc)/./lib/barkpark.ts:10:81)
+    at <unknown> (rsc)/./lib/barkpark.ts (/tmp/bp-cli-test-w2/smoke-w2/.next/server/app/page.js:77:1)
+    at eval (webpack-internal:///(rsc)/./app/page.tsx:9:71)
+    at <unknown> (rsc)/./app/page.tsx (/tmp/bp-cli-test-w2/smoke-w2/.next/server/app/page.js:55:1) {
+  page: '/'
+}
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 3.1s (946 modules)
+ GET / 500 in 7934ms

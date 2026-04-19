@@ -1,7 +1,7 @@
 declare const __BARKPARK_VERSION__: string
 
 export const BARKPARK_VERSION: string =
-  typeof __BARKPARK_VERSION__ !== 'undefined' ? __BARKPARK_VERSION__ : '0.1.0'
+  typeof __BARKPARK_VERSION__ !== 'undefined' ? __BARKPARK_VERSION__ : '1.0.0-preview.0'
 
 export const AVAILABLE_TEMPLATES = ['website-starter', 'blog-starter'] as const
 

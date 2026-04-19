@@ -1,0 +1,22 @@
+
+> smoke-w2@0.1.0 build
+> next build
+
+   ▲ Next.js 15.5.15
+   - Experiments (use with caution):
+     · serverActions
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 5.3s
+   Linting and checking validity of types ...
+   Collecting page data ...
+[Error: Failed to collect configuration for /pricing] {
+  [cause]: TypeError: (0 , d.createContext) is not a function
+      at 49833 (.next/server/app/pricing/page.js:1:4145)
+      at c (.next/server/webpack-runtime.js:1:127)
+      at 8883 (.next/server/app/pricing/page.js:1:319)
+      at c (.next/server/webpack-runtime.js:1:127)
+}
+
+> Build error occurred
+[Error: Failed to collect page data for /pricing] { type: 'Error' }
