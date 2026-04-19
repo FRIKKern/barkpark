@@ -159,12 +159,14 @@ describe('barkparkFetch — draft branch', () => {
 })
 
 describe('createBarkparkServer + defineLive', () => {
-  it('createBarkparkServer returns barkparkFetch + Live stubs + defineLive', () => {
+  it('createBarkparkServer returns barkparkFetch + defineLive (no Live components — those live on the client entry)', () => {
     const out = createBarkparkServer(makeCfg())
     expect(typeof out.barkparkFetch).toBe('function')
-    expect(typeof out.BarkparkLive).toBe('function')
-    expect(typeof out.BarkparkLiveProvider).toBe('function')
     expect(typeof out.defineLive).toBe('function')
+    // BarkparkLive / BarkparkLiveProvider deliberately absent — import from
+    // '@barkpark/nextjs/client' to stay outside the react-server graph.
+    expect((out as Record<string, unknown>).BarkparkLive).toBeUndefined()
+    expect((out as Record<string, unknown>).BarkparkLiveProvider).toBeUndefined()
   })
 
   it('barkparkFetch from createBarkparkServer behaves the same as defineLive(cfg).barkparkFetch', async () => {
@@ -176,11 +178,5 @@ describe('createBarkparkServer + defineLive', () => {
     const inner = defineLive(cfg)
     await expect(top.barkparkFetch({ type: 'post' })).resolves.toEqual({ documents: [] })
     await expect(inner.barkparkFetch({ type: 'post' })).resolves.toEqual({ documents: [] })
-  })
-
-  it('returns Live components bound to cfg.client (real rendering covered by tests/live.client.test.tsx)', () => {
-    const { BarkparkLive, BarkparkLiveProvider } = createBarkparkServer(makeCfg())
-    expect(typeof BarkparkLive).toBe('function')
-    expect(typeof BarkparkLiveProvider).toBe('function')
   })
 })
