@@ -117,6 +117,19 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Changesets version
+        # Consume pending .changeset/*.md files into package.json version bumps
+        # (and, in pre-mode, append their ids to .changeset/pre.json.changesets).
+        # Skipping this step is the root of the "publish skipped every package
+        # because versions were already published" misfire — see Task #8 and
+        # Boss msg 144 PATH B. Safe to run when no changesets are pending:
+        # `changeset version` is a no-op if .changeset/ has no unconsumed
+        # entries. Lockfile is refreshed in --lockfile-only mode so the next
+        # step sees the new versions without a full re-resolve.
+        run: |
+          pnpm changeset version
+          pnpm install --lockfile-only
+
       - name: Build all packages
         run: pnpm -r build
 

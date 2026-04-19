@@ -12,6 +12,8 @@
     "@barkpark/react": "0.0.0"
   },
   "changesets": [
-    "phase-8-initial-preview"
+    "phase-8-initial-preview",
+    "preview2-rsc-boundary",
+    "sdk-envelope-fix"
   ]
 }
