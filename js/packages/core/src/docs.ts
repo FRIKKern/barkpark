@@ -5,8 +5,8 @@
 // GET /v1/data/query/:dataset/:type?filter[...]=...&order=...&limit=...&offset=...
 // Returns a DocsBuilder<T> wired to transport — each .find() / .findOne() hits the wire.
 //
-// Envelope shape per w6.3-phoenix-contract.md §query and types.ts ReadEnvelope<T>:
-//   { result: { perspective, documents: T[], count, limit, offset }, syncTags, ms, etag, schemaHash }
+// Envelope shape (Phoenix query_controller — flat, top-level):
+//   { perspective, documents: T[], count, limit, offset }
 
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
@@ -15,7 +15,6 @@ import type {
   BarkparkDocument,
   DocsBuilder,
   Perspective,
-  ReadEnvelope,
 } from './types'
 
 export interface DocsOperationOptions {
@@ -55,7 +54,7 @@ export function createDocsOperation<T = BarkparkDocument>(
 
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
     if (opts?.signal !== undefined) reqOpts.signal = opts.signal
-    const { data } = await request<ReadEnvelope<QueryResultBody<T>>>(config, path, reqOpts)
-    return data.result.documents ?? []
+    const { data } = await request<QueryResultBody<T>>(config, path, reqOpts)
+    return data.documents ?? []
   })
 }

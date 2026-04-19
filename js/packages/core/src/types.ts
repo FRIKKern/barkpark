@@ -97,14 +97,25 @@ export interface BarkparkDocument {
   [field: string]: unknown
 }
 
-/** Read envelope (Phoenix query/doc controllers). */
-export interface ReadEnvelope<T = unknown> {
-  result: T
-  syncTags: string[]
-  ms: number
-  etag: string
-  schemaHash: string
+/**
+ * Query endpoint envelope (Phoenix query_controller).
+ * Shape is flat — fields live at the top level, not under a `result` wrapper.
+ * Verified against GET /v1/data/query/:dataset/:type on the live API (2026-04).
+ */
+export interface QueryEnvelope<T = BarkparkDocument> {
+  perspective: Perspective
+  documents: T[]
+  count: number
+  limit: number
+  offset: number
 }
+
+/**
+ * @deprecated Phoenix returns flat envelopes. `query` responses are {@link QueryEnvelope};
+ * `doc` responses are the document body directly. This type is retained only as a type alias
+ * for the document body and will be removed in a future preview.
+ */
+export type ReadEnvelope<T = unknown> = T
 
 /** Mutate envelope (Phoenix mutate_controller). */
 export interface MutateResult {

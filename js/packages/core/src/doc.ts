@@ -2,7 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 // Read-side operation: single-document fetch.
-// GET /v1/data/doc/:dataset/:type/:id → 200 ReadEnvelope<BarkparkDocument> | 404 not_found.
+// GET /v1/data/doc/:dataset/:type/:id → 200 {document fields at top level} | 404 not_found.
 // On 404, transport throws BarkparkNotFoundError; getDoc catches and returns { data: null }
 // so callers (client.doc) can treat missing as null per ADR-009 / w6.2-impl-spec §Status → class.
 
@@ -12,7 +12,6 @@ import type {
   BarkparkClientConfig,
   BarkparkDocument,
   Perspective,
-  ReadEnvelope,
 } from './types'
 
 export interface DocResult<T> {
@@ -55,9 +54,9 @@ export async function getDoc<T = BarkparkDocument>(
   try {
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
     if (opts?.signal !== undefined) reqOpts.signal = opts.signal
-    const { data, response } = await request<ReadEnvelope<T>>(config, path, reqOpts)
+    const { data, response } = await request<T>(config, path, reqOpts)
     const etag = stripEtagQuotes(response.headers.get('ETag'))
-    const result: DocResult<T> = { data: data.result }
+    const result: DocResult<T> = { data }
     if (etag !== undefined) result.etag = etag
     return result
   } catch (err) {
