@@ -55,6 +55,14 @@ defmodule Barkpark.PreviewToken do
 
   def verify(_, _), do: {:error, :invalid}
 
+  @doc """
+  Records the JTI of a preview token as used.
+
+  Returns `{:ok, claims}` on first use and `{:error, :already_used}` when the JTI was
+  previously recorded — this is the replay-protection signal consumed by the
+  validation plug. Entries are bounded by `expires_at` (= the token's `exp` claim);
+  `sweep/1` reaps rows past the grace period so the table does not grow unbounded.
+  """
   def record_jti(claims, _opts \\ []) when is_map(claims) do
     now = DateTime.utc_now()
 
@@ -67,8 +75,31 @@ defmodule Barkpark.PreviewToken do
       expires_at: from_unix(Map.get(claims, "exp"), now)
     }
 
-    Repo.insert_all("preview_token_jti", [row], on_conflict: :nothing, conflict_target: :jti)
-    :ok
+    case Repo.insert_all("preview_token_jti", [row],
+           on_conflict: :nothing,
+           conflict_target: :jti
+         ) do
+      {1, _} -> {:ok, claims}
+      {0, _} -> {:error, :already_used}
+    end
+  end
+
+  @doc """
+  Combines `verify/2` and `record_jti/1` in one call for the preview-token plug path.
+
+  Returns:
+    * `{:ok, claims}` — signature valid, not expired, not revoked, first use
+    * `{:error, :already_used}` — signature valid but JTI was already recorded (replay)
+    * `{:error, :invalid | :expired | :revoked | :bad_signature}` — from verify
+  """
+  @spec verify_and_record(binary(), binary()) ::
+          {:ok, map()}
+          | {:error, :invalid | :expired | :revoked | :bad_signature | :already_used}
+  def verify_and_record(raw, secret) when is_binary(raw) and is_binary(secret) do
+    case verify(raw, secret) do
+      {:ok, claims} -> record_jti(claims)
+      {:error, _} = err -> err
+    end
   end
 
   def revoke(jti) when is_binary(jti) do
@@ -79,13 +110,21 @@ defmodule Barkpark.PreviewToken do
     if n == 0, do: {:error, :not_found}, else: :ok
   end
 
+  @doc """
+  True only when the JTI row exists AND has a non-null `revoked_at`.
+
+  Unknown JTIs are NOT treated as revoked — replay protection is handled separately
+  via `record_jti/1` returning `{:error, :already_used}` on duplicate insert. Fresh
+  tokens that have never hit the validation path are valid; only explicit revocations
+  (via `revoke/1`) flip this to true.
+  """
   def revoked?(jti) when is_binary(jti) do
     case Repo.one(
            from j in "preview_token_jti",
              where: j.jti == ^jti,
              select: {j.jti, j.revoked_at}
          ) do
-      nil -> true
+      nil -> false
       {_, nil} -> false
       {_, %DateTime{}} -> true
     end
