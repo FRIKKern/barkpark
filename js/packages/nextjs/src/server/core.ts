@@ -110,6 +110,19 @@ export async function barkparkFetchInner<T = unknown>(
   const userTags = opts.tags ?? []
   const knownSyncTags = opts.syncTags ?? []
 
+  // Canonical auto-tags so `revalidateTag('bp:ds:<ds>:doc:<id>')` and
+  // `:type:<type>` fired by the webhook bridge actually match this fetch.
+  // Order: [dsTag, typeTag?, docTag?, ...userTags, ...knownSyncTags]
+  // — userTags trail the canonical set so caller-provided tags still win
+  // ordering for user-visible assertions.
+  const autoTags: string[] = []
+  if (typeof opts.type === 'string' && opts.type.length > 0) {
+    autoTags.push(`bp:ds:${dataset}:type:${opts.type}`)
+    if (typeof opts.id === 'string' && opts.id.length > 0) {
+      autoTags.push(`bp:ds:${dataset}:doc:${opts.id}`)
+    }
+  }
+
   const resolvedPerspective = isDraft ? 'drafts' : opts.perspective
   const url = buildUrl(cfg, opts, resolvedPerspective)
 
@@ -118,6 +131,7 @@ export async function barkparkFetchInner<T = unknown>(
     isDraft,
     userTags,
     dsTag,
+    autoTags,
     knownSyncTags,
     revalidate: opts.revalidate,
     signal: opts.signal ?? cfg.fetchOptions?.signal,
@@ -129,6 +143,7 @@ interface RunFetchInput {
   isDraft: boolean
   userTags: readonly string[]
   dsTag: string
+  autoTags: readonly string[]
   knownSyncTags: readonly string[]
   revalidate: number | false | undefined
   signal: AbortSignal | undefined
@@ -144,7 +159,14 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
       init.cache = 'no-store'
     } else {
       init.cache = 'force-cache'
-      const tags: string[] = [input.dsTag, ...input.userTags, ...input.knownSyncTags]
+      const seen = new Set<string>()
+      const tags: string[] = []
+      for (const t of [input.dsTag, ...input.autoTags, ...input.userTags, ...input.knownSyncTags]) {
+        if (typeof t === 'string' && t.length > 0 && !seen.has(t)) {
+          seen.add(t)
+          tags.push(t)
+        }
+      }
       const nextOpts: { tags: string[]; revalidate?: number | false } = { tags }
       if (input.revalidate !== undefined) nextOpts.revalidate = input.revalidate
       init.next = nextOpts

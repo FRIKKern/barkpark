@@ -65,7 +65,7 @@ describe('barkparkFetch — published branch', () => {
 
     const i = init as RequestInit & { cache?: RequestCache; next?: { tags?: string[]; revalidate?: number | false } }
     expect(i.cache).toBe('force-cache')
-    expect(i.next?.tags).toEqual(['bp:ds:production:_all', 'custom-tag'])
+    expect(i.next?.tags).toEqual(['bp:ds:production:_all', 'bp:ds:production:type:post', 'custom-tag'])
 
     const headers = i.headers as Record<string, string>
     expect(headers.Authorization).toBeUndefined()
