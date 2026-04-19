@@ -13,7 +13,6 @@ import {
   BarkparkTimeoutError,
   BarkparkValidationError,
   buildQueryString,
-  type ReadEnvelope,
 } from '@barkpark/core'
 
 import {
@@ -189,8 +188,7 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
 
   if (!resp.ok) await decodeAndThrow(resp, input.url)
 
-  const envelope = (await resp.json()) as ReadEnvelope<T>
-  return envelope.result
+  return (await resp.json()) as T
 }
 
 type BoundBarkparkLiveProps = Omit<BarkparkLiveProps, 'client'>
