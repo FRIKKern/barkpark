@@ -1,5 +1,11 @@
 # @barkpark/core
 
+## 1.0.0-preview.2
+
+### Patch Changes
+
+- [#24](https://github.com/FRIKKern/barkpark/pull/24) [`47b96c8`](https://github.com/FRIKKern/barkpark/commit/47b96c8b28ab8901be5fe971ba7762dcfdffd662) Thanks [@FRIKKern](https://github.com/FRIKKern)! - fix: SDK query()/doc() now read Phoenix's flat envelope shape (`data.documents` and `data` directly), not the non-existent `data.result` wrapper. Resolves shake-down defects #16 and #18.
+
 ## 1.0.0-preview.0
 
 ### Major Changes
