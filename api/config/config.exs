@@ -42,6 +42,10 @@ config :barkpark, :preview,
   ttl_seconds: 600,
   issuer: "barkpark"
 
+# Fallback CORS allowlist for API routes without a dataset path segment
+# (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
+config :barkpark, :default_cors_origins, []
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
