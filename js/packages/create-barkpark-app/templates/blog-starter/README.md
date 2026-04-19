@@ -5,7 +5,7 @@ a headless CMS with a Phoenix API, PostgreSQL backend, and Studio UI.
 
 ## What's inside
 
-- Next.js 15 App Router, React 18, TypeScript
+- Next.js 15 App Router, React 19, TypeScript
 - `@barkpark/nextjs` for server fetching + draft-mode preview
 - `@barkpark/react` for `PortableText` rendering of rich-text content
 - Tailwind CSS for styling
