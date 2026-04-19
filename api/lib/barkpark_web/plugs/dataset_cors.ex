@@ -1,43 +1,161 @@
 defmodule BarkparkWeb.Plugs.DatasetCors do
   @moduledoc """
-  Per-dataset CORS allow-list enforcement.
+  Per-dataset CORS reflection plug.
 
-  Runs inside the `:api` and `:api_preview` pipelines AFTER Corsica (which
-  handles the reflection/header logic at the endpoint layer). This plug
-  enforces the policy: the request's `Origin` header must appear in the
-  dataset's allow-list, OR the allow-list must be empty (default-allow) OR
-  contain `"*"` (public), OR the request must have no `Origin` (server-to-
-  server). Mismatches return an explicit 403 JSON envelope so SDK clients
-  can diagnose, rather than relying on CORS silent-reject.
+  Runs at the endpoint layer (not router pipelines) so it can handle preflight
+  OPTIONS requests before routing. The request's `Origin` header is matched
+  against the dataset's `cors_origins` allow-list (inferred from `path_info`).
+  For routes without a dataset segment, falls back to
+  `:default_cors_origins` application config.
+
+  Matching origins are reflected in `access-control-allow-origin`; mismatches
+  never emit ACAO. Never wildcards — fail-closed.
   """
+
+  @behaviour Plug
 
   import Plug.Conn
 
   alias Barkpark.Content
-  alias Barkpark.Content.Errors
 
+  @allow_methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+
+  # Union of the required minimum for task #17 and the original Corsica
+  # allow_headers list at origin/main:api/lib/barkpark_web/endpoint.ex.
+  # Preserving the Corsica set prevents preflight regressions for existing
+  # browser-based SDK/Studio flows that rely on `accept`, `if-match`, etc.
+  @allow_headers_list ~w(
+    authorization
+    content-type
+    x-requested-with
+    x-barkpark-preview-token
+    accept
+    if-match
+    if-none-match
+    idempotency-key
+    x-barkpark-api-version
+    last-event-id
+  )
+  @allow_headers Enum.join(@allow_headers_list, ", ")
+
+  # Union of pagination headers (task #17 minimum) and the original Corsica
+  # expose_headers list. Dropping any of these would break SDKs that read
+  # ETag / x-request-id / x-barkpark-* cross-origin.
+  @expose_headers_list ~w(
+    x-total-count
+    x-page
+    x-per-page
+    etag
+    x-request-id
+    retry-after
+    x-barkpark-signature
+    x-barkpark-timestamp
+    x-barkpark-event-id
+  )
+  @expose_headers Enum.join(@expose_headers_list, ", ")
+
+  @max_age "600"
+
+  @impl true
   def init(opts), do: opts
 
-  def call(%Plug.Conn{method: "OPTIONS"} = conn, _opts), do: conn
-
+  @impl true
   def call(conn, _opts) do
-    with dataset when is_binary(dataset) <- conn.path_params["dataset"],
-         [origin | _] <- get_req_header(conn, "origin"),
-         allowed when allowed != [] <- Content.allowed_origins_for_dataset(dataset),
-         false <- "*" in allowed,
-         false <- origin in allowed do
-      deny(conn)
-    else
-      _ -> conn
+    case get_req_header(conn, "origin") do
+      [] -> conn
+      [origin | _] -> handle(conn, origin)
     end
   end
 
-  defp deny(conn) do
-    env = Errors.to_envelope({:error, :forbidden_origin}, conn)
+  defp handle(conn, origin) do
+    {dataset_key, conn} = dataset_from_conn(conn)
+    allowed = allowed_origins(dataset_key)
+    matched? = origin_match?(origin, allowed)
 
+    cond do
+      preflight?(conn) and matched? ->
+        send_preflight(conn, origin)
+
+      preflight?(conn) ->
+        conn
+        |> send_resp(204, "")
+        |> halt()
+
+      matched? ->
+        register_before_send(conn, &add_cors_headers(&1, origin))
+
+      true ->
+        conn
+    end
+  end
+
+  defp preflight?(conn) do
+    conn.method == "OPTIONS" and get_req_header(conn, "access-control-request-method") != []
+  end
+
+  defp send_preflight(conn, origin) do
     conn
-    |> put_status(env.status)
-    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
+    |> put_resp_header("access-control-allow-origin", origin)
+    |> put_resp_header("access-control-allow-methods", @allow_methods)
+    |> put_resp_header("access-control-allow-headers", @allow_headers)
+    |> put_resp_header("access-control-max-age", @max_age)
+    |> put_resp_header("vary", "Origin")
+    |> send_resp(204, "")
     |> halt()
+  end
+
+  defp add_cors_headers(conn, origin) do
+    conn
+    |> put_resp_header("access-control-allow-origin", origin)
+    |> put_resp_header("access-control-expose-headers", @expose_headers)
+    |> put_resp_header("vary", "Origin")
+  end
+
+  defp origin_match?(origin, allowed) do
+    normalized = strip_trailing_slash(origin)
+    Enum.any?(allowed, fn a -> strip_trailing_slash(a) == normalized end)
+  end
+
+  defp strip_trailing_slash(s) when is_binary(s) do
+    if String.ends_with?(s, "/") do
+      binary_part(s, 0, byte_size(s) - 1)
+    else
+      s
+    end
+  end
+
+  defp strip_trailing_slash(other), do: other
+
+  defp allowed_origins({:dataset, ds}) when is_binary(ds) and ds != "" do
+    Content.allowed_origins_for_dataset(ds)
+  end
+
+  defp allowed_origins(_), do: Application.get_env(:barkpark, :default_cors_origins, [])
+
+  defp dataset_from_conn(conn) do
+    case conn.path_info do
+      ["v1", "data", _, ds | _] ->
+        {{:dataset, ds}, conn}
+
+      ["v1", "preview", _, ds | _] ->
+        {{:dataset, ds}, conn}
+
+      ["v1", "schemas", ds | _] ->
+        {{:dataset, ds}, conn}
+
+      ["v1", "webhooks", ds | _] ->
+        {{:dataset, ds}, conn}
+
+      ["media" | _] ->
+        conn = fetch_query_params(conn)
+
+        case conn.query_params["dataset"] do
+          ds when is_binary(ds) and ds != "" -> {{:dataset, ds}, conn}
+          _ -> {:no_dataset, conn}
+        end
+
+      _ ->
+        {:no_dataset, conn}
+    end
   end
 end
