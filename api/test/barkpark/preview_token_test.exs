@@ -8,7 +8,7 @@ defmodule Barkpark.PreviewTokenTest do
   describe "sign/2 and verify/2" do
     test "round-trips claims successfully" do
       {jwt, claims} = PreviewToken.sign(%{dataset: "production", doc_ids: ["p1"]}, @secret)
-      :ok = PreviewToken.record_jti(Map.new(claims, fn {k, v} -> {to_string(k), v} end))
+      {:ok, _} = PreviewToken.record_jti(stringify(claims))
 
       assert {:ok, decoded} = PreviewToken.verify(jwt, @secret)
       assert decoded["dataset"] == "production"
@@ -17,9 +17,14 @@ defmodule Barkpark.PreviewTokenTest do
       assert is_binary(decoded["jti"])
     end
 
+    test "verify/2 alone does not reject a never-recorded jti" do
+      {jwt, _claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
+      assert {:ok, _} = PreviewToken.verify(jwt, @secret)
+    end
+
     test "detects tampered payload" do
       {jwt, claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
-      :ok = PreviewToken.record_jti(stringify(claims))
+      {:ok, _} = PreviewToken.record_jti(stringify(claims))
 
       [header, _payload, sig] = String.split(jwt, ".")
       tampered_payload = Base.url_encode64(~s({"dataset":"leaked","exp":99999999999}), padding: false)
@@ -41,7 +46,7 @@ defmodule Barkpark.PreviewTokenTest do
       }
 
       {jwt, full} = PreviewToken.sign(claims, @secret)
-      :ok = PreviewToken.record_jti(stringify(full))
+      {:ok, _} = PreviewToken.record_jti(stringify(full))
 
       assert {:error, :expired} = PreviewToken.verify(jwt, @secret)
     end
@@ -57,32 +62,47 @@ defmodule Barkpark.PreviewTokenTest do
       string_claims = stringify(claims)
       jti = string_claims["jti"]
 
-      :ok = PreviewToken.record_jti(string_claims)
+      {:ok, _} = PreviewToken.record_jti(string_claims)
       refute PreviewToken.revoked?(jti)
 
       :ok = PreviewToken.revoke(jti)
       assert PreviewToken.revoked?(jti)
     end
 
-    test "revoked? is true for unknown jti (never issued)" do
-      assert PreviewToken.revoked?(Ecto.UUID.generate())
+    test "revoked? is false for unknown jti (never recorded)" do
+      refute PreviewToken.revoked?(Ecto.UUID.generate())
     end
 
-    test "record_jti is idempotent" do
+    test "record_jti second call returns {:error, :already_used} (replay)" do
       {_, claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
       string_claims = stringify(claims)
 
-      :ok = PreviewToken.record_jti(string_claims)
-      :ok = PreviewToken.record_jti(string_claims)
+      assert {:ok, _} = PreviewToken.record_jti(string_claims)
+      assert {:error, :already_used} = PreviewToken.record_jti(string_claims)
     end
 
     test "verify returns :revoked after revocation" do
       {jwt, claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
       string_claims = stringify(claims)
-      :ok = PreviewToken.record_jti(string_claims)
+      {:ok, _} = PreviewToken.record_jti(string_claims)
       :ok = PreviewToken.revoke(string_claims["jti"])
 
       assert {:error, :revoked} = PreviewToken.verify(jwt, @secret)
+    end
+  end
+
+  describe "verify_and_record/2" do
+    test "first call returns {:ok, claims}; replay returns {:error, :already_used}" do
+      {jwt, _} = PreviewToken.sign(%{dataset: "production", doc_ids: ["p1"]}, @secret)
+
+      assert {:ok, claims} = PreviewToken.verify_and_record(jwt, @secret)
+      assert claims["dataset"] == "production"
+
+      assert {:error, :already_used} = PreviewToken.verify_and_record(jwt, @secret)
+    end
+
+    test "propagates verify errors untouched" do
+      assert {:error, :invalid} = PreviewToken.verify_and_record("not-a-jwt", @secret)
     end
   end
 
@@ -90,18 +110,18 @@ defmodule Barkpark.PreviewTokenTest do
     test "removes rows past grace period" do
       {_, claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
       string_claims = stringify(claims)
-      :ok = PreviewToken.record_jti(string_claims)
+      {:ok, _} = PreviewToken.record_jti(string_claims)
 
       far_future = DateTime.add(DateTime.utc_now(), 10_000, :second)
       assert {:ok, n} = PreviewToken.sweep(far_future)
       assert n >= 1
-      assert PreviewToken.revoked?(string_claims["jti"])
+      refute PreviewToken.revoked?(string_claims["jti"])
     end
 
     test "keeps rows within grace period" do
       {_, claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
       string_claims = stringify(claims)
-      :ok = PreviewToken.record_jti(string_claims)
+      {:ok, _} = PreviewToken.record_jti(string_claims)
 
       assert {:ok, 0} = PreviewToken.sweep(DateTime.utc_now())
     end

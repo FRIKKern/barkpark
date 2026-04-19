@@ -16,12 +16,14 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
 
     with raw when is_binary(raw) <- extract_token(conn),
          true <- is_binary(secret) and byte_size(secret) > 0,
-         {:ok, claims} <- PreviewToken.verify(raw, secret) do
+         {:ok, claims} <- PreviewToken.verify(raw, secret),
+         {:ok, _} <- PreviewToken.record_jti(claims) do
       conn
       |> assign(:preview_claims, claims)
       |> assign(:forced_perspective, "drafts")
     else
-      _ -> deny(conn)
+      {:error, :already_used} -> deny(conn, :replay)
+      _ -> deny(conn, :unauthorized)
     end
   end
 
@@ -36,8 +38,8 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
     end
   end
 
-  defp deny(conn) do
-    env = Errors.to_envelope({:error, :unauthorized}, conn)
+  defp deny(conn, reason) do
+    env = Errors.to_envelope({:error, reason}, conn)
 
     conn
     |> put_status(env.status)
