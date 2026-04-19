@@ -23,9 +23,29 @@ DB_USER="barkpark"
 DB_PASS="$(openssl rand -hex 16)"
 ARCH=$(uname -m)
 
+# ── Required: DOMAIN ────────────────────────────────────────────────────────
+# Phoenix endpoint check_origin whitelists exactly one host+scheme. If we bake
+# an IP in while the public URL is https://<dns>, browsers get 403 on
+# /live/websocket and the LiveView Studio becomes click-dead. See task #11 and
+# docs/ops/studio-nav-bug-2026-04-19.md for the full incident.
+if [ -z "${DOMAIN:-}" ]; then
+  echo "ERROR: DOMAIN env var is required." >&2
+  echo "" >&2
+  echo "  Usage: DOMAIN=api.barkpark.cloud bash -s < deploy.sh" >&2
+  echo "" >&2
+  echo "  DOMAIN must be the public DNS hostname your users will visit," >&2
+  echo "  not the VPS IP. If you want an IP-only dev box, set" >&2
+  echo "  DOMAIN=<ip> PHX_SCHEME=http explicitly." >&2
+  echo "" >&2
+  echo "  Background: docs/ops/studio-nav-bug-2026-04-19.md (task #11)" >&2
+  exit 2
+fi
+PHX_SCHEME="${PHX_SCHEME:-https}"
+
 echo "============================================"
 echo "  Barkpark — Server Setup"
-echo "  Arch: $ARCH"
+echo "  Arch:   $ARCH"
+echo "  Domain: $DOMAIN ($PHX_SCHEME)"
 echo "============================================"
 echo ""
 
@@ -111,11 +131,11 @@ git config core.hooksPath .githooks
 if [ ! -f "$APP_DIR/.env" ]; then
   echo ">> Generating .env..."
   SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
-  IP=$(hostname -I | awk '{print $1}')
   cat > "$APP_DIR/.env" << ENVEOF
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
 SECRET_KEY_BASE=$SECRET
-PHX_HOST=$IP
+PHX_HOST=$DOMAIN
+PHX_SCHEME=$PHX_SCHEME
 PORT=4000
 MIX_ENV=prod
 ENVEOF
