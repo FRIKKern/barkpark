@@ -39,32 +39,32 @@ describe('MSW handlers smoke', () => {
     expect(body.error.request_id).toBeTruthy()
   })
 
-  it('GET /v1/data/query/:dataset/post?perspective=drafts returns draft only', async () => {
+  it('GET /v1/data/query/:dataset/post?perspective=drafts returns draft only (flat envelope)', async () => {
     const res = await fetch(
       `${TEST_BASE_URL}/v1/data/query/${TEST_DATASET}/post?perspective=drafts`,
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      result: { perspective: string; documents: Array<{ _draft: boolean }>; count: number }
-      syncTags: string[]
-      ms: number
-      etag: string
-      schemaHash: string
+      perspective: string
+      documents: Array<{ _draft: boolean }>
+      count: number
+      limit: number
+      offset: number
     }
-    expect(body.result.perspective).toBe('drafts')
-    expect(body.result.documents).toHaveLength(1)
-    expect(body.result.documents[0]!._draft).toBe(true)
-    expect(body.syncTags.length).toBeGreaterThan(0)
-    expect(body.etag).toMatch(/^[a-f0-9]+$/)
-    expect(body.schemaHash).toBe(TEST_SCHEMA_HASH)
+    expect(body.perspective).toBe('drafts')
+    expect(body.documents).toHaveLength(1)
+    expect(body.documents[0]!._draft).toBe(true)
+    expect(res.headers.get('etag')).toMatch(/^"[a-f0-9]+"$/)
+    // schemaHash lives on /v1/meta per the Phoenix flat envelope — not on query response.
+    expect(TEST_SCHEMA_HASH).toMatch(/^[a-f0-9]+$/)
   })
 
-  it('GET /v1/data/doc returns 200 for existing doc and 404 for missing', async () => {
+  it('GET /v1/data/doc returns 200 for existing doc and 404 for missing (flat shape)', async () => {
     const ok = await fetch(`${TEST_BASE_URL}/v1/data/doc/${TEST_DATASET}/post/p1`)
     expect(ok.status).toBe(200)
-    const okBody = (await ok.json()) as { result: { _id: string; _rev: string } }
-    expect(okBody.result._id).toBe('p1')
-    expect(ok.headers.get('etag')).toBe(`"${okBody.result._rev}"`)
+    const okBody = (await ok.json()) as { _id: string; _rev: string }
+    expect(okBody._id).toBe('p1')
+    expect(ok.headers.get('etag')).toBe(`"${okBody._rev}"`)
 
     const miss = await fetch(`${TEST_BASE_URL}/v1/data/doc/${TEST_DATASET}/post/zzz`)
     expect(miss.status).toBe(404)

@@ -58,19 +58,13 @@ describe('getDoc', () => {
         seenUrl = request.url
         return HttpResponse.json(
           {
-            result: {
-              _id: 'p1',
-              _type: 'post',
-              _rev: '1111111111111111111111111111aaaa',
-              _draft: false,
-              _publishedId: 'p1',
-              _createdAt: 'x',
-              _updatedAt: 'x',
-            },
-            syncTags: [],
-            ms: 1,
-            etag: '1111111111111111111111111111aaaa',
-            schemaHash: 'abc1234567890def',
+            _id: 'p1',
+            _type: 'post',
+            _rev: '1111111111111111111111111111aaaa',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: 'x',
+            _updatedAt: 'x',
           },
           { status: 200, headers: { ETag: `"x"` } },
         )
@@ -82,7 +76,7 @@ describe('getDoc', () => {
 })
 
 describe('createDocsOperation', () => {
-  it('returns documents array from ReadEnvelope.result.documents', async () => {
+  it('returns documents array from flat query envelope (data.documents)', async () => {
     const docs = await createDocsOperation(baseConfig, 'post').find()
     expect(Array.isArray(docs)).toBe(true)
     expect(docs.length).toBeGreaterThanOrEqual(1)
@@ -95,13 +89,7 @@ describe('createDocsOperation', () => {
       http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
         seenUrl = request.url
         return HttpResponse.json(
-          {
-            result: { perspective: 'published', documents: [], count: 0, limit: 10, offset: 0 },
-            syncTags: [],
-            ms: 1,
-            etag: 'deadbeefcafebabef00dfaceabcdef01',
-            schemaHash: 'abc1234567890def',
-          },
+          { perspective: 'published', documents: [], count: 0, limit: 10, offset: 0 },
           { status: 200 },
         )
       }),

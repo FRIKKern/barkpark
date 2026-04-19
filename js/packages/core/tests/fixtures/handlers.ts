@@ -6,10 +6,10 @@
 import { http, HttpResponse, delay } from 'msw'
 import type {
   MetaResponse,
-  ReadEnvelope,
   MutateEnvelope,
   MutateResult,
   BarkparkDocument,
+  Perspective,
 } from '../../src/types'
 
 const BASE = 'http://test.barkpark.local'
@@ -109,28 +109,22 @@ export const defaultHandlers = [
     }
 
     const windowed = docs.slice(offset, offset + limit)
-    const envelope: ReadEnvelope<{
-      perspective: 'published' | 'drafts' | 'raw'
+    const envelope: {
+      perspective: Perspective
       documents: BarkparkDocument[]
       count: number
       limit: number
       offset: number
-    }> = {
-      result: { perspective, documents: windowed, count: windowed.length, limit, offset },
-      syncTags: [tagType(type), ...windowed.map((d) => tagDoc(d._id))],
-      ms: 3,
-      etag: LIST_ETAG,
-      schemaHash: fixtures.schemaHash,
-    }
+    } = { perspective, documents: windowed, count: windowed.length, limit, offset }
 
     const ifNoneMatch = request.headers.get('if-none-match')
-    if (ifNoneMatch && ifNoneMatch.replace(/^W\//, '').replace(/^"|"$/g, '') === envelope.etag) {
+    if (ifNoneMatch && ifNoneMatch.replace(/^W\//, '').replace(/^"|"$/g, '') === LIST_ETAG) {
       return new HttpResponse(null, { status: 304, headers: { 'x-request-id': 'req_query_304' } })
     }
 
     return HttpResponse.json(envelope, {
       status: 200,
-      headers: { ETag: `"${envelope.etag}"`, 'x-request-id': 'req_query_1' },
+      headers: { ETag: `"${LIST_ETAG}"`, 'x-request-id': 'req_query_1' },
     })
   }),
 
@@ -148,18 +142,11 @@ export const defaultHandlers = [
         { status: 404, headers: { 'x-request-id': 'req_doc_404' } },
       )
     }
-    const envelope: ReadEnvelope<BarkparkDocument> = {
-      result: found,
-      syncTags: [tagType(type), tagDoc(found._id)],
-      ms: 2,
-      etag: found._rev,
-      schemaHash: fixtures.schemaHash,
-    }
     const ifNoneMatch = request.headers.get('if-none-match')
     if (ifNoneMatch && ifNoneMatch.replace(/^W\//, '').replace(/^"|"$/g, '') === found._rev) {
       return new HttpResponse(null, { status: 304, headers: { 'x-request-id': 'req_doc_304' } })
     }
-    return HttpResponse.json(envelope, {
+    return HttpResponse.json(found, {
       status: 200,
       headers: { ETag: `"${found._rev}"`, 'x-request-id': 'req_doc_1' },
     })
