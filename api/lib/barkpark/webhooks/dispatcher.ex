@@ -57,6 +57,10 @@ defmodule Barkpark.Webhooks.Dispatcher do
       doc_id: doc_id,
       document: document,
       dataset: dataset,
+      sync_tags: [
+        "bp:ds:#{dataset}:doc:#{doc_id}",
+        "bp:ds:#{dataset}:type:#{type}"
+      ],
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
     }
   end

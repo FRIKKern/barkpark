@@ -94,6 +94,15 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     assert is_binary(payload.timestamp)
   end
 
+  test "build_payload emits canonical bp:ds:* sync_tags for a publish event" do
+    payload = Dispatcher.build_payload("publish", "post", "p1", %{"_id" => "p1"}, "production")
+
+    assert payload.sync_tags == [
+             "bp:ds:production:doc:p1",
+             "bp:ds:production:type:post"
+           ]
+  end
+
   test "200 on first attempt succeeds without retry", %{webhook: wh} do
     :ok = FakeHTTP.start([{:ok, 200}])
     eid = new_event_id()
