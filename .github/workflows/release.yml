@@ -126,6 +126,13 @@ jobs:
         # `changeset version` is a no-op if .changeset/ has no unconsumed
         # entries. Lockfile is refreshed in --lockfile-only mode so the next
         # step sees the new versions without a full re-resolve.
+        #
+        # GITHUB_TOKEN is required by @changesets/get-github-info to fetch PR
+        # and commit metadata used in generated changelog entries. Without it,
+        # the version step aborts and publish never runs (Task #14 regression
+        # from PR #32 / Task #8).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pnpm changeset version
           pnpm install --lockfile-only
