@@ -61,3 +61,5 @@ config :phoenix, :stacktrace_depth, 20
 
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
+
+config :barkpark, :default_cors_origins, ["http://localhost:3000", "http://localhost:5173"]
