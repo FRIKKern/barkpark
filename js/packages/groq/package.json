@@ -1,6 +1,11 @@
 {
   "name": "@barkpark/groq",
   "version": "0.0.0-placeholder",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRIKKern/barkpark.git",
+    "directory": "js/packages/groq"
+  },
   "license": "Apache-2.0",
   "description": "Reserved npm name for the Barkpark GROQ DSL — deferred to 1.1. See https://barkpark.dev/roadmap.",
   "type": "module",

@@ -1,6 +1,11 @@
 {
   "name": "@barkpark/nextjs-query",
   "version": "0.0.0-placeholder",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRIKKern/barkpark.git",
+    "directory": "js/packages/nextjs-query"
+  },
   "license": "Apache-2.0",
   "description": "Reserved npm name for the Barkpark TanStack Query adapter — deferred to 1.1. See https://barkpark.dev/roadmap.",
   "type": "module",

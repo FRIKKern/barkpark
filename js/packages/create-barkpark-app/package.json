@@ -1,6 +1,11 @@
 {
   "name": "create-barkpark-app",
   "version": "1.0.0-preview.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRIKKern/barkpark.git",
+    "directory": "js/packages/create-barkpark-app"
+  },
   "license": "Apache-2.0",
   "description": "Interactive scaffolder for Barkpark-powered apps. Run `pnpm create barkpark-app my-site`.",
   "type": "module",
