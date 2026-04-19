@@ -1,0 +1,15 @@
+{
+  "mode": "pre",
+  "tag": "preview",
+  "initialVersions": {
+    "@barkpark/docs": "0.0.0",
+    "@barkpark/codegen": "0.0.0",
+    "@barkpark/core": "0.0.0",
+    "create-barkpark-app": "0.0.0",
+    "@barkpark/groq": "0.0.0-placeholder",
+    "@barkpark/nextjs": "0.1.0",
+    "@barkpark/nextjs-query": "0.0.0-placeholder",
+    "@barkpark/react": "0.0.0"
+  },
+  "changesets": []
+}
