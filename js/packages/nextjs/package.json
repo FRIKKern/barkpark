@@ -1,6 +1,11 @@
 {
   "name": "@barkpark/nextjs",
   "version": "1.0.0-preview.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRIKKern/barkpark.git",
+    "directory": "js/packages/nextjs"
+  },
   "license": "Apache-2.0",
   "description": "Next.js App Router integration for the Barkpark headless CMS.",
   "type": "module",
