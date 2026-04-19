@@ -7,8 +7,11 @@ export {
   createBarkparkServer,
   defineLive,
   barkparkFetchInner as barkparkFetch,
-  BarkparkLive,
-  BarkparkLiveProvider,
 } from './core'
 
 export type { BarkparkServerConfig, BarkparkFetchOptions } from './types'
+
+// BarkparkLive / BarkparkLiveProvider are intentionally NOT re-exported here.
+// They live behind a `'use client'` boundary in `src/client/live.tsx` and
+// would pull `React.createContext` into the Next 15 `react-server` graph.
+// Import them from `@barkpark/nextjs/client` instead.
