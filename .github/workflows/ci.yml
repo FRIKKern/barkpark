@@ -1,0 +1,104 @@
+name: ci
+
+# Phase 8 slice 8.0 — Lighthouse CI baseline against apps/demo.
+#
+# ci.yml did not exist prior to this slice (only twoslash.yml + typedoc.yml
+# were in .github/workflows/). Created here with one `lighthouse` job
+# intentionally fail-soft (`continue-on-error: true`) for slice 8.0. Slice 8.6
+# upgrades the assertion level in lighthouserc.json from `warn` to `error`,
+# at which point the `continue-on-error` guard can be removed in a follow-up.
+
+on:
+  push:
+    branches: [main, "phase-8/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lighthouse:
+    name: Lighthouse CI — apps/demo
+    runs-on: ubuntu-latest
+    # Fail-soft: Lighthouse scores are sensitive to runner noise and the demo
+    # app is still evolving. Slice 8.0 treats this as a signal, not a gate.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect demo app presence
+        id: detect
+        run: |
+          if [ -d apps/demo ] && [ -f apps/demo/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip — apps/demo not present
+        if: steps.detect.outputs.present != 'true'
+        run: echo "apps/demo/ not found — Lighthouse job skipped."
+
+      - name: Setup Node
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        if: steps.detect.outputs.present == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install JS workspace deps
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: pnpm install --frozen-lockfile
+
+      - name: Build apps/demo
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: pnpm --filter demo build
+
+      - name: Start apps/demo (background)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: |
+          pnpm --filter demo start &
+          echo $! > /tmp/demo.pid
+          # Wait for server to respond on :3000
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/ > /dev/null 2>&1; then
+              echo "demo server is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "demo server did not start within 120s"
+          exit 1
+
+      - name: Run Lighthouse CI
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm dlx @lhci/cli@latest autorun --config=./lighthouserc.json
+
+      - name: Stop apps/demo
+        if: always() && steps.detect.outputs.present == 'true'
+        run: |
+          if [ -f /tmp/demo.pid ]; then
+            kill "$(cat /tmp/demo.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload Lighthouse artifact
+        if: always() && steps.detect.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: |
+            .lighthouseci/
+            lhci_reports/
+          if-no-files-found: ignore
+          retention-days: 14
