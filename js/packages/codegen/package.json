@@ -1,6 +1,6 @@
 {
   "name": "@barkpark/codegen",
-  "version": "0.0.0",
+  "version": "1.0.0-preview.0",
   "license": "Apache-2.0",
   "description": "CLI for the Barkpark headless CMS — schema introspection and TypeScript codegen.",
   "type": "module",
@@ -23,9 +23,15 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
     "test": "vitest run",

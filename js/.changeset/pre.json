@@ -11,5 +11,7 @@
     "@barkpark/nextjs-query": "0.0.0-placeholder",
     "@barkpark/react": "0.0.0"
   },
-  "changesets": []
+  "changesets": [
+    "phase-8-initial-preview"
+  ]
 }

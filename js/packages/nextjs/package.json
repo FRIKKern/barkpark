@@ -1,6 +1,6 @@
 {
   "name": "@barkpark/nextjs",
-  "version": "0.1.0",
+  "version": "1.0.0-preview.0",
   "license": "Apache-2.0",
   "description": "Next.js App Router integration for the Barkpark headless CMS.",
   "type": "module",
@@ -90,9 +90,15 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
     "test": "vitest run",
@@ -112,7 +118,9 @@
     "zod": "^3.23.0"
   },
   "peerDependenciesMeta": {
-    "zod": { "optional": true }
+    "zod": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^20",

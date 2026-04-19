@@ -1,6 +1,6 @@
 {
   "name": "create-barkpark-app",
-  "version": "0.0.0",
+  "version": "1.0.0-preview.0",
   "license": "Apache-2.0",
   "description": "Interactive scaffolder for Barkpark-powered apps. Run `pnpm create barkpark-app my-site`.",
   "type": "module",
@@ -8,7 +8,12 @@
     "create-barkpark-app": "./dist/index.js",
     "cba": "./dist/index.js"
   },
-  "files": ["dist", "templates", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20.9"
   },
