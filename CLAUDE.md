@@ -222,6 +222,7 @@ PostgreSQL with tables: `documents`, `schema_definitions`, `api_tokens`, `media_
 8. **LiveView JS not loaded** — `phx-click` events rendered in HTML but nothing worked. LiveView needs its JS client loaded.
 9. **Repo was private** — `git clone` failed on server. Made public for deployment.
 10. **Go binary committed** — `barkpark` binary accidentally committed. Added to .gitignore.
+11. **Phoenix check_origin drift after TLS cutover** — deploy.sh baked `PHX_HOST=<IP>` into .env. After TLS cutover, browser Origin `https://api.barkpark.cloud` did not match the http://<IP> whitelist → `/live/websocket` returned 403 → LiveView silently dropped → Studio became click-dead. Fix: set `PHX_HOST` to the public DNS hostname and `PHX_SCHEME=https`. See `docs/ops/studio-nav-bug-2026-04-19.md` for full diagnosis and `make domain-cutover DOMAIN=…` for the remediation workflow.
 
 ## Testing
 

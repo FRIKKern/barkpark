@@ -1,4 +1,7 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover
+
+SSH_HOST ?= root@89.167.28.206
+PROD_APP_DIR ?= /opt/barkpark
 
 # ── Server operations (run on Hetzner VPS) ───────────────────────────────────
 
@@ -78,6 +81,29 @@ deploy: ## Pull latest from GitHub, rebuild, restart (one command)
 	@echo ">> Deployed. Waiting for API..."
 	@sleep 10
 	@curl -s --max-time 5 http://localhost:4000/api/schemas > /dev/null && echo ">> API is live!" || echo ">> Still warming up, check: make logs"
+
+# ── Domain cutover (prod env-only change, no code redeploy) ──────────────────
+# Safely update PHX_HOST/PHX_SCHEME on the running prod server and restart.
+# Does NOT rebuild or redeploy code. Does NOT touch Caddy, DNS, or secrets.
+# See docs/ops/studio-nav-bug-2026-04-19.md for why this exists (task #11).
+
+domain-cutover: ## Update prod PHX_HOST=<DOMAIN> + PHX_SCHEME=https, restart, verify
+	@if [ -z "$(DOMAIN)" ]; then \
+	  echo "ERROR: DOMAIN is required."; \
+	  echo "  Usage: make domain-cutover DOMAIN=api.barkpark.cloud"; \
+	  echo "  See docs/ops/studio-nav-bug-2026-04-19.md (task #11)."; \
+	  exit 2; \
+	fi
+	@echo ">> Updating $(SSH_HOST):$(PROD_APP_DIR)/.env — PHX_HOST=$(DOMAIN) PHX_SCHEME=https"
+	ssh $(SSH_HOST) 'cd $(PROD_APP_DIR) && cp .env .env.bak.$$(date +%s) && sed -i "s|^PHX_HOST=.*|PHX_HOST=$(DOMAIN)|" .env && { grep -q "^PHX_SCHEME=" .env || echo "PHX_SCHEME=https" >> .env; }'
+	@echo ">> Restarting barkpark.service"
+	ssh $(SSH_HOST) 'systemctl restart barkpark.service && sleep 3 && systemctl is-active barkpark.service'
+	@echo ">> Last 20 log lines"
+	ssh $(SSH_HOST) 'journalctl -u barkpark -n 20 --no-pager'
+	@echo ">> Verify Studio HTTP (expect 200)"
+	curl -sI https://$(DOMAIN)/studio/production | head -5
+	@echo ">> Verify WebSocket (must NOT be 403)"
+	curl -sI -H 'Origin: https://$(DOMAIN)' -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: test' -H 'Sec-WebSocket-Version: 13' https://$(DOMAIN)/live/websocket | head -5
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
