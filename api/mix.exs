@@ -52,7 +52,11 @@ defmodule Barkpark.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:corsica, "~> 2.1"},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      {:sweet_xml, "~> 0.7"},
+      {:xml_builder, "~> 2.2"},
+      {:cloak_ecto, "~> 1.2"},
+      {:oban, "~> 2.17"}
     ]
   end
 
