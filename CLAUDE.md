@@ -137,6 +137,23 @@ curl localhost:4000/media
 
 string, slug, text (rows), richText, image, select (options), boolean, datetime, color, reference (refType), array
 
+## Plugin schemas (Schema Definition v2 — TUI constraint)
+
+The Phase 0 plugin foundation introduces four nested field types beyond the v1 primitives above:
+
+- `composite` — object with named subfields
+- `arrayOf` — homogeneous array with `ordered: true|false`
+- `codelist` — registry-backed enum pinned to an `issue` version (e.g. ONIX issue 73)
+- `localizedText` — multi-language string with `languages`, `format`, and `fallbackChain`
+
+**The Go TUI is read-only for plugin schemas in v1** (decision 12 in `.doey/plans/masterplan-20260425-085425.md`). Documents whose schema declares any of the four v2 types render as **JSON dumps** in the TUI; edits go through the LiveView Studio at `/studio`. The TUI editor menus skip composite / array / codelist / localizedText fields entirely — there is no inline form for them.
+
+This is a declared v1 constraint, NOT a missing feature. v2 may add TUI editing for these types once a publisher actually demands it; until then, Studio is the editing surface.
+
+Concrete example: when the OnixEdit plugin lands (Phase 4–5), its `book` schema (~200 fields, deeply nested composites + arrayOf contributors + Thema codelist + localizedText blurbs) will open in the TUI as a JSON view only. Editing happens in Studio.
+
+The legacy seed schemas (post, page, author, category, project, siteSettings, navigation, colors) use only v1 primitives and continue to work in the TUI exactly as before — they go through the validator's permanent `flat_mode` branch with no behavioural change. See `docs/plugins/SCHEMA_V2.md` for the full v2 reference.
+
 ## Project Structure
 
 ```
