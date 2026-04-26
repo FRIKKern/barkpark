@@ -26,11 +26,13 @@ defmodule Barkpark.Plugin do
   @callback register_workers(any()) :: [Supervisor.child_spec()]
   @callback register_schemas(keyword()) :: [Barkpark.Content.SchemaDefinition.t()]
   @callback validate_settings(map()) :: :ok | {:error, [{atom(), String.t()}]}
+  @callback checkers() :: [{String.t() | atom(), module()}]
 
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       register_schemas: 1,
-                      validate_settings: 1
+                      validate_settings: 1,
+                      checkers: 0
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -68,11 +70,15 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def validate_settings(_settings), do: :ok
 
+      @impl Barkpark.Plugin
+      def checkers, do: []
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
                      register_schemas: 1,
-                     validate_settings: 1
+                     validate_settings: 1,
+                     checkers: 0
     end
   end
 end
