@@ -9,12 +9,14 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
     end
 
-    schema = case Content.get_schema(type, dataset) do
-      {:ok, s} -> s
-      _ -> nil
-    end
+    schema =
+      case Content.get_schema(type, dataset) do
+        {:ok, s} -> s
+        _ -> nil
+      end
 
     pub_id = Content.published_id(doc_id)
+
     socket =
       socket
       |> assign(type: type, doc_id: pub_id, schema: schema, dataset: dataset)
@@ -44,6 +46,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
         Enum.reduce(schema.fields, %{}, fn field, acc ->
           key = field["name"]
           val = Map.get(params, key, "")
+
           case key do
             k when k in ["title", "status"] -> acc
             _ -> if val != "", do: Map.put(acc, key, val), else: acc
@@ -67,16 +70,27 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
   end
 
   def handle_event("publish", _params, socket) do
-    case Content.publish_document(socket.assigns.doc_id, socket.assigns.type, socket.assigns.dataset) do
+    case Content.publish_document(
+           socket.assigns.doc_id,
+           socket.assigns.type,
+           socket.assigns.dataset
+         ) do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document published") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to publish")}
     end
   end
 
   def handle_event("unpublish", _params, socket) do
-    case Content.unpublish_document(socket.assigns.doc_id, socket.assigns.type, socket.assigns.dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document unpublished") |> load_document()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unpublish")}
+    case Content.unpublish_document(
+           socket.assigns.doc_id,
+           socket.assigns.type,
+           socket.assigns.dataset
+         ) do
+      {:ok, _} ->
+        {:noreply, socket |> put_flash(:info, "Document unpublished") |> load_document()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to unpublish")}
     end
   end
 
@@ -100,7 +114,9 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
 
     {doc, is_draft} =
       case draft_result do
-        {:ok, d} -> {d, true}
+        {:ok, d} ->
+          {d, true}
+
         _ ->
           case pub_result do
             {:ok, d} -> {d, false}
@@ -118,15 +134,20 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
   end
 
   defp doc_to_form(nil, _), do: %{}
+
   defp doc_to_form(doc, schema) do
     base = %{"title" => doc.title || "", "status" => doc.status || "draft"}
+
     if schema do
       Enum.reduce(schema.fields, base, fn field, acc ->
         key = field["name"]
-        val = case key do
-          k when k in ["title", "status"] -> Map.get(acc, key, "")
-          _ -> get_in(doc.content || %{}, [key]) || ""
-        end
+
+        val =
+          case key do
+            k when k in ["title", "status"] -> Map.get(acc, key, "")
+            _ -> get_in(doc.content || %{}, [key]) || ""
+          end
+
         Map.put(acc, key, val)
       end)
     else
@@ -204,9 +225,11 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     """
   end
 
-  defp render_field_input(%{"type" => "select", "name" => name, "options" => options}, form_data) when is_list(options) do
+  defp render_field_input(%{"type" => "select", "name" => name, "options" => options}, form_data)
+       when is_list(options) do
     current = Map.get(form_data, name, "")
     assigns = %{name: name, options: options, current: current}
+
     ~H"""
     <select name={"doc[#{@name}]"} class="form-input">
       <%= for opt <- @options do %>
@@ -216,10 +239,12 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     """
   end
 
-  defp render_field_input(%{"type" => type, "name" => name} = field, form_data) when type in ["text", "richText"] do
+  defp render_field_input(%{"type" => type, "name" => name} = field, form_data)
+       when type in ["text", "richText"] do
     val = Map.get(form_data, name, "")
     rows = Map.get(field, "rows") || if(type == "richText", do: 6, else: 3)
     assigns = %{name: name, val: val, rows: rows}
+
     ~H"""
     <textarea name={"doc[#{@name}]"} class="form-input" rows={@rows}><%= @val %></textarea>
     """
@@ -228,6 +253,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
   defp render_field_input(%{"type" => "boolean", "name" => name}, form_data) do
     checked = Map.get(form_data, name, "") == "true"
     assigns = %{name: name, checked: checked}
+
     ~H"""
     <div class="form-checkbox">
       <input type="hidden" name={"doc[#{@name}]"} value="false" />
@@ -240,6 +266,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
   defp render_field_input(%{"type" => "color", "name" => name}, form_data) do
     val = Map.get(form_data, name, "#3b82f6")
     assigns = %{name: name, val: val}
+
     ~H"""
     <div style="display: flex; align-items: center; gap: 10px;">
       <input type="color" name={"doc[#{@name}]"} value={@val}
@@ -252,6 +279,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
   defp render_field_input(%{"name" => name}, form_data) do
     val = Map.get(form_data, name, "")
     assigns = %{name: name, val: val}
+
     ~H"""
     <input type="text" name={"doc[#{@name}]"} value={@val} class="form-input" />
     """

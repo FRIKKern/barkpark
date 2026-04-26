@@ -64,7 +64,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayFieldTest do
       assert html =~ ~s(phx-value-action="remove_row")
       assert html =~ ~s(phx-value-action="add_row")
       # First row's up button is disabled
-      assert html =~ ~r/phx-value-action="move_up"[^>]*phx-value-field="tags"[^>]*phx-value-index="0"[^>]*disabled/
+      assert html =~
+               ~r/phx-value-action="move_up"[^>]*phx-value-field="tags"[^>]*phx-value-index="0"[^>]*disabled/
+
       # Last row's down button is disabled
       assert html =~ ~r/phx-value-action="move_down"[^>]*phx-value-index="2"[^>]*disabled/
     end

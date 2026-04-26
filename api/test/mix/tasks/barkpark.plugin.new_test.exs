@@ -7,7 +7,9 @@ defmodule Mix.Tasks.Barkpark.Plugin.NewTest do
     prev_shell = Mix.shell()
     Mix.shell(Mix.Shell.IO)
 
-    tmp = Path.join(System.tmp_dir!(), "barkpark_plugin_new_#{System.unique_integer([:positive])}")
+    tmp =
+      Path.join(System.tmp_dir!(), "barkpark_plugin_new_#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp)
 
     on_exit(fn ->

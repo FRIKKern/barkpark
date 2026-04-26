@@ -39,7 +39,12 @@ defmodule Barkpark.Content.ValidationTest do
           %{"name" => "excerpt", "title" => "Excerpt", "type" => "text", "rows" => 3},
           %{"name" => "body", "title" => "Body", "type" => "richText"},
           %{"name" => "featuredImage", "title" => "Featured Image", "type" => "image"},
-          %{"name" => "author", "title" => "Author", "type" => "reference", "refType" => "author"},
+          %{
+            "name" => "author",
+            "title" => "Author",
+            "type" => "reference",
+            "refType" => "author"
+          },
           %{"name" => "featured", "title" => "Featured Post", "type" => "boolean"}
         ]
       },
@@ -196,7 +201,12 @@ defmodule Barkpark.Content.ValidationTest do
           %{
             "name" => "slug",
             "type" => "slug",
-            "validation" => %{"required" => true, "min" => 3, "max" => 20, "pattern" => "^[a-z-]+$"}
+            "validation" => %{
+              "required" => true,
+              "min" => 3,
+              "max" => 20,
+              "pattern" => "^[a-z-]+$"
+            }
           },
           %{"name" => "summary", "type" => "text"}
         ]

@@ -16,12 +16,19 @@ defmodule BarkparkWeb.Contract.WebhooksTest do
 
   test "full CRUD lifecycle", %{conn: conn} do
     # Create
-    resp = conn |> authed() |> post("/v1/webhooks/test", Jason.encode!(%{
-      name: "My Hook",
-      url: "http://example.com/webhook",
-      events: ["create", "publish"],
-      types: ["post"]
-    }))
+    resp =
+      conn
+      |> authed()
+      |> post(
+        "/v1/webhooks/test",
+        Jason.encode!(%{
+          name: "My Hook",
+          url: "http://example.com/webhook",
+          events: ["create", "publish"],
+          types: ["post"]
+        })
+      )
+
     assert resp.status == 201
     body = Jason.decode!(resp.resp_body)
     id = body["webhook"]["id"]

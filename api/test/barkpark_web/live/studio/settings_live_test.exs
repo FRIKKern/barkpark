@@ -14,7 +14,9 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   @junior_token "junior-test-token"
 
   setup %{conn: conn} do
-    {:ok, _} = Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
+
     {:ok, _} = Auth.create_token(@junior_token, "test junior", "production", ["read"])
 
     {:ok, conn: conn}

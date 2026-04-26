@@ -54,6 +54,7 @@ defmodule BarkparkWeb.Plugs.IdempotencyTest do
     assert c2.halted
     assert c2.status == 200
     assert c2.resp_body == ~s({"transactionId":"tx1","results":[]})
+
     assert [{"idempotency-replay", "true"}] =
              Enum.filter(c2.resp_headers, fn {k, _} -> k == "idempotency-replay" end)
   end

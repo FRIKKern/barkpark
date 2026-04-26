@@ -81,7 +81,10 @@ defmodule Barkpark.Content.ExpandTest do
     {:ok, _} = Content.publish_document("p2", "post", "exp")
 
     docs =
-      Content.list_documents("post", "exp", perspective: :published, filter_map: %{"title" => "Orphan"})
+      Content.list_documents("post", "exp",
+        perspective: :published,
+        filter_map: %{"title" => "Orphan"}
+      )
       |> Enum.map(&Envelope.render/1)
 
     [expanded] = Expand.expand(docs, :all, "exp")
@@ -134,7 +137,10 @@ defmodule Barkpark.Content.ExpandTest do
     {:ok, _} = Content.publish_document("p3", "post", "exp")
 
     docs =
-      Content.list_documents("post", "exp", perspective: :published, filter_map: %{"title" => "Deep"})
+      Content.list_documents("post", "exp",
+        perspective: :published,
+        filter_map: %{"title" => "Deep"}
+      )
       |> Enum.map(&Envelope.render/1)
 
     [post] = Expand.expand(docs, :all, "exp")

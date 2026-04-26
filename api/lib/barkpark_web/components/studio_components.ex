@@ -3,6 +3,7 @@ defmodule BarkparkWeb.StudioComponents do
   use Phoenix.Component
 
   attr :status, :string, required: true
+
   def status_badge(assigns) do
     ~H"""
     <span class={"status status-#{@status}"}>
@@ -13,6 +14,7 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   attr :schema, :map, required: true
+
   def schema_card(assigns) do
     ~H"""
     <a href={"/studio/#{@schema.name}"} class="schema-card">

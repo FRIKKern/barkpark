@@ -6,26 +6,34 @@ defmodule Barkpark.Content.LocalizedTextTest do
   describe "resolve/2 — fallback chain" do
     test "primary language present → returns primary" do
       assert {:ok, "nob", "Hei"} =
-               LocalizedText.resolve(%{"nob" => "Hei", "eng" => "Hello"},
-                 ["nob", "eng", "first-non-empty"])
+               LocalizedText.resolve(
+                 %{"nob" => "Hei", "eng" => "Hello"},
+                 ["nob", "eng", "first-non-empty"]
+               )
     end
 
     test "primary missing, secondary used → returns secondary" do
       assert {:ok, "eng", "Hello"} =
-               LocalizedText.resolve(%{"eng" => "Hello"},
-                 ["nob", "eng", "first-non-empty"])
+               LocalizedText.resolve(
+                 %{"eng" => "Hello"},
+                 ["nob", "eng", "first-non-empty"]
+               )
     end
 
     test "primary missing + secondary missing → first-non-empty scoops it up" do
       assert {:ok, "deu", "Hallo"} =
-               LocalizedText.resolve(%{"deu" => "Hallo"},
-                 ["nob", "eng", "first-non-empty"])
+               LocalizedText.resolve(
+                 %{"deu" => "Hallo"},
+                 ["nob", "eng", "first-non-empty"]
+               )
     end
 
     test "all languages empty → :no_value" do
       assert {:error, :no_value} =
-               LocalizedText.resolve(%{"nob" => "", "eng" => "  ", "deu" => ""},
-                 ["nob", "eng", "first-non-empty"])
+               LocalizedText.resolve(
+                 %{"nob" => "", "eng" => "  ", "deu" => ""},
+                 ["nob", "eng", "first-non-empty"]
+               )
     end
 
     test "empty value map → :no_value" do
@@ -35,14 +43,18 @@ defmodule Barkpark.Content.LocalizedTextTest do
 
     test "empty primary string is treated as missing" do
       assert {:ok, "eng", "Hello"} =
-               LocalizedText.resolve(%{"nob" => "", "eng" => "Hello"},
-                 ["nob", "eng"])
+               LocalizedText.resolve(
+                 %{"nob" => "", "eng" => "Hello"},
+                 ["nob", "eng"]
+               )
     end
 
     test "whitespace-only is treated as missing" do
       assert {:ok, "eng", "Hello"} =
-               LocalizedText.resolve(%{"nob" => "   \n\t", "eng" => "Hello"},
-                 ["nob", "eng"])
+               LocalizedText.resolve(
+                 %{"nob" => "   \n\t", "eng" => "Hello"},
+                 ["nob", "eng"]
+               )
     end
 
     test "no fallback sentinel + no chain match → :no_value even if other langs filled" do

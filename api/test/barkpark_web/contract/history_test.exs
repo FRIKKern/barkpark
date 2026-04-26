@@ -6,8 +6,15 @@ defmodule BarkparkWeb.Contract.HistoryTest do
 
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
-    Content.upsert_schema(%{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}, "test")
-    {:ok, doc} = Content.create_document("post", %{"doc_id" => "drafts.h1", "title" => "V1"}, "test")
+
+    Content.upsert_schema(
+      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      "test"
+    )
+
+    {:ok, doc} =
+      Content.create_document("post", %{"doc_id" => "drafts.h1", "title" => "V1"}, "test")
+
     Content.publish_document("h1", "post", "test")
 
     Content.apply_mutations(

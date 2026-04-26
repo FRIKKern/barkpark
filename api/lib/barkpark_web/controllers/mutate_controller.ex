@@ -15,6 +15,7 @@ defmodule BarkparkWeb.MutateController do
 
       {:error, reason} ->
         env = Errors.to_envelope({:error, reason}, conn)
+
         conn
         |> put_status(env.status)
         |> json(%{error: Map.delete(env, :status)})
@@ -23,6 +24,7 @@ defmodule BarkparkWeb.MutateController do
 
   def mutate(conn, _params) do
     env = Errors.to_envelope({:error, :malformed}, conn)
+
     conn
     |> put_status(env.status)
     |> json(%{error: Map.delete(env, :status)})

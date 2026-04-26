@@ -6,7 +6,12 @@ defmodule BarkparkWeb.Contract.ExportTest do
 
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
-    Content.upsert_schema(%{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}, "test")
+
+    Content.upsert_schema(
+      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      "test"
+    )
+
     Content.create_document("post", %{"doc_id" => "drafts.e1", "title" => "One"}, "test")
     Content.create_document("post", %{"doc_id" => "drafts.e2", "title" => "Two"}, "test")
     Content.publish_document("e1", "post", "test")

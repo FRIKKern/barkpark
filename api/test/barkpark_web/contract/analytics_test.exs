@@ -7,8 +7,16 @@ defmodule BarkparkWeb.Contract.AnalyticsTest do
 
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
-    Content.upsert_schema(%{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}, "test")
-    Content.upsert_schema(%{"name" => "author", "title" => "Author", "visibility" => "public", "fields" => []}, "test")
+
+    Content.upsert_schema(
+      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      "test"
+    )
+
+    Content.upsert_schema(
+      %{"name" => "author", "title" => "Author", "visibility" => "public", "fields" => []},
+      "test"
+    )
 
     Content.create_document("post", %{"doc_id" => "drafts.a1", "title" => "P1"}, "test")
     Content.create_document("post", %{"doc_id" => "drafts.a2", "title" => "P2"}, "test")

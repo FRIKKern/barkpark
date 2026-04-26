@@ -3,7 +3,9 @@ defmodule Barkpark.Repo.Migrations.CreateWebhookDeliveries do
 
   def change do
     create table(:webhook_deliveries) do
-      add :endpoint_id, references(:webhooks, type: :binary_id, on_delete: :delete_all), null: false
+      add :endpoint_id, references(:webhooks, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :event_id, references(:mutation_events, on_delete: :delete_all), null: false
       add :status, :string, null: false, default: "pending"
       add :attempts, :integer, null: false, default: 0
