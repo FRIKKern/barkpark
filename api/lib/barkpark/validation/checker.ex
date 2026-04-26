@@ -12,5 +12,11 @@ defmodule Barkpark.Validation.Checker do
   they are looked up under the namespaced name `plugin:<name>:<checker>`.
   """
 
-  @callback check(value :: term(), args :: term()) :: :ok | {:error, atom() | String.t()}
+  @typedoc "Stable error reason returned by a checker on failure."
+  @type reason :: atom() | String.t()
+
+  @typedoc "Checker-specific parameters resolved from rule DSL frontmatter."
+  @type params :: map()
+
+  @callback check(value :: term(), args :: term()) :: :ok | {:error, reason()}
 end
