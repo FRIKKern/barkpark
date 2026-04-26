@@ -15,6 +15,11 @@ defmodule Barkpark.Application do
       # WI1: plugin registry — must come up before workers/endpoint so any
       # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
       Barkpark.Plugins.Registry,
+      # Phase 3 WI1: cross-field validation kernel — registry of value-
+      # checkers (ETS-backed) and per-schema rule cache. Both must be up
+      # before the endpoint can serve mutate/export traffic.
+      Barkpark.Validation.Registry,
+      Barkpark.Content.Validation.Rules,
       {Oban, Application.fetch_env!(:barkpark, Oban)},
       {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Barkpark.PubSub},
@@ -38,6 +43,10 @@ defmodule Barkpark.Application do
         # one-shot Task so a slow filesystem walk never blocks startup.
         Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
           Barkpark.Plugins.Registry.discover_and_register()
+          # Phase 3 WI1: pull `checkers/0` slots out of every plugin
+          # registered above and namespace them as
+          # `plugin:<name>:<checker>` in the value-checker registry.
+          Barkpark.Validation.Registry.reload_plugin_checkers()
         end)
 
         ok
