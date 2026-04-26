@@ -14,15 +14,13 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
       _ -> nil
     end
 
-    type_node = Structure.type_node(type, dataset)
-
     socket =
       socket
       |> assign(
         type: type,
         dataset: dataset,
         schema: schema,
-        type_node: type_node,
+        type_node: nil,
         perspective: :drafts,
         active_filter: nil
       )
