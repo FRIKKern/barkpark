@@ -1,0 +1,63 @@
+{
+  "name": "textContent",
+  "title": "Text content (ONIX 3.0 collateral detail)",
+  "description": "Sub-schema for one entry inside book.collateralDetail.textContents (arrayOf). Phase 4 WI2 owns this shape; primary semantic carrier is the localizedText `text` blurb with a Norwegian-first fallback chain. textType (list 153), contentAudience (list 154), and textFormat (list 34) are codelist refs declared per D20.",
+  "fields": [
+    {
+      "name": "textType",
+      "title": "Text type",
+      "type": "codelist",
+      "codelistId": "onixedit:text_type",
+      "version": 73,
+      "onix": { "element": "TextType", "codelistId": 153 }
+    },
+    {
+      "name": "contentAudience",
+      "title": "Content audience",
+      "type": "codelist",
+      "codelistId": "onixedit:content_audience",
+      "version": 73,
+      "onix": { "element": "ContentAudience", "codelistId": 154 }
+    },
+    {
+      "name": "textFormat",
+      "title": "Text format",
+      "type": "codelist",
+      "codelistId": "onixedit:text_format",
+      "version": 73,
+      "onix": { "element": "TextFormat", "codelistId": 34 }
+    },
+    {
+      "name": "text",
+      "title": "Text body",
+      "type": "localizedText",
+      "languages": ["nob", "eng"],
+      "format": "rich",
+      "fallbackChain": ["nob", "eng", "first-non-empty"],
+      "onix": { "element": "Text" }
+    },
+    {
+      "name": "textSourceCorporate",
+      "title": "Text source — corporate",
+      "type": "string",
+      "onix": { "element": "TextSourceCorporate" }
+    },
+    {
+      "name": "textAuthor",
+      "title": "Text author",
+      "type": "string",
+      "onix": { "element": "TextAuthor" }
+    },
+    {
+      "name": "textSourceTitle",
+      "title": "Text source — title",
+      "type": "string",
+      "onix": { "element": "TextSourceTitle" }
+    },
+    {
+      "name": "sourceCorporate",
+      "title": "Source — corporate name",
+      "type": "string"
+    }
+  ]
+}

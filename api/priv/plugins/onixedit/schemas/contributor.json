@@ -1,0 +1,181 @@
+{
+  "name": "contributor",
+  "title": "Contributor (ONIX 3.0)",
+  "description": "Sub-schema for a single contributor entry inside the book schema's `contributors` arrayOf. Phase 4 WI2 owns this shape; it is referenced by integration into the book schema's contributors[item] composite. ContributorRole is pinned to ONIX list 17 (D17). BiographicalNote is a localizedText with a Norwegian-first fallback chain.",
+  "fields": [
+    {
+      "name": "sequenceNumber",
+      "title": "Sequence number",
+      "type": "string",
+      "onix": { "element": "SequenceNumber" }
+    },
+    {
+      "name": "contributorRole",
+      "title": "Contributor role",
+      "type": "codelist",
+      "codelistId": "onixedit:contributor_role",
+      "version": 73,
+      "onix": { "element": "ContributorRole", "codelistId": 17 }
+    },
+    {
+      "name": "languageCode",
+      "title": "Language of contribution",
+      "type": "codelist",
+      "codelistId": "onixedit:language_code",
+      "version": 73,
+      "onix": { "element": "LanguageCode", "codelistId": 74 }
+    },
+    {
+      "name": "nameType",
+      "title": "Name type",
+      "type": "codelist",
+      "codelistId": "onixedit:name_type",
+      "version": 73,
+      "onix": { "element": "NameType", "codelistId": 18 }
+    },
+    {
+      "name": "personName",
+      "title": "Person name",
+      "type": "composite",
+      "fields": [
+        {
+          "name": "personName",
+          "title": "Person name (display form)",
+          "type": "string",
+          "onix": { "element": "PersonName" }
+        },
+        {
+          "name": "personNameInverted",
+          "title": "Person name (inverted)",
+          "type": "string",
+          "onix": { "element": "PersonNameInverted" }
+        },
+        {
+          "name": "titlesBeforeNames",
+          "title": "Titles before names",
+          "type": "string",
+          "onix": { "element": "TitlesBeforeNames" }
+        },
+        {
+          "name": "namesBeforeKey",
+          "title": "Names before key",
+          "type": "string",
+          "onix": { "element": "NamesBeforeKey" }
+        },
+        {
+          "name": "prefixToKey",
+          "title": "Prefix to key",
+          "type": "string",
+          "onix": { "element": "PrefixToKey" }
+        },
+        {
+          "name": "keyNames",
+          "title": "Key names",
+          "type": "string",
+          "onix": { "element": "KeyNames" }
+        },
+        {
+          "name": "namesAfterKey",
+          "title": "Names after key",
+          "type": "string",
+          "onix": { "element": "NamesAfterKey" }
+        },
+        {
+          "name": "suffixToKey",
+          "title": "Suffix to key",
+          "type": "string",
+          "onix": { "element": "SuffixToKey" }
+        },
+        {
+          "name": "lettersAfterNames",
+          "title": "Letters after names",
+          "type": "string",
+          "onix": { "element": "LettersAfterNames" }
+        },
+        {
+          "name": "titlesAfterNames",
+          "title": "Titles after names",
+          "type": "string",
+          "onix": { "element": "TitlesAfterNames" }
+        }
+      ]
+    },
+    {
+      "name": "corporateName",
+      "title": "Corporate name (alternative to personName)",
+      "type": "composite",
+      "fields": [
+        {
+          "name": "corporateName",
+          "title": "Corporate name",
+          "type": "string",
+          "onix": { "element": "CorporateName" }
+        },
+        {
+          "name": "corporateNameInverted",
+          "title": "Corporate name (inverted)",
+          "type": "string",
+          "onix": { "element": "CorporateNameInverted" }
+        }
+      ]
+    },
+    {
+      "name": "nameIdentifiers",
+      "title": "Name identifiers",
+      "type": "arrayOf",
+      "ordered": false,
+      "of": {
+        "name": "nameIdentifier",
+        "type": "composite",
+        "fields": [
+          {
+            "name": "nameIdType",
+            "type": "codelist",
+            "codelistId": "onixedit:name_id_type",
+            "version": 73,
+            "onix": { "element": "NameIDType", "codelistId": 44 }
+          },
+          { "name": "idTypeName", "type": "string" },
+          { "name": "idValue", "type": "string" }
+        ]
+      }
+    },
+    {
+      "name": "professionalAffiliation",
+      "title": "Professional affiliation",
+      "type": "arrayOf",
+      "ordered": false,
+      "of": {
+        "name": "professionalAffiliationItem",
+        "type": "composite",
+        "fields": [
+          {
+            "name": "professionalPosition",
+            "type": "string",
+            "onix": { "element": "ProfessionalPosition" }
+          },
+          {
+            "name": "affiliation",
+            "type": "string",
+            "onix": { "element": "Affiliation" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "biographicalNote",
+      "title": "Biographical note",
+      "type": "localizedText",
+      "languages": ["nob", "eng"],
+      "format": "rich",
+      "fallbackChain": ["nob", "eng", "first-non-empty"],
+      "onix": { "element": "BiographicalNote" }
+    },
+    {
+      "name": "websiteForContributor",
+      "title": "Website for contributor",
+      "type": "string",
+      "onix": { "element": "WebsiteLink" }
+    }
+  ]
+}
