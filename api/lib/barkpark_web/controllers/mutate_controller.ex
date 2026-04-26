@@ -3,6 +3,7 @@ defmodule BarkparkWeb.MutateController do
 
   alias Barkpark.Content
   alias Barkpark.Content.Errors
+  alias BarkparkWeb.ErrorEnvelope
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -14,21 +15,38 @@ defmodule BarkparkWeb.MutateController do
         json(conn, %{transactionId: tx_id, results: results})
 
       {:error, reason} ->
-        env = Errors.to_envelope({:error, reason}, conn)
-
-        conn
-        |> put_status(env.status)
-        |> json(%{error: Map.delete(env, :status)})
+        respond_with_error(conn, reason)
     end
   end
 
   def mutate(conn, _params) do
-    env = Errors.to_envelope({:error, :malformed}, conn)
+    respond_with_error(conn, :malformed)
+  end
+
+  defp respond_with_error(conn, reason) do
+    env = Errors.to_envelope({:error, reason}, conn)
+    body = render_error_body(conn, env)
 
     conn
     |> put_status(env.status)
-    |> json(%{error: Map.delete(env, :status)})
+    |> json(%{error: body})
   end
+
+  defp render_error_body(conn, env) do
+    base = Map.delete(env, :status)
+    version = Map.get(conn.assigns, :error_envelope_version, :v1)
+
+    if version == :v2 and validation_failed?(env) do
+      base
+      |> Map.delete(:details)
+      |> Map.merge(ErrorEnvelope.serialize_v2(Map.get(env, :details, %{})))
+    else
+      base
+    end
+  end
+
+  defp validation_failed?(%{code: "validation_failed", details: %{}}), do: true
+  defp validation_failed?(_), do: false
 
   defp apply_if_match_header(conn, [mutation] = _mutations) do
     case get_req_header(conn, "if-match") do
