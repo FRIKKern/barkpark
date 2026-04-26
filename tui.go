@@ -1044,6 +1044,11 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
 
 	default:
+		// D12 (masterplan-20260425-085425): the Go TUI is read-only for v2
+		// plugin schema field types — composite, arrayOf, codelist, localizedText.
+		// Documents whose schema declares any v2 type render through this
+		// default branch (no panic, no editor surface). Editing happens in the
+		// LiveView Studio at /studio via BarkparkWeb.Studio.Plugins.Adapter.
 		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(placeholder("...")))
 	}
 

@@ -7,6 +7,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   alias Barkpark.{Content, Media, Structure}
   alias BarkparkWeb.Presence
+  alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
 
   @presence_topic "studio:presence"
 
@@ -1136,7 +1137,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                       <%= if rules["required"] do %><span class="field-required">*</span><% end %>
                       <span class="editor-field-type"><%= field["type"] %></span>
                     </label>
-                    <%= render_input(assigns, field) %>
+                    <%= if PluginAdapter.v2?(field), do: PluginAdapter.render(assigns, field), else: render_input(assigns, field) %>
                     <%= if errs = @validation_errors[field_name] do %>
                       <div class="field-errors"><%= Enum.join(errs, ", ") %></div>
                     <% end %>
