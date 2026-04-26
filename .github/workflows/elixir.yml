@@ -149,3 +149,51 @@ jobs:
         run: mix compile --warnings-as-errors
         env:
           MIX_ENV: prod
+
+  validation-perf:
+    # Phase 3 WI4 — cross-field validation perf gate. Independent of mix-test
+    # (which is advisory) so a perf regression blocks merge even while the
+    # test suite is being remediated, and a flaky test does not mask perf
+    # drift. Runs the synthetic 200-field / 100-rule bench, takes the median
+    # of 5 timed runs, fails the job if median > 100ms.
+    name: Validation perf bench (median-of-5, alarm >100ms)
+    runs-on: ubuntu-latest-4-core
+    env:
+      MIX_ENV: test
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          key: ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      - name: Run validation perf bench (median-of-5, fail if >100ms)
+        # --no-start skips OTP app boot. The bench is pure-compute; we don't
+        # need Postgres just to time the rule evaluator.
+        run: mix run --no-start bench/validation_perf.exs
