@@ -1,0 +1,121 @@
+name: elixir
+
+# Phase 2 / WI4 — Elixir CI gate.
+#
+# Two jobs:
+#   1. mix-test         — format check + dev-mode compile + test suite.
+#   2. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
+#                         _build/prod, --warnings-as-errors enforced.
+#
+# Why a separate prod-compile job?
+# PR #42 (Phase 1) introduced a `runtime.exs` `when`-guard that referenced a
+# macro. The construct is legal in :dev but rejected only by the prod compiler,
+# so static review and `mix test` both passed; production compile failed and
+# required the PR #43 hotfix. From this slice forward every PR must clear a
+# clean MIX_ENV=prod compile before merge. See docs/ops/merge-gates.md and
+# CLAUDE.md "Past Mistakes" for the full post-mortem.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: elixir-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mix-test:
+    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # api/mix.exs requires `~> 1.15`. Track production server (ASDF) when
+        # bumped; update both .tool-versions (when added) and this matrix.
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: Format check
+        run: mix format --check-formatted
+
+      - name: Compile (dev, --warnings-as-errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Test
+        run: mix test
+
+  mix-prod-compile:
+    # The merge gate. See docs/ops/merge-gates.md.
+    name: Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    needs: mix-test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps (prod build is intentionally NOT cached)
+        uses: actions/cache@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-mix-prod-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-prod-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Clean prod build (Golden Rule #1 — no partial cleans)
+        run: rm -rf _build/prod
+        env:
+          MIX_ENV: prod
+
+      - name: Fetch deps (prod)
+        run: mix deps.get
+        env:
+          MIX_ENV: prod
+
+      - name: Force-recompile deps (prod)
+        run: mix deps.compile --force
+        env:
+          MIX_ENV: prod
+
+      - name: Prod compile (--warnings-as-errors)
+        # The gate. If this fails, the PR must be fixed before merge.
+        run: mix compile --warnings-as-errors
+        env:
+          MIX_ENV: prod

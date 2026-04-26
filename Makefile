@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -104,6 +104,18 @@ domain-cutover: ## Update prod PHX_HOST=<DOMAIN> + PHX_SCHEME=https, restart, ve
 	curl -sI https://$(DOMAIN)/studio/production | head -5
 	@echo ">> Verify WebSocket (must NOT be 403)"
 	curl -sI -H 'Origin: https://$(DOMAIN)' -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: test' -H 'Sec-WebSocket-Version: 13' https://$(DOMAIN)/live/websocket | head -5
+
+# ── Pre-merge gate ───────────────────────────────────────────────────────────
+# Mirrors .github/workflows/elixir.yml `mix-prod-compile`. Run before pushing.
+# See docs/ops/merge-gates.md for the full rationale (PR #42 lessons-learned).
+
+precheck: ## Run the prod-compile merge gate locally (mirrors CI)
+	@echo ">> Pre-merge gate: clean prod build + warnings-as-errors compile"
+	rm -rf api/_build/prod
+	cd api && MIX_ENV=prod mix deps.get && \
+	  MIX_ENV=prod mix deps.compile --force && \
+	  MIX_ENV=prod mix compile --warnings-as-errors
+	@echo ">> precheck OK — safe to push"
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 

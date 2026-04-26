@@ -12,6 +12,9 @@ defmodule Barkpark.Application do
       BarkparkWeb.Telemetry,
       Barkpark.Repo,
       Barkpark.Vault,
+      # WI1: plugin registry — must come up before workers/endpoint so any
+      # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
+      Barkpark.Plugins.Registry,
       {Oban, Application.fetch_env!(:barkpark, Oban)},
       {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Barkpark.PubSub},
@@ -30,6 +33,13 @@ defmodule Barkpark.Application do
     case Supervisor.start_link(children, opts) do
       {:ok, _pid} = ok ->
         Barkpark.Telemetry.Handlers.attach()
+
+        # WI1: plugin registry — boot-time discovery runs in a supervised
+        # one-shot Task so a slow filesystem walk never blocks startup.
+        Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+          Barkpark.Plugins.Registry.discover_and_register()
+        end)
+
         ok
 
       other ->

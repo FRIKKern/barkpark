@@ -1,0 +1,7 @@
+{
+  "plugin_name": "hello",
+  "version": "0.0.1",
+  "description": "WI1 test fixture plugin.",
+  "capabilities": ["routes"],
+  "module": "Barkpark.Plugins.Hello"
+}

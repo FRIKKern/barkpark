@@ -56,7 +56,9 @@ defmodule Barkpark.MixProject do
       {:sweet_xml, "~> 0.7"},
       {:xml_builder, "~> 2.2"},
       {:cloak_ecto, "~> 1.2"},
-      {:oban, "~> 2.17"}
+      {:oban, "~> 2.17"},
+      # WI2: json schema validator dep
+      {:ex_json_schema, "~> 0.10"}
     ]
   end
 
