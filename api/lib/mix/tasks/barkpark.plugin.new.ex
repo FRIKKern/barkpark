@@ -11,7 +11,9 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
     * `--out PATH`           — output directory (default `priv/plugins/<name>`)
     * `--module ModuleName`  — module name (default derived from `<name>`)
     * `--description "..."`  — manifest description (default boilerplate)
-    * `--capabilities r,w,s` — CSV list of capability atoms (default `read`)
+    * `--capabilities r,w,s` — CSV list of capability names (default empty).
+      Single-letter shortcuts: `r`→`routes`, `w`→`workers`, `s`→`schemas`,
+      `n`→`node`, `c`→`codelists`, `t`→`settings`. Full names also accepted.
     * `--force`              — overwrite an existing output directory
 
   The generated skeleton uses the `Barkpark.Plugin` behaviour at compile
@@ -93,7 +95,7 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
     }
   end
 
-  defp parse_capabilities(nil), do: ["read"]
+  defp parse_capabilities(nil), do: []
 
   defp parse_capabilities(csv) do
     csv
@@ -102,15 +104,14 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
     |> Enum.reject(&(&1 == ""))
     |> Enum.map(&expand_capability/1)
     |> Enum.uniq()
-    |> case do
-      [] -> ["read"]
-      list -> list
-    end
   end
 
-  defp expand_capability("r"), do: "read"
-  defp expand_capability("w"), do: "write"
-  defp expand_capability("s"), do: "schema"
+  defp expand_capability("r"), do: "routes"
+  defp expand_capability("w"), do: "workers"
+  defp expand_capability("s"), do: "schemas"
+  defp expand_capability("n"), do: "node"
+  defp expand_capability("c"), do: "codelists"
+  defp expand_capability("t"), do: "settings"
   defp expand_capability(other), do: other
 
   defp default_module(name) do
