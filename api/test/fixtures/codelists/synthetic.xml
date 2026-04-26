@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic ONIX codelist fixture — covers a tiny slice of lists 1, 7, 17, 64
+  for round-trip / hierarchy / multi-language / idempotency tests.
+
+  This is NOT a real EDItEUR snapshot. Per Phase 4 decision D21, Barkpark
+  ships the parser only; publishers bring their own snapshot. Do not derive
+  production codes from this file.
+-->
+<ONIXCodeTable IssueNumber="73">
+  <CodeList>
+    <CodeListNumber>1</CodeListNumber>
+    <CodeListDescription>Notification or update type</CodeListDescription>
+    <Code>
+      <CodeValue>01</CodeValue>
+      <CodeDescription>Early notification</CodeDescription>
+    </Code>
+    <Code>
+      <CodeValue>03</CodeValue>
+      <CodeDescription>Notification confirmed on publication</CodeDescription>
+    </Code>
+  </CodeList>
+
+  <CodeList>
+    <CodeListNumber>7</CodeListNumber>
+    <CodeListDescription>Product form (truncated synthetic subset)</CodeListDescription>
+    <Code>
+      <CodeValue>BC</CodeValue>
+      <CodeDescription>Paperback / softback</CodeDescription>
+    </Code>
+    <Code>
+      <CodeValue>BB</CodeValue>
+      <CodeDescription>Hardback</CodeDescription>
+    </Code>
+    <Code>
+      <CodeValue>EB</CodeValue>
+      <Description language="eng">Digital download</Description>
+      <Description language="nob">Digital nedlasting</Description>
+    </Code>
+  </CodeList>
+
+  <CodeList>
+    <CodeListNumber>17</CodeListNumber>
+    <CodeListDescription>Contributor role code</CodeListDescription>
+    <Code>
+      <CodeValue>A01</CodeValue>
+      <Description language="eng">By (author)</Description>
+      <Description language="nob">Forfatter</Description>
+    </Code>
+    <Code>
+      <CodeValue>B01</CodeValue>
+      <CodeDescription>Edited by</CodeDescription>
+    </Code>
+    <Code>
+      <CodeValue>B06</CodeValue>
+      <CodeDescription>Translated by</CodeDescription>
+    </Code>
+  </CodeList>
+
+  <CodeList>
+    <CodeListNumber>64</CodeListNumber>
+    <CodeListDescription>Synthetic hierarchical fixture (Thema-style)</CodeListDescription>
+    <Code>
+      <CodeValue>A</CodeValue>
+      <CodeDescription>The arts</CodeDescription>
+    </Code>
+    <Code>
+      <CodeValue>AB</CodeValue>
+      <CodeDescription>The arts: general topics</CodeDescription>
+      <ParentCode>A</ParentCode>
+    </Code>
+    <Code>
+      <CodeValue>ABA</CodeValue>
+      <CodeDescription>Theory of art</CodeDescription>
+      <ParentCode>AB</ParentCode>
+    </Code>
+    <Code>
+      <CodeValue>B</CodeValue>
+      <CodeDescription>Biography</CodeDescription>
+    </Code>
+    <Code>
+      <CodeValue>BG</CodeValue>
+      <CodeDescription>Biography: general</CodeDescription>
+      <ParentCode>B</ParentCode>
+    </Code>
+  </CodeList>
+</ONIXCodeTable>
