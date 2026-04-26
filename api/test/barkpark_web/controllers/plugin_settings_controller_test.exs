@@ -93,5 +93,10 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
       resp = conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", body)
       assert resp.status == 400
     end
+
+    test "DELETE on missing plugin returns 404", %{conn: conn} do
+      resp = conn |> admin_conn() |> delete("/v1/plugins/settings/does-not-exist")
+      assert resp.status == 404
+    end
   end
 end

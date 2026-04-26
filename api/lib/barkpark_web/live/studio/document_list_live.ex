@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.Studio.DocumentListLive do
   use BarkparkWeb, :live_view
 
-  alias Barkpark.{Content, Structure}
+  alias Barkpark.Content
 
   @impl true
   def mount(%{"type" => type, "dataset" => dataset}, _session, socket) do
