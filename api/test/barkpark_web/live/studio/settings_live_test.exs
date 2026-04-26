@@ -2,7 +2,6 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
-  import Plug.Test, only: [init_test_session: 2]
 
   alias Barkpark.Auth
   alias Barkpark.Plugins.Settings
