@@ -23,7 +23,11 @@ defmodule Barkpark.ContentDraftsPaginationTest do
 
     for i <- [1, 3, 5, 7, 9] do
       {:ok, _} =
-        Content.upsert_document("post", %{"_id" => "dp-#{i}", "title" => "Doc #{i} (edited)"}, "dp")
+        Content.upsert_document(
+          "post",
+          %{"_id" => "dp-#{i}", "title" => "Doc #{i} (edited)"},
+          "dp"
+        )
     end
 
     :ok
@@ -40,7 +44,7 @@ defmodule Barkpark.ContentDraftsPaginationTest do
     docs =
       Content.list_documents("post", "dp", perspective: :drafts, limit: 100)
 
-    ids = Enum.map(docs, & Content.published_id(&1.doc_id)) |> Enum.sort()
+    ids = Enum.map(docs, &Content.published_id(&1.doc_id)) |> Enum.sort()
     assert length(docs) == 10
     assert ids == Enum.sort(Enum.map(1..10, &"dp-#{&1}"))
   end

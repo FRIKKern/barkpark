@@ -17,7 +17,14 @@ defmodule Barkpark.Webhooks.Delivery do
 
   def changeset(delivery, attrs) do
     delivery
-    |> cast(attrs, [:endpoint_id, :event_id, :status, :attempts, :last_status_code, :last_error_text])
+    |> cast(attrs, [
+      :endpoint_id,
+      :event_id,
+      :status,
+      :attempts,
+      :last_status_code,
+      :last_error_text
+    ])
     |> validate_required([:endpoint_id, :event_id])
     |> validate_inclusion(:status, @statuses)
     |> unique_constraint([:endpoint_id, :event_id])

@@ -9,7 +9,13 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
     socket =
       socket
-      |> assign(nav_section: :media, dataset: dataset, files: files, page_title: "Media Library", selected_file: nil)
+      |> assign(
+        nav_section: :media,
+        dataset: dataset,
+        files: files,
+        page_title: "Media Library",
+        selected_file: nil
+      )
       |> allow_upload(:media, accept: :any, max_entries: 5, max_file_size: 100_000_000)
 
     {:ok, socket}
@@ -23,7 +29,11 @@ defmodule BarkparkWeb.Studio.MediaLive do
       consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
         dest = Path.join(System.tmp_dir!(), entry.client_name)
         File.cp!(path, dest)
-        Media.upload(%Plug.Upload{path: dest, filename: entry.client_name, content_type: entry.client_type}, socket.assigns.dataset)
+
+        Media.upload(
+          %Plug.Upload{path: dest, filename: entry.client_name, content_type: entry.client_type},
+          socket.assigns.dataset
+        )
       end)
 
     {:noreply, assign(socket, files: Media.list_files(socket.assigns.dataset))}
@@ -42,7 +52,9 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   def handle_event("delete-file", %{"id" => id}, socket) do
     Media.delete_file(id)
-    {:noreply, assign(socket, files: Media.list_files(socket.assigns.dataset), selected_file: nil)}
+
+    {:noreply,
+     assign(socket, files: Media.list_files(socket.assigns.dataset), selected_file: nil)}
   end
 
   @impl true
@@ -222,6 +234,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
   end
 
   defp mime_icon(nil), do: "&#128196;"
+
   defp mime_icon(mime) do
     cond do
       String.starts_with?(mime, "image/") -> "&#128248;"
@@ -238,6 +251,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
   defp format_size(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
 
   defp format_date(nil), do: ""
+
   defp format_date(dt) do
     Calendar.strftime(dt, "%b %d, %Y at %H:%M")
   end

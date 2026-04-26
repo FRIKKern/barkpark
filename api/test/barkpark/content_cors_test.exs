@@ -10,13 +10,21 @@ defmodule Barkpark.ContentCorsTest do
   test "returns union across multiple schemas, deduplicated" do
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "post", "title" => "Post", "cors_origins" => ["https://a.example", "https://shared.example"]},
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "cors_origins" => ["https://a.example", "https://shared.example"]
+        },
         "ds_union_test"
       )
 
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "page", "title" => "Page", "cors_origins" => ["https://b.example", "https://shared.example"]},
+        %{
+          "name" => "page",
+          "title" => "Page",
+          "cors_origins" => ["https://b.example", "https://shared.example"]
+        },
         "ds_union_test"
       )
 

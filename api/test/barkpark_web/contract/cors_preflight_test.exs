@@ -23,7 +23,13 @@ defmodule BarkparkWeb.Contract.CorsPreflightTest do
   defp hdr(conn, name), do: conn |> Plug.Conn.get_resp_header(name) |> List.first()
 
   test "OPTIONS /v1/data/query/:ds/:type returns full preflight header set", %{conn: conn} do
-    conn = preflight(conn, "/v1/data/query/production/post", "GET", "authorization,x-barkpark-api-version")
+    conn =
+      preflight(
+        conn,
+        "/v1/data/query/production/post",
+        "GET",
+        "authorization,x-barkpark-api-version"
+      )
 
     assert conn.status in [200, 204]
     assert hdr(conn, "access-control-allow-origin") != nil
@@ -33,7 +39,13 @@ defmodule BarkparkWeb.Contract.CorsPreflightTest do
   end
 
   test "OPTIONS /v1/data/doc/:ds/:type/:id returns full preflight header set", %{conn: conn} do
-    conn = preflight(conn, "/v1/data/doc/production/post/p1", "GET", "authorization,x-barkpark-api-version")
+    conn =
+      preflight(
+        conn,
+        "/v1/data/doc/production/post/p1",
+        "GET",
+        "authorization,x-barkpark-api-version"
+      )
 
     assert conn.status in [200, 204]
     assert hdr(conn, "access-control-allow-origin") != nil
@@ -43,7 +55,13 @@ defmodule BarkparkWeb.Contract.CorsPreflightTest do
   end
 
   test "preflight allow-headers advertises authorization + x-barkpark-api-version", %{conn: conn} do
-    conn = preflight(conn, "/v1/data/query/production/post", "GET", "authorization,x-barkpark-api-version")
+    conn =
+      preflight(
+        conn,
+        "/v1/data/query/production/post",
+        "GET",
+        "authorization,x-barkpark-api-version"
+      )
 
     allow_headers = hdr(conn, "access-control-allow-headers") || ""
     lowered = String.downcase(allow_headers)

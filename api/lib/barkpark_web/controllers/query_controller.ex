@@ -65,6 +65,7 @@ defmodule BarkparkWeb.QueryController do
 
   defp respond(conn, inner, dataset, sync_tags, etag, t0) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
+
     conn =
       conn
       |> put_resp_header("etag", ~s("#{etag}"))
@@ -153,12 +154,14 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_int(nil, d), do: d
+
   defp parse_int(s, d) when is_binary(s) do
     case Integer.parse(s) do
       {n, _} -> n
       :error -> d
     end
   end
+
   defp parse_int(n, _) when is_integer(n), do: n
 
   defp parse_order("_updatedAt:asc"), do: :updated_at_asc

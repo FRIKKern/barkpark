@@ -24,23 +24,33 @@ defmodule BarkparkWeb.Contract.QueryTest do
   end
 
   test "offset paginates", %{conn: conn} do
-    %{"result" => b1} = conn |> get("/v1/data/query/test/post?limit=2&offset=0") |> json_response(200)
-    %{"result" => b2} = conn |> get("/v1/data/query/test/post?limit=2&offset=2") |> json_response(200)
+    %{"result" => b1} =
+      conn |> get("/v1/data/query/test/post?limit=2&offset=0") |> json_response(200)
+
+    %{"result" => b2} =
+      conn |> get("/v1/data/query/test/post?limit=2&offset=2") |> json_response(200)
+
     ids1 = Enum.map(b1["documents"], & &1["_id"]) |> MapSet.new()
     ids2 = Enum.map(b2["documents"], & &1["_id"]) |> MapSet.new()
     assert MapSet.disjoint?(ids1, ids2)
   end
 
   test "filter[title]=T3 works", %{conn: conn} do
-    %{"result" => body} = conn |> get("/v1/data/query/test/post?filter[title]=T3") |> json_response(200)
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter[title]=T3") |> json_response(200)
+
     assert length(body["documents"]) == 1
     assert hd(body["documents"])["title"] == "T3"
   end
 
   test "order=_createdAt:asc reverses default", %{conn: conn} do
     %{"result" => desc} = conn |> get("/v1/data/query/test/post") |> json_response(200)
-    %{"result" => asc} = conn |> get("/v1/data/query/test/post?order=_createdAt:asc") |> json_response(200)
-    assert Enum.map(desc["documents"], & &1["_id"]) == Enum.reverse(Enum.map(asc["documents"], & &1["_id"]))
+
+    %{"result" => asc} =
+      conn |> get("/v1/data/query/test/post?order=_createdAt:asc") |> json_response(200)
+
+    assert Enum.map(desc["documents"], & &1["_id"]) ==
+             Enum.reverse(Enum.map(asc["documents"], & &1["_id"]))
   end
 
   test "envelope carries result + syncTags + ms + etag + schemaHash", %{conn: conn} do

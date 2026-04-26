@@ -103,11 +103,13 @@ defmodule BarkparkWeb.ListenController do
   end
 
   defp parse_int(nil), do: nil
+
   defp parse_int(v) when is_binary(v) do
     case Integer.parse(v) do
       {n, _} -> n
       :error -> nil
     end
   end
+
   defp parse_int(n) when is_integer(n), do: n
 end

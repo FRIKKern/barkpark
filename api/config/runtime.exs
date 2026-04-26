@@ -50,9 +50,7 @@ config :barkpark, Barkpark.Vault,
   ciphers: [
     default: {
       Cloak.Ciphers.AES.GCM,
-      tag: "AES.GCM.V1",
-      key: :crypto.hash(:sha256, cloak_key),
-      iv_length: 12
+      tag: "AES.GCM.V1", key: :crypto.hash(:sha256, cloak_key), iv_length: 12
     }
   ]
 

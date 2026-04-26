@@ -40,7 +40,8 @@ defmodule Barkpark.ApiTester.EndpointsTest do
   test "all 8 mutation kinds are registered" do
     ids = Endpoints.all("production") |> Enum.map(& &1.id)
 
-    for kind <- ~w(create createOrReplace createIfNotExists patch publish unpublish discardDraft delete) do
+    for kind <-
+          ~w(create createOrReplace createIfNotExists patch publish unpublish discardDraft delete) do
       assert "mutate-#{kind}" in ids, "missing mutate-#{kind}"
     end
   end
@@ -83,7 +84,8 @@ defmodule Barkpark.ApiTester.EndpointsTest do
   end
 
   test "new API expansion endpoints have valid specs" do
-    new_ids = ~w(export-dataset history-list history-show history-restore search-documents analytics-overview webhooks-list webhooks-create webhooks-delete)
+    new_ids =
+      ~w(export-dataset history-list history-show history-restore search-documents analytics-overview webhooks-list webhooks-create webhooks-delete)
 
     for id <- new_ids do
       endpoint = Endpoints.find("test", id)

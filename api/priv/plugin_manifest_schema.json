@@ -1,0 +1,171 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://barkpark.cloud/schemas/plugin_manifest.json",
+  "title": "Barkpark Plugin Manifest",
+  "description": "Canonical schema for plugin.json. The validator at compile time enforces this. Plugins are inert data until Barkpark.Plugins.Manifest.validate!/1 accepts them (decision D7: no eval).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plugin_name", "version", "description", "capabilities"],
+  "properties": {
+    "plugin_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Slug-like discriminator. Lowercase, must start with a letter, only [a-z0-9_-]. Unique across registry (D20)."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.-]+)?$",
+      "description": "Semantic version (MAJOR.MINOR.PATCH with optional pre-release tag)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable description of the plugin's purpose."
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["routes", "workers", "schemas", "settings", "node", "codelists"]
+      },
+      "description": "Declared capability set. Registry uses this to decide which subsystems to wire."
+    },
+    "module": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9_]*(\\.[A-Z][A-Za-z0-9_]*)*$",
+      "description": "Optional Elixir module override. Defaults to auto-derived from plugin_name."
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["plugin_name", "version_req"],
+        "properties": {
+          "plugin_name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "version_req": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Version requirement string (e.g. '~> 1.2', '>= 0.0.0')."
+          }
+        }
+      }
+    },
+    "schemas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "file"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 },
+          "file": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Route table descriptors. WI5 will define the exact DSL."
+    },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "child_spec_module"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "child_spec_module": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9_]*(\\.[A-Z][A-Za-z0-9_]*)*$"
+          }
+        }
+      }
+    },
+    "settings_schema": {
+      "type": "object",
+      "description": "Embedded JSON Schema for runtime user-supplied plugin settings. Validated by Barkpark.Plugins.Settings on put/3."
+    },
+    "codelists": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue", "name", "file"],
+        "properties": {
+          "issue": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              { "type": "integer", "minimum": 0 }
+            ],
+            "description": "Codelist issue/version (e.g. ONIX issue 73). String or integer."
+          },
+          "name": { "type": "string", "minLength": 1 },
+          "file": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "BYO codelists shipped with the plugin (D21)."
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "package"],
+      "properties": {
+        "entrypoint": { "type": "string", "minLength": 1 },
+        "package": { "type": "string", "minLength": 1 },
+        "scripts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lint": { "type": "string", "minLength": 1 },
+            "typecheck": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "plugin_name": "hello",
+      "version": "0.1.0",
+      "description": "Minimal example plugin.",
+      "capabilities": ["routes"]
+    },
+    {
+      "plugin_name": "onix-edit",
+      "version": "1.2.3-beta.1",
+      "description": "ONIX 3.0 book metadata editor.",
+      "capabilities": ["routes", "workers", "schemas", "settings", "node", "codelists"],
+      "module": "Barkpark.Plugins.OnixEdit",
+      "dependencies": [
+        { "plugin_name": "core-codelists", "version_req": "~> 1.0" }
+      ],
+      "schemas": [
+        { "name": "book", "version": "1", "file": "schemas/book.json" }
+      ],
+      "routes": ["GET /onix/books"],
+      "workers": [
+        { "name": "onix_publisher", "child_spec_module": "Barkpark.Plugins.OnixEdit.Publisher" }
+      ],
+      "settings_schema": {
+        "type": "object",
+        "required": ["api_token"],
+        "properties": { "api_token": { "type": "string" } }
+      },
+      "codelists": [
+        { "issue": 73, "name": "thema", "file": "codelists/thema-73.json" }
+      ],
+      "node": {
+        "entrypoint": "ui/index.tsx",
+        "package": "@barkpark/onix-edit",
+        "scripts": { "lint": "eslint .", "typecheck": "tsc --noEmit" }
+      }
+    }
+  ]
+}

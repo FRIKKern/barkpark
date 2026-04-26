@@ -5,7 +5,13 @@ defmodule Barkpark.WebhooksTest do
   alias Barkpark.Webhooks.{Webhook, Dispatcher}
 
   test "create and list webhooks" do
-    {:ok, wh} = Webhooks.create_webhook(%{"name" => "Test", "url" => "http://example.com/hook", "dataset" => "test"})
+    {:ok, wh} =
+      Webhooks.create_webhook(%{
+        "name" => "Test",
+        "url" => "http://example.com/hook",
+        "dataset" => "test"
+      })
+
     assert wh.name == "Test"
     assert wh.active == true
 
@@ -14,22 +20,60 @@ defmodule Barkpark.WebhooksTest do
   end
 
   test "update a webhook" do
-    {:ok, wh} = Webhooks.create_webhook(%{"name" => "Test", "url" => "http://example.com/hook", "dataset" => "test"})
+    {:ok, wh} =
+      Webhooks.create_webhook(%{
+        "name" => "Test",
+        "url" => "http://example.com/hook",
+        "dataset" => "test"
+      })
+
     {:ok, updated} = Webhooks.update_webhook(wh, %{"active" => false})
     assert updated.active == false
   end
 
   test "delete a webhook" do
-    {:ok, wh} = Webhooks.create_webhook(%{"name" => "Test", "url" => "http://example.com/hook", "dataset" => "test"})
+    {:ok, wh} =
+      Webhooks.create_webhook(%{
+        "name" => "Test",
+        "url" => "http://example.com/hook",
+        "dataset" => "test"
+      })
+
     {:ok, _} = Webhooks.delete_webhook(wh)
     assert Webhooks.list_webhooks("test") == []
   end
 
   test "active_webhooks_for matches event and type" do
-    Webhooks.create_webhook(%{"name" => "All", "url" => "http://example.com/all", "dataset" => "test", "events" => [], "types" => []})
-    Webhooks.create_webhook(%{"name" => "Creates", "url" => "http://example.com/create", "dataset" => "test", "events" => ["create"], "types" => []})
-    Webhooks.create_webhook(%{"name" => "Posts", "url" => "http://example.com/post", "dataset" => "test", "events" => [], "types" => ["post"]})
-    Webhooks.create_webhook(%{"name" => "Inactive", "url" => "http://example.com/off", "dataset" => "test", "active" => false})
+    Webhooks.create_webhook(%{
+      "name" => "All",
+      "url" => "http://example.com/all",
+      "dataset" => "test",
+      "events" => [],
+      "types" => []
+    })
+
+    Webhooks.create_webhook(%{
+      "name" => "Creates",
+      "url" => "http://example.com/create",
+      "dataset" => "test",
+      "events" => ["create"],
+      "types" => []
+    })
+
+    Webhooks.create_webhook(%{
+      "name" => "Posts",
+      "url" => "http://example.com/post",
+      "dataset" => "test",
+      "events" => [],
+      "types" => ["post"]
+    })
+
+    Webhooks.create_webhook(%{
+      "name" => "Inactive",
+      "url" => "http://example.com/off",
+      "dataset" => "test",
+      "active" => false
+    })
 
     matches = Webhooks.active_webhooks_for("test", "create", "post")
     names = Enum.map(matches, & &1.name) |> Enum.sort()
@@ -91,9 +135,13 @@ defmodule Barkpark.WebhooksTest do
     end
 
     test "rotate_secret moves current secret to previous with 24h expiry by default" do
-      {:ok, wh} = Webhooks.create_webhook(%{
-        "name" => "rot", "url" => "http://example.com/h", "dataset" => "test", "secret" => "s1"
-      })
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "rot",
+          "url" => "http://example.com/h",
+          "dataset" => "test",
+          "secret" => "s1"
+        })
 
       {:ok, rotated} = Webhooks.rotate_secret(wh, "s2")
 
@@ -125,17 +173,24 @@ defmodule Barkpark.WebhooksTest do
 
   describe "delivery dedup (P1-d)" do
     setup do
-      {:ok, wh} = Webhooks.create_webhook(%{
-        "name" => "D", "url" => "http://example.com/d", "dataset" => "test", "secret" => "s"
-      })
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "D",
+          "url" => "http://example.com/d",
+          "dataset" => "test",
+          "secret" => "s"
+        })
 
       # A real mutation_events row is needed for the FK. Use Content to create one.
       alias Barkpark.Content
+
       Content.upsert_schema(
         %{"name" => "widget", "title" => "W", "visibility" => "public", "fields" => []},
         "test"
       )
-      {:ok, _doc} = Content.create_document("widget", %{"_id" => "dedup1", "title" => "x"}, "test")
+
+      {:ok, _doc} =
+        Content.create_document("widget", %{"_id" => "dedup1", "title" => "x"}, "test")
 
       [ev | _] = Barkpark.Repo.all(Barkpark.Content.MutationEvent)
       %{webhook: wh, event_id: ev.id}
@@ -148,7 +203,10 @@ defmodule Barkpark.WebhooksTest do
       assert d.event_id == eid
     end
 
-    test "claim_delivery returns {:error, :already_delivered} on duplicate", %{webhook: wh, event_id: eid} do
+    test "claim_delivery returns {:error, :already_delivered} on duplicate", %{
+      webhook: wh,
+      event_id: eid
+    } do
       assert {:ok, _d} = Webhooks.claim_delivery(wh.id, eid)
       assert {:error, :already_delivered} = Webhooks.claim_delivery(wh.id, eid)
     end

@@ -13,12 +13,18 @@ defmodule Barkpark.Structure do
       :id,
       :title,
       :icon,
-      :type,        # :list, :document_type_list, :document, :divider
-      :type_name,   # schema type name (for doc lists/singletons)
-      :filter,      # "field=value" filter string (used for UI phx-value; converted to filter_map before querying)
-      :visibility,  # :public or :private
-      items: [],    # child nodes
-      child: nil    # what opens when selected
+      # :list, :document_type_list, :document, :divider
+      :type,
+      # schema type name (for doc lists/singletons)
+      :type_name,
+      # "field=value" filter string (used for UI phx-value; converted to filter_map before querying)
+      :filter,
+      # :public or :private
+      :visibility,
+      # child nodes
+      items: [],
+      # what opens when selected
+      child: nil
     ]
   end
 
@@ -56,25 +62,28 @@ defmodule Barkpark.Structure do
     items = []
 
     # Posts — with status filter sub-views
-    items = if Map.has_key?(schemas, "post") do
-      items ++ [doc_type_with_filters(schemas["post"])]
-    else
-      items
-    end
+    items =
+      if Map.has_key?(schemas, "post") do
+        items ++ [doc_type_with_filters(schemas["post"])]
+      else
+        items
+      end
 
     # Pages — simple list
-    items = if Map.has_key?(schemas, "page") do
-      items ++ [doc_type_list_item(schemas["page"])]
-    else
-      items
-    end
+    items =
+      if Map.has_key?(schemas, "page") do
+        items ++ [doc_type_list_item(schemas["page"])]
+      else
+        items
+      end
 
     # Projects — with status filter sub-views
-    items = if Map.has_key?(schemas, "project") do
-      items ++ [doc_type_with_filters(schemas["project"])]
-    else
-      items
-    end
+    items =
+      if Map.has_key?(schemas, "project") do
+        items ++ [doc_type_with_filters(schemas["project"])]
+      else
+        items
+      end
 
     items
   end
@@ -83,17 +92,19 @@ defmodule Barkpark.Structure do
   defp build_taxonomy_group(schemas) do
     items = []
 
-    items = if Map.has_key?(schemas, "author") do
-      items ++ [doc_type_list_item(schemas["author"])]
-    else
-      items
-    end
+    items =
+      if Map.has_key?(schemas, "author") do
+        items ++ [doc_type_list_item(schemas["author"])]
+      else
+        items
+      end
 
-    items = if Map.has_key?(schemas, "category") do
-      items ++ [doc_type_list_item(schemas["category"])]
-    else
-      items
-    end
+    items =
+      if Map.has_key?(schemas, "category") do
+        items ++ [doc_type_list_item(schemas["category"])]
+      else
+        items
+      end
 
     items
   end
@@ -105,23 +116,26 @@ defmodule Barkpark.Structure do
     if private == [] do
       []
     else
-      [%Node{
-        id: "settings",
-        title: "Settings",
-        icon: "⚙",
-        type: :list,
-        visibility: :private,
-        items: Enum.map(private, fn s ->
-          %Node{
-            id: s.name,
-            title: s.title,
-            icon: s.icon,
-            type: :document,
-            type_name: s.name,
-            visibility: :private
-          }
-        end)
-      }]
+      [
+        %Node{
+          id: "settings",
+          title: "Settings",
+          icon: "⚙",
+          type: :list,
+          visibility: :private,
+          items:
+            Enum.map(private, fn s ->
+              %Node{
+                id: s.name,
+                title: s.title,
+                icon: s.icon,
+                type: :document,
+                type_name: s.name,
+                visibility: :private
+              }
+            end)
+        }
+      ]
     end
   end
 
@@ -129,9 +143,10 @@ defmodule Barkpark.Structure do
 
   # A document type that has a status field → gets a sub-list with filtered views
   defp doc_type_with_filters(schema) do
-    status_field = Enum.find(schema.fields, fn f ->
-      f["name"] == "status" && is_list(f["options"])
-    end)
+    status_field =
+      Enum.find(schema.fields, fn f ->
+        f["name"] == "status" && is_list(f["options"])
+      end)
 
     if status_field do
       %Node{
@@ -141,25 +156,27 @@ defmodule Barkpark.Structure do
         type: :list,
         type_name: schema.name,
         visibility: :public,
-        items: [
-          %Node{
-            id: "#{schema.name}-all",
-            title: "All #{schema.title}",
-            icon: schema.icon,
-            type: :document_type_list,
-            type_name: schema.name
-          },
-          divider()
-        ] ++ Enum.map(status_field["options"], fn opt ->
-          %Node{
-            id: "#{schema.name}-#{opt}",
-            title: String.capitalize(opt),
-            icon: status_icon(opt),
-            type: :document_type_list,
-            type_name: schema.name,
-            filter: "status=#{opt}"
-          }
-        end)
+        items:
+          [
+            %Node{
+              id: "#{schema.name}-all",
+              title: "All #{schema.title}",
+              icon: schema.icon,
+              type: :document_type_list,
+              type_name: schema.name
+            },
+            divider()
+          ] ++
+            Enum.map(status_field["options"], fn opt ->
+              %Node{
+                id: "#{schema.name}-#{opt}",
+                title: String.capitalize(opt),
+                icon: status_icon(opt),
+                type: :document_type_list,
+                type_name: schema.name,
+                filter: "status=#{opt}"
+              }
+            end)
       }
     else
       doc_type_list_item(schema)
@@ -190,12 +207,14 @@ defmodule Barkpark.Structure do
     private = Enum.filter(schemas, &(&1.visibility == "private"))
 
     %{
-      content: Enum.map(public, fn s ->
-        %{name: s.name, title: s.title, icon: s.icon, visibility: :public}
-      end),
-      settings: Enum.map(private, fn s ->
-        %{name: s.name, title: s.title, icon: s.icon, visibility: :private}
-      end)
+      content:
+        Enum.map(public, fn s ->
+          %{name: s.name, title: s.title, icon: s.icon, visibility: :public}
+        end),
+      settings:
+        Enum.map(private, fn s ->
+          %{name: s.name, title: s.title, icon: s.icon, visibility: :private}
+        end)
     }
   end
 

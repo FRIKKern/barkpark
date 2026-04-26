@@ -10,7 +10,8 @@ defmodule Barkpark.Repo.Migrations.CreateRevisions do
       add :title, :string
       add :status, :string
       add :content, :map
-      add :action, :string, null: false  # "create", "update", "publish", "unpublish", "delete"
+      # "create", "update", "publish", "unpublish", "delete"
+      add :action, :string, null: false
 
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end

@@ -1,0 +1,89 @@
+name: plugin-node
+
+# Phase 2 / WI4 — Per-plugin Node CI.
+#
+# Plugins under api/priv/plugins/ may declare a top-level `"node"` object in
+# their plugin.json (with optional engines.node, scripts to run for lint and
+# typecheck). This workflow:
+#   1. Discovers every plugin.json with a "node" key.
+#   2. Builds a dynamic matrix from those manifests.
+#   3. Runs `npm ci` + lint/typecheck per plugin.
+#
+# If no plugin declares "node" the matrix-builder emits a single no-op entry
+# so the workflow still ends with a green check (required-status compatible).
+
+on:
+  pull_request:
+    paths:
+      - "api/priv/plugins/**"
+      - ".github/workflows/plugin-node.yml"
+  push:
+    branches: [main]
+    paths:
+      - "api/priv/plugins/**"
+      - ".github/workflows/plugin-node.yml"
+
+concurrency:
+  group: plugin-node-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Discover plugin matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      empty: ${{ steps.build.outputs.empty }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build matrix from plugin manifests
+        id: build
+        run: bash api/test/scripts/build-plugin-node-matrix.sh
+
+  plugin:
+    name: Plugin ${{ matrix.entry.plugin }} (Node ${{ matrix.entry.node }})
+    needs: discover
+    if: needs.discover.outputs.empty != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.entry.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.entry.node }}
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.entry.dir }}/node_modules
+          key: ${{ runner.os }}-plugin-${{ matrix.entry.plugin }}-${{ hashFiles(format('{0}/package-lock.json', matrix.entry.dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-plugin-${{ matrix.entry.plugin }}-
+
+      - name: Install
+        working-directory: ${{ matrix.entry.dir }}
+        run: npm ci
+
+      - name: Lint
+        if: matrix.entry.lint == true
+        working-directory: ${{ matrix.entry.dir }}
+        run: npm run lint
+
+      - name: Typecheck
+        if: matrix.entry.typecheck == true
+        working-directory: ${{ matrix.entry.dir }}
+        run: npm run typecheck
+
+  noop:
+    name: No node-capable plugins (skip)
+    needs: discover
+    if: needs.discover.outputs.empty == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No plugin.json declares a 'node' capability — nothing to build."

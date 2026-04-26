@@ -77,7 +77,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
     new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, form_state)
 
-    {:noreply, assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id, scenario_results: [])}
+    {:noreply,
+     assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id, scenario_results: [])}
   end
 
   def handle_event("form-change", params, socket) do
@@ -114,7 +115,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         socket.assigns.last_result_by_id
       else
         form_state = Map.get(socket.assigns.form_state_by_id, endpoint.id, %{})
-        req = Runner.build_request(endpoint, form_state, %{token: socket.assigns.token, base: "http://localhost:4000"})
+
+        req =
+          Runner.build_request(endpoint, form_state, %{
+            token: socket.assigns.token,
+            base: "http://localhost:4000"
+          })
 
         legacy = %{
           id: endpoint.id,
@@ -143,7 +149,15 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
         scenarios =
           if scenarios == [] && ep[:expect] do
-            [%{label: "default", path_overrides: %{}, query_overrides: %{}, body: nil, expect: ep.expect}]
+            [
+              %{
+                label: "default",
+                path_overrides: %{},
+                query_overrides: %{},
+                body: nil,
+                expect: ep.expect
+              }
+            ]
           else
             scenarios
           end
@@ -205,8 +219,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           cond do
             Enum.any?(srs, &(&1.result.verdict == :fail)) ->
               Enum.find(srs, &(&1.result.verdict == :fail)).result
+
             Enum.any?(srs, &(&1.result.verdict == :error)) ->
               Enum.find(srs, &(&1.result.verdict == :error)).result
+
             true ->
               List.first(srs).result
           end
@@ -214,11 +230,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         {ep_id, worst}
       end)
 
-    {:noreply, assign(socket, scenario_results: scenario_results, last_result_by_id: last_results)}
+    {:noreply,
+     assign(socket, scenario_results: scenario_results, last_result_by_id: last_results)}
   end
 
   defp decode_body(nil), do: nil
   defp decode_body(""), do: nil
+
   defp decode_body(text) do
     case Jason.decode(text) do
       {:ok, decoded} -> decoded
@@ -229,7 +247,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp build_curl(%{kind: :reference}, _form_state, _token), do: ""
 
   defp build_curl(endpoint, form_state, token) do
-    req = Runner.build_request(endpoint, form_state, %{token: token, base: "http://localhost:4000"})
+    req =
+      Runner.build_request(endpoint, form_state, %{token: token, base: "http://localhost:4000"})
 
     parts = ["curl -sS"]
     parts = if req.method == "GET", do: parts, else: parts ++ ["-X", req.method]
@@ -493,7 +512,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   defp docs_column_title(nil), do: "—"
   defp docs_column_title(%{kind: :reference, label: label}), do: label
-  defp docs_column_title(%{kind: :endpoint, method: method, path_template: path}), do: "#{method} #{path}"
+
+  defp docs_column_title(%{kind: :endpoint, method: method, path_template: path}),
+    do: "#{method} #{path}"
 
   # Auth level → existing design-system badge variant
   defp auth_badge_class(:public), do: "badge-public"
@@ -528,6 +549,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp endpoint_icon(_), do: "file"
 
   attr :endpoint, :map, required: true
+
   defp endpoint_docs(assigns) do
     ~H"""
     <p class="api-description"><%= @endpoint.description %></p>
@@ -581,8 +603,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   attr :endpoint, :map, required: true
   attr :form_state, :map, required: true
   attr :token, :string, required: true
+
   defp endpoint_playground(assigns) do
-    assigns = assign(assigns, :curl, build_curl(assigns.endpoint, assigns.form_state, assigns.token))
+    assigns =
+      assign(assigns, :curl, build_curl(assigns.endpoint, assigns.form_state, assigns.token))
 
     ~H"""
     <div class="api-section">Playground</div>
@@ -638,6 +662,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   attr :result, :map, required: true
+
   defp response_view(assigns) do
     ~H"""
     <div class="api-verdict-reason"><%= @result.verdict_reason %></div>
@@ -650,7 +675,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     """
   end
 
-  defp format_body(%{body_json: json}) when is_map(json) or is_list(json), do: Jason.encode!(json, pretty: true)
+  defp format_body(%{body_json: json}) when is_map(json) or is_list(json),
+    do: Jason.encode!(json, pretty: true)
+
   defp format_body(%{body_text: text}) when is_binary(text) and text != "", do: text
   defp format_body(_), do: ""
 

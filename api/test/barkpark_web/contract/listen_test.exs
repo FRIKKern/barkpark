@@ -7,6 +7,7 @@ defmodule BarkparkWeb.Contract.ListenTest do
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
       "rep"
     )
+
     :ok
   end
 

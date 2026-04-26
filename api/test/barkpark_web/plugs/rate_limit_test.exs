@@ -29,8 +29,10 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
   test "GETs are billed against the read bucket (burst = read_per_minute)" do
     with_limits(read_per_minute: 2, write_per_minute: 1)
 
-    c1 = build(:get, "/v1/data/query/production/post", %{"dataset" => "production"},
-           [{"authorization", "Bearer get-token"}])
+    c1 =
+      build(:get, "/v1/data/query/production/post", %{"dataset" => "production"}, [
+        {"authorization", "Bearer get-token"}
+      ])
 
     assert Plug.Conn.halted?(RateLimit.call(c1, RateLimit.init([]))) == false
     assert Plug.Conn.halted?(RateLimit.call(c1, RateLimit.init([]))) == false
@@ -42,10 +44,15 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
   test "POSTs have their own bucket (GET exhaustion does not affect POST)" do
     with_limits(read_per_minute: 1, write_per_minute: 1)
 
-    get_conn = build(:get, "/v1/data/query/production/post", %{"dataset" => "production"},
-                 [{"authorization", "Bearer same-token"}])
-    post_conn = build(:post, "/v1/data/mutate/production", %{"dataset" => "production"},
-                  [{"authorization", "Bearer same-token"}])
+    get_conn =
+      build(:get, "/v1/data/query/production/post", %{"dataset" => "production"}, [
+        {"authorization", "Bearer same-token"}
+      ])
+
+    post_conn =
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer same-token"}
+      ])
 
     assert RateLimit.call(get_conn, RateLimit.init([])).halted == false
     assert RateLimit.call(get_conn, RateLimit.init([])).halted == true
@@ -57,8 +64,10 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
   test "429 response uses retry_after envelope and header" do
     with_limits(read_per_minute: 1, write_per_minute: 1)
 
-    conn = build(:post, "/v1/data/mutate/production", %{"dataset" => "production"},
-             [{"authorization", "Bearer retry-token"}])
+    conn =
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer retry-token"}
+      ])
 
     _ = RateLimit.call(conn, RateLimit.init([]))
     denied = RateLimit.call(conn, RateLimit.init([]))
@@ -81,8 +90,10 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       datasets: %{"staging" => %{read: 3}}
     )
 
-    conn = build(:get, "/v1/data/query/staging/post", %{"dataset" => "staging"},
-             [{"authorization", "Bearer ds-token"}])
+    conn =
+      build(:get, "/v1/data/query/staging/post", %{"dataset" => "staging"}, [
+        {"authorization", "Bearer ds-token"}
+      ])
 
     # Default read would allow 1; override bumps it to 3
     assert RateLimit.call(conn, RateLimit.init([])).halted == false

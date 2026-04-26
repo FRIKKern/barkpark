@@ -11,7 +11,8 @@ defmodule Barkpark.Media do
 
   @doc "Save an uploaded file to disk and create a DB record."
   def upload(plug_upload, dataset) when is_binary(dataset) do
-    %Plug.Upload{filename: original_name, path: temp_path, content_type: content_type} = plug_upload
+    %Plug.Upload{filename: original_name, path: temp_path, content_type: content_type} =
+      plug_upload
 
     # Generate date-based path: uploads/2026/04/filename
     now = DateTime.utc_now()
