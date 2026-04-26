@@ -23,6 +23,38 @@ end
 config :barkpark, BarkparkWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+cloak_key =
+  case System.get_env("BARKPARK_CLOAK_KEY") do
+    nil when config_env() == :prod ->
+      raise """
+      BARKPARK_CLOAK_KEY is not set.
+
+      Generate one with:
+          mix phx.gen.secret 32
+      and add to /opt/barkpark/.env as BARKPARK_CLOAK_KEY=<value>.
+
+      This MUST be independent of SECRET_KEY_BASE so that key rotation
+      in either system does not invalidate the other.
+      """
+
+    nil ->
+      # Dev/test fallback — documented constant; rotation in dev does not matter.
+      "DEV-ONLY-cloak-key-do-not-use-in-prod-32"
+
+    val ->
+      val
+  end
+
+config :barkpark, Barkpark.Vault,
+  ciphers: [
+    default: {
+      Cloak.Ciphers.AES.GCM,
+      tag: "AES.GCM.V1",
+      key: :crypto.hash(:sha256, cloak_key),
+      iv_length: 12
+    }
+  ]
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

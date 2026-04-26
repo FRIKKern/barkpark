@@ -11,6 +11,8 @@ defmodule Barkpark.Application do
       Barkpark.RateLimiter,
       BarkparkWeb.Telemetry,
       Barkpark.Repo,
+      Barkpark.Vault,
+      {Oban, Application.fetch_env!(:barkpark, Oban)},
       {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Barkpark.PubSub},
       # Start a worker by calling: Barkpark.Worker.start_link(arg)
@@ -24,7 +26,15 @@ defmodule Barkpark.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Barkpark.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    case Supervisor.start_link(children, opts) do
+      {:ok, _pid} = ok ->
+        Barkpark.Telemetry.Handlers.attach()
+        ok
+
+      other ->
+        other
+    end
   end
 
   # Tell Phoenix to update the endpoint configuration
