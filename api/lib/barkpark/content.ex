@@ -521,7 +521,7 @@ defmodule Barkpark.Content do
 
   @doc "Remove all references to a document ID from other documents."
   def disconnect_references(doc_id, dataset) do
-    pub_id = published_id(doc_id)
+    _pub_id = published_id(doc_id)
     refs = find_referencing_docs(doc_id, dataset)
 
     Enum.each(refs, fn %{doc_id: ref_doc_id, type: type, field: field} ->
@@ -868,7 +868,7 @@ defmodule Barkpark.Content do
   # (no ghost events on the SSE stream). Direct writes outside a
   # transaction broadcast immediately — same behaviour as before.
 
-  defp tap_broadcast(result, dataset, type, action, prev_rev \\ nil) do
+  defp tap_broadcast(result, dataset, type, action, prev_rev) do
     case result do
       {:ok, doc} ->
         save_revision(doc, type, dataset, action)

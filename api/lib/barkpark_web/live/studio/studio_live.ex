@@ -443,7 +443,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("restore-revision", %{"id" => rev_id}, socket) do
     type = socket.assigns[:editor_type]
     case Content.restore_revision(rev_id, type, socket.assigns.dataset) do
-      {:ok, doc} ->
+      {:ok, _doc} ->
         {:noreply, socket
          |> assign(show_history: false, revisions: [])
          |> put_flash(:info, "Restored from history")
@@ -458,31 +458,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket = assign(socket, editor_form: form)
     send(self(), {:autosave_form, form})
     {:noreply, socket}
-  end
-
-  defp save_doc(socket, params, flash_msg) do
-    doc = socket.assigns[:editor_doc]
-    schema = socket.assigns[:editor_schema]
-    type = socket.assigns[:editor_type]
-    if doc && type do
-      content = build_content(params, schema)
-      attrs = %{
-        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
-        "title" => Map.get(params, "title", doc.title),
-        "status" => Map.get(params, "status", doc.status),
-        "content" => content
-      }
-      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
-        {:ok, _} ->
-          socket = assign(socket, save_status: "Saved")
-          socket = if flash_msg, do: put_flash(socket, :info, flash_msg), else: socket
-          {:noreply, rebuild_panes(socket)}
-        {:error, _} ->
-          {:noreply, assign(socket, save_status: "Save failed")}
-      end
-    else
-      {:noreply, socket}
-    end
   end
 
   def handle_event("publish", _, socket) do
@@ -510,6 +485,31 @@ defmodule BarkparkWeb.Studio.StudioLive do
     do_action(socket, fn doc, type ->
       Content.unpublish_document(Content.published_id(doc.doc_id), type, socket.assigns.dataset)
     end, "Unpublished")
+  end
+
+  defp save_doc(socket, params, flash_msg) do
+    doc = socket.assigns[:editor_doc]
+    schema = socket.assigns[:editor_schema]
+    type = socket.assigns[:editor_type]
+    if doc && type do
+      content = build_content(params, schema)
+      attrs = %{
+        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
+        "title" => Map.get(params, "title", doc.title),
+        "status" => Map.get(params, "status", doc.status),
+        "content" => content
+      }
+      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
+        {:ok, _} ->
+          socket = assign(socket, save_status: "Saved")
+          socket = if flash_msg, do: put_flash(socket, :info, flash_msg), else: socket
+          {:noreply, rebuild_panes(socket)}
+        {:error, _} ->
+          {:noreply, assign(socket, save_status: "Save failed")}
+      end
+    else
+      {:noreply, socket}
+    end
   end
 
   defp do_action(socket, action, msg) do
@@ -1434,7 +1434,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Enum.at(@presence_colors, index)
   end
 
-  defp build_presences_list(socket) do
+  defp build_presences_list(_socket) do
     Presence.list(@presence_topic)
     |> Enum.flat_map(fn {uid, %{metas: metas}} ->
       Enum.map(metas, &Map.put(&1, :user_id, uid))
@@ -1468,7 +1468,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp resolve_presence_doc_title(presence, dataset \\ "production") do
+  defp resolve_presence_doc_title(presence, dataset) do
     type = presence.type
     doc_id = presence.doc_id
     if type && doc_id do
