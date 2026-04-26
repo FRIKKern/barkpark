@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Barkpark.Plugin.NewTest do
       assert manifest["plugin_name"] == "hello"
       assert manifest["version"] == "0.1.0"
       assert manifest["description"] == "Hi"
-      assert manifest["capabilities"] == ["read", "write", "schema"]
+      assert manifest["capabilities"] == ["routes", "workers", "schemas"]
     end
 
     test "plugin.json passes Barkpark.Plugins.Manifest.validate!/1 when available", %{tmp: tmp} do
@@ -91,15 +91,13 @@ defmodule Mix.Tasks.Barkpark.Plugin.NewTest do
       end
     end
 
-    test "module body uses Barkpark.Plugin and exposes manifest/0", %{tmp: tmp} do
+    test "module body uses Barkpark.Plugin", %{tmp: tmp} do
       out = Path.join(tmp, "hello")
       run(["hello", "--out", out])
 
       body = File.read!(Path.join(out, "lib/hello.ex"))
       assert body =~ "defmodule Hello do"
-      assert body =~ "use Barkpark.Plugin,"
-      assert body =~ "plugin_name: \"hello\""
-      assert body =~ "def manifest do"
+      assert body =~ "use Barkpark.Plugin"
     end
 
     test "--module overrides default module name", %{tmp: tmp} do
@@ -112,18 +110,18 @@ defmodule Mix.Tasks.Barkpark.Plugin.NewTest do
 
     test "--capabilities CSV parses correctly", %{tmp: tmp} do
       out = Path.join(tmp, "hello")
-      run(["hello", "--out", out, "--capabilities", "read, write , schema"])
+      run(["hello", "--out", out, "--capabilities", "routes, workers , schemas"])
 
       manifest = out |> Path.join("plugin.json") |> File.read!() |> Jason.decode!()
-      assert manifest["capabilities"] == ["read", "write", "schema"]
+      assert manifest["capabilities"] == ["routes", "workers", "schemas"]
     end
 
-    test "default capabilities is [read]", %{tmp: tmp} do
+    test "default capabilities is empty", %{tmp: tmp} do
       out = Path.join(tmp, "hello")
       run(["hello", "--out", out])
 
       manifest = out |> Path.join("plugin.json") |> File.read!() |> Jason.decode!()
-      assert manifest["capabilities"] == ["read"]
+      assert manifest["capabilities"] == []
     end
 
     test "default module name derived from hyphenated slug", %{tmp: tmp} do
@@ -160,44 +158,24 @@ defmodule Mix.Tasks.Barkpark.Plugin.NewTest do
   end
 
   describe "compiled module smoke" do
-    test "generated module compiles against a Barkpark.Plugin stub", %{tmp: tmp} do
+    test "generated lib/<name>.ex compiles and exposes manifest/0", %{tmp: tmp} do
       out = Path.join(tmp, "smoke")
       run(["smoke", "--out", out])
 
-      plugin_mod = Module.concat([:Barkpark, :Plugin])
+      module_path = Path.join(out, "lib/smoke.ex")
+      assert File.exists?(module_path)
+      assert File.exists?(Path.join(out, "plugin.json"))
 
-      unless Code.ensure_loaded?(plugin_mod) do
-        Code.compile_string("""
-        defmodule Barkpark.Plugin do
-          @callback manifest() :: map()
-          defmacro __using__(_opts) do
-            quote do
-              @behaviour Barkpark.Plugin
-            end
-          end
-        end
-        """)
-      end
-
-      manifest_path = Path.join(out, "plugin.json")
-      module_src = File.read!(Path.join(out, "lib/smoke.ex"))
-      replacement = inspect(manifest_path)
-
-      patched =
-        String.replace(
-          module_src,
-          ~r/Path\.join\(\[:code\.priv_dir\(:barkpark\), "plugins", "smoke", "plugin\.json"\]\)/,
-          fn _ -> replacement end
-        )
-
-      [{mod, _bin} | _] = Code.compile_string(patched)
+      [{mod, _bin} | _] = Code.compile_file(module_path)
       assert function_exported?(mod, :manifest, 0)
 
       manifest = mod.manifest()
       assert manifest["plugin_name"] == "smoke"
+      assert manifest["version"] == "0.1.0"
     after
-      :code.purge(Smoke)
-      :code.delete(Smoke)
+      smoke_mod = Module.concat([:Smoke])
+      :code.purge(smoke_mod)
+      :code.delete(smoke_mod)
     end
   end
 
