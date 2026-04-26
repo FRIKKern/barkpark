@@ -5,7 +5,13 @@ defmodule BarkparkWeb.Contract.CorsPreflightTest do
 
   setup do
     Content.upsert_schema(
-      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      %{
+        "name" => "post",
+        "title" => "Post",
+        "visibility" => "public",
+        "fields" => [],
+        "cors_origins" => ["http://studio.example"]
+      },
       "production"
     )
 
