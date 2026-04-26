@@ -41,6 +41,10 @@ defmodule Barkpark.Application do
 
         # WI1: plugin registry — boot-time discovery runs in a supervised
         # one-shot Task so a slow filesystem walk never blocks startup.
+        # Phase 3 WI3: after discovery completes, walk the registered
+        # plugins and load their declared checkers into the validation
+        # registry. Sequential inside one task — order matters (checkers
+        # need plugins to be present first), but neither blocks endpoint.
         Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
           Barkpark.Plugins.Registry.discover_and_register()
           # Phase 3 WI1: pull `checkers/0` slots out of every plugin
