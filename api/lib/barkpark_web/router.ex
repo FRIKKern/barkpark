@@ -13,16 +13,19 @@ defmodule BarkparkWeb.Router do
   pipeline :api do
     plug BarkparkWeb.Plugs.AcceptBarkparkVendor
     plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
     plug BarkparkWeb.Plugs.RateLimit
   end
 
   pipeline :api_unlimited do
     plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
   end
 
   pipeline :api_preview do
     plug BarkparkWeb.Plugs.AcceptBarkparkVendor
     plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
     plug BarkparkWeb.Plugs.RateLimit
     plug BarkparkWeb.Plugs.PreviewToken
   end
