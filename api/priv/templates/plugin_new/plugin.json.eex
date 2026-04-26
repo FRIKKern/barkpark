@@ -1,0 +1,6 @@
+{
+  "plugin_name": "<%= @plugin_name %>",
+  "version": "0.1.0",
+  "description": "<%= @description %>",
+  "capabilities": [<%= @capabilities |> Enum.map_join(", ", &("\"" <> &1 <> "\"")) %>]
+}
