@@ -31,6 +31,7 @@ defmodule BarkparkWeb.LegacyController do
 
     # Map legacy format to internal format
     doc_id = Map.get(attrs, "id") || Map.get(attrs, "doc_id")
+
     internal_attrs = %{
       "doc_id" => doc_id,
       "title" => Map.get(attrs, "title"),
@@ -58,19 +59,23 @@ defmodule BarkparkWeb.LegacyController do
   def schemas(conn, _params) do
     schemas = Content.list_schemas(@dataset)
 
-    json(conn, Enum.map(schemas, fn s ->
-      %{
-        name: s.name,
-        title: s.title,
-        icon: s.icon,
-        fields: s.fields
-      }
-    end))
+    json(
+      conn,
+      Enum.map(schemas, fn s ->
+        %{
+          name: s.name,
+          title: s.title,
+          icon: s.icon,
+          fields: s.fields
+        }
+      end)
+    )
   end
 
   # Parse legacy "field=value" filter string into a map for list_documents/3.
   defp parse_legacy_filter(nil), do: %{}
   defp parse_legacy_filter(""), do: %{}
+
   defp parse_legacy_filter(s) do
     case String.split(s, "=", parts: 2) do
       [field, value] -> %{field => value}

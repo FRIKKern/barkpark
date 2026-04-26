@@ -120,7 +120,13 @@ defmodule Barkpark.ApiTester.Endpoints do
           ],
           notes: "Sort key and direction"
         },
-        %{name: "filter[title]", type: :string, default: "", notes: "Exact-match filter. Also supports operator form: filter[field][eq], filter[field][in]=a,b, filter[field][contains], filter[field][gt], filter[field][gte], filter[field][lt], filter[field][lte]"}
+        %{
+          name: "filter[title]",
+          type: :string,
+          default: "",
+          notes:
+            "Exact-match filter. Also supports operator form: filter[field][eq], filter[field][in]=a,b, filter[field][contains], filter[field][gt], filter[field][gte], filter[field][lt], filter[field][lte]"
+        }
       ],
       body_example: nil,
       response_shape: """
@@ -135,8 +141,20 @@ defmodule Barkpark.ApiTester.Endpoints do
       possible_errors: [:not_found],
       expect: {200, :envelope_has_reserved_keys},
       scenarios: [
-        %{label: "lists published docs", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :envelope_has_reserved_keys}},
-        %{label: "nonexistent type → 404", path_overrides: %{"type" => "zzzzz"}, query_overrides: %{}, body: nil, expect: {404, :error_code_not_found}}
+        %{
+          label: "lists published docs",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :envelope_has_reserved_keys}
+        },
+        %{
+          label: "nonexistent type → 404",
+          path_overrides: %{"type" => "zzzzz"},
+          query_overrides: %{},
+          body: nil,
+          expect: {404, :error_code_not_found}
+        }
       ]
     }
   end
@@ -157,7 +175,12 @@ defmodule Barkpark.ApiTester.Endpoints do
         %{name: "type", type: :string, default: "post"}
       ],
       query_params: [
-        %{name: "filter[title][contains]", type: :string, default: "smoke", notes: "Substring match, case-insensitive"},
+        %{
+          name: "filter[title][contains]",
+          type: :string,
+          default: "smoke",
+          notes: "Substring match, case-insensitive"
+        },
         %{name: "limit", type: :integer, default: "5"}
       ],
       body_example: nil,
@@ -186,7 +209,12 @@ defmodule Barkpark.ApiTester.Endpoints do
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "type", type: :string, default: "post", notes: "Document type name"},
-        %{name: "doc_id", type: :string, default: "p1", notes: "Full document id (may include drafts. prefix)"}
+        %{
+          name: "doc_id",
+          type: :string,
+          default: "p1",
+          notes: "Full document id (may include drafts. prefix)"
+        }
       ],
       query_params: [],
       body_example: nil,
@@ -205,8 +233,20 @@ defmodule Barkpark.ApiTester.Endpoints do
       possible_errors: [:not_found],
       expect: {200, :envelope_top_level},
       scenarios: [
-        %{label: "gets document p1", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :envelope_top_level}},
-        %{label: "missing doc → 404", path_overrides: %{"doc_id" => "nonexistent"}, query_overrides: %{}, body: nil, expect: {404, :error_code_not_found}}
+        %{
+          label: "gets document p1",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :envelope_top_level}
+        },
+        %{
+          label: "missing doc → 404",
+          path_overrides: %{"doc_id" => "nonexistent"},
+          query_overrides: %{},
+          body: nil,
+          expect: {404, :error_code_not_found}
+        }
       ]
     }
   end
@@ -228,7 +268,12 @@ defmodule Barkpark.ApiTester.Endpoints do
       ],
       query_params: [
         %{name: "limit", type: :integer, default: "3", notes: "How many docs to fetch"},
-        %{name: "expand", type: :string, default: "true", notes: "true | comma-list of field names"}
+        %{
+          name: "expand",
+          type: :string,
+          default: "true",
+          notes: "true | comma-list of field names"
+        }
       ],
       body_example: nil,
       response_shape: """
@@ -575,12 +620,18 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/export/{dataset}",
-      description: "Stream all documents as newline-delimited JSON (NDJSON). Each line is a complete document envelope. Response uses Content-Type: application/x-ndjson and chunked transfer encoding. Memory-efficient for large datasets.",
+      description:
+        "Stream all documents as newline-delimited JSON (NDJSON). Each line is a complete document envelope. Response uses Content-Type: application/x-ndjson and chunked transfer encoding. Memory-efficient for large datasets.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
       query_params: [
-        %{name: "type", type: :string, default: "", notes: "Exact match by document type (e.g., 'post'). Omit to export all types."}
+        %{
+          name: "type",
+          type: :string,
+          default: "",
+          notes: "Exact match by document type (e.g., 'post'). Omit to export all types."
+        }
       ],
       body_example: nil,
       response_shape: """
@@ -592,9 +643,28 @@ defmodule Barkpark.ApiTester.Endpoints do
       expect: {200, :ok},
       runnable: true,
       scenarios: [
-        %{label: "exports NDJSON", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :ndjson_response}},
-        %{label: "export with type filter", path_overrides: %{}, query_overrides: %{"type" => "post"}, body: nil, expect: {200, :ndjson_response}},
-        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+        %{
+          label: "exports NDJSON",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :ndjson_response}
+        },
+        %{
+          label: "export with type filter",
+          path_overrides: %{},
+          query_overrides: %{"type" => "post"},
+          body: nil,
+          expect: {200, :ndjson_response}
+        },
+        %{
+          label: "no auth → 401",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {401, :error_code_unauthorized},
+          no_auth: true
+        }
       ]
     }
   end
@@ -610,14 +680,32 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :public,
       method: "GET",
       path_template: "/v1/data/search/{dataset}",
-      description: "Case-insensitive title search using ILIKE. Defaults to published perspective. Returns matched documents with total count. Public — no auth required.",
+      description:
+        "Case-insensitive title search using ILIKE. Defaults to published perspective. Returns matched documents with total count. Public — no auth required.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
       query_params: [
-        %{name: "q", type: :string, default: "", notes: "Required. Case-insensitive substring match on title. Empty or missing returns 400 malformed."},
-        %{name: "type", type: :string, default: "", notes: "Exact match filter by document type (e.g., 'post', 'author')"},
-        %{name: "perspective", type: :select, default: "published", options: ["published", "drafts", "raw"], notes: "published = no drafts. prefix; drafts = only drafts.; raw = all documents"},
+        %{
+          name: "q",
+          type: :string,
+          default: "",
+          notes:
+            "Required. Case-insensitive substring match on title. Empty or missing returns 400 malformed."
+        },
+        %{
+          name: "type",
+          type: :string,
+          default: "",
+          notes: "Exact match filter by document type (e.g., 'post', 'author')"
+        },
+        %{
+          name: "perspective",
+          type: :select,
+          default: "published",
+          options: ["published", "drafts", "raw"],
+          notes: "published = no drafts. prefix; drafts = only drafts.; raw = all documents"
+        },
         %{name: "limit", type: :integer, default: "50", notes: "1–200, default 50"},
         %{name: "offset", type: :integer, default: "0", notes: "Pagination offset, default 0"}
       ],
@@ -644,10 +732,34 @@ defmodule Barkpark.ApiTester.Endpoints do
       expect: nil,
       runnable: true,
       scenarios: [
-        %{label: "search with results", path_overrides: %{}, query_overrides: %{"q" => "post"}, body: nil, expect: {200, :search_has_results}},
-        %{label: "search no matches", path_overrides: %{}, query_overrides: %{"q" => "zzzzzznoexist"}, body: nil, expect: {200, :search_empty}},
-        %{label: "missing q → 400", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {400, :error_code_malformed}},
-        %{label: "search with type filter", path_overrides: %{}, query_overrides: %{"q" => "a", "type" => "post"}, body: nil, expect: {200, :search_type_match}}
+        %{
+          label: "search with results",
+          path_overrides: %{},
+          query_overrides: %{"q" => "post"},
+          body: nil,
+          expect: {200, :search_has_results}
+        },
+        %{
+          label: "search no matches",
+          path_overrides: %{},
+          query_overrides: %{"q" => "zzzzzznoexist"},
+          body: nil,
+          expect: {200, :search_empty}
+        },
+        %{
+          label: "missing q → 400",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {400, :error_code_malformed}
+        },
+        %{
+          label: "search with type filter",
+          path_overrides: %{},
+          query_overrides: %{"q" => "a", "type" => "post"},
+          body: nil,
+          expect: {200, :search_type_match}
+        }
       ]
     }
   end
@@ -663,11 +775,18 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/history/{dataset}/{type}/{doc_id}",
-      description: "List revision snapshots for a document, newest first. Each mutation (create, update, publish, unpublish, delete, patch) creates a revision. Returns the published document ID — do not include the drafts. prefix.",
+      description:
+        "List revision snapshots for a document, newest first. Each mutation (create, update, publish, unpublish, delete, patch) creates a revision. Returns the published document ID — do not include the drafts. prefix.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "type", type: :string, default: "post", notes: "Document type"},
-        %{name: "doc_id", type: :string, default: "p1", notes: "Published document ID (without drafts. prefix). Each revision is stored under the published ID."}
+        %{
+          name: "doc_id",
+          type: :string,
+          default: "p1",
+          notes:
+            "Published document ID (without drafts. prefix). Each revision is stored under the published ID."
+        }
       ],
       query_params: [
         %{name: "limit", type: :integer, default: "50", notes: "1–200, default 50"}
@@ -691,8 +810,21 @@ defmodule Barkpark.ApiTester.Endpoints do
       expect: {200, :ok},
       runnable: true,
       scenarios: [
-        %{label: "lists revisions", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :has_revisions_list}},
-        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+        %{
+          label: "lists revisions",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :has_revisions_list}
+        },
+        %{
+          label: "no auth → 401",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {401, :error_code_unauthorized},
+          no_auth: true
+        }
       ]
     }
   end
@@ -706,10 +838,16 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/revision/{dataset}/{id}",
-      description: "Fetch a single revision by UUID. Returns the full content snapshot as it existed at that point in time. Use this to inspect what changed between revisions.",
+      description:
+        "Fetch a single revision by UUID. Returns the full content snapshot as it existed at that point in time. Use this to inspect what changed between revisions.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
-        %{name: "id", type: :string, default: "", notes: "Revision UUID (from the list revisions endpoint)"}
+        %{
+          name: "id",
+          type: :string,
+          default: "",
+          notes: "Revision UUID (from the list revisions endpoint)"
+        }
       ],
       query_params: [],
       body_example: nil,
@@ -743,7 +881,8 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "POST",
       path_template: "/v1/data/revision/{dataset}/{id}/restore",
-      description: "Restore a document to a previous revision. Creates or updates the draft at drafts.{doc_id} with the revision's content. The published version is not affected — you must publish separately.",
+      description:
+        "Restore a document to a previous revision. Creates or updates the draft at drafts.{doc_id} with the revision's content. The published version is not affected — you must publish separately.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
         %{name: "id", type: :string, default: "", notes: "Revision UUID to restore"}
@@ -782,7 +921,8 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :token,
       method: "GET",
       path_template: "/v1/data/analytics/{dataset}",
-      description: "Dataset overview: total document count, per-type breakdown (total/published/drafts), and the 50 most recent mutation events. Counts include both published and draft documents.",
+      description:
+        "Dataset overview: total document count, per-type breakdown (total/published/drafts), and the 50 most recent mutation events. Counts include both published and draft documents.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
@@ -811,9 +951,28 @@ defmodule Barkpark.ApiTester.Endpoints do
       expect: {200, :ok},
       runnable: true,
       scenarios: [
-        %{label: "returns stats", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :analytics_has_types}},
-        %{label: "empty dataset", path_overrides: %{"dataset" => "nonexistent"}, query_overrides: %{}, body: nil, expect: {200, :analytics_empty}},
-        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+        %{
+          label: "returns stats",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :analytics_has_types}
+        },
+        %{
+          label: "empty dataset",
+          path_overrides: %{"dataset" => "nonexistent"},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :analytics_empty}
+        },
+        %{
+          label: "no auth → 401",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {401, :error_code_unauthorized},
+          no_auth: true
+        }
       ]
     }
   end
@@ -856,8 +1015,21 @@ defmodule Barkpark.ApiTester.Endpoints do
       expect: {200, :ok},
       runnable: true,
       scenarios: [
-        %{label: "lists webhooks", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :has_webhooks_list}},
-        %{label: "no auth → 401", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {401, :error_code_unauthorized}, no_auth: true}
+        %{
+          label: "lists webhooks",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :has_webhooks_list}
+        },
+        %{
+          label: "no auth → 401",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {401, :error_code_unauthorized},
+          no_auth: true
+        }
       ]
     }
   end
@@ -871,7 +1043,8 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :admin,
       method: "POST",
       path_template: "/v1/webhooks/{dataset}",
-      description: "Register a webhook subscription. The webhook fires asynchronously on matching mutations. Empty events array matches ALL mutation types. Empty types array matches ALL document types. Requires admin token. Returns 201 on success. Valid events: create, update, publish, unpublish, delete, discardDraft, patch.",
+      description:
+        "Register a webhook subscription. The webhook fires asynchronously on matching mutations. Empty events array matches ALL mutation types. Empty types array matches ALL document types. Requires admin token. Returns 201 on success. Valid events: create, update, publish, unpublish, delete, discardDraft, patch.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}
       ],
@@ -913,10 +1086,16 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: :admin,
       method: "DELETE",
       path_template: "/v1/webhooks/{dataset}/{id}",
-      description: "Permanently remove a webhook subscription. Pending deliveries for this webhook are cancelled. Requires admin token.",
+      description:
+        "Permanently remove a webhook subscription. Pending deliveries for this webhook are cancelled. Requires admin token.",
       path_params: [
         %{name: "dataset", type: :string, default: dataset, notes: "Dataset name"},
-        %{name: "id", type: :string, default: "", notes: "Webhook UUID (from the list webhooks endpoint)"}
+        %{
+          name: "id",
+          type: :string,
+          default: "",
+          notes: "Webhook UUID (from the list webhooks endpoint)"
+        }
       ],
       query_params: [],
       body_example: nil,
@@ -942,7 +1121,12 @@ defmodule Barkpark.ApiTester.Endpoints do
         "Server-Sent Events stream of mutations. Supply Last-Event-ID for resume. Docs-only here — the playground does not stream; use curl -N to try it from the command line.",
       path_params: [%{name: "dataset", type: :string, default: dataset, notes: "Dataset name"}],
       query_params: [
-        %{name: "lastEventId", type: :integer, default: "", notes: "Resume cursor (or use Last-Event-ID header)"}
+        %{
+          name: "lastEventId",
+          type: :integer,
+          default: "",
+          notes: "Resume cursor (or use Last-Event-ID header)"
+        }
       ],
       body_example: nil,
       response_shape: """
@@ -986,7 +1170,13 @@ defmodule Barkpark.ApiTester.Endpoints do
       possible_errors: [:unauthorized, :forbidden],
       expect: {200, :schema_version_1},
       scenarios: [
-        %{label: "lists schemas", path_overrides: %{}, query_overrides: %{}, body: nil, expect: {200, :schema_version_1}}
+        %{
+          label: "lists schemas",
+          path_overrides: %{},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :schema_version_1}
+        }
       ]
     }
   end
@@ -1019,7 +1209,13 @@ defmodule Barkpark.ApiTester.Endpoints do
       possible_errors: [:not_found, :unauthorized, :forbidden],
       expect: {200, :schema_version_1_show},
       scenarios: [
-        %{label: "shows post schema", path_overrides: %{"name" => "post"}, query_overrides: %{}, body: nil, expect: {200, :schema_version_1_show}}
+        %{
+          label: "shows post schema",
+          path_overrides: %{"name" => "post"},
+          query_overrides: %{},
+          body: nil,
+          expect: {200, :schema_version_1_show}
+        }
       ]
     }
   end
@@ -1033,7 +1229,8 @@ defmodule Barkpark.ApiTester.Endpoints do
       label: "Document envelope",
       kind: :reference,
       render_key: :envelope,
-      description: "Every document is returned as a flat JSON object with 7 reserved _-prefixed keys plus arbitrary user fields."
+      description:
+        "Every document is returned as a flat JSON object with 7 reserved _-prefixed keys plus arbitrary user fields."
     }
   end
 
@@ -1044,7 +1241,8 @@ defmodule Barkpark.ApiTester.Endpoints do
       label: "Error codes",
       kind: :reference,
       render_key: :error_codes,
-      description: "All errors return {\"error\": {\"code\": \"...\", \"message\": \"...\"}} — 9 codes total."
+      description:
+        "All errors return {\"error\": {\"code\": \"...\", \"message\": \"...\"}} — 9 codes total."
     }
   end
 

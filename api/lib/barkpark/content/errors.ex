@@ -57,7 +57,12 @@ defmodule Barkpark.Content.Errors do
         end)
       end)
 
-    %{code: "validation_failed", message: "document failed validation", status: 422, details: details}
+    %{
+      code: "validation_failed",
+      message: "document failed validation",
+      status: 422,
+      details: details
+    }
   end
 
   defp build({:error, :rate_limited}),

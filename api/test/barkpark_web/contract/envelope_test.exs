@@ -3,8 +3,14 @@ defmodule BarkparkWeb.Contract.EnvelopeTest do
   alias Barkpark.Content
 
   setup do
-    Content.upsert_schema(%{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}, "test")
-    {:ok, _} = Content.create_document("post", %{"_id" => "e1", "title" => "A", "body" => "x"}, "test")
+    Content.upsert_schema(
+      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      "test"
+    )
+
+    {:ok, _} =
+      Content.create_document("post", %{"_id" => "e1", "title" => "A", "body" => "x"}, "test")
+
     {:ok, _} = Content.publish_document("e1", "post", "test")
     :ok
   end

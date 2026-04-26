@@ -14,7 +14,13 @@ defmodule BarkparkWeb.Studio.DashboardLive do
     structure = Structure.build(dataset)
     counts = build_counts(structure, dataset)
 
-    {:ok, assign(socket, structure: structure, counts: counts, page_title: "Structure", dataset: dataset)}
+    {:ok,
+     assign(socket,
+       structure: structure,
+       counts: counts,
+       page_title: "Structure",
+       dataset: dataset
+     )}
   end
 
   @impl true
@@ -25,7 +31,7 @@ defmodule BarkparkWeb.Studio.DashboardLive do
 
   defp build_counts(structure, dataset) do
     structure.items
-    |> Enum.filter(&(&1.type_name))
+    |> Enum.filter(& &1.type_name)
     |> Enum.map(fn node ->
       count = length(Content.list_documents(node.type_name, dataset, perspective: :drafts))
       {node.type_name, count}
@@ -57,6 +63,7 @@ defmodule BarkparkWeb.Studio.DashboardLive do
 
   defp render_node(assigns, %{type: :list} = node) do
     assigns = assign(assigns, node: node)
+
     ~H"""
     <div style="padding: 8px 0;">
       <div style="padding: 8px 20px;">
@@ -74,6 +81,7 @@ defmodule BarkparkWeb.Studio.DashboardLive do
   defp render_node(assigns, %{type: type} = node) when type in [:document_type_list, :document] do
     count = Map.get(assigns.counts, node.type_name, 0)
     assigns = assign(assigns, node: node, count: count)
+
     ~H"""
     <a href={"/studio/#{@node.type_name}"} class="doc-list-item" style="padding: 10px 20px;">
       <span style="font-size: 20px; width: 28px; text-align: center;"><%= @node.icon %></span>

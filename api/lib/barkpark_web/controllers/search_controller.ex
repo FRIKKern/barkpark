@@ -46,11 +46,13 @@ defmodule BarkparkWeb.SearchController do
   defp parse_perspective(_), do: :published
 
   defp parse_int(nil, default), do: default
+
   defp parse_int(val, default) when is_binary(val) do
     case Integer.parse(val) do
       {n, _} -> max(n, 0)
       :error -> default
     end
   end
+
   defp parse_int(_, default), do: default
 end

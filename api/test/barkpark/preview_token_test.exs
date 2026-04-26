@@ -27,7 +27,10 @@ defmodule Barkpark.PreviewTokenTest do
       {:ok, _} = PreviewToken.record_jti(stringify(claims))
 
       [header, _payload, sig] = String.split(jwt, ".")
-      tampered_payload = Base.url_encode64(~s({"dataset":"leaked","exp":99999999999}), padding: false)
+
+      tampered_payload =
+        Base.url_encode64(~s({"dataset":"leaked","exp":99999999999}), padding: false)
+
       tampered = header <> "." <> tampered_payload <> "." <> sig
 
       assert {:error, :bad_signature} = PreviewToken.verify(tampered, @secret)

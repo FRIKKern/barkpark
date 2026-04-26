@@ -43,7 +43,8 @@ defmodule Barkpark.Plugins.Registry do
     GenServer.call(@name, {:register, module, manifest})
   end
 
-  @spec lookup(String.t()) :: {:ok, %{module: module(), manifest: map(), name: String.t()}} | :error
+  @spec lookup(String.t()) ::
+          {:ok, %{module: module(), manifest: map(), name: String.t()}} | :error
   def lookup(plugin_name) when is_binary(plugin_name) do
     GenServer.call(@name, {:lookup, plugin_name})
   end
@@ -121,9 +122,7 @@ defmodule Barkpark.Plugins.Registry do
       register(module, manifest)
     else
       reason ->
-        Logger.warning(
-          "Barkpark.Plugins.Registry: skipping #{inspect(dir)} — #{inspect(reason)}"
-        )
+        Logger.warning("Barkpark.Plugins.Registry: skipping #{inspect(dir)} — #{inspect(reason)}")
 
         :error
     end

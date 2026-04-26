@@ -17,7 +17,9 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
   @junior_token "barkpark-test-junior-token"
 
   setup do
-    {:ok, _admin} = Auth.create_token(@admin_token, "test-admin", "test", ["read", "write", "admin"])
+    {:ok, _admin} =
+      Auth.create_token(@admin_token, "test-admin", "test", ["read", "write", "admin"])
+
     {:ok, _junior} = Auth.create_token(@junior_token, "test-junior", "test", ["read", "write"])
     :ok
   end

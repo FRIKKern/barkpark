@@ -10,6 +10,7 @@ defmodule Barkpark.ContentFlatTest do
         %{"_id" => "flat-1", "title" => "T", "body" => "hi", "tags" => ["a", "b"]},
         "test"
       )
+
     env = Envelope.render(doc)
     assert env["body"] == "hi"
     assert env["tags"] == ["a", "b"]

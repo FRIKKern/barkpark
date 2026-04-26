@@ -62,12 +62,16 @@ defmodule Barkpark.ApiTester.Runner do
     |> URI.encode_query()
   end
 
-  defp maybe_add_auth(headers, auth, token) when auth in [:token, :admin] and token not in [nil, ""] do
+  defp maybe_add_auth(headers, auth, token)
+       when auth in [:token, :admin] and token not in [nil, ""] do
     [{"Authorization", "Bearer " <> token} | headers]
   end
+
   defp maybe_add_auth(headers, _, _), do: headers
 
-  defp maybe_add_content_type(headers, "POST"), do: [{"Content-Type", "application/json"} | headers]
+  defp maybe_add_content_type(headers, "POST"),
+    do: [{"Content-Type", "application/json"} | headers]
+
   defp maybe_add_content_type(headers, _), do: headers
 
   @doc """
@@ -168,7 +172,11 @@ defmodule Barkpark.ApiTester.Runner do
 
   defp check(%{expect: nil}, _), do: {:pass, "no expectation — manual check"}
 
-  defp check(%{expect: {expected_status, predicate}}, %{status: status, body_json: body, headers: headers}) do
+  defp check(%{expect: {expected_status, predicate}}, %{
+         status: status,
+         body_json: body,
+         headers: headers
+       }) do
     if status != expected_status do
       {:fail, "expected HTTP #{expected_status}, got #{status}"}
     else
@@ -209,23 +217,47 @@ defmodule Barkpark.ApiTester.Runner do
   defp run_predicate(:order_ascending, _, _), do: {:fail, "need at least 2 docs to verify order"}
 
   defp run_predicate(:error_code_not_found, %{"error" => %{"code" => "not_found"}}, _), do: :ok
-  defp run_predicate(:error_code_not_found, body, _), do: {:fail, "not a not_found envelope: #{inspect(body)}"}
 
-  defp run_predicate(:error_code_unauthorized, %{"error" => %{"code" => "unauthorized"}}, _), do: :ok
-  defp run_predicate(:error_code_unauthorized, body, _), do: {:fail, "not an unauthorized envelope: #{inspect(body)}"}
+  defp run_predicate(:error_code_not_found, body, _),
+    do: {:fail, "not a not_found envelope: #{inspect(body)}"}
+
+  defp run_predicate(:error_code_unauthorized, %{"error" => %{"code" => "unauthorized"}}, _),
+    do: :ok
+
+  defp run_predicate(:error_code_unauthorized, body, _),
+    do: {:fail, "not an unauthorized envelope: #{inspect(body)}"}
 
   defp run_predicate(:error_code_malformed, %{"error" => %{"code" => "malformed"}}, _), do: :ok
-  defp run_predicate(:error_code_malformed, body, _), do: {:fail, "not a malformed envelope: #{inspect(body)}"}
 
-  defp run_predicate(:schema_version_1, %{"_schemaVersion" => 1, "schemas" => schemas}, _) when is_list(schemas), do: :ok
-  defp run_predicate(:schema_version_1, body, _), do: {:fail, "missing _schemaVersion/schemas: #{inspect(body)}"}
+  defp run_predicate(:error_code_malformed, body, _),
+    do: {:fail, "not a malformed envelope: #{inspect(body)}"}
+
+  defp run_predicate(:schema_version_1, %{"_schemaVersion" => 1, "schemas" => schemas}, _)
+       when is_list(schemas),
+       do: :ok
+
+  defp run_predicate(:schema_version_1, body, _),
+    do: {:fail, "missing _schemaVersion/schemas: #{inspect(body)}"}
 
   # Single-schema response wraps under a singular `schema` key, not `schemas`.
-  defp run_predicate(:schema_version_1_show, %{"_schemaVersion" => 1, "schema" => %{"name" => _}}, _), do: :ok
-  defp run_predicate(:schema_version_1_show, body, _), do: {:fail, "missing _schemaVersion/schema: #{inspect(body)}"}
+  defp run_predicate(
+         :schema_version_1_show,
+         %{"_schemaVersion" => 1, "schema" => %{"name" => _}},
+         _
+       ),
+       do: :ok
 
-  defp run_predicate(:mutate_result_has_envelope, %{"transactionId" => tx, "results" => [r | _]}, _) when is_binary(tx) do
+  defp run_predicate(:schema_version_1_show, body, _),
+    do: {:fail, "missing _schemaVersion/schema: #{inspect(body)}"}
+
+  defp run_predicate(
+         :mutate_result_has_envelope,
+         %{"transactionId" => tx, "results" => [r | _]},
+         _
+       )
+       when is_binary(tx) do
     doc = r["document"]
+
     if is_map(doc) && Map.has_key?(doc, "_id") && Map.has_key?(doc, "_rev") do
       :ok
     else
@@ -233,7 +265,8 @@ defmodule Barkpark.ApiTester.Runner do
     end
   end
 
-  defp run_predicate(:mutate_result_has_envelope, body, _), do: {:fail, "no transactionId/results: #{inspect(body)}"}
+  defp run_predicate(:mutate_result_has_envelope, body, _),
+    do: {:fail, "no transactionId/results: #{inspect(body)}"}
 
   defp run_predicate(:legacy_deprecation_headers, _, headers) do
     has = fn name ->
@@ -248,17 +281,27 @@ defmodule Barkpark.ApiTester.Runner do
     end
   end
 
-  defp run_predicate(:search_has_results, %{"documents" => docs, "count" => c}, _) when is_list(docs) and c > 0, do: :ok
+  defp run_predicate(:search_has_results, %{"documents" => docs, "count" => c}, _)
+       when is_list(docs) and c > 0,
+       do: :ok
+
   defp run_predicate(:search_has_results, _, _), do: {:fail, "expected documents with count > 0"}
 
   defp run_predicate(:search_empty, %{"documents" => [], "count" => 0}, _), do: :ok
   defp run_predicate(:search_empty, _, _), do: {:fail, "expected empty results"}
 
-  defp run_predicate(:search_type_match, %{"documents" => docs}, _) when is_list(docs) and length(docs) > 0, do: :ok
+  defp run_predicate(:search_type_match, %{"documents" => docs}, _)
+       when is_list(docs) and length(docs) > 0,
+       do: :ok
+
   defp run_predicate(:search_type_match, _, _), do: {:fail, "expected documents"}
 
-  defp run_predicate(:analytics_has_types, %{"types" => types, "total_documents" => total}, _) when is_list(types) and is_integer(total), do: :ok
-  defp run_predicate(:analytics_has_types, _, _), do: {:fail, "expected types array and total_documents"}
+  defp run_predicate(:analytics_has_types, %{"types" => types, "total_documents" => total}, _)
+       when is_list(types) and is_integer(total),
+       do: :ok
+
+  defp run_predicate(:analytics_has_types, _, _),
+    do: {:fail, "expected types array and total_documents"}
 
   defp run_predicate(:analytics_empty, %{"total_documents" => 0, "types" => []}, _), do: :ok
   defp run_predicate(:analytics_empty, _, _), do: {:fail, "expected zero documents"}

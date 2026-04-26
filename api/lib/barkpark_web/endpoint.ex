@@ -54,7 +54,8 @@ defmodule BarkparkWeb.Endpoint do
 
   defp parse_body(conn, _opts) do
     try do
-      Plug.Parsers.call(conn,
+      Plug.Parsers.call(
+        conn,
         Plug.Parsers.init(
           parsers: [:urlencoded, :multipart, :json],
           pass: ["*/*"],

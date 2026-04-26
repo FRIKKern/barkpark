@@ -6,12 +6,34 @@ defmodule BarkparkWeb.Contract.SearchTest do
 
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
-    Content.upsert_schema(%{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}, "test")
-    Content.upsert_schema(%{"name" => "author", "title" => "Author", "visibility" => "public", "fields" => []}, "test")
 
-    Content.create_document("post", %{"doc_id" => "drafts.s1", "title" => "Elixir Phoenix Guide"}, "test")
-    Content.create_document("post", %{"doc_id" => "drafts.s2", "title" => "React Tutorial"}, "test")
-    Content.create_document("author", %{"doc_id" => "drafts.s3", "title" => "Phoenix Wright"}, "test")
+    Content.upsert_schema(
+      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      "test"
+    )
+
+    Content.upsert_schema(
+      %{"name" => "author", "title" => "Author", "visibility" => "public", "fields" => []},
+      "test"
+    )
+
+    Content.create_document(
+      "post",
+      %{"doc_id" => "drafts.s1", "title" => "Elixir Phoenix Guide"},
+      "test"
+    )
+
+    Content.create_document(
+      "post",
+      %{"doc_id" => "drafts.s2", "title" => "React Tutorial"},
+      "test"
+    )
+
+    Content.create_document(
+      "author",
+      %{"doc_id" => "drafts.s3", "title" => "Phoenix Wright"},
+      "test"
+    )
 
     Content.publish_document("s1", "post", "test")
     Content.publish_document("s2", "post", "test")

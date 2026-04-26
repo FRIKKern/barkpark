@@ -262,7 +262,8 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
         ]
       }
 
-      assert {:ok, %Parsed{name: "post", title: "Post", version: 1, fields: [%Field{name: "title"}]}} =
+      assert {:ok,
+              %Parsed{name: "post", title: "Post", version: 1, fields: [%Field{name: "title"}]}} =
                SchemaDefinition.parse(schema)
     end
 
