@@ -54,12 +54,24 @@ defmodule Barkpark.Webhooks.DispatcherTest do
       "test"
     )
 
+    # Setup-race fix: scope the seed webhook's `events` filter so it does NOT
+    # match the "create" action that `Content.create_document/3` (used inside
+    # `new_event_id/0`) fires via `tap_broadcast → Dispatcher.dispatch_async`.
+    # Without this, the fire-and-forget Task spawned by that create-broadcast
+    # would race with the test's own `Dispatcher.deliver/3` call:
+    # the Task would `claim_delivery` first (DB-side, via the shared sandbox),
+    # then consume a scripted FakeHTTP response — leaving the test asserting
+    # `{:ok, 200, 1}` against an already-claimed delivery and an empty Agent.
+    # Tests still call `Dispatcher.deliver(wh, ...)` directly, which bypasses
+    # `active_webhooks_for/3`, so this `events` filter does not change the
+    # behaviour under test.
     {:ok, wh} =
       Webhooks.create_webhook(%{
         "name" => "ep",
         "url" => "http://example.test/hook",
         "dataset" => "test",
-        "secret" => "sek"
+        "secret" => "sek",
+        "events" => ["publish"]
       })
 
     %{webhook: wh}

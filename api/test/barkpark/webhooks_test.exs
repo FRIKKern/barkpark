@@ -173,12 +173,19 @@ defmodule Barkpark.WebhooksTest do
 
   describe "delivery dedup (P1-d)" do
     setup do
+      # Setup-race fix: scope `events` so the seed webhook does NOT match the
+      # "create" action fired by `Content.create_document/3` below. Otherwise
+      # `tap_broadcast → Dispatcher.dispatch_async` spawns a fire-and-forget
+      # Task that claims `(endpoint_id, event_id)` against the shared Ecto
+      # sandbox AND attempts a real `Req.post` to `http://example.com/d`,
+      # both of which leak into these claim_delivery / mark_delivered tests.
       {:ok, wh} =
         Webhooks.create_webhook(%{
           "name" => "D",
           "url" => "http://example.com/d",
           "dataset" => "test",
-          "secret" => "s"
+          "secret" => "s",
+          "events" => ["publish"]
         })
 
       # A real mutation_events row is needed for the FK. Use Content to create one.
