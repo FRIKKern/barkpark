@@ -81,6 +81,7 @@ defmodule BarkparkWeb.Contract.SchemaEnvelopeTest do
     for field <- post["fields"] do
       assert Map.has_key?(field, "required?"),
              "missing required? on field #{inspect(field)}"
+
       assert is_boolean(field["required?"])
     end
 

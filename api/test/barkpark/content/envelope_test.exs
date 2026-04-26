@@ -7,9 +7,14 @@ defmodule Barkpark.Content.EnvelopeTest do
     {:ok, doc} =
       Content.create_document(
         "post",
-        %{"doc_id" => "env-1", "title" => "Hello", "content" => %{"body" => "hi", "tags" => ["a"]}},
+        %{
+          "doc_id" => "env-1",
+          "title" => "Hello",
+          "content" => %{"body" => "hi", "tags" => ["a"]}
+        },
         "test"
       )
+
     %{doc: doc}
   end
 
@@ -40,6 +45,7 @@ defmodule Barkpark.Content.EnvelopeTest do
         %{"doc_id" => "env-2", "title" => "X", "content" => %{"_id" => "HIJACK"}},
         "test"
       )
+
     env = Envelope.render(d)
     assert env["_id"] == d.doc_id
     refute env["_id"] == "HIJACK"

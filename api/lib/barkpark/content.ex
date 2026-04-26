@@ -22,7 +22,15 @@ defmodule Barkpark.Content do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, Envelope, MutationEvent, Revision, SchemaDefinition, Validation}
+
+  alias Barkpark.Content.{
+    Document,
+    Envelope,
+    MutationEvent,
+    Revision,
+    SchemaDefinition,
+    Validation
+  }
 
   @drafts_prefix "drafts."
 
@@ -88,8 +96,7 @@ defmodule Barkpark.Content do
   defp list_with_drafts_merged(query, order, limit, offset) do
     inner =
       from(d in query,
-        distinct:
-          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        distinct: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
         order_by: [
           fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
           fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
@@ -111,6 +118,7 @@ defmodule Barkpark.Content do
   defp apply_perspective(query, _), do: query
 
   defp apply_filter_map(query, map) when map_size(map) == 0, do: query
+
   defp apply_filter_map(query, map) do
     Enum.reduce(map, query, fn
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
@@ -125,15 +133,22 @@ defmodule Barkpark.Content do
   end
 
   defp apply_field_op(query, "title", "eq", v), do: where(query, [d], d.title == ^v)
-  defp apply_field_op(query, "title", "in", vs) when is_list(vs), do: where(query, [d], d.title in ^vs)
-  defp apply_field_op(query, "title", "contains", v), do: where(query, [d], ilike(d.title, ^"%#{v}%"))
+
+  defp apply_field_op(query, "title", "in", vs) when is_list(vs),
+    do: where(query, [d], d.title in ^vs)
+
+  defp apply_field_op(query, "title", "contains", v),
+    do: where(query, [d], ilike(d.title, ^"%#{v}%"))
+
   defp apply_field_op(query, "title", "gt", v), do: where(query, [d], d.title > ^v)
   defp apply_field_op(query, "title", "gte", v), do: where(query, [d], d.title >= ^v)
   defp apply_field_op(query, "title", "lt", v), do: where(query, [d], d.title < ^v)
   defp apply_field_op(query, "title", "lte", v), do: where(query, [d], d.title <= ^v)
 
   defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
-  defp apply_field_op(query, "status", "in", vs) when is_list(vs), do: where(query, [d], d.status in ^vs)
+
+  defp apply_field_op(query, "status", "in", vs) when is_list(vs),
+    do: where(query, [d], d.status in ^vs)
 
   defp apply_field_op(query, field, "eq", v),
     do: where(query, [d], fragment("?->>? = ?", d.content, ^field, ^v))
@@ -304,6 +319,7 @@ defmodule Barkpark.Content do
     case get_document(did, type, dataset) do
       {:ok, draft} ->
         prev_rev = draft.rev
+
         Repo.delete(draft)
         |> tap_broadcast(dataset, type, "discardDraft", prev_rev)
 
@@ -490,8 +506,12 @@ defmodule Barkpark.Content do
 
   defp ensure_rev(_doc, nil), do: :ok
   defp ensure_rev(_doc, ""), do: :ok
-  defp ensure_rev(nil, expected), do: {:error, {:rev_mismatch, %{expected: expected, actual: nil}}}
+
+  defp ensure_rev(nil, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: nil}}}
+
   defp ensure_rev(%{rev: r}, r), do: :ok
+
   defp ensure_rev(%{rev: actual}, expected),
     do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
 
@@ -501,10 +521,11 @@ defmodule Barkpark.Content do
     schemas = list_schemas(dataset)
 
     # Find all schema fields that are references
-    ref_fields = for schema <- schemas,
-                     field <- schema.fields,
-                     field["type"] == "reference",
-                     do: {schema.name, field["name"]}
+    ref_fields =
+      for schema <- schemas,
+          field <- schema.fields,
+          field["type"] == "reference",
+          do: {schema.name, field["name"]}
 
     # Search each type for docs that reference this ID
     Enum.flat_map(ref_fields, fn {type_name, field_name} ->
@@ -521,7 +542,7 @@ defmodule Barkpark.Content do
 
   @doc "Remove all references to a document ID from other documents."
   def disconnect_references(doc_id, dataset) do
-    pub_id = published_id(doc_id)
+    _pub_id = published_id(doc_id)
     refs = find_referencing_docs(doc_id, dataset)
 
     Enum.each(refs, fn %{doc_id: ref_doc_id, type: type, field: field} ->
@@ -529,11 +550,14 @@ defmodule Barkpark.Content do
         {:ok, doc} ->
           updated_content = Map.delete(doc.content || %{}, field)
           prev_rev = doc.rev
+
           doc
           |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
           |> Repo.update()
           |> tap_broadcast(dataset, type, "update", prev_rev)
-        _ -> :ok
+
+        _ ->
+          :ok
       end
     end)
   end
@@ -754,9 +778,12 @@ defmodule Barkpark.Content do
   defp maybe_put_of(out, "array", f) do
     of =
       cond do
-        is_list(f["of"]) -> Enum.map(f["of"], &element_spec/1)
+        is_list(f["of"]) ->
+          Enum.map(f["of"], &element_spec/1)
+
         is_list(get_in(f, ["options", "list"])) ->
           Enum.map(f["options"]["list"], &element_spec/1)
+
         true ->
           [%{"type" => "string"}]
       end
@@ -769,11 +796,17 @@ defmodule Barkpark.Content do
   defp maybe_put_to(out, "reference", f) do
     to =
       cond do
-        is_list(f["to"]) -> Enum.map(f["to"], &element_spec/1)
+        is_list(f["to"]) ->
+          Enum.map(f["to"], &element_spec/1)
+
         is_list(get_in(f, ["options", "references"])) ->
           Enum.map(f["options"]["references"], &element_spec/1)
-        is_binary(f["refType"]) -> [%{"type" => f["refType"]}]
-        true -> []
+
+        is_binary(f["refType"]) ->
+          [%{"type" => f["refType"]}]
+
+        true ->
+          []
       end
 
     Map.put(out, "to", to)
@@ -811,6 +844,7 @@ defmodule Barkpark.Content do
   end
 
   defp hash_schema_tuple({nil, nil}), do: "0000000000000000"
+
   defp hash_schema_tuple({n, t}) do
     payload = "#{n}|#{inspect(t)}"
     :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower) |> binary_part(0, 16)
@@ -868,7 +902,7 @@ defmodule Barkpark.Content do
   # (no ghost events on the SSE stream). Direct writes outside a
   # transaction broadcast immediately — same behaviour as before.
 
-  defp tap_broadcast(result, dataset, type, action, prev_rev \\ nil) do
+  defp tap_broadcast(result, dataset, type, action, prev_rev) do
     case result do
       {:ok, doc} ->
         save_revision(doc, type, dataset, action)
@@ -927,7 +961,14 @@ defmodule Barkpark.Content do
         [{dataset, action, type, doc_id, document, event_id} | queue]
       )
     else
-      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document, event_id)
+      Barkpark.Webhooks.Dispatcher.dispatch_async(
+        dataset,
+        action,
+        type,
+        doc_id,
+        document,
+        event_id
+      )
     end
   end
 
@@ -947,7 +988,14 @@ defmodule Barkpark.Content do
     webhook_queue
     |> Enum.reverse()
     |> Enum.each(fn {dataset, action, type, doc_id, document, event_id} ->
-      Barkpark.Webhooks.Dispatcher.dispatch_async(dataset, action, type, doc_id, document, event_id)
+      Barkpark.Webhooks.Dispatcher.dispatch_async(
+        dataset,
+        action,
+        type,
+        doc_id,
+        document,
+        event_id
+      )
     end)
   end
 
@@ -1007,7 +1055,9 @@ defmodule Barkpark.Content do
 
     base = search_perspective_filter(base, perspective)
 
-    docs = base |> order_by([d], desc: d.updated_at) |> limit(^limit) |> offset(^offset) |> Repo.all()
+    docs =
+      base |> order_by([d], desc: d.updated_at) |> limit(^limit) |> offset(^offset) |> Repo.all()
+
     count = base |> select([d], count(d.id)) |> Repo.one()
 
     {docs, count}
@@ -1069,6 +1119,7 @@ defmodule Barkpark.Content do
         "status" => rev.status,
         "content" => rev.content
       }
+
       upsert_document(type, attrs, dataset)
     end
   end

@@ -73,9 +73,7 @@ defmodule Barkpark.Content.CodelistsTest do
 
     test "explicit chain overrides defaults" do
       assert %{label: "Norwegian Bokmål"} =
-               Codelists.lookup("onixedit", "onixedit:language", "nob",
-                 languages: ["eng", "nob"]
-               )
+               Codelists.lookup("onixedit", "onixedit:language", "nob", languages: ["eng", "nob"])
     end
 
     test "no preferred language match falls back to any translation" do
@@ -173,8 +171,7 @@ defmodule Barkpark.Content.CodelistsTest do
       # Row counts stable: 1 codelist, 2 values, 2 translations.
       assert Repo.aggregate(
                from(c in Codelist,
-                 where:
-                   c.plugin_name == "onixedit" and c.list_id == "onixedit:idem"
+                 where: c.plugin_name == "onixedit" and c.list_id == "onixedit:idem"
                ),
                :count
              ) == 1
@@ -185,7 +182,7 @@ defmodule Barkpark.Content.CodelistsTest do
              ) == 2
 
       value_ids =
-         Repo.all(from v in Value, where: v.codelist_id == ^id_1, select: v.id)
+        Repo.all(from v in Value, where: v.codelist_id == ^id_1, select: v.id)
 
       assert Repo.aggregate(
                from(t in Translation, where: t.codelist_value_id in ^value_ids),

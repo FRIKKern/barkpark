@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
       "test"
     )
+
     :ok
   end
 
@@ -49,6 +50,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert resp.status == 200
     body_json = Jason.decode!(resp.resp_body)
     assert is_binary(body_json["transactionId"])
+
     assert [%{"id" => _, "operation" => "create", "document" => %{"_id" => _, "_type" => "post"}}] =
              body_json["results"]
   end

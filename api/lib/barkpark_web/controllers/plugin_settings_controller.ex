@@ -55,9 +55,6 @@ defmodule BarkparkWeb.PluginSettingsController do
       :ok ->
         json(conn, %{ok: true})
 
-      {:ok, _} ->
-        json(conn, %{ok: true})
-
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "not_found"})
     end

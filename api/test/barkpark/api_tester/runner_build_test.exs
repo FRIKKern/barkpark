@@ -21,8 +21,10 @@ defmodule Barkpark.ApiTester.RunnerBuildTest do
     assert String.starts_with?(req.url, "http://localhost:4000/v1/data/query/staging/post?")
     assert String.contains?(req.url, "perspective=drafts")
     assert String.contains?(req.url, "limit=5")
+
     assert String.contains?(req.url, "filter%5Btitle%5D=hello+world") or
              String.contains?(req.url, "filter%5Btitle%5D=hello%20world")
+
     assert req.body_text in [nil, ""]
   end
 
@@ -35,6 +37,7 @@ defmodule Barkpark.ApiTester.RunnerBuildTest do
 
   test "build_request attaches Authorization for :token and :admin endpoints" do
     create = Endpoints.find("production", "mutate-create")
+
     req =
       Runner.build_request(
         create,
@@ -50,7 +53,13 @@ defmodule Barkpark.ApiTester.RunnerBuildTest do
 
   test "build_request does NOT attach Authorization for :public endpoints" do
     list = Endpoints.find("production", "query-list")
-    req = Runner.build_request(list, %{"dataset" => "production", "type" => "post"}, %{token: "dev-tok", base: "http://x"})
+
+    req =
+      Runner.build_request(list, %{"dataset" => "production", "type" => "post"}, %{
+        token: "dev-tok",
+        base: "http://x"
+      })
+
     refute Enum.any?(req.headers, fn {k, _} -> k == "Authorization" end)
   end
 end

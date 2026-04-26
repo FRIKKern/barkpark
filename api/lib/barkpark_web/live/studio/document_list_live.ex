@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.Studio.DocumentListLive do
   use BarkparkWeb, :live_view
 
-  alias Barkpark.{Content, Structure}
+  alias Barkpark.Content
 
   @impl true
   def mount(%{"type" => type, "dataset" => dataset}, _session, socket) do
@@ -9,12 +9,11 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
     end
 
-    schema = case Content.get_schema(type, dataset) do
-      {:ok, s} -> s
-      _ -> nil
-    end
-
-    type_node = Structure.type_node(type, dataset)
+    schema =
+      case Content.get_schema(type, dataset) do
+        {:ok, s} -> s
+        _ -> nil
+      end
 
     socket =
       socket
@@ -22,7 +21,7 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
         type: type,
         dataset: dataset,
         schema: schema,
-        type_node: type_node,
+        type_node: nil,
         perspective: :drafts,
         active_filter: nil
       )
@@ -55,9 +54,15 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
     type = socket.assigns.type
     id = "#{type}-#{:rand.uniform(999_999)}"
 
-    case Content.create_document(type, %{"doc_id" => id, "title" => "Untitled"}, socket.assigns.dataset) do
+    case Content.create_document(
+           type,
+           %{"doc_id" => id, "title" => "Untitled"},
+           socket.assigns.dataset
+         ) do
       {:ok, doc} ->
-        {:noreply, push_navigate(socket, to: "/studio/#{type}/#{Content.published_id(doc.doc_id)}")}
+        {:noreply,
+         push_navigate(socket, to: "/studio/#{type}/#{Content.published_id(doc.doc_id)}")}
+
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create document")}
     end
@@ -70,7 +75,12 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
 
   defp load_documents(socket) do
     opts = [perspective: socket.assigns.perspective]
-    opts = if socket.assigns.active_filter, do: opts ++ [filter_map: parse_filter_string(socket.assigns.active_filter)], else: opts
+
+    opts =
+      if socket.assigns.active_filter,
+        do: opts ++ [filter_map: parse_filter_string(socket.assigns.active_filter)],
+        else: opts
+
     docs = Content.list_documents(socket.assigns.type, socket.assigns.dataset, opts)
     assign(socket, documents: docs)
   end
@@ -167,6 +177,7 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
   # Parse a "field=value" filter string into a map for list_documents/3 :filter_map.
   defp parse_filter_string(nil), do: %{}
   defp parse_filter_string(""), do: %{}
+
   defp parse_filter_string(s) do
     case String.split(s, "=", parts: 2) do
       [field, value] -> %{field => value}

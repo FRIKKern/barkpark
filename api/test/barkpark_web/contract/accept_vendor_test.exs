@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Contract.AcceptVendorTest do
     assert String.starts_with?(ct, "application/vnd.barkpark+json")
 
     body = Jason.decode!(resp.resp_body)
+
     for key <- ~w(result syncTags ms etag schemaHash) do
       assert Map.has_key?(body, key), "envelope missing key: #{key}"
     end

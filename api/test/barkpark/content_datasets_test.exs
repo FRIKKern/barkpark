@@ -3,8 +3,18 @@ defmodule Barkpark.ContentDatasetsTest do
   alias Barkpark.Content
 
   test "list_datasets returns sorted distinct values from schema_definitions and documents" do
-    {:ok, _} = Content.upsert_schema(%{"name" => "post", "title" => "P", "visibility" => "public", "fields" => []}, "alpha")
-    {:ok, _} = Content.upsert_schema(%{"name" => "post", "title" => "P", "visibility" => "public", "fields" => []}, "beta")
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "P", "visibility" => "public", "fields" => []},
+        "alpha"
+      )
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "P", "visibility" => "public", "fields" => []},
+        "beta"
+      )
+
     {:ok, _} = Content.create_document("post", %{"_id" => "d1", "title" => "x"}, "gamma")
 
     datasets = Content.list_datasets()

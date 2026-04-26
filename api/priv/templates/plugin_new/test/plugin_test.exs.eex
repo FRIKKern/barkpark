@@ -1,0 +1,12 @@
+defmodule <%= @module %>Test do
+  use ExUnit.Case, async: true
+
+  test "manifest/0 returns the parsed plugin.json map" do
+    manifest = <%= @module %>.manifest()
+
+    assert is_map(manifest)
+    assert manifest["plugin_name"] == "<%= @plugin_name %>"
+    assert manifest["version"] == "0.1.0"
+    assert is_list(manifest["capabilities"])
+  end
+end

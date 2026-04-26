@@ -123,7 +123,9 @@ defmodule Barkpark.Webhooks.Dispatcher do
     ]
 
     headers =
-      if event_id, do: [{"x-barkpark-event-id", Integer.to_string(event_id)} | base_headers], else: base_headers
+      if event_id,
+        do: [{"x-barkpark-event-id", Integer.to_string(event_id)} | base_headers],
+        else: base_headers
 
     case http_post(webhook.url, body, headers) do
       {:ok, status} when status in 200..299 ->
