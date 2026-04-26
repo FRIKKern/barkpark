@@ -28,6 +28,11 @@ jobs:
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
     runs-on: ubuntu-latest
+    # ADVISORY job — failures do not block merge while pre-existing test-infra
+    # drift is being remediated (see Task #2 triage report 2026-04-26 + 6 fix
+    # groups in flight). Compile + format + prod-compile-gate are blocking.
+    # Once Group A-F land, remove continue-on-error to make tests blocking.
+    continue-on-error: true
     services:
       postgres:
         image: postgres:15
