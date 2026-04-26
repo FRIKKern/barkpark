@@ -1,0 +1,10 @@
+{
+  "plugin_name": "onixedit",
+  "version": "0.1.0",
+  "description": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3.",
+  "capabilities": ["schemas", "codelists"],
+  "module": "Barkpark.Plugins.OnixEdit",
+  "schemas": [
+    { "name": "book", "version": "1", "file": "schemas/book.json" }
+  ]
+}
