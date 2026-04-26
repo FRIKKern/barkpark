@@ -29,3 +29,6 @@ config :phoenix, :plug_init_mode, :runtime
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Drive Oban manually in tests so we can drain queues from assertions.
+config :barkpark, Oban, testing: :manual

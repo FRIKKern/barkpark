@@ -47,6 +47,15 @@ defmodule BarkparkWeb.Router do
     get "/studio", PageController, :redirect_to_studio
   end
 
+  # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────
+  scope "/studio", BarkparkWeb.Studio do
+    pipe_through :browser
+
+    live_session :admin_studio, on_mount: [{BarkparkWeb.LiveAuth, :admin}] do
+      live "/settings", SettingsLive
+    end
+  end
+
   # ── Studio (LiveView) ─────────────────────────────────────────────────────
   scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser
@@ -110,6 +119,15 @@ defmodule BarkparkWeb.Router do
     get "/:dataset/:name", SchemaController, :show
     post "/:dataset", SchemaController, :upsert
     delete "/:dataset/:name", SchemaController, :delete
+  end
+
+  # ── Plugin settings — admin-only encrypted-JSON CRUD ───────────────────
+  scope "/v1/plugins/settings", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/:plugin_name", PluginSettingsController, :show
+    put "/:plugin_name", PluginSettingsController, :update
+    delete "/:plugin_name", PluginSettingsController, :delete
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────
