@@ -3,6 +3,18 @@ defmodule BarkparkWeb.Contract.RateLimitTest do
 
   setup do
     :ets.delete_all_objects(:barkpark_rate_limiter)
+
+    original = Application.get_env(:barkpark, :rate_limits)
+
+    Application.put_env(
+      :barkpark,
+      :rate_limits,
+      read_per_minute: 200,
+      write_per_minute: 60,
+      datasets: %{}
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, :rate_limits, original) end)
     :ok
   end
 
@@ -16,7 +28,7 @@ defmodule BarkparkWeb.Contract.RateLimitTest do
 
     resp = get(base_conn, "/v1/data/query/ratelimit_test/nosuch")
     assert resp.status == 429
-    assert get_resp_header(resp, "retry-after") == ["60"]
+    assert get_resp_header(resp, "retry-after") == ["1"]
     body = Jason.decode!(resp.resp_body)
     assert body["error"]["code"] == "rate_limited"
   end
