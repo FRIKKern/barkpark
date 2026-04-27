@@ -46,12 +46,12 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   def codelist_field(assigns) do
     assigns =
       assigns
-      |> assign_new(:value, fn -> nil end)
-      |> assign_new(:errors, fn -> %{} end)
-      |> assign_new(:on_change, fn -> nil end)
-      |> assign_new(:plugin_name, fn -> "core" end)
-      |> assign_new(:path, fn -> "" end)
-      |> assign_new(:codelist_loader, fn -> nil end)
+      |> Map.put_new(:value, nil)
+      |> Map.put_new(:errors, %{})
+      |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:plugin_name, "core")
+      |> Map.put_new(:path, "")
+      |> Map.put_new(:codelist_loader, nil)
 
     list_id = assigns.field.codelist_id || ""
     plugin_name = assigns.plugin_name
@@ -61,14 +61,14 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
 
     assigns =
       assigns
-      |> assign(:title, title_for(assigns.field))
-      |> assign(:plugin_name, plugin_name)
-      |> assign(:list_id, list_id)
-      |> assign(:options, options)
-      |> assign(:input_name, assigns.path)
-      |> assign(:input_id, "f-#{assigns.field.name}")
-      |> assign(:errors_list, errors_list(assigns.errors))
-      |> assign(:empty_phrase, @no_codelist_phrase)
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:plugin_name, plugin_name)
+      |> Map.put(:list_id, list_id)
+      |> Map.put(:options, options)
+      |> Map.put(:input_name, assigns.path)
+      |> Map.put(:input_id, "f-#{assigns.field.name}")
+      |> Map.put(:errors_list, errors_list(assigns.errors))
+      |> Map.put(:empty_phrase, @no_codelist_phrase)
 
     ~H"""
     <div class="bp-field bp-field-codelist" data-field-type="codelist" data-field-name={@field.name}>

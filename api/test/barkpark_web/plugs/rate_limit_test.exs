@@ -34,8 +34,8 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
         {"authorization", "Bearer get-token"}
       ])
 
-    assert Plug.Conn.halted?(RateLimit.call(c1, RateLimit.init([]))) == false
-    assert Plug.Conn.halted?(RateLimit.call(c1, RateLimit.init([]))) == false
+    refute RateLimit.call(c1, RateLimit.init([])).halted
+    refute RateLimit.call(c1, RateLimit.init([])).halted
     out = RateLimit.call(c1, RateLimit.init([]))
     assert out.halted
     assert out.status == 429
