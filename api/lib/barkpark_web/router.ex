@@ -66,6 +66,11 @@ defmodule BarkparkWeb.Router do
     live "/", StudioLive
     live "/media", MediaLive
     live "/api-tester", ApiTesterLive
+
+    # Plugin-owned dedicated editors. Must come BEFORE the catch-all below.
+    # OnixEdit `book` documents (Phase 5 WI1).
+    live "/onixedit/book/:doc_id", Plugins.OnixEdit.BookEditor
+
     live "/*path", StudioLive
   end
 
