@@ -121,7 +121,7 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
   end
 
   describe "ThemaSubjectCategory field" do
-    test "definition_map/0 produces a parseable codelist field at the book surface" do
+    test "definition_map/0 produces a parseable arrayOf codelist field at the book surface" do
       mock_book = %{
         "name" => "book",
         "fields" => [ThemaSubjectCategory.definition_map()]
@@ -130,13 +130,15 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
       assert {:ok, %Parsed{version: 2, fields: [thema]}} =
                SchemaDefinition.parse(mock_book, plugin: "onixedit")
 
+      assert %Field{type: "arrayOf", ordered: false, of: inner} = thema
+
       assert %Field{
                type: "codelist",
                codelist_id: "onixedit:thema",
                version: 73
-             } = thema
+             } = inner
 
-      assert thema.onix["codelistId"] == 93
+      assert inner.onix["codelistId"] == 93
     end
 
     test "declares thema (list 93 / issue 73) per D17" do

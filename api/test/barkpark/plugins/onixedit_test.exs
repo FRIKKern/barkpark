@@ -87,12 +87,18 @@ defmodule Barkpark.Plugins.OnixEditTest do
              "contributors `of` should be a composite for WI2 to enrich"
     end
 
-    test "themaSubjectCategory is a codelist field pinned to ONIX list 93", %{parsed: parsed} do
+    test "themaSubjectCategory is an arrayOf codelist pinned to ONIX list 93", %{parsed: parsed} do
       thema = find_top(parsed, "themaSubjectCategory")
 
-      assert thema.type == "codelist"
-      assert thema.codelist_id == "onixedit:thema"
-      assert thema.onix["codelistId"] == 93
+      assert thema.type == "arrayOf"
+      assert thema.ordered == false
+
+      assert %SchemaDefinition.Field{
+               type: "codelist",
+               codelist_id: "onixedit:thema"
+             } = thema.of
+
+      assert thema.of.onix["codelistId"] == 93
     end
 
     test "collateralDetail.textContents is the localizedText insertion point", %{parsed: parsed} do
