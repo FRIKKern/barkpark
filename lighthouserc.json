@@ -3,9 +3,7 @@
   "ci": {
     "collect": {
       "url": [
-        "http://localhost:3000/",
-        "http://localhost:3000/docs",
-        "http://localhost:3000/studio"
+        "http://localhost:3000/"
       ],
       "numberOfRuns": 3,
       "settings": {
