@@ -81,6 +81,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
   alias BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePicker
 
   @type tab ::
@@ -108,6 +109,69 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   @tab_slug_to_atom Map.new(@tabs, fn {atom, _} -> {Atom.to_string(atom), atom} end)
   @default_tab :identity
   @schema_name "book"
+
+  # Tab → top-level field-name membership for the WI4 tabs.
+  #
+  # The book.json schema does not carry a per-field tab annotation
+  # (decision: keep schema clean and let the editor own tab layout — the
+  # ONIX 3.0 element-block grouping is an editor concern, not a schema
+  # concern). This map encodes the WI4 grouping; WI3 owns the
+  # `:contributors` and `:subjects` keys (left absent here).
+  @wi4_tab_fields %{
+    identity: [
+      "notificationType",
+      "deletionText",
+      "recordSourceType",
+      "recordSourceIdentifier",
+      "recordSourceName",
+      "productIdentifiers",
+      "barcode",
+      "productForm",
+      "productFormDetail",
+      "productFormFeatures",
+      "productPackaging",
+      "productFormDescription",
+      "productPartCount",
+      "productParts",
+      "epubTechnicalProtection",
+      "epubUsageConstraints",
+      "extents",
+      "illustrationsNote",
+      "ancillaryContents",
+      "productClassifications",
+      "bp_internal_note",
+      "bp_export_status",
+      "bp_last_exported_at"
+    ],
+    title: [
+      "titleDetails",
+      "thesis",
+      "editionType",
+      "editionNumber",
+      "editionVersionNumber",
+      "editionStatement",
+      "noEdition",
+      "religiousText",
+      "languages"
+    ],
+    publishing: [
+      "publishingDetail"
+    ],
+    supply: [
+      "productSupplies"
+    ],
+    marketing: [
+      "audienceCodes",
+      "audienceRanges",
+      "audienceDescription",
+      "complexity",
+      "collateralDetail",
+      "contentDetail"
+    ],
+    related: [
+      "relatedMaterial"
+    ]
+  }
 
   @doc "Returns the ordered tab list as `[{atom, label}, …]`."
   def tabs, do: @tabs
@@ -505,21 +569,12 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   #
   # Owner: WI4 owns Identity / Title / Publishing / Supply / Marketing /
   # Related. WI3 owns Subjects / Contributors.
-  defp render_tab(:identity, assigns) do
-    ~H"""
-    <div data-tab-body="identity">
-      <p class="text-sm text-muted">Identity tab — implemented in WI4</p>
-    </div>
-    """
-  end
-
-  defp render_tab(:title, assigns) do
-    ~H"""
-    <div data-tab-body="title">
-      <p class="text-sm text-muted">Title tab — implemented in WI4</p>
-    </div>
-    """
-  end
+  defp render_tab(:identity, assigns), do: render_wi4_tab(:identity, assigns)
+  defp render_tab(:title, assigns), do: render_wi4_tab(:title, assigns)
+  defp render_tab(:publishing, assigns), do: render_wi4_tab(:publishing, assigns)
+  defp render_tab(:supply, assigns), do: render_wi4_tab(:supply, assigns)
+  defp render_tab(:marketing, assigns), do: render_wi4_tab(:marketing, assigns)
+  defp render_tab(:related, assigns), do: render_wi4_tab(:related, assigns)
 
   defp render_tab(:contributors, assigns) do
     ~H"""
@@ -544,37 +599,241 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     """
   end
 
-  defp render_tab(:publishing, assigns) do
+  # ── WI4 generic tab body — picks the relevant subset of @schema.fields,
+  # filters by the Simplified/Advanced toggle (`assigns.simplified` —
+  # defaults to `false` → show all), and dispatches each field to the v2
+  # plugin Adapter (composite / arrayOf / codelist / localizedText) or to a
+  # v1 leaf input. ───────────────────────────────────────────────────────
+  defp render_wi4_tab(tab, assigns) do
+    fields =
+      assigns.schema
+      |> tab_fields(tab)
+      |> Enum.filter(&field_visible?(&1, simplified?(assigns)))
+
+    errors = Map.get(assigns, :validation_errors, %{})
+
+    assigns =
+      assigns
+      |> assign(:tab_id, Atom.to_string(tab))
+      |> assign(:fields, fields)
+      |> assign(:errors, errors)
+
     ~H"""
-    <div data-tab-body="publishing">
-      <p class="text-sm text-muted">Publishing tab — implemented in WI4</p>
+    <div data-tab-body={@tab_id}>
+      <%= if @fields == [] do %>
+        <p class="text-sm text-muted" data-empty="true">
+          No fields configured for this tab.
+        </p>
+      <% else %>
+        <div class="bp-tab-fields" style="display: flex; flex-direction: column; gap: 16px;">
+          <%= for field <- @fields do %>
+            <div
+              class={field_wrapper_class(@errors, field["name"])}
+              data-field-name={field["name"]}
+            >
+              <%= if !PluginAdapter.v2?(field) do %>
+                <label class="bp-field-label" for={leaf_input_id(field["name"])}>
+                  <%= field_title(field) %>
+                </label>
+              <% end %>
+              <%= render_field(assigns, field) %>
+              <%= for err <- field_errors(@errors, field["name"]) do %>
+                <span class="error" data-error-for={field["name"]}><%= err %></span>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
     </div>
     """
   end
 
-  defp render_tab(:supply, assigns) do
+  # ── Per-field dispatch. v2 → adapter (composite / arrayOf / codelist /
+  # localizedText). v1 → leaf input. ─────────────────────────────────────
+  defp render_field(assigns, field) do
+    if PluginAdapter.v2?(field) do
+      PluginAdapter.render(adapter_assigns(assigns), field)
+    else
+      leaf_input(assigns, field)
+    end
+  end
+
+  defp adapter_assigns(assigns) do
+    assigns
+    |> Map.put(:editor_form, assigns.form)
+    |> Map.put(:editor_schema, assigns.schema)
+    |> Map.put(:validation_errors, Map.get(assigns, :validation_errors, %{}))
+  end
+
+  # ── v1 leaf inputs (string, text, boolean, datetime, slug, color, …). ──
+  defp leaf_input(assigns, %{"type" => "text", "name" => name} = field) do
+    val = Map.get(assigns.form, name, "")
+    rows = Map.get(field, "rows") || 3
+    assigns = assign(assigns, n: name, v: val, rows: rows)
+
     ~H"""
-    <div data-tab-body="supply">
-      <p class="text-sm text-muted">Supply tab — implemented in WI4</p>
+    <textarea
+      id={leaf_input_id(@n)}
+      name={"doc[#{@n}]"}
+      class="bp-input form-input"
+      rows={@rows}
+      phx-debounce="500"
+    ><%= @v %></textarea>
+    """
+  end
+
+  defp leaf_input(assigns, %{"type" => "boolean", "name" => name}) do
+    checked = Map.get(assigns.form, name, "") == "true"
+    assigns = assign(assigns, n: name, c: checked)
+
+    ~H"""
+    <div class="form-checkbox">
+      <input type="hidden" name={"doc[#{@n}]"} value="false" />
+      <input
+        id={leaf_input_id(@n)}
+        type="checkbox"
+        name={"doc[#{@n}]"}
+        value="true"
+        checked={@c}
+        phx-debounce="100"
+      />
     </div>
     """
   end
 
-  defp render_tab(:marketing, assigns) do
+  defp leaf_input(assigns, %{"type" => "datetime", "name" => name}) do
+    val = Map.get(assigns.form, name, "")
+    assigns = assign(assigns, n: name, v: val)
+
     ~H"""
-    <div data-tab-body="marketing">
-      <p class="text-sm text-muted">Marketing tab — implemented in WI4</p>
-    </div>
+    <input
+      id={leaf_input_id(@n)}
+      type="datetime-local"
+      name={"doc[#{@n}]"}
+      value={@v}
+      class="bp-input form-input"
+      phx-debounce="300"
+    />
     """
   end
 
-  defp render_tab(:related, assigns) do
+  defp leaf_input(assigns, %{"type" => "color", "name" => name}) do
+    val = Map.get(assigns.form, name, "")
+    assigns = assign(assigns, n: name, v: val)
+
     ~H"""
-    <div data-tab-body="related">
-      <p class="text-sm text-muted">Related tab — implemented in WI4</p>
-    </div>
+    <input
+      id={leaf_input_id(@n)}
+      type="color"
+      name={"doc[#{@n}]"}
+      value={@v}
+      class="bp-input"
+      phx-debounce="300"
+    />
     """
   end
+
+  defp leaf_input(assigns, %{"type" => "select", "name" => name, "options" => opts})
+       when is_list(opts) do
+    val = Map.get(assigns.form, name, "")
+    assigns = assign(assigns, n: name, opts: opts, v: val)
+
+    ~H"""
+    <select
+      id={leaf_input_id(@n)}
+      name={"doc[#{@n}]"}
+      class="bp-input form-input"
+      phx-debounce="300"
+    >
+      <%= for o <- @opts do %>
+        <option value={o} selected={o == @v}><%= o %></option>
+      <% end %>
+    </select>
+    """
+  end
+
+  defp leaf_input(assigns, %{"name" => name}) do
+    val = Map.get(assigns.form, name, "")
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <input
+      id={leaf_input_id(@n)}
+      type="text"
+      name={"doc[#{@n}]"}
+      value={@v}
+      class="bp-input form-input"
+      phx-debounce="500"
+    />
+    """
+  end
+
+  # ── Field selection / filtering helpers. ───────────────────────────────
+
+  # Resolves the ordered list of raw field maps that belong to `tab`. Honors
+  # the schema's actual field order — we walk @schema.fields once and pick
+  # the ones whose name appears in the tab's allow-list. Unknown / missing
+  # schemas yield an empty list (parent shell renders an empty-state).
+  defp tab_fields(nil, _tab), do: []
+
+  defp tab_fields(%{fields: fields}, tab) when is_list(fields) do
+    allow = Map.get(@wi4_tab_fields, tab, [])
+    allow_set = MapSet.new(allow)
+
+    fields
+    |> Enum.filter(fn
+      %{"name" => name} -> MapSet.member?(allow_set, name)
+      _ -> false
+    end)
+  end
+
+  defp tab_fields(_, _), do: []
+
+  # `simplified: false` on a field means "Advanced-only — hide in
+  # Simplified mode". Default is true (show in both modes). When
+  # `assigns.simplified` is `false` (the default Advanced view) we keep
+  # everything; when it is `true` we drop fields that opted out.
+  defp simplified?(%{simplified: true}), do: true
+  defp simplified?(%{simplified: _}), do: false
+  defp simplified?(_), do: false
+
+  defp field_visible?(_field, false), do: true
+
+  defp field_visible?(%{"simplified" => false}, true), do: false
+  defp field_visible?(_field, true), do: true
+
+  defp field_title(%{"title" => t}) when is_binary(t) and t != "", do: t
+  defp field_title(%{"name" => n}) when is_binary(n), do: humanize_name(n)
+  defp field_title(_), do: ""
+
+  defp humanize_name(name) do
+    name
+    |> String.replace(~r/[_\-]+/, " ")
+    |> String.split(" ", trim: true)
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp leaf_input_id(name), do: "f-book-#{name}"
+
+  defp field_wrapper_class(errors, name) when is_map(errors) do
+    case Map.get(errors, name) do
+      nil -> "bp-field-wrapper"
+      [] -> "bp-field-wrapper"
+      %{} = m when map_size(m) == 0 -> "bp-field-wrapper"
+      _ -> "bp-field-wrapper has-error"
+    end
+  end
+
+  defp field_wrapper_class(_, _), do: "bp-field-wrapper"
+
+  defp field_errors(errors, name) when is_map(errors) do
+    case Map.get(errors, name) do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp field_errors(_, _), do: []
 
   # ── Render helpers ─────────────────────────────────────────────────────────
 
