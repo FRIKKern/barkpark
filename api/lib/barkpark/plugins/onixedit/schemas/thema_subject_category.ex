@@ -3,9 +3,12 @@ defmodule Barkpark.Plugins.OnixEdit.Schemas.ThemaSubjectCategory do
   Thema subject category codelist field (Phase 4 WI2).
 
   Thema is ONIX codelist 93 — a hierarchical (~3000-node) subject scheme
-  maintained by EDItEUR. The book schema's `subject.themaSubjectCategory`
-  field is a single `codelist` reference pointing at the registry
-  (`Barkpark.Content.Codelists`).
+  maintained by EDItEUR. The book schema's `themaSubjectCategory` field
+  is an `arrayOf` codelist references pointing at the registry
+  (`Barkpark.Content.Codelists`); a publication carries one main Thema
+  code plus zero or more qualifiers / secondary subjects, per the
+  EDItEUR Thema Best Practice Guide and ONIX 3.0 §P.12 (`<Subject>`
+  composite is repeatable).
 
   This module exposes only the field DEFINITION map; the registry data
   is WI3's bring-your-own-snapshot import (D21). The module exists for
@@ -22,11 +25,16 @@ defmodule Barkpark.Plugins.OnixEdit.Schemas.ThemaSubjectCategory do
 
   @field_definition %{
     "name" => "themaSubjectCategory",
-    "title" => "Thema subject category",
-    "type" => "codelist",
-    "codelistId" => "onixedit:thema",
-    "version" => 73,
-    "onix" => %{"element" => "SubjectCode", "codelistId" => 93}
+    "title" => "Thema subject categories (main + qualifiers; ONIX list 93)",
+    "type" => "arrayOf",
+    "ordered" => false,
+    "of" => %{
+      "name" => "themaCode",
+      "type" => "codelist",
+      "codelistId" => "onixedit:thema",
+      "version" => 73,
+      "onix" => %{"element" => "SubjectCode", "codelistId" => 93}
+    }
   }
 
   @spec plugin_name() :: String.t()
