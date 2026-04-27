@@ -488,15 +488,15 @@ defmodule Barkpark.Content.ValidationTest do
       schema = %{
         "fields" => [
           %{
-            "name" => "title",
+            "name" => "blurb",
             "type" => "localizedText",
             "languages" => ["nob", "eng"]
           }
         ]
       }
 
-      content = %{"title" => %{"swe" => "Hej"}}
-      assert {:error, %{"title" => msgs}} = Validation.validate(content, nil, schema)
+      content = %{"blurb" => %{"swe" => "Hej"}}
+      assert {:error, %{"blurb" => msgs}} = Validation.validate(content, nil, schema)
       assert Enum.any?(msgs, &String.contains?(&1, "swe"))
     end
   end
