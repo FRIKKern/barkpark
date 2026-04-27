@@ -58,14 +58,10 @@ defmodule Barkpark.Codelists.EDItEURTest do
 
       # list 17 — multi-language, contributor role 'A01'
       assert %{value: "A01", label: "Forfatter"} =
-               Codelists.lookup("onixedit", "onixedit:list_17", "A01",
-                 languages: ["nob", "eng"]
-               )
+               Codelists.lookup("onixedit", "onixedit:list_17", "A01", languages: ["nob", "eng"])
 
       assert %{value: "A01", label: "By (author)"} =
-               Codelists.lookup("onixedit", "onixedit:list_17", "A01",
-                 languages: ["eng"]
-               )
+               Codelists.lookup("onixedit", "onixedit:list_17", "A01", languages: ["eng"])
     end
   end
 
@@ -107,14 +103,10 @@ defmodule Barkpark.Codelists.EDItEURTest do
       {:ok, _} = EDItEUR.seed(parsed, issue: "73")
 
       assert %{label: "Digital nedlasting"} =
-               Codelists.lookup("onixedit", "onixedit:list_7", "EB",
-                 languages: ["nob", "eng"]
-               )
+               Codelists.lookup("onixedit", "onixedit:list_7", "EB", languages: ["nob", "eng"])
 
       assert %{label: "Digital download"} =
-               Codelists.lookup("onixedit", "onixedit:list_7", "EB",
-                 languages: ["eng"]
-               )
+               Codelists.lookup("onixedit", "onixedit:list_7", "EB", languages: ["eng"])
     end
   end
 
@@ -154,8 +146,7 @@ defmodule Barkpark.Codelists.EDItEURTest do
       System.put_env("BARKPARK_ONIX_CODELIST_PATH", "/from/env.xml")
 
       try do
-        assert {:ok, "/explicit.xml"} =
-                 EDItEUR.resolve_source(source: "/explicit.xml")
+        assert {:ok, "/explicit.xml"} = EDItEUR.resolve_source(source: "/explicit.xml")
 
         assert {:ok, "/from/env.xml"} = EDItEUR.resolve_source([])
       after
