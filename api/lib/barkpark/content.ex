@@ -1050,8 +1050,7 @@ defmodule Barkpark.Content do
       |> where([d], d.dataset == ^dataset)
       |> where([d], ilike(d.title, ^pattern))
 
-    base =
-      if type, do: where(base, [d], d.type == ^type), else: base
+    base = if type, do: where(base, [d], d.type == ^type), else: base
 
     base = search_perspective_filter(base, perspective)
 

@@ -41,8 +41,7 @@ defmodule Barkpark.Plugins.Settings do
       updated_by: user_id
     }
 
-    record =
-      Repo.get(SettingsRecord, plugin_name) || %SettingsRecord{plugin_name: plugin_name}
+    record = Repo.get(SettingsRecord, plugin_name) || %SettingsRecord{plugin_name: plugin_name}
 
     record
     |> SettingsRecord.changeset(attrs)

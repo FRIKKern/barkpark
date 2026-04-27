@@ -153,8 +153,7 @@ defmodule Barkpark.Plugins.ManifestTest do
     end
 
     test "missing plugin_name returns {:error, [_ | _]}" do
-      assert {:error, errors} =
-               minimal() |> Map.delete("plugin_name") |> Manifest.validate()
+      assert {:error, errors} = minimal() |> Map.delete("plugin_name") |> Manifest.validate()
 
       assert is_list(errors)
       assert length(errors) >= 1
