@@ -63,12 +63,10 @@ defmodule Barkpark.Content.CodelistsTest do
 
     test "default fallback prefers nob, then eng" do
       # nob entry has both translations; default chain hits nob first
-      assert %{label: "Norsk bokmål"} =
-               Codelists.lookup("onixedit", "onixedit:language", "nob")
+      assert %{label: "Norsk bokmål"} = Codelists.lookup("onixedit", "onixedit:language", "nob")
 
       # eng entry has only eng; chain falls through to eng
-      assert %{label: "English"} =
-               Codelists.lookup("onixedit", "onixedit:language", "eng")
+      assert %{label: "English"} = Codelists.lookup("onixedit", "onixedit:language", "eng")
     end
 
     test "explicit chain overrides defaults" do
@@ -78,8 +76,7 @@ defmodule Barkpark.Content.CodelistsTest do
 
     test "no preferred language match falls back to any translation" do
       # fra is the only translation; default chain (nob, eng) misses
-      assert %{label: "Français"} =
-               Codelists.lookup("onixedit", "onixedit:language", "fra")
+      assert %{label: "Français"} = Codelists.lookup("onixedit", "onixedit:language", "fra")
     end
   end
 
@@ -159,11 +156,9 @@ defmodule Barkpark.Content.CodelistsTest do
         ]
       }
 
-      assert {:ok, %Codelist{id: id_1}} =
-               Codelists.register("onixedit", "onixedit:idem", payload)
+      assert {:ok, %Codelist{id: id_1}} = Codelists.register("onixedit", "onixedit:idem", payload)
 
-      assert {:ok, %Codelist{id: id_2}} =
-               Codelists.register("onixedit", "onixedit:idem", payload)
+      assert {:ok, %Codelist{id: id_2}} = Codelists.register("onixedit", "onixedit:idem", payload)
 
       assert id_1 == id_2,
              "re-registration should upsert the codelist row, not duplicate it"
@@ -181,8 +176,7 @@ defmodule Barkpark.Content.CodelistsTest do
                :count
              ) == 2
 
-      value_ids =
-        Repo.all(from v in Value, where: v.codelist_id == ^id_1, select: v.id)
+      value_ids = Repo.all(from v in Value, where: v.codelist_id == ^id_1, select: v.id)
 
       assert Repo.aggregate(
                from(t in Translation, where: t.codelist_value_id in ^value_ids),
@@ -243,14 +237,11 @@ defmodule Barkpark.Content.CodelistsTest do
 
   describe "list/1" do
     test "returns codelists registered under a plugin" do
-      {:ok, _} =
-        Codelists.register("plugin-a", "plugin-a:one", %{issue: "1", values: []})
+      {:ok, _} = Codelists.register("plugin-a", "plugin-a:one", %{issue: "1", values: []})
 
-      {:ok, _} =
-        Codelists.register("plugin-a", "plugin-a:two", %{issue: "1", values: []})
+      {:ok, _} = Codelists.register("plugin-a", "plugin-a:two", %{issue: "1", values: []})
 
-      {:ok, _} =
-        Codelists.register("plugin-b", "plugin-b:one", %{issue: "1", values: []})
+      {:ok, _} = Codelists.register("plugin-b", "plugin-b:one", %{issue: "1", values: []})
 
       ids =
         "plugin-a"

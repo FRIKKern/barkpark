@@ -253,8 +253,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     parts = ["curl -sS"]
     parts = if req.method == "GET", do: parts, else: parts ++ ["-X", req.method]
 
-    header_parts =
-      Enum.flat_map(req.headers, fn {k, v} -> ["-H", shell_escape("#{k}: #{v}")] end)
+    header_parts = Enum.flat_map(req.headers, fn {k, v} -> ["-H", shell_escape("#{k}: #{v}")] end)
 
     parts = parts ++ header_parts
 

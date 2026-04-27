@@ -81,8 +81,7 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
       """)
     end
 
-    description =
-      Keyword.get(opts, :description, "A Barkpark plugin named " <> name <> ".")
+    description = Keyword.get(opts, :description, "A Barkpark plugin named " <> name <> ".")
 
     capabilities = parse_capabilities(Keyword.get(opts, :capabilities))
     module = Keyword.get(opts, :module, default_module(name))
