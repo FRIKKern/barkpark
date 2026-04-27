@@ -34,7 +34,10 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
       assert is_list(parsed.fields)
 
       role = Enum.find(parsed.fields, &(&1.name == "contributorRole"))
-      assert %Field{type: "codelist", codelist_id: "onixedit:contributor_role", version: 73} = role
+
+      assert %Field{type: "codelist", codelist_id: "onixedit:contributor_role", version: 73} =
+               role
+
       assert role.onix == %{"element" => "ContributorRole", "codelistId" => 17}
 
       bio = Enum.find(parsed.fields, &(&1.name == "biographicalNote"))
@@ -162,8 +165,7 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
 
       assert %Field{type: "arrayOf", ordered: true, of: %Field{type: "composite"}} = arr
 
-      role_in_item =
-        Enum.find(arr.of.fields, &(&1.name == "contributorRole"))
+      role_in_item = Enum.find(arr.of.fields, &(&1.name == "contributorRole"))
 
       assert %Field{type: "codelist", codelist_id: "onixedit:contributor_role"} = role_in_item
     end
@@ -195,6 +197,7 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
         |> Enum.find(&(&1.name == "biographicalNote"))
 
       value = %{"nob" => "", "eng" => "Born in Bergen, 1970…"}
+
       assert {:ok, "eng", "Born in Bergen, 1970…"} =
                LocalizedText.resolve(value, bio_field.fallback_chain)
     end
