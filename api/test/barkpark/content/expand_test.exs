@@ -27,8 +27,7 @@ defmodule Barkpark.Content.ExpandTest do
       "exp"
     )
 
-    {:ok, _} =
-      Content.create_document("author", %{"_id" => "a1", "title" => "Jane"}, "exp")
+    {:ok, _} = Content.create_document("author", %{"_id" => "a1", "title" => "Jane"}, "exp")
 
     {:ok, _} = Content.publish_document("a1", "author", "exp")
 
