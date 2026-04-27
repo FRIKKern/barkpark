@@ -58,7 +58,9 @@ defmodule Barkpark.MixProject do
       {:cloak_ecto, "~> 1.2"},
       {:oban, "~> 2.17"},
       # WI2: json schema validator dep
-      {:ex_json_schema, "~> 0.10"}
+      {:ex_json_schema, "~> 0.10"},
+      # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 

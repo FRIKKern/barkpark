@@ -50,12 +50,11 @@ defmodule BarkparkWeb.Contract.AcceptVendorTest do
   end
 
   test "query with unsupported Accept returns 406", %{conn: conn} do
-    resp =
+    assert_error_sent(406, fn ->
       conn
       |> put_req_header("accept", "application/xml")
       |> get("/v1/data/query/test/post")
-
-    assert resp.status == 406
+    end)
   end
 
   test "doc endpoint with vendor Accept also returns vendor envelope", %{conn: conn} do

@@ -30,13 +30,13 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   def composite_field(assigns) do
     assigns =
       assigns
-      |> assign_new(:value, fn -> %{} end)
-      |> assign_new(:errors, fn -> %{} end)
-      |> assign_new(:on_change, fn -> nil end)
-      |> assign_new(:plugin_name, fn -> "core" end)
-      |> assign_new(:path, fn -> "" end)
-      |> assign(:title, title_for(assigns.field))
-      |> assign(:subfields, assigns.field.fields || [])
+      |> Map.put_new(:value, %{})
+      |> Map.put_new(:errors, %{})
+      |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:plugin_name, "core")
+      |> Map.put_new(:path, "")
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:subfields, assigns.field.fields || [])
 
     ~H"""
     <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name}>
