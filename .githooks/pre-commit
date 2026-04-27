@@ -1,0 +1,55 @@
+#!/bin/bash
+# Pre-commit hook: fail fast on unformatted Elixir code.
+#
+# Why: PR #58 + PR #59 were "mix format pass" hotfixes — unformatted code
+# slipped through because the format check in elixir.yml lives inside the
+# advisory `mix-test` job (continue-on-error: true), so format failures
+# never blocked merge. This hook is the local half of the fix; the CI
+# `format` job (.github/workflows/elixir.yml) is the blocking half.
+#
+# Install: `make hooks` (sets core.hooksPath to .githooks).
+# Bypass:  `git commit --no-verify` (use sparingly; CI will still gate).
+#
+# Scope: only staged *.ex / *.exs files. If none, hook is a no-op and adds
+# zero latency to non-Elixir commits.
+
+set -e
+
+# Gather staged Elixir files (added/copied/modified, NUL-separated).
+# Filter out deletions so we don't try to format files that no longer exist.
+STAGED=$(git diff --cached --name-only --diff-filter=ACM -z -- '*.ex' '*.exs' | tr '\0' '\n' | sed '/^$/d')
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+# All Elixir code lives under api/. The .formatter.exs and mix.exs both
+# resolve from that directory.
+if [ ! -f api/mix.exs ]; then
+  echo "[pre-commit] api/mix.exs not found — skipping format check." >&2
+  exit 0
+fi
+
+# Strip the api/ prefix so paths are relative to the mix project root.
+RELATIVE=$(echo "$STAGED" | sed -n 's|^api/||p')
+
+if [ -z "$RELATIVE" ]; then
+  # Staged Elixir files exist but none under api/ — nothing the formatter
+  # owns. Bail gracefully.
+  exit 0
+fi
+
+# `mix format --check-formatted <files>` exits non-zero with a list of
+# offenders. Run from api/ so .formatter.exs (import_deps, subdirectories)
+# resolves correctly.
+echo "[pre-commit] mix format --check-formatted on $(echo "$RELATIVE" | wc -l | tr -d ' ') file(s)..."
+cd api
+if ! echo "$RELATIVE" | xargs mix format --check-formatted; then
+  echo ""
+  echo "[pre-commit] FAIL — unformatted Elixir files staged."
+  echo "  Fix:    cd api && mix format"
+  echo "  Bypass: git commit --no-verify  (CI will still block the PR)"
+  exit 1
+fi
+
+exit 0

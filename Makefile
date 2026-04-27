@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck hooks format
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -116,6 +116,21 @@ precheck: ## Run the prod-compile merge gate locally (mirrors CI)
 	  MIX_ENV=prod mix deps.compile --force && \
 	  MIX_ENV=prod mix compile --warnings-as-errors
 	@echo ">> precheck OK — safe to push"
+
+# ── Format enforcement ───────────────────────────────────────────────────────
+# See .githooks/pre-commit + .github/workflows/elixir.yml `format` job.
+# Task #29 — eliminate recurring "mix format pass" hotfixes (PR #58, #59).
+
+hooks: ## Install repo hooks (.githooks/) into git config — enables pre-commit format check
+	git config core.hooksPath .githooks
+	@echo ">> core.hooksPath=.githooks — pre-commit format check active."
+	@echo "   Bypass with: git commit --no-verify (CI will still block the PR)."
+
+format: ## Run mix format on api/ (writes changes)
+	cd api && mix format
+
+format-check: ## Run mix format --check-formatted on api/ (read-only, mirrors CI gate)
+	cd api && mix format --check-formatted
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
