@@ -1,17 +1,29 @@
 name: ci
 
-# Phase 8 slice 8.0 — Lighthouse CI baseline against apps/demo.
+# Lighthouse CI against the Next.js demo at web/ (Vercel-deployed).
 #
-# ci.yml did not exist prior to this slice (only twoslash.yml + typedoc.yml
-# were in .github/workflows/). Created here with one `lighthouse` job
-# intentionally fail-soft (`continue-on-error: true`) for slice 8.0. Slice 8.6
-# upgrades the assertion level in lighthouserc.json from `warn` to `error`,
-# at which point the `continue-on-error` guard can be removed in a follow-up.
+# Phase 8 slice 8.0 originally targeted apps/demo, which is being retired
+# by PR #60 (web/scaffold-1) in favour of a standalone web/ Next.js app.
+# Task #34 repoints this workflow at web/ and adds a paths filter so the
+# job only runs on changes that can plausibly affect Lighthouse scores —
+# unrelated API/Studio/docs PRs no longer pay the ~2 minute cost.
+#
+# Still fail-soft (continue-on-error: true) — scores are runner-noise
+# sensitive and lighthouserc.json assertions are `warn`. A follow-up can
+# tighten to `error` once baselines stabilise on web/.
 
 on:
   push:
-    branches: [main, "phase-8/**"]
+    branches: [main]
+    paths:
+      - "web/**"
+      - "lighthouserc.json"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "web/**"
+      - "lighthouserc.json"
+      - ".github/workflows/ci.yml"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,28 +31,26 @@ concurrency:
 
 jobs:
   lighthouse:
-    name: Lighthouse CI — apps/demo
+    name: Lighthouse CI — web/
     runs-on: ubuntu-latest
-    # Fail-soft: Lighthouse scores are sensitive to runner noise and the demo
-    # app is still evolving. Slice 8.0 treats this as a signal, not a gate.
     continue-on-error: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect demo app presence
+      - name: Detect web app presence
         id: detect
         run: |
-          if [ -d apps/demo ] && [ -f apps/demo/package.json ]; then
+          if [ -d web ] && [ -f web/package.json ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip — apps/demo not present
+      - name: Skip — web/ not present
         if: steps.detect.outputs.present != 'true'
-        run: echo "apps/demo/ not found — Lighthouse job skipped."
+        run: echo "web/ not found — Lighthouse job skipped."
 
       - name: Setup Node
         if: steps.detect.outputs.present == 'true'
@@ -54,42 +64,42 @@ jobs:
         with:
           version: 9
 
-      - name: Install JS workspace deps
+      - name: Install web/ deps
         if: steps.detect.outputs.present == 'true'
-        working-directory: js
+        working-directory: web
         run: pnpm install --frozen-lockfile
 
-      - name: Build apps/demo
+      - name: Build web/
         if: steps.detect.outputs.present == 'true'
-        working-directory: js
-        run: pnpm --filter demo build
+        working-directory: web
+        run: pnpm run build
 
-      - name: Start apps/demo (background)
+      - name: Start web/ (background)
         if: steps.detect.outputs.present == 'true'
-        working-directory: js
+        working-directory: web
         run: |
-          pnpm --filter demo start &
-          echo $! > /tmp/demo.pid
+          pnpm run start &
+          echo $! > /tmp/web.pid
           # Wait for server to respond on :3000
           for i in $(seq 1 60); do
             if curl -sf http://localhost:3000/ > /dev/null 2>&1; then
-              echo "demo server is up"
+              echo "web server is up"
               exit 0
             fi
             sleep 2
           done
-          echo "demo server did not start within 120s"
+          echo "web server did not start within 120s"
           exit 1
 
       - name: Run Lighthouse CI
         if: steps.detect.outputs.present == 'true'
         run: pnpm dlx @lhci/cli@latest autorun --config=./lighthouserc.json
 
-      - name: Stop apps/demo
+      - name: Stop web/
         if: always() && steps.detect.outputs.present == 'true'
         run: |
-          if [ -f /tmp/demo.pid ]; then
-            kill "$(cat /tmp/demo.pid)" 2>/dev/null || true
+          if [ -f /tmp/web.pid ]; then
+            kill "$(cat /tmp/web.pid)" 2>/dev/null || true
           fi
 
       - name: Upload Lighthouse artifact
