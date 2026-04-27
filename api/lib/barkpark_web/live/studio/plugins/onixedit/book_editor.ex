@@ -337,8 +337,8 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     end
   end
 
-  defp tab_path(socket, tab) do
-    "/studio/#{socket.assigns.dataset}/onixedit/book/#{socket.assigns.doc_id}?tab=#{tab}"
+  defp tab_path(dataset, doc_id, tab) do
+    "/studio/#{dataset}/onixedit/book/#{doc_id}?tab=#{tab}"
   end
 
   # ── render ─────────────────────────────────────────────────────────────────
@@ -383,7 +383,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
          style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-muted); margin-bottom: 16px;">
       <%= for {tab_key, label} <- tabs() do %>
         <.link
-          patch={tab_path(@socket, tab_key)}
+          patch={tab_path(@dataset, @doc_id, tab_key)}
           class={tab_link_class(tab_key, @active_tab)}
           data-tab={Atom.to_string(tab_key)}
           data-active={if tab_key == @active_tab, do: "true", else: "false"}

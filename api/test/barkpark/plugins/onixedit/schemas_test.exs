@@ -155,7 +155,7 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
             "name" => "contributors",
             "type" => "arrayOf",
             "ordered" => true,
-            "of" => Contributor.definition_map()
+            "of" => Map.put(Contributor.definition_map(), "type", "composite")
           }
         ]
       }
@@ -178,7 +178,7 @@ defmodule Barkpark.Plugins.OnixEdit.SchemasTest do
             "name" => "textContents",
             "type" => "arrayOf",
             "ordered" => false,
-            "of" => TextContent.definition_map()
+            "of" => Map.put(TextContent.definition_map(), "type", "composite")
           }
         ]
       }

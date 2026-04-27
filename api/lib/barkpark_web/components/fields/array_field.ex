@@ -41,15 +41,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   def array_field(assigns) do
     assigns =
       assigns
-      |> assign_new(:value, fn -> [] end)
-      |> assign_new(:errors, fn -> %{} end)
-      |> assign_new(:on_change, fn -> nil end)
-      |> assign_new(:on_reorder, fn -> "array_op" end)
-      |> assign_new(:plugin_name, fn -> "core" end)
-      |> assign_new(:path, fn -> "" end)
-      |> assign(:title, title_for(assigns.field))
-      |> assign(:rows, Enum.with_index(assigns[:value] || []))
-      |> assign(:ordered?, !!assigns.field.ordered)
+      |> Map.put_new(:value, [])
+      |> Map.put_new(:errors, %{})
+      |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:on_reorder, "array_op")
+      |> Map.put_new(:plugin_name, "core")
+      |> Map.put_new(:path, "")
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
+      |> Map.put(:ordered?, !!assigns.field.ordered)
 
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf"

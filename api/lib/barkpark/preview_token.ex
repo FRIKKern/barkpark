@@ -127,6 +127,7 @@ defmodule Barkpark.PreviewToken do
       nil -> false
       {_, nil} -> false
       {_, %DateTime{}} -> true
+      {_, %NaiveDateTime{}} -> true
     end
   end
 
