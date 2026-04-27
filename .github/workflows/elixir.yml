@@ -2,10 +2,21 @@ name: elixir
 
 # Phase 2 / WI4 — Elixir CI gate.
 #
-# Two jobs:
-#   1. mix-test         — format check + dev-mode compile + test suite.
-#   2. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
+# Jobs:
+#   1. format           — `mix format --check-formatted`. Blocking. Runs
+#                         first so an unformatted PR fails in <60s without
+#                         spinning up Postgres or compiling. (Task #29 —
+#                         see PR #58/#59 mix-format hotfixes.)
+#   2. mix-test         — dev-mode compile + test suite. Advisory.
+#   3. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
 #                         _build/prod, --warnings-as-errors enforced.
+#
+# Why a dedicated `format` job? The format check used to live inside
+# `mix-test`, which is `continue-on-error: true` while the test suite is
+# remediated. That meant unformatted code merged twice (PR #58, PR #59)
+# and required follow-up "mix format pass" PRs. Splitting format out into
+# its own blocking, fast job — the standard Elixir/Phoenix CI pattern —
+# closes that hole without making the advisory test job blocking yet.
 #
 # Why a separate prod-compile job?
 # PR #42 (Phase 1) introduced a `runtime.exs` `when`-guard that referenced a
@@ -25,6 +36,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format:
+    # Blocking format gate. Fast (~30s, no DB, no full compile) so it
+    # short-circuits unformatted PRs before the heavier jobs run.
+    name: Format (mix format --check-formatted)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps (formatter only needs deps for import_deps)
+        uses: actions/cache@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Fetch deps (required by .formatter.exs import_deps)
+        run: mix deps.get
+
+      - name: mix format --check-formatted
+        run: mix format --check-formatted
+
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
     runs-on: ubuntu-latest
@@ -85,8 +132,9 @@ jobs:
       - name: Fetch deps
         run: mix deps.get
 
-      - name: Format check
-        run: mix format --check-formatted
+      # Format check now lives in the dedicated `format` job above (Task
+      # #29). It used to run here but was non-blocking because mix-test
+      # carries continue-on-error: true.
 
       - name: Compile (dev, --warnings-as-errors)
         run: mix compile --warnings-as-errors
