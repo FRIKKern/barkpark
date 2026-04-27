@@ -130,8 +130,20 @@ if config_env() == :prod do
 
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Phoenix Endpoint.check_origin allowlist. Without an explicit list it
+  # whitelists only "#{scheme}://#{host}", which silently blocks the Vercel
+  # apex demo and preview URLs (LiveView /live/websocket → 403).
+  # cross-link: docs/ops/studio-nav-bug-2026-04-19.md (these origins are load-bearing for Vercel apex)
+  check_origin = [
+    "#{scheme}://#{host}",
+    "https://barkpark.cloud",
+    "https://www.barkpark.cloud",
+    "https://*.vercel.app"
+  ]
+
   config :barkpark, BarkparkWeb.Endpoint,
     url: [host: host, port: String.to_integer(System.get_env("PORT", "4000")), scheme: scheme],
+    check_origin: check_origin,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
