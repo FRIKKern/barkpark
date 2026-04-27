@@ -5,8 +5,11 @@
 // GET /v1/data/query/:dataset/:type?filter[...]=...&order=...&limit=...&offset=...
 // Returns a DocsBuilder<T> wired to transport — each .find() / .findOne() hits the wire.
 //
-// Envelope shape (Phoenix query_controller — flat, top-level):
-//   { perspective, documents: T[], count, limit, offset }
+// Envelope shape — tolerant: Phoenix wraps reads in
+//   { result: { perspective, documents: T[], count, limit, offset }, syncTags, ms, etag, schemaHash }
+// when barkpark_filterresponse=true (the default). When the wrapper is disabled
+// the body is flat: { perspective, documents: T[], count, limit, offset }.
+// We accept both.
 
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
@@ -54,7 +57,9 @@ export function createDocsOperation<T = BarkparkDocument>(
 
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
     if (opts?.signal !== undefined) reqOpts.signal = opts.signal
-    const { data } = await request<QueryResultBody<T>>(config, path, reqOpts)
-    return data.documents ?? []
+    const { data } = await request<
+      QueryResultBody<T> & { result?: QueryResultBody<T> }
+    >(config, path, reqOpts)
+    return data.result?.documents ?? data.documents ?? []
   })
 }

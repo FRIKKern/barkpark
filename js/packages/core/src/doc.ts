@@ -2,7 +2,9 @@
 // Copyright 2026 Barkpark contributors
 
 // Read-side operation: single-document fetch.
-// GET /v1/data/doc/:dataset/:type/:id → 200 {document fields at top level} | 404 not_found.
+// GET /v1/data/doc/:dataset/:type/:id → 200 {result: {document fields}, syncTags, ms, ...} | 404 not_found.
+// Envelope is tolerant — when Phoenix's barkpark_filterresponse=true the body is
+// { result: T, syncTags, ms, etag, schemaHash }; when disabled it is the flat doc T.
 // On 404, transport throws BarkparkNotFoundError; getDoc catches and returns { data: null }
 // so callers (client.doc) can treat missing as null per ADR-009 / w6.2-impl-spec §Status → class.
 
@@ -54,9 +56,13 @@ export async function getDoc<T = BarkparkDocument>(
   try {
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
     if (opts?.signal !== undefined) reqOpts.signal = opts.signal
-    const { data, response } = await request<T>(config, path, reqOpts)
+    const { data, response } = await request<T | { result: T }>(config, path, reqOpts)
+    const doc =
+      data !== null && typeof data === 'object' && 'result' in data
+        ? (data as { result: T }).result
+        : (data as T)
     const etag = stripEtagQuotes(response.headers.get('ETag'))
-    const result: DocResult<T> = { data }
+    const result: DocResult<T> = { data: doc }
     if (etag !== undefined) result.etag = etag
     return result
   } catch (err) {
