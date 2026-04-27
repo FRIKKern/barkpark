@@ -118,8 +118,7 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
         ]
       }
 
-      assert {:error, {:codelist_version_must_be_integer, "x:y"}} =
-               SchemaDefinition.parse(schema)
+      assert {:error, {:codelist_version_must_be_integer, "x:y"}} = SchemaDefinition.parse(schema)
     end
 
     test "accepts localizedText with fallbackChain" do
@@ -172,8 +171,7 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
         ]
       }
 
-      assert {:error, {:reserved_namespace, "plugin:foo:bar"}} =
-               SchemaDefinition.parse(schema)
+      assert {:error, {:reserved_namespace, "plugin:foo:bar"}} = SchemaDefinition.parse(schema)
     end
 
     test "allows `plugin:onixedit:foo` when parsing as plugin: \"onixedit\"" do

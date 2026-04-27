@@ -34,15 +34,13 @@ defmodule Barkpark.ContentDraftsPaginationTest do
   end
 
   test "drafts perspective with limit=5 returns exactly 5 rows" do
-    docs =
-      Content.list_documents("post", "dp", perspective: :drafts, limit: 5)
+    docs = Content.list_documents("post", "dp", perspective: :drafts, limit: 5)
 
     assert length(docs) == 5
   end
 
   test "drafts perspective with limit=100 returns 10 merged rows (not 15)" do
-    docs =
-      Content.list_documents("post", "dp", perspective: :drafts, limit: 100)
+    docs = Content.list_documents("post", "dp", perspective: :drafts, limit: 100)
 
     ids = Enum.map(docs, &Content.published_id(&1.doc_id)) |> Enum.sort()
     assert length(docs) == 10

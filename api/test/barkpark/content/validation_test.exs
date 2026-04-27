@@ -427,8 +427,7 @@ defmodule Barkpark.Content.ValidationTest do
     end
 
     test "whitespace in code fails", %{schema: schema} do
-      assert {:error, %{"lang" => msgs}} =
-               Validation.validate(%{"lang" => "no b"}, nil, schema)
+      assert {:error, %{"lang" => msgs}} = Validation.validate(%{"lang" => "no b"}, nil, schema)
 
       assert Enum.any?(msgs, &String.contains?(&1, "whitespace"))
     end
@@ -442,8 +441,7 @@ defmodule Barkpark.Content.ValidationTest do
     # typeahead) and the cross-field DSL (Phase 3). The validator never
     # calls the registry — proven by this NOT failing on a bogus code.
     test "unknown but well-shaped code passes (no registry call)", %{schema: schema} do
-      assert {:ok, _} =
-               Validation.validate(%{"lang" => "bogus-but-shaped-fine"}, nil, schema)
+      assert {:ok, _} = Validation.validate(%{"lang" => "bogus-but-shaped-fine"}, nil, schema)
     end
   end
 

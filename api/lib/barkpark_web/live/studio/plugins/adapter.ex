@@ -227,7 +227,10 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   end
 
   defp to_field_struct_or_nil(%{"type" => _, "name" => _} = raw), do: to_field_struct(raw)
-  defp to_field_struct_or_nil(other) when is_map(other), do: to_field_struct_or_nil(stringify(other))
+
+  defp to_field_struct_or_nil(other) when is_map(other),
+    do: to_field_struct_or_nil(stringify(other))
+
   defp to_field_struct_or_nil(_), do: nil
 
   defp localized_format("rich"), do: :rich

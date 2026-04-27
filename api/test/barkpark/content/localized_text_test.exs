@@ -37,8 +37,7 @@ defmodule Barkpark.Content.LocalizedTextTest do
     end
 
     test "empty value map → :no_value" do
-      assert {:error, :no_value} =
-               LocalizedText.resolve(%{}, ["nob", "eng", "first-non-empty"])
+      assert {:error, :no_value} = LocalizedText.resolve(%{}, ["nob", "eng", "first-non-empty"])
     end
 
     test "empty primary string is treated as missing" do
@@ -58,8 +57,7 @@ defmodule Barkpark.Content.LocalizedTextTest do
     end
 
     test "no fallback sentinel + no chain match → :no_value even if other langs filled" do
-      assert {:error, :no_value} =
-               LocalizedText.resolve(%{"deu" => "Hallo"}, ["nob", "eng"])
+      assert {:error, :no_value} = LocalizedText.resolve(%{"deu" => "Hallo"}, ["nob", "eng"])
     end
   end
 
