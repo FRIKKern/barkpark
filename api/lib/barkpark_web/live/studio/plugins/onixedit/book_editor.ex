@@ -173,10 +173,14 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   # Emission contract from ThemaTreePicker (Phase 5 WI2). The picker emits its
   # current selection as a MapSet whenever the user toggles a code; we mirror it
-  # into `@subjects_thema` so future autosave / WI3 SubjectsTab work can serialise
-  # it into the document. WI2 does NOT persist the selection — that lands in WI3.
+  # into `@subjects_thema` AND persist it to `doc.content["themaSubjectCategory"]`
+  # as a sorted list (Phase 5 WI3). The persistence path bypasses `build_content/2`
+  # because the v2 schema field for `themaSubjectCategory` is declared as a
+  # single-value `codelist` while the picker is intrinsically multi-select; we
+  # store the MapSet as a list directly so the round-trip survives even when the
+  # registered schema has empty `fields` (e.g. minimal test fixtures).
   def handle_info({:thema_selection_changed, %MapSet{} = codes}, socket) do
-    {:noreply, assign(socket, subjects_thema: codes)}
+    {:noreply, persist_thema(socket, codes)}
   end
 
   @impl true
@@ -321,8 +325,66 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
       is_draft: is_draft,
       has_published: match?({:ok, _}, pub_result),
       form: doc_to_form(doc, schema),
+      subjects_thema: extract_thema(doc),
       page_title: (doc && doc.title) || "New Book"
     )
+  end
+
+  # Re-hydrate the picker's MapSet from `doc.content["themaSubjectCategory"]`.
+  # Tolerates string lists (the canonical shape we persist), nil / missing keys,
+  # and accidental scalar values (treated as a single-element selection).
+  defp extract_thema(nil), do: MapSet.new()
+
+  defp extract_thema(%{content: content}) when is_map(content) do
+    case Map.get(content, "themaSubjectCategory") do
+      list when is_list(list) -> MapSet.new(Enum.filter(list, &is_binary/1))
+      code when is_binary(code) and code != "" -> MapSet.new([code])
+      _ -> MapSet.new()
+    end
+  end
+
+  defp extract_thema(_), do: MapSet.new()
+
+  # Persist the picker's selection to `doc.content["themaSubjectCategory"]` as
+  # a sorted list. Always writes to the draft id (per Studio's draft/published
+  # model). When no document exists yet we still keep the MapSet in assigns so
+  # the picker UI stays in sync; persistence resumes on the next save.
+  defp persist_thema(socket, codes) do
+    socket = assign(socket, subjects_thema: codes)
+
+    case socket.assigns[:doc] do
+      nil ->
+        socket
+
+      doc ->
+        type = socket.assigns.type
+        dataset = socket.assigns.dataset
+        published_id = Content.published_id(doc.doc_id)
+        list = codes |> MapSet.to_list() |> Enum.sort()
+
+        content =
+          (doc.content || %{})
+          |> Map.put("themaSubjectCategory", list)
+
+        attrs = %{
+          "doc_id" => Content.draft_id(published_id),
+          "title" => doc.title,
+          "status" => doc.status || "draft",
+          "content" => content
+        }
+
+        case Content.upsert_document(type, attrs, dataset) do
+          {:ok, saved} ->
+            assign(socket,
+              doc: saved,
+              is_draft: Content.draft?(saved.doc_id),
+              save_status: "Saved"
+            )
+
+          {:error, _} ->
+            assign(socket, save_status: "Save failed")
+        end
+    end
   end
 
   defp doc_to_form(nil, _), do: %{"title" => "", "status" => "draft"}
@@ -471,7 +533,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     ~H"""
     <div data-tab-body="subjects">
       <p class="text-sm text-muted" style="margin-bottom: 12px;">
-        Subjects tab — Thema picker (WI2). Persistence + Contributors land in WI3.
+        Thema subject categories. Selections autosave to the draft on every change.
       </p>
       <.live_component
         module={ThemaTreePicker}
