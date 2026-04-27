@@ -1,0 +1,31 @@
+# Vercel rootDirectory is set to `web/` in the project dashboard (Phase 3).
+# This .vercelignore is defensive — exclude every non-Next.js path from any
+# context the build might still see. Do NOT exclude `web/`.
+
+api/
+.doey/
+.claude/
+.githooks/
+.github/
+apps/
+docs/
+priv/
+deps/
+_build/
+
+# Phoenix / Elixir
+*.ex
+*.exs
+*.beam
+
+# Go TUI
+*.go
+go.mod
+go.sum
+
+# Build / runtime artifacts not relevant to Next
+Makefile
+deploy.sh
+docker-compose.yml
+Dockerfile
+*.lock

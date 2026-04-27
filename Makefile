@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck hooks format
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -47,6 +47,12 @@ api: ## Start Phoenix API locally (dev mode)
 
 tui: ## Build and run the Go TUI locally
 	go run .
+
+web: ## Start the Next.js Vercel demo (web/) locally on :3000
+	cd web && pnpm dev
+
+web-build: ## Build the Next.js Vercel demo (web/) for production
+	cd web && pnpm build
 
 run: ## Start Phoenix (if needed) and run TUI
 	./run.sh
