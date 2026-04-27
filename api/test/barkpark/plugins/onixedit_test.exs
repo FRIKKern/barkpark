@@ -101,6 +101,7 @@ defmodule Barkpark.Plugins.OnixEditTest do
 
       text_contents = Enum.find(collateral.fields, &(&1.name == "textContents"))
       assert text_contents != nil, "expected `textContents` under collateralDetail"
+
       assert text_contents.type == "arrayOf",
              "WI2 will swap or extend the inner composite with a localizedText blurb"
     end
@@ -157,11 +158,15 @@ defmodule Barkpark.Plugins.OnixEditTest do
     Enum.reduce(fields, 0, fn f, acc -> acc + 1 + count_in_field(f) end)
   end
 
-  defp count_in_field(%SchemaDefinition.Field{type: "composite", fields: kids}) when is_list(kids),
-    do: count_fields(kids)
+  defp count_in_field(%SchemaDefinition.Field{type: "composite", fields: kids})
+       when is_list(kids),
+       do: count_fields(kids)
 
-  defp count_in_field(%SchemaDefinition.Field{type: "arrayOf", of: %SchemaDefinition.Field{} = inner}),
-    do: 1 + count_in_field(inner)
+  defp count_in_field(%SchemaDefinition.Field{
+         type: "arrayOf",
+         of: %SchemaDefinition.Field{} = inner
+       }),
+       do: 1 + count_in_field(inner)
 
   defp count_in_field(_), do: 0
 
@@ -174,8 +179,11 @@ defmodule Barkpark.Plugins.OnixEditTest do
   defp walk_in_field(%SchemaDefinition.Field{type: "composite", fields: kids}) when is_list(kids),
     do: walk_fields(kids)
 
-  defp walk_in_field(%SchemaDefinition.Field{type: "arrayOf", of: %SchemaDefinition.Field{} = inner}),
-    do: [inner | walk_in_field(inner)]
+  defp walk_in_field(%SchemaDefinition.Field{
+         type: "arrayOf",
+         of: %SchemaDefinition.Field{} = inner
+       }),
+       do: [inner | walk_in_field(inner)]
 
   defp walk_in_field(_), do: []
 end
