@@ -72,7 +72,20 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePickerTest do
           "title" => "Book (ONIX 3.0)",
           "icon" => "book",
           "visibility" => "private",
-          "fields" => []
+          "fields" => [
+            %{
+              "name" => "themaSubjectCategory",
+              "title" => "Thema subject categories",
+              "type" => "arrayOf",
+              "ordered" => false,
+              "of" => %{
+                "name" => "themaCode",
+                "type" => "codelist",
+                "codelistId" => "onixedit:thema",
+                "version" => 73
+              }
+            }
+          ]
         },
         @dataset
       )

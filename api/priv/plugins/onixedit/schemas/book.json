@@ -577,11 +577,16 @@
     },
     {
       "name": "themaSubjectCategory",
-      "title": "Thema subject category (WI2 may enrich; codelist 93 seeded by WI3)",
-      "type": "codelist",
-      "codelistId": "onixedit:thema",
-      "version": 73,
-      "onix": { "codelistId": 93 }
+      "title": "Thema subject categories (main + qualifiers; ONIX list 93)",
+      "type": "arrayOf",
+      "ordered": false,
+      "of": {
+        "name": "themaCode",
+        "type": "codelist",
+        "codelistId": "onixedit:thema",
+        "version": 73,
+        "onix": { "element": "SubjectCode", "codelistId": 93 }
+      }
     },
 
     {
