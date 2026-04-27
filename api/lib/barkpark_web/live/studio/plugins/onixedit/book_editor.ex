@@ -81,6 +81,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePicker
 
   @type tab ::
           :identity
@@ -136,7 +137,8 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
         type: @schema_name,
         schema: schema,
         active_tab: @default_tab,
-        save_status: ""
+        save_status: "",
+        subjects_thema: MapSet.new()
       )
       |> load_document()
 
@@ -167,6 +169,14 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     else
       {:noreply, socket}
     end
+  end
+
+  # Emission contract from ThemaTreePicker (Phase 5 WI2). The picker emits its
+  # current selection as a MapSet whenever the user toggles a code; we mirror it
+  # into `@subjects_thema` so future autosave / WI3 SubjectsTab work can serialise
+  # it into the document. WI2 does NOT persist the selection — that lands in WI3.
+  def handle_info({:thema_selection_changed, %MapSet{} = codes}, socket) do
+    {:noreply, assign(socket, subjects_thema: codes)}
   end
 
   @impl true
@@ -460,7 +470,14 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   defp render_tab(:subjects, assigns) do
     ~H"""
     <div data-tab-body="subjects">
-      <p class="text-sm text-muted">Subjects tab — implemented in WI3</p>
+      <p class="text-sm text-muted" style="margin-bottom: 12px;">
+        Subjects tab — Thema picker (WI2). Persistence + Contributors land in WI3.
+      </p>
+      <.live_component
+        module={ThemaTreePicker}
+        id="thema-picker"
+        selected={@subjects_thema}
+      />
     </div>
     """
   end
