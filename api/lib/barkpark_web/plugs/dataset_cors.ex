@@ -56,6 +56,17 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
 
   @max_age "600"
 
+  # Production frontend origins — always unioned with per-dataset cors_origins
+  # and the :default_cors_origins app config. The Vercel apex is the canonical
+  # public site; the wildcard covers preview deployments. Patterns containing
+  # `*` match host segments only (no scheme/path globbing).
+  # cross-link: docs/ops/studio-nav-bug-2026-04-19.md (these origins are load-bearing for Vercel apex)
+  @always_allowed_origins [
+    "https://barkpark.cloud",
+    "https://www.barkpark.cloud",
+    "https://*.vercel.app"
+  ]
+
   @impl true
   def init(opts), do: opts
 
@@ -113,7 +124,33 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
 
   defp origin_match?(origin, allowed) do
     normalized = strip_trailing_slash(origin)
-    Enum.any?(allowed, fn a -> strip_trailing_slash(a) == normalized end)
+
+    Enum.any?(allowed, fn a ->
+      pattern = strip_trailing_slash(a)
+
+      cond do
+        not is_binary(pattern) -> false
+        String.contains?(pattern, "*") -> wildcard_match?(pattern, normalized)
+        true -> pattern == normalized
+      end
+    end)
+  end
+
+  # Subdomain wildcard match: `https://*.vercel.app` matches
+  # `https://foo.vercel.app` and `https://foo-bar.vercel.app` but NOT
+  # `https://vercel.app` or `https://evil.com/x.vercel.app`. Anchored on both
+  # ends so path-injected origins cannot slip through.
+  defp wildcard_match?(pattern, origin) do
+    regex_source =
+      pattern
+      |> String.split("*")
+      |> Enum.map(&Regex.escape/1)
+      |> Enum.join("[^./]+")
+
+    case Regex.compile("\\A" <> regex_source <> "\\z") do
+      {:ok, re} -> Regex.match?(re, origin)
+      _ -> false
+    end
   end
 
   defp strip_trailing_slash(s) when is_binary(s) do
@@ -127,10 +164,12 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
   defp strip_trailing_slash(other), do: other
 
   defp allowed_origins({:dataset, ds}) when is_binary(ds) and ds != "" do
-    Content.allowed_origins_for_dataset(ds)
+    @always_allowed_origins ++ Content.allowed_origins_for_dataset(ds)
   end
 
-  defp allowed_origins(_), do: Application.get_env(:barkpark, :default_cors_origins, [])
+  defp allowed_origins(_) do
+    @always_allowed_origins ++ Application.get_env(:barkpark, :default_cors_origins, [])
+  end
 
   defp dataset_from_conn(conn) do
     case conn.path_info do
