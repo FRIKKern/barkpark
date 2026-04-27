@@ -80,7 +80,32 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> subscribe_to_doc()
       |> track_presence()
 
-    {:noreply, socket}
+    case specialized_editor_redirect(socket) do
+      nil -> {:noreply, socket}
+      to -> {:noreply, push_navigate(socket, to: to)}
+    end
+  end
+
+  # ── Plugin-owned dedicated editors (Phase 5 dispatch) ─────────────────────
+  #
+  # When the resolved editor's type matches a plugin-owned dedicated editor,
+  # navigate the user there instead of rendering inline. v1 schemas (post,
+  # page, …) and v2 schemas without a dedicated editor are unaffected.
+  defp specialized_editor_redirect(socket) do
+    case socket.assigns[:editor_type] do
+      "book" ->
+        case socket.assigns[:editor_doc] do
+          %{doc_id: doc_id} ->
+            pub_id = Content.published_id(doc_id)
+            "/studio/#{socket.assigns.dataset}/onixedit/book/#{pub_id}"
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   # Doc-specific update — just patch the editor form, no rebuild
