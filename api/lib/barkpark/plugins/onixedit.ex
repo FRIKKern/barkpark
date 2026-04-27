@@ -53,7 +53,10 @@ defmodule Barkpark.Plugins.OnixEdit do
   def book_schema! do
     path = Path.join(@schemas_dir, "book.json")
 
-    case path |> File.read!() |> Jason.decode!() |> SchemaDefinition.parse(plugin: @plugin_name) do
+    case path
+         |> File.read!()
+         |> Jason.decode!()
+         |> SchemaDefinition.parse(plugin: @plugin_name) do
       {:ok, parsed} -> parsed
       {:error, reason} -> raise "OnixEdit book schema failed to parse: #{inspect(reason)}"
     end
@@ -87,7 +90,9 @@ defmodule Barkpark.Plugins.OnixEdit do
   `:list_id`, and `:issue`. WI3 may extend this to richer metadata once the
   importer exists; until then, this is the soft hand-off point.
   """
-  @spec codelist_requirements() :: [%{plugin_name: String.t(), list_id: String.t(), issue: String.t()}]
+  @spec codelist_requirements() :: [
+          %{plugin_name: String.t(), list_id: String.t(), issue: String.t()}
+        ]
   def codelist_requirements do
     [
       # Critical lists pinned in the masterplan (D17 / D21).
@@ -141,7 +146,11 @@ defmodule Barkpark.Plugins.OnixEdit do
       %{plugin_name: @plugin_name, list_id: "onixedit:resource_content_type", issue: "73"},
       %{plugin_name: @plugin_name, list_id: "onixedit:resource_mode", issue: "73"},
       %{plugin_name: @plugin_name, list_id: "onixedit:resource_form", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:resource_version_feature_type", issue: "73"},
+      %{
+        plugin_name: @plugin_name,
+        list_id: "onixedit:resource_version_feature_type",
+        issue: "73"
+      },
       %{plugin_name: @plugin_name, list_id: "onixedit:prize_code", issue: "73"},
       %{plugin_name: @plugin_name, list_id: "onixedit:text_item_type", issue: "73"},
       %{plugin_name: @plugin_name, list_id: "onixedit:publishing_role", issue: "73"},
