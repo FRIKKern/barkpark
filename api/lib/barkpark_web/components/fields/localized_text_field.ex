@@ -41,10 +41,10 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   def localized_text_field(assigns) do
     assigns =
       assigns
-      |> assign_new(:value, fn -> %{} end)
-      |> assign_new(:errors, fn -> %{} end)
-      |> assign_new(:on_change, fn -> nil end)
-      |> assign_new(:path, fn -> "" end)
+      |> Map.put_new(:value, %{})
+      |> Map.put_new(:errors, %{})
+      |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:path, "")
 
     field = assigns.field
     value_map = assigns.value || %{}
@@ -57,14 +57,14 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
 
     assigns =
       assigns
-      |> assign(:title, title_for(field))
-      |> assign(:languages, languages)
-      |> assign(:format, field.format || :plain)
-      |> assign(:value_map, value_map)
-      |> assign(:warning, warning)
-      |> assign(:resolution, resolution)
-      |> assign(:base_id, "f-#{field.name}")
-      |> assign(:base_path, assigns.path)
+      |> Map.put(:title, title_for(field))
+      |> Map.put(:languages, languages)
+      |> Map.put(:format, field.format || :plain)
+      |> Map.put(:value_map, value_map)
+      |> Map.put(:warning, warning)
+      |> Map.put(:resolution, resolution)
+      |> Map.put(:base_id, "f-#{field.name}")
+      |> Map.put(:base_path, assigns.path)
 
     ~H"""
     <fieldset class="bp-field bp-field-localized" data-field-type="localizedText"

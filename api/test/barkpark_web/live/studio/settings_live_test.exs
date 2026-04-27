@@ -51,8 +51,16 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     test "save valid JSON stores settings and emits write audit", %{view: view} do
       json = ~s({"api_key": "supersecret-1234", "url": "https://x.example"})
 
+      # First set the plugin_name in the LV state via the load form's
+      # phx-change="update_name" — LiveView 1.1+ rejects test forms that
+      # override a hidden input's server-rendered value, so we sync state
+      # before submitting save.
       view
-      |> form("form[phx-submit=save]", %{plugin_name: "myplug", settings_json: json})
+      |> form("form[phx-submit=load]", %{plugin_name: "myplug"})
+      |> render_change()
+
+      view
+      |> form("form[phx-submit=save]", %{settings_json: json})
       |> render_submit()
 
       # row exists

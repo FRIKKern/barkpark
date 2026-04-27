@@ -179,6 +179,11 @@ defmodule Barkpark.Content do
   defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
   defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
+  def get_document(doc_id, type, dataset)
+      when is_nil(doc_id) or is_nil(type) or is_nil(dataset) do
+    {:error, :not_found}
+  end
+
   def get_document(doc_id, type, dataset) do
     Document
     |> where([d], d.doc_id == ^doc_id and d.type == ^type and d.dataset == ^dataset)
@@ -397,12 +402,22 @@ defmodule Barkpark.Content do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
-    # A create must NOT overwrite an existing draft
-    case id && get_document(draft_id(id), type, dataset) do
-      {:ok, existing} ->
+    # A create must NOT overwrite an existing draft. Skip the lookup when
+    # type/id are missing — let create_document/3 surface a validation error
+    # (Ecto rejects nil equality comparisons in queries).
+    existing =
+      if id && type do
+        case get_document(draft_id(id), type, dataset) do
+          {:ok, doc} -> doc
+          _ -> nil
+        end
+      end
+
+    case existing do
+      %_{} = doc ->
         case if_rev(attrs) do
           nil -> {:error, :conflict}
-          expected -> {:error, {:rev_mismatch, %{expected: expected, actual: existing.rev}}}
+          expected -> {:error, {:rev_mismatch, %{expected: expected, actual: doc.rev}}}
         end
 
       _ ->

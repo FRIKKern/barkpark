@@ -79,6 +79,7 @@ defmodule Barkpark.Validation.CrossCodelist do
 
     cond do
       is_nil(driver) -> true
+      is_nil(dependent) -> true
       not Map.has_key?(mapping, driver) -> true
       true -> matches?(dependent, Map.fetch!(mapping, driver))
     end
