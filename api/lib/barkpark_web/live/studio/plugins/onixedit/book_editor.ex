@@ -237,12 +237,11 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   # Emission contract from ThemaTreePicker (Phase 5 WI2). The picker emits its
   # current selection as a MapSet whenever the user toggles a code; we mirror it
-  # into `@subjects_thema` AND persist it to `doc.content["themaSubjectCategory"]`
-  # as a sorted list (Phase 5 WI3). The persistence path bypasses `build_content/2`
-  # because the v2 schema field for `themaSubjectCategory` is declared as a
-  # single-value `codelist` while the picker is intrinsically multi-select; we
-  # store the MapSet as a list directly so the round-trip survives even when the
-  # registered schema has empty `fields` (e.g. minimal test fixtures).
+  # into `@subjects_thema` and the form, then run the standard save path so the
+  # sorted list lands in `doc.content["themaSubjectCategory"]` via
+  # `build_content/2`. The schema declares the field as `arrayOf` codelist (ONIX
+  # 3.0 §P.12 `<Subject>` is repeatable; EDItEUR Thema Best Practice allows a
+  # main subject plus qualifiers/secondaries), so the multi-value shape matches.
   def handle_info({:thema_selection_changed, %MapSet{} = codes}, socket) do
     {:noreply, persist_thema(socket, codes)}
   end
@@ -409,46 +408,19 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   defp extract_thema(_), do: MapSet.new()
 
-  # Persist the picker's selection to `doc.content["themaSubjectCategory"]` as
-  # a sorted list. Always writes to the draft id (per Studio's draft/published
-  # model). When no document exists yet we still keep the MapSet in assigns so
-  # the picker UI stays in sync; persistence resumes on the next save.
+  # Mirror the picker's selection into the form as a sorted list and run the
+  # standard save path. `build_content/2` keeps `themaSubjectCategory` because
+  # the schema declares it as `arrayOf` codelist; the list value passes the
+  # nil/empty filter unchanged. When no document exists yet we still keep the
+  # MapSet (and the form mirror) in assigns so the picker UI stays in sync;
+  # persistence resumes on the next save.
   defp persist_thema(socket, codes) do
-    socket = assign(socket, subjects_thema: codes)
+    list = codes |> MapSet.to_list() |> Enum.sort()
+    form = Map.put(socket.assigns.form, "themaSubjectCategory", list)
 
-    case socket.assigns[:doc] do
-      nil ->
-        socket
-
-      doc ->
-        type = socket.assigns.type
-        dataset = socket.assigns.dataset
-        published_id = Content.published_id(doc.doc_id)
-        list = codes |> MapSet.to_list() |> Enum.sort()
-
-        content =
-          (doc.content || %{})
-          |> Map.put("themaSubjectCategory", list)
-
-        attrs = %{
-          "doc_id" => Content.draft_id(published_id),
-          "title" => doc.title,
-          "status" => doc.status || "draft",
-          "content" => content
-        }
-
-        case Content.upsert_document(type, attrs, dataset) do
-          {:ok, saved} ->
-            assign(socket,
-              doc: saved,
-              is_draft: Content.draft?(saved.doc_id),
-              save_status: "Saved"
-            )
-
-          {:error, _} ->
-            assign(socket, save_status: "Save failed")
-        end
-    end
+    socket
+    |> assign(subjects_thema: codes)
+    |> save(form)
   end
 
   defp doc_to_form(nil, _), do: %{"title" => "", "status" => "draft"}
