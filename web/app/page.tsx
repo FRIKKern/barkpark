@@ -1,4 +1,4 @@
-import { client } from "@/lib/barkpark-shim";
+import { client } from "@/lib/barkpark-client";
 import type { BarkparkDocument } from "@barkpark/core";
 
 export const revalidate = 60;
