@@ -1,0 +1,8 @@
+=== Test 2: block when DOEY_ALLOW_FORCE_PUSH unset ===
+Payload: {"tool_name":"Bash","tool_input":{"command":"git push --force-with-lease origin chore/branch"}}
+--- stdout/stderr ---
+Force push blocked. Use normal push.
+--- exit code: 2 ---
+--- audit log contents ---
+(no audit log)
+logged event 1250
