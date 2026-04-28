@@ -1,0 +1,16 @@
+=== Test 4a: unsafe --force still blocked even with flag set ===
+Payload: {"tool_name":"Bash","tool_input":{"command":"git push --force origin chore/branch"}}
+--- stdout/stderr ---
+Force push blocked. Use normal push.
+--- exit code: 2 ---
+
+=== Test 4b: --force AND --force-with-lease together → blocked ===
+Payload: {"tool_name":"Bash","tool_input":{"command":"git push --force --force-with-lease origin chore/branch"}}
+--- stdout/stderr ---
+Force push blocked. Use normal push.
+--- exit code: 2 ---
+
+--- audit log contents (should be empty: no opt-in line for unsafe variants) ---
+(no audit log)
+logged event 1251
+logged event 1252

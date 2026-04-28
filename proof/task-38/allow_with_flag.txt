@@ -1,0 +1,6 @@
+=== Test 3: allow when DOEY_ALLOW_FORCE_PUSH=1 ===
+Payload: {"tool_name":"Bash","tool_input":{"command":"git push --force-with-lease origin chore/branch"}}
+--- stdout/stderr ---
+--- exit code: 0 ---
+--- audit log contents ---
+2026-04-28T14:27:19+00:00 allow_force_push_opted_in cmd=git push --force-with-lease origin chore/branch
