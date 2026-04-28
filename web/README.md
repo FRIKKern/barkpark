@@ -25,7 +25,7 @@ Copy `.env.example` → `.env.local` to pin local values; `.env.local` is gitign
 
 ## SDK
 
-This project uses two pinned `@barkpark/*` packages — both at exact `1.0.0-preview.2` (no caret, no tilde) so the demo is locked off a moving preview API surface:
+This project uses two pinned `@barkpark/*` packages — both at exact `1.0.0-preview.3` (no caret, no tilde) so the demo is locked off a moving preview API surface:
 
 | Package | Used for |
 |---------|----------|
@@ -33,22 +33,6 @@ This project uses two pinned `@barkpark/*` packages — both at exact `1.0.0-pre
 | `@barkpark/nextjs` | App Router integration — `createBarkparkServer`, `BarkparkLive`, draft-mode routes, webhook handler. **Installed and ready** for Phase 5+ wiring of preview / live updates. The Phase 1 demo does NOT call into it yet. |
 
 `lib/barkpark-client.ts` constructs the shared `@barkpark/core` client from `NEXT_PUBLIC_API_URL`, `dataset: "production"`, `perspective: "published"`.
-
-### Why the shim exists
-
-`lib/barkpark-shim.ts` wraps `createClient` with a custom `fetch` that unwraps Phoenix's `{result: …}` envelope before the SDK parses it. Background:
-
-- `@barkpark/nextjs@1.0.0-preview.2` and `@barkpark/core@1.0.0-preview.2` expect read responses to be flat — e.g. `client.docs("post").find()` reads `data.documents` directly.
-- Phoenix `/v1/data/query/{dataset}/{type}` returns `{"result":{"count":N,"documents":[…]}}` (the canonical envelope shared by `getDoc`, mutate, etc.).
-- Without the shim, `data.documents ?? []` returns `[]` and the demo page renders an empty list even though the API is healthy.
-
-The shim is intentionally minimal (~50 lines) and lives only in `web/`. Removal path:
-
-1. Upstream SDK fix lands as `@barkpark/nextjs@1.0.0-preview.3` / `@barkpark/core@1.0.0-preview.3` — tracked in **Doey Task #32** (upstream SDK PR).
-2. Bump both pinned versions in `package.json`.
-3. Delete `web/lib/barkpark-shim.ts` and switch `app/page.tsx` (and any future consumers) back to `@/lib/barkpark-client`.
-
-Cross-link: see plan masterplan `masterplan-20260417-212541` for the broader Phoenix-vs-SDK envelope reconciliation context.
 
 ### Rolling back to a vendored thin client
 
@@ -74,7 +58,6 @@ Phase 2 of Task #27 must add `https://barkpark.cloud` (and the Vercel preview wi
 
 - `app/page.tsx` — Server Component, fetches published posts and renders `title + slug` list.
 - `lib/barkpark-client.ts` — `@barkpark/core` client bound to `production` / `published` from `NEXT_PUBLIC_API_URL`.
-- `lib/barkpark-shim.ts` — Phoenix-envelope-aware client (unwraps `{result: …}`). Used by `app/page.tsx`. Remove when Task #32 lands.
 - `.env.example` — copy to `.env.local` for local dev.
 
 ## Cross-links

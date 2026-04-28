@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@barkpark/core':
-        specifier: 1.0.0-preview.2
-        version: 1.0.0-preview.2
+        specifier: 1.0.0-preview.3
+        version: 1.0.0-preview.3
       '@barkpark/nextjs':
-        specifier: 1.0.0-preview.2
-        version: 1.0.0-preview.2(next@16.2.4(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@4.3.6)
+        specifier: 1.0.0-preview.3
+        version: 1.0.0-preview.3(next@16.2.4(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@4.3.6)
       next:
         specifier: 16.2.4
         version: 16.2.4(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -122,12 +122,12 @@ packages:
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
 
-  '@barkpark/core@1.0.0-preview.2':
-    resolution: {integrity: sha512-VmPC4C3IGhIFADRUnDjbhOXtXuu7xqsQ76a62U4lQgt9jDDqoE5aAvDT8U87oizqP6CIZjkx4eISQ1xpr9i6aw==}
+  '@barkpark/core@1.0.0-preview.3':
+    resolution: {integrity: sha512-mfE1brPP/rcGC+EvNClM2pPHH0NoZmN2U4znGTI+9CymmvJ7IyP6PlKU1pKARdp4G6QFxuzyi0dBtL97Kyfqcw==}
     engines: {node: '>=20'}
 
-  '@barkpark/nextjs@1.0.0-preview.2':
-    resolution: {integrity: sha512-atcLCHyfgOiQ+/Crdqxur0/0K/QUXc8leqZBwwtyo2q4ZXHEhaPiSW6GtTvmiDWXcBoDLt+Ju05bYBWjT8+D/A==}
+  '@barkpark/nextjs@1.0.0-preview.3':
+    resolution: {integrity: sha512-smvYFbguvoZkjtE9WhhhyPiAw1Qetbuvowa/wl+981NFUTgH8tWN6a9ayGqCxi4IE6LoQ1TXiPWMZWcC/5QV4A==}
     engines: {node: '>=20'}
     peerDependencies:
       next: '>=15 <17'
@@ -2048,13 +2048,13 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
-  '@barkpark/core@1.0.0-preview.2':
+  '@barkpark/core@1.0.0-preview.3':
     optionalDependencies:
       undici: 6.25.0
 
-  '@barkpark/nextjs@1.0.0-preview.2(next@16.2.4(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@4.3.6)':
+  '@barkpark/nextjs@1.0.0-preview.3(next@16.2.4(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@4.3.6)':
     dependencies:
-      '@barkpark/core': 1.0.0-preview.2
+      '@barkpark/core': 1.0.0-preview.3
       next: 16.2.4(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
