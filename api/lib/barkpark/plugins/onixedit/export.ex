@@ -17,7 +17,14 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     * `Barkpark.Plugins.OnixEdit.Export.Message` — ONIXMessage wrapper (this WI)
   """
 
-  alias Barkpark.Plugins.OnixEdit.Export.{DescriptiveDetail, Header, Message}
+  alias Barkpark.Plugins.OnixEdit.Export.{
+    CollateralDetail,
+    DescriptiveDetail,
+    Header,
+    Message,
+    PublishingDetail,
+    ProductSupply
+  }
 
   @default_dataset_host "barkpark.cloud"
 
@@ -81,22 +88,32 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     |> Enum.reject(&is_nil/1)
   end
 
-  @doc false
-  def collateral_detail(_book_doc, _opts) do
-    raise RuntimeError,
-          "Barkpark.Plugins.OnixEdit.Export.collateral_detail/2 not implemented yet — landing in WI4 (Collateral)"
+  @doc """
+  Build the `<CollateralDetail>` element. Returns the XmlBuilder element, or
+  `nil` when the document carries no collateral content.
+  """
+  @spec collateral_detail(map(), keyword()) :: any() | nil
+  def collateral_detail(book_doc, opts \\ []) when is_map(book_doc) do
+    CollateralDetail.build(book_doc, opts)
   end
 
-  @doc false
-  def publishing_detail(_book_doc, _opts) do
-    raise RuntimeError,
-          "Barkpark.Plugins.OnixEdit.Export.publishing_detail/2 not implemented yet — landing in WI4 (Publishing)"
+  @doc """
+  Build the `<PublishingDetail>` element. Returns the XmlBuilder element, or
+  `nil` when the document carries no publishing detail.
+  """
+  @spec publishing_detail(map(), keyword()) :: any() | nil
+  def publishing_detail(book_doc, opts \\ []) when is_map(book_doc) do
+    PublishingDetail.build(book_doc, opts)
   end
 
-  @doc false
-  def product_supply(_book_doc, _opts) do
-    raise RuntimeError,
-          "Barkpark.Plugins.OnixEdit.Export.product_supply/2 not implemented yet — landing in WI4 (Supply)"
+  @doc """
+  Build a list of `<ProductSupply>` elements. Returns a list (one per
+  productSupplies entry, or one synthesized default), or `nil` when no
+  ProductSupply children should be emitted.
+  """
+  @spec product_supply(map(), keyword()) :: any() | [any()] | nil
+  def product_supply(book_doc, opts \\ []) when is_map(book_doc) do
+    ProductSupply.build(book_doc, opts)
   end
 
   @doc false
@@ -119,7 +136,12 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
         XmlBuilder.element(:NotificationType, notification_type)
       ] ++
         product_identifiers(book_doc) ++
-        [descriptive_detail(book_doc, opts)]
+        [
+          descriptive_detail(book_doc, opts),
+          collateral_detail(book_doc, opts),
+          publishing_detail(book_doc, opts)
+        ] ++
+        List.wrap(product_supply(book_doc, opts))
 
     XmlBuilder.element(:Product, Enum.reject(children, &is_nil/1))
   end
