@@ -479,7 +479,7 @@
           "type": "codelist",
           "codelistId": "onixedit:bible_version",
           "version": 73,
-          "onix": { "codelistId": 162 }
+          "onix": { "codelistId": 86 }
         },
         {
           "name": "studyBibleType",
