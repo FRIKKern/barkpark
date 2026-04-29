@@ -9,6 +9,21 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
     * List 150 — `product_form/1`      (`BA Book`, `BB Hardback`, `EB Digital download…`)
     * List 175 — `product_form_detail/1` (Common product form detail codes)
 
+  WI4 extends with the 10 lists CollateralDetail / PublishingDetail /
+  ProductSupply emit against:
+
+    * List 23  — `publishing_date_role/1`   (`01 Publication date`, …)
+    * List 25  — `supplier_role/1`          (`09 Publisher to retailers`, …)
+    * List 45  — `publishing_role/1`        (`01 Publisher`, `02 Co-publisher`, …)
+    * List 58  — `price_type/1`             (`02 RRP including tax`, …)
+    * List 65  — `product_availability/1`   (`20 Available`, `10 Not yet available`, …)
+    * List 91  — `country_code/1`           (ISO 3166-1 alpha-2: `NO`, `SE`, …)
+    * List 96  — `currency_code/1`          (ISO 4217: `NOK`, `SEK`, …)
+    * List 153 — `text_type/1`              (`03 Description`, …)
+    * List 154 — `content_audience/1`       (`00 Unrestricted`, …)
+    * List 158 — `resource_content_type/1`  (`01 Front cover`, …)
+    * List 159 — `resource_mode/1`          (`03 Image`, …)
+
   These maps are intentionally small — they cover the Norwegian-publisher
   primary use cases the test fixtures and seed data exercise. The full
   enumerations live in the vendored EDItEUR XSDs at
@@ -87,6 +102,86 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
     "P" => "Mathematics & Science"
   }
 
+  # ---- WI4 lists -----------------------------------------------------------
+
+  @publishing_date_role %{
+    "01" => "Publication date",
+    "11" => "Embargo date",
+    "12" => "Public announcement date"
+  }
+
+  @supplier_role %{
+    "02" => "Wholesaler",
+    "09" => "Publisher to retailers"
+  }
+
+  @publishing_role %{
+    "01" => "Publisher",
+    "02" => "Co-publisher",
+    "03" => "Sponsor",
+    "04" => "Publisher of original-language version"
+  }
+
+  @price_type %{
+    "02" => "RRP including tax",
+    "04" => "RRP excluding tax",
+    "41" => "Subscription price"
+  }
+
+  @product_availability %{
+    "10" => "Not yet available",
+    "20" => "Available",
+    "22" => "Awaiting reprint",
+    "50" => "Not available"
+  }
+
+  @country_code %{
+    "NO" => "Norway",
+    "SE" => "Sweden",
+    "DK" => "Denmark",
+    "FI" => "Finland",
+    "IS" => "Iceland",
+    "GB" => "United Kingdom",
+    "US" => "United States",
+    "DE" => "Germany"
+  }
+
+  @currency_code %{
+    "NOK" => "Norwegian krone",
+    "SEK" => "Swedish krona",
+    "DKK" => "Danish krone",
+    "EUR" => "Euro",
+    "USD" => "US dollar",
+    "GBP" => "Pound sterling"
+  }
+
+  @text_type %{
+    "01" => "Sender's title",
+    "02" => "Sender's title (alternative)",
+    "03" => "Description"
+  }
+
+  @content_audience %{
+    "00" => "Unrestricted",
+    "01" => "Booktrade",
+    "03" => "General readership"
+  }
+
+  @resource_content_type %{
+    "01" => "Front cover",
+    "03" => "Series image",
+    "04" => "Contributor portrait",
+    "17" => "Sample text"
+  }
+
+  @resource_mode %{
+    "02" => "Audio",
+    "03" => "Image",
+    "04" => "Text",
+    "05" => "Video",
+    "06" => "Multi-mode"
+  }
+
   @doc """
   Resolve a ContributorRole code (List 17). Returns `{:ok, code}` on hit;
   raises `ArgumentError` with an `unknown_contributor_role_code` message on miss.
@@ -155,4 +250,149 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   @doc false
   @spec thema_label(code()) :: String.t() | nil
   def thema_label(code), do: Map.get(@thema, code)
+
+  # ---- WI4 resolvers --------------------------------------------------------
+
+  @doc """
+  Resolve a PublishingDateRole code (List 23). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_publishing_date_role_code` message on miss.
+  """
+  @spec publishing_date_role(code()) :: {:ok, code()}
+  def publishing_date_role(code) when is_binary(code) do
+    if Map.has_key?(@publishing_date_role, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_publishing_date_role_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a SupplierRole code (List 25). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_supplier_role_code` message on miss.
+  """
+  @spec supplier_role(code()) :: {:ok, code()}
+  def supplier_role(code) when is_binary(code) do
+    if Map.has_key?(@supplier_role, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_supplier_role_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a PublishingRole code (List 45). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_publishing_role_code` message on miss.
+  """
+  @spec publishing_role(code()) :: {:ok, code()}
+  def publishing_role(code) when is_binary(code) do
+    if Map.has_key?(@publishing_role, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_publishing_role_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a PriceType code (List 58). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_price_type_code` message on miss.
+  """
+  @spec price_type(code()) :: {:ok, code()}
+  def price_type(code) when is_binary(code) do
+    if Map.has_key?(@price_type, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_price_type_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a ProductAvailability code (List 65). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_product_availability_code` message on miss.
+  """
+  @spec product_availability(code()) :: {:ok, code()}
+  def product_availability(code) when is_binary(code) do
+    if Map.has_key?(@product_availability, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_product_availability_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a CountryCode (List 91, ISO 3166-1 alpha-2). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_country_code_code` message on miss.
+  """
+  @spec country_code(code()) :: {:ok, code()}
+  def country_code(code) when is_binary(code) do
+    if Map.has_key?(@country_code, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_country_code_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a CurrencyCode (List 96, ISO 4217). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_currency_code_code` message on miss.
+  """
+  @spec currency_code(code()) :: {:ok, code()}
+  def currency_code(code) when is_binary(code) do
+    if Map.has_key?(@currency_code, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_currency_code_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a TextType code (List 153). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_text_type_code` message on miss.
+  """
+  @spec text_type(code()) :: {:ok, code()}
+  def text_type(code) when is_binary(code) do
+    if Map.has_key?(@text_type, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_text_type_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a ContentAudience code (List 154). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_content_audience_code` message on miss.
+  """
+  @spec content_audience(code()) :: {:ok, code()}
+  def content_audience(code) when is_binary(code) do
+    if Map.has_key?(@content_audience, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_content_audience_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a ResourceContentType code (List 158). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_resource_content_type_code` message on miss.
+  """
+  @spec resource_content_type(code()) :: {:ok, code()}
+  def resource_content_type(code) when is_binary(code) do
+    if Map.has_key?(@resource_content_type, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_resource_content_type_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve a ResourceMode code (List 159). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_resource_mode_code` message on miss.
+  """
+  @spec resource_mode(code()) :: {:ok, code()}
+  def resource_mode(code) when is_binary(code) do
+    if Map.has_key?(@resource_mode, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_resource_mode_code: #{inspect(code)}"
+    end
+  end
 end
