@@ -136,6 +136,14 @@ jobs:
       # #29). It used to run here but was non-blocking because mix-test
       # carries continue-on-error: true.
 
+      - name: Install libxml2-utils for ONIX XSD validation (Phase 6 WI5)
+        # The :validator-tagged tests under
+        # api/test/barkpark/plugins/onixedit/export/ shell to xmllint to validate
+        # exported ONIX 3.0 XML against the EDItEUR XSD vendored at
+        # api/priv/onix/onix-3.0/. Without this binary the gate would skip on CI.
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+        working-directory: .
+
       - name: Compile (dev, --warnings-as-errors)
         run: mix compile --warnings-as-errors
 

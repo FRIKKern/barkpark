@@ -28,8 +28,17 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Header do
       XmlBuilder.element(:Sender, [
         XmlBuilder.element(:SenderName, @sender_name)
       ]),
-      XmlBuilder.element(:SentDateTime, DateTime.to_iso8601(sent_at)),
+      XmlBuilder.element(:SentDateTime, format_sent_at(sent_at)),
       XmlBuilder.element(:MessageNote, "Barkpark dataset:" <> to_string(dataset))
     ])
+  end
+
+  # ONIX `dt.DateOrDateTime` permits `YYYYMMDD`, `YYYYMMDDTHHMM`, or
+  # `YYYYMMDDTHHMMSS` (no separators). `DateTime.to_iso8601/1` emits a colon-
+  # separated representation that fails XSD validation; format compactly here.
+  defp format_sent_at(%DateTime{} = dt) do
+    dt
+    |> DateTime.truncate(:second)
+    |> Calendar.strftime("%Y%m%dT%H%M%S")
   end
 end

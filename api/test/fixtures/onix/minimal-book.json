@@ -1,0 +1,44 @@
+{
+  "_note": "WI5 fixture — smallest book document that produces XSD-valid ONIX 3.0. Must round-trip through Export.export/2 -> Validator.validate_xsd/2 with :ok. Bumping any required field below into nil will trip the gate. Intentionally omits collateralDetail.textContents and themaSubjectCategory because of WI3/WI4 emission bugs surfaced by WI5; see PR description for follow-up tracking.",
+  "_publishedId": "p1",
+  "productIdentifiers": [
+    { "productIdType": "15", "idValue": "9788234567890" }
+  ],
+  "productForm": "BC",
+  "titleDetails": [
+    {
+      "titleType": "01",
+      "titleElements": [
+        { "titleElementLevel": "01", "titleText": "Minimum Book" }
+      ]
+    }
+  ],
+  "contributors": [
+    {
+      "contributorRole": "A01",
+      "personName": { "keyNames": "Author" }
+    }
+  ],
+  "publishingDetail": {
+    "publishers": [
+      { "publishingRole": "01", "publisherName": "Demo Forlag" }
+    ],
+    "publishingDates": [
+      { "publishingDateRole": "01", "date": "2026-01-01" }
+    ]
+  },
+  "productSupplies": [
+    {
+      "market": { "territory": { "countries": ["NO"] } },
+      "supplyDetails": [
+        {
+          "supplier": { "supplierRole": "09", "supplierName": "Demo Forlag" },
+          "productAvailability": "20",
+          "prices": [
+            { "priceType": "02", "priceAmount": "100.00", "currencyCode": "NOK" }
+          ]
+        }
+      ]
+    }
+  ]
+}

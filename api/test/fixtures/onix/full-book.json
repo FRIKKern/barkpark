@@ -1,0 +1,74 @@
+{
+  "_note": "WI5 fixture — exercises every WI3+WI4 codepath that currently emits XSD-valid ONIX. Multi-contributor, multi-price (NOK + EUR), ProductFormDetail, cover image SupportingResource. Reused as Phase 6 WI8 proof fixture. Intentional omissions surfaced by WI5's gate: themaSubjectCategory (WI3 emits MainSubject as sibling of Subject — XSD requires it as a flag inside Subject), collateralDetail.textContents (WI4 emits language='nb-NO' but ONIX expects ISO 639-2/B 'nob'), publisherRepresentatives (WI4 emits AgentName before required AgentRole). Track each as a follow-up before WI8 lands the proof artefact.",
+  "_publishedId": "p9",
+  "productIdentifiers": [
+    { "productIdType": "15", "idValue": "9788234567890" }
+  ],
+  "productForm": "BB",
+  "productFormDetail": "B102",
+  "titleDetails": [
+    {
+      "titleType": "01",
+      "titleElements": [
+        {
+          "titleElementLevel": "01",
+          "titleText": "Min nye bok",
+          "subtitle": "En roman"
+        }
+      ]
+    }
+  ],
+  "contributors": [
+    {
+      "contributorRole": "A01",
+      "personName": {
+        "personName": "Knut Hamsun",
+        "namesBeforeKey": "Knut",
+        "keyNames": "Hamsun"
+      }
+    },
+    {
+      "contributorRole": "B06",
+      "personName": { "keyNames": "Translator" }
+    }
+  ],
+  "collateralDetail": {
+    "supportingResources": [
+      {
+        "resourceContentType": "01",
+        "contentAudience": "00",
+        "resourceMode": "03",
+        "resourceVersions": [
+          {
+            "resourceForm": "02",
+            "resourceLink": "https://api.barkpark.cloud/media/p9-cover.jpg"
+          }
+        ]
+      }
+    ]
+  },
+  "publishingDetail": {
+    "imprint": { "imprintName": "Demo Forlag" },
+    "publishers": [
+      { "publishingRole": "01", "publisherName": "Acme Pub" }
+    ],
+    "publishingDates": [
+      { "publishingDateRole": "01", "date": "2026-04-29" }
+    ]
+  },
+  "productSupplies": [
+    {
+      "market": { "territory": { "countries": ["NO"] } },
+      "supplyDetails": [
+        {
+          "supplier": { "supplierRole": "09", "supplierName": "Acme Pub" },
+          "productAvailability": "20",
+          "prices": [
+            { "priceType": "02", "priceAmount": "299.00", "currencyCode": "NOK" },
+            { "priceType": "04", "priceAmount": "29.00", "currencyCode": "EUR" }
+          ]
+        }
+      ]
+    }
+  ]
+}

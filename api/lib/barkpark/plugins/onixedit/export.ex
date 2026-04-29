@@ -23,7 +23,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     Header,
     Message,
     PublishingDetail,
-    ProductSupply
+    ProductSupply,
+    Validator
   }
 
   @default_dataset_host "barkpark.cloud"
@@ -116,10 +117,15 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     ProductSupply.build(book_doc, opts)
   end
 
-  @doc false
-  def validate_against_xsd(_xml_iodata, _opts) do
-    raise RuntimeError,
-          "Barkpark.Plugins.OnixEdit.Export.validate_against_xsd/2 not implemented yet — landing in WI5 (xmllint XSD validation gate)"
+  @doc """
+  Validate an exported ONIX iodata payload against the vendored EDItEUR ONIX
+  3.0 XSD. Returns `:ok` on success or `{:error, [reason, ...]}` on failure.
+  Thin wrapper over `Barkpark.Plugins.OnixEdit.Export.Validator.validate_xsd/2`;
+  see that module for xmllint and CI integration notes.
+  """
+  @spec validate_against_xsd(iodata(), Path.t()) :: :ok | {:error, [String.t()]}
+  def validate_against_xsd(xml_iodata, xsd_path \\ Validator.default_xsd_path()) do
+    Validator.validate_xsd(xml_iodata, xsd_path)
   end
 
   # ---- Internals --------------------------------------------------------------
