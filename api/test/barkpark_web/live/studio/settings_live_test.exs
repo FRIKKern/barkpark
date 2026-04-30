@@ -110,6 +110,112 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
   end
 
+  describe "bokbasen typed preset" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      end)
+
+      {:ok, conn: conn}
+    end
+
+    test "loading bokbasen renders 5 typed inputs (no raw textarea)", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      html =
+        view
+        |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+        |> render_submit()
+
+      assert html =~ ~s(data-preset="bokbasen")
+      assert html =~ ~s(name="api_base")
+      assert html =~ ~s(name="oauth_token_url")
+      assert html =~ ~s(name="client_id")
+      assert html =~ ~s(name="client_secret")
+      assert html =~ ~s(name="client_role")
+      assert html =~ ~s(type="password")
+      refute html =~ ~s(id="settings_json")
+    end
+
+    test "submitting the typed form persists via Bokbasen.Settings", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+      |> render_submit()
+
+      view
+      |> form(~s(form[data-preset="bokbasen"]), %{
+        api_base: "https://api.bokbasen.io",
+        oauth_token_url: "https://login.bokbasen.io/oauth2/token",
+        client_id: "ui-client-id",
+        client_secret: "ui-secret-value",
+        client_role: "publisher"
+      })
+      |> render_submit()
+
+      assert {:ok,
+              %{
+                "client_id" => "ui-client-id",
+                "client_secret" => "ui-secret-value",
+                "api_base" => "https://api.bokbasen.io",
+                "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+                "client_role" => "publisher"
+              }} = Settings.reveal("bokbasen")
+    end
+
+    test "loading bokbasen masks secrets but shows URL + role plain", %{conn: conn} do
+      Settings.put("bokbasen", %{
+        "api_base" => "https://api.bokbasen.io",
+        "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+        "client_id" => "longclientidvalue",
+        "client_secret" => "longsecretvalue",
+        "client_role" => "publisher"
+      })
+
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      html =
+        view
+        |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+        |> render_submit()
+
+      refute html =~ "longclientidvalue"
+      refute html =~ "longsecretvalue"
+      assert html =~ "********alue"
+      assert html =~ "https://api.bokbasen.io"
+      assert html =~ ~s(value="publisher")
+    end
+
+    test "rejects submit with missing required fields", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+      |> render_submit()
+
+      html =
+        view
+        |> form(~s(form[data-preset="bokbasen"]), %{
+          api_base: "",
+          oauth_token_url: "",
+          client_id: "x",
+          client_secret: "y",
+          client_role: "publisher"
+        })
+        |> render_submit()
+
+      assert html =~ "Missing or invalid"
+      assert {:error, :not_found} = Settings.get("bokbasen")
+    end
+  end
+
   defp audited?(plugin, action) do
     Repo.exists?(
       from a in SettingsAudit,
