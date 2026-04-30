@@ -138,6 +138,13 @@ defmodule BarkparkWeb.Router do
     delete "/:plugin_name", PluginSettingsController, :delete
   end
 
+  # ── OnixEdit ONIX 3.0 export — admin-only file download ────────────────
+  scope "/v1/plugins/onixedit", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/export/:dataset/:id", OnixeditExportController, :show
+  end
+
   # ── Webhooks — requires admin token ────────────────────────────────────
   scope "/v1/webhooks", BarkparkWeb do
     pipe_through [:api, :require_admin]

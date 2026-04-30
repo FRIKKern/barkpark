@@ -128,6 +128,56 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     Validator.validate_xsd(xml_iodata, xsd_path)
   end
 
+  # ---- WI6 file/string output API --------------------------------------------
+
+  @doc """
+  Render a book document to ONIX 3.0 XML iodata, gated on XSD validation.
+  Returns `{:ok, iodata}` only when the rendered XML validates against the
+  vendored EDItEUR ONIX 3.0 reference XSD. Returns
+  `{:error, {:xsd_invalid, reasons}}` otherwise so callers can never emit
+  schema-invalid XML downstream.
+  """
+  @spec to_iodata(map()) :: {:ok, iodata()} | {:error, {:xsd_invalid, [String.t()]}}
+  def to_iodata(book_doc) when is_map(book_doc) do
+    iodata = to_xml(book_doc)
+    binary = IO.iodata_to_binary(iodata)
+
+    case Validator.validate_xsd(binary) do
+      :ok -> {:ok, iodata}
+      {:error, reasons} -> {:error, {:xsd_invalid, reasons}}
+    end
+  end
+
+  @doc """
+  Render a book document to a UTF-8 ONIX 3.0 XML binary, gated on XSD
+  validation. Same error envelope as `to_iodata/1`.
+  """
+  @spec to_string(map()) :: {:ok, binary()} | {:error, {:xsd_invalid, [String.t()]}}
+  def to_string(book_doc) when is_map(book_doc) do
+    case to_iodata(book_doc) do
+      {:ok, iodata} -> {:ok, IO.iodata_to_binary(iodata)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Render a book document and write the resulting ONIX 3.0 XML to `path`.
+  Validation runs before the write, so a validation failure short-circuits
+  and never touches the filesystem. Returns `:ok` on success,
+  `{:error, {:xsd_invalid, reasons}}` on validation failure, or
+  `{:error, posix_reason}` from `File.write/2`.
+  """
+  @spec to_file(map(), Path.t()) ::
+          :ok | {:error, {:xsd_invalid, [String.t()]}} | {:error, File.posix()}
+  def to_file(book_doc, path) when is_map(book_doc) and is_binary(path) do
+    with {:ok, binary} <- __MODULE__.to_string(book_doc),
+         :ok <- File.write(path, binary) do
+      :ok
+    else
+      {:error, _} = err -> err
+    end
+  end
+
   # ---- Internals --------------------------------------------------------------
 
   defp product(book_doc, opts) do
