@@ -1,10 +1,12 @@
 defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditorTest do
   use BarkparkWeb.ConnCase, async: false
+  use Oban.Testing, repo: Barkpark.Repo
 
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
   alias Barkpark.Content.Codelists
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
 
   @dataset "production"
   @doc_id "book-test-1"
@@ -516,6 +518,197 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditorTest do
 
       assert html =~ ~s|data-field-type="composite"|
       assert html =~ ~s|data-field-name="relatedMaterial"|
+    end
+  end
+
+  describe "WI5 — Publish to Bokbasen flow" do
+    @bokbasen_dataset "production"
+    @bokbasen_doc_id "book-bokbasen-1"
+
+    setup %{conn: conn} do
+      # Minimal book schema. The bp_export_status string field is what the
+      # PublishWorker writes its lifecycle JSON into; the toolbar pill reads it.
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => "book",
+            "title" => "Book (ONIX 3.0)",
+            "icon" => "book",
+            "visibility" => "private",
+            "fields" => [
+              %{"name" => "bp_export_status", "title" => "Export status", "type" => "string"}
+            ]
+          },
+          @bokbasen_dataset
+        )
+
+      # Seed a book with enough content that ONIX export passes XSD. Mirror
+      # the WI4 worker test fixture path so the dry-run preview can render
+      # without a validation error.
+      content =
+        Path.expand(
+          "../../../../../fixtures/onix/full-book.json",
+          __DIR__
+        )
+        |> File.read!()
+        |> Jason.decode!()
+
+      {:ok, _doc} =
+        Content.create_document(
+          "book",
+          %{"doc_id" => @bokbasen_doc_id, "title" => "Bokbasen Book", "content" => content},
+          @bokbasen_dataset
+        )
+
+      {:ok, conn: conn}
+    end
+
+    defp open_editor(conn) do
+      live(conn, "/studio/#{@bokbasen_dataset}/onixedit/book/#{@bokbasen_doc_id}")
+    end
+
+    test "renders Publish to Bokbasen button in toolbar", %{conn: conn} do
+      {:ok, view, html} = open_editor(conn)
+
+      assert html =~ "Publish to Bokbasen"
+      assert has_element?(view, ~s|[data-test-id="bokbasen-publish-button"]|)
+    end
+
+    test "clicking publish button opens the confirmation modal", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+
+      refute has_element?(view, ~s|[data-test-id="publish-modal"]|)
+
+      view |> element(~s|[data-test-id="bokbasen-publish-button"]|) |> render_click()
+
+      assert has_element?(view, ~s|[data-test-id="publish-modal"]|)
+      assert has_element?(view, ~s|[data-test-id="publish-modal-dryrun"]|)
+      assert has_element?(view, ~s|[data-test-id="publish-modal-confirm"]|)
+      assert has_element?(view, ~s|[data-test-id="publish-modal-cancel"]|)
+    end
+
+    test "Cancel closes the modal and clears the preview", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+      view |> element(~s|[data-test-id="bokbasen-publish-button"]|) |> render_click()
+
+      assert has_element?(view, ~s|[data-test-id="publish-modal"]|)
+
+      view |> element(~s|[data-test-id="publish-modal-cancel"]|) |> render_click()
+
+      refute has_element?(view, ~s|[data-test-id="publish-modal"]|)
+    end
+
+    test "Dry run renders preview and does NOT enqueue an Oban job", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+      view |> element(~s|[data-test-id="bokbasen-publish-button"]|) |> render_click()
+
+      view |> element(~s|[data-test-id="publish-modal-dryrun"]|) |> render_click()
+
+      # Modal stays open with preview visible.
+      assert has_element?(view, ~s|[data-test-id="publish-modal"]|)
+      assert has_element?(view, ~s|[data-test-id="publish-preview"]|)
+
+      # No Oban job enqueued for the dry run.
+      refute_enqueued(worker: PublishWorker)
+    end
+
+    test "Publish enqueues an Oban job and writes pending state", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+      view |> element(~s|[data-test-id="bokbasen-publish-button"]|) |> render_click()
+
+      view |> element(~s|[data-test-id="publish-modal-confirm"]|) |> render_click()
+
+      # Newly-created docs land as drafts in the underlying schema, so the
+      # LiveView holds the draft id and the worker is enqueued against it.
+      draft_id = "drafts.#{@bokbasen_doc_id}"
+
+      # Job enqueued with the expected document id.
+      assert_enqueued(
+        worker: PublishWorker,
+        args: %{"document_id" => draft_id, "type" => "book", "dataset" => "production"}
+      )
+
+      # bp_export_status reflects the pending marker on the draft doc.
+      {:ok, doc} = Content.get_document(draft_id, "book", @bokbasen_dataset)
+      status = PublishWorker.read_status(doc)
+      assert status["state"] == "pending"
+
+      # Modal closes after enqueue.
+      refute has_element?(view, ~s|[data-test-id="publish-modal"]|)
+
+      # Pill renders the new state.
+      assert has_element?(
+               view,
+               ~s|[data-test-id="bokbasen-status-pill"][data-bp-state="pending"]|
+             )
+    end
+
+    test "no pill rendered when bp_export_status is unset", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+      refute has_element?(view, ~s|[data-test-id="bokbasen-status-pill"]|)
+    end
+
+    test "PubSub broadcast updates pill without page reload", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+      refute has_element?(view, ~s|[data-test-id="bokbasen-status-pill"]|)
+
+      # The LiveView subscribes on both draft and published forms of the doc_id.
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "bokbasen:document:#{@bokbasen_doc_id}",
+        {:bokbasen_status_update, %{"state" => "polling"}}
+      )
+
+      # Render again to pick up the cast message.
+      html = render(view)
+      assert html =~ ~s|data-bp-state="polling"|
+      assert html =~ "bp-pill-blue"
+    end
+
+    test "pill colors map correctly to lifecycle states", %{conn: conn} do
+      cases = [
+        {"pending", "bp-pill-gray"},
+        {"staging", "bp-pill-gray"},
+        {"staged", "bp-pill-blue"},
+        {"polling", "bp-pill-blue"},
+        {"accepted", "bp-pill-green"},
+        {"rejected", "bp-pill-red"},
+        {"failed", "bp-pill-orange"},
+        {"cannot_cancel", "bp-pill-orange"},
+        {"cancelled", "bp-pill-orange"}
+      ]
+
+      for {state, expected_class} <- cases do
+        {:ok, view, _html} = open_editor(conn)
+
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          "bokbasen:document:#{@bokbasen_doc_id}",
+          {:bokbasen_status_update, %{"state" => state}}
+        )
+
+        html = render(view)
+
+        assert html =~ ~s|data-bp-state="#{state}"|,
+               "expected pill state #{state} in HTML"
+
+        assert html =~ expected_class,
+               "expected color class #{expected_class} for state #{state}"
+      end
+    end
+
+    test "tooltip surfaces last_error summary", %{conn: conn} do
+      {:ok, view, _html} = open_editor(conn)
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "bokbasen:document:#{@bokbasen_doc_id}",
+        {:bokbasen_status_update,
+         %{"state" => "failed", "last_error" => %{"summary" => "auth bad creds"}}}
+      )
+
+      html = render(view)
+      assert html =~ "auth bad creds"
     end
   end
 end

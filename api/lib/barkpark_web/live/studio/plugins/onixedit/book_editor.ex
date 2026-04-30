@@ -81,6 +81,8 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
+  alias Barkpark.Plugins.OnixEdit.Export
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
   alias BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePicker
 
@@ -181,11 +183,17 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   @impl true
   def mount(%{"dataset" => dataset, "doc_id" => doc_id}, _session, socket) do
+    pub_id = Content.published_id(doc_id)
+
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
+      # WI5 — receive lifecycle updates from the Bokbasen PublishWorker so the
+      # toolbar status pill updates without a page reload. Subscribe on both
+      # draft and published forms of the doc_id so we catch transitions
+      # regardless of which form the worker writes to.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{pub_id}")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{Content.draft_id(pub_id)}")
     end
-
-    pub_id = Content.published_id(doc_id)
 
     schema =
       case Content.get_schema(@schema_name, dataset) do
@@ -202,7 +210,10 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
         schema: schema,
         active_tab: @default_tab,
         save_status: "",
-        subjects_thema: MapSet.new()
+        subjects_thema: MapSet.new(),
+        show_publish_modal: false,
+        publish_preview: nil,
+        bp_status: %{}
       )
       |> load_document()
 
@@ -244,6 +255,16 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   # main subject plus qualifiers/secondaries), so the multi-value shape matches.
   def handle_info({:thema_selection_changed, %MapSet{} = codes}, socket) do
     {:noreply, persist_thema(socket, codes)}
+  end
+
+  # WI5 — broadcast from `Bokbasen.PublishWorker.persist_status/2`. The
+  # payload is the full merged status map (state, submission_id, last_error,
+  # …); we mirror it into `@bp_status` so the toolbar pill picks up the new
+  # color + tooltip on the next render. We do NOT reload the doc here — the
+  # broadcast already contains the authoritative status, and a re-fetch
+  # would race against an in-flight DB update from the worker.
+  def handle_info({:bokbasen_status_update, %{} = status}, socket) do
+    {:noreply, assign(socket, :bp_status, status)}
   end
 
   @impl true
@@ -292,6 +313,57 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     url = "/v1/plugins/onixedit/export/#{socket.assigns.dataset}/#{socket.assigns.doc_id}.onix"
 
     {:noreply, push_event(socket, "download", %{url: url})}
+  end
+
+  # WI5 — Publish to Bokbasen flow. Opens the confirmation modal; the user
+  # picks "Dry run" (preview only) or "Publish" (enqueue Oban worker).
+  def handle_event("publish_to_bokbasen", _params, socket) do
+    {:noreply, assign(socket, show_publish_modal: true, publish_preview: nil)}
+  end
+
+  def handle_event("cancel_publish_modal", _params, socket) do
+    {:noreply, assign(socket, show_publish_modal: false, publish_preview: nil)}
+  end
+
+  # Dry run: render the ONIX XML in-memory (XSD-validated by `Export.to_iodata/1`)
+  # and stash a preview slice in assigns. We do NOT enqueue the worker and do
+  # NOT persist `bp_export_status`. The modal stays open showing the preview.
+  def handle_event("confirm_publish_dryrun", _params, socket) do
+    case build_preview(socket) do
+      {:ok, preview} ->
+        {:noreply, assign(socket, publish_preview: preview)}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(publish_preview: %{kind: :error, message: format_preview_error(reason)})}
+    end
+  end
+
+  # Real publish: enqueue the PublishWorker and write a `pending` marker into
+  # `bp_export_status` so the toolbar pill flips immediately (the worker will
+  # transition through staging → staged → polling → accepted on its own).
+  def handle_event("confirm_publish_real", _params, socket) do
+    case enqueue_publish(socket) do
+      {:ok, _job, status} ->
+        {:noreply,
+         socket
+         |> assign(show_publish_modal: false, publish_preview: nil, bp_status: status)
+         |> load_document()
+         |> put_flash(:info, "Publish enqueued — track status in toolbar pill")}
+
+      {:error, :no_doc} ->
+        {:noreply,
+         socket
+         |> assign(show_publish_modal: false, publish_preview: nil)
+         |> put_flash(:error, "No document loaded — save first")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(show_publish_modal: false, publish_preview: nil)
+         |> put_flash(:error, "Publish failed to enqueue: #{format_preview_error(reason)}")}
+    end
   end
 
   def handle_event("discard-draft", _params, socket) do
@@ -400,6 +472,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
       has_published: match?({:ok, _}, pub_result),
       form: doc_to_form(doc, schema),
       subjects_thema: extract_thema(doc),
+      bp_status: PublishWorker.read_status(doc),
       page_title: (doc && doc.title) || "New Book"
     )
   end
@@ -460,6 +533,144 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     "/studio/#{dataset}/onixedit/book/#{doc_id}?tab=#{tab}"
   end
 
+  # ── WI5 — Bokbasen publish helpers ─────────────────────────────────────────
+
+  defp build_preview(%{assigns: %{doc: nil}}), do: {:error, :no_doc}
+
+  defp build_preview(%{assigns: %{doc: doc}}) do
+    book_doc = book_doc_from(doc)
+
+    case Export.to_iodata(book_doc) do
+      {:ok, iodata} ->
+        binary = IO.iodata_to_binary(iodata)
+        {:ok, %{kind: :xml, xml: binary, summary: summarize(book_doc, binary)}}
+
+      {:error, {:xsd_invalid, reasons}} ->
+        {:error, {:xsd_invalid, reasons}}
+    end
+  end
+
+  defp enqueue_publish(%{assigns: %{doc: nil}}), do: {:error, :no_doc}
+
+  defp enqueue_publish(%{assigns: %{doc: doc, type: type, dataset: dataset}}) do
+    args = %{"document_id" => doc.doc_id, "type" => type, "dataset" => dataset}
+
+    case Oban.insert(PublishWorker.new(args)) do
+      {:ok, job} ->
+        # Mark the doc as pending so the pill flips immediately. We reuse the
+        # worker's own `persist_status/2` helper (which also broadcasts on
+        # PubSub) so the write path is identical to a worker-driven update.
+        updated = PublishWorker.persist_status(doc, %{"state" => "pending", "last_error" => nil})
+        {:ok, job, PublishWorker.read_status(updated)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp book_doc_from(%{} = doc) do
+    pub_id = Content.published_id(doc.doc_id)
+
+    (doc.content || %{})
+    |> Map.delete("bp_export_status")
+    |> Map.put("_id", doc.doc_id)
+    |> Map.put("_publishedId", pub_id)
+    |> Map.put("_type", doc.type)
+  end
+
+  defp summarize(book_doc, xml) do
+    title =
+      case book_doc do
+        %{"titleDetails" => [%{"titleText" => t} | _]} when is_binary(t) -> t
+        %{"title" => t} when is_binary(t) -> t
+        _ -> Map.get(book_doc, "_id", "")
+      end
+
+    isbn =
+      book_doc
+      |> Map.get("productIdentifiers", [])
+      |> List.wrap()
+      |> Enum.find(fn
+        %{"productIdType" => t} -> t in ["15", "03"]
+        _ -> false
+      end)
+      |> case do
+        %{"idValue" => v} when is_binary(v) -> v
+        _ -> nil
+      end
+
+    thema_count =
+      book_doc
+      |> Map.get("themaSubjectCategory", [])
+      |> List.wrap()
+      |> length()
+
+    contrib_count =
+      book_doc
+      |> Map.get("contributors", [])
+      |> List.wrap()
+      |> length()
+
+    %{
+      title: title,
+      isbn: isbn,
+      thema_count: thema_count,
+      contributor_count: contrib_count,
+      byte_size: byte_size(xml)
+    }
+  end
+
+  defp format_preview_error({:xsd_invalid, reasons}) when is_list(reasons) do
+    "ONIX failed XSD validation: " <> Enum.join(Enum.take(reasons, 3), "; ")
+  end
+
+  defp format_preview_error(:no_doc), do: "No document loaded"
+
+  defp format_preview_error(other), do: inspect(other, limit: 100)
+
+  # Status pill color mapping. Tailwind classes are kept self-contained so the
+  # pill works whether or not the host theme overrides the badge palette.
+  @gray_states ~w(pending staging)
+  @blue_states ~w(staged polling)
+  @green_states ~w(accepted)
+  @red_states ~w(rejected)
+  @orange_states ~w(failed cannot_cancel cancelled)
+
+  defp pill_state(%{} = status) do
+    case Map.get(status, "state") do
+      s when is_binary(s) -> s
+      s when is_atom(s) and not is_nil(s) -> Atom.to_string(s)
+      _ -> nil
+    end
+  end
+
+  defp pill_state(_), do: nil
+
+  defp pill_color(state) when state in @gray_states, do: "bp-pill-gray"
+  defp pill_color(state) when state in @blue_states, do: "bp-pill-blue"
+  defp pill_color(state) when state in @green_states, do: "bp-pill-green"
+  defp pill_color(state) when state in @red_states, do: "bp-pill-red"
+  defp pill_color(state) when state in @orange_states, do: "bp-pill-orange"
+  defp pill_color(_), do: "bp-pill-gray"
+
+  defp pill_label(state) when is_binary(state) do
+    state |> String.replace("_", " ") |> String.capitalize()
+  end
+
+  defp pill_label(_), do: ""
+
+  defp pill_tooltip(%{} = status) do
+    case Map.get(status, "last_error") do
+      %{"summary" => s} when is_binary(s) -> s
+      %{"type" => t, "details" => d} -> "#{t}: #{inspect(d, limit: 200)}"
+      %{"type" => t} when is_binary(t) -> t
+      s when is_binary(s) -> s
+      _ -> nil
+    end
+  end
+
+  defp pill_tooltip(_), do: nil
+
   # ── render ─────────────────────────────────────────────────────────────────
 
   @impl true
@@ -481,6 +692,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
         </div>
       </div>
       <div class="main-header-right">
+        <%= render_bokbasen_pill(assigns) %>
         <%= if @doc do %>
           <button
             id="onix-export-button"
@@ -490,6 +702,12 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
             data-test-id="onix-export-button"
             aria-label="Export to ONIX"
           >Export to ONIX</button>
+          <button
+            class="btn btn-sm"
+            phx-click="publish_to_bokbasen"
+            data-test-id="bokbasen-publish-button"
+            aria-label="Publish to Bokbasen"
+          >Publish to Bokbasen</button>
         <% end %>
         <%= if @is_draft do %>
           <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
@@ -540,7 +758,108 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
         </div>
       </form>
     </div>
+
+    <%= render_publish_modal(assigns) %>
     """
+  end
+
+  # ── WI5 — Bokbasen status pill + publish modal ─────────────────────────────
+
+  defp render_bokbasen_pill(assigns) do
+    state = pill_state(assigns.bp_status)
+    assigns = assign(assigns, :pill_state, state)
+
+    ~H"""
+    <%= if @pill_state do %>
+      <span
+        class={"badge bp-pill " <> pill_color(@pill_state)}
+        data-test-id="bokbasen-status-pill"
+        data-bp-state={@pill_state}
+        title={pill_tooltip(@bp_status)}
+      ><%= pill_label(@pill_state) %></span>
+    <% end %>
+    """
+  end
+
+  defp render_publish_modal(assigns) do
+    ~H"""
+    <%= if @show_publish_modal do %>
+      <div
+        class="bp-modal-overlay"
+        data-test-id="publish-modal"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;"
+      >
+        <div
+          class="bp-modal card"
+          style="background: var(--surface, #fff); padding: 24px; min-width: 480px; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; gap: 12px; overflow: auto;"
+        >
+          <h2 class="h3" style="margin: 0;">Publish to Bokbasen?</h2>
+          <p class="text-sm text-muted" style="margin: 0;">
+            <strong>Dry run</strong> renders ONIX XML in-memory and validates against the EDItEUR XSD without contacting Bokbasen.
+            <br />
+            <strong>Publish</strong> enqueues an async job that stages the submission and polls for acceptance — track progress in the toolbar pill.
+          </p>
+
+          <%= render_publish_preview(assigns) %>
+
+          <div style="display: flex; gap: 8px; justify-content: flex-end; padding-top: 8px;">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              phx-click="cancel_publish_modal"
+              data-test-id="publish-modal-cancel"
+            >Cancel</button>
+            <button
+              type="button"
+              class="btn"
+              phx-click="confirm_publish_dryrun"
+              data-test-id="publish-modal-dryrun"
+            >Dry run</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              phx-click="confirm_publish_real"
+              data-test-id="publish-modal-confirm"
+            >Publish</button>
+          </div>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp render_publish_preview(assigns) do
+    ~H"""
+    <%= if @publish_preview do %>
+      <div data-test-id="publish-preview" style="border: 1px solid var(--border-muted); border-radius: 4px; padding: 12px;">
+        <%= case @publish_preview do %>
+          <% %{kind: :error, message: msg} -> %>
+            <p class="text-sm" style="color: var(--error, #b91c1c); margin: 0;" data-test-id="publish-preview-error"><%= msg %></p>
+          <% %{kind: :xml, xml: xml, summary: s} -> %>
+            <ul class="text-sm" style="margin: 0 0 8px; padding-left: 18px;">
+              <li>Title: <strong><%= s.title %></strong></li>
+              <li>ISBN: <%= s.isbn || "—" %></li>
+              <li>Thema codes: <%= s.thema_count %></li>
+              <li>Contributors: <%= s.contributor_count %></li>
+              <li>Bytes: <%= s.byte_size %></li>
+            </ul>
+            <pre
+              class="bp-preview-xml"
+              data-test-id="publish-preview-xml"
+              style="white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; font-family: var(--font-mono); font-size: 12px; margin: 0; background: var(--surface-muted, #f5f5f5); padding: 8px;"
+            ><%= preview_slice(xml) %></pre>
+          <% _ -> %>
+        <% end %>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp preview_slice(xml) when is_binary(xml) do
+    xml
+    |> String.split("\n")
+    |> Enum.take(50)
+    |> Enum.join("\n")
   end
 
   # ── Tab body dispatch — the WI3 / WI4 seam. ────────────────────────────────

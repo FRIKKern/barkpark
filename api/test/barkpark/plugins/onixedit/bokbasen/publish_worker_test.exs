@@ -342,6 +342,49 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
     end
   end
 
+  describe "PubSub broadcast on persist_status (WI5)" do
+    test "stage success broadcasts {:bokbasen_status_update, status_map}", %{
+      bypass: bypass,
+      base: base
+    } do
+      stub_token(bypass)
+      doc = seed_book("p-broadcast")
+
+      Bypass.stub(bypass, "POST", "/metadata/import/onix/v2", fn conn ->
+        body =
+          Jason.encode!(%{
+            "submission_id" => "sub-bcast",
+            "poll_url" => "#{base}/metadata/import/onix/v2/status/sub-bcast"
+          })
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(202, body)
+      end)
+
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{doc.doc_id}")
+
+      assert {:snooze, _} = perform_job(PublishWorker, args(doc.doc_id))
+
+      # `stage_step` calls persist_status twice: once with state=staging, then
+      # again with state=staged after Bokbasen accepts the upload. We assert
+      # both transitions arrive on the per-doc topic in order.
+      assert_receive {:bokbasen_status_update, %{"state" => "staging"}}, 1_000
+      assert_receive {:bokbasen_status_update, %{"state" => "staged"} = staged}, 1_000
+      assert staged["bokbasen_submission_id"] == "sub-bcast"
+    end
+
+    test "persist_status/2 is callable directly and broadcasts" do
+      doc = seed_book("p-direct")
+
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{doc.doc_id}")
+
+      _updated = PublishWorker.persist_status(doc, %{"state" => "pending"})
+
+      assert_receive {:bokbasen_status_update, %{"state" => "pending"}}, 1_000
+    end
+  end
+
   describe "poll parse graceful failure" do
     test "malformed poll body → :rejected with parse-error context, no crash", %{bypass: bypass} do
       stub_token(bypass)

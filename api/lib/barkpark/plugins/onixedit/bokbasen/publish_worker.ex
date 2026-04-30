@@ -400,7 +400,17 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
 
   def read_status(_), do: %{}
 
-  defp persist_status(%Document{} = doc, patch) when is_map(patch) do
+  @doc """
+  Public counterpart to `read_status/1`. Merges `patch` into the current
+  `bp_export_status` map, writes it back via `Document.changeset`, and
+  broadcasts the merged map on the per-document Bokbasen topic so any
+  subscribed LiveView (e.g. BookEditor) can refresh its status pill in
+  real time without polling.
+
+  WI5 added the broadcast so the toolbar pill stays in sync with worker
+  transitions across the stage / poll / cancel lifecycle.
+  """
+  def persist_status(%Document{} = doc, patch) when is_map(patch) do
     current = read_status(doc)
 
     merged =
@@ -415,6 +425,12 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
       doc
       |> Document.changeset(%{"content" => new_content})
       |> Repo.update()
+
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      "bokbasen:document:#{doc.doc_id}",
+      {:bokbasen_status_update, merged}
+    )
 
     updated
   end
