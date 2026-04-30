@@ -20,6 +20,10 @@ defmodule Barkpark.Application do
       # before the endpoint can serve mutate/export traffic.
       Barkpark.Validation.Registry,
       Barkpark.Content.Validation.Rules,
+      # Phase 7 WI3: OAuth2 token cache for Bokbasen ingestion. Lazy —
+      # does not fetch a token at boot; first Auth.token/0 call triggers
+      # the first fetch.
+      Barkpark.Plugins.OnixEdit.Bokbasen.Auth,
       {Oban, Application.fetch_env!(:barkpark, Oban)},
       {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Barkpark.PubSub},
