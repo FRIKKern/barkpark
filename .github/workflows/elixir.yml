@@ -153,6 +153,22 @@ jobs:
           mix ecto.migrate
 
       - name: Test
+        # CI runs the default `mix test`. Phase 7 WI7 added a
+        # `:bokbasen_integration`-tagged end-to-end suite at
+        # api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs that is
+        # excluded by default via api/test/test_helper.exs. CI does NOT run
+        # the tagged suite because it is a self-contained Bypass-mock
+        # contributor sanity test, not a CI gate; the WI3 client_test and
+        # WI4 publish_worker_test already cover the same lifecycle paths
+        # and run on every PR.
+        #
+        # To run the integration suite locally with the Bypass mock:
+        #
+        #     cd api && mix test --include bokbasen_integration
+        #
+        # See README "Phase 7: Bokbasen integration" and
+        # docs/spec/bokbasen-api-contract.md "How to test" for details.
+        # Do NOT add a CI job that requires real Bokbasen credentials.
         run: mix test
 
   mix-prod-compile:

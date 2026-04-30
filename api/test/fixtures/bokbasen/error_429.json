@@ -1,0 +1,4 @@
+{
+  "error": "rate_limited",
+  "error_description": "Test fixture: synthetic 429, see Retry-After header"
+}

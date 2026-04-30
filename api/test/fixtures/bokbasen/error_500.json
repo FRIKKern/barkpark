@@ -1,0 +1,4 @@
+{
+  "error": "internal_server_error",
+  "error_description": "Test fixture: synthetic 5xx for retry-path coverage"
+}

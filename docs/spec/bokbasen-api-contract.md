@@ -669,6 +669,77 @@ becomes a follow-up). All cross-link the relevant contract section.
 
 ---
 
+## How to test
+
+The Phase 7 deliverables ship with a tagged end-to-end integration test
+that drives the full publishing pipeline against a [Bypass][^bypass-hex]
+HTTP mock. The test is the executable, version-controlled counterpart
+to this contract — it confirms WI2/WI3/WI4 production code parses the
+exact response shapes documented above.
+
+### File layout
+
+- **Test:** `api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs`
+- **Redacted fixtures:** `api/test/fixtures/bokbasen/`
+  - `oauth_token_response.json` — OAuth2 client_credentials token reply
+    (synthetic `test_access_token_xyz`, see §2.2).
+  - `stage_202_location.txt` — 202 `Location` header value the worker
+    parses to recover `submission_id` + `poll_url` (see §3.1).
+  - `poll_pending.xml` / `poll_accepted.xml` / `poll_rejected.xml` —
+    XML poll-status fixtures with `<state>UNPROCESSED</state>` /
+    `<state>COMPLETED</state>` / `<state>FAILED</state>` (see §3.2).
+  - `error_401.json` / `error_429.json` / `error_500.json` — error
+    envelopes the WI3 `Errors` module surfaces as `AuthError`,
+    `RateLimitError`, `HTTPError`.
+
+All fixture credentials are synthetic — `test_*` prefixes,
+`api.example.com` URLs, no real bearer tokens, no real submission IDs.
+The fixture filenames + shapes are CI-stable; treat them as the
+contract's executable annex.
+
+### Default `mix test` excludes the suite
+
+The suite is tagged `@moduletag :bokbasen_integration` and excluded by
+default via `api/test/test_helper.exs` so CI's standard `mix test`
+invocation stays free of any external-shape fixtures and cannot leak
+real credentials. The `format` and `mix-prod-compile` gates run
+unaffected.
+
+### Run the integration suite locally
+
+```bash
+cd api
+mix test --include bokbasen_integration
+```
+
+To run only the Bokbasen E2E test:
+
+```bash
+cd api
+mix test --include bokbasen_integration \
+  test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs
+```
+
+### Run against the real Bokbasen sandbox
+
+Set the five env vars (see §2.2 *Authentication* for the published
+URLs) and clear the test-only stub:
+
+```bash
+export BOKBASEN_API_BASE="<api base from §2.2>"
+export BOKBASEN_OAUTH_TOKEN_URL="<token endpoint from §2.2>"
+export BOKBASEN_CLIENT_ID="<sandbox client id>"
+export BOKBASEN_CLIENT_SECRET="<sandbox client secret>"
+export BOKBASEN_CLIENT_ROLE="publisher"
+
+cd api && mix run priv/scripts/publish_demo.exs   # if/when added
+```
+
+The integration test itself **never** reaches a real Bokbasen endpoint;
+it only exercises the local Bypass mock against the redacted fixtures.
+
+---
+
 ## Footnotes / sources
 
 [^import]: Bokbasen Confluence — *Import Service*, page id 48955439.
