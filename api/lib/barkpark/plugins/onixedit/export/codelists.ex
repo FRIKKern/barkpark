@@ -122,6 +122,11 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
     "04" => "Publisher of original-language version"
   }
 
+  @agent_role %{
+    "06" => "Non-exclusive sales agent",
+    "07" => "Local publisher"
+  }
+
   @price_type %{
     "02" => "RRP including tax",
     "04" => "RRP excluding tax",
@@ -289,6 +294,24 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
       {:ok, code}
     else
       raise ArgumentError, "unknown_publishing_role_code: #{inspect(code)}"
+    end
+  end
+
+  @doc """
+  Resolve an AgentRole code (List 69). Returns `{:ok, code}` on hit;
+  raises `ArgumentError` with an `unknown_agent_role_code` message on miss.
+
+  Minimal map — `"07"` (Local publisher) is the default `<AgentRole>` inside
+  the synthesized `<PublisherRepresentative>` envelope. `"06"` (Non-exclusive
+  sales agent) is also enumerated so book.json may pass it through. Add
+  additional codes from List 69 only as new fixtures demand them.
+  """
+  @spec agent_role(code()) :: {:ok, code()}
+  def agent_role(code) when is_binary(code) do
+    if Map.has_key?(@agent_role, code) do
+      {:ok, code}
+    else
+      raise ArgumentError, "unknown_agent_role_code: #{inspect(code)}"
     end
   end
 

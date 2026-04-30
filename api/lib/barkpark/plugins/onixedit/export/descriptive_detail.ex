@@ -17,11 +17,13 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetail do
     5. `<Contributor>+` — one element per book.json `contributors[]` entry,
        carrying SequenceNumber, ContributorRole (list 17), the PersonName name
        parts (PersonName / NamesBeforeKey / KeyNames / NamesAfterKey).
-    6. `<MainSubject>` + `<Subject>+` — Boss Q3 convention: first Thema in
-       `themaSubjectCategory[]` → `<MainSubject>` with
-       `<MainSubjectSchemeIdentifier>93`, remaining → `<Subject>` with
-       `<SubjectSchemeIdentifier>93`. Free-form `subjects[]` entries (book.json
-       Subject composite) are passed through unchanged after the Thema set.
+    6. `<Subject>+` — Boss Q3 convention: first Thema in
+       `themaSubjectCategory[]` → `<Subject>` with an empty `<MainSubject/>`
+       flag as its first child, then `<SubjectSchemeIdentifier>93`. Remaining
+       Thema codes → `<Subject>` without the MainSubject flag. ONIX 3.0 XSD
+       models `MainSubject` as a child of `<Subject>`, not a sibling. Free-form
+       `subjects[]` entries (book.json Subject composite) are passed through
+       unchanged after the Thema set.
 
   Sub-blocks for which book.json declares no value are silently skipped — empty
   `<DescriptiveDetail/>` is preferable to a wall of empty tags. Unknown
@@ -273,8 +275,9 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetail do
           {:ok, first_code} = Codelists.thema(first)
 
           main =
-            XmlBuilder.element(:MainSubject, [
-              XmlBuilder.element(:MainSubjectSchemeIdentifier, "93"),
+            XmlBuilder.element(:Subject, [
+              XmlBuilder.element(:MainSubject),
+              XmlBuilder.element(:SubjectSchemeIdentifier, "93"),
               XmlBuilder.element(:SubjectSchemeVersion, "1.5"),
               XmlBuilder.element(:SubjectCode, first_code)
             ])

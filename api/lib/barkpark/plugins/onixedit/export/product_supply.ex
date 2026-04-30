@@ -13,13 +13,33 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
     * `<Market>` — `<Territory><CountriesIncluded>{codes}</CountriesIncluded></Territory>`.
       Defaults to `NO` when book.json lists no countries.
     * `<MarketPublishingDetail>` — `<PublisherRepresentative>` per
-      `publisherRepresentatives[]` entry (only when present).
+      `publisherRepresentatives[]` entry (only when present). Each
+      `<PublisherRepresentative>` emits `<AgentRole>` (List 69, default `07`
+      "Local publisher") FIRST, then `<AgentName>` — XSD enforces that
+      ordering.
     * `<SupplyDetail>` — emitted once per `supplyDetails[]` entry, or a
       synthesized default when `supplyDetails` is empty. Carries
       `<Supplier>` (SupplierRole defaults to `09` "Publisher to retailers"),
       `<ProductAvailability>` (defaults to `20` "Available"), and
       `<Price>` for each `prices[]` entry. PriceType defaults to `02` (RRP
       including tax) and CurrencyCode defaults to `NOK` when omitted.
+
+  ## Synthesized Supplier when `productSupplies` is absent
+
+  When `book.json` carries no `productSupplies` (or the array is empty), a
+  default Norwegian-locale ProductSupply is synthesized so Bokbasen ingestion
+  always sees a valid envelope. The synthesized `<SupplyDetail>` carries:
+
+    * `<Supplier>` with `<SupplierRole>09</SupplierRole>` (Publisher to
+      end-customers) and `<SupplierName>` resolved from
+      `book.publishingDetail.publishers[0].publisherName` (or
+      `imprint.imprintName` as a final fallback).
+    * `<ProductAvailability>20</ProductAvailability>` (Available).
+    * `<UnpricedItemType>01</UnpricedItemType>` (Free of charge — placeholder
+      until real `<Price>` data is added to book.json).
+
+  Real Price/Supplier data should be added to book.json when known; the
+  synthesis is a Bokbasen-friendly placeholder, not a permanent default.
 
   Empty optional containers are never emitted (e.g. an empty `<Price>`
   block fails XSD validation in WI5). Codelist resolution raises
@@ -33,6 +53,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
   @default_supplier_role "09"
   @default_product_availability "20"
   @default_price_type "02"
+  @default_agent_role "07"
+  @default_unpriced_item_type "01"
 
   @doc """
   Build a list of `<ProductSupply>` elements (zero-or-more) from a book document.
@@ -47,10 +69,15 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
       |> List.wrap()
       |> Enum.filter(&is_map/1)
 
+    ctx = %{
+      publisher_name: derive_publisher_name(book_doc),
+      synthesized: supplies == []
+    }
+
     elements =
       case supplies do
-        [] -> [build_supply(%{})]
-        _ -> Enum.map(supplies, &build_supply/1)
+        [] -> [build_supply(%{}, ctx)]
+        _ -> Enum.map(supplies, &build_supply(&1, ctx))
       end
       |> Enum.reject(&is_nil/1)
 
@@ -60,10 +87,39 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
     end
   end
 
-  defp build_supply(supply) when is_map(supply) do
+  # Derive a SupplierName fallback from the book's publishing detail. Used by
+  # the synthesized-Supplier path when `productSupplies` is absent. Returns
+  # the first non-blank value from publishers[0].publisherName then
+  # imprint.imprintName; nil if neither is present.
+  defp derive_publisher_name(book_doc) do
+    pd = Map.get(book_doc, "publishingDetail") || %{}
+
+    pub_name =
+      pd
+      |> Map.get("publishers", [])
+      |> List.wrap()
+      |> Enum.find_value(fn p ->
+        if is_map(p), do: presence(Map.get(p, "publisherName"))
+      end)
+
+    imprint_name = pd |> Map.get("imprint") |> imprint_name()
+
+    pub_name || imprint_name
+  end
+
+  defp imprint_name(imprint) when is_map(imprint), do: presence(Map.get(imprint, "imprintName"))
+  defp imprint_name(_), do: nil
+
+  defp presence(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp presence(_), do: nil
+
+  defp build_supply(supply, ctx) when is_map(supply) do
     market = build_market(Map.get(supply, "market"))
     market_publishing = build_market_publishing(Map.get(supply, "marketPublishingDetail"))
-    supply_details = build_supply_details(Map.get(supply, "supplyDetails", []))
+    supply_details = build_supply_details(Map.get(supply, "supplyDetails", []), ctx)
 
     children =
       ([market, market_publishing] ++ supply_details)
@@ -129,11 +185,15 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
 
   defp build_publisher_representative(rep) when is_map(rep) do
     name = Map.get(rep, "agentName")
+    role = Map.get(rep, "agentRole") || @default_agent_role
 
     if blank?(name) do
       nil
     else
+      {:ok, role_code} = Codelists.agent_role(role)
+
       XmlBuilder.element(:PublisherRepresentative, [
+        XmlBuilder.element(:AgentRole, role_code),
         XmlBuilder.element(:AgentName, name)
       ])
     end
@@ -141,22 +201,23 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
 
   # ---- SupplyDetail ---------------------------------------------------------
 
-  defp build_supply_details(list) when is_list(list) and list != [] do
+  defp build_supply_details(list, ctx) when is_list(list) and list != [] do
     list
     |> Enum.filter(&is_map/1)
-    |> Enum.map(&build_supply_detail/1)
+    |> Enum.map(&build_supply_detail(&1, ctx))
     |> Enum.reject(&is_nil/1)
   end
 
-  defp build_supply_details(_), do: [build_supply_detail(%{})]
+  defp build_supply_details(_, ctx), do: [build_supply_detail(%{}, ctx)]
 
-  defp build_supply_detail(detail) when is_map(detail) do
-    supplier = build_supplier(Map.get(detail, "supplier"))
+  defp build_supply_detail(detail, ctx) when is_map(detail) do
+    supplier = build_supplier(Map.get(detail, "supplier"), ctx)
     availability = build_product_availability(Map.get(detail, "productAvailability"))
     prices = build_prices(Map.get(detail, "prices", []))
+    unpriced = build_unpriced_when_synthesized(prices, ctx)
 
     children =
-      ([supplier, availability] ++ prices)
+      ([supplier, availability] ++ prices ++ List.wrap(unpriced))
       |> List.flatten()
       |> Enum.reject(&is_nil/1)
 
@@ -166,7 +227,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
     end
   end
 
-  defp build_supplier(supplier) when is_map(supplier) do
+  defp build_supplier(supplier, _ctx) when is_map(supplier) do
     role = Map.get(supplier, "supplierRole") || @default_supplier_role
     name = Map.get(supplier, "supplierName")
 
@@ -182,11 +243,30 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
     XmlBuilder.element(:Supplier, children)
   end
 
-  defp build_supplier(_) do
+  defp build_supplier(_, %{synthesized: true, publisher_name: name}) do
+    XmlBuilder.element(:Supplier, [
+      XmlBuilder.element(:SupplierRole, @default_supplier_role),
+      XmlBuilder.element(:SupplierName, name || "Unknown publisher")
+    ])
+  end
+
+  defp build_supplier(_, _ctx) do
     XmlBuilder.element(:Supplier, [
       XmlBuilder.element(:SupplierRole, @default_supplier_role)
     ])
   end
+
+  # Emit `<UnpricedItemType>` only on the synthesized SupplyDetail when no
+  # `<Price>` children were produced. ONIX 3.0 SupplyDetail content model
+  # forces `(UnpricedItemType | Price+)`; without this the synthesized envelope
+  # fails XSD validation. Real supplyDetails entries with empty `prices` are
+  # left as-is — the publisher must add either a Price or an explicit
+  # UnpricedItemType to book.json (out-of-scope fixup for WI5.5).
+  defp build_unpriced_when_synthesized([], %{synthesized: true}) do
+    XmlBuilder.element(:UnpricedItemType, @default_unpriced_item_type)
+  end
+
+  defp build_unpriced_when_synthesized(_, _), do: nil
 
   defp build_product_availability(code) when is_binary(code) and code != "" do
     {:ok, c} = Codelists.product_availability(code)
