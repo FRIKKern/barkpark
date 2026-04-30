@@ -54,6 +54,28 @@ config :barkpark, Barkpark.Vault,
     }
   ]
 
+# Bokbasen credentials (Phase 7 / OnixEdit plugin, WI2). Read from OS env in
+# every environment so dev can `source secrets/bokbasen.env` and prod can rely
+# on systemd's EnvironmentFile=. Missing values fall back to the encrypted
+# plugin_settings row at lookup time — see
+# `Barkpark.Plugins.OnixEdit.Bokbasen.Settings`. The HTTP client (WI3) and
+# the Oban worker (WI4) read this via `get_credentials/0`.
+bokbasen_env_keys = [
+  api_base: System.get_env("BOKBASEN_API_BASE"),
+  oauth_token_url: System.get_env("BOKBASEN_OAUTH_TOKEN_URL"),
+  client_id: System.get_env("BOKBASEN_CLIENT_ID"),
+  client_secret: System.get_env("BOKBASEN_CLIENT_SECRET"),
+  client_role: System.get_env("BOKBASEN_CLIENT_ROLE")
+]
+
+bokbasen_env =
+  bokbasen_env_keys
+  |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+if bokbasen_env != [] do
+  config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
