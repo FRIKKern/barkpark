@@ -404,6 +404,63 @@ end-to-end demonstration artifact for Phase 6 (Bokbasen pre-flight).
 - Regenerate: `cd api && mix onix.export_proof`
 - Drift guard: `api/test/barkpark/plugins/onixedit/export_proof_test.exs`
 
+## Phase 7: Bokbasen integration
+
+Phase 7 closes the OnixEdit publishing loop: a `book` document → ONIX
+3.0 export → Bokbasen's metadata-import API (single-phase async-poll) →
+status accepted, all driven by an Oban worker with a 9-state machine
+(`pending → staging → staged → polling → accepted | rejected | failed |
+cancelled | cannot_cancel`). Status transitions are broadcast over
+`Phoenix.PubSub` so the BookEditor LiveView's status pill updates in
+real time without polling. Three mix tasks plus an admin LiveView at
+`/admin/bokbasen` cover ops surface (status, retry, cancel).
+
+### How to test
+
+A redacted end-to-end integration test exercises the full pipeline
+against a [Bypass](https://hex.pm/packages/bypass) HTTP mock. The
+suite is tagged `@moduletag :bokbasen_integration` and excluded by
+default so the standard `mix test` invocation stays clean.
+
+```bash
+cd api
+mix test --include bokbasen_integration \
+  test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs
+```
+
+The test loads its responses from sanitized fixtures under
+`api/test/fixtures/bokbasen/` (synthetic `test_*` IDs and
+`api.example.com` URLs, never real Bokbasen creds).
+
+### Enable the real Bokbasen sandbox
+
+Set the five env vars below, or persist them via the encrypted
+`plugin_settings` row keyed `"bokbasen"` (see
+`Barkpark.Plugins.OnixEdit.Bokbasen.Settings`):
+
+| Env var | Purpose |
+|---------|---------|
+| `BOKBASEN_API_BASE` | Base URL of the Bokbasen metadata-import API (see contract spec for the published value) |
+| `BOKBASEN_OAUTH_TOKEN_URL` | OAuth2 token endpoint URL (see contract spec) |
+| `BOKBASEN_CLIENT_ID` | OAuth2 client id (encrypted at rest in DB) |
+| `BOKBASEN_CLIENT_SECRET` | OAuth2 client secret (encrypted at rest in DB) |
+| `BOKBASEN_CLIENT_ROLE` | `publisher` (default) or `distributor` |
+
+Tunables (optional):
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `BOKBASEN_HTTP_TIMEOUT_MS` | 30000 | Per-request receive timeout |
+| `BOKBASEN_RATE_LIMIT_MS` | 0 | Per-request floor sleep (1 req/sec ⇒ 1000) |
+
+### Cross-references
+
+- Wire contract: [`docs/spec/bokbasen-api-contract.md`](docs/spec/bokbasen-api-contract.md)
+- ONIX pre-flight: [`docs/spec/bokbasen-onix-pre-flight.md`](docs/spec/bokbasen-onix-pre-flight.md)
+- Worker: `api/lib/barkpark/plugins/onixedit/bokbasen/publish_worker.ex`
+- HTTP client: `api/lib/barkpark/plugins/onixedit/bokbasen/client.ex`
+- Admin LiveView: `/admin/bokbasen`
+
 ## Architecture
 
 ```
