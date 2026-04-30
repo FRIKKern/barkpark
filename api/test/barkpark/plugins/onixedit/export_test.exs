@@ -42,7 +42,7 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
       bin = header |> XmlBuilder.generate() |> IO.iodata_to_binary()
 
       assert bin =~ ~s|<SenderName>barkpark.cloud</SenderName>|
-      assert bin =~ ~s|<SentDateTime>2026-04-29T12:00:00Z</SentDateTime>|
+      assert bin =~ ~s|<SentDateTime>20260429T120000</SentDateTime>|
       assert bin =~ ~s|<MessageNote>Barkpark dataset:production</MessageNote>|
     end
 

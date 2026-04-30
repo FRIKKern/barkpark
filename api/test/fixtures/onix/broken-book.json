@@ -1,0 +1,41 @@
+{
+  "_note": "WI5 fixture — intentionally malformed to prove the XSD gate fires. Drops productIdentifiers entirely, so Export emits <Product> without any <ProductIdentifier> child. ONIX 3.0 reference XSD requires at least one <ProductIdentifier> per Product (gp.product_numbers, minOccurs default 1). xmllint surfaces this as 'DescriptiveDetail: This element is not expected. Expected is one of (..., ProductIdentifier)' because the validator was looking for ProductIdentifier when it hit DescriptiveDetail. Tests assert {:error, reasons} with 'ProductIdentifier' in the reason list.",
+  "_publishedId": "p_broken",
+  "productForm": "BC",
+  "titleDetails": [
+    {
+      "titleType": "01",
+      "titleElements": [
+        { "titleElementLevel": "01", "titleText": "Broken Book" }
+      ]
+    }
+  ],
+  "contributors": [
+    {
+      "contributorRole": "A01",
+      "personName": { "keyNames": "Author" }
+    }
+  ],
+  "publishingDetail": {
+    "publishers": [
+      { "publishingRole": "01", "publisherName": "Demo Forlag" }
+    ],
+    "publishingDates": [
+      { "publishingDateRole": "01", "date": "2026-01-01" }
+    ]
+  },
+  "productSupplies": [
+    {
+      "market": { "territory": { "countries": ["NO"] } },
+      "supplyDetails": [
+        {
+          "supplier": { "supplierRole": "09", "supplierName": "Demo Forlag" },
+          "productAvailability": "20",
+          "prices": [
+            { "priceType": "02", "priceAmount": "100.00", "currencyCode": "NOK" }
+          ]
+        }
+      ]
+    }
+  ]
+}

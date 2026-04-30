@@ -899,6 +899,110 @@ Items found during the mapping that should land outside Phase 6's scope:
     lands, ensure the file is referenced from Task #11 (Phase 7 Bokbasen)
     so the next phase has a concrete starting fixture.
 
+## 11. XSD Validation (WI5)
+
+WI5 lands the formal gate that blocks invalid ONIX from shipping. It wraps
+`xmllint --noout --schema` against the vendored EDItEUR Reference XSD
+(Issue 73 / Revision 8 / schema version 3.0.8.0 — see §6 for provenance).
+
+### Where it lives
+
+- Module: `Barkpark.Plugins.OnixEdit.Export.Validator` at
+  `api/lib/barkpark/plugins/onixedit/export/validator.ex`.
+- Public surface: `validate_xsd/2` (returns `:ok | {:error, [reason, ...]}`)
+  and `default_xsd_path/0` (resolved via `Application.app_dir(:barkpark, ...)`).
+- Top-level wrapper: `Barkpark.Plugins.OnixEdit.Export.validate_against_xsd/2`
+  delegates here; replaces the WI2 raise stub.
+- Tests: `api/test/barkpark/plugins/onixedit/export/validator_test.exs` with
+  `@moduletag :validator`.
+- Fixtures: `api/test/fixtures/onix/{minimal,full,broken}-book.json` —
+  see file-level `_note` for what each one exercises.
+
+### Local development
+
+xmllint ships in the `libxml2-utils` package on Debian/Ubuntu and via
+`brew install libxml2` on macOS. Without it, the validator returns
+`{:error, ["xmllint not on PATH; install libxml2-utils to run validator"]}`
+and the test module skips cleanly via `setup_all`.
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install -y libxml2-utils
+
+# macOS (Homebrew)
+brew install libxml2
+
+# Run only the validator suite
+cd api && mix test test/barkpark/plugins/onixedit/export/validator_test.exs
+
+# Or run the full test suite including the :validator tag
+cd api && mix test --include validator
+```
+
+### What failures look like
+
+`xmllint --noout --schema <xsd> <xml>` writes one diagnostic line per
+violation to stderr, e.g.
+
+```
+broken-book.xml:13: element DescriptiveDetail: Schemas validity error :
+  Element '...DescriptiveDetail': This element is not expected. Expected
+  is one of (..., ProductIdentifier).
+broken-book.xml fails to validate
+```
+
+`Validator.parse_reasons/1` keeps lines mentioning *element*, *attribute*,
+*complexType*, or *fails to validate*. Reading: each line tells you the
+file/line, the element under inspection, and the XSD-expected siblings
+or parent constraint that was violated.
+
+### CI behaviour
+
+The Phase-2 / WI4 `mix-test` job in `.github/workflows/elixir.yml` installs
+`libxml2-utils` immediately after `mix deps.get`. There is no
+`--exclude :validator` anywhere — the gate runs on every PR. Failing
+validator tests turn the job red; the job is currently
+`continue-on-error: true` (advisory) while pre-existing test-infra drift
+is being remediated, but ONIX-specific failures are visible in the run log
+and Boss treats them as merge blockers.
+
+### Backlog surfaced by WI5
+
+WI5 ran every WI3+WI4 codepath through xmllint and found four upstream
+emission bugs. WI5 fixed the smallest one (Header SentDateTime ISO-8601
+format → ONIX-compatible `YYYYMMDDTHHMMSS`); the rest are in the
+pre-WI8 follow-up backlog:
+
+1. **WI3 Thema → MainSubject convention.** WI3 emits `<MainSubject>` as a
+   sibling of `<Subject>`, but ONIX 3.0 XSD treats `<MainSubject>` as an
+   empty flag *inside* `<Subject>`. The `<MainSubjectSchemeIdentifier>`
+   element does not exist in the XSD. Boss Q3 convention is correct
+   (first Thema is primary); the encoding needs to flip to:
+   `<Subject><MainSubject/><SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>...</Subject>`.
+   `themaSubjectCategory` is therefore omitted from `full-book.json` and
+   the Phase-7 / WI8 proof fixture until this lands.
+2. **WI4 Text language attribute.** `CollateralDetail.textContents[].text`
+   resolves the localizedText fallback chain and emits e.g.
+   `<Text language="nb-NO">…</Text>`. ONIX expects ISO 639-2/B alpha-3
+   (`nob`), not BCP-47 (`nb-NO`). Same fix needed for any `language=` in
+   contributor BiographicalNote and other localized blocks.
+3. **WI4 PublisherRepresentative ordering.** WI4 emits `<AgentName>` only
+   inside `<PublisherRepresentative>`; XSD requires `<AgentRole>` first
+   (then optional `<AgentName>`). Either default an `agentRole` (List 69
+   `01` "Sales agent") or make AgentRole non-optional in the schema and
+   propagate the requirement through to Studio.
+4. **WI4 default ProductSupply Supplier.** When book.json carries no
+   `productSupplies`, `ProductSupply.build_supplier/1` synthesises a
+   `<Supplier>` with `<SupplierRole>` only. XSD requires either
+   `<SupplierIdentifier>` or `<SupplierName>`. Fix: synthesise a default
+   `<SupplierName>"Barkpark"</SupplierName>` (or pull the SenderName)
+   so the default is XSD-valid; alternatively also synthesise a default
+   `<UnpricedItemType>` when no `prices` are present, so `<SupplyDetail>`
+   does not fail on missing Price/SupplyDate/etc.
+
+Each is a small, well-bounded fix the next worker can land before WI8
+takes the proof artefact.
+
 ## Appendix A — Field count & status totals
 
 Counted against the 10 mapping subsections plus envelope:
