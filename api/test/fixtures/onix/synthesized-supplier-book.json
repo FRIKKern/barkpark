@@ -1,0 +1,30 @@
+{
+  "_note": "WI5.5 fixture — exercises the synthesized-Supplier path. productSupplies is intentionally OMITTED so ProductSupply.build/2 generates a default <ProductSupply> with synthesized <SupplierRole>09</SupplierRole>, <SupplierName> derived from publishingDetail.publishers[0].publisherName, <ProductAvailability>20</ProductAvailability>, and <UnpricedItemType>01</UnpricedItemType> placeholder. Must validate green against the EDItEUR XSD via the synthesis path.",
+  "_publishedId": "p_synth",
+  "productIdentifiers": [
+    { "productIdType": "15", "idValue": "9788234500017" }
+  ],
+  "productForm": "BC",
+  "titleDetails": [
+    {
+      "titleType": "01",
+      "titleElements": [
+        { "titleElementLevel": "01", "titleText": "Synthesized Supplier Book" }
+      ]
+    }
+  ],
+  "contributors": [
+    {
+      "contributorRole": "A01",
+      "personName": { "keyNames": "Synthesizer" }
+    }
+  ],
+  "publishingDetail": {
+    "publishers": [
+      { "publishingRole": "01", "publisherName": "Demo Forlag" }
+    ],
+    "publishingDates": [
+      { "publishingDateRole": "01", "date": "2026-04-30" }
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "_note": "WI5 fixture — exercises every WI3+WI4 codepath that currently emits XSD-valid ONIX. Multi-contributor, multi-price (NOK + EUR), ProductFormDetail, cover image SupportingResource. Reused as Phase 6 WI8 proof fixture. Intentional omissions surfaced by WI5's gate: themaSubjectCategory (WI3 emits MainSubject as sibling of Subject — XSD requires it as a flag inside Subject), collateralDetail.textContents (WI4 emits language='nb-NO' but ONIX expects ISO 639-2/B 'nob'), publisherRepresentatives (WI4 emits AgentName before required AgentRole). Track each as a follow-up before WI8 lands the proof artefact.",
+  "_note": "WI5.5 fixture — exercises every WI3+WI4 codepath now compliant with the EDItEUR XSD: multi-Thema (MainSubject nested inside first Subject), multi-contributor, nb-NO + eng descriptions in CollateralDetail (asserts ISO 639-2/B 'nob' on <Text language=…>), multi-supplier productSupplies (NO + SE/DK markets), ProductFormDetail, cover image SupportingResource. PublisherRepresentative ordering is exercised in wi4_test.exs unit assertions; it's omitted here because MarketPublishingDetail requires a <MarketPublishingStatus> child the export pipeline does not yet emit (out-of-scope follow-up). Reused as Phase 6 WI8 proof fixture.",
   "_publishedId": "p9",
   "productIdentifiers": [
     { "productIdType": "15", "idValue": "9788234567890" }
@@ -32,7 +32,18 @@
       "personName": { "keyNames": "Translator" }
     }
   ],
+  "themaSubjectCategory": ["FBA", "FBC", "Y"],
   "collateralDetail": {
+    "textContents": [
+      {
+        "textType": "03",
+        "contentAudience": "00",
+        "text": {
+          "nob": "En medrivende roman om kjærlighet og lengsel.",
+          "eng": "A captivating novel about love and longing."
+        }
+      }
+    ],
     "supportingResources": [
       {
         "resourceContentType": "01",
@@ -66,6 +77,18 @@
           "prices": [
             { "priceType": "02", "priceAmount": "299.00", "currencyCode": "NOK" },
             { "priceType": "04", "priceAmount": "29.00", "currencyCode": "EUR" }
+          ]
+        }
+      ]
+    },
+    {
+      "market": { "territory": { "countries": ["SE", "DK"] } },
+      "supplyDetails": [
+        {
+          "supplier": { "supplierRole": "02", "supplierName": "Nordic Wholesale" },
+          "productAvailability": "20",
+          "prices": [
+            { "priceType": "02", "priceAmount": "329.00", "currencyCode": "SEK" }
           ]
         }
       ]

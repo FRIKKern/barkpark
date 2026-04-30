@@ -37,10 +37,26 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ValidatorTest do
       assert :ok = Validator.validate_xsd(xml)
     end
 
-    test "full-book.json produces XSD-valid ONIX with WI3+WI4 blocks" do
+    test "full-book.json produces XSD-valid ONIX with WI3+WI4+WI5.5 blocks" do
       book = load_fixture("full-book")
       {:ok, xml} = export_xml(book)
       assert :ok = Validator.validate_xsd(xml)
+    end
+
+    test "synthesized-supplier-book.json (no productSupplies) validates via synthesis path" do
+      book = load_fixture("synthesized-supplier-book")
+      {:ok, xml} = export_xml(book)
+      assert :ok = Validator.validate_xsd(xml)
+    end
+
+    test "all three valid fixtures validate green in one sweep" do
+      for name <- ["minimal-book", "full-book", "synthesized-supplier-book"] do
+        book = load_fixture(name)
+        {:ok, xml} = export_xml(book)
+
+        assert :ok = Validator.validate_xsd(xml),
+               "expected #{name}.json to validate against the EDItEUR XSD"
+      end
     end
   end
 
