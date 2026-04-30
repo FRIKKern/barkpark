@@ -8,6 +8,8 @@
 
 # Bokbasen ONIX 3.0 pre-flight audit
 
+> → See [`bokbasen-api-contract.md`](./bokbasen-api-contract.md) for the wire contract pinned in Phase 7 WI1.
+
 > **Scope:** capture what is *publicly documented* about Bokbasen's ONIX
 > ingestion and verify the existing barkpark ONIX 3.0 export against those
 > findings. Apply only low-risk in-scope fixes that public Bokbasen
@@ -177,15 +179,33 @@ acceptance criterion. Each maps to a Phase 7 candidate task in §6.
   preferred? **Pre-flight assumption:** the current placeholder
   `<SenderName>barkpark.cloud</SenderName>` is acceptable; no GLN
   required. Confirm before Phase 7 ships transport code.
+  **Resolved (WI1):** `bokbasen-api-contract.md` §2.1 + §1.3 confirm
+  that sender identity is fully derived from the OAuth2 token (audience
+  `https://api.bokbasen.io/metadata/`); `<Header>/<Sender>` is
+  informational. WI1 pins the placeholder `<SenderName>barkpark.cloud</SenderName>`
+  as acceptable; no GLN/proprietary ID needed for the import path.
 - **Q2 — Test/sandbox endpoint.** Public docs name only the production
   hosts (`api.bokbasen.io`). The `https://api.stage.bokbasen.io/dds/`
   audience appears once in DDS docs. Does the metadata import service
   have a mirror at `api.stage.bokbasen.io`? Is there a synthetic fixture
   set publishers can POST against without affecting catalogue state?
+  **Resolved (WI1, partial):** the *auth* sandbox is confirmed at
+  `https://auth.stage.bokbasen.io/oauth/token`
+  (`bokbasen-api-contract.md` §2.1). The corresponding *metadata import
+  sandbox host* is **still open** — see
+  `bokbasen-api-contract.md` §9 Q-C [blocking].
 - **Q3 — OAuth2 client credentials.** `client_id` / `client_secret`
   issuance process is partner-only. What scopes does barkpark need
   (`metadata:import:onix`, `metadata:import:object`)? Audience is
   `https://api.bokbasen.io/metadata/`.
+  **Resolved (WI1, partial):** flow is fully pinned in
+  `bokbasen-api-contract.md` §2 — `client_credentials` grant against
+  `https://auth.bokbasen.io/oauth/token`, audience
+  `https://api.bokbasen.io/metadata/`, response carries access_token
+  + expires_in. No explicit scopes documented in public materials —
+  permissions are gated server-side by the audience and the
+  client-record's role. Credential *issuance* itself remains
+  partner-only and is part of §9 Q-C [blocking].
 - **Q4 — Required `<Language>` block.** Bokbasen's import expects a
   `<DescriptiveDetail>/<Language>/<LanguageCode>` composite to identify
   the language of the *work* (vs. the language of `<Text>` content,
@@ -215,6 +235,12 @@ acceptance criterion. Each maps to a Phase 7 candidate task in §6.
   currently emits `<ONIXMessage>` only. Does Bokbasen recommend V1 or V2
   for new integrations? V2 is described as "documentation in progress…"
   in their public space.
+  **Resolved (WI1):** WI1 pins **V2** as the default Phase 7 endpoint
+  (`bokbasen-api-contract.md` §3) — V2 accepts the existing
+  `<ONIXMessage>` wrapper barkpark already emits *and* additionally
+  supports ONIX 3.1.x payloads, so it is a strict superset of V1 for
+  our purposes. Boss-confirm preference is tracked as §9 Q-L
+  [non-blocking].
 - **Q9 — Norwegian VAT itemisation.** Norwegian books have been zero-VAT
   since 2023 across print, e-book, and audio formats. Bokbasen's import
   spec does not require an itemised `<Tax>` composite under `<Price>` —
