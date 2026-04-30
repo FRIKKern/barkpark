@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ONIXMessage release="3.0" xmlns="http://ns.editeur.org/onix/3.0/reference">
+  <Header>
+    <Sender>
+      <SenderName>barkpark.cloud</SenderName>
+    </Sender>
+    <SentDateTime>20260430T112142</SentDateTime>
+    <MessageNote>Barkpark dataset:production</MessageNote>
+  </Header>
+  <Product>
+    <RecordReference>barkpark.cloud:p9</RecordReference>
+    <NotificationType>03</NotificationType>
+    <ProductIdentifier>
+      <ProductIDType>15</ProductIDType>
+      <IDValue>9788234567890</IDValue>
+    </ProductIdentifier>
+    <DescriptiveDetail>
+      <ProductComposition>00</ProductComposition>
+      <ProductForm>BB</ProductForm>
+      <ProductFormDetail>B102</ProductFormDetail>
+      <TitleDetail>
+        <TitleType>01</TitleType>
+        <TitleElement>
+          <TitleElementLevel>01</TitleElementLevel>
+          <TitleText>Min nye bok</TitleText>
+          <Subtitle>En roman</Subtitle>
+        </TitleElement>
+      </TitleDetail>
+      <Contributor>
+        <SequenceNumber>1</SequenceNumber>
+        <ContributorRole>A01</ContributorRole>
+        <PersonName>Knut Hamsun</PersonName>
+        <NamesBeforeKey>Knut</NamesBeforeKey>
+        <KeyNames>Hamsun</KeyNames>
+      </Contributor>
+      <Contributor>
+        <SequenceNumber>2</SequenceNumber>
+        <ContributorRole>B06</ContributorRole>
+        <KeyNames>Translator</KeyNames>
+      </Contributor>
+      <Subject>
+        <MainSubject/>
+        <SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>
+        <SubjectSchemeVersion>1.5</SubjectSchemeVersion>
+        <SubjectCode>FBA</SubjectCode>
+      </Subject>
+      <Subject>
+        <SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>
+        <SubjectSchemeVersion>1.5</SubjectSchemeVersion>
+        <SubjectCode>FBC</SubjectCode>
+      </Subject>
+      <Subject>
+        <SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>
+        <SubjectSchemeVersion>1.5</SubjectSchemeVersion>
+        <SubjectCode>Y</SubjectCode>
+      </Subject>
+    </DescriptiveDetail>
+    <CollateralDetail>
+      <TextContent>
+        <TextType>03</TextType>
+        <ContentAudience>00</ContentAudience>
+        <Text language="nob">En medrivende roman om kjærlighet og lengsel.</Text>
+      </TextContent>
+      <SupportingResource>
+        <ResourceContentType>01</ResourceContentType>
+        <ContentAudience>00</ContentAudience>
+        <ResourceMode>03</ResourceMode>
+        <ResourceVersion>
+          <ResourceForm>02</ResourceForm>
+          <ResourceLink>https://api.barkpark.cloud/media/p9-cover.jpg</ResourceLink>
+        </ResourceVersion>
+      </SupportingResource>
+    </CollateralDetail>
+    <PublishingDetail>
+      <Imprint>
+        <ImprintName>Demo Forlag</ImprintName>
+      </Imprint>
+      <Publisher>
+        <PublishingRole>01</PublishingRole>
+        <PublisherName>Acme Pub</PublisherName>
+      </Publisher>
+      <PublishingDate>
+        <PublishingDateRole>01</PublishingDateRole>
+        <Date>20260429</Date>
+      </PublishingDate>
+    </PublishingDetail>
+    <ProductSupply>
+      <Market>
+        <Territory>
+          <CountriesIncluded>NO</CountriesIncluded>
+        </Territory>
+      </Market>
+      <SupplyDetail>
+        <Supplier>
+          <SupplierRole>09</SupplierRole>
+          <SupplierName>Acme Pub</SupplierName>
+        </Supplier>
+        <ProductAvailability>20</ProductAvailability>
+        <Price>
+          <PriceType>02</PriceType>
+          <PriceAmount>299.00</PriceAmount>
+          <CurrencyCode>NOK</CurrencyCode>
+        </Price>
+        <Price>
+          <PriceType>04</PriceType>
+          <PriceAmount>29.00</PriceAmount>
+          <CurrencyCode>EUR</CurrencyCode>
+        </Price>
+      </SupplyDetail>
+    </ProductSupply>
+    <ProductSupply>
+      <Market>
+        <Territory>
+          <CountriesIncluded>SE DK</CountriesIncluded>
+        </Territory>
+      </Market>
+      <SupplyDetail>
+        <Supplier>
+          <SupplierRole>02</SupplierRole>
+          <SupplierName>Nordic Wholesale</SupplierName>
+        </Supplier>
+        <ProductAvailability>20</ProductAvailability>
+        <Price>
+          <PriceType>02</PriceType>
+          <PriceAmount>329.00</PriceAmount>
+          <CurrencyCode>SEK</CurrencyCode>
+        </Price>
+      </SupplyDetail>
+    </ProductSupply>
+  </Product>
+</ONIXMessage>

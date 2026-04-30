@@ -392,6 +392,18 @@ Or with a custom token:
 BARKPARK_API_URL=http://YOUR_VPS_IP:4000 BARKPARK_API_TOKEN=your-token go run .
 ```
 
+## ONIX 3.0 Export Proof
+
+`proof/onix-sample.xml` is the validated ONIX 3.0 reference output produced by
+the OnixEdit export pipeline (`Barkpark.Plugins.OnixEdit.Export.to_string/1`)
+from the source fixture `api/test/fixtures/onix/full-book.json`. It validates
+clean against the vendored EDItEUR XSD at
+`api/priv/onix/onix-3.0/ONIX_BookProduct_3.0_reference.xsd` and serves as the
+end-to-end demonstration artifact for Phase 6 (Bokbasen pre-flight).
+
+- Regenerate: `cd api && mix onix.export_proof`
+- Drift guard: `api/test/barkpark/plugins/onixedit/export_proof_test.exs`
+
 ## Architecture
 
 ```

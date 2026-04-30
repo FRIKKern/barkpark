@@ -4,6 +4,15 @@
 > **Owner:** Barkpark Phase 6 (Task #43).
 > **Unblocks:** WI2 (skeleton) → WI3 (DescriptiveDetail) → WI4 (Collateral/Publishing/Supply) → WI5 (XSD CI gate) → WI6 (HTTP+UI) → WI7 (Bokbasen pre-flight) → WI8 (sample fixture for Phase 7).
 
+> **Worked example (WI8):** `proof/onix-sample.xml` is the live, XSD-validated
+> ONIX 3.0 output produced by `Barkpark.Plugins.OnixEdit.Export.to_string/1`
+> from `api/test/fixtures/onix/full-book.json`. Use it as the authoritative
+> reference when reading the per-field mappings below — every XPath in this
+> document corresponds to an element you can search for in that file. Drift
+> against the live exporter is enforced by
+> `api/test/barkpark/plugins/onixedit/export_proof_test.exs`; regenerate with
+> `cd api && mix onix.export_proof`.
+
 ## 1. Overview
 
 Phase 6 turns each OnixEdit `book` document into an ONIX-for-Books 3.0
