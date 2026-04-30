@@ -59,6 +59,19 @@ defmodule BarkparkWeb.Router do
     end
   end
 
+  # ── Operations admin (LiveView) — admin-gated via on_mount ──────────────
+  # TODO(phase-8): admin-role enforcement currently piggybacks the global
+  # `admin` permission. A dedicated `ops`/`operator` role may be added so
+  # the publish-ops console can be granted to operators without exposing
+  # plugin-settings reveal/audit.
+  scope "/admin", BarkparkWeb.Admin do
+    pipe_through :browser
+
+    live_session :admin_ops, on_mount: [{BarkparkWeb.LiveAuth, :admin}] do
+      live "/bokbasen", BokbasenLive
+    end
+  end
+
   # ── Studio (LiveView) ─────────────────────────────────────────────────────
   scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser
