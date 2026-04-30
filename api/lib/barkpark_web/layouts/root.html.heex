@@ -460,6 +460,24 @@
       }
     };
 
+    // OnixEdit WI6 — server-pushed download trigger. The LiveView pushes a
+    // `download` event with `{url, filename}`; we synthesize a hidden anchor
+    // click to trigger a normal browser download flow against the
+    // admin-gated controller.
+    Hooks.OnixDownload = {
+      mounted() {
+        this.handleEvent("download", ({url, filename}) => {
+          const a = document.createElement("a");
+          a.href = url;
+          if (filename) a.download = filename;
+          a.style.display = "none";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        });
+      }
+    };
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: {
         _csrf_token: csrfToken,
