@@ -58,7 +58,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
       assert bin =~ ~s|<KeyNames>Hamsun</KeyNames>|
 
       refute bin =~ ~s|<ProductFormDetail>|
-      refute bin =~ ~s|<MainSubject>|
+      refute bin =~ ~s|<MainSubject|
       refute bin =~ ~s|<Subject>|
     end
 
@@ -78,36 +78,55 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
     end
   end
 
-  describe "multi-Thema book — Boss Q3 main-subject convention" do
-    test "first Thema → MainSubject, remaining → Subject; ordering preserved" do
+  describe "multi-Thema book — Boss Q3 main-subject convention (XSD-correct nesting)" do
+    test "first Thema → <Subject> with <MainSubject/> child; remaining → plain <Subject>; ordering preserved" do
       doc =
         minimal_book()
         |> Map.put("themaSubjectCategory", ["FBA", "FBC", "Y"])
 
       bin = descriptive_detail_xml(doc)
 
-      assert bin =~ ~s|<MainSubject>|
-
+      # First Subject contains the MainSubject flag AND SubjectSchemeIdentifier=93,
+      # SubjectSchemeVersion, and SubjectCode for "FBA".
       assert bin =~
-               ~r|<MainSubject>\s*<MainSubjectSchemeIdentifier>93</MainSubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.5</SubjectSchemeVersion>\s*<SubjectCode>FBA</SubjectCode>\s*</MainSubject>|s
+               ~r|<Subject>\s*<MainSubject/>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.5</SubjectSchemeVersion>\s*<SubjectCode>FBA</SubjectCode>\s*</Subject>|s
 
-      subject_codes =
-        Regex.scan(
-          ~r|<Subject>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.5</SubjectSchemeVersion>\s*<SubjectCode>([A-Z0-9]+)</SubjectCode>\s*</Subject>|s,
-          bin
-        )
+      # All Thema Subjects in document order: first must include <MainSubject/>,
+      # subsequent must NOT.
+      subjects =
+        Regex.scan(~r|<Subject>(.*?)</Subject>|s, bin)
         |> Enum.map(&Enum.at(&1, 1))
 
-      assert subject_codes == ["FBC", "Y"]
+      assert length(subjects) == 3
+      [first | rest] = subjects
+
+      assert first =~ ~s|<MainSubject/>|
+      assert first =~ ~s|<SubjectCode>FBA</SubjectCode>|
+
+      Enum.each(rest, fn body ->
+        refute body =~ ~s|<MainSubject|,
+               "non-first Subject must not contain MainSubject; got: #{body}"
+      end)
+
+      rest_codes =
+        rest
+        |> Enum.map(fn body ->
+          [_, code] = Regex.run(~r|<SubjectCode>([^<]+)</SubjectCode>|, body)
+          code
+        end)
+
+      assert rest_codes == ["FBC", "Y"]
     end
 
-    test "single Thema → only MainSubject, no <Subject>" do
+    test "single Thema → one <Subject> carrying the <MainSubject/> flag" do
       doc = Map.put(minimal_book(), "themaSubjectCategory", ["F"])
       bin = descriptive_detail_xml(doc)
 
-      assert bin =~ ~s|<MainSubject>|
-      assert bin =~ ~s|<SubjectCode>F</SubjectCode>|
-      refute bin =~ ~r|<Subject>\s*<SubjectSchemeIdentifier>|s
+      assert bin =~
+               ~r|<Subject>\s*<MainSubject/>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.5</SubjectSchemeVersion>\s*<SubjectCode>F</SubjectCode>\s*</Subject>|s
+
+      # Exactly one <Subject> in this case.
+      assert Regex.scan(~r|<Subject>|, bin) |> length() == 1
     end
   end
 
@@ -136,7 +155,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
       assert bin =~ ~s|<ProductFormDetail>B102</ProductFormDetail>|
       assert bin =~ ~s|<TitleDetail>|
       assert bin =~ ~s|<Contributor>|
-      assert bin =~ ~s|<MainSubject>|
+      assert bin =~ ~s|<MainSubject/>|
       assert bin =~ ~s|<SubjectCode>FBA</SubjectCode>|
       assert bin =~ ~s|<SubjectCode>FBC</SubjectCode>|
 

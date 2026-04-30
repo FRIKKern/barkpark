@@ -86,7 +86,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
           },
           "marketPublishingDetail" => %{
             "publisherRepresentatives" => [
-              %{"agentName" => "Bokbasen"}
+              %{"agentRole" => "06", "agentName" => "Bokbasen"}
             ]
           },
           "supplyDetails" => [
@@ -148,8 +148,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
     end
   end
 
-  describe "CollateralDetail — Norwegian-locale Text language semantics" do
-    test "nb-NO when localizedText resolves to nob" do
+  describe "CollateralDetail — Norwegian-locale Text language semantics (ISO 639-2/B)" do
+    test "language=\"nob\" when localizedText resolves to nob" do
       element =
         CollateralDetail.build(%{
           "collateralDetail" => %{
@@ -160,11 +160,13 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
         })
 
       bin = element |> XmlBuilder.generate() |> IO.iodata_to_binary()
-      assert bin =~ ~s|<Text language="nb-NO">Norsk tekst</Text>|
+      assert bin =~ ~s|<Text language="nob">Norsk tekst</Text>|
+      refute bin =~ ~s|<Text language="nb-NO">|
+      refute bin =~ ~s|<Text language="eng">|
       refute bin =~ ~s|<Text language="en">|
     end
 
-    test "en + Logger.warning when only English description supplied" do
+    test "language=\"eng\" + Logger.warning when only English description supplied" do
       log =
         capture_log([level: :warning], fn ->
           element =
@@ -177,10 +179,30 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
             })
 
           bin = element |> XmlBuilder.generate() |> IO.iodata_to_binary()
-          assert bin =~ ~s|<Text language="en">English-only description.</Text>|
+          assert bin =~ ~s|<Text language="eng">English-only description.</Text>|
+          refute bin =~ ~s|<Text language="en">|
         end)
 
       assert log =~ "TextContent fell back to English"
+    end
+
+    test "unmapped locale falls back to eng + Logger.warning" do
+      log =
+        capture_log([level: :warning], fn ->
+          element =
+            CollateralDetail.build(%{
+              "collateralDetail" => %{
+                "textContents" => [
+                  %{"text" => %{"klingon" => "tlhIngan Hol jatlh."}}
+                ]
+              }
+            })
+
+          bin = element |> XmlBuilder.generate() |> IO.iodata_to_binary()
+          assert bin =~ ~s|<Text language="eng">tlhIngan Hol jatlh.</Text>|
+        end)
+
+      assert log =~ "non-Norwegian, non-English language"
     end
 
     test "missing supportingResources → CollateralDetail emits TextContent only; well-formed" do
@@ -214,14 +236,80 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
       refute bin =~ ~s|<Price/>|
     end
 
-    test "missing productSupplies entirely → synthesized default ProductSupply with NO + 09 + 20" do
-      bin = xml(%{"_publishedId" => "p1"})
+    test "synthesizes complete Supplier when productSupplies is absent" do
+      bin =
+        xml(%{
+          "_publishedId" => "p1",
+          "publishingDetail" => %{
+            "publishers" => [%{"publishingRole" => "01", "publisherName" => "Demo Forlag"}]
+          }
+        })
 
       assert bin =~ ~s|<ProductSupply>|
       assert bin =~ ~s|<CountriesIncluded>NO</CountriesIncluded>|
+      assert bin =~ ~s|<Supplier>|
       assert bin =~ ~s|<SupplierRole>09</SupplierRole>|
+      assert bin =~ ~s|<SupplierName>Demo Forlag</SupplierName>|
       assert bin =~ ~s|<ProductAvailability>20</ProductAvailability>|
+      assert bin =~ ~s|<UnpricedItemType>01</UnpricedItemType>|
       refute bin =~ ~s|<Price>|
+
+      # Ordering: SupplierRole before SupplierName (inside Supplier),
+      # and Supplier → ProductAvailability → UnpricedItemType inside SupplyDetail.
+      role_pos = position(bin, "<SupplierRole>")
+      name_pos = position(bin, "<SupplierName>")
+      avail_pos = position(bin, "<ProductAvailability>")
+      unpriced_pos = position(bin, "<UnpricedItemType>")
+
+      assert role_pos < name_pos
+      assert name_pos < avail_pos
+      assert avail_pos < unpriced_pos
+    end
+
+    test "synthesized Supplier falls back to imprintName when no publisher present" do
+      bin =
+        xml(%{
+          "_publishedId" => "p_only_imprint",
+          "publishingDetail" => %{"imprint" => %{"imprintName" => "Boutique Imprint"}}
+        })
+
+      assert bin =~ ~s|<SupplierName>Boutique Imprint</SupplierName>|
+    end
+
+    test "synthesized Supplier emits placeholder name when neither publisher nor imprint is present" do
+      bin = xml(%{"_publishedId" => "p_unknown"})
+
+      assert bin =~ ~s|<SupplierName>Unknown publisher</SupplierName>|
+      assert bin =~ ~s|<UnpricedItemType>01</UnpricedItemType>|
+    end
+
+    test "PublisherRepresentative emits AgentRole before AgentName (XSD-required ordering)" do
+      bin = xml(full_book())
+
+      assert bin =~ ~s|<PublisherRepresentative>|
+      assert bin =~ ~s|<AgentRole>06</AgentRole>|
+      assert bin =~ ~s|<AgentName>Bokbasen</AgentName>|
+
+      role_pos = position(bin, "<AgentRole>")
+      name_pos = position(bin, "<AgentName>")
+      assert role_pos < name_pos
+    end
+
+    test "PublisherRepresentative defaults agentRole to 07 when book.json omits it" do
+      element =
+        ProductSupply.build(%{
+          "productSupplies" => [
+            %{
+              "marketPublishingDetail" => %{
+                "publisherRepresentatives" => [%{"agentName" => "Default Agent"}]
+              }
+            }
+          ]
+        })
+
+      bin = element |> List.first() |> XmlBuilder.generate() |> IO.iodata_to_binary()
+      assert bin =~ ~s|<AgentRole>07</AgentRole>|
+      assert bin =~ ~s|<AgentName>Default Agent</AgentName>|
     end
 
     test "build/2 returns a list of <ProductSupply> elements" do
@@ -279,6 +367,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
       cases = [
         {:publishing_date_role, ["01", "11", "12"]},
         {:supplier_role, ["02", "09"]},
+        {:agent_role, ["06", "07"]},
         {:price_type, ["02", "04", "41"]},
         {:product_availability, ["10", "20", "22", "50"]},
         {:country_code, ["NO", "SE", "DK", "FI", "IS", "GB", "US", "DE"]},
@@ -299,6 +388,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
       funs = [
         :publishing_date_role,
         :supplier_role,
+        :agent_role,
         :price_type,
         :product_availability,
         :country_code,
