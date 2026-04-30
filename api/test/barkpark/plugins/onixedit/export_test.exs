@@ -68,6 +68,81 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
     end
   end
 
+  defp load_fixture(name) do
+    Path.join([File.cwd!(), "test", "fixtures", "onix", name <> ".json"])
+    |> File.read!()
+    |> Jason.decode!()
+  end
+
+  describe "WI6 — to_iodata/1 / to_string/1 / to_file/2" do
+    setup do
+      if System.find_executable("xmllint") do
+        :ok
+      else
+        {:skip, "xmllint not on PATH — install libxml2-utils to run WI6 file-output gate"}
+      end
+    end
+
+    test "to_iodata/1 returns ok-iodata containing <ONIXMessage for a valid book" do
+      book = load_fixture("minimal-book")
+      assert {:ok, iodata} = Export.to_iodata(book)
+      bin = IO.iodata_to_binary(iodata)
+      assert bin =~ ~s|<ONIXMessage|
+      assert bin =~ ~s|release="3.0"|
+      assert bin =~ ~s|<RecordReference>barkpark.cloud:p1</RecordReference>|
+    end
+
+    test "to_string/1 returns a UTF-8 binary" do
+      book = load_fixture("minimal-book")
+      assert {:ok, bin} = Export.to_string(book)
+      assert is_binary(bin)
+      assert String.starts_with?(bin, "<?xml ")
+      assert bin =~ ~s|</ONIXMessage>|
+    end
+
+    test "to_file/2 writes the same bytes to_string/1 returns" do
+      book = load_fixture("minimal-book")
+
+      path =
+        Path.join(System.tmp_dir!(), "barkpark-wi6-#{System.unique_integer([:positive])}.onix")
+
+      try do
+        assert :ok = Export.to_file(book, path)
+        assert {:ok, expected} = Export.to_string(book)
+        assert File.read!(path) == expected
+      after
+        _ = File.rm(path)
+      end
+    end
+
+    test "to_iodata/1 short-circuits on XSD failure (broken-book has no productIdentifiers)" do
+      book = load_fixture("broken-book")
+
+      assert {:error, {:xsd_invalid, reasons}} = Export.to_iodata(book)
+      assert is_list(reasons)
+      assert reasons != []
+    end
+
+    test "to_string/1 propagates the xsd_invalid envelope" do
+      book = load_fixture("broken-book")
+      assert {:error, {:xsd_invalid, _reasons}} = Export.to_string(book)
+    end
+
+    test "to_file/2 does NOT touch the filesystem when XSD validation fails" do
+      book = load_fixture("broken-book")
+
+      path =
+        Path.join(
+          System.tmp_dir!(),
+          "barkpark-wi6-fail-#{System.unique_integer([:positive])}.onix"
+        )
+
+      refute File.exists?(path)
+      assert {:error, {:xsd_invalid, _reasons}} = Export.to_file(book, path)
+      refute File.exists?(path), "to_file/2 must not write the file when validation fails"
+    end
+  end
+
   describe "xmllint sanity (informal — not the WI5 gate)" do
     @tag :xmllint
     test "minimal ONIXMessage is well-formed per xmllint --noout" do

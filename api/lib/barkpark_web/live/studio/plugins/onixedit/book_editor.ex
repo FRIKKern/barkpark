@@ -283,6 +283,17 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     end
   end
 
+  # WI6 — Export to ONIX. Pushes a `download` event to the LiveView client
+  # which navigates the browser to the controller URL (the controller streams
+  # ONIX XML with `Content-Disposition: attachment`). Keeping the heavy work
+  # in the controller lets the LiveView stay light and reuses the same
+  # admin-gated pipeline.
+  def handle_event("export_onix", _params, socket) do
+    url = "/v1/plugins/onixedit/export/#{socket.assigns.dataset}/#{socket.assigns.doc_id}.onix"
+
+    {:noreply, push_event(socket, "download", %{url: url})}
+  end
+
   def handle_event("discard-draft", _params, socket) do
     case Content.discard_draft(socket.assigns.doc_id, socket.assigns.type, socket.assigns.dataset) do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Draft discarded") |> load_document()}
@@ -470,6 +481,16 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
         </div>
       </div>
       <div class="main-header-right">
+        <%= if @doc do %>
+          <button
+            id="onix-export-button"
+            class="btn btn-sm"
+            phx-click="export_onix"
+            phx-hook="OnixDownload"
+            data-test-id="onix-export-button"
+            aria-label="Export to ONIX"
+          >Export to ONIX</button>
+        <% end %>
         <%= if @is_draft do %>
           <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
           <%= if @has_published do %>

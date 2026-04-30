@@ -127,6 +127,27 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditorTest do
     end
   end
 
+  describe "WI6 — Export to ONIX button" do
+    test "renders an Export to ONIX button in the toolbar", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/studio/#{@dataset}/onixedit/book/#{@doc_id}")
+
+      assert html =~ "Export to ONIX"
+      assert has_element?(view, ~s|[data-test-id="onix-export-button"]|)
+    end
+
+    test "phx-click=\"export_onix\" pushes a `download` event with the controller URL",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/onixedit/book/#{@doc_id}")
+
+      view
+      |> element(~s|[data-test-id="onix-export-button"]|)
+      |> render_click()
+
+      assert_push_event(view, "download", %{url: url})
+      assert url == "/v1/plugins/onixedit/export/#{@dataset}/#{@doc_id}.onix"
+    end
+  end
+
   describe "Subjects tab — Thema persistence (WI3)" do
     setup do
       {:ok, _codelist} = Codelists.register("onixedit", "onixedit:thema", @thema_fixture)
