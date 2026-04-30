@@ -18,6 +18,8 @@ data.json
 
 # Secrets
 .env
+# Local dev secrets (committed: secrets/*.env.example only)
+secrets/*.env
 
 # Phoenix API (Elixir)
 api/_build/
