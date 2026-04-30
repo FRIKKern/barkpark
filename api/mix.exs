@@ -60,7 +60,9 @@ defmodule Barkpark.MixProject do
       # WI2: json schema validator dep
       {:ex_json_schema, "~> 0.10"},
       # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
-      {:lazy_html, ">= 0.1.0", only: :test}
+      {:lazy_html, ">= 0.1.0", only: :test},
+      # Phase 7 WI3: in-process HTTP mock for Bokbasen client tests
+      {:bypass, "~> 2.1", only: :test}
     ]
   end
 
