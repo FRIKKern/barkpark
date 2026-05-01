@@ -84,6 +84,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
   alias Barkpark.Plugins.OnixEdit.Export
+  alias Barkpark.Plugins.OnixEdit.Export.StatusPill
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
   alias BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePicker
 
@@ -629,14 +630,11 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   defp format_preview_error(other), do: inspect(other, limit: 100)
 
-  # Status pill color mapping. Tailwind classes are kept self-contained so the
-  # pill works whether or not the host theme overrides the badge palette.
-  @gray_states ~w(pending staging)
-  @blue_states ~w(staged polling)
-  @green_states ~w(accepted)
-  @red_states ~w(rejected)
-  @orange_states ~w(failed cannot_cancel cancelled)
-
+  # Status pill color/label mapping is centralised in
+  # `Barkpark.Plugins.OnixEdit.Export.StatusPill` (Phase 8 WI5) — both this
+  # toolbar pill and the admin/bokbasen LV row pill route through the same
+  # 5-bucket palette. Phase 7 WI5/WI6 carried inline copies; the helper
+  # eliminates the two-place drift risk.
   defp pill_state(%{} = status) do
     case Map.get(status, "state") do
       s when is_binary(s) -> s
@@ -647,18 +645,9 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   defp pill_state(_), do: nil
 
-  defp pill_color(state) when state in @gray_states, do: "bp-pill-gray"
-  defp pill_color(state) when state in @blue_states, do: "bp-pill-blue"
-  defp pill_color(state) when state in @green_states, do: "bp-pill-green"
-  defp pill_color(state) when state in @red_states, do: "bp-pill-red"
-  defp pill_color(state) when state in @orange_states, do: "bp-pill-orange"
-  defp pill_color(_), do: "bp-pill-gray"
+  defp pill_color(state), do: StatusPill.color_class(state)
 
-  defp pill_label(state) when is_binary(state) do
-    state |> String.replace("_", " ") |> String.capitalize()
-  end
-
-  defp pill_label(_), do: ""
+  defp pill_label(state), do: StatusPill.label(state)
 
   defp pill_tooltip(%{} = status) do
     case Map.get(status, "last_error") do
