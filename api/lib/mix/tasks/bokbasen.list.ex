@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Bokbasen.List do
   use Mix.Task
 
   alias Barkpark.Content.Document
-  alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
   alias Barkpark.Repo
 
   import Ecto.Query
@@ -88,13 +88,14 @@ defmodule Mix.Tasks.Bokbasen.List do
     |> order_by([d], desc: d.updated_at)
     |> Repo.all()
     |> Enum.map(fn doc ->
-      status = PublishWorker.read_status(doc)
+      status = BokbasenStatus.read(doc)
 
       %{
         doc_id: doc.doc_id,
         title: doc.title || "",
         state: Map.get(status, "state"),
-        submission_id: Map.get(status, "bokbasen_submission_id"),
+        submission_id:
+          Map.get(status, "submission_id") || Map.get(status, "bokbasen_submission_id"),
         last_action_at: Map.get(status, "updated_at")
       }
     end)

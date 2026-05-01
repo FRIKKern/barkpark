@@ -1482,7 +1482,47 @@
     },
 
     { "name": "bp_internal_note", "title": "Internal note", "type": "text" },
-    { "name": "bp_export_status", "title": "Export status (workflow)", "type": "string" },
+    {
+      "name": "bp_export_status",
+      "title": "Export status (workflow)",
+      "type": "composite",
+      "fields": [
+        {
+          "name": "state",
+          "type": "select",
+          "options": [
+            "pending",
+            "staging",
+            "staged",
+            "polling",
+            "accepted",
+            "rejected",
+            "failed",
+            "cancelled",
+            "cannot_cancel"
+          ]
+        },
+        { "name": "submission_id", "type": "string" },
+        { "name": "submitted_at", "type": "datetime" },
+        { "name": "staged_at", "type": "datetime" },
+        { "name": "polling_at", "type": "datetime" },
+        { "name": "accepted_at", "type": "datetime" },
+        { "name": "rejected_at", "type": "datetime" },
+        { "name": "retry_at", "type": "datetime" },
+        { "name": "attempt_count", "type": "string" },
+        { "name": "signed_off", "type": "boolean" },
+        {
+          "name": "last_error",
+          "type": "composite",
+          "fields": [
+            { "name": "type", "type": "string" },
+            { "name": "message", "type": "text" },
+            { "name": "details", "type": "text" },
+            { "name": "http_status", "type": "string" }
+          ]
+        }
+      ]
+    },
     { "name": "bp_last_exported_at", "title": "Last ONIX export at", "type": "datetime" }
   ],
   "validations": []

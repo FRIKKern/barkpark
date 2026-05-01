@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
 
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
   alias Barkpark.Repo
 
   @type_default "book"
@@ -305,7 +306,7 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
   end
 
   defp document_to_row(%Document{} = doc) do
-    status = PublishWorker.read_status(doc)
+    status = BokbasenStatus.read(doc)
 
     %{
       doc_id: doc.doc_id,
@@ -313,7 +314,7 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
       dataset: doc.dataset,
       title: doc.title,
       state: Map.get(status, "state"),
-      submission_id: Map.get(status, "bokbasen_submission_id"),
+      submission_id: submission_id_of(status),
       last_action_at: parse_dt(Map.get(status, "updated_at")),
       last_error: Map.get(status, "last_error")
     }
@@ -322,10 +323,14 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
   defp status_to_row(status) when is_map(status) do
     %{
       state: Map.get(status, "state"),
-      submission_id: Map.get(status, "bokbasen_submission_id"),
+      submission_id: submission_id_of(status),
       last_action_at: parse_dt(Map.get(status, "updated_at")),
       last_error: Map.get(status, "last_error")
     }
+  end
+
+  defp submission_id_of(status) when is_map(status) do
+    Map.get(status, "submission_id") || Map.get(status, "bokbasen_submission_id")
   end
 
   defp matches_status?(%{doc_id: doc_id}, %{} = status) do
@@ -443,7 +448,9 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
 
     text =
       case err do
+        %{"type" => t, "message" => m} when is_binary(m) and m != "" -> "#{t}: #{m}"
         %{"type" => t, "summary" => s} -> "#{t}: #{s}"
+        %{"message" => m} when is_binary(m) and m != "" -> m
         %{"type" => t} -> t
         _ -> inspect(err)
       end
