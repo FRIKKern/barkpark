@@ -235,13 +235,13 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.E2ETest do
 
       after_stage = status_of(reload(doc))
       assert after_stage["state"] == "staged"
-      assert after_stage["bokbasen_submission_id"] == @submission_id
+      assert after_stage["submission_id"] == @submission_id
       assert after_stage["last_error"] in [nil, %{}]
 
       # PubSub: staging then staged.
       assert_receive {:bokbasen_status_update, %{"state" => "staging"}}, 1_000
       assert_receive {:bokbasen_status_update, %{"state" => "staged"} = staged_msg}, 1_000
-      assert staged_msg["bokbasen_submission_id"] == @submission_id
+      assert staged_msg["submission_id"] == @submission_id
 
       # 2) First poll → UNPROCESSED → :pending → snooze.
       assert {:snooze, secs2} = perform_job(PublishWorker, args(doc.doc_id))
@@ -249,7 +249,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.E2ETest do
 
       after_poll1 = status_of(reload(doc))
       assert after_poll1["state"] == "polling"
-      assert after_poll1["bokbasen_submission_id"] == @submission_id
+      assert after_poll1["submission_id"] == @submission_id
       assert after_poll1["last_error"] in [nil, %{}]
 
       assert_receive {:bokbasen_status_update, %{"state" => "polling"}}, 1_000
@@ -263,7 +263,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.E2ETest do
 
       # Contract shape per docs/spec/bokbasen-api-contract.md and WI4 worker:
       assert final["state"] == "accepted"
-      assert final["bokbasen_submission_id"] == @submission_id
+      assert final["submission_id"] == @submission_id
       assert final["last_error"] in [nil, %{}]
       assert is_binary(final["updated_at"])
       # XML-poll details survive the parse so operators can inspect raw

@@ -526,8 +526,9 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditorTest do
     @bokbasen_doc_id "book-bokbasen-1"
 
     setup %{conn: conn} do
-      # Minimal book schema. The bp_export_status string field is what the
-      # PublishWorker writes its lifecycle JSON into; the toolbar pill reads it.
+      # Minimal book schema. Phase 8 WI1 promoted bp_export_status from a
+      # string field to a composite — the PublishWorker writes a native map
+      # via `Bokbasen.Status.write/2` and the toolbar pill reads `state`.
       {:ok, _schema} =
         Content.upsert_schema(
           %{
@@ -536,7 +537,14 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditorTest do
             "icon" => "book",
             "visibility" => "private",
             "fields" => [
-              %{"name" => "bp_export_status", "title" => "Export status", "type" => "string"}
+              %{
+                "name" => "bp_export_status",
+                "title" => "Export status",
+                "type" => "composite",
+                "fields" => [
+                  %{"name" => "state", "type" => "string"}
+                ]
+              }
             ]
           },
           @bokbasen_dataset

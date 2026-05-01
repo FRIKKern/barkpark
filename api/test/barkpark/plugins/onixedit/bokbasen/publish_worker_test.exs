@@ -146,17 +146,24 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
       reloaded = reload(doc)
       s = status_of(reloaded)
       assert s["state"] == "staged"
-      assert s["bokbasen_submission_id"] == "sub-happy"
+      assert s["submission_id"] == "sub-happy"
+      assert is_binary(s["staged_at"])
+      assert is_binary(s["submitted_at"])
 
       # 2nd perform: poll → pending → snooze
       assert {:snooze, _} = perform_job(PublishWorker, args(doc.doc_id))
-      assert status_of(reload(doc))["state"] == "polling"
+      mid = status_of(reload(doc))
+      assert mid["state"] == "polling"
+      assert mid["attempt_count"] == 1
+      assert is_binary(mid["polling_at"])
 
       # 3rd perform: poll → accepted → :ok
       assert :ok = perform_job(PublishWorker, args(doc.doc_id))
       final = status_of(reload(doc))
       assert final["state"] == "accepted"
-      assert final["bokbasen_submission_id"] == "sub-happy"
+      assert final["submission_id"] == "sub-happy"
+      assert is_binary(final["accepted_at"])
+      assert final["signed_off"] == true
     end
   end
 
@@ -220,7 +227,8 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
       s = status_of(reload(doc))
       assert s["state"] == "failed"
       assert s["last_error"]["type"] == "schema_rejection"
-      assert s["last_error"]["summary"] =~ "INVALID_ISBN"
+      assert s["last_error"]["message"] =~ "INVALID_ISBN"
+      assert s["last_error"]["http_status"] == 422
     end
   end
 
@@ -338,7 +346,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
       assert s["state"] == "cannot_cancel"
       assert s["last_error"]["type"] == "cannot_cancel"
       assert s["last_error"]["http_status"] == 404
-      assert s["last_error"]["note"] =~ "NotificationType=05"
+      assert s["last_error"]["message"] =~ "NotificationType=05"
     end
   end
 
@@ -366,12 +374,12 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
 
       assert {:snooze, _} = perform_job(PublishWorker, args(doc.doc_id))
 
-      # `stage_step` calls persist_status twice: once with state=staging, then
-      # again with state=staged after Bokbasen accepts the upload. We assert
-      # both transitions arrive on the per-doc topic in order.
+      # `stage_step` writes twice: once with state=staging, then again with
+      # state=staged after Bokbasen accepts the upload. We assert both
+      # transitions arrive on the per-doc topic in order.
       assert_receive {:bokbasen_status_update, %{"state" => "staging"}}, 1_000
       assert_receive {:bokbasen_status_update, %{"state" => "staged"} = staged}, 1_000
-      assert staged["bokbasen_submission_id"] == "sub-bcast"
+      assert staged["submission_id"] == "sub-bcast"
     end
 
     test "persist_status/2 is callable directly and broadcasts" do

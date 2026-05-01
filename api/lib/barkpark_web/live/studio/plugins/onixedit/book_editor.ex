@@ -82,6 +82,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
   alias Barkpark.Plugins.OnixEdit.Export
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
   alias BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePicker
@@ -472,7 +473,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
       has_published: match?({:ok, _}, pub_result),
       form: doc_to_form(doc, schema),
       subjects_thema: extract_thema(doc),
-      bp_status: PublishWorker.read_status(doc),
+      bp_status: BokbasenStatus.read(doc),
       page_title: (doc && doc.title) || "New Book"
     )
   end
@@ -557,11 +558,11 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
     case Oban.insert(PublishWorker.new(args)) do
       {:ok, job} ->
-        # Mark the doc as pending so the pill flips immediately. We reuse the
-        # worker's own `persist_status/2` helper (which also broadcasts on
-        # PubSub) so the write path is identical to a worker-driven update.
-        updated = PublishWorker.persist_status(doc, %{"state" => "pending", "last_error" => nil})
-        {:ok, job, PublishWorker.read_status(updated)}
+        # Mark the doc as pending so the pill flips immediately. Reuse the
+        # canonical write path (Status.write/2 broadcasts on PubSub) so the
+        # write is identical to a worker-driven update.
+        updated = BokbasenStatus.write(doc, %{"state" => "pending", "last_error" => nil})
+        {:ok, job, BokbasenStatus.read(updated)}
 
       {:error, reason} ->
         {:error, reason}
@@ -661,8 +662,9 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   defp pill_tooltip(%{} = status) do
     case Map.get(status, "last_error") do
+      %{"message" => m} when is_binary(m) and m != "" -> m
       %{"summary" => s} when is_binary(s) -> s
-      %{"type" => t, "details" => d} -> "#{t}: #{inspect(d, limit: 200)}"
+      %{"type" => t, "details" => d} when is_binary(t) -> "#{t}: #{inspect(d, limit: 200)}"
       %{"type" => t} when is_binary(t) -> t
       s when is_binary(s) -> s
       _ -> nil
