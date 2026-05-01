@@ -2,5 +2,5 @@
 <importItem>
   <submissionId>test-submission-id-xyz</submissionId>
   <state>FAILED</state>
-  <error>Synthetic ONIX validation error: missing /Product/RecordReference</error>
+  <error code="ONIX-VALIDATION" field="/Product/RecordReference">Synthetic ONIX validation error: missing /Product/RecordReference</error>
 </importItem>
