@@ -39,7 +39,7 @@ defmodule Mix.Tasks.Bokbasen.Status do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
   alias Barkpark.Repo
 
   import Ecto.Query
@@ -73,17 +73,25 @@ defmodule Mix.Tasks.Bokbasen.Status do
   defp detail(book_id) do
     case lookup_book(book_id) do
       {:ok, doc} ->
-        status = PublishWorker.read_status(doc)
+        status = BokbasenStatus.read(doc)
         state = Map.get(status, "state") || "(none)"
         last_action_at = Map.get(status, "updated_at") || "(never)"
-        submission_id = Map.get(status, "bokbasen_submission_id") || "(none)"
+        submission_id = submission_id_of(status) || "(none)"
         last_error = format_error(Map.get(status, "last_error"))
 
         Mix.shell().info("doc_id           : #{doc.doc_id}")
         Mix.shell().info("title            : #{doc.title || "(untitled)"}")
         Mix.shell().info("state            : #{state}")
-        Mix.shell().info("last_action_at   : #{last_action_at}")
         Mix.shell().info("submission_id    : #{submission_id}")
+        Mix.shell().info("submitted_at     : #{or_none(Map.get(status, "submitted_at"))}")
+        Mix.shell().info("staged_at        : #{or_none(Map.get(status, "staged_at"))}")
+        Mix.shell().info("polling_at       : #{or_none(Map.get(status, "polling_at"))}")
+        Mix.shell().info("accepted_at      : #{or_none(Map.get(status, "accepted_at"))}")
+        Mix.shell().info("rejected_at      : #{or_none(Map.get(status, "rejected_at"))}")
+        Mix.shell().info("retry_at         : #{or_none(Map.get(status, "retry_at"))}")
+        Mix.shell().info("attempt_count    : #{Map.get(status, "attempt_count") || 0}")
+        Mix.shell().info("signed_off       : #{Map.get(status, "signed_off") || false}")
+        Mix.shell().info("last_action_at   : #{last_action_at}")
         Mix.shell().info("last_error       : #{last_error}")
         :ok
 
@@ -123,7 +131,7 @@ defmodule Mix.Tasks.Bokbasen.Status do
     |> Repo.all()
     |> Enum.reduce(%{}, fn doc, acc ->
       key =
-        case Map.get(PublishWorker.read_status(doc), "state") do
+        case Map.get(BokbasenStatus.read(doc), "state") do
           s when is_binary(s) and s != "" -> s
           _ -> "(none)"
         end
@@ -131,6 +139,15 @@ defmodule Mix.Tasks.Bokbasen.Status do
       Map.update(acc, key, 1, &(&1 + 1))
     end)
   end
+
+  defp submission_id_of(status) when is_map(status) do
+    Map.get(status, "submission_id") || Map.get(status, "bokbasen_submission_id")
+  end
+
+  defp or_none(nil), do: "(none)"
+  defp or_none(""), do: "(none)"
+  defp or_none(v) when is_binary(v), do: v
+  defp or_none(v), do: inspect(v)
 
   defp lookup_book(book_id) do
     with {:error, :not_found} <- Content.get_document(book_id, @type_default, @dataset_default) do
@@ -150,7 +167,8 @@ defmodule Mix.Tasks.Bokbasen.Status do
     type = Map.get(err, "type") || "unknown"
 
     summary =
-      Map.get(err, "summary") ||
+      Map.get(err, "message") ||
+        Map.get(err, "summary") ||
         Map.get(err, "reason") ||
         Map.get(err, "note") ||
         Map.get(err, "details") ||
