@@ -167,9 +167,17 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   defp do_stage(doc, binary, attempt, client_opts) do
     case Client.stage(binary, client_opts) do
       {:ok, %{submission_id: sub_id, poll_url: poll_url}} when is_binary(sub_id) ->
+        # Phase 8 WI2 — defensively re-sanitize the submission_id Client.stage
+        # returned: Bokbasen Location headers can have trailing slashes or
+        # query strings that the Client's split-and-take-last extractor does
+        # not strip. We prefer the Client's value but fall back to extracting
+        # from poll_url (which preserves the full Location URL on the
+        # no-JSON-body path).
+        effective_id = extract_submission_id(sub_id) || extract_submission_id(poll_url) || sub_id
+
         Status.write(doc, %{
           "state" => "staged",
-          "submission_id" => sub_id,
+          "submission_id" => effective_id,
           "poll_url" => poll_url,
           "staged_at" => DateTime.utc_now(),
           "last_error" => nil
@@ -290,12 +298,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           "submission_id" => sub_id,
           "poll_url" => poll_url,
           "rejected_at" => DateTime.utc_now(),
-          "last_error" => %{
-            "type" => "rejected",
-            "message" => "Bokbasen rejected submission",
-            "details" => format_details(details),
-            "http_status" => 200
-          }
+          "last_error" => build_rejected_envelope(details, 200)
         })
 
         {:cancel, :rejected}
@@ -313,6 +316,25 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "rate_limited_exhausted")
           {:cancel, :exhausted}
         else
+          retry_at =
+            case parse_retry_after(secs) do
+              {:ok, dt} -> dt
+              :error -> nil
+            end
+
+          Status.write(doc, %{
+            "state" => "polling",
+            "submission_id" => sub_id,
+            "poll_url" => poll_url,
+            "retry_at" => retry_at,
+            "last_error" => %{
+              "type" => "rate_limited",
+              "message" => "Bokbasen rate-limited; retrying after #{secs}s",
+              "details" => nil,
+              "http_status" => 429
+            }
+          })
+
           {:snooze, max(secs, 1)}
         end
 
@@ -390,10 +412,13 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   defp do_cancel(doc, sub_id, opts) do
     case Client.cancel(sub_id, opts) do
       :ok ->
+        # Phase 8 WI2 — Bokbasen returns 204 No Content with no body, so we
+        # have no server-side cancellation timestamp to record. Per the WI2
+        # contract `cancelled_at` remains nil; only `state` and the merged
+        # `updated_at` (auto-stamped by Status.write/2) change.
         Status.write(doc, %{
           "state" => "cancelled",
           "submission_id" => sub_id,
-          "cancelled_at" => DateTime.utc_now(),
           "last_error" => nil
         })
 
@@ -466,9 +491,6 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   defp http_status_of(%SchemaRejectionError{}), do: 422
   defp http_status_of(_), do: nil
 
-  defp format_details(details) when is_binary(details), do: details
-  defp format_details(details), do: inspect(details, limit: 500, printable_limit: 1000)
-
   defp submission_id_of(%{} = status) do
     Map.get(status, "submission_id") || Map.get(status, "bokbasen_submission_id")
   end
@@ -497,4 +519,166 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
 
   defp safe_truncate(body) when is_binary(body), do: String.slice(body, 0, 500)
   defp safe_truncate(body), do: inspect(body, limit: 200)
+
+  # ---------------------------------------------------------------------------
+  # Phase 8 WI2 — submission_id sanitization
+  # ---------------------------------------------------------------------------
+
+  @doc false
+  # Strip query-string + trailing slash, take last path segment. Idempotent
+  # for already-clean IDs ("abc-123" → "abc-123").
+  @spec extract_submission_id(String.t() | any()) :: String.t() | nil
+  def extract_submission_id(value) when is_binary(value) and value != "" do
+    cleaned =
+      value
+      |> String.split("?", parts: 2)
+      |> hd()
+      |> String.trim_trailing("/")
+      |> String.split("/")
+      |> List.last()
+
+    case cleaned do
+      "" -> nil
+      v -> v
+    end
+  end
+
+  def extract_submission_id(_), do: nil
+
+  # ---------------------------------------------------------------------------
+  # Phase 8 WI2 — Retry-After parsing (integer seconds OR HTTP-date)
+  # ---------------------------------------------------------------------------
+
+  @month_map %{
+    "Jan" => 1,
+    "Feb" => 2,
+    "Mar" => 3,
+    "Apr" => 4,
+    "May" => 5,
+    "Jun" => 6,
+    "Jul" => 7,
+    "Aug" => 8,
+    "Sep" => 9,
+    "Oct" => 10,
+    "Nov" => 11,
+    "Dec" => 12
+  }
+
+  @doc """
+  Parse a Retry-After header value into an absolute `DateTime` in UTC.
+
+  Accepts either:
+
+    * an integer (seconds, relative to `now`)
+    * an integer-seconds string (`"60"`)
+    * an RFC 7231 IMF-fixdate (`"Wed, 21 Oct 2025 07:28:00 GMT"`)
+
+  Returns `{:ok, dt}` on success or `:error` on parse failure.
+
+  The optional `now` is used as the base when the value is integer
+  seconds (defaults to `DateTime.utc_now/0`). Useful for deterministic
+  tests.
+  """
+  @spec parse_retry_after(term(), DateTime.t()) :: {:ok, DateTime.t()} | :error
+  def parse_retry_after(value), do: parse_retry_after(value, DateTime.utc_now())
+
+  def parse_retry_after(nil, _now), do: :error
+
+  def parse_retry_after(value, now) when is_integer(value) and value >= 0 do
+    {:ok, DateTime.add(now, value, :second)}
+  end
+
+  def parse_retry_after(value, now) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {n, ""} when n >= 0 -> {:ok, DateTime.add(now, n, :second)}
+      _ -> parse_http_date(value)
+    end
+  end
+
+  def parse_retry_after(_, _), do: :error
+
+  defp parse_http_date(s) do
+    case Regex.run(
+           ~r/^[A-Za-z]+,\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s+GMT$/,
+           String.trim(s)
+         ) do
+      [_, d, mon, y, h, mi, sec] ->
+        with {:ok, mn} <- Map.fetch(@month_map, mon),
+             {:ok, ndt} <-
+               NaiveDateTime.new(
+                 String.to_integer(y),
+                 mn,
+                 String.to_integer(d),
+                 String.to_integer(h),
+                 String.to_integer(mi),
+                 String.to_integer(sec)
+               ),
+             {:ok, dt} <- DateTime.from_naive(ndt, "Etc/UTC") do
+          {:ok, dt}
+        else
+          _ ->
+            Logger.debug("PublishWorker.parse_http_date: bad date #{inspect(s)}")
+            :error
+        end
+
+      _ ->
+        Logger.debug("PublishWorker.parse_http_date: bad date #{inspect(s)}")
+        :error
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Phase 8 WI2 — :rejected last_error envelope
+  # ---------------------------------------------------------------------------
+
+  defp build_rejected_envelope(details, http_status) do
+    raw =
+      case details do
+        %{"raw" => r} when is_binary(r) -> r
+        m when is_map(m) -> Jason.encode!(m)
+        b when is_binary(b) -> b
+        other -> inspect(other)
+      end
+
+    truncated_raw = String.slice(raw, 0, 4096)
+    {error_text, error_attrs} = extract_error_xml(raw)
+
+    message =
+      case error_text do
+        nil -> "Bokbasen rejected the submission"
+        text -> "Bokbasen rejected the submission: " <> truncate_message(text, 200)
+      end
+
+    %{
+      "type" => "schema_rejection",
+      "message" => message,
+      "details" => %{
+        "raw_xml" => truncated_raw,
+        "error_text" => error_text,
+        "error_attrs" => error_attrs
+      },
+      "http_status" => http_status
+    }
+  end
+
+  defp extract_error_xml(body) when is_binary(body) do
+    case Regex.run(~r/<error([^>]*)>([^<]*)<\/error>/s, body) do
+      [_, attrs_str, text] ->
+        {String.trim(text), parse_xml_attrs(attrs_str)}
+
+      _ ->
+        {nil, %{}}
+    end
+  end
+
+  defp extract_error_xml(_), do: {nil, %{}}
+
+  defp parse_xml_attrs(attrs_str) when is_binary(attrs_str) do
+    Regex.scan(~r/(\w+)="([^"]*)"/, attrs_str)
+    |> Enum.into(%{}, fn [_, k, v] -> {k, v} end)
+  end
+
+  defp truncate_message(text, max) when is_binary(text) and is_integer(max) do
+    if String.length(text) > max, do: String.slice(text, 0, max), else: text
+  end
 end
