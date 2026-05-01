@@ -14,29 +14,42 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   The worker re-enqueues itself via `{:snooze, secs}` between stage and
   poll steps. Each `perform/1` invocation is one transition.
 
-  ## Persistence shape
+  ## Persistence shape (Phase 8 WI1)
 
   State is stored in `document.content["bp_export_status"]` as a
-  JSON-encoded string (the schema field is a plain `string`):
+  **native composite map** (Phase 8 WI1 promoted the field from a
+  JSON-encoded string). Reads/writes go through
+  `Barkpark.Plugins.OnixEdit.Bokbasen.Status` which preserves
+  backwards-compat with the legacy string shape.
 
-      {
-        "state": "polling",
-        "bokbasen_submission_id": "abc-123",
-        "poll_url": "https://api.bokbasen.no/.../status/abc-123",
-        "last_error": null,
-        "updated_at": "2026-04-30T13:45:00Z"
+  Composite fields written by this worker:
+
+      %{
+        "state"          => "polling",
+        "submission_id"  => "abc-123",
+        "poll_url"       => "https://api.bokbasen.no/.../status/abc-123",
+        "submitted_at"   => "2026-04-30T13:45:00Z",
+        "staged_at"      => "2026-04-30T13:45:05Z",
+        "polling_at"     => "2026-04-30T13:45:10Z",
+        "accepted_at"    => nil,
+        "rejected_at"    => nil,
+        "retry_at"       => nil,
+        "attempt_count"  => 2,
+        "signed_off"     => false,
+        "last_error"     => nil,
+        "updated_at"     => "2026-04-30T13:45:10Z"
       }
 
-  Defensive fallback: legacy plain strings (`"draft"`, `"published"`,
-  etc.) are coerced to `%{"state" => <legacy>}` on read.
+  `Status.write/2` derives `signed_off: true` whenever the merged status
+  has `accepted_at` set.
 
   ## Idempotency
 
-  If `bokbasen_submission_id` is already present in `bp_export_status`
-  on entry, the stage step is **skipped** and the worker resumes
-  polling. Combined with the `unique:` clause on the Oban worker
-  (60s window keyed on `document_id`), this means re-enqueueing or
-  retrying the same document never causes a duplicate stage POST.
+  If `submission_id` is already present in `bp_export_status` on entry,
+  the stage step is **skipped** and the worker resumes polling. Combined
+  with the `unique:` clause on the Oban worker (60s window keyed on
+  `document_id`), this means re-enqueueing or retrying the same document
+  never causes a duplicate stage POST.
 
   ## Retry policy
 
@@ -80,8 +93,8 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Errors.NetworkError
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Errors.RateLimitError
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Errors.SchemaRejectionError
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.Status
   alias Barkpark.Plugins.OnixEdit.Export
-  alias Barkpark.Repo
 
   @max_effective_attempts 3
   @poll_initial_delay_s 5
@@ -102,9 +115,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         {:cancel, :document_missing}
 
       {:ok, %Document{} = doc} ->
-        status = read_status(doc)
+        status = Status.read(doc)
 
-        case status["bokbasen_submission_id"] do
+        case submission_id_of(status) do
           sub_id when is_binary(sub_id) and sub_id != "" ->
             poll_step(doc, sub_id, status["poll_url"], attempt, client_opts)
 
@@ -124,7 +137,10 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   # ---------------------------------------------------------------------------
 
   defp stage_step(%Document{} = doc, attempt, client_opts) do
-    persist_status(doc, %{"state" => "staging"})
+    Status.write(doc, %{
+      "state" => "staging",
+      "submitted_at" => DateTime.utc_now()
+    })
 
     book_doc = book_doc_from(doc)
 
@@ -134,9 +150,14 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         do_stage(doc, binary, attempt, client_opts)
 
       {:error, {:xsd_invalid, reasons}} ->
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "failed",
-          "last_error" => %{"type" => "xsd_invalid", "reasons" => reasons}
+          "last_error" => %{
+            "type" => "xsd_invalid",
+            "message" => "ONIX failed XSD validation",
+            "details" => Enum.join(reasons, "; "),
+            "http_status" => nil
+          }
         })
 
         {:cancel, :xsd_invalid}
@@ -146,10 +167,11 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   defp do_stage(doc, binary, attempt, client_opts) do
     case Client.stage(binary, client_opts) do
       {:ok, %{submission_id: sub_id, poll_url: poll_url}} when is_binary(sub_id) ->
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "staged",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
           "poll_url" => poll_url,
+          "staged_at" => DateTime.utc_now(),
           "last_error" => nil
         })
 
@@ -168,9 +190,15 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "rate_limited_exhausted")
           {:cancel, :exhausted}
         else
-          persist_status(doc, %{
+          Status.write(doc, %{
             "state" => "staging",
-            "last_error" => %{"type" => "rate_limited", "retry_after_seconds" => secs}
+            "retry_at" => DateTime.utc_now() |> DateTime.add(secs, :second),
+            "last_error" => %{
+              "type" => "rate_limited",
+              "message" => "Bokbasen rate-limited; retrying after #{secs}s",
+              "details" => nil,
+              "http_status" => 429
+            }
           })
 
           {:snooze, max(secs, 1)}
@@ -181,9 +209,14 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "network_exhausted")
           {:cancel, :exhausted}
         else
-          persist_status(doc, %{
+          Status.write(doc, %{
             "state" => "staging",
-            "last_error" => %{"type" => "network", "reason" => inspect(err.reason)}
+            "last_error" => %{
+              "type" => "network",
+              "message" => inspect(err.reason),
+              "details" => nil,
+              "http_status" => nil
+            }
           })
 
           {:error, err}
@@ -194,9 +227,14 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "http_exhausted")
           {:cancel, :exhausted}
         else
-          persist_status(doc, %{
+          Status.write(doc, %{
             "state" => "staging",
-            "last_error" => %{"type" => "http", "status" => err.status}
+            "last_error" => %{
+              "type" => "http",
+              "message" => "Bokbasen HTTP #{err.status}",
+              "details" => safe_truncate(err.body),
+              "http_status" => err.status
+            }
           })
 
           {:error, err}
@@ -220,32 +258,44 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
 
     case Client.poll(sub_id, opts) do
       {:ok, %{status: :pending}} ->
-        persist_status(doc, %{
+        current = Status.read(doc)
+        next_count = (current["attempt_count"] || 0) + 1
+
+        Status.write(doc, %{
           "state" => "polling",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
           "poll_url" => poll_url,
+          "polling_at" => DateTime.utc_now(),
+          "attempt_count" => next_count,
           "last_error" => nil
         })
 
         {:snooze, poll_backoff(attempt)}
 
       {:ok, %{status: :accepted, details: details}} ->
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "accepted",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
           "poll_url" => poll_url,
-          "last_error" => nil,
-          "details" => details
+          "accepted_at" => DateTime.utc_now(),
+          "details" => details,
+          "last_error" => nil
         })
 
         :ok
 
       {:ok, %{status: :rejected, details: details}} ->
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "rejected",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
           "poll_url" => poll_url,
-          "last_error" => %{"type" => "rejected", "details" => details}
+          "rejected_at" => DateTime.utc_now(),
+          "last_error" => %{
+            "type" => "rejected",
+            "message" => "Bokbasen rejected submission",
+            "details" => format_details(details),
+            "http_status" => 200
+          }
         })
 
         {:cancel, :rejected}
@@ -279,14 +329,16 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         # Treat as terminal :rejected with parse-error context — we already
         # have a submission, but the response payload is unintelligible and
         # retrying the same poll won't change that.
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "rejected",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
           "poll_url" => poll_url,
+          "rejected_at" => DateTime.utc_now(),
           "last_error" => %{
             "type" => "poll_parse_error",
-            "http_status" => status,
-            "raw_body" => safe_truncate(body)
+            "message" => "Could not parse Bokbasen poll response",
+            "details" => safe_truncate(body),
+            "http_status" => status
           }
         })
 
@@ -323,9 +375,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         {:error, :not_found}
 
       {:ok, %Document{} = doc} ->
-        status = read_status(doc)
+        status = Status.read(doc)
 
-        case status["bokbasen_submission_id"] do
+        case submission_id_of(status) do
           sub_id when is_binary(sub_id) and sub_id != "" ->
             do_cancel(doc, sub_id, opts)
 
@@ -338,9 +390,10 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   defp do_cancel(doc, sub_id, opts) do
     case Client.cancel(sub_id, opts) do
       :ok ->
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "cancelled",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
+          "cancelled_at" => DateTime.utc_now(),
           "last_error" => nil
         })
 
@@ -353,13 +406,14 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
             "<NotificationType>05</NotificationType> to mark the record as withdrawn."
         )
 
-        persist_status(doc, %{
+        Status.write(doc, %{
           "state" => "cannot_cancel",
-          "bokbasen_submission_id" => sub_id,
+          "submission_id" => sub_id,
           "last_error" => %{
             "type" => "cannot_cancel",
-            "http_status" => status,
-            "note" => "operator must resubmit with NotificationType=05"
+            "message" => "operator must resubmit with NotificationType=05",
+            "details" => nil,
+            "http_status" => status
           }
         })
 
@@ -372,79 +426,54 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   end
 
   # ---------------------------------------------------------------------------
-  # Persistence
+  # Persistence helpers (Phase 8 WI1: thin wrappers over Status)
   # ---------------------------------------------------------------------------
 
-  @doc false
-  def read_status(%Document{content: content}) when is_map(content) do
-    case Map.get(content, "bp_export_status") do
-      nil ->
-        %{}
-
-      "" ->
-        %{}
-
-      str when is_binary(str) ->
-        case Jason.decode(str) do
-          {:ok, m} when is_map(m) -> m
-          _ -> %{"state" => str}
-        end
-
-      m when is_map(m) ->
-        m
-
-      _ ->
-        %{}
-    end
-  end
-
-  def read_status(_), do: %{}
+  @doc """
+  Phase 7 compat shim — `Status.read/1` is the canonical path. Kept so any
+  out-of-tree caller continues to compile; new code should call
+  `Barkpark.Plugins.OnixEdit.Bokbasen.Status.read/1` directly.
+  """
+  @spec read_status(Document.t() | any()) :: map()
+  def read_status(arg), do: Status.read(arg)
 
   @doc """
-  Public counterpart to `read_status/1`. Merges `patch` into the current
-  `bp_export_status` map, writes it back via `Document.changeset`, and
-  broadcasts the merged map on the per-document Bokbasen topic so any
-  subscribed LiveView (e.g. BookEditor) can refresh its status pill in
-  real time without polling.
-
-  WI5 added the broadcast so the toolbar pill stays in sync with worker
-  transitions across the stage / poll / cancel lifecycle.
+  Phase 7 compat shim — delegates to `Status.write/2`.
   """
-  def persist_status(%Document{} = doc, patch) when is_map(patch) do
-    current = read_status(doc)
-
-    merged =
-      current
-      |> Map.merge(patch)
-      |> Map.put("updated_at", DateTime.utc_now() |> DateTime.to_iso8601())
-
-    encoded = Jason.encode!(merged)
-    new_content = Map.put(doc.content || %{}, "bp_export_status", encoded)
-
-    {:ok, updated} =
-      doc
-      |> Document.changeset(%{"content" => new_content})
-      |> Repo.update()
-
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      "bokbasen:document:#{doc.doc_id}",
-      {:bokbasen_status_update, merged}
-    )
-
-    updated
-  end
+  @spec persist_status(Document.t(), map()) :: Document.t()
+  def persist_status(%Document{} = doc, patch) when is_map(patch),
+    do: Status.write(doc, patch)
 
   defp terminal_failure(doc, err, kind) do
-    persist_status(doc, %{
+    Status.write(doc, %{
       "state" => "failed",
-      "last_error" => %{"type" => kind, "summary" => format_error(err)}
+      "last_error" => %{
+        "type" => kind,
+        "message" => format_error(err),
+        "details" => nil,
+        "http_status" => http_status_of(err)
+      }
     })
   end
 
   defp format_error(err) do
     inspect(err, limit: 500, printable_limit: 1000)
   end
+
+  defp http_status_of(%HTTPError{status: status}), do: status
+  defp http_status_of(%RateLimitError{}), do: 429
+  defp http_status_of(%AuthError{}), do: 401
+  defp http_status_of(%SchemaRejectionError{}), do: 422
+  defp http_status_of(_), do: nil
+
+  defp format_details(details) when is_binary(details), do: details
+  defp format_details(details), do: inspect(details, limit: 500, printable_limit: 1000)
+
+  defp submission_id_of(%{} = status) do
+    Map.get(status, "submission_id") || Map.get(status, "bokbasen_submission_id")
+  end
+
+  defp submission_id_of(_), do: nil
 
   defp book_doc_from(%Document{} = doc) do
     pub_id = Content.published_id(doc.doc_id)
