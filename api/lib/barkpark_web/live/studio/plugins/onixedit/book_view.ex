@@ -92,42 +92,50 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookView do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="book-view-shell editor-panel" style="overflow-y:auto;padding:1rem;">
-      <%= if @doc do %>
-        <header class="book-view-header" style="margin-bottom:1rem;">
-          <span class={"badge badge-" <> if(@is_draft, do: "draft", else: "published")}>
-            <%= if @is_draft, do: "draft", else: "published" %>
-          </span>
-          <h1 style="margin:.25rem 0;"><%= @doc.title || "Untitled" %></h1>
-          <div class="muted" style="font-size:.85rem;display:flex;gap:1rem;flex-wrap:wrap;">
-            <span>_id: <%= @doc.doc_id %></span>
-            <span>_type: book</span>
-            <span>_createdAt: <%= @doc.inserted_at %></span>
-            <span>_updatedAt: <%= @doc.updated_at %></span>
-          </div>
-          <div style="margin-top:.5rem;">
-            <a class="btn btn-ghost btn-sm"
-               href={"/studio/#{@dataset}/onixedit/book/#{Content.published_id(@doc.doc_id)}"}>
-              Open in editor →
-            </a>
-          </div>
-        </header>
+    <div class="studio-with-sidebar" style="display:flex;height:100%;min-height:0;">
+      <.studio_sidebar dataset={@dataset} selected_path={["book"]} />
+      <div class="book-view-shell editor-panel" style="flex:1 1 auto;display:flex;flex-direction:column;min-width:0;">
+        <%= if @doc do %>
+          <.document_header
+            dataset={@dataset}
+            title={@doc.title || "Untitled"}
+            back_href={"/studio/#{@dataset}"}
+          >
+            <:status_pill>
+              <span class={"badge badge-" <> if(@is_draft, do: "draft", else: "published")}>
+                <%= if @is_draft, do: "draft", else: "published" %>
+              </span>
+            </:status_pill>
+            <:meta>
+              <span>_id: <%= @doc.doc_id %></span>
+              <span>_type: book</span>
+              <span>_createdAt: <%= @doc.inserted_at %></span>
+              <span>_updatedAt: <%= @doc.updated_at %></span>
+            </:meta>
+            <:actions>
+              <a
+                class="btn btn-ghost btn-sm"
+                href={"/studio/#{@dataset}/onixedit/book/#{Content.published_id(@doc.doc_id)}"}
+              >Open in editor &rarr;</a>
+            </:actions>
+          </.document_header>
 
-        <section class="book-view-fields">
-          <%= if @schema do %>
-            <%= for field <- @schema.fields do %>
-              <%= render_field(assigns, field) %>
+          <section class="book-view-fields" style="padding:1rem;overflow-y:auto;">
+            <%= if @schema do %>
+              <%= for field <- @schema.fields do %>
+                <%= render_field(assigns, field) %>
+              <% end %>
+            <% else %>
+              <div class="muted" style="margin-bottom:.5rem;">
+                schema unavailable; raw content below
+              </div>
+              <pre class="json-dump"><%= Jason.encode!(@doc.content || %{}, pretty: true) %></pre>
             <% end %>
-          <% else %>
-            <div class="muted" style="margin-bottom:.5rem;">
-              schema unavailable; raw content below
-            </div>
-            <pre class="json-dump"><%= Jason.encode!(@doc.content || %{}, pretty: true) %></pre>
-          <% end %>
-        </section>
-      <% else %>
-        <p class="muted">Book document not found.</p>
-      <% end %>
+          </section>
+        <% else %>
+          <.empty_editor message="Book document not found." />
+        <% end %>
+      </div>
     </div>
     """
   end
