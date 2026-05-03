@@ -398,6 +398,10 @@ End-to-end reference plugin: book editor → ONIX 3.0 export → Bokbasen publis
 
 See [`docs/spec/onixedit-masterplan-summary.md`](docs/spec/onixedit-masterplan-summary.md) for the full masterplan close-out (phases, decisions, deferred items).
 
+### Plugin schema install
+
+Plugin-declared schemas (e.g. OnixEdit's `book`) auto-install on every server start. A post-boot Task in `Barkpark.Application` walks `Barkpark.Plugins.Registry.all/0` and persists each plugin's `register_schemas/1` output via `Barkpark.Content.upsert_schema/2`. Fresh databases pick up the same schemas through `priv/repo/seeds.exs`, which calls the shared helper `Barkpark.Plugins.Bootstrap.register_all_schemas/0` after the v1 seed loop. Both paths are idempotent against the `(name, dataset)` composite unique index — re-running a deploy or `mix ecto.reset` produces zero duplicate rows. Full reference: [`docs/plugins/INSTALL.md`](docs/plugins/INSTALL.md).
+
 ## ONIX 3.0 Export Proof
 
 `proof/onix-sample.xml` is the validated ONIX 3.0 reference output produced by
