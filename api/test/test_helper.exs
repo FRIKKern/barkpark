@@ -5,5 +5,19 @@
 #     mix test --include bokbasen_integration
 #
 # See api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs.
-ExUnit.start(exclude: [:bokbasen_integration])
+#
+# Phase 8 WI5 — the Phase 4-8 demo test (`phase8_e2e_test.exs`) is tagged
+# `:phase8_demo`. It composes the full pipeline (book → ONIX export →
+# Bokbasen submit → poll → :accepted → composite write) plus optional
+# WI3/WI4 assertions. WI3 (BookEditor sign-off badge) and WI4 (codelist
+# staleness) ship in parallel teams; their assertion blocks are tagged
+# `:requires_wi3` and `:requires_wi4` so this test stays green-on-default
+# until WI6 close-out flips the includes.
+#
+# Run the demo explicitly:
+#
+#     mix test --include phase8_demo
+#     mix test --include phase8_demo --include requires_wi3 --include requires_wi4
+#
+ExUnit.start(exclude: [:bokbasen_integration, :phase8_demo, :requires_wi3, :requires_wi4])
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

@@ -37,6 +37,7 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
+  alias Barkpark.Plugins.OnixEdit.Export.StatusPill
   alias Barkpark.Repo
 
   @type_default "book"
@@ -44,12 +45,6 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
 
   @all_states ~w(pending staging staged polling accepted rejected failed cancelled cannot_cancel)
   @retryable_states ~w(failed rejected cancelled cannot_cancel)
-
-  @gray_states ~w(pending staging)
-  @blue_states ~w(staged polling)
-  @green_states ~w(accepted)
-  @red_states ~w(rejected)
-  @orange_states ~w(failed cancelled cannot_cancel)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -408,12 +403,7 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
   defp sort_marker(field, :desc, field), do: " ▼"
   defp sort_marker(_, _, _), do: ""
 
-  defp pill_color(state) when state in @gray_states, do: "bp-pill-gray"
-  defp pill_color(state) when state in @blue_states, do: "bp-pill-blue"
-  defp pill_color(state) when state in @green_states, do: "bp-pill-green"
-  defp pill_color(state) when state in @red_states, do: "bp-pill-red"
-  defp pill_color(state) when state in @orange_states, do: "bp-pill-orange"
-  defp pill_color(_), do: "bp-pill-gray"
+  defp pill_color(state), do: StatusPill.color_class(state)
 
   defp truncate(nil, _), do: ""
 

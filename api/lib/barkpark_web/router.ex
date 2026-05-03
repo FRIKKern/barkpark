@@ -59,15 +59,14 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # ── Operations admin (LiveView) — admin-gated via on_mount ──────────────
-  # TODO(phase-8): admin-role enforcement currently piggybacks the global
-  # `admin` permission. A dedicated `ops`/`operator` role may be added so
-  # the publish-ops console can be granted to operators without exposing
-  # plugin-settings reveal/audit.
+  # ── Operations admin (LiveView) — `ops` or `admin` permission ───────────
+  # Phase 8 WI5: dedicated `ops` role lets operators reach the publish-ops
+  # console without inheriting full admin (settings-reveal / schema CRUD).
+  # Existing admin tokens still pass — see `BarkparkWeb.LiveAuth.:ops`.
   scope "/admin", BarkparkWeb.Admin do
     pipe_through :browser
 
-    live_session :admin_ops, on_mount: [{BarkparkWeb.LiveAuth, :admin}] do
+    live_session :admin_ops, on_mount: [{BarkparkWeb.LiveAuth, :ops}] do
       live "/bokbasen", BokbasenLive
     end
   end
