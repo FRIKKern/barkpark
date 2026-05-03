@@ -70,6 +70,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       listen_sse(dataset),
       schemas_list(dataset),
       schemas_show(dataset),
+      ref_schema_browser(),
       webhooks_list(dataset),
       webhooks_create(dataset),
       webhooks_delete(dataset)
@@ -1254,6 +1255,20 @@ defmodule Barkpark.ApiTester.Endpoints do
       kind: :reference,
       render_key: :known_limitations,
       description: "6 quirks of v1 that may bite real clients."
+    }
+  end
+
+  # Phase 8 WI4 — live reference panel that data-drives off
+  # `Content.list_schemas/1` so plugin schemas (e.g. book) auto-appear.
+  defp ref_schema_browser do
+    %{
+      id: "ref-schemas",
+      category: "Schemas",
+      label: "Schema reference",
+      kind: :reference,
+      render_key: :schema_browser,
+      description:
+        "Live reference for every schema in this dataset — legacy seeds AND plugin-registered schemas. Updates automatically when schemas are added, edited, or removed via the Schema CRUD endpoints."
     }
   end
 end

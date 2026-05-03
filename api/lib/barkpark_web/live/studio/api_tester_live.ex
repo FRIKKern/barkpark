@@ -795,4 +795,73 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     </style>
     """
   end
+
+  # Phase 8 WI4 — live, data-driven schema browser. Iterates
+  # `Content.list_schemas/1` so plugin schemas (e.g. book) auto-appear with
+  # field shape, visibility badge, and an example query curl. v2 field
+  # types (composite/arrayOf/codelist/localizedText) render as collapsed
+  # JSON dumps per CLAUDE.md plugin-v2 (decision D12).
+  defp render_reference(assigns, :schema_browser) do
+    schemas = Barkpark.Content.list_schemas(assigns.dataset)
+    {public, private} = Enum.split_with(schemas, &(&1.visibility == "public"))
+    assigns = assign(assigns, public_schemas: public, private_schemas: private)
+
+    ~H"""
+    <p class="api-description">
+      Every schema registered in this dataset, with field shape and an example
+      query curl. Plugin-registered schemas (visibility: <code class="api-inline-code">private</code>)
+      require a Bearer token on <code class="api-inline-code">/v1/data/query/*</code> — see Query → List documents.
+    </p>
+
+    <div class="api-section">Public schemas (<%= length(@public_schemas) %>)</div>
+    <%= for s <- @public_schemas do %>
+      <.schema_browser_card schema={s} dataset={@dataset} />
+    <% end %>
+
+    <div class="api-section">Private schemas (<%= length(@private_schemas) %>)</div>
+    <%= for s <- @private_schemas do %>
+      <.schema_browser_card schema={s} dataset={@dataset} />
+    <% end %>
+    """
+  end
+
+  attr :schema, :map, required: true
+  attr :dataset, :string, required: true
+
+  defp schema_browser_card(assigns) do
+    ~H"""
+    <details class="api-schema-card" style="margin: 8px 0; border: 1px solid var(--border, #e5e5e5); border-radius: 6px; padding: 8px 12px;">
+      <summary style="display:flex; gap:12px; align-items:center; cursor:pointer;">
+        <code><%= @schema.name %></code>
+        <span class="text-muted"><%= @schema.title %></span>
+        <span class={"badge badge-" <> @schema.visibility}><%= @schema.visibility %></span>
+        <span class="text-dim text-xs"><%= length(@schema.fields || []) %> fields</span>
+      </summary>
+      <table class="api-table" style="margin-top: 8px;">
+        <thead><tr><th>Name</th><th>Type</th><th>Title</th><th>Spec</th></tr></thead>
+        <tbody>
+          <%= for f <- @schema.fields || [] do %>
+            <tr>
+              <td><code><%= f["name"] %></code></td>
+              <td class="text-dim text-xs"><%= f["type"] %></td>
+              <td class="text-muted"><%= f["title"] %></td>
+              <td>
+                <%= if f["type"] in ["composite", "arrayOf", "codelist", "localizedText"] do %>
+                  <details>
+                    <summary class="text-xs text-muted">JSON</summary>
+                    <pre class="api-code-block" style="font-size:11px;"><%= Jason.encode!(f, pretty: true) %></pre>
+                  </details>
+                <% else %>
+                  <span class="text-dim">—</span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+      <div class="api-section">Example</div>
+      <pre class="api-code-block"><%= "GET /v1/data/query/#{@dataset}/#{@schema.name}" %><%= if @schema.visibility == "private", do: "\nAuthorization: Bearer <token>", else: "" %></pre>
+    </details>
+    """
+  end
 end
