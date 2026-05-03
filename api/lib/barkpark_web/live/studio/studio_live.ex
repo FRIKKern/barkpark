@@ -7,14 +7,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   alias Barkpark.{Content, Media, Structure}
   alias BarkparkWeb.Presence
-
-  @presence_topic "studio:presence"
+  alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
 
   @impl true
   def mount(_params, _session, socket) do
     # Read identity from client localStorage via connect params
     connect_params = get_connect_params(socket) || %{}
-    user_id = connect_params["user_id"] || generate_user_id()
+    user_id = connect_params["user_id"] || PresenceState.generate_user_id()
     stored_name = connect_params["user_name"]
     stored_color = connect_params["user_color"]
 
@@ -24,10 +23,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
         else: "User #{String.slice(user_id, 0..3)}"
 
     user_color =
-      if stored_color && stored_color != "", do: stored_color, else: pick_color(user_id)
+      if stored_color && stored_color != "",
+        do: stored_color,
+        else: PresenceState.pick_color(user_id)
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, @presence_topic)
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, PresenceState.topic())
     end
 
     {:ok,
@@ -113,7 +114,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     if sender != self() && socket.assigns[:editor_doc] do
       # Another user edited this doc — update form values live
       schema = socket.assigns[:editor_schema]
-      updated_form = doc_data_to_form(doc_data, schema)
+      updated_form = Content.doc_to_form(doc_data, schema)
 
       {:noreply,
        assign(socket, editor_form: updated_form, save_status: "Updated by another user")}
@@ -125,7 +126,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Presence updates
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
-    {:noreply, assign(socket, presences: build_presences_list(socket))}
+    {:noreply, assign(socket, presences: PresenceState.list())}
   end
 
   # Global doc change — rebuild if we're viewing this type
@@ -141,47 +142,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  # Autosave triggered programmatically (e.g. after image selection)
+  # Autosave triggered programmatically (e.g. after image selection).
+  # Indirection lets the picker close immediately (assign + close in the
+  # click handler) and runs the save in a separate handle_info turn.
   @impl true
   def handle_info({:autosave_form, form}, socket) do
-    doc = socket.assigns[:editor_doc]
-    schema = socket.assigns[:editor_schema]
-    type = socket.assigns[:editor_type]
-
-    if doc && type do
-      content = build_content(form, schema)
-
-      attrs = %{
-        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
-        "title" => Map.get(form, "title", doc.title),
-        "status" => Map.get(form, "status", doc.status),
-        "content" => content
-      }
-
-      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
-        {:ok, saved_doc} ->
-          panes =
-            update_doc_title_in_panes(
-              socket.assigns.panes,
-              Content.published_id(saved_doc.doc_id),
-              Map.get(form, "title", doc.title)
-            )
-
-          {:noreply,
-           assign(socket,
-             panes: panes,
-             editor_doc: saved_doc,
-             editor_is_draft: Content.draft?(saved_doc.doc_id),
-             editor_form: form,
-             save_status: "Saved"
-           )}
-
-        {:error, _} ->
-          {:noreply, socket}
-      end
-    else
-      {:noreply, socket}
-    end
+    {:noreply, do_autosave(socket, form)}
   end
 
   # Subscribe to the specific doc being edited
@@ -226,33 +192,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
       }
 
       # Use update if already tracked, track if new
-      case Presence.get_by_key(@presence_topic, socket.assigns.user_id) do
-        [] -> Presence.track(self(), @presence_topic, socket.assigns.user_id, meta)
-        _ -> Presence.update(self(), @presence_topic, socket.assigns.user_id, meta)
+      case Presence.get_by_key(PresenceState.topic(), socket.assigns.user_id) do
+        [] -> Presence.track(self(), PresenceState.topic(), socket.assigns.user_id, meta)
+        _ -> Presence.update(self(), PresenceState.topic(), socket.assigns.user_id, meta)
       end
 
-      assign(socket, presences: build_presences_list(socket))
+      assign(socket, presences: PresenceState.list())
     else
       socket
-    end
-  end
-
-  defp doc_data_to_form(doc_data, schema) do
-    base = %{"title" => doc_data.title || "", "status" => doc_data.status || "draft"}
-
-    if schema do
-      Enum.reduce(schema.fields, base, fn field, acc ->
-        key = field["name"]
-
-        val =
-          if key in ["title", "status"],
-            do: Map.get(acc, key),
-            else: get_in(doc_data.content || %{}, [key]) || ""
-
-        Map.put(acc, key, val)
-      end)
-    else
-      base
     end
   end
 
@@ -297,57 +244,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   def handle_event("save", %{"doc" => params}, socket) do
-    save_doc(socket, params, "Saved")
+    socket = do_autosave(socket, params)
+
+    case socket.assigns[:save_status] do
+      "Saved" -> {:noreply, socket |> put_flash(:info, "Saved") |> rebuild_panes()}
+      _ -> {:noreply, socket}
+    end
   end
 
   def handle_event("autosave", %{"doc" => params}, socket) do
-    doc = socket.assigns[:editor_doc]
-    schema = socket.assigns[:editor_schema]
-    type = socket.assigns[:editor_type]
-
-    if doc && type do
-      content = build_content(params, schema)
-      new_title = Map.get(params, "title", doc.title)
-
-      attrs = %{
-        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
-        "title" => new_title,
-        "status" => Map.get(params, "status", doc.status),
-        "content" => content
-      }
-
-      # Run validation (informational — doesn't block draft saves)
-      validation_errors =
-        case Content.validate_document(type, new_title, content, socket.assigns.dataset) do
-          {:error, errs} -> errs
-          _ -> %{}
-        end
-
-      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
-        {:ok, saved_doc} ->
-          panes =
-            update_doc_title_in_panes(
-              socket.assigns.panes,
-              Content.published_id(saved_doc.doc_id),
-              new_title
-            )
-
-          {:noreply,
-           assign(socket,
-             panes: panes,
-             editor_doc: saved_doc,
-             editor_is_draft: Content.draft?(saved_doc.doc_id),
-             editor_form: params,
-             save_status: "Saved",
-             validation_errors: validation_errors
-           )}
-
-        {:error, _} ->
-          {:noreply, assign(socket, save_status: "Save failed")}
-      end
-    else
-      {:noreply, socket}
-    end
+    {:noreply, do_autosave(socket, params)}
   end
 
   def handle_event("autosave", _params, socket) do
@@ -430,12 +336,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   def handle_event("ref-search", %{"value" => query}, socket) do
-    filtered =
-      Enum.filter(socket.assigns.ref_candidates, fn c ->
-        String.contains?(String.downcase(c.title), String.downcase(query))
-      end)
-
-    {:noreply, assign(socket, ref_search: query, ref_filtered: filtered)}
+    {:noreply, assign(socket, ref_search: query)}
   end
 
   def handle_event("select-ref", %{"id" => ref_id, "field" => field_name}, socket) do
@@ -484,30 +385,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, assign(socket, show_delete: false, delete_refs: [])}
   end
 
-  def handle_event("confirm-delete", %{"disconnect" => "true"}, socket) do
+  def handle_event("confirm-delete", params, socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      Content.disconnect_references(doc.doc_id, socket.assigns.dataset)
-      Content.delete_document(doc.doc_id, type, socket.assigns.dataset)
-      # Navigate back to the type list
-      new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+      if params["disconnect"] == "true" do
+        Content.disconnect_references(doc.doc_id, socket.assigns.dataset)
+      end
 
-      {:noreply,
-       socket
-       |> assign(show_delete: false, delete_refs: [])
-       |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  def handle_event("confirm-delete", _, socket) do
-    doc = socket.assigns[:editor_doc]
-    type = socket.assigns[:editor_type]
-
-    if doc && type do
       Content.delete_document(doc.doc_id, type, socket.assigns.dataset)
       new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
 
@@ -533,7 +419,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("jump-to-user", %{"type" => type, "doc-id" => doc_id}, socket) do
     # Build the path to that document — need to find it in the structure
     structure = Structure.build(socket.assigns.dataset)
-    path = find_doc_path(structure, type, doc_id)
+    path = PaneBuilder.find_doc_path(structure, type, doc_id)
     {:noreply, push_patch(socket, to: studio_path(path, socket.assigns.dataset))}
   end
 
@@ -577,7 +463,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      content = build_content(socket.assigns.editor_form, socket.assigns[:editor_schema])
+      content = Content.build_content(socket.assigns.editor_form, socket.assigns[:editor_schema])
       title = Map.get(socket.assigns.editor_form, "title", doc.title)
 
       case Content.validate_document(type, title, content, socket.assigns.dataset) do
@@ -611,32 +497,42 @@ defmodule BarkparkWeb.Studio.StudioLive do
     )
   end
 
-  defp save_doc(socket, params, flash_msg) do
+  # Single autosave path consumed by handle_event "autosave",
+  # handle_event "save", and handle_info :autosave_form. Delegates to
+  # Content.upsert_draft/5 (validation + upsert + errors map) and
+  # mutates pane titles in-memory to avoid an N+1 DB rebuild on every
+  # keystroke.
+  defp do_autosave(socket, params) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      content = build_content(params, schema)
+      case Content.upsert_draft(doc, type, schema, params, socket.assigns.dataset) do
+        {:ok, saved_doc, errs} ->
+          new_title = Map.get(params, "title", doc.title)
 
-      attrs = %{
-        "doc_id" => Content.draft_id(Content.published_id(doc.doc_id)),
-        "title" => Map.get(params, "title", doc.title),
-        "status" => Map.get(params, "status", doc.status),
-        "content" => content
-      }
+          panes =
+            PaneBuilder.update_title(
+              socket.assigns.panes,
+              Content.published_id(saved_doc.doc_id),
+              new_title
+            )
 
-      case Content.upsert_document(type, attrs, socket.assigns.dataset) do
-        {:ok, _} ->
-          socket = assign(socket, save_status: "Saved")
-          socket = if flash_msg, do: put_flash(socket, :info, flash_msg), else: socket
-          {:noreply, rebuild_panes(socket)}
+          assign(socket,
+            panes: panes,
+            editor_doc: saved_doc,
+            editor_is_draft: Content.draft?(saved_doc.doc_id),
+            editor_form: params,
+            save_status: "Saved",
+            validation_errors: errs
+          )
 
         {:error, _} ->
-          {:noreply, assign(socket, save_status: "Save failed")}
+          assign(socket, save_status: "Save failed")
       end
     else
-      {:noreply, socket}
+      socket
     end
   end
 
@@ -658,35 +554,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp studio_path_for([], dataset), do: "/studio/#{dataset}"
   defp studio_path_for(segments, dataset), do: "/studio/#{dataset}/" <> Enum.join(segments, "/")
 
-  defp build_content(params, schema) do
-    if schema do
-      Enum.reduce(schema.fields, %{}, fn field, acc ->
-        key = field["name"]
-        val = Map.get(params, key, "")
-        if key in ["title", "status"] or val == "", do: acc, else: Map.put(acc, key, val)
-      end)
-    else
-      %{}
-    end
-  end
-
   # ── Pane builder ───────────────────────────────────────────────────────────
 
   defp rebuild_panes(socket) do
-    path = socket.assigns.nav_path
-    structure = Structure.build(socket.assigns.dataset)
-
-    # Pane 0: root structure list
-    root_pane = %{
-      title: structure.title,
-      items: build_list_items(structure),
-      selected: Enum.at(path, 0)
-    }
-
-    panes = [root_pane]
-
-    # Walk path through the structure tree, building panes at each depth
-    {panes, editor} = walk_path(path, 0, structure, panes, nil, socket.assigns.dataset)
+    {panes, editor} = PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path)
 
     assign(socket,
       panes: panes,
@@ -698,232 +569,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
       editor_form: (editor && editor[:form]) || %{},
       save_status: socket.assigns[:save_status] || ""
     )
-  end
-
-  # Recursively walk the path, resolving each segment against the current node's children.
-  # Mirrors the TUI's rebuildPanes() loop through path segments.
-  defp walk_path([], _depth, _current, panes, editor, _dataset), do: {panes, editor}
-
-  defp walk_path([id | rest], depth, current, panes, _editor, dataset) do
-    # Find the matching child node (check id first, then type_name)
-    found =
-      Enum.find(current.items, fn node ->
-        node.id == id || node.type_name == id
-      end)
-
-    case found do
-      nil ->
-        {panes, nil}
-
-      %{type: :list} = node ->
-        # Sub-list (e.g. Settings) — add a new list pane column, keep walking
-        list_pane = %{
-          title: node.title,
-          items: build_list_items(node),
-          selected: Enum.at(rest, 0)
-        }
-
-        walk_path(rest, depth + 1, node, panes ++ [list_pane], nil, dataset)
-
-      %{type: :document_type_list, type_name: type_name} = node ->
-        # Document list — add doc list pane, then resolve doc editor if path continues
-        schema =
-          case Content.get_schema(type_name, dataset) do
-            {:ok, s} -> s
-            _ -> nil
-          end
-
-        opts = [perspective: :drafts]
-
-        opts =
-          if node.filter, do: opts ++ [filter_map: parse_filter_string(node.filter)], else: opts
-
-        docs = Content.list_documents(type_name, dataset, opts)
-
-        doc_pane = %{
-          title: node.title || (schema && schema.title) || type_name,
-          icon: node.icon || (schema && schema.icon),
-          type_name: type_name,
-          items:
-            Enum.map(docs, fn doc ->
-              pub_id = Content.published_id(doc.doc_id)
-
-              %{
-                type: :doc,
-                id: pub_id,
-                title: doc.title || "Untitled",
-                is_draft: Content.draft?(doc.doc_id),
-                status: doc.status
-              }
-            end),
-          selected: Enum.at(rest, 0)
-        }
-
-        editor =
-          case rest do
-            [doc_id | _] ->
-              {doc, is_draft, has_pub} = fetch_doc(type_name, doc_id, dataset)
-
-              if doc && schema do
-                %{
-                  doc: doc,
-                  schema: schema,
-                  type: type_name,
-                  is_draft: is_draft,
-                  has_published: has_pub,
-                  form: doc_to_form(doc, schema)
-                }
-              end
-
-            _ ->
-              nil
-          end
-
-        {panes ++ [doc_pane], editor}
-
-      %{type: :document, type_name: type_name} ->
-        # Singleton — open editor directly
-        schema =
-          case Content.get_schema(type_name, dataset) do
-            {:ok, s} -> s
-            _ -> nil
-          end
-
-        if schema do
-          # Singletons use the type name as the doc ID
-          {doc, is_draft, has_pub} = fetch_doc(type_name, type_name, dataset)
-
-          editor =
-            if doc do
-              %{
-                doc: doc,
-                schema: schema,
-                type: type_name,
-                is_draft: is_draft,
-                has_published: has_pub,
-                form: doc_to_form(doc, schema)
-              }
-            end
-
-          {panes, editor}
-        else
-          {panes, nil}
-        end
-
-      _ ->
-        {panes, nil}
-    end
-  end
-
-  # Decide whether a nav pane should render as a narrow collapsed strip.
-  #
-  # Rule (matches Sanity's "breadcrumb collapse"): the two right-most
-  # columns stay full width. "Column" includes the editor panel if an
-  # editor is currently open — so:
-  #
-  #   - No editor, 1 or 2 panes  → no collapse
-  #   - No editor, 3+ panes      → collapse all panes except the last 2
-  #   - Editor open, 1 or 2 panes → no collapse (editor is the 2nd full column)
-  #   - Editor open, 3+ panes    → collapse all panes except the last one
-  #
-  # Gives the rightmost focus (editor or deepest nav) room to breathe.
-  defp collapse_pane?(idx, num_panes, has_editor?) do
-    keep_full_nav_count = if has_editor?, do: 1, else: 2
-    idx < num_panes - keep_full_nav_count
-  end
-
-  defp build_list_items(node) do
-    Enum.flat_map(node.items, fn child ->
-      case child.type do
-        :divider ->
-          [%{type: :divider, id: child.id}]
-
-        _ ->
-          # `drillable` == this item opens a new pane to the right when
-          # clicked (a sub-list or a document list). Singletons (`:document`)
-          # open the editor directly, so they should NOT carry the chevron
-          # — the chevron is the visual promise of a new pane to the right.
-          drillable = child.type in [:list, :document_type_list]
-
-          [
-            %{
-              type: :item,
-              id: child.id,
-              title: child.title,
-              icon: child.icon,
-              drillable: drillable
-            }
-          ]
-      end
-    end)
-  end
-
-  # Parse a "field=value" filter string (from Structure.Node.filter) into a map
-  # suitable for Content.list_documents/3's :filter_map option.
-  defp parse_filter_string(nil), do: %{}
-  defp parse_filter_string(""), do: %{}
-
-  defp parse_filter_string(s) do
-    case String.split(s, "=", parts: 2) do
-      [field, value] -> %{field => value}
-      _ -> %{}
-    end
-  end
-
-  # Update a doc's title in the pane items list without rebuilding from DB
-  defp update_doc_title_in_panes(panes, doc_id, new_title) do
-    Enum.map(panes, fn pane ->
-      updated_items =
-        Enum.map(pane.items, fn item ->
-          if Map.get(item, :type) == :doc && Map.get(item, :id) == doc_id do
-            %{item | title: new_title}
-          else
-            item
-          end
-        end)
-
-      %{pane | items: updated_items}
-    end)
-  end
-
-  defp fetch_doc(type, doc_id, dataset) do
-    draft_r = Content.get_document(Content.draft_id(doc_id), type, dataset)
-    pub_r = Content.get_document(Content.published_id(doc_id), type, dataset)
-
-    {doc, is_draft} =
-      case draft_r do
-        {:ok, d} ->
-          {d, true}
-
-        _ ->
-          case pub_r do
-            {:ok, d} -> {d, false}
-            _ -> {nil, false}
-          end
-      end
-
-    {doc, is_draft, match?({:ok, _}, pub_r)}
-  end
-
-  defp doc_to_form(nil, _), do: %{}
-
-  defp doc_to_form(doc, schema) do
-    base = %{"title" => doc.title || "", "status" => doc.status || "draft"}
-
-    if schema do
-      Enum.reduce(schema.fields, base, fn field, acc ->
-        key = field["name"]
-
-        val =
-          if key in ["title", "status"],
-            do: Map.get(acc, key),
-            else: get_in(doc.content || %{}, [key]) || ""
-
-        Map.put(acc, key, val)
-      end)
-    else
-      base
-    end
   end
 
   # ── Render ─────────────────────────────────────────────────────────────────
@@ -944,7 +589,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
-        <% collapsed = collapse_pane?(idx, num_panes, has_editor) %>
+        <% collapsed = PaneBuilder.collapse?(idx, num_panes, has_editor) %>
         <.pane_column
           id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
           title={pane.title}
@@ -974,7 +619,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   </.pane_section_header>
 
                 <% :doc -> %>
-                  <% item_presences = presences_on_doc(@presences, item.id) %>
+                  <% item_presences = PresenceState.on_doc(@presences, item.id) %>
                   <.pane_doc_item
                     id={"doc-#{item.id}"}
                     phx_click="select"
@@ -1050,240 +695,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
       />
     </.pane_layout>
 
-    <style>
-      /* Pane layout classes (.pane-layout, .pane-column, .pane-header,
-         .pane-item, .pane-doc-*, etc.) moved to root.html.heex so every
-         Studio LiveView can use them. The .editor-* family was also
-         hoisted to root.html.heex (Phase 8 WI? — Task 9 PR-A) so plugin
-         LiveViews (BookView, BookEditor) can use document_header /
-         editor_field / empty_editor on cold-load. StudioLive-specific
-         rules only below. */
-
-      .save-status { font-size: 12px; color: var(--success); opacity: 0.8; transition: opacity 0.3s; }
-
-      /* Image field */
-      .image-field { position: relative; }
-      .image-preview { position: relative; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-muted); }
-      .image-preview img { width: 100%; max-height: 200px; object-fit: cover; display: block; }
-      .image-preview-actions { display: flex; gap: 6px; padding: 8px; background: var(--bg-card); border-top: 1px solid var(--border-muted); }
-      .image-upload-zone {
-        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-        padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-sm);
-        cursor: pointer; color: var(--fg-muted); transition: all 0.15s;
-      }
-      .image-upload-zone:hover { border-color: var(--primary); color: var(--fg); background: hsl(217.2 91.2% 59.8% / 0.03); }
-      .image-upload-icon { font-size: 24px; font-weight: 300; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
-      .image-upload-text { font-size: 13px; }
-      .image-picker-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; }
-      .image-picker {
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 560px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
-      }
-      .image-picker-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border-muted); }
-      .image-picker-upload { padding: 12px 16px; border-bottom: 1px solid var(--border-muted); }
-      .image-file-input { font-size: 13px; color: var(--fg-muted); }
-      .image-upload-entry { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-      .image-upload-entry img { border-radius: 4px; object-fit: cover; }
-      .image-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 16px; overflow-y: auto; }
-      .image-picker-item { cursor: pointer; border: 2px solid transparent; border-radius: var(--radius-sm); overflow: hidden; transition: border-color 0.1s; }
-      .image-picker-item:hover { border-color: var(--primary); }
-      .image-picker-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
-      .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-      /* Reference field */
-      .ref-field { position: relative; }
-      .ref-selected {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 12px; border: 1px solid var(--border-muted);
-        border-radius: var(--radius-sm); background: var(--bg-card);
-      }
-      .ref-selected-info { display: flex; flex-direction: column; gap: 2px; }
-      .ref-selected-title { font-size: 14px; font-weight: 500; }
-      .ref-selected-type { font-size: 11px; color: var(--fg-dim); }
-      .ref-candidate {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border-muted);
-        transition: background 0.1s;
-      }
-      .ref-candidate:hover { background: var(--bg-muted); }
-      .ref-candidate:last-child { border-bottom: none; }
-      .ref-candidate-title { font-size: 14px; font-weight: 500; }
-      .ref-candidate-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); }
-
-      /* History */
-      .history-modal {
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 520px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
-      }
-      .history-list { overflow-y: auto; flex: 1; }
-      .history-item {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 12px 16px; border-bottom: 1px solid var(--border-muted);
-      }
-      .history-item:last-child { border-bottom: none; }
-      .history-item-info { display: flex; flex-direction: column; gap: 4px; }
-      .history-item-action { display: flex; align-items: center; gap: 8px; }
-      .history-item-title { font-size: 13px; font-weight: 500; }
-      .history-item-time { font-size: 11px; color: var(--fg-dim); }
-      .history-action-badge {
-        font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-        padding: 2px 6px; border-radius: 4px;
-      }
-      .history-action-create { background: hsl(217.2 91.2% 59.8% / 0.12); color: var(--primary); }
-      .history-action-update { background: hsl(240 3.7% 15.9%); color: var(--fg-muted); }
-      .history-action-publish { background: hsl(142 71% 45% / 0.12); color: var(--success); }
-      .history-action-unpublish { background: hsl(38 92% 50% / 0.12); color: var(--warning); }
-
-      /* Delete modal */
-      .delete-modal {
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 480px; background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
-      }
-      .delete-modal-header {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 16px 20px; border-bottom: 1px solid var(--border-muted);
-      }
-      .delete-modal-body { padding: 20px; }
-      .delete-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-      .delete-warning { margin-bottom: 8px; }
-      .delete-ref-list {
-        border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
-        max-height: 200px; overflow-y: auto;
-      }
-      .delete-ref-item {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
-      }
-      .delete-ref-item:last-child { border-bottom: none; }
-      .delete-ref-title { font-size: 13px; font-weight: 500; }
-      .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
-
-      /* Presence */
-      .presence-nav {
-        position: fixed; top: 0; right: 0; z-index: 40;
-        display: flex; align-items: center; gap: 4px;
-        height: 48px; padding: 0 12px;
-      }
-      .presence-avatar {
-        width: 28px; height: 28px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 12px; font-weight: 600; color: white;
-        border: 2px solid var(--bg-card); margin-left: -4px;
-        cursor: default; text-transform: uppercase;
-      }
-      .presence-avatar:first-child { margin-left: 0; }
-      .presence-avatar.clickable { cursor: pointer; }
-      .presence-avatar.clickable:hover { transform: scale(1.1); border-color: var(--fg); }
-      .presence-user-wrap { position: relative; display: inline-flex; }
-      .presence-tooltip {
-        display: none; position: absolute; top: 100%; right: 0; margin-top: 8px;
-        background: var(--bg-popover); border: 1px solid var(--border);
-        border-radius: var(--radius-sm); padding: 8px 12px; min-width: 160px;
-        z-index: 60; pointer-events: none;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      }
-      .presence-user-wrap:hover .presence-tooltip { display: block; }
-      .presence-tooltip-name { font-size: 13px; font-weight: 600; }
-      .presence-tooltip-location { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
-      .presence-tooltip-location strong { color: var(--fg); }
-      .presence-tooltip-hint { font-size: 10px; color: var(--fg-dim); margin-top: 6px; }
-      .presence-me-group {
-        display: flex; align-items: center; gap: 8px; cursor: pointer;
-        padding: 2px 4px 2px 10px; border-radius: 20px;
-        transition: background 0.1s; margin-left: 4px;
-      }
-      .presence-me-group:hover { background: var(--bg-muted); }
-      .presence-me-info { text-align: right; }
-      .presence-me-name { font-size: 12px; font-weight: 600; display: block; line-height: 1.2; }
-      .presence-me-location { font-size: 10px; color: var(--fg-dim); display: block; line-height: 1.2; }
-      .presence-me {
-        width: 30px; height: 30px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 13px; font-weight: 600; color: white;
-        border: none; cursor: pointer;
-        text-transform: uppercase; flex-shrink: 0;
-      }
-      .presence-dots { display: flex; gap: 4px; margin-left: 8px; }
-      .presence-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); cursor: default; }
-      .presence-dot-sm { width: 6px; height: 6px; border-radius: 50%; margin-left: 2px; flex-shrink: 0; }
-
-      /* Profile modal */
-      .profile-modal {
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 360px; background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
-      }
-      .profile-colors { display: flex; gap: 8px; flex-wrap: wrap; }
-      .profile-color-option { cursor: pointer; }
-      .profile-color-option.selected .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
-      .profile-color-swatch {
-        display: block; width: 28px; height: 28px; border-radius: 50%;
-        border: 3px solid transparent; transition: all 0.1s;
-      }
-      .profile-color-swatch:hover { border-color: var(--fg-muted); }
-
-      /* Validation */
-      .field-required { color: var(--destructive); margin-left: 2px; }
-      .field-errors { font-size: 12px; color: var(--destructive); margin-top: 4px; }
-      /* .editor-field.has-error .form-input{...} hoisted to root.html.heex */
-    </style>
     """
-  end
-
-  defp generate_user_id do
-    :crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower)
-  end
-
-  @presence_colors ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316)
-  defp pick_color(user_id) do
-    index = :erlang.phash2(user_id, length(@presence_colors))
-    Enum.at(@presence_colors, index)
-  end
-
-  defp build_presences_list(_socket) do
-    Presence.list(@presence_topic)
-    |> Enum.flat_map(fn {uid, %{metas: metas}} ->
-      Enum.map(metas, &Map.put(&1, :user_id, uid))
-    end)
-  end
-
-  # Find the URL path for a given type + doc_id in the structure tree
-  defp find_doc_path(structure, type, doc_id) do
-    # Check if the type is a direct child (simple doc list)
-    direct = Enum.find(structure.items, &(&1.id == type && &1.type == :document_type_list))
-
-    if direct do
-      [type, doc_id]
-    else
-      # Check if it's nested (e.g. post inside a sub-list with filters)
-      parent =
-        Enum.find(structure.items, fn node ->
-          node.type == :list &&
-            Enum.any?(node.items || [], fn child ->
-              child.type == :document_type_list && child.type_name == type
-            end)
-        end)
-
-      if parent do
-        # Find the "all" sub-item
-        all_item =
-          Enum.find(parent.items, fn child ->
-            child.type == :document_type_list && child.type_name == type && child.filter == nil
-          end)
-
-        sub_id = if all_item, do: all_item.id, else: "#{type}-all"
-        [parent.id, sub_id, doc_id]
-      else
-        # Settings singleton or fallback
-        [type, doc_id]
-      end
-    end
-  end
-
-  defp presences_on_doc(presences, doc_id) do
-    Enum.filter(presences, &(&1.doc_id == doc_id))
   end
 end
