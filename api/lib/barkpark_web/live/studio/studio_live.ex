@@ -1104,24 +1104,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
       <!-- Editor -->
       <%= if @editor_doc do %>
         <div class="editor-panel">
-          <div class="pane-header editor-header">
-            <div style="display: flex; align-items: center; gap: 8px;">
+          <.document_header
+            dataset={@dataset}
+            title={@editor_doc.title || "Untitled"}
+          >
+            <:status_pill>
               <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
                 <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
               </span>
-              <span class="pane-header-title"><%= @editor_doc.title || "Untitled" %></span>
-              <%= if @editor_doc do %>
-                <% doc_presences = presences_on_doc(@presences, Content.published_id(@editor_doc.doc_id)) %>
-                <%= if doc_presences != [] do %>
-                  <div class="presence-dots">
-                    <%= for p <- doc_presences do %>
-                      <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
-                    <% end %>
-                  </div>
-                <% end %>
+            </:status_pill>
+            <:presence>
+              <% doc_presences = presences_on_doc(@presences, Content.published_id(@editor_doc.doc_id)) %>
+              <%= if doc_presences != [] do %>
+                <div class="presence-dots">
+                  <%= for p <- doc_presences do %>
+                    <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
+                  <% end %>
+                </div>
               <% end %>
-            </div>
-            <div style="display: flex; gap: 6px;">
+            </:presence>
+            <:actions>
               <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
               <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
               <%= if @editor_is_draft do %>
@@ -1129,8 +1131,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
               <% else %>
                 <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
               <% end %>
-            </div>
-          </div>
+            </:actions>
+          </.document_header>
 
           <div class="editor-body">
             <%= if @editor_schema do %>
@@ -1140,33 +1142,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
             <% end %>
 
             <form phx-submit="save" phx-change="autosave" id="editor-form">
-              <div class={"editor-field #{if @validation_errors["title"], do: "has-error"}"}>
-                <label class="editor-field-label">
-                  Title
-                  <%= if field_rules = get_title_validation(@editor_schema) do %>
-                    <%= if field_rules["required"] do %><span class="field-required">*</span><% end %>
-                  <% end %>
-                </label>
+              <.editor_field
+                label="Title"
+                required={(get_title_validation(@editor_schema) || %{})["required"] == true}
+                errors={Map.get(@validation_errors, "title", [])}
+              >
                 <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
-                <%= if errs = @validation_errors["title"] do %>
-                  <div class="field-errors"><%= Enum.join(errs, ", ") %></div>
-                <% end %>
-              </div>
+              </.editor_field>
               <%= if @editor_schema do %>
                 <%= for field <- Enum.reject(@editor_schema.fields, & &1["name"] == "title") do %>
                   <% field_name = field["name"] %>
                   <% rules = field["validation"] || %{} %>
-                  <div class={"editor-field #{if @validation_errors[field_name], do: "has-error"}"}>
-                    <label class="editor-field-label">
-                      <%= field["title"] || field_name %>
-                      <%= if rules["required"] do %><span class="field-required">*</span><% end %>
-                      <span class="editor-field-type"><%= field["type"] %></span>
-                    </label>
+                  <.editor_field
+                    label={field["title"] || field_name}
+                    type={field["type"]}
+                    required={rules["required"] == true}
+                    errors={Map.get(@validation_errors, field_name, [])}
+                  >
                     <%= if PluginAdapter.v2?(field), do: PluginAdapter.render(assigns, field), else: render_input(assigns, field) %>
-                    <%= if errs = @validation_errors[field_name] do %>
-                      <div class="field-errors"><%= Enum.join(errs, ", ") %></div>
-                    <% end %>
-                  </div>
+                  </.editor_field>
                 <% end %>
               <% end %>
               <div class="editor-actions">
@@ -1176,12 +1170,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
           </div>
         </div>
       <% else %>
-        <div class="editor-empty">
-          <div style="color: var(--fg-dim); text-align: center;">
-            <div style="margin-bottom: 12px; opacity: 0.4;"><.icon name="file-text" size={40} /></div>
-            <div class="text-sm">Select a document to edit</div>
-          </div>
-        </div>
+        <.empty_editor message="Select a document to edit">
+          <:icon><.icon name="file-text" size={40} /></:icon>
+        </.empty_editor>
       <% end %>
 
       <!-- Image picker modal (outside editor form to avoid nested forms) -->
@@ -1314,25 +1305,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     <style>
       /* Pane layout classes (.pane-layout, .pane-column, .pane-header,
          .pane-item, .pane-doc-*, etc.) moved to root.html.heex so every
-         Studio LiveView can use them. StudioLive-specific rules only below. */
+         Studio LiveView can use them. The .editor-* family was also
+         hoisted to root.html.heex (Phase 8 WI? — Task 9 PR-A) so plugin
+         LiveViews (BookView, BookEditor) can use document_header /
+         editor_field / empty_editor on cold-load. StudioLive-specific
+         rules only below. */
 
-      /* Editor */
-      .editor-panel { flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
-      .editor-header { justify-content: space-between; background: var(--bg); }
-      .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
-      .editor-meta { font-size: 12px; color: var(--fg-dim); margin-bottom: 20px; }
-      .editor-field { margin-bottom: 20px; }
-      .editor-field-label {
-        display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600;
-        color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
-      }
-      .editor-field-type { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg-dim); margin-left: 6px; font-size: 11px; }
-      .editor-actions { padding-top: 16px; border-top: 1px solid var(--border-muted); display: flex; align-items: center; gap: 12px; }
       .save-status { font-size: 12px; color: var(--success); opacity: 0.8; transition: opacity 0.3s; }
-      .editor-empty {
-        flex: 1; display: flex; align-items: center; justify-content: center;
-        background: var(--bg);
-      }
 
       /* Image field */
       .image-field { position: relative; }
@@ -1501,8 +1480,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       /* Validation */
       .field-required { color: var(--destructive); margin-left: 2px; }
       .field-errors { font-size: 12px; color: var(--destructive); margin-top: 4px; }
-      .editor-field.has-error .form-input { border-color: var(--destructive); }
-      .editor-field.has-error .form-input:focus { box-shadow: 0 0 0 2px hsl(0 62.8% 50.6% / 0.15); }
+      /* .editor-field.has-error .form-input{...} hoisted to root.html.heex */
     </style>
     """
   end
