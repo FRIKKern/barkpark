@@ -131,6 +131,8 @@ make status    # service health
 make logs      # tail logs
 ```
 
+After any prod operation that touches `systemctl`, run `./api/scripts/prod-postcheck.sh` (see [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md)).
+
 ## Schema & Field Types
 
 Create schemas via API — they drive the Studio UI, TUI, and desk structure automatically.
