@@ -28,12 +28,6 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
         <% end %>
       </select>
     </label>
-    <style>
-      .dataset-switcher { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; font-size: 12px; }
-      .dataset-switcher-label { color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; font-size: 10px; }
-      .dataset-switcher-select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; cursor: pointer; }
-      .dataset-switcher-select:hover { border-color: var(--fg-muted); }
-    </style>
     """
   end
 
