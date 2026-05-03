@@ -131,6 +131,8 @@ make status    # service health
 make logs      # tail logs
 ```
 
+After any prod operation that touches `systemctl`, run `./api/scripts/prod-postcheck.sh` (see [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md)).
+
 ## Schema & Field Types
 
 Create schemas via API — they drive the Studio UI, TUI, and desk structure automatically.
@@ -397,6 +399,10 @@ BARKPARK_API_URL=http://YOUR_VPS_IP:4000 BARKPARK_API_TOKEN=your-token go run .
 End-to-end reference plugin: book editor → ONIX 3.0 export → Bokbasen publish + ack-loop with sign-off gate. Demonstrates the full Barkpark plugin contract — Schema Definition v2 (composite / arrayOf / codelist / localizedText), Studio LiveView surfaces, encrypted credentials, Oban-backed background workers, and structured ack-loop state.
 
 See [`docs/spec/onixedit-masterplan-summary.md`](docs/spec/onixedit-masterplan-summary.md) for the full masterplan close-out (phases, decisions, deferred items).
+
+### Plugin schema install
+
+Plugin-declared schemas (e.g. OnixEdit's `book`) auto-install on every server start. A post-boot Task in `Barkpark.Application` walks `Barkpark.Plugins.Registry.all/0` and persists each plugin's `register_schemas/1` output via `Barkpark.Content.upsert_schema/2`. Fresh databases pick up the same schemas through `priv/repo/seeds.exs`, which calls the shared helper `Barkpark.Plugins.Bootstrap.register_all_schemas/0` after the v1 seed loop. Both paths are idempotent against the `(name, dataset)` composite unique index — re-running a deploy or `mix ecto.reset` produces zero duplicate rows. Full reference: [`docs/plugins/INSTALL.md`](docs/plugins/INSTALL.md).
 
 ## ONIX 3.0 Export Proof
 

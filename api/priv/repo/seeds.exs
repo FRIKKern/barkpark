@@ -457,3 +457,21 @@ dev_token = "barkpark-dev-token"
 
 IO.puts("Dev token created: #{dev_token}")
 IO.puts("Use with: curl -H 'Authorization: Bearer #{dev_token}' ...")
+
+# ── Plugin Schemas (Bootstrap) ──────────────────────────────────────────────
+#
+# Mirrors the post-boot Task in Barkpark.Application — when seeds run via
+# `mix run priv/repo/seeds.exs` the app is already started, so the registry
+# is populated. Idempotent via the (name, dataset) unique index on
+# schema_definitions; per-plugin failures are logged inside Bootstrap and
+# never raise here.
+
+IO.puts("\n=== Registering plugin schemas ===")
+
+case Barkpark.Plugins.Bootstrap.register_all_schemas() do
+  {:ok, count} ->
+    IO.puts("Registered #{count} plugin schema(s) via Plugins.Bootstrap")
+
+  {:error, reason} ->
+    IO.puts(:stderr, "Plugin schema bootstrap reported errors: #{inspect(reason)}")
+end

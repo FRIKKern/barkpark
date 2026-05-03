@@ -154,6 +154,8 @@ Concrete example: when the OnixEdit plugin lands (Phase 4–5), its `book` schem
 
 The legacy seed schemas (post, page, author, category, project, siteSettings, navigation, colors) use only v1 primitives and continue to work in the TUI exactly as before — they go through the validator's permanent `flat_mode` branch with no behavioural change. See `docs/plugins/SCHEMA_V2.md` for the full v2 reference.
 
+**Plugin schemas auto-install on every server start** via the post-boot Task in `Barkpark.Application` (helper: `Barkpark.Plugins.Bootstrap.register_all_schemas/0`); seeds.exs calls the same helper for fresh databases. Idempotent on `(name, dataset)`. Do NOT reintroduce the legacy `mix run -e "...register_schemas..."` workaround — `book` and any future plugin schemas now land automatically. Full reference: `docs/plugins/INSTALL.md`.
+
 ## Project Structure
 
 ```
