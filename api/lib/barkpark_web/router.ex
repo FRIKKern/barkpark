@@ -86,15 +86,17 @@ defmodule BarkparkWeb.Router do
   scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser
 
-    live "/", StudioLive
-    live "/media", MediaLive
-    live "/api-tester", ApiTesterLive
+    live_session :studio_public, on_mount: [{BarkparkWeb.LiveAuth, :fetch_api_token}] do
+      live "/", StudioLive
+      live "/media", MediaLive
+      live "/api-tester", ApiTesterLive
 
-    # Plugin-owned dedicated editors. Must come BEFORE the catch-all below.
-    # OnixEdit `book` documents (Phase 5 WI1).
-    live "/onixedit/book/:doc_id", Plugins.OnixEdit.BookEditor
+      # Plugin-owned dedicated editors. Must come BEFORE the catch-all below.
+      # OnixEdit `book` documents (Phase 5 WI1).
+      live "/onixedit/book/:doc_id", Plugins.OnixEdit.BookEditor
 
-    live "/*path", StudioLive
+      live "/*path", StudioLive
+    end
   end
 
   # ── Meta (SDK handshake) — no auth, no rate limit ───────────────────────
