@@ -214,7 +214,12 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
         subjects_thema: MapSet.new(),
         show_publish_modal: false,
         publish_preview: nil,
-        bp_status: %{}
+        bp_status: %{},
+        show_republish_modal: false,
+        show_edit_warning_modal: false,
+        edit_warning_dismissed: false,
+        pending_save_params: nil,
+        dirty_since_signoff: false
       )
       |> load_document()
 
@@ -270,14 +275,19 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   @impl true
   def handle_event("autosave", %{"doc" => params}, socket) do
-    form = Map.merge(socket.assigns.form, params)
-    {:noreply, save(socket, form)}
+    {:noreply, do_save(%{"doc" => params}, socket)}
   end
 
-  def handle_event("save", %{"doc" => params}, socket) do
-    form = Map.merge(socket.assigns.form, params)
-    socket = save(socket, form)
-    {:noreply, put_flash(socket, :info, "Changes saved")}
+  def handle_event("save", %{"doc" => params} = full_params, socket) do
+    if signed_off?(socket.assigns.bp_status) and not socket.assigns.edit_warning_dismissed do
+      {:noreply,
+       socket
+       |> assign(:pending_save_params, full_params)
+       |> assign(:show_edit_warning_modal, true)}
+    else
+      socket = do_save(%{"doc" => params}, socket)
+      {:noreply, put_flash(socket, :info, "Changes saved")}
+    end
   end
 
   def handle_event("publish", _params, socket) do
@@ -372,6 +382,64 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
       {:ok, _} -> {:noreply, socket |> put_flash(:info, "Draft discarded") |> load_document()}
       {:error, _} -> {:noreply, put_flash(socket, :error, "No draft to discard")}
     end
+  end
+
+  # ── WI3 — Re-publish modal (notificationType=04 UPDATE) ────────────────────
+
+  def handle_event("open-republish-modal", _params, socket) do
+    {:noreply, assign(socket, :show_republish_modal, true)}
+  end
+
+  def handle_event("dismiss-republish-modal", _params, socket) do
+    {:noreply, assign(socket, :show_republish_modal, false)}
+  end
+
+  # Persist `notificationType=04` into the doc, then enqueue PublishWorker on
+  # the freshly-reloaded doc so the worker reads the updated content. Reset
+  # `:dirty_since_signoff` because the user has just initiated a fresh
+  # republish — the gate stays closed until the next post-acceptance edit.
+  def handle_event("confirm-republish", _params, socket) do
+    case do_republish(socket) do
+      {:ok, socket} ->
+        {:noreply,
+         socket
+         |> assign(show_republish_modal: false, dirty_since_signoff: false)
+         |> put_flash(:info, "Re-publish enqueued — track status in toolbar pill")}
+
+      {:error, :no_doc, socket} ->
+        {:noreply,
+         socket
+         |> assign(show_republish_modal: false)
+         |> put_flash(:error, "No document loaded — save first")}
+
+      {:error, reason, socket} ->
+        {:noreply,
+         socket
+         |> assign(show_republish_modal: false)
+         |> put_flash(:error, "Re-publish failed: #{format_preview_error(reason)}")}
+    end
+  end
+
+  # ── WI3 — Edit-warning modal (signed-off save guard) ───────────────────────
+
+  def handle_event("confirm-save-after-warning", _params, socket) do
+    params = socket.assigns.pending_save_params || %{"doc" => %{}}
+    socket = do_save(params, socket)
+
+    {:noreply,
+     socket
+     |> assign(
+       show_edit_warning_modal: false,
+       edit_warning_dismissed: true,
+       pending_save_params: nil
+     )
+     |> put_flash(:info, "Changes saved")}
+  end
+
+  def handle_event("dismiss-edit-warning", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(show_edit_warning_modal: false, pending_save_params: nil)}
   end
 
   # ── private ────────────────────────────────────────────────────────────────
@@ -551,6 +619,42 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     end
   end
 
+  # Re-publish: stamp `notificationType=04` (ONIX UPDATE notification) on the
+  # current doc, reload it (so `:doc`/`:form`/`:bp_status` are fresh), then
+  # enqueue the standard PublishWorker. Returns the updated socket so the
+  # caller can fold modal/dirty assigns onto a single result.
+  defp do_republish(%{assigns: %{doc: nil}} = socket), do: {:error, :no_doc, socket}
+
+  defp do_republish(%{assigns: %{doc: doc, type: type, dataset: dataset}} = socket) do
+    new_content = Map.put(doc.content || %{}, "notificationType", "04")
+
+    attrs = %{
+      "doc_id" => doc.doc_id,
+      "title" => doc.title,
+      "status" => doc.status,
+      "content" => new_content
+    }
+
+    case Content.upsert_document(type, attrs, dataset) do
+      {:ok, _saved} ->
+        socket = load_document(socket)
+
+        case enqueue_publish(socket) do
+          {:ok, _job, status} ->
+            {:ok, assign(socket, :bp_status, status)}
+
+          {:error, :no_doc} ->
+            {:error, :no_doc, socket}
+
+          {:error, reason} ->
+            {:error, reason, socket}
+        end
+
+      {:error, reason} ->
+        {:error, reason, socket}
+    end
+  end
+
   defp enqueue_publish(%{assigns: %{doc: nil}}), do: {:error, :no_doc}
 
   defp enqueue_publish(%{assigns: %{doc: doc, type: type, dataset: dataset}}) do
@@ -629,6 +733,44 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
 
   defp format_preview_error(other), do: inspect(other, limit: 100)
 
+  # ── WI3 — sign-off gate helpers ────────────────────────────────────────────
+
+  # Bokbasen sign-off is asserted by `Status.write/2` whenever `accepted_at`
+  # lands on the merged composite. The badge / re-publish gate keys off this
+  # flag so the editor only nags the user once Bokbasen has actually accepted
+  # the submission (`signed_off=true` is derived, never written by hand).
+  defp signed_off?(status) when is_map(status), do: Map.get(status, "signed_off") == true
+  defp signed_off?(_), do: false
+
+  # Truncated submission id for the badge body. We append a horizontal-ellipsis
+  # so it is visually obvious the value is abridged; the full id is exposed via
+  # `data-clipboard-text` on the copy link.
+  defp submission_id_short(status) do
+    status |> Map.get("submission_id", "") |> String.slice(0, 8) |> Kernel.<>("…")
+  end
+
+  # Dirty = the editor has accepted at least one autosave/save event since the
+  # current `accepted_at` was assigned. We track this via the
+  # `:dirty_since_signoff` assign (flipped in `do_save/2` when status is
+  # currently signed-off, reset by `confirm-republish` and by mount).
+  defp dirty?(%{dirty_since_signoff: true}), do: true
+  defp dirty?(_), do: false
+
+  # Extracted body of the original `handle_event("save", …)`. `handle_event/3`
+  # now wraps this so the edit-warning modal can intercept saves on signed-off
+  # docs without duplicating persistence logic. Autosave routes through here
+  # directly (autosaves never trigger the modal — only explicit user saves do).
+  defp do_save(%{"doc" => params}, socket) do
+    form = Map.merge(socket.assigns.form, params)
+    socket = save(socket, form)
+
+    if signed_off?(socket.assigns.bp_status) do
+      assign(socket, :dirty_since_signoff, true)
+    else
+      socket
+    end
+  end
+
   # Status pill color mapping. Tailwind classes are kept self-contained so the
   # pill works whether or not the host theme overrides the badge palette.
   @gray_states ~w(pending staging)
@@ -695,6 +837,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
       </div>
       <div class="main-header-right">
         <%= render_bokbasen_pill(assigns) %>
+        <%= render_signoff_badge(assigns) %>
         <%= if @doc do %>
           <button
             id="onix-export-button"
@@ -710,6 +853,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
             data-test-id="bokbasen-publish-button"
             aria-label="Publish to Bokbasen"
           >Publish to Bokbasen</button>
+          <%= render_republish_button(assigns) %>
         <% end %>
         <%= if @is_draft do %>
           <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
@@ -762,6 +906,8 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     </div>
 
     <%= render_publish_modal(assigns) %>
+    <%= render_republish_modal(assigns) %>
+    <%= render_edit_warning_modal(assigns) %>
     """
   end
 
@@ -862,6 +1008,140 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     |> String.split("\n")
     |> Enum.take(50)
     |> Enum.join("\n")
+  end
+
+  # ── WI3 — sign-off badge + re-publish button + modals ──────────────────────
+
+  defp render_signoff_badge(assigns) do
+    status = assigns.bp_status
+    submission_id = Map.get(status, "submission_id", "")
+    accepted_at = Map.get(status, "accepted_at", "")
+
+    assigns =
+      assigns
+      |> assign(:signed_off, signed_off?(status))
+      |> assign(:submission_short, submission_id_short(status))
+      |> assign(:submission_full, submission_id)
+      |> assign(
+        :badge_title,
+        "Signed off · accepted #{accepted_at} · submission #{submission_id}"
+      )
+
+    ~H"""
+    <%= if @signed_off do %>
+      <span
+        class="badge bp-pill bp-pill-green"
+        data-test-id="bokbasen-signoff-badge"
+        title={@badge_title}
+      >
+        <.icon name="check-circle" size={14} />
+        <span>Signed off</span>
+        <span class="bp-signoff-id" data-test-id="bokbasen-signoff-submission-id">
+          <%= @submission_short %>
+        </span>
+        <a
+          href="#"
+          onclick={"navigator.clipboard.writeText('#{@submission_full}'); return false;"}
+          data-clipboard-text={@submission_full}
+          data-test-id="bokbasen-signoff-copy"
+          title="Copy submission id"
+        >
+          <.icon name="copy" size={12} />
+        </a>
+      </span>
+    <% end %>
+    """
+  end
+
+  defp render_republish_button(assigns) do
+    assigns =
+      assigns
+      |> assign(:show_republish, signed_off?(assigns.bp_status) and dirty?(assigns))
+
+    ~H"""
+    <%= if @show_republish do %>
+      <button
+        type="button"
+        class="btn btn-primary btn-sm"
+        phx-click="open-republish-modal"
+        data-test-id="bokbasen-republish-button"
+      >
+        <.icon name="refresh-cw" size={14} /> Re-publish (UPDATE)
+      </button>
+    <% end %>
+    """
+  end
+
+  defp render_republish_modal(assigns) do
+    ~H"""
+    <%= if @show_republish_modal do %>
+      <div
+        class="bp-modal-overlay"
+        data-test-id="republish-modal"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;"
+      >
+        <div
+          class="bp-modal card"
+          style="background: var(--surface, #fff); padding: 24px; min-width: 480px; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; gap: 12px; overflow: auto;"
+        >
+          <h2 class="h3" style="margin: 0;">Re-publish to Bokbasen?</h2>
+          <p class="text-sm text-muted" style="margin: 0;">
+            This document was already accepted by Bokbasen. Re-publishing stamps the ONIX message as <strong>notificationType <code>04</code> (UPDATE)</strong> and enqueues an async job — track progress in the toolbar pill.
+          </p>
+          <div style="display: flex; gap: 8px; justify-content: flex-end; padding-top: 8px;">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              phx-click="dismiss-republish-modal"
+              data-test-id="republish-modal-cancel"
+            >Cancel</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              phx-click="confirm-republish"
+              data-test-id="republish-modal-confirm"
+            >Re-publish (UPDATE)</button>
+          </div>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp render_edit_warning_modal(assigns) do
+    ~H"""
+    <%= if @show_edit_warning_modal do %>
+      <div
+        class="bp-modal-overlay"
+        data-test-id="edit-warning-modal"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;"
+      >
+        <div
+          class="bp-modal card"
+          style="background: var(--surface, #fff); padding: 24px; min-width: 480px; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; gap: 12px; overflow: auto;"
+        >
+          <h2 class="h3" style="margin: 0;">Edit accepted submission?</h2>
+          <p class="text-sm text-muted" style="margin: 0;">
+            This document has already been accepted by Bokbasen. Saving will diverge the local content from the accepted submission — you will need to <strong>Re-publish (UPDATE)</strong> to bring Bokbasen back in sync.
+          </p>
+          <div style="display: flex; gap: 8px; justify-content: flex-end; padding-top: 8px;">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              phx-click="dismiss-edit-warning"
+              data-test-id="edit-warning-modal-cancel"
+            >Cancel</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              phx-click="confirm-save-after-warning"
+              data-test-id="edit-warning-modal-confirm"
+            >Save anyway</button>
+          </div>
+        </div>
+      </div>
+    <% end %>
+    """
   end
 
   # ── Tab body dispatch — the WI3 / WI4 seam. ────────────────────────────────
