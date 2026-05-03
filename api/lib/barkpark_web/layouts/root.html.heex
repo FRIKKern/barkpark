@@ -415,6 +415,29 @@
     }
     .pane-column--collapsed:hover .pane-column-collapsed-label { color: var(--fg); }
 
+    /* ── Editor pane (used by StudioLive + plugin LVs via document_header /
+       editor_field / empty_editor in BarkparkWeb.StudioComponents).
+       Hoisted from StudioLive's inline <style> so plugin LiveViews
+       (BookView, BookEditor) render correctly on cold-load direct
+       navigation without first visiting StudioLive. ──────────────────── */
+    .editor-panel { flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+    .editor-header { justify-content: space-between; background: var(--bg); }
+    .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
+    .editor-meta { font-size: 12px; color: var(--fg-dim); margin-bottom: 20px; }
+    .editor-field { margin-bottom: 20px; }
+    .editor-field-label {
+      display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600;
+      color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .editor-field-type { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg-dim); margin-left: 6px; font-size: 11px; }
+    .editor-actions { padding-top: 16px; border-top: 1px solid var(--border-muted); display: flex; align-items: center; gap: 12px; }
+    .editor-empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      background: var(--bg);
+    }
+    .editor-field.has-error .form-input { border-color: var(--destructive); }
+    .editor-field.has-error .form-input:focus { box-shadow: 0 0 0 2px hsl(0 62.8% 50.6% / 0.15); }
+
     /* ── Scrollbar ─────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
