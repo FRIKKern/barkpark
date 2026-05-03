@@ -194,6 +194,122 @@ defmodule Barkpark.Content do
     end
   end
 
+  @doc """
+  Fetch a document with draft-first preference. Returns the draft if it
+  exists, otherwise falls back to the published row, plus flags for
+  whether the returned doc is the draft and whether a published version
+  exists. Used by the Studio editor and plugin LVs (BookView,
+  BookEditor) — consolidated in Task #11 WI3 from prior duplicates.
+
+      {doc | nil, is_draft :: boolean, has_published :: boolean}
+  """
+  @spec fetch_doc_with_draft(String.t(), String.t(), String.t()) ::
+          {Document.t() | nil, boolean(), boolean()}
+  def fetch_doc_with_draft(type, doc_id, dataset) do
+    pub_id = published_id(doc_id)
+    draft_r = get_document(draft_id(pub_id), type, dataset)
+    pub_r = get_document(pub_id, type, dataset)
+
+    {doc, is_draft} =
+      case draft_r do
+        {:ok, d} ->
+          {d, true}
+
+        _ ->
+          case pub_r do
+            {:ok, d} -> {d, false}
+            _ -> {nil, false}
+          end
+      end
+
+    {doc, is_draft, match?({:ok, _}, pub_r)}
+  end
+
+  @doc """
+  Build a form map from a document and its schema. Returns a map keyed
+  by field name with string values, including `"title"` and `"status"`
+  baseline keys. Returns `%{}` when `doc` is nil. Used by the Studio
+  editor + plugin LVs — consolidated in Task #11 WI3 from prior
+  duplicates in StudioLive (`doc_to_form`, `doc_data_to_form`),
+  DocumentEditLive (orphan), and BookEditor.
+  """
+  @spec doc_to_form(map() | nil, map() | nil) :: map()
+  def doc_to_form(nil, _schema), do: %{}
+
+  def doc_to_form(doc, schema) do
+    base = %{"title" => doc.title || "", "status" => doc.status || "draft"}
+
+    if schema do
+      Enum.reduce(schema.fields, base, fn field, acc ->
+        key = field["name"]
+
+        val =
+          if key in ["title", "status"],
+            do: Map.get(acc, key),
+            else: get_in(doc.content || %{}, [key]) || ""
+
+        Map.put(acc, key, val)
+      end)
+    else
+      base
+    end
+  end
+
+  @doc """
+  Build a `content` map from a form params map by reducing schema
+  fields. Excludes `"title"` and `"status"` (those live on the
+  document row, not under `content`). Empty-string values are dropped.
+  Returns `%{}` when `schema` is nil. Used by the Studio editor +
+  BookEditor — consolidated in Task #11 WI3.
+  """
+  @spec build_content(map(), map() | nil) :: map()
+  def build_content(_params, nil), do: %{}
+
+  def build_content(params, schema) do
+    Enum.reduce(schema.fields, %{}, fn field, acc ->
+      key = field["name"]
+      val = Map.get(params, key, "")
+      if key in ["title", "status"] or val == "", do: acc, else: Map.put(acc, key, val)
+    end)
+  end
+
+  @doc """
+  Upsert a draft for the document being edited. Builds attrs from the
+  form params + schema, runs informational validation, calls
+  `upsert_document/3`, and returns the saved doc together with the
+  validation errors map (drafts save with warnings; only publish blocks).
+
+  Returns `{:ok, saved_doc, validation_errors_map}` on success or
+  `{:error, term}` on a DB upsert failure. Consolidated in Task #11
+  WI3 from prior duplicate bodies in StudioLive
+  (`handle_event "autosave"`, `handle_info :autosave_form`,
+  `save_doc/3`).
+  """
+  @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t()) ::
+          {:ok, Document.t(), map()} | {:error, term()}
+  def upsert_draft(base_doc, type, schema, params, dataset) do
+    content = build_content(params, schema)
+    new_title = Map.get(params, "title", base_doc.title)
+
+    attrs = %{
+      "doc_id" => draft_id(published_id(base_doc.doc_id)),
+      "title" => new_title,
+      "status" => Map.get(params, "status", base_doc.status),
+      "content" => content
+    }
+
+    validation_errors =
+      case validate_document(type, new_title, content, dataset) do
+        {:error, errs} -> errs
+        _ -> %{}
+      end
+
+    case upsert_document(type, attrs, dataset) do
+      {:ok, doc} -> {:ok, doc, validation_errors}
+      {:error, _} = err -> err
+    end
+  end
+
   @doc "Validate document content against its schema. Returns {:ok, content} or {:error, errors_map}."
   def validate_document(type, title, content, dataset) do
     case get_schema(type, dataset) do

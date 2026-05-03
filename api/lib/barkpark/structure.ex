@@ -245,6 +245,22 @@ defmodule Barkpark.Structure do
     }
   end
 
+  @doc """
+  Parse a `field=value` filter string (used by `Structure.Node.filter`)
+  into a map suitable for `Barkpark.Content.list_documents/3`'s
+  `:filter_map` option. Returns `%{}` for nil / "" / malformed input.
+  """
+  @spec parse_filter(String.t() | nil) :: map()
+  def parse_filter(nil), do: %{}
+  def parse_filter(""), do: %{}
+
+  def parse_filter(s) when is_binary(s) do
+    case String.split(s, "=", parts: 2) do
+      [field, value] -> %{field => value}
+      _ -> %{}
+    end
+  end
+
   defp status_icon("published"), do: "●"
   defp status_icon("draft"), do: "○"
   defp status_icon("active"), do: "◆"
