@@ -56,8 +56,15 @@ defmodule Barkpark.Repo.Migrations.AddCodelistIssueVersion do
     :ok
   end
 
+  # `schema_definitions.fields` is `jsonb[]` (a Postgres array of jsonb
+  # objects), not a single `jsonb`. Casting `fields::text` directly returns
+  # the Postgres array literal `{"{...}","{...}"}`, which is NOT valid JSON
+  # and breaks `Jason.decode!`. We round-trip through `to_jsonb(fields)` so
+  # the value reaches Elixir as a JSON array string, then on write-back we
+  # let Postgres unfold a JSON-encoded array back into `jsonb[]` via
+  # `jsonb_array_elements`.
   defp transform_schemas(transform, repo) do
-    %{rows: rows} = repo.query!("SELECT id, fields::text FROM schema_definitions")
+    %{rows: rows} = repo.query!("SELECT id, to_jsonb(fields)::text FROM schema_definitions")
 
     Enum.each(rows, fn [id, fields_json] ->
       fields = Jason.decode!(fields_json)
@@ -65,8 +72,12 @@ defmodule Barkpark.Repo.Migrations.AddCodelistIssueVersion do
 
       if new_fields != fields do
         repo.query!(
-          "UPDATE schema_definitions SET fields = $1 WHERE id = $2",
-          [new_fields, id]
+          """
+          UPDATE schema_definitions
+          SET fields = ARRAY(SELECT jsonb_array_elements($1::jsonb))::jsonb[]
+          WHERE id = $2
+          """,
+          [Jason.encode!(new_fields), id]
         )
       end
     end)
