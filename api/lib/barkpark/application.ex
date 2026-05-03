@@ -51,6 +51,11 @@ defmodule Barkpark.Application do
         # need plugins to be present first), but neither blocks endpoint.
         Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
           Barkpark.Plugins.Registry.discover_and_register()
+          # Task 5: persist each plugin's `register_schemas/1` output via
+          # `Content.upsert_schema/2`. Idempotent on `(name, dataset)`. Per-
+          # plugin try/rescue inside Bootstrap keeps a bad plugin from
+          # tanking the whole sweep — never crashes app start.
+          Barkpark.Plugins.Bootstrap.register_all_schemas()
           # Phase 3 WI1: pull `checkers/0` slots out of every plugin
           # registered above and namespace them as
           # `plugin:<name>:<checker>` in the value-checker registry.
