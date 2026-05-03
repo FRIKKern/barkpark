@@ -2,6 +2,8 @@ defmodule BarkparkWeb.StudioComponents do
   @moduledoc "Reusable components for the Barkpark Studio."
   use Phoenix.Component
 
+  import BarkparkWeb.Icons
+
   attr :status, :string, required: true
 
   def status_badge(assigns) do
@@ -490,5 +492,723 @@ defmodule BarkparkWeb.StudioComponents do
       <div class="pane-doc-id"><%= @doc_id %></div>
     </div>
     """
+  end
+
+  # ── Chrome components (Task #11 WI2) ────────────────────────────────
+  #
+  # Net-new wrappers around the chrome markup that today lives inline in
+  # `api/lib/barkpark_web/layouts/studio.html.heex` and (for flash only)
+  # `app.html.heex`. Each emits byte-identical HTML to the legacy
+  # markup so the WI1 layout snapshot tests stay green.
+
+  @doc """
+  Renders Studio flash banners (info + error) using the canonical
+  `style="margin: 8px 16px 0;"` margin. Both `studio.html.heex` and
+  `app.html.heex` call this — the markup is byte-identical between
+  layouts, so consolidating eliminates duplication.
+
+  When neither flash key is set, emits no markup (no leaked wrapper).
+  """
+  attr :flash, :map, required: true
+
+  def studio_flash(assigns) do
+    ~H"""
+    <%= if Phoenix.Flash.get(@flash, :info) do %>
+      <div class="flash flash-info" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
+    <% end %>
+    <%= if Phoenix.Flash.get(@flash, :error) do %>
+      <div class="flash flash-error" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Sign-out form for the Studio topbar. POSTs to `logout_path` (default
+  `/logout`). Renders byte-identical to the legacy inline form in
+  `studio.html.heex`. Caller wraps with `:if={assigns[:api_token]}` —
+  the component itself does NOT guard, so an empty `<div class="studio-bar-actions">`
+  wrapper does not leak into the topbar when no api_token is set.
+
+  Uses a hardcoded path string rather than the `~p` sigil because
+  `BarkparkWeb.StudioComponents` does not import `:verified_routes`.
+  """
+  attr :logout_path, :string, default: "/logout"
+
+  def studio_signout_button(assigns) do
+    ~H"""
+    <div class="studio-bar-actions">
+      <.form :let={_f} for={%{}} as={:session} action={@logout_path} method="post">
+        <button type="submit" class="btn btn-ghost btn-sm" aria-label="Sign out">
+          <.icon name="log-out" size={14} />
+          Sign out
+        </button>
+      </.form>
+    </div>
+    """
+  end
+
+  @doc """
+  Studio top-level tab navigation. Reads tab data from
+  `BarkparkWeb.Studio.Nav.tabs/1` (single source of truth) and renders
+  the canonical `<div class="studio-bar-tabs">` wrapper with one anchor
+  per tab. The active tab gets the `active` modifier when its `id`
+  matches `nav_section`.
+
+  Caller wraps with `:if={assigns[:dataset]}` — the component itself
+  does NOT guard, so an empty `<div class="studio-bar-tabs">` does not
+  leak into the topbar when no dataset is set.
+  """
+  attr :dataset, :string, required: true
+  attr :nav_section, :atom, default: nil
+
+  def studio_tabs(assigns) do
+    ~H"""
+    <div class="studio-bar-tabs">
+      <%= for tab <- BarkparkWeb.Studio.Nav.tabs(@dataset) do %>
+        <a
+          href={tab.path}
+          class={"studio-tab #{if @nav_section == tab.id, do: "active"}"}
+        ><%= tab.label %></a>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Studio topbar wrapper. Emits the canonical `<div class="studio-bar">`
+  shell and renders three slots in order: `:brand` (single, optional),
+  `:tabs` (single, optional), `:actions` (multi, optional).
+
+  Each slot is rendered verbatim — slot content is responsible for its
+  own inner wrapper (e.g. `<div class="studio-bar-brand">`,
+  `<div class="studio-bar-actions">`). Self-contained sub-components
+  like `<.studio_signout_button />` already include their own wrapper.
+
+  Callers use `:if=` on each slot invocation to gate rendering — e.g.
+  `<:actions :if={assigns[:api_token]}>…</:actions>`. This avoids
+  empty-wrapper leak when the gate is false.
+  """
+  slot :brand
+  slot :tabs
+  slot :actions
+
+  def studio_topbar(assigns) do
+    ~H"""
+    <div class="studio-bar">
+      <%= render_slot(@brand) %>
+      <%= render_slot(@tabs) %>
+      <%= for a <- @actions do %><%= render_slot(a) %><% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Outermost Studio chrome wrapper. Emits `<div class={@class}>` with
+  the inner block rendered inside. Default class is `studio-shell`,
+  the canonical full-viewport flex column. Override `:class` if a
+  caller needs a different shell (rare — kept as an escape hatch).
+  """
+  attr :class, :string, default: "studio-shell"
+  slot :inner_block, required: true
+
+  def studio_shell(assigns) do
+    ~H"""
+    <div class={@class}>
+      <%= render_slot(@inner_block) %>
+    </div>
+    """
+  end
+
+  # ── Body components (Task #11 WI2) ──────────────────────────────────
+  #
+  # Net-new wrappers extracted from `StudioLive.render/1`. Each emits
+  # byte-identical HTML to the legacy inline markup so the WI1 layout
+  # snapshot tests and the Task #10 byte-identity test stay green.
+
+  alias BarkparkWeb.Components.FieldInputs
+  alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
+
+  @doc """
+  Renders one schema field row: the `<.editor_field>` wrapper plus the
+  v1/v2 fork that dispatches to either `FieldInputs.input/1` (v1 leaf
+  controls) or `PluginAdapter.render/2` (v2 composite/arrayOf/codelist/
+  localizedText). Output is byte-identical to the inline markup at the
+  former `studio_live.ex:1157-1168` call site.
+
+  The plain `<input type="text" name="doc[title]">` for the title row is
+  NOT a schema field and stays inline inside `studio_editor_shell/1`.
+
+  Attributes:
+    * `:field`             — (required) one schema field map.
+    * `:editor_form`       — (required) form state map keyed by field name.
+    * `:dataset`           — (default `"production"`) plumbed to FieldInputs.
+    * `:validation_errors` — (default `%{}`) keyed by field name; values are
+                              error string lists.
+    * `:parent_assigns`    — (default `%{}`) full parent LV assigns map,
+                              required by `PluginAdapter.render/2` for v2
+                              schema fields (OnixEdit `book` etc.).
+  """
+  attr :field, :map, required: true
+  attr :editor_form, :map, required: true
+  attr :dataset, :string, default: "production"
+  attr :validation_errors, :map, default: %{}
+  attr :parent_assigns, :map, default: %{}
+
+  def studio_field_renderer(assigns) do
+    ~H"""
+    <% field_name = @field["name"] %>
+    <% rules = @field["validation"] || %{} %>
+    <.editor_field
+      label={@field["title"] || field_name}
+      type={@field["type"]}
+      required={rules["required"] == true}
+      errors={Map.get(@validation_errors, field_name, [])}
+    >
+      <%= if PluginAdapter.v2?(@field) do %>
+        <%= PluginAdapter.render(@parent_assigns, @field) %>
+      <% else %>
+        <FieldInputs.input field={@field} editor_form={@editor_form} dataset={@dataset} />
+      <% end %>
+    </.editor_field>
+    """
+  end
+
+  @doc """
+  Image-picker modal extracted from the legacy inline block at
+  `studio_live.ex:1184-1215`. Renders the overlay + media-grid card when
+  `image_picker_field` is non-nil. All `phx-*` events bubble to the
+  parent LV's `handle_event/3` (StudioLive owns: close-image-picker,
+  validate-upload, upload-image, select-media).
+
+  The `uploads` attr is the LV's full uploads struct; function
+  components render in the parent process so the upload config scopes
+  correctly. Do NOT promote this to a LiveComponent — `@uploads.image`
+  scoping does not carry across LiveComponent boundaries.
+  """
+  attr :image_picker_field, :string, default: nil
+  attr :uploads, :map, required: true
+  attr :media_files, :list, default: []
+
+  def image_picker_modal(assigns) do
+    ~H"""
+    <%= if @image_picker_field do %>
+      <div class="image-picker-overlay" phx-click="close-image-picker"></div>
+      <div class="image-picker">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Select Image</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker">x</button>
+        </div>
+        <div class="image-picker-upload">
+          <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
+            <.live_file_input upload={@uploads.image} class="image-file-input" />
+            <%= for entry <- @uploads.image.entries do %>
+              <div class="image-upload-entry">
+                <.live_img_preview entry={entry} width="60" height="60" />
+                <span class="text-sm"><%= entry.client_name %></span>
+                <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+              </div>
+            <% end %>
+          </form>
+        </div>
+        <div class="image-picker-grid">
+          <%= if @media_files == [] do %>
+            <div class="text-sm text-muted" style="padding: 16px; text-align: center;">No images yet. Upload one above.</div>
+          <% end %>
+          <%= for file <- @media_files do %>
+            <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@image_picker_field}>
+              <img src={"/media/files/#{file.path}"} alt={file.original_name} />
+              <div class="image-picker-name"><%= file.original_name %></div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Reference-picker modal extracted from the legacy inline block at
+  `studio_live.ex:1218-1240`. Shares the `.image-picker` overlay styling
+  (deliberate — same modal chrome). Caller pre-filters candidates via
+  `ref_search` so this component is data-only.
+
+  Events bubble to StudioLive: close-ref-picker, ref-search, select-ref.
+  """
+  attr :ref_picker_field, :string, default: nil
+  attr :ref_search, :string, default: ""
+  attr :ref_candidates, :list, default: []
+
+  def ref_picker_modal(assigns) do
+    ~H"""
+    <%= if @ref_picker_field do %>
+      <div class="image-picker-overlay" phx-click="close-ref-picker"></div>
+      <div class="image-picker">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Select reference</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker">x</button>
+        </div>
+        <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
+          <input type="text" placeholder="Search..." class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} />
+        </div>
+        <div style="max-height: 400px; overflow-y: auto;">
+          <% filtered = filter_ref_candidates(@ref_candidates, @ref_search) %>
+          <%= for candidate <- filtered do %>
+            <div class="ref-candidate" phx-click="select-ref" phx-value-id={candidate.id} phx-value-field={@ref_picker_field}>
+              <span class="ref-candidate-title"><%= candidate.title %></span>
+              <span class="ref-candidate-id"><%= candidate.id %></span>
+            </div>
+          <% end %>
+          <%= if filtered == [] do %>
+            <div class="text-sm text-muted" style="padding: 20px; text-align: center;">No documents found</div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp filter_ref_candidates(candidates, ""), do: candidates
+  defp filter_ref_candidates(candidates, nil), do: candidates
+
+  defp filter_ref_candidates(candidates, query) do
+    q = String.downcase(query)
+
+    Enum.filter(candidates, fn c ->
+      String.contains?(String.downcase(c.title), q) or String.contains?(String.downcase(c.id), q)
+    end)
+  end
+
+  @doc """
+  History modal extracted from `studio_live.ex:1243-1268`. Renders the
+  list of past revisions with restore buttons. The `format_history_time/1`
+  helper migrates from StudioLive into this module (private).
+
+  Events bubble to StudioLive: close-history, restore-revision.
+  """
+  attr :show_history, :boolean, default: false
+  attr :revisions, :list, default: []
+
+  def history_modal(assigns) do
+    ~H"""
+    <%= if @show_history do %>
+      <div class="image-picker-overlay" phx-click="close-history"></div>
+      <div class="history-modal">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Document history</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history">x</button>
+        </div>
+        <div class="history-list">
+          <%= if @revisions == [] do %>
+            <div class="text-sm text-muted" style="padding: 24px; text-align: center;">No history yet</div>
+          <% end %>
+          <%= for rev <- @revisions do %>
+            <div class="history-item">
+              <div class="history-item-info">
+                <div class="history-item-action">
+                  <span class={"history-action-badge history-action-#{rev.action}"}><%= rev.action %></span>
+                  <span class="history-item-title"><%= rev.title || "Untitled" %></span>
+                </div>
+                <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
+              </div>
+              <button class="btn btn-sm" phx-click="restore-revision" phx-value-id={rev.id} data-confirm="Restore this version? Current changes will be overwritten.">Restore</button>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp format_history_time(dt) do
+    Calendar.strftime(dt, "%b %d, %Y at %H:%M:%S")
+  end
+
+  @doc """
+  Delete-confirmation modal extracted from `studio_live.ex:1271-1307`.
+  Two visual states: clean delete (no incoming references) and
+  disconnect+delete (refs exist; lists each one).
+
+  Events bubble to StudioLive: close-delete, confirm-delete (with or
+  without `phx-value-disconnect="true"`).
+  """
+  attr :show_delete, :boolean, default: false
+  attr :delete_refs, :list, default: []
+  attr :editor_doc, :map, default: nil
+
+  def delete_modal(assigns) do
+    ~H"""
+    <%= if @show_delete do %>
+      <div class="image-picker-overlay" phx-click="close-delete"></div>
+      <div class="delete-modal">
+        <div class="delete-modal-header">
+          <span style="font-weight: 600; font-size: 16px;">Delete document</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete">x</button>
+        </div>
+        <div class="delete-modal-body">
+          <%= if @delete_refs == [] do %>
+            <p class="text-sm">Are you sure you want to delete <strong><%= @editor_doc && @editor_doc.title %></strong>? This action cannot be undone.</p>
+            <div class="delete-modal-actions">
+              <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
+              <button class="btn btn-destructive btn-sm" phx-click="confirm-delete">Delete</button>
+            </div>
+          <% else %>
+            <div class="delete-warning">
+              <p class="text-sm" style="margin-bottom: 12px;">
+                <strong><%= @editor_doc && @editor_doc.title %></strong> is referenced by
+                <strong><%= length(@delete_refs) %></strong> document<%= if length(@delete_refs) != 1, do: "s" %>:
+              </p>
+              <div class="delete-ref-list">
+                <%= for ref <- @delete_refs do %>
+                  <div class="delete-ref-item">
+                    <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                    <span class="delete-ref-meta"><%= ref.type %> / <%= ref.field %></span>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+            <div class="delete-modal-actions">
+              <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
+              <button class="btn btn-destructive btn-sm" phx-click="confirm-delete" phx-value-disconnect="true">Disconnect references and delete</button>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Profile-edit modal extracted from `studio_live.ex:986-1025`. Shown
+  when `show_profile` is true. Form `phx-change="preview-profile"` lets
+  StudioLive preview the new color/name before commit; `phx-submit="save-profile"`
+  persists.
+
+  Events bubble to StudioLive: close-profile, save-profile, preview-profile.
+  """
+  attr :show_profile, :boolean, default: false
+  attr :user_name, :string, required: true
+  attr :user_color, :string, required: true
+
+  def profile_modal(assigns) do
+    ~H"""
+    <%= if @show_profile do %>
+      <div class="image-picker-overlay" phx-click="close-profile"></div>
+      <div class="profile-modal">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Your profile</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile">x</button>
+        </div>
+        <form phx-submit="save-profile" phx-change="preview-profile" style="padding: 20px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+            <div class="presence-me" style={"background: #{@user_color}; width: 40px; height: 40px; font-size: 16px;"}>
+              <%= String.first(@user_name) %>
+            </div>
+            <div>
+              <div style="font-weight: 600;"><%= @user_name %></div>
+              <div class="text-xs text-muted">This is how others see you</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input type="text" name="name" value={@user_name} class="form-input" autofocus phx-debounce="200" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Color</label>
+            <div class="profile-colors">
+              <%= for c <- ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316) do %>
+                <label class={"profile-color-option #{if c == @user_color, do: "selected"}"}>
+                  <input type="radio" name="color" value={c} checked={c == @user_color} style="display:none" />
+                  <span class="profile-color-swatch" style={"background: #{c}"}></span>
+                </label>
+              <% end %>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+            <button type="button" class="btn btn-sm" phx-click="close-profile">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+          </div>
+        </form>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Umbrella that composes the five Studio modal components into a single
+  call site. Each child renders only when its gate assign is set, so the
+  umbrella's emitted DOM is byte-identical to the legacy five top-level
+  `<%= if … %>` blocks formerly inline in StudioLive.
+
+  Per-modal components remain individually exported for testability and
+  for any future LV that wants only one modal in isolation.
+
+  Order matches the legacy render order: profile, image_picker,
+  ref_picker, history, delete. (Profile sits OUTSIDE pane_layout in the
+  legacy markup; the other four sit INSIDE. Caller chooses placement.)
+  """
+  attr :show_profile, :boolean, default: false
+  attr :user_name, :string, default: ""
+  attr :user_color, :string, default: ""
+
+  attr :image_picker_field, :string, default: nil
+  attr :uploads, :map, required: true
+  attr :media_files, :list, default: []
+
+  attr :ref_picker_field, :string, default: nil
+  attr :ref_search, :string, default: ""
+  attr :ref_candidates, :list, default: []
+
+  attr :show_history, :boolean, default: false
+  attr :revisions, :list, default: []
+
+  attr :show_delete, :boolean, default: false
+  attr :delete_refs, :list, default: []
+  attr :editor_doc, :map, default: nil
+
+  def studio_modals(assigns) do
+    ~H"""
+    <.profile_modal
+      show_profile={@show_profile}
+      user_name={@user_name}
+      user_color={@user_color}
+    />
+    <.image_picker_modal
+      image_picker_field={@image_picker_field}
+      uploads={@uploads}
+      media_files={@media_files}
+    />
+    <.ref_picker_modal
+      ref_picker_field={@ref_picker_field}
+      ref_search={@ref_search}
+      ref_candidates={@ref_candidates}
+    />
+    <.history_modal show_history={@show_history} revisions={@revisions} />
+    <.delete_modal
+      show_delete={@show_delete}
+      delete_refs={@delete_refs}
+      editor_doc={@editor_doc}
+    />
+    """
+  end
+
+  @doc """
+  Presence-nav overlay (top-right) extracted from `studio_live.ex:947-984`.
+  Renders one avatar+tooltip per other user plus the self pill. The
+  outer wrapper preserves the LV hook contract:
+
+      <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
+
+  Both `id="presence-hook"` AND `phx-hook="PresenceIdentity"` are
+  load-bearing — the localStorage-sync mechanism declared in
+  `root.html.heex` listens on this element. Do NOT change either.
+
+  Events bubble to the parent LV: `jump-to-user`, `show-profile`.
+  Helpers `truncate_text/2` and `resolve_presence_doc_title/2` migrate
+  from StudioLive into module-private of this component.
+  """
+  attr :user_id, :string, required: true
+  attr :user_name, :string, required: true
+  attr :user_color, :string, required: true
+  attr :presences, :list, default: []
+  attr :editor_doc, :map, default: nil
+  attr :dataset, :string, required: true
+
+  def presence_nav(assigns) do
+    ~H"""
+    <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
+      <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
+      <%= for p <- others do %>
+        <% p_doc_title = resolve_presence_doc_title(p, @dataset) %>
+        <%= if p.doc_id && p.type do %>
+          <div class="presence-user-wrap"
+               phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
+            <div class="presence-avatar clickable" style={"background: #{p.color}"}>
+              <%= String.first(Map.get(p, :name, "U")) %>
+            </div>
+            <div class="presence-tooltip">
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+              <div class="presence-tooltip-location">editing <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
+              <div class="presence-tooltip-hint">Click to jump there</div>
+            </div>
+          </div>
+        <% else %>
+          <div class="presence-user-wrap">
+            <div class="presence-avatar" style={"background: #{p.color}"}>
+              <%= String.first(Map.get(p, :name, "U")) %>
+            </div>
+            <div class="presence-tooltip">
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+              <div class="presence-tooltip-location">browsing</div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+      <div class="presence-me-group" phx-click="show-profile">
+        <div class="presence-me-info">
+          <span class="presence-me-name"><%= @user_name %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
+        </div>
+        <div class="presence-me" style={"background: #{@user_color}"}>
+          <%= String.first(@user_name) %>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp truncate_text(nil, _max), do: ""
+  defp truncate_text(text, max) when byte_size(text) <= max, do: text
+  defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
+
+  defp resolve_presence_doc_title(presence, dataset) do
+    type = presence.type
+    doc_id = presence.doc_id
+
+    if type && doc_id do
+      case Barkpark.Content.get_document(doc_id, type, dataset) do
+        {:ok, doc} ->
+          doc.title || doc_id
+
+        _ ->
+          case Barkpark.Content.get_document("drafts.#{doc_id}", type, dataset) do
+            {:ok, doc} -> doc.title || doc_id
+            _ -> doc_id
+          end
+      end
+    else
+      "browsing"
+    end
+  end
+
+  @doc """
+  StudioLive editor column extracted from `studio_live.ex:1106-1181`.
+  Renders the `<.document_header>` (Task #9) + form-with-fields when an
+  `editor_doc` is loaded, or `<.empty_editor>` (Task #9) otherwise.
+  Schema fields delegate to `<.studio_field_renderer>` (which itself
+  wraps `FieldInputs.input/1` per Task #10 byte-identity contract).
+
+  The TODO at studio_live.ex:1099-1103 (hand-rolled editor column)
+  is preserved verbatim — WI2 does NOT absorb that debt; it requires a
+  `<.pane_column>` API change tracked in
+  `docs/superpowers/plans/2026-04-14-unified-pane-components.md`.
+
+  Plugin LVs (BookView, BookEditor) do NOT consume this component —
+  their action sets diverge enough (Bokbasen pills, ONIX export, custom
+  tab nav) that wrapping forces endless slots. They call
+  `<.document_header>` directly and stay decoupled.
+
+  Events bubble to StudioLive: save, autosave, show-history, delete-doc,
+  publish, unpublish, plus the studio_field_renderer phx-click events
+  (open-image-picker, clear-image, open-ref-picker, clear-ref).
+
+  Slots:
+    * `:extra_actions` — (optional) appended after Publish/Unpublish.
+                          Currently unused; documented for plugin LVs.
+    * `:empty_state`   — (optional) overrides the default
+                          `<.empty_editor message="Select a document …">`.
+  """
+  attr :editor_doc, :map, default: nil
+  attr :editor_schema, :map, default: nil
+  attr :editor_form, :map, required: true
+  attr :editor_is_draft, :boolean, default: false
+  attr :dataset, :string, required: true
+  attr :validation_errors, :map, default: %{}
+  attr :save_status, :string, default: ""
+  attr :presences, :list, default: []
+  attr :parent_assigns, :map, default: %{}
+
+  slot :extra_actions
+  slot :empty_state
+
+  def studio_editor_shell(assigns) do
+    ~H"""
+    <%= if @editor_doc do %>
+      <div class="editor-panel">
+        <.document_header
+          dataset={@dataset}
+          title={@editor_doc.title || "Untitled"}
+        >
+          <:status_pill>
+            <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
+              <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
+            </span>
+          </:status_pill>
+          <:presence>
+            <% doc_presences = presences_on_doc(@presences, Barkpark.Content.published_id(@editor_doc.doc_id)) %>
+            <%= if doc_presences != [] do %>
+              <div class="presence-dots">
+                <%= for p <- doc_presences do %>
+                  <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
+                <% end %>
+              </div>
+            <% end %>
+          </:presence>
+          <:actions>
+            <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
+            <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
+            <%= if @editor_is_draft do %>
+              <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
+            <% else %>
+              <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
+            <% end %>
+            <%= render_slot(@extra_actions) %>
+          </:actions>
+        </.document_header>
+
+        <div class="editor-body">
+          <%= if @editor_schema do %>
+            <div class="editor-meta">
+              <.icon name={@editor_schema.icon} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+            </div>
+          <% end %>
+
+          <form phx-submit="save" phx-change="autosave" id="editor-form">
+            <.editor_field
+              label="Title"
+              required={(get_title_validation(@editor_schema) || %{})["required"] == true}
+              errors={Map.get(@validation_errors, "title", [])}
+            >
+              <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
+            </.editor_field>
+            <%= if @editor_schema do %>
+              <%= for field <- Enum.reject(@editor_schema.fields, & &1["name"] == "title") do %>
+                <.studio_field_renderer
+                  field={field}
+                  editor_form={@editor_form}
+                  dataset={@dataset}
+                  validation_errors={@validation_errors}
+                  parent_assigns={@parent_assigns}
+                />
+              <% end %>
+            <% end %>
+            <div class="editor-actions">
+              <span class="save-status"><%= @save_status %></span>
+            </div>
+          </form>
+        </div>
+      </div>
+    <% else %>
+      <%= if @empty_state != [] do %>
+        <%= render_slot(@empty_state) %>
+      <% else %>
+        <.empty_editor message="Select a document to edit">
+          <:icon><.icon name="file-text" size={40} /></:icon>
+        </.empty_editor>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  defp presences_on_doc(presences, doc_id) do
+    Enum.filter(presences, &(&1.doc_id == doc_id))
+  end
+
+  defp get_title_validation(nil), do: nil
+
+  defp get_title_validation(schema) do
+    case Enum.find(schema.fields, &(&1["name"] == "title")) do
+      %{"validation" => v} -> v
+      _ -> nil
+    end
   end
 end

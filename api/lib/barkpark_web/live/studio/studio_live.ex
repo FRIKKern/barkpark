@@ -7,8 +7,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   alias Barkpark.{Content, Media, Structure}
   alias BarkparkWeb.Presence
-  alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
-  import BarkparkWeb.Components.FieldInputs
 
   @presence_topic "studio:presence"
 
@@ -872,17 +870,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp filter_ref_candidates(candidates, ""), do: candidates
-  defp filter_ref_candidates(candidates, nil), do: candidates
-
-  defp filter_ref_candidates(candidates, query) do
-    q = String.downcase(query)
-
-    Enum.filter(candidates, fn c ->
-      String.contains?(String.downcase(c.title), q) or String.contains?(String.downcase(c.id), q)
-    end)
-  end
-
   # Update a doc's title in the pane items list without rebuilding from DB
   defp update_doc_title_in_panes(panes, doc_id, new_title) do
     Enum.map(panes, fn pane ->
@@ -944,85 +931,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
-      <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
-      <%= for p <- others do %>
-        <% p_doc_title = resolve_presence_doc_title(p, @dataset) %>
-        <%= if p.doc_id && p.type do %>
-          <div class="presence-user-wrap"
-               phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
-            <div class="presence-avatar clickable" style={"background: #{p.color}"}>
-              <%= String.first(Map.get(p, :name, "U")) %>
-            </div>
-            <div class="presence-tooltip">
-              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
-              <div class="presence-tooltip-location">editing <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
-              <div class="presence-tooltip-hint">Click to jump there</div>
-            </div>
-          </div>
-        <% else %>
-          <div class="presence-user-wrap">
-            <div class="presence-avatar" style={"background: #{p.color}"}>
-              <%= String.first(Map.get(p, :name, "U")) %>
-            </div>
-            <div class="presence-tooltip">
-              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
-              <div class="presence-tooltip-location">browsing</div>
-            </div>
-          </div>
-        <% end %>
-      <% end %>
-      <div class="presence-me-group" phx-click="show-profile">
-        <div class="presence-me-info">
-          <span class="presence-me-name"><%= @user_name %></span>
-          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
-        </div>
-        <div class="presence-me" style={"background: #{@user_color}"}>
-          <%= String.first(@user_name) %>
-        </div>
-      </div>
-    </div>
-
-    <!-- Profile edit modal -->
-    <%= if @show_profile do %>
-      <div class="image-picker-overlay" phx-click="close-profile"></div>
-      <div class="profile-modal">
-        <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Your profile</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile">x</button>
-        </div>
-        <form phx-submit="save-profile" phx-change="preview-profile" style="padding: 20px;">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
-            <div class="presence-me" style={"background: #{@user_color}; width: 40px; height: 40px; font-size: 16px;"}>
-              <%= String.first(@user_name) %>
-            </div>
-            <div>
-              <div style="font-weight: 600;"><%= @user_name %></div>
-              <div class="text-xs text-muted">This is how others see you</div>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Name</label>
-            <input type="text" name="name" value={@user_name} class="form-input" autofocus phx-debounce="200" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Color</label>
-            <div class="profile-colors">
-              <%= for c <- ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316) do %>
-                <label class={"profile-color-option #{if c == @user_color, do: "selected"}"}>
-                  <input type="radio" name="color" value={c} checked={c == @user_color} style="display:none" />
-                  <span class="profile-color-swatch" style={"background: #{c}"}></span>
-                </label>
-              <% end %>
-            </div>
-          </div>
-          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
-            <button type="button" class="btn btn-sm" phx-click="close-profile">Cancel</button>
-            <button type="submit" class="btn btn-primary btn-sm">Save</button>
-          </div>
-        </form>
-      </div>
-    <% end %>
+    <.presence_nav
+      user_id={@user_id}
+      user_name={@user_name}
+      user_color={@user_color}
+      presences={@presences}
+      editor_doc={@editor_doc}
+      dataset={@dataset}
+    />
 
     <.pane_layout id="studio-panes">
       <% has_editor = @editor_doc != nil %>
@@ -1103,208 +1019,35 @@ defmodule BarkparkWeb.Studio.StudioLive do
            pane_column that fully replaces the default title row. See
            docs/superpowers/plans/2026-04-14-unified-pane-components.md. -->
       <!-- Editor -->
-      <%= if @editor_doc do %>
-        <div class="editor-panel">
-          <.document_header
-            dataset={@dataset}
-            title={@editor_doc.title || "Untitled"}
-          >
-            <:status_pill>
-              <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
-                <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
-              </span>
-            </:status_pill>
-            <:presence>
-              <% doc_presences = presences_on_doc(@presences, Content.published_id(@editor_doc.doc_id)) %>
-              <%= if doc_presences != [] do %>
-                <div class="presence-dots">
-                  <%= for p <- doc_presences do %>
-                    <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
-                  <% end %>
-                </div>
-              <% end %>
-            </:presence>
-            <:actions>
-              <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
-              <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
-              <%= if @editor_is_draft do %>
-                <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
-              <% else %>
-                <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
-              <% end %>
-            </:actions>
-          </.document_header>
+      <.studio_editor_shell
+        editor_doc={@editor_doc}
+        editor_schema={@editor_schema}
+        editor_form={@editor_form}
+        editor_is_draft={@editor_is_draft}
+        dataset={@dataset}
+        validation_errors={@validation_errors}
+        save_status={@save_status}
+        presences={@presences}
+        parent_assigns={assigns}
+      />
 
-          <div class="editor-body">
-            <%= if @editor_schema do %>
-              <div class="editor-meta">
-                <.icon name={@editor_schema.icon} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
-              </div>
-            <% end %>
-
-            <form phx-submit="save" phx-change="autosave" id="editor-form">
-              <.editor_field
-                label="Title"
-                required={(get_title_validation(@editor_schema) || %{})["required"] == true}
-                errors={Map.get(@validation_errors, "title", [])}
-              >
-                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
-              </.editor_field>
-              <%= if @editor_schema do %>
-                <%= for field <- Enum.reject(@editor_schema.fields, & &1["name"] == "title") do %>
-                  <% field_name = field["name"] %>
-                  <% rules = field["validation"] || %{} %>
-                  <.editor_field
-                    label={field["title"] || field_name}
-                    type={field["type"]}
-                    required={rules["required"] == true}
-                    errors={Map.get(@validation_errors, field_name, [])}
-                  >
-                    <%= if PluginAdapter.v2?(field) do %>
-                      <%= PluginAdapter.render(assigns, field) %>
-                    <% else %>
-                      <.input field={field} editor_form={@editor_form} />
-                    <% end %>
-                  </.editor_field>
-                <% end %>
-              <% end %>
-              <div class="editor-actions">
-                <span class="save-status"><%= @save_status %></span>
-              </div>
-            </form>
-          </div>
-        </div>
-      <% else %>
-        <.empty_editor message="Select a document to edit">
-          <:icon><.icon name="file-text" size={40} /></:icon>
-        </.empty_editor>
-      <% end %>
-
-      <!-- Image picker modal (outside editor form to avoid nested forms) -->
-      <%= if @image_picker_field do %>
-        <div class="image-picker-overlay" phx-click="close-image-picker"></div>
-        <div class="image-picker">
-          <div class="image-picker-header">
-            <span style="font-weight: 600; font-size: 14px;">Select Image</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker">x</button>
-          </div>
-          <div class="image-picker-upload">
-            <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
-              <.live_file_input upload={@uploads.image} class="image-file-input" />
-              <%= for entry <- @uploads.image.entries do %>
-                <div class="image-upload-entry">
-                  <.live_img_preview entry={entry} width="60" height="60" />
-                  <span class="text-sm"><%= entry.client_name %></span>
-                  <button type="submit" class="btn btn-primary btn-sm">Upload</button>
-                </div>
-              <% end %>
-            </form>
-          </div>
-          <div class="image-picker-grid">
-            <%= if @media_files == [] do %>
-              <div class="text-sm text-muted" style="padding: 16px; text-align: center;">No images yet. Upload one above.</div>
-            <% end %>
-            <%= for file <- @media_files do %>
-              <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@image_picker_field}>
-                <img src={"/media/files/#{file.path}"} alt={file.original_name} />
-                <div class="image-picker-name"><%= file.original_name %></div>
-              </div>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-
-      <!-- Reference picker modal -->
-      <%= if @ref_picker_field do %>
-        <div class="image-picker-overlay" phx-click="close-ref-picker"></div>
-        <div class="image-picker">
-          <div class="image-picker-header">
-            <span style="font-weight: 600; font-size: 14px;">Select reference</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker">x</button>
-          </div>
-          <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
-            <input type="text" placeholder="Search..." class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} />
-          </div>
-          <div style="max-height: 400px; overflow-y: auto;">
-            <%= for candidate <- filter_ref_candidates(@ref_candidates, @ref_search) do %>
-              <div class="ref-candidate" phx-click="select-ref" phx-value-id={candidate.id} phx-value-field={@ref_picker_field}>
-                <span class="ref-candidate-title"><%= candidate.title %></span>
-                <span class="ref-candidate-id"><%= candidate.id %></span>
-              </div>
-            <% end %>
-            <%= if filter_ref_candidates(@ref_candidates, @ref_search) == [] do %>
-              <div class="text-sm text-muted" style="padding: 20px; text-align: center;">No documents found</div>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-
-      <!-- History modal -->
-      <%= if @show_history do %>
-        <div class="image-picker-overlay" phx-click="close-history"></div>
-        <div class="history-modal">
-          <div class="image-picker-header">
-            <span style="font-weight: 600; font-size: 14px;">Document history</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history">x</button>
-          </div>
-          <div class="history-list">
-            <%= if @revisions == [] do %>
-              <div class="text-sm text-muted" style="padding: 24px; text-align: center;">No history yet</div>
-            <% end %>
-            <%= for rev <- @revisions do %>
-              <div class="history-item">
-                <div class="history-item-info">
-                  <div class="history-item-action">
-                    <span class={"history-action-badge history-action-#{rev.action}"}><%= rev.action %></span>
-                    <span class="history-item-title"><%= rev.title || "Untitled" %></span>
-                  </div>
-                  <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
-                </div>
-                <button class="btn btn-sm" phx-click="restore-revision" phx-value-id={rev.id} data-confirm="Restore this version? Current changes will be overwritten.">Restore</button>
-              </div>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-
-      <!-- Delete confirmation modal -->
-      <%= if @show_delete do %>
-        <div class="image-picker-overlay" phx-click="close-delete"></div>
-        <div class="delete-modal">
-          <div class="delete-modal-header">
-            <span style="font-weight: 600; font-size: 16px;">Delete document</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete">x</button>
-          </div>
-          <div class="delete-modal-body">
-            <%= if @delete_refs == [] do %>
-              <p class="text-sm">Are you sure you want to delete <strong><%= @editor_doc && @editor_doc.title %></strong>? This action cannot be undone.</p>
-              <div class="delete-modal-actions">
-                <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
-                <button class="btn btn-destructive btn-sm" phx-click="confirm-delete">Delete</button>
-              </div>
-            <% else %>
-              <div class="delete-warning">
-                <p class="text-sm" style="margin-bottom: 12px;">
-                  <strong><%= @editor_doc && @editor_doc.title %></strong> is referenced by
-                  <strong><%= length(@delete_refs) %></strong> document<%= if length(@delete_refs) != 1, do: "s" %>:
-                </p>
-                <div class="delete-ref-list">
-                  <%= for ref <- @delete_refs do %>
-                    <div class="delete-ref-item">
-                      <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
-                      <span class="delete-ref-meta"><%= ref.type %> / <%= ref.field %></span>
-                    </div>
-                  <% end %>
-                </div>
-              </div>
-              <div class="delete-modal-actions">
-                <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
-                <button class="btn btn-destructive btn-sm" phx-click="confirm-delete" phx-value-disconnect="true">Disconnect references and delete</button>
-              </div>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
+      <!-- Profile + 4 content modals; all gated by their show/picker assigns -->
+      <.studio_modals
+        show_profile={@show_profile}
+        user_name={@user_name}
+        user_color={@user_color}
+        image_picker_field={@image_picker_field}
+        uploads={@uploads}
+        media_files={@media_files}
+        ref_picker_field={@ref_picker_field}
+        ref_search={@ref_search}
+        ref_candidates={@ref_candidates}
+        show_history={@show_history}
+        revisions={@revisions}
+        show_delete={@show_delete}
+        delete_refs={@delete_refs}
+        editor_doc={@editor_doc}
+      />
     </.pane_layout>
 
     <style>
@@ -1490,10 +1233,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
     """
   end
 
-  defp format_history_time(dt) do
-    Calendar.strftime(dt, "%b %d, %Y at %H:%M:%S")
-  end
-
   defp generate_user_id do
     :crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower)
   end
@@ -1543,39 +1282,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
       end
     end
   end
-
-  defp resolve_presence_doc_title(presence, dataset) do
-    type = presence.type
-    doc_id = presence.doc_id
-
-    if type && doc_id do
-      case Content.get_document(doc_id, type, dataset) do
-        {:ok, doc} ->
-          doc.title || doc_id
-
-        _ ->
-          case Content.get_document("drafts.#{doc_id}", type, dataset) do
-            {:ok, doc} -> doc.title || doc_id
-            _ -> doc_id
-          end
-      end
-    else
-      "browsing"
-    end
-  end
-
-  defp get_title_validation(nil), do: nil
-
-  defp get_title_validation(schema) do
-    case Enum.find(schema.fields, &(&1["name"] == "title")) do
-      %{"validation" => v} -> v
-      _ -> nil
-    end
-  end
-
-  defp truncate_text(nil, _max), do: ""
-  defp truncate_text(text, max) when byte_size(text) <= max, do: text
-  defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
 
   defp presences_on_doc(presences, doc_id) do
     Enum.filter(presences, &(&1.doc_id == doc_id))
