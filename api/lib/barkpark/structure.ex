@@ -47,14 +47,25 @@ defmodule Barkpark.Structure do
 
   defp build_desk_items(schemas) do
     content_items = build_content_group(schemas)
+    books_items = build_books_group(schemas)
     taxonomy_items = build_taxonomy_group(schemas)
     settings_items = build_settings_group(schemas)
 
-    content_items ++
-      [divider()] ++
-      taxonomy_items ++
-      [divider()] ++
+    maybe_join([
+      content_items,
+      books_items,
+      taxonomy_items,
       settings_items
+    ])
+  end
+
+  # Joins non-empty groups with a single divider between adjacent non-empty
+  # groups. Avoids stray dividers when a group is absent.
+  defp maybe_join(groups) do
+    groups
+    |> Enum.reject(&(&1 == []))
+    |> Enum.intersperse([divider()])
+    |> List.flatten()
   end
 
   # Content types with filtered sub-views (like Sanity's documentTypeList with ordering)
@@ -88,6 +99,16 @@ defmodule Barkpark.Structure do
     items
   end
 
+  # Plugin-owned book schema (OnixEdit). Private visibility, but surfaced
+  # in the top-level content nav rather than buried under Settings.
+  defp build_books_group(schemas) do
+    if Map.has_key?(schemas, "book") do
+      [doc_type_list_item(schemas["book"])]
+    else
+      []
+    end
+  end
+
   # Taxonomy types — supporting content (authors, categories)
   defp build_taxonomy_group(schemas) do
     items = []
@@ -111,7 +132,13 @@ defmodule Barkpark.Structure do
 
   # Settings — singletons grouped under a sub-list
   defp build_settings_group(schemas) do
-    private = Enum.filter(Map.values(schemas), &(&1.visibility == "private"))
+    # Plugin-owned schemas surfaced in their own nav group are excluded here
+    # so they don't render twice (book lives in build_books_group/1).
+    private =
+      schemas
+      |> Map.values()
+      |> Enum.filter(&(&1.visibility == "private"))
+      |> Enum.reject(&(&1.name == "book"))
 
     if private == [] do
       []
