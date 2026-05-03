@@ -116,6 +116,201 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
+  Passive Studio sidebar — renders the top-level structure tree as plain
+  anchor links. Used by plugin LiveViews (BookView, BookEditor) that
+  render outside StudioLive's interactive `<.pane_layout>` so the user
+  retains a way to navigate back into Studio.
+
+  Intentionally has NO `phx-click` — events would otherwise route to the
+  enclosing LiveView (BookView etc.) which has no matching handler. Each
+  item is an `<a href>` that triggers a normal LiveView navigation back
+  into StudioLive.
+
+  Attributes:
+    * `:dataset`       — (required) string, current dataset name
+    * `:selected_path` — (optional) list, current nav path; the first
+                         segment is matched against item ids to mark the
+                         active link
+  """
+  attr :dataset, :string, required: true
+  attr :selected_path, :list, default: []
+
+  def studio_sidebar(assigns) do
+    structure = Barkpark.Structure.build(assigns.dataset)
+    selected_id = List.first(assigns.selected_path)
+
+    assigns =
+      assigns
+      |> assign(:structure, structure)
+      |> assign(:selected_id, selected_id)
+
+    ~H"""
+    <aside
+      class="studio-sidebar"
+      style="width:240px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border-color, #e5e7eb);padding:.5rem;"
+    >
+      <div
+        class="studio-sidebar-header"
+        style="font-weight:600;padding:.5rem .75rem;color:var(--muted-color,#6b7280);"
+      ><%= @structure.title %></div>
+      <%= for item <- @structure.items do %>
+        <%= case item.type do %>
+          <% :divider -> %>
+            <div class="studio-sidebar-divider" style="height:1px;background:var(--border-color,#e5e7eb);margin:.5rem 0;"></div>
+          <% _ -> %>
+            <a
+              href={"/studio/#{@dataset}/#{item.id}"}
+              class={
+                ["studio-sidebar-item", item.id == @selected_id && "studio-sidebar-item--active"]
+                |> Enum.filter(& &1)
+                |> Enum.join(" ")
+              }
+              style={
+                "display:block;padding:.4rem .75rem;border-radius:4px;text-decoration:none;color:inherit;" <>
+                  if(item.id == @selected_id, do: "font-weight:600;background:rgba(0,0,0,.04);", else: "")
+              }
+            >
+              <%= if item.icon do %><span style="margin-right:.4rem;"><%= item.icon %></span><% end %><%= item.title %>
+            </a>
+        <% end %>
+      <% end %>
+    </aside>
+    """
+  end
+
+  @doc """
+  Sanity-style document chrome header for the editor pane. Emits the
+  legacy `<div class="pane-header editor-header">` markup so it can
+  replace StudioLive's hand-rolled header at studio_live.ex:1107
+  byte-identically and also be reused by plugin LiveViews
+  (BookView, BookEditor). The corresponding CSS lives in
+  `root.html.heex` (hoisted from StudioLive's inline `<style>`).
+
+  Attributes:
+    * `:dataset`   — (required) string, current dataset name. Carried
+                     so callers can compose other links if needed.
+    * `:title`     — (required) document title text.
+    * `:back_href` — (optional) when present, render a `←` arrow link
+                     before the status pill (used by plugin LVs;
+                     StudioLive omits this).
+
+  Slots:
+    * `:status_pill` — small badge rendered before the title (e.g.
+                       Draft/Published). Matches the legacy badge
+                       slot order in `editor-header`.
+    * `:presence`    — presence-dot block rendered after the title
+                       (StudioLive only — plugin LVs leave empty).
+    * `:meta`        — extra inline meta tokens (e.g. _id, _type,
+                       timestamps). Rendered as a small muted row at
+                       the end of the left flex container; empty for
+                       StudioLive (no rendered output) so byte-identity
+                       holds.
+    * `:actions`     — top-right action buttons (History/Delete/
+                       Publish in StudioLive; Bokbasen/ONIX export in
+                       BookEditor; Open-in-editor in BookView). Slot
+                       contents render verbatim — preserve any
+                       `data-test-id` attributes.
+  """
+  attr :dataset, :string, required: true
+  attr :title, :string, required: true
+  attr :back_href, :string, default: nil
+
+  slot :status_pill
+  slot :presence
+  slot :meta
+  slot :actions
+
+  def document_header(assigns) do
+    ~H"""
+    <div class="pane-header editor-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <%= if @back_href do %>
+          <a href={@back_href} class="btn btn-ghost btn-sm" aria-label="Back to Studio">&larr;</a>
+        <% end %>
+        <%= render_slot(@status_pill) %>
+        <span class="pane-header-title"><%= @title %></span>
+        <%= render_slot(@presence) %>
+        <%= if @meta != [] do %>
+          <div class="editor-header-meta" style="font-size: 11px; color: var(--fg-dim); display: flex; gap: 12px; flex-wrap: wrap; margin-left: 4px;">
+            <%= render_slot(@meta) %>
+          </div>
+        <% end %>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <%= render_slot(@actions) %>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Wrapper for a single field row in the editor body. Emits the legacy
+  `<div class="editor-field">` markup with `<label class="editor-field-label">`
+  containing the field title, optional `*` required indicator, and
+  optional type pill. Used by StudioLive (line 1143 + 1159) and plugin
+  LVs to keep field rhythm consistent. CSS in `root.html.heex`.
+
+  Attributes:
+    * `:label`    — (required) field label text.
+    * `:type`     — (optional) field type tag (e.g. "string", "image");
+                     when set renders the small `editor-field-type`
+                     pill next to the label.
+    * `:required` — (optional, default false) renders a `*` indicator.
+    * `:errors`   — (optional, default []) list of error strings; when
+                     non-empty adds the `has-error` class and renders a
+                     `<div class="field-errors">` below the input.
+
+  Default slot: the input/control itself.
+  """
+  attr :label, :string, required: true
+  attr :type, :string, default: nil
+  attr :required, :boolean, default: false
+  attr :errors, :list, default: []
+  slot :inner_block, required: true
+
+  def editor_field(assigns) do
+    ~H"""
+    <div class={"editor-field #{if @errors != [], do: "has-error"}"}>
+      <label class="editor-field-label">
+        <%= @label %>
+        <%= if @required do %><span class="field-required">*</span><% end %>
+        <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
+      </label>
+      <%= render_slot(@inner_block) %>
+      <%= if @errors != [] do %>
+        <div class="field-errors"><%= Enum.join(@errors, ", ") %></div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Centered placeholder for the editor pane when no document is loaded
+  or loading failed. Emits the legacy `<div class="editor-empty">`
+  markup. CSS in `root.html.heex`.
+
+  Attributes:
+    * `:message` — (required) primary message text.
+
+  Optional `:icon` slot for a leading icon/glyph (e.g. `<.icon name="file-text">`).
+  """
+  attr :message, :string, required: true
+  slot :icon
+
+  def empty_editor(assigns) do
+    ~H"""
+    <div class="editor-empty">
+      <div style="color: var(--fg-dim); text-align: center;">
+        <%= if @icon != [] do %>
+          <div style="margin-bottom: 12px; opacity: 0.4;"><%= render_slot(@icon) %></div>
+        <% end %>
+        <div class="text-sm"><%= @message %></div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
   Placeholder rendered when there's nothing to show in a pane column.
   """
   attr :message, :string, required: true

@@ -810,24 +810,27 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="main-header" style="margin: -24px -24px 24px; padding: 0 24px;">
-      <div class="main-header-left">
-        <a href={"/studio/#{@dataset}"} class="btn btn-ghost btn-sm">&larr;</a>
-        <div>
-          <h1 class="h2"><%= (@doc && @doc.title) || "New Book" %></h1>
-          <div class="toolbar" style="gap: 6px; margin-top: 2px;">
-            <span class="text-xs text-muted">
-              <%= if @schema, do: "#{@schema.icon} #{@schema.title}", else: "book" %>
-            </span>
-            <span class={"badge badge-#{badge_status(@is_draft, @doc)}"}>
-              <%= status_label(@is_draft, @doc) %>
-            </span>
-          </div>
-        </div>
-      </div>
-      <div class="main-header-right">
+    <div class="studio-with-sidebar" style="display:flex;height:100%;min-height:0;">
+    <.studio_sidebar dataset={@dataset} selected_path={["book"]} />
+    <div class="book-editor-shell" style="flex:1 1 auto;overflow-y:auto;min-width:0;padding:24px;">
+    <.document_header
+      dataset={@dataset}
+      title={(@doc && @doc.title) || "New Book"}
+      back_href={"/studio/#{@dataset}"}
+    >
+      <:status_pill>
+        <span class={"badge badge-#{badge_status(@is_draft, @doc)}"}>
+          <%= status_label(@is_draft, @doc) %>
+        </span>
         <%= render_bokbasen_pill(assigns) %>
         <%= render_signoff_badge(assigns) %>
+      </:status_pill>
+      <:meta>
+        <span class="text-xs text-muted">
+          <%= if @schema, do: "#{@schema.icon} #{@schema.title}", else: "book" %>
+        </span>
+      </:meta>
+      <:actions>
         <%= if @doc do %>
           <button
             id="onix-export-button"
@@ -859,8 +862,8 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
             <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
           <% end %>
         <% end %>
-      </div>
-    </div>
+      </:actions>
+    </.document_header>
 
     <nav class="tab-nav" data-test-id="book-editor-tabs"
          style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-muted); margin-bottom: 16px;">
@@ -898,6 +901,8 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     <%= render_publish_modal(assigns) %>
     <%= render_republish_modal(assigns) %>
     <%= render_edit_warning_modal(assigns) %>
+    </div>
+    </div>
     """
   end
 
