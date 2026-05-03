@@ -157,4 +157,26 @@ defmodule Barkpark.StructureTest do
       assert "colors" in ids
     end
   end
+
+  describe "parse_filter/1" do
+    test "returns empty map for nil" do
+      assert Structure.parse_filter(nil) == %{}
+    end
+
+    test "returns empty map for empty string" do
+      assert Structure.parse_filter("") == %{}
+    end
+
+    test "returns single-key map for field=value" do
+      assert Structure.parse_filter("status=published") == %{"status" => "published"}
+    end
+
+    test "splits on first = only (preserves = in value)" do
+      assert Structure.parse_filter("body=foo=bar") == %{"body" => "foo=bar"}
+    end
+
+    test "returns empty map for malformed input (no =)" do
+      assert Structure.parse_filter("nonsense") == %{}
+    end
+  end
 end
