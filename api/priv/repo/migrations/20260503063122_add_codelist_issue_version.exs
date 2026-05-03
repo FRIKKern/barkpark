@@ -63,6 +63,16 @@ defmodule Barkpark.Repo.Migrations.AddCodelistIssueVersion do
   # the value reaches Elixir as a JSON array string, then on write-back we
   # let Postgres unfold a JSON-encoded array back into `jsonb[]` via
   # `jsonb_array_elements`.
+  #
+  # Note: the chained `$1::text::jsonb` cast is required. Postgrex's
+  # text-format param binding does not coerce a `Jason.encode!` payload
+  # directly into the jsonb scalar that `jsonb_array_elements/1` needs —
+  # the bare `$1::jsonb` form raises SQLSTATE 22023 "cannot extract
+  # elements from a scalar" against a real Postgres connection (even
+  # though the same SQL with an inline literal works). The chained cast
+  # forces Postgrex to bind the param as text and lets Postgres do the
+  # text→jsonb cast in SQL on a known-text value, which is the standard
+  # Postgrex jsonb param workaround.
   defp transform_schemas(transform, repo) do
     %{rows: rows} = repo.query!("SELECT id, to_jsonb(fields)::text FROM schema_definitions")
 
@@ -74,7 +84,7 @@ defmodule Barkpark.Repo.Migrations.AddCodelistIssueVersion do
         repo.query!(
           """
           UPDATE schema_definitions
-          SET fields = ARRAY(SELECT jsonb_array_elements($1::jsonb))::jsonb[]
+          SET fields = ARRAY(SELECT jsonb_array_elements($1::text::jsonb))::jsonb[]
           WHERE id = $2
           """,
           [Jason.encode!(new_fields), id]
