@@ -1,0 +1,46 @@
+<div class="empty-state" style="min-height: 70vh;">
+  <div class="card" style="max-width: 420px; width: 100%;">
+    <div class="card-header" style="display: block;">
+      <h2 class="h2">Sign in</h2>
+      <p class="text-sm text-muted" style="margin-top: 4px;">
+        Paste your Barkpark API token to access admin tools.
+      </p>
+    </div>
+
+    <div style="padding: 20px;">
+      <%= if Phoenix.Flash.get(@flash, :error) do %>
+        <div class="flash flash-error" role="alert">
+          {Phoenix.Flash.get(@flash, :error)}
+        </div>
+      <% end %>
+      <%= if Phoenix.Flash.get(@flash, :info) do %>
+        <div class="flash flash-info">
+          {Phoenix.Flash.get(@flash, :info)}
+        </div>
+      <% end %>
+
+      <.form :let={_f} for={%{}} as={:session} action={~p"/login"} method="post">
+        <input type="hidden" name="return_to" value={@return_to} />
+
+        <div class="form-group">
+          <label class="form-label" for="session_token">API token</label>
+          <input
+            type="password"
+            name="token"
+            id="session_token"
+            class="form-input"
+            autocomplete="off"
+            autofocus
+            required
+            placeholder="paste token"
+          />
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+          <button type="submit" class="btn btn-primary">Sign in</button>
+          <a href="/studio" class="btn btn-ghost">Cancel</a>
+        </div>
+      </.form>
+    </div>
+  </div>
+</div>
