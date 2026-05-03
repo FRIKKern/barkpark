@@ -1,26 +1,21 @@
-<div class="studio-shell">
-  <div class="studio-bar">
-    <div class="studio-bar-brand">
-      <div class="sidebar-brand-icon">B</div>
-      <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
-      <%= if assigns[:dataset] do %>
-        <BarkparkWeb.Studio.DatasetSwitcher.switcher
-          current={@dataset}
-          current_section={assigns[:nav_section] || :structure}
-        />
-      <% end %>
-    </div>
-    <div class="studio-bar-tabs">
-      <%= if assigns[:dataset] do %>
-        <%= for tab <- BarkparkWeb.Studio.Nav.tabs(@dataset) do %>
-          <a
-            href={tab.path}
-            class={"studio-tab #{if assigns[:nav_section] == tab.id, do: "active"}"}
-          ><%= tab.label %></a>
+<.studio_shell>
+  <.studio_topbar>
+    <:brand>
+      <div class="studio-bar-brand">
+        <div class="sidebar-brand-icon">B</div>
+        <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
+        <%= if assigns[:dataset] do %>
+          <BarkparkWeb.Studio.DatasetSwitcher.switcher
+            current={@dataset}
+            current_section={assigns[:nav_section] || :structure}
+          />
         <% end %>
-      <% end %>
-    </div>
-    <%= if assigns[:nav_section] == :api_tester do %>
+      </div>
+    </:brand>
+    <:tabs :if={assigns[:dataset]}>
+      <.studio_tabs dataset={@dataset} nav_section={assigns[:nav_section]} />
+    </:tabs>
+    <:actions :if={assigns[:nav_section] == :api_tester}>
       <div class="studio-bar-actions">
         <form phx-change="token-change" style="display:contents;">
           <label class="studio-bar-actions-label">Token</label>
@@ -28,25 +23,13 @@
         </form>
         <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
       </div>
-    <% end %>
-    <%= if assigns[:api_token] do %>
-      <div class="studio-bar-actions">
-        <.form :let={_f} for={%{}} as={:session} action={~p"/logout"} method="post">
-          <button type="submit" class="btn btn-ghost btn-sm" aria-label="Sign out">
-            <.icon name="log-out" size={14} />
-            Sign out
-          </button>
-        </.form>
-      </div>
-    <% end %>
-  </div>
+    </:actions>
+    <:actions :if={assigns[:api_token]}>
+      <.studio_signout_button />
+    </:actions>
+  </.studio_topbar>
 
-  <%= if Phoenix.Flash.get(@flash, :info) do %>
-    <div class="flash flash-info" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
-  <% end %>
-  <%= if Phoenix.Flash.get(@flash, :error) do %>
-    <div class="flash flash-error" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
-  <% end %>
+  <.studio_flash flash={@flash} />
 
   {@inner_content}
-</div>
+</.studio_shell>

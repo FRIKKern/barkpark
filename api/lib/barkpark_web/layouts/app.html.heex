@@ -1,10 +1,5 @@
 <div class="app-shell">
-  <%= if Phoenix.Flash.get(@flash, :info) do %>
-    <div class="flash flash-info" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
-  <% end %>
-  <%= if Phoenix.Flash.get(@flash, :error) do %>
-    <div class="flash flash-error" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
-  <% end %>
+  <.studio_flash flash={@flash} />
 
   {@inner_content}
 </div>
