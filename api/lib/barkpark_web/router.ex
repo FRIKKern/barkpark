@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Router do
     plug :accepts, ["json"]
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
     plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.OptionalToken
   end
 
   pipeline :api_unlimited do

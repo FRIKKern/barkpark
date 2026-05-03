@@ -8,7 +8,7 @@ defmodule BarkparkWeb.QueryController do
   action_fallback BarkparkWeb.FallbackController
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
-    if preview?(conn) or Content.schema_public?(type, dataset) do
+    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset) do
       t0 = System.monotonic_time(:microsecond)
       perspective = resolve_perspective(conn, params)
       limit = parse_int(params["limit"], 100)
@@ -44,7 +44,7 @@ defmodule BarkparkWeb.QueryController do
   end
 
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    if preview?(conn) or Content.schema_public?(type, dataset) do
+    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset) do
       t0 = System.monotonic_time(:microsecond)
       expand_spec = parse_expand(params["expand"])
 
@@ -145,6 +145,8 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
+
+  defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
 
   defp resolve_perspective(conn, params) do
     case conn.assigns[:forced_perspective] do
