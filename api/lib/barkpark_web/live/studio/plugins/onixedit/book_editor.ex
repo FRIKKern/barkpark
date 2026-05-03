@@ -85,6 +85,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Status, as: BokbasenStatus
   alias Barkpark.Plugins.OnixEdit.Export
   alias Barkpark.Plugins.OnixEdit.Export.StatusPill
+  alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
   alias BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor.ThemaTreePicker
 
@@ -1221,7 +1222,7 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
               data-field-name={field["name"]}
             >
               <%= if !PluginAdapter.v2?(field) do %>
-                <label class="bp-field-label" for={leaf_input_id(field["name"])}>
+                <label class="bp-field-label" for={"f-book-" <> field["name"]}>
                   <%= field_title(field) %>
                 </label>
               <% end %>
@@ -1238,12 +1239,16 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
   end
 
   # ── Per-field dispatch. v2 → adapter (composite / arrayOf / codelist /
-  # localizedText). v1 → leaf input. ─────────────────────────────────────
+  # localizedText). v1 → shared FieldInputs.input/1. ─────────────────────
   defp render_field(assigns, field) do
     if PluginAdapter.v2?(field) do
       PluginAdapter.render(adapter_assigns(assigns), field)
     else
-      leaf_input(assigns, field)
+      assigns = Map.put(assigns, :field, field)
+
+      ~H"""
+      <FieldInputs.input field={@field} editor_form={@form} id_prefix="f-book-" />
+      """
     end
   end
 
@@ -1252,109 +1257,6 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     |> Map.put(:editor_form, assigns.form)
     |> Map.put(:editor_schema, assigns.schema)
     |> Map.put(:validation_errors, Map.get(assigns, :validation_errors, %{}))
-  end
-
-  # ── v1 leaf inputs (string, text, boolean, datetime, slug, color, …). ──
-  defp leaf_input(assigns, %{"type" => "text", "name" => name} = field) do
-    val = Map.get(assigns.form, name, "")
-    rows = Map.get(field, "rows") || 3
-    assigns = assign(assigns, n: name, v: val, rows: rows)
-
-    ~H"""
-    <textarea
-      id={leaf_input_id(@n)}
-      name={"doc[#{@n}]"}
-      class="bp-input form-input"
-      rows={@rows}
-      phx-debounce="500"
-    ><%= @v %></textarea>
-    """
-  end
-
-  defp leaf_input(assigns, %{"type" => "boolean", "name" => name}) do
-    checked = Map.get(assigns.form, name, "") == "true"
-    assigns = assign(assigns, n: name, c: checked)
-
-    ~H"""
-    <div class="form-checkbox">
-      <input type="hidden" name={"doc[#{@n}]"} value="false" />
-      <input
-        id={leaf_input_id(@n)}
-        type="checkbox"
-        name={"doc[#{@n}]"}
-        value="true"
-        checked={@c}
-        phx-debounce="100"
-      />
-    </div>
-    """
-  end
-
-  defp leaf_input(assigns, %{"type" => "datetime", "name" => name}) do
-    val = Map.get(assigns.form, name, "")
-    assigns = assign(assigns, n: name, v: val)
-
-    ~H"""
-    <input
-      id={leaf_input_id(@n)}
-      type="datetime-local"
-      name={"doc[#{@n}]"}
-      value={@v}
-      class="bp-input form-input"
-      phx-debounce="300"
-    />
-    """
-  end
-
-  defp leaf_input(assigns, %{"type" => "color", "name" => name}) do
-    val = Map.get(assigns.form, name, "")
-    assigns = assign(assigns, n: name, v: val)
-
-    ~H"""
-    <input
-      id={leaf_input_id(@n)}
-      type="color"
-      name={"doc[#{@n}]"}
-      value={@v}
-      class="bp-input"
-      phx-debounce="300"
-    />
-    """
-  end
-
-  defp leaf_input(assigns, %{"type" => "select", "name" => name, "options" => opts})
-       when is_list(opts) do
-    val = Map.get(assigns.form, name, "")
-    assigns = assign(assigns, n: name, opts: opts, v: val)
-
-    ~H"""
-    <select
-      id={leaf_input_id(@n)}
-      name={"doc[#{@n}]"}
-      class="bp-input form-input"
-      phx-debounce="300"
-    >
-      <%= for o <- @opts do %>
-        <option value={o} selected={o == @v}><%= o %></option>
-      <% end %>
-    </select>
-    """
-  end
-
-  defp leaf_input(assigns, %{"name" => name}) do
-    val = Map.get(assigns.form, name, "")
-    assigns = assign(assigns, n: name, v: val)
-
-    ~H"""
-    <input
-      id={leaf_input_id(@n)}
-      type="text"
-      name={"doc[#{@n}]"}
-      value={@v}
-      class="bp-input form-input"
-      phx-debounce="500"
-    />
-    """
   end
 
   # ── Field selection / filtering helpers. ───────────────────────────────
@@ -1401,8 +1303,6 @@ defmodule BarkparkWeb.Studio.Plugins.OnixEdit.BookEditor do
     |> String.split(" ", trim: true)
     |> Enum.map_join(" ", &String.capitalize/1)
   end
-
-  defp leaf_input_id(name), do: "f-book-#{name}"
 
   defp field_wrapper_class(errors, name) when is_map(errors) do
     case Map.get(errors, name) do
