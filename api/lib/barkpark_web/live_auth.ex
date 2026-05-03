@@ -42,6 +42,19 @@ defmodule BarkparkWeb.LiveAuth do
     authorize(socket, session, ["ops", "admin"], "Operator access required")
   end
 
+  def on_mount(:fetch_api_token, _params, session, socket) do
+    case session["api_token"] do
+      raw when is_binary(raw) ->
+        case Auth.verify_token(raw) do
+          {:ok, api_token} -> {:cont, assign(socket, :api_token, api_token)}
+          _ -> {:cont, assign(socket, :api_token, nil)}
+        end
+
+      _ ->
+        {:cont, assign(socket, :api_token, nil)}
+    end
+  end
+
   defp authorize(socket, session, allowed_perms, denial_flash) do
     raw = session["api_token"]
 
