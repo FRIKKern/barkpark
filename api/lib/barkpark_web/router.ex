@@ -50,6 +50,15 @@ defmodule BarkparkWeb.Router do
     get "/studio", PageController, :redirect_to_studio
   end
 
+  # ── Session login (paste API token) ─────────────────────────────────
+  scope "/", BarkparkWeb do
+    pipe_through :browser
+
+    get "/login", SessionController, :new
+    post "/login", SessionController, :create
+    post "/logout", SessionController, :delete
+  end
+
   # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────
   scope "/studio", BarkparkWeb.Studio do
     pipe_through :browser

@@ -18,6 +18,15 @@ defmodule BarkparkWeb.LiveAuth do
   via `Barkpark.Auth`, and halt with a redirect to `/studio` on failure.
 
   Tests inject the session token with `Plug.Test.init_test_session/2`.
+
+  Browser sessions are bootstrapped at `GET /login` (see
+  `BarkparkWeb.SessionController`), where a human pastes their raw API
+  token. The controller stores it under `session["api_token"]` after
+  verifying via `Barkpark.Auth.verify_token/1`. `POST /logout` clears
+  the session.
+
+  A failed `on_mount` redirects to `/studio` with an error flash. To
+  recover, the user navigates to `/login` and pastes a valid token.
   """
 
   import Phoenix.LiveView
