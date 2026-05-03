@@ -94,6 +94,8 @@ defmodule BarkparkWeb.Router do
       # Plugin-owned dedicated editors. Must come BEFORE the catch-all below.
       # OnixEdit `book` documents (Phase 5 WI1).
       live "/onixedit/book/:doc_id", Plugins.OnixEdit.BookEditor
+      # Phase 8 WI3 — read-only book view, default click target from Structure nav.
+      live "/onixedit/book/:doc_id/view", Plugins.OnixEdit.BookView
 
       live "/*path", StudioLive
     end
