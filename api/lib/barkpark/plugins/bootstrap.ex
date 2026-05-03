@@ -119,12 +119,21 @@ defmodule Barkpark.Plugins.Bootstrap do
   end
 
   defp upsert_one(plugin_name, %SchemaDefinition{} = schema) do
+    # Normalise to a fully string-keyed map BEFORE handing to
+    # `Content.upsert_schema/2`. The struct's keys are atoms but plugin
+    # `register_schemas/1` impls typically build :fields from
+    # JSON-decoded plugin manifests (string-keyed nested maps); plus
+    # `Content.upsert_schema/2` itself force-injects `"dataset"` (string)
+    # alongside our `:dataset` (atom), producing a top-level mixed-key
+    # map that `Ecto.Changeset.cast/3` rejects with
+    # `expected params to be a map with atoms or string keys`.
     attrs =
       schema
       |> Map.from_struct()
       |> Map.drop(@drop_keys)
+      |> stringify_keys()
 
-    dataset = Map.get(attrs, :dataset) || "production"
+    dataset = schema.dataset || "production"
 
     case Content.upsert_schema(attrs, dataset) do
       {:ok, %SchemaDefinition{} = saved} ->
@@ -136,7 +145,7 @@ defmodule Barkpark.Plugins.Bootstrap do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         Logger.warning(
-          "Plugins.Bootstrap: upsert_schema failed for plugin #{inspect(plugin_name)} schema #{inspect(Map.get(attrs, :name))}: #{inspect(changeset.errors)}"
+          "Plugins.Bootstrap: upsert_schema failed for plugin #{inspect(plugin_name)} schema #{inspect(Map.get(attrs, "name"))}: #{inspect(changeset.errors)}"
         )
 
         {:error, {:changeset, changeset.errors}}
@@ -150,4 +159,24 @@ defmodule Barkpark.Plugins.Bootstrap do
 
     {:error, {:invalid_entry, other}}
   end
+
+  # ─── Key normalisation ─────────────────────────────────────────────────
+
+  # Recursively walks a term and converts atom keys to strings inside maps
+  # and lists. Tagged structs (DateTime, Date, Time, NaiveDateTime, and any
+  # other `%StructName{}`) are returned unchanged — their keys are part of
+  # the struct's contract, not free-form params, and Ecto handles them
+  # natively. Scalars and binaries pass through.
+  #
+  # Idempotent: a fully string-keyed term re-stringifies to itself
+  # (`to_string("name") == "name"`).
+  defp stringify_keys(%{__struct__: _} = struct), do: struct
+
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), stringify_keys(v)} end)
+  end
+
+  defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
+
+  defp stringify_keys(other), do: other
 end

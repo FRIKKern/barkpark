@@ -45,6 +45,32 @@ defmodule Barkpark.Plugins.BootstrapTest do
     def register_schemas(_opts), do: raise("synthetic bootstrap failure")
   end
 
+  defmodule MixedKeyStub do
+    @moduledoc false
+    # Synthetic plugin that emits a `%SchemaDefinition{}` whose `:fields`
+    # value is a list of *string-keyed* maps — mirroring the shape produced
+    # by real plugins that load fields from a JSON-decoded manifest (e.g.
+    # OnixEdit's `book.json`). Bootstrap must stringify the wrapping struct
+    # keys before handing the attrs to `Content.upsert_schema/2`; otherwise
+    # `Ecto.Changeset.cast/3` raises with "expected params to be a map with
+    # atoms or string keys".
+    alias Barkpark.Content.SchemaDefinition
+
+    def schema_name, do: "bootstrap_test_mixed_keys"
+
+    def register_schemas(_opts) do
+      [
+        %SchemaDefinition{
+          name: schema_name(),
+          title: "Mixed Keys Stub",
+          visibility: "private",
+          fields: [%{"name" => "f1", "type" => "string"}],
+          dataset: "production"
+        }
+      ]
+    end
+  end
+
   describe "register_all_schemas/0 — DB-level" do
     test "installs the OnixEdit book schema" do
       assert {:ok, count} = Bootstrap.register_all_schemas()
@@ -85,6 +111,45 @@ defmodule Barkpark.Plugins.BootstrapTest do
         )
 
       assert count == 1
+    end
+
+    test "register_all_schemas/0 normalizes mixed atom/string keys before upsert" do
+      plugin_name = "bootstrap_test_mixed_keys_plugin_#{System.unique_integer([:positive])}"
+
+      assert :ok =
+               Registry.register(
+                 __MODULE__.MixedKeyStub,
+                 %{"plugin_name" => plugin_name, "version" => "0.0.0"}
+               )
+
+      # If `stringify_keys/1` is missing or skipped, `Content.upsert_schema/2`
+      # raises ArgumentError from `Ecto.Changeset.cast/3` because the struct's
+      # atom-keyed top-level collides with the `"dataset"` (string) key the
+      # upsert helper force-injects. With the helper applied, the call
+      # returns `{:ok, n}` and the row lands.
+      assert {:ok, count} = Bootstrap.register_all_schemas()
+      assert count >= 1
+
+      schema =
+        SchemaDefinition
+        |> where(
+          [s],
+          s.name == ^MixedKeyStub.schema_name() and s.dataset == "production"
+        )
+        |> Repo.one()
+
+      assert schema, "expected mixed-key stub schema to be persisted"
+      assert schema.visibility == "private"
+      # The :fields list arrives string-keyed and round-trips through Postgres
+      # JSONB unchanged. We assert key shape (string keys preserved) rather
+      # than equality on the literal structure to keep this resilient to any
+      # future field-shape sanitisation.
+      assert is_list(schema.fields)
+      assert [%{} = field | _] = schema.fields
+      assert Map.has_key?(field, "name")
+      assert Map.has_key?(field, "type")
+      assert field["name"] == "f1"
+      assert field["type"] == "string"
     end
 
     test "returns error tuple when a registered plugin raises in register_schemas/1" do
