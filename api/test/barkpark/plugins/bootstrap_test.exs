@@ -122,6 +122,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
                  %{"plugin_name" => plugin_name, "version" => "0.0.0"}
                )
 
+      cleanup_stub_on_exit(plugin_name)
+
       # If `stringify_keys/1` is missing or skipped, `Content.upsert_schema/2`
       # raises ArgumentError from `Ecto.Changeset.cast/3` because the struct's
       # atom-keyed top-level collides with the `"dataset"` (string) key the
@@ -160,6 +162,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
                  __MODULE__.RaisingStub,
                  %{"plugin_name" => stub_name, "version" => "0.0.0"}
                )
+
+      cleanup_stub_on_exit(stub_name)
 
       assert {:error, errors} = Bootstrap.register_all_schemas()
       assert is_list(errors)
@@ -227,5 +231,25 @@ defmodule Barkpark.Plugins.BootstrapTest do
       assert is_binary(body["datasetSchemaHash"])
       assert body["_schemaVersion"] == 1
     end
+  end
+
+  # ─── Test isolation helpers ────────────────────────────────────────────
+
+  # `Barkpark.Plugins.Registry` is a singleton GenServer whose state lives
+  # outside the Ecto sandbox, so `Registry.register/2` calls leak between
+  # tests (and between test runs). The Registry currently exposes no public
+  # `unregister/1`, so we surgically remove the test stub from its state via
+  # `:sys.replace_state/2` — OTP's documented test/debug hook for cases
+  # exactly like this. Registered via `on_exit/2` so cleanup runs even when
+  # the body's assertions fail.
+  #
+  # TODO: if more tests start needing this pattern, promote a public
+  # `Barkpark.Plugins.Registry.unregister/1` and drop the direct state poke.
+  defp cleanup_stub_on_exit(plugin_name) do
+    ExUnit.Callbacks.on_exit(fn ->
+      :sys.replace_state(Barkpark.Plugins.Registry, fn state ->
+        %{state | plugins: Map.delete(state.plugins, plugin_name)}
+      end)
+    end)
   end
 end
