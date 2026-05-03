@@ -97,7 +97,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         case socket.assigns[:editor_doc] do
           %{doc_id: doc_id} ->
             pub_id = Content.published_id(doc_id)
-            "/studio/#{socket.assigns.dataset}/onixedit/book/#{pub_id}"
+            "/studio/#{socket.assigns.dataset}/onixedit/book/#{pub_id}/view"
 
           _ ->
             nil
