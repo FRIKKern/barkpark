@@ -1,0 +1,134 @@
+defmodule Barkpark.Repo.Migrations.AddCodelistIssueVersion do
+  @moduledoc """
+  Phase 8 WI4 — backfills `issue_version: "73"` onto every legacy codelist
+  reference that lacks one.
+
+  Two data sources are walked:
+
+    * `schema_definitions.fields` — the declarative side. Each field map
+      whose `type == "codelist"` is a codelist *declaration*; we add
+      `issue_version` so downstream tooling (`StalenessChecker`,
+      OnixEdit admin LV) can resolve the pinned issue without falling
+      back to the legacy `version` integer.
+    * `documents.content` — the value side. For documents that captured
+      the registry issue at write time as an inlined ref (any nested map
+      that already carries a `codelistId` key), the migration adds
+      `issue_version: "73"` if absent. Plain scalar codelist values
+      (e.g. `"03"`) are left untouched — they have no slot for a pin.
+
+  Idempotent: re-running yields the same shape (the `add_default/1`
+  helper short-circuits when `issue_version` is already present).
+  Reversible: `down/0` strips `issue_version` from every map that has
+  both `issue_version` and a codelist-shaped sibling.
+
+  ## Test seam
+
+  `apply_up/1` and `apply_down/1` are exposed for the migration test —
+  they accept a `Repo` module so the test can drive the transformation
+  inside the sandboxed connection without invoking `up/0` / `down/0`
+  directly (which the migration runner reserves).
+  """
+
+  use Ecto.Migration
+
+  @default_issue "73"
+
+  def up, do: forward(&add_default/1, repo())
+  def down, do: forward(&strip/1, repo())
+
+  @doc """
+  Applies the up-transformation to every schema_definitions and documents
+  row. Exposed for tests; production callers go through `up/0`.
+  """
+  def apply_up(repo \\ Barkpark.Repo), do: forward(&add_default/1, repo)
+
+  @doc """
+  Applies the down-transformation. Exposed for tests; production callers
+  go through `down/0`.
+  """
+  def apply_down(repo \\ Barkpark.Repo), do: forward(&strip/1, repo)
+
+  # ── orchestration ─────────────────────────────────────────────────────
+
+  defp forward(transform, repo) do
+    transform_schemas(transform, repo)
+    transform_documents(transform, repo)
+    :ok
+  end
+
+  defp transform_schemas(transform, repo) do
+    %{rows: rows} = repo.query!("SELECT id, fields::text FROM schema_definitions")
+
+    Enum.each(rows, fn [id, fields_json] ->
+      fields = Jason.decode!(fields_json)
+      new_fields = Enum.map(fields, &walk(&1, transform))
+
+      if new_fields != fields do
+        repo.query!(
+          "UPDATE schema_definitions SET fields = $1 WHERE id = $2",
+          [new_fields, id]
+        )
+      end
+    end)
+  end
+
+  defp transform_documents(transform, repo) do
+    %{rows: rows} = repo.query!("SELECT id, content::text FROM documents")
+
+    Enum.each(rows, fn [id, content_json] ->
+      content = Jason.decode!(content_json)
+      new_content = walk(content, transform)
+
+      if new_content != content do
+        repo.query!(
+          "UPDATE documents SET content = $1 WHERE id = $2",
+          [new_content, id]
+        )
+      end
+    end)
+  end
+
+  # ── recursive walker ──────────────────────────────────────────────────
+
+  # Walks any value, applying `transform` to maps that look like a
+  # codelist ref. Recurses into maps and lists so nested composites,
+  # arrays of composites, and the top-level container are all covered.
+  defp walk(value, transform) when is_map(value) do
+    transformed =
+      if codelist_ref?(value) do
+        transform.(value)
+      else
+        value
+      end
+
+    Map.new(transformed, fn {k, v} -> {k, walk(v, transform)} end)
+  end
+
+  defp walk(value, transform) when is_list(value) do
+    Enum.map(value, &walk(&1, transform))
+  end
+
+  defp walk(value, _transform), do: value
+
+  # ── codelist-ref classifier ───────────────────────────────────────────
+
+  # A "codelist ref" is any map that:
+  #   * declares `"type" => "codelist"` (schema_definitions side), OR
+  #   * carries a `"codelistId"` key alongside structured ref data
+  #     (documents side — used by inlined value annotations).
+  defp codelist_ref?(%{} = m) do
+    Map.get(m, "type") == "codelist" or Map.has_key?(m, "codelistId")
+  end
+
+  # ── transforms ────────────────────────────────────────────────────────
+
+  defp add_default(%{} = m) do
+    case Map.get(m, "issue_version") do
+      nil -> Map.put(m, "issue_version", @default_issue)
+      "" -> Map.put(m, "issue_version", @default_issue)
+      _ -> m
+    end
+  end
+
+  defp strip(%{} = m), do: Map.delete(m, "issue_version")
+end

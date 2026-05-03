@@ -10,13 +10,19 @@
       "type": "codelist",
       "codelistId": "onixedit:notification_type",
       "version": 73,
-      "onix": { "element": "NotificationType", "codelistId": 1 }
+      "onix": {
+        "element": "NotificationType",
+        "codelistId": 1
+      },
+      "issue_version": "73"
     },
     {
       "name": "deletionText",
       "title": "Deletion text",
       "type": "text",
-      "onix": { "element": "DeletionText" }
+      "onix": {
+        "element": "DeletionText"
+      }
     },
     {
       "name": "recordSourceType",
@@ -24,7 +30,11 @@
       "type": "codelist",
       "codelistId": "onixedit:record_source_type",
       "version": 73,
-      "onix": { "element": "RecordSourceType", "codelistId": 3 }
+      "onix": {
+        "element": "RecordSourceType",
+        "codelistId": 3
+      },
+      "issue_version": "73"
     },
     {
       "name": "recordSourceIdentifier",
@@ -36,19 +46,29 @@
           "type": "codelist",
           "codelistId": "onixedit:name_id_type",
           "version": 73,
-          "onix": { "codelistId": 44 }
+          "onix": {
+            "codelistId": 44
+          },
+          "issue_version": "73"
         },
-        { "name": "idTypeName", "type": "string" },
-        { "name": "idValue", "type": "string" }
+        {
+          "name": "idTypeName",
+          "type": "string"
+        },
+        {
+          "name": "idValue",
+          "type": "string"
+        }
       ]
     },
     {
       "name": "recordSourceName",
       "title": "Record source name",
       "type": "string",
-      "onix": { "element": "RecordSourceName" }
+      "onix": {
+        "element": "RecordSourceName"
+      }
     },
-
     {
       "name": "productIdentifiers",
       "title": "Product identifiers (ISBN, GTIN, DOI…)",
@@ -63,10 +83,19 @@
             "type": "codelist",
             "codelistId": "onixedit:product_id_type",
             "version": 73,
-            "onix": { "codelistId": 5 }
+            "onix": {
+              "codelistId": 5
+            },
+            "issue_version": "73"
           },
-          { "name": "idTypeName", "type": "string" },
-          { "name": "idValue", "type": "string" }
+          {
+            "name": "idTypeName",
+            "type": "string"
+          },
+          {
+            "name": "idValue",
+            "type": "string"
+          }
         ]
       }
     },
@@ -76,16 +105,22 @@
       "type": "codelist",
       "codelistId": "onixedit:barcode_indicator",
       "version": 73,
-      "onix": { "codelistId": 141 }
+      "onix": {
+        "codelistId": 141
+      },
+      "issue_version": "73"
     },
-
     {
       "name": "productForm",
       "title": "Product form",
       "type": "codelist",
       "codelistId": "onixedit:product_form",
       "version": 73,
-      "onix": { "element": "ProductForm", "codelistId": 150 }
+      "onix": {
+        "element": "ProductForm",
+        "codelistId": 150
+      },
+      "issue_version": "73"
     },
     {
       "name": "productFormDetail",
@@ -93,7 +128,10 @@
       "type": "codelist",
       "codelistId": "onixedit:product_form_detail",
       "version": 73,
-      "onix": { "codelistId": 175 }
+      "onix": {
+        "codelistId": 175
+      },
+      "issue_version": "73"
     },
     {
       "name": "productFormFeatures",
@@ -109,10 +147,19 @@
             "type": "codelist",
             "codelistId": "onixedit:product_form_feature_type",
             "version": 73,
-            "onix": { "codelistId": 79 }
+            "onix": {
+              "codelistId": 79
+            },
+            "issue_version": "73"
           },
-          { "name": "productFormFeatureValue", "type": "string" },
-          { "name": "productFormFeatureDescription", "type": "text" }
+          {
+            "name": "productFormFeatureValue",
+            "type": "string"
+          },
+          {
+            "name": "productFormFeatureDescription",
+            "type": "text"
+          }
         ]
       }
     },
@@ -122,7 +169,10 @@
       "type": "codelist",
       "codelistId": "onixedit:product_packaging",
       "version": 73,
-      "onix": { "codelistId": 80 }
+      "onix": {
+        "codelistId": 80
+      },
+      "issue_version": "73"
     },
     {
       "name": "productFormDescription",
@@ -151,35 +201,46 @@
                 "name": "productIdType",
                 "type": "codelist",
                 "codelistId": "onixedit:product_id_type",
-                "version": 73
+                "version": 73,
+                "issue_version": "73"
               },
-              { "name": "idValue", "type": "string" }
+              {
+                "name": "idValue",
+                "type": "string"
+              }
             ]
           },
           {
             "name": "productForm",
             "type": "codelist",
             "codelistId": "onixedit:product_form",
-            "version": 73
+            "version": 73,
+            "issue_version": "73"
           },
           {
             "name": "productPackaging",
             "type": "codelist",
             "codelistId": "onixedit:product_packaging",
-            "version": 73
+            "version": 73,
+            "issue_version": "73"
           },
-          { "name": "numberOfCopies", "type": "string" }
+          {
+            "name": "numberOfCopies",
+            "type": "string"
+          }
         ]
       }
     },
-
     {
       "name": "epubTechnicalProtection",
       "title": "E-publication technical protection",
       "type": "codelist",
       "codelistId": "onixedit:epub_technical_protection",
       "version": 73,
-      "onix": { "codelistId": 144 }
+      "onix": {
+        "codelistId": 144
+      },
+      "issue_version": "73"
     },
     {
       "name": "epubUsageConstraints",
@@ -195,33 +256,44 @@
             "type": "codelist",
             "codelistId": "onixedit:epub_usage_type",
             "version": 73,
-            "onix": { "codelistId": 145 }
+            "onix": {
+              "codelistId": 145
+            },
+            "issue_version": "73"
           },
           {
             "name": "epubUsageStatus",
             "type": "codelist",
             "codelistId": "onixedit:epub_usage_status",
             "version": 73,
-            "onix": { "codelistId": 146 }
+            "onix": {
+              "codelistId": 146
+            },
+            "issue_version": "73"
           },
           {
             "name": "epubUsageLimit",
             "type": "composite",
             "fields": [
-              { "name": "quantity", "type": "string" },
+              {
+                "name": "quantity",
+                "type": "string"
+              },
               {
                 "name": "epubUsageUnit",
                 "type": "codelist",
                 "codelistId": "onixedit:epub_usage_unit",
                 "version": 73,
-                "onix": { "codelistId": 147 }
+                "onix": {
+                  "codelistId": 147
+                },
+                "issue_version": "73"
               }
             ]
           }
         ]
       }
     },
-
     {
       "name": "extents",
       "title": "Extents (page count, duration, file size…)",
@@ -236,21 +308,32 @@
             "type": "codelist",
             "codelistId": "onixedit:extent_type",
             "version": 73,
-            "onix": { "codelistId": 23 }
+            "onix": {
+              "codelistId": 23
+            },
+            "issue_version": "73"
           },
-          { "name": "extentValue", "type": "string" },
-          { "name": "extentValueRoman", "type": "string" },
+          {
+            "name": "extentValue",
+            "type": "string"
+          },
+          {
+            "name": "extentValueRoman",
+            "type": "string"
+          },
           {
             "name": "extentUnit",
             "type": "codelist",
             "codelistId": "onixedit:extent_unit",
             "version": 73,
-            "onix": { "codelistId": 24 }
+            "onix": {
+              "codelistId": 24
+            },
+            "issue_version": "73"
           }
         ]
       }
     },
-
     {
       "name": "illustrationsNote",
       "title": "Illustrations note",
@@ -270,14 +353,22 @@
             "type": "codelist",
             "codelistId": "onixedit:ancillary_content_type",
             "version": 73,
-            "onix": { "codelistId": 25 }
+            "onix": {
+              "codelistId": 25
+            },
+            "issue_version": "73"
           },
-          { "name": "number", "type": "string" },
-          { "name": "ancillaryContentDescription", "type": "text" }
+          {
+            "name": "number",
+            "type": "string"
+          },
+          {
+            "name": "ancillaryContentDescription",
+            "type": "text"
+          }
         ]
       }
     },
-
     {
       "name": "productClassifications",
       "title": "Product classifications (HS / Schedule B…)",
@@ -292,14 +383,22 @@
             "type": "codelist",
             "codelistId": "onixedit:product_classification_type",
             "version": 73,
-            "onix": { "codelistId": 9 }
+            "onix": {
+              "codelistId": 9
+            },
+            "issue_version": "73"
           },
-          { "name": "productClassificationCode", "type": "string" },
-          { "name": "percent", "type": "string" }
+          {
+            "name": "productClassificationCode",
+            "type": "string"
+          },
+          {
+            "name": "percent",
+            "type": "string"
+          }
         ]
       }
     },
-
     {
       "name": "titleDetails",
       "title": "Title detail",
@@ -314,7 +413,10 @@
             "type": "codelist",
             "codelistId": "onixedit:title_type",
             "version": 73,
-            "onix": { "codelistId": 15 }
+            "onix": {
+              "codelistId": 15
+            },
+            "issue_version": "73"
           },
           {
             "name": "titleStatement",
@@ -328,27 +430,50 @@
               "name": "titleElement",
               "type": "composite",
               "fields": [
-                { "name": "sequenceNumber", "type": "string" },
+                {
+                  "name": "sequenceNumber",
+                  "type": "string"
+                },
                 {
                   "name": "titleElementLevel",
                   "type": "codelist",
                   "codelistId": "onixedit:title_element_level",
                   "version": 73,
-                  "onix": { "codelistId": 149 }
+                  "onix": {
+                    "codelistId": 149
+                  },
+                  "issue_version": "73"
                 },
-                { "name": "partNumber", "type": "string" },
-                { "name": "yearOfAnnual", "type": "string" },
-                { "name": "titleText", "type": "string" },
-                { "name": "titlePrefix", "type": "string" },
-                { "name": "titleWithoutPrefix", "type": "string" },
-                { "name": "subtitle", "type": "string" }
+                {
+                  "name": "partNumber",
+                  "type": "string"
+                },
+                {
+                  "name": "yearOfAnnual",
+                  "type": "string"
+                },
+                {
+                  "name": "titleText",
+                  "type": "string"
+                },
+                {
+                  "name": "titlePrefix",
+                  "type": "string"
+                },
+                {
+                  "name": "titleWithoutPrefix",
+                  "type": "string"
+                },
+                {
+                  "name": "subtitle",
+                  "type": "string"
+                }
               ]
             }
           }
         ]
       }
     },
-
     {
       "name": "thesis",
       "title": "Thesis",
@@ -359,14 +484,25 @@
           "type": "codelist",
           "codelistId": "onixedit:thesis_type",
           "version": 73,
-          "onix": { "codelistId": 72 }
+          "onix": {
+            "codelistId": 72
+          },
+          "issue_version": "73"
         },
-        { "name": "thesisPresentedTo", "type": "string" },
-        { "name": "thesisYear", "type": "string" },
-        { "name": "dissertationTitle", "type": "string" }
+        {
+          "name": "thesisPresentedTo",
+          "type": "string"
+        },
+        {
+          "name": "thesisYear",
+          "type": "string"
+        },
+        {
+          "name": "dissertationTitle",
+          "type": "string"
+        }
       ]
     },
-
     {
       "name": "contributors",
       "title": "Contributors (WI2 fills in inner shape — author / editor / illustrator etc.)",
@@ -389,7 +525,6 @@
       "title": "No contributor (anonymous)",
       "type": "boolean"
     },
-
     {
       "name": "conference",
       "title": "Conference",
@@ -400,14 +535,35 @@
           "type": "codelist",
           "codelistId": "onixedit:conference_role",
           "version": 73,
-          "onix": { "codelistId": 20 }
+          "onix": {
+            "codelistId": 20
+          },
+          "issue_version": "73"
         },
-        { "name": "conferenceName", "type": "string" },
-        { "name": "conferenceAcronym", "type": "string" },
-        { "name": "conferenceNumber", "type": "string" },
-        { "name": "conferenceTheme", "type": "string" },
-        { "name": "conferenceDate", "type": "datetime" },
-        { "name": "conferencePlace", "type": "string" },
+        {
+          "name": "conferenceName",
+          "type": "string"
+        },
+        {
+          "name": "conferenceAcronym",
+          "type": "string"
+        },
+        {
+          "name": "conferenceNumber",
+          "type": "string"
+        },
+        {
+          "name": "conferenceTheme",
+          "type": "string"
+        },
+        {
+          "name": "conferenceDate",
+          "type": "datetime"
+        },
+        {
+          "name": "conferencePlace",
+          "type": "string"
+        },
         {
           "name": "conferenceSponsors",
           "type": "arrayOf",
@@ -416,8 +572,14 @@
             "name": "conferenceSponsor",
             "type": "composite",
             "fields": [
-              { "name": "personName", "type": "string" },
-              { "name": "corporateName", "type": "string" }
+              {
+                "name": "personName",
+                "type": "string"
+              },
+              {
+                "name": "corporateName",
+                "type": "string"
+              }
             ]
           }
         },
@@ -434,29 +596,55 @@
                 "type": "codelist",
                 "codelistId": "onixedit:website_role",
                 "version": 73,
-                "onix": { "codelistId": 73 }
+                "onix": {
+                  "codelistId": 73
+                },
+                "issue_version": "73"
               },
-              { "name": "websiteDescription", "type": "text" },
-              { "name": "websiteLink", "type": "string" }
+              {
+                "name": "websiteDescription",
+                "type": "text"
+              },
+              {
+                "name": "websiteLink",
+                "type": "string"
+              }
             ]
           }
         }
       ]
     },
-
     {
       "name": "editionType",
       "title": "Edition type",
       "type": "codelist",
       "codelistId": "onixedit:edition_type",
       "version": 73,
-      "onix": { "codelistId": 21 }
+      "onix": {
+        "codelistId": 21
+      },
+      "issue_version": "73"
     },
-    { "name": "editionNumber", "title": "Edition number", "type": "string" },
-    { "name": "editionVersionNumber", "title": "Edition version number", "type": "string" },
-    { "name": "editionStatement", "title": "Edition statement", "type": "string" },
-    { "name": "noEdition", "title": "No edition (one-off)", "type": "boolean" },
-
+    {
+      "name": "editionNumber",
+      "title": "Edition number",
+      "type": "string"
+    },
+    {
+      "name": "editionVersionNumber",
+      "title": "Edition version number",
+      "type": "string"
+    },
+    {
+      "name": "editionStatement",
+      "title": "Edition statement",
+      "type": "string"
+    },
+    {
+      "name": "noEdition",
+      "title": "No edition (one-off)",
+      "type": "boolean"
+    },
     {
       "name": "religiousText",
       "title": "Religious text",
@@ -471,7 +659,10 @@
             "type": "codelist",
             "codelistId": "onixedit:bible_contents",
             "version": 73,
-            "onix": { "codelistId": 82 }
+            "onix": {
+              "codelistId": 82
+            },
+            "issue_version": "73"
           }
         },
         {
@@ -479,14 +670,20 @@
           "type": "codelist",
           "codelistId": "onixedit:bible_version",
           "version": 73,
-          "onix": { "codelistId": 86 }
+          "onix": {
+            "codelistId": 86
+          },
+          "issue_version": "73"
         },
         {
           "name": "studyBibleType",
           "type": "codelist",
           "codelistId": "onixedit:study_bible_type",
           "version": 73,
-          "onix": { "codelistId": 84 }
+          "onix": {
+            "codelistId": 84
+          },
+          "issue_version": "73"
         },
         {
           "name": "bibleTextFeatures",
@@ -497,12 +694,14 @@
             "type": "codelist",
             "codelistId": "onixedit:bible_text_feature",
             "version": 73,
-            "onix": { "codelistId": 97 }
+            "onix": {
+              "codelistId": 97
+            },
+            "issue_version": "73"
           }
         }
       ]
     },
-
     {
       "name": "languages",
       "title": "Languages",
@@ -517,40 +716,54 @@
             "type": "codelist",
             "codelistId": "onixedit:language_role",
             "version": 73,
-            "onix": { "codelistId": 22 }
+            "onix": {
+              "codelistId": 22
+            },
+            "issue_version": "73"
           },
           {
             "name": "languageCode",
             "type": "codelist",
             "codelistId": "onixedit:language_code",
             "version": 73,
-            "onix": { "codelistId": 74 }
+            "onix": {
+              "codelistId": 74
+            },
+            "issue_version": "73"
           },
           {
             "name": "countryCode",
             "type": "codelist",
             "codelistId": "onixedit:country_code",
             "version": 73,
-            "onix": { "codelistId": 91 }
+            "onix": {
+              "codelistId": 91
+            },
+            "issue_version": "73"
           },
           {
             "name": "regionCode",
             "type": "codelist",
             "codelistId": "onixedit:region_code",
             "version": 73,
-            "onix": { "codelistId": 49 }
+            "onix": {
+              "codelistId": 49
+            },
+            "issue_version": "73"
           },
           {
             "name": "scriptCode",
             "type": "codelist",
             "codelistId": "onixedit:script_code",
             "version": 73,
-            "onix": { "codelistId": 121 }
+            "onix": {
+              "codelistId": 121
+            },
+            "issue_version": "73"
           }
         ]
       }
     },
-
     {
       "name": "subjects",
       "title": "Subjects",
@@ -560,18 +773,36 @@
         "name": "subject",
         "type": "composite",
         "fields": [
-          { "name": "mainSubject", "type": "boolean" },
+          {
+            "name": "mainSubject",
+            "type": "boolean"
+          },
           {
             "name": "subjectSchemeIdentifier",
             "type": "codelist",
             "codelistId": "onixedit:subject_scheme",
             "version": 73,
-            "onix": { "codelistId": 27 }
+            "onix": {
+              "codelistId": 27
+            },
+            "issue_version": "73"
           },
-          { "name": "subjectSchemeName", "type": "string" },
-          { "name": "subjectSchemeVersion", "type": "string" },
-          { "name": "subjectCode", "type": "string" },
-          { "name": "subjectHeadingText", "type": "string" }
+          {
+            "name": "subjectSchemeName",
+            "type": "string"
+          },
+          {
+            "name": "subjectSchemeVersion",
+            "type": "string"
+          },
+          {
+            "name": "subjectCode",
+            "type": "string"
+          },
+          {
+            "name": "subjectHeadingText",
+            "type": "string"
+          }
         ]
       }
     },
@@ -585,10 +816,13 @@
         "type": "codelist",
         "codelistId": "onixedit:thema",
         "version": 73,
-        "onix": { "element": "SubjectCode", "codelistId": 93 }
+        "onix": {
+          "element": "SubjectCode",
+          "codelistId": 93
+        },
+        "issue_version": "73"
       }
     },
-
     {
       "name": "audienceCodes",
       "title": "Audience codes",
@@ -603,15 +837,24 @@
             "type": "codelist",
             "codelistId": "onixedit:audience_code_type",
             "version": 73,
-            "onix": { "codelistId": 29 }
+            "onix": {
+              "codelistId": 29
+            },
+            "issue_version": "73"
           },
-          { "name": "audienceCodeTypeName", "type": "string" },
+          {
+            "name": "audienceCodeTypeName",
+            "type": "string"
+          },
           {
             "name": "audienceCodeValue",
             "type": "codelist",
             "codelistId": "onixedit:audience_code_value",
             "version": 73,
-            "onix": { "codelistId": 28 }
+            "onix": {
+              "codelistId": 28
+            },
+            "issue_version": "73"
           }
         ]
       }
@@ -630,20 +873,33 @@
             "type": "codelist",
             "codelistId": "onixedit:audience_range_qualifier",
             "version": 73,
-            "onix": { "codelistId": 30 }
+            "onix": {
+              "codelistId": 30
+            },
+            "issue_version": "73"
           },
           {
             "name": "audienceRangePrecision",
             "type": "codelist",
             "codelistId": "onixedit:audience_range_precision",
             "version": 73,
-            "onix": { "codelistId": 31 }
+            "onix": {
+              "codelistId": 31
+            },
+            "issue_version": "73"
           },
-          { "name": "audienceRangeValue", "type": "string" }
+          {
+            "name": "audienceRangeValue",
+            "type": "string"
+          }
         ]
       }
     },
-    { "name": "audienceDescription", "title": "Audience description", "type": "text" },
+    {
+      "name": "audienceDescription",
+      "title": "Audience description",
+      "type": "text"
+    },
     {
       "name": "complexity",
       "title": "Complexity",
@@ -654,12 +910,17 @@
           "type": "codelist",
           "codelistId": "onixedit:complexity_scheme",
           "version": 73,
-          "onix": { "codelistId": 32 }
+          "onix": {
+            "codelistId": 32
+          },
+          "issue_version": "73"
         },
-        { "name": "complexityCode", "type": "string" }
+        {
+          "name": "complexityCode",
+          "type": "string"
+        }
       ]
     },
-
     {
       "name": "collateralDetail",
       "title": "Collateral detail",
@@ -680,14 +941,20 @@
                 "type": "codelist",
                 "codelistId": "onixedit:text_type",
                 "version": 73,
-                "onix": { "codelistId": 153 }
+                "onix": {
+                  "codelistId": 153
+                },
+                "issue_version": "73"
               },
               {
                 "name": "contentAudience",
                 "type": "codelist",
                 "codelistId": "onixedit:content_audience",
                 "version": 73,
-                "onix": { "codelistId": 154 }
+                "onix": {
+                  "codelistId": 154
+                },
+                "issue_version": "73"
               },
               {
                 "name": "textSourceCorporate",
@@ -717,22 +984,32 @@
                 "type": "codelist",
                 "codelistId": "onixedit:cited_content_type",
                 "version": 73,
-                "onix": { "codelistId": 156 }
+                "onix": {
+                  "codelistId": 156
+                },
+                "issue_version": "73"
               },
               {
                 "name": "contentAudience",
                 "type": "codelist",
                 "codelistId": "onixedit:content_audience",
-                "version": 73
+                "version": 73,
+                "issue_version": "73"
               },
               {
                 "name": "sourceType",
                 "type": "codelist",
                 "codelistId": "onixedit:cited_source_type",
                 "version": 73,
-                "onix": { "codelistId": 157 }
+                "onix": {
+                  "codelistId": 157
+                },
+                "issue_version": "73"
               },
-              { "name": "sourceTitle", "type": "string" },
+              {
+                "name": "sourceTitle",
+                "type": "string"
+              },
               {
                 "name": "citedDate",
                 "type": "composite",
@@ -742,12 +1019,21 @@
                     "type": "codelist",
                     "codelistId": "onixedit:content_date_role",
                     "version": 73,
-                    "onix": { "codelistId": 163 }
+                    "onix": {
+                      "codelistId": 163
+                    },
+                    "issue_version": "73"
                   },
-                  { "name": "date", "type": "datetime" }
+                  {
+                    "name": "date",
+                    "type": "datetime"
+                  }
                 ]
               },
-              { "name": "resourceLink", "type": "string" }
+              {
+                "name": "resourceLink",
+                "type": "string"
+              }
             ]
           }
         },
@@ -764,22 +1050,32 @@
                 "type": "codelist",
                 "codelistId": "onixedit:resource_content_type",
                 "version": 73,
-                "onix": { "codelistId": 158 }
+                "onix": {
+                  "codelistId": 158
+                },
+                "issue_version": "73"
               },
               {
                 "name": "contentAudience",
                 "type": "codelist",
                 "codelistId": "onixedit:content_audience",
-                "version": 73
+                "version": 73,
+                "issue_version": "73"
               },
               {
                 "name": "resourceMode",
                 "type": "codelist",
                 "codelistId": "onixedit:resource_mode",
                 "version": 73,
-                "onix": { "codelistId": 159 }
+                "onix": {
+                  "codelistId": 159
+                },
+                "issue_version": "73"
               },
-              { "name": "resourceFeatureDescription", "type": "text" },
+              {
+                "name": "resourceFeatureDescription",
+                "type": "text"
+              },
               {
                 "name": "resourceVersions",
                 "type": "arrayOf",
@@ -793,9 +1089,15 @@
                       "type": "codelist",
                       "codelistId": "onixedit:resource_form",
                       "version": 73,
-                      "onix": { "codelistId": 161 }
+                      "onix": {
+                        "codelistId": 161
+                      },
+                      "issue_version": "73"
                     },
-                    { "name": "resourceVersionFeatureDescription", "type": "text" },
+                    {
+                      "name": "resourceVersionFeatureDescription",
+                      "type": "text"
+                    },
                     {
                       "name": "resourceVersionFeatures",
                       "type": "arrayOf",
@@ -809,13 +1111,22 @@
                             "type": "codelist",
                             "codelistId": "onixedit:resource_version_feature_type",
                             "version": 73,
-                            "onix": { "codelistId": 162 }
+                            "onix": {
+                              "codelistId": 162
+                            },
+                            "issue_version": "73"
                           },
-                          { "name": "featureValue", "type": "string" }
+                          {
+                            "name": "featureValue",
+                            "type": "string"
+                          }
                         ]
                       }
                     },
-                    { "name": "resourceLink", "type": "string" },
+                    {
+                      "name": "resourceLink",
+                      "type": "string"
+                    },
                     {
                       "name": "contentDate",
                       "type": "composite",
@@ -824,9 +1135,13 @@
                           "name": "contentDateRole",
                           "type": "codelist",
                           "codelistId": "onixedit:content_date_role",
-                          "version": 73
+                          "version": 73,
+                          "issue_version": "73"
                         },
-                        { "name": "date", "type": "datetime" }
+                        {
+                          "name": "date",
+                          "type": "datetime"
+                        }
                       ]
                     }
                   ]
@@ -843,30 +1158,47 @@
             "name": "prize",
             "type": "composite",
             "fields": [
-              { "name": "prizeName", "type": "string" },
-              { "name": "prizeYear", "type": "string" },
+              {
+                "name": "prizeName",
+                "type": "string"
+              },
+              {
+                "name": "prizeYear",
+                "type": "string"
+              },
               {
                 "name": "prizeCountry",
                 "type": "codelist",
                 "codelistId": "onixedit:country_code",
                 "version": 73,
-                "onix": { "codelistId": 91 }
+                "onix": {
+                  "codelistId": 91
+                },
+                "issue_version": "73"
               },
               {
                 "name": "prizeCode",
                 "type": "codelist",
                 "codelistId": "onixedit:prize_code",
                 "version": 73,
-                "onix": { "codelistId": 41 }
+                "onix": {
+                  "codelistId": 41
+                },
+                "issue_version": "73"
               },
-              { "name": "prizeStatement", "type": "text" },
-              { "name": "prizeJury", "type": "string" }
+              {
+                "name": "prizeStatement",
+                "type": "text"
+              },
+              {
+                "name": "prizeJury",
+                "type": "string"
+              }
             ]
           }
         }
       ]
     },
-
     {
       "name": "contentDetail",
       "title": "Content detail (chapters, articles, etc.)",
@@ -880,7 +1212,10 @@
             "name": "contentItem",
             "type": "composite",
             "fields": [
-              { "name": "levelSequenceNumber", "type": "string" },
+              {
+                "name": "levelSequenceNumber",
+                "type": "string"
+              },
               {
                 "name": "textItem",
                 "type": "composite",
@@ -890,15 +1225,33 @@
                     "type": "codelist",
                     "codelistId": "onixedit:text_item_type",
                     "version": 73,
-                    "onix": { "codelistId": 153 }
+                    "onix": {
+                      "codelistId": 153
+                    },
+                    "issue_version": "73"
                   },
-                  { "name": "textItemIdentifier", "type": "string" },
-                  { "name": "pageRun", "type": "string" },
-                  { "name": "numberOfPages", "type": "string" }
+                  {
+                    "name": "textItemIdentifier",
+                    "type": "string"
+                  },
+                  {
+                    "name": "pageRun",
+                    "type": "string"
+                  },
+                  {
+                    "name": "numberOfPages",
+                    "type": "string"
+                  }
                 ]
               },
-              { "name": "componentTypeName", "type": "string" },
-              { "name": "componentNumber", "type": "string" },
+              {
+                "name": "componentTypeName",
+                "type": "string"
+              },
+              {
+                "name": "componentNumber",
+                "type": "string"
+              },
               {
                 "name": "titleDetail",
                 "type": "composite",
@@ -907,9 +1260,13 @@
                     "name": "titleType",
                     "type": "codelist",
                     "codelistId": "onixedit:title_type",
-                    "version": 73
+                    "version": 73,
+                    "issue_version": "73"
                   },
-                  { "name": "titleText", "type": "string" }
+                  {
+                    "name": "titleText",
+                    "type": "string"
+                  }
                 ]
               }
             ]
@@ -917,7 +1274,6 @@
         }
       ]
     },
-
     {
       "name": "publishingDetail",
       "title": "Publishing detail",
@@ -936,13 +1292,25 @@
                   "type": "codelist",
                   "codelistId": "onixedit:name_id_type",
                   "version": 73,
-                  "onix": { "codelistId": 44 }
+                  "onix": {
+                    "codelistId": 44
+                  },
+                  "issue_version": "73"
                 },
-                { "name": "idTypeName", "type": "string" },
-                { "name": "idValue", "type": "string" }
+                {
+                  "name": "idTypeName",
+                  "type": "string"
+                },
+                {
+                  "name": "idValue",
+                  "type": "string"
+                }
               ]
             },
-            { "name": "imprintName", "type": "string" }
+            {
+              "name": "imprintName",
+              "type": "string"
+            }
           ]
         },
         {
@@ -958,7 +1326,10 @@
                 "type": "codelist",
                 "codelistId": "onixedit:publishing_role",
                 "version": 73,
-                "onix": { "codelistId": 45 }
+                "onix": {
+                  "codelistId": 45
+                },
+                "issue_version": "73"
               },
               {
                 "name": "publisherIdentifier",
@@ -968,32 +1339,54 @@
                     "name": "publisherIDType",
                     "type": "codelist",
                     "codelistId": "onixedit:name_id_type",
-                    "version": 73
+                    "version": 73,
+                    "issue_version": "73"
                   },
-                  { "name": "idValue", "type": "string" }
+                  {
+                    "name": "idValue",
+                    "type": "string"
+                  }
                 ]
               },
-              { "name": "publisherName", "type": "string" },
-              { "name": "fundingSource", "type": "string" }
+              {
+                "name": "publisherName",
+                "type": "string"
+              },
+              {
+                "name": "fundingSource",
+                "type": "string"
+              }
             ]
           }
         },
-        { "name": "cityOfPublication", "type": "string" },
+        {
+          "name": "cityOfPublication",
+          "type": "string"
+        },
         {
           "name": "countryOfPublication",
           "type": "codelist",
           "codelistId": "onixedit:country_code",
           "version": 73,
-          "onix": { "codelistId": 91 }
+          "onix": {
+            "codelistId": 91
+          },
+          "issue_version": "73"
         },
         {
           "name": "publishingStatus",
           "type": "codelist",
           "codelistId": "onixedit:publishing_status",
           "version": 73,
-          "onix": { "codelistId": 64 }
+          "onix": {
+            "codelistId": 64
+          },
+          "issue_version": "73"
         },
-        { "name": "publishingStatusNote", "type": "text" },
+        {
+          "name": "publishingStatusNote",
+          "type": "text"
+        },
         {
           "name": "publishingDates",
           "type": "arrayOf",
@@ -1007,25 +1400,40 @@
                 "type": "codelist",
                 "codelistId": "onixedit:publishing_date_role",
                 "version": 73,
-                "onix": { "codelistId": 163 }
+                "onix": {
+                  "codelistId": 163
+                },
+                "issue_version": "73"
               },
               {
                 "name": "dateFormat",
                 "type": "codelist",
                 "codelistId": "onixedit:date_format",
                 "version": 73,
-                "onix": { "codelistId": 55 }
+                "onix": {
+                  "codelistId": 55
+                },
+                "issue_version": "73"
               },
-              { "name": "date", "type": "datetime" }
+              {
+                "name": "date",
+                "type": "datetime"
+              }
             ]
           }
         },
-        { "name": "latestReprintNumber", "type": "string" },
+        {
+          "name": "latestReprintNumber",
+          "type": "string"
+        },
         {
           "name": "copyrightStatement",
           "type": "composite",
           "fields": [
-            { "name": "copyrightYear", "type": "string" },
+            {
+              "name": "copyrightYear",
+              "type": "string"
+            },
             {
               "name": "copyrightOwners",
               "type": "arrayOf",
@@ -1042,13 +1450,23 @@
                         "name": "copyrightOwnerIDType",
                         "type": "codelist",
                         "codelistId": "onixedit:name_id_type",
-                        "version": 73
+                        "version": 73,
+                        "issue_version": "73"
                       },
-                      { "name": "idValue", "type": "string" }
+                      {
+                        "name": "idValue",
+                        "type": "string"
+                      }
                     ]
                   },
-                  { "name": "personName", "type": "string" },
-                  { "name": "corporateName", "type": "string" }
+                  {
+                    "name": "personName",
+                    "type": "string"
+                  },
+                  {
+                    "name": "corporateName",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -1067,7 +1485,10 @@
                 "type": "codelist",
                 "codelistId": "onixedit:sales_rights_type",
                 "version": 73,
-                "onix": { "codelistId": 46 }
+                "onix": {
+                  "codelistId": 46
+                },
+                "issue_version": "73"
               },
               {
                 "name": "territory",
@@ -1081,7 +1502,8 @@
                       "name": "country",
                       "type": "codelist",
                       "codelistId": "onixedit:country_code",
-                      "version": 73
+                      "version": 73,
+                      "issue_version": "73"
                     }
                   },
                   {
@@ -1092,13 +1514,26 @@
                       "name": "region",
                       "type": "codelist",
                       "codelistId": "onixedit:region_code",
-                      "version": 73
+                      "version": 73,
+                      "issue_version": "73"
                     }
                   },
-                  { "name": "regionsIncluded", "type": "string" },
-                  { "name": "countriesIncluded", "type": "string" },
-                  { "name": "regionsExcluded", "type": "string" },
-                  { "name": "countriesExcluded", "type": "string" }
+                  {
+                    "name": "regionsIncluded",
+                    "type": "string"
+                  },
+                  {
+                    "name": "countriesIncluded",
+                    "type": "string"
+                  },
+                  {
+                    "name": "regionsExcluded",
+                    "type": "string"
+                  },
+                  {
+                    "name": "countriesExcluded",
+                    "type": "string"
+                  }
                 ]
               },
               {
@@ -1114,11 +1549,23 @@
                       "type": "codelist",
                       "codelistId": "onixedit:sales_restriction_type",
                       "version": 73,
-                      "onix": { "codelistId": 71 }
+                      "onix": {
+                        "codelistId": 71
+                      },
+                      "issue_version": "73"
                     },
-                    { "name": "salesRestrictionNote", "type": "text" },
-                    { "name": "startDate", "type": "datetime" },
-                    { "name": "endDate", "type": "datetime" }
+                    {
+                      "name": "salesRestrictionNote",
+                      "type": "text"
+                    },
+                    {
+                      "name": "startDate",
+                      "type": "datetime"
+                    },
+                    {
+                      "name": "endDate",
+                      "type": "datetime"
+                    }
                   ]
                 }
               }
@@ -1127,7 +1574,6 @@
         }
       ]
     },
-
     {
       "name": "relatedMaterial",
       "title": "Related material",
@@ -1146,7 +1592,10 @@
                 "type": "codelist",
                 "codelistId": "onixedit:work_relation",
                 "version": 73,
-                "onix": { "codelistId": 164 }
+                "onix": {
+                  "codelistId": 164
+                },
+                "issue_version": "73"
               },
               {
                 "name": "workIdentifier",
@@ -1157,9 +1606,15 @@
                     "type": "codelist",
                     "codelistId": "onixedit:work_id_type",
                     "version": 73,
-                    "onix": { "codelistId": 16 }
+                    "onix": {
+                      "codelistId": 16
+                    },
+                    "issue_version": "73"
                   },
-                  { "name": "idValue", "type": "string" }
+                  {
+                    "name": "idValue",
+                    "type": "string"
+                  }
                 ]
               }
             ]
@@ -1178,7 +1633,10 @@
                 "type": "codelist",
                 "codelistId": "onixedit:product_relation",
                 "version": 73,
-                "onix": { "codelistId": 51 }
+                "onix": {
+                  "codelistId": 51
+                },
+                "issue_version": "73"
               },
               {
                 "name": "productIdentifier",
@@ -1188,23 +1646,27 @@
                     "name": "productIDType",
                     "type": "codelist",
                     "codelistId": "onixedit:product_id_type",
-                    "version": 73
+                    "version": 73,
+                    "issue_version": "73"
                   },
-                  { "name": "idValue", "type": "string" }
+                  {
+                    "name": "idValue",
+                    "type": "string"
+                  }
                 ]
               },
               {
                 "name": "productForm",
                 "type": "codelist",
                 "codelistId": "onixedit:product_form",
-                "version": 73
+                "version": 73,
+                "issue_version": "73"
               }
             ]
           }
         }
       ]
     },
-
     {
       "name": "productSupplies",
       "title": "Product supply",
@@ -1230,7 +1692,8 @@
                       "name": "country",
                       "type": "codelist",
                       "codelistId": "onixedit:country_code",
-                      "version": 73
+                      "version": 73,
+                      "issue_version": "73"
                     }
                   },
                   {
@@ -1241,7 +1704,8 @@
                       "name": "region",
                       "type": "codelist",
                       "codelistId": "onixedit:region_code",
-                      "version": 73
+                      "version": 73,
+                      "issue_version": "73"
                     }
                   }
                 ]
@@ -1263,12 +1727,21 @@
                           "type": "codelist",
                           "codelistId": "onixedit:sales_outlet_id_type",
                           "version": 73,
-                          "onix": { "codelistId": 102 }
+                          "onix": {
+                            "codelistId": 102
+                          },
+                          "issue_version": "73"
                         },
-                        { "name": "idValue", "type": "string" }
+                        {
+                          "name": "idValue",
+                          "type": "string"
+                        }
                       ]
                     },
-                    { "name": "salesOutletName", "type": "string" }
+                    {
+                      "name": "salesOutletName",
+                      "type": "string"
+                    }
                   ]
                 }
               }
@@ -1291,9 +1764,15 @@
                       "type": "codelist",
                       "codelistId": "onixedit:agent_role",
                       "version": 73,
-                      "onix": { "codelistId": 69 }
+                      "onix": {
+                        "codelistId": 69
+                      },
+                      "issue_version": "73"
                     },
-                    { "name": "agentName", "type": "string" }
+                    {
+                      "name": "agentName",
+                      "type": "string"
+                    }
                   ]
                 }
               },
@@ -1302,7 +1781,10 @@
                 "type": "codelist",
                 "codelistId": "onixedit:market_publishing_status",
                 "version": 73,
-                "onix": { "codelistId": 68 }
+                "onix": {
+                  "codelistId": 68
+                },
+                "issue_version": "73"
               },
               {
                 "name": "marketDates",
@@ -1316,9 +1798,13 @@
                       "name": "marketDateRole",
                       "type": "codelist",
                       "codelistId": "onixedit:publishing_date_role",
-                      "version": 73
+                      "version": 73,
+                      "issue_version": "73"
                     },
-                    { "name": "date", "type": "datetime" }
+                    {
+                      "name": "date",
+                      "type": "datetime"
+                    }
                   ]
                 }
               }
@@ -1341,7 +1827,10 @@
                       "type": "codelist",
                       "codelistId": "onixedit:supplier_role",
                       "version": 73,
-                      "onix": { "codelistId": 93 }
+                      "onix": {
+                        "codelistId": 93
+                      },
+                      "issue_version": "73"
                     },
                     {
                       "name": "supplierIdentifier",
@@ -1352,14 +1841,29 @@
                           "type": "codelist",
                           "codelistId": "onixedit:supplier_id_type",
                           "version": 73,
-                          "onix": { "codelistId": 92 }
+                          "onix": {
+                            "codelistId": 92
+                          },
+                          "issue_version": "73"
                         },
-                        { "name": "idValue", "type": "string" }
+                        {
+                          "name": "idValue",
+                          "type": "string"
+                        }
                       ]
                     },
-                    { "name": "supplierName", "type": "string" },
-                    { "name": "telephoneNumber", "type": "string" },
-                    { "name": "emailAddress", "type": "string" }
+                    {
+                      "name": "supplierName",
+                      "type": "string"
+                    },
+                    {
+                      "name": "telephoneNumber",
+                      "type": "string"
+                    },
+                    {
+                      "name": "emailAddress",
+                      "type": "string"
+                    }
                   ]
                 },
                 {
@@ -1367,7 +1871,10 @@
                   "type": "codelist",
                   "codelistId": "onixedit:product_availability",
                   "version": 73,
-                  "onix": { "codelistId": 65 }
+                  "onix": {
+                    "codelistId": 65
+                  },
+                  "issue_version": "73"
                 },
                 {
                   "name": "supplyDates",
@@ -1382,9 +1889,15 @@
                         "type": "codelist",
                         "codelistId": "onixedit:supply_date_role",
                         "version": 73,
-                        "onix": { "codelistId": 166 }
+                        "onix": {
+                          "codelistId": 166
+                        },
+                        "issue_version": "73"
                       },
-                      { "name": "date", "type": "datetime" }
+                      {
+                        "name": "date",
+                        "type": "datetime"
+                      }
                     ]
                   }
                 },
@@ -1392,12 +1905,24 @@
                   "name": "orderTime",
                   "type": "composite",
                   "fields": [
-                    { "name": "days", "type": "string" },
-                    { "name": "weeks", "type": "string" },
-                    { "name": "orderTimeDescription", "type": "text" }
+                    {
+                      "name": "days",
+                      "type": "string"
+                    },
+                    {
+                      "name": "weeks",
+                      "type": "string"
+                    },
+                    {
+                      "name": "orderTimeDescription",
+                      "type": "text"
+                    }
                   ]
                 },
-                { "name": "packQuantity", "type": "string" },
+                {
+                  "name": "packQuantity",
+                  "type": "string"
+                },
                 {
                   "name": "prices",
                   "type": "arrayOf",
@@ -1411,35 +1936,51 @@
                         "type": "codelist",
                         "codelistId": "onixedit:price_type",
                         "version": 73,
-                        "onix": { "codelistId": 58 }
+                        "onix": {
+                          "codelistId": 58
+                        },
+                        "issue_version": "73"
                       },
                       {
                         "name": "priceQualifier",
                         "type": "codelist",
                         "codelistId": "onixedit:price_qualifier",
                         "version": 73,
-                        "onix": { "codelistId": 59 }
+                        "onix": {
+                          "codelistId": 59
+                        },
+                        "issue_version": "73"
                       },
                       {
                         "name": "priceStatus",
                         "type": "codelist",
                         "codelistId": "onixedit:price_status",
                         "version": 73,
-                        "onix": { "codelistId": 61 }
+                        "onix": {
+                          "codelistId": 61
+                        },
+                        "issue_version": "73"
                       },
-                      { "name": "priceAmount", "type": "string" },
+                      {
+                        "name": "priceAmount",
+                        "type": "string"
+                      },
                       {
                         "name": "currencyCode",
                         "type": "codelist",
                         "codelistId": "onixedit:currency_code",
                         "version": 73,
-                        "onix": { "codelistId": 96 }
+                        "onix": {
+                          "codelistId": 96
+                        },
+                        "issue_version": "73"
                       },
                       {
                         "name": "countryOfManufacture",
                         "type": "codelist",
                         "codelistId": "onixedit:country_code",
-                        "version": 73
+                        "version": 73,
+                        "issue_version": "73"
                       },
                       {
                         "name": "taxRate",
@@ -1450,11 +1991,23 @@
                             "type": "codelist",
                             "codelistId": "onixedit:tax_rate_type",
                             "version": 73,
-                            "onix": { "codelistId": 171 }
+                            "onix": {
+                              "codelistId": 171
+                            },
+                            "issue_version": "73"
                           },
-                          { "name": "taxRatePercent", "type": "string" },
-                          { "name": "taxableAmount", "type": "string" },
-                          { "name": "taxAmount", "type": "string" }
+                          {
+                            "name": "taxRatePercent",
+                            "type": "string"
+                          },
+                          {
+                            "name": "taxableAmount",
+                            "type": "string"
+                          },
+                          {
+                            "name": "taxAmount",
+                            "type": "string"
+                          }
                         ]
                       },
                       {
@@ -1466,9 +2019,15 @@
                             "type": "codelist",
                             "codelistId": "onixedit:price_date_role",
                             "version": 73,
-                            "onix": { "codelistId": 173 }
+                            "onix": {
+                              "codelistId": 173
+                            },
+                            "issue_version": "73"
                           },
-                          { "name": "date", "type": "datetime" }
+                          {
+                            "name": "date",
+                            "type": "datetime"
+                          }
                         ]
                       }
                     ]
@@ -1480,8 +2039,11 @@
         ]
       }
     },
-
-    { "name": "bp_internal_note", "title": "Internal note", "type": "text" },
+    {
+      "name": "bp_internal_note",
+      "title": "Internal note",
+      "type": "text"
+    },
     {
       "name": "bp_export_status",
       "title": "Export status (workflow)",
@@ -1502,28 +2064,71 @@
             "cannot_cancel"
           ]
         },
-        { "name": "submission_id", "type": "string" },
-        { "name": "submitted_at", "type": "datetime" },
-        { "name": "staged_at", "type": "datetime" },
-        { "name": "polling_at", "type": "datetime" },
-        { "name": "accepted_at", "type": "datetime" },
-        { "name": "rejected_at", "type": "datetime" },
-        { "name": "retry_at", "type": "datetime" },
-        { "name": "attempt_count", "type": "string" },
-        { "name": "signed_off", "type": "boolean" },
+        {
+          "name": "submission_id",
+          "type": "string"
+        },
+        {
+          "name": "submitted_at",
+          "type": "datetime"
+        },
+        {
+          "name": "staged_at",
+          "type": "datetime"
+        },
+        {
+          "name": "polling_at",
+          "type": "datetime"
+        },
+        {
+          "name": "accepted_at",
+          "type": "datetime"
+        },
+        {
+          "name": "rejected_at",
+          "type": "datetime"
+        },
+        {
+          "name": "retry_at",
+          "type": "datetime"
+        },
+        {
+          "name": "attempt_count",
+          "type": "string"
+        },
+        {
+          "name": "signed_off",
+          "type": "boolean"
+        },
         {
           "name": "last_error",
           "type": "composite",
           "fields": [
-            { "name": "type", "type": "string" },
-            { "name": "message", "type": "text" },
-            { "name": "details", "type": "text" },
-            { "name": "http_status", "type": "string" }
+            {
+              "name": "type",
+              "type": "string"
+            },
+            {
+              "name": "message",
+              "type": "text"
+            },
+            {
+              "name": "details",
+              "type": "text"
+            },
+            {
+              "name": "http_status",
+              "type": "string"
+            }
           ]
         }
       ]
     },
-    { "name": "bp_last_exported_at", "title": "Last ONIX export at", "type": "datetime" }
+    {
+      "name": "bp_last_exported_at",
+      "title": "Last ONIX export at",
+      "type": "datetime"
+    }
   ],
   "validations": []
 }
