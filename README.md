@@ -392,6 +392,12 @@ Or with a custom token:
 BARKPARK_API_URL=http://YOUR_VPS_IP:4000 BARKPARK_API_TOKEN=your-token go run .
 ```
 
+## OnixEdit Reference Plugin
+
+End-to-end reference plugin: book editor → ONIX 3.0 export → Bokbasen publish + ack-loop with sign-off gate. Demonstrates the full Barkpark plugin contract — Schema Definition v2 (composite / arrayOf / codelist / localizedText), Studio LiveView surfaces, encrypted credentials, Oban-backed background workers, and structured ack-loop state.
+
+See [`docs/spec/onixedit-masterplan-summary.md`](docs/spec/onixedit-masterplan-summary.md) for the full masterplan close-out (phases, decisions, deferred items).
+
 ## ONIX 3.0 Export Proof
 
 `proof/onix-sample.xml` is the validated ONIX 3.0 reference output produced by
