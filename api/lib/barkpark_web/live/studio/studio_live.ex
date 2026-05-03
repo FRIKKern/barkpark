@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias Barkpark.{Content, Media, Structure}
   alias BarkparkWeb.Presence
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
+  import BarkparkWeb.Components.FieldInputs
 
   @presence_topic "studio:presence"
 
@@ -1159,7 +1160,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     required={rules["required"] == true}
                     errors={Map.get(@validation_errors, field_name, [])}
                   >
-                    <%= if PluginAdapter.v2?(field), do: PluginAdapter.render(assigns, field), else: render_input(assigns, field) %>
+                    <%= if PluginAdapter.v2?(field) do %>
+                      <%= PluginAdapter.render(assigns, field) %>
+                    <% else %>
+                      <.input field={field} editor_form={@editor_form} />
+                    <% end %>
                   </.editor_field>
                 <% end %>
               <% end %>
@@ -1482,131 +1487,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
       .field-errors { font-size: 12px; color: var(--destructive); margin-top: 4px; }
       /* .editor-field.has-error .form-input{...} hoisted to root.html.heex */
     </style>
-    """
-  end
-
-  defp render_input(assigns, %{"type" => "select", "name" => name, "options" => opts})
-       when is_list(opts) do
-    val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, opts: opts, v: val)
-
-    ~H"""
-    <select name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
-      <%= for o <- @opts do %><option value={o} selected={o == @v}><%= o %></option><% end %>
-    </select>
-    """
-  end
-
-  defp render_input(assigns, %{"type" => t, "name" => name} = f) when t in ["text", "richText"] do
-    val = Map.get(assigns.editor_form, name, "")
-    rows = Map.get(f, "rows") || if(t == "richText", do: 6, else: 3)
-    assigns = assign(assigns, n: name, v: val, rows: rows)
-
-    ~H"""
-    <textarea name={"doc[#{@n}]"} class="form-input" rows={@rows} phx-debounce="500"><%= @v %></textarea>
-    """
-  end
-
-  defp render_input(assigns, %{"type" => "boolean", "name" => name}) do
-    checked = Map.get(assigns.editor_form, name, "") == "true"
-    assigns = assign(assigns, n: name, c: checked)
-
-    ~H"""
-    <div class="form-checkbox">
-      <input type="hidden" name={"doc[#{@n}]"} value="false" />
-      <input type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
-    </div>
-    """
-  end
-
-  defp render_input(assigns, %{"type" => "color", "name" => name}) do
-    val = Map.get(assigns.editor_form, name, "#3b82f6")
-    assigns = assign(assigns, n: name, v: val)
-
-    ~H"""
-    <div style="display:flex;align-items:center;gap:10px;">
-      <input type="color" name={"doc[#{@n}]"} value={@v} phx-debounce="300" style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
-      <span style="font-family:var(--font-mono);font-size:13px;"><%= @v %></span>
-    </div>
-    """
-  end
-
-  defp render_input(assigns, %{"type" => "reference", "name" => name, "refType" => ref_type}) do
-    val = Map.get(assigns.editor_form, name, "")
-    has_ref = val != "" and val != nil
-    # Resolve the referenced doc title for display
-    ref_title =
-      if has_ref do
-        case Content.get_document(val, ref_type, "production") do
-          {:ok, doc} ->
-            doc.title || val
-
-          _ ->
-            case Content.get_document("drafts.#{val}", ref_type, "production") do
-              {:ok, doc} -> doc.title || val
-              _ -> val
-            end
-        end
-      end
-
-    assigns =
-      assign(assigns, n: name, v: val, has_ref: has_ref, ref_title: ref_title, ref_type: ref_type)
-
-    ~H"""
-    <input type="hidden" name={"doc[#{@n}]"} value={@v} />
-    <div class="ref-field">
-      <%= if @has_ref do %>
-        <div class="ref-selected">
-          <div class="ref-selected-info">
-            <span class="ref-selected-title"><%= @ref_title %></span>
-            <span class="ref-selected-type"><%= @ref_type %></span>
-          </div>
-          <div style="display: flex; gap: 6px;">
-            <button type="button" class="btn btn-sm" phx-click="open-ref-picker" phx-value-field={@n} phx-value-ref-type={@ref_type}>Change</button>
-            <button type="button" class="btn btn-destructive btn-sm" phx-click="clear-ref" phx-value-field={@n}>Remove</button>
-          </div>
-        </div>
-      <% else %>
-        <button type="button" class="btn btn-sm" phx-click="open-ref-picker" phx-value-field={@n} phx-value-ref-type={@ref_type} style="width: 100%; justify-content: flex-start; color: var(--fg-muted);">
-          Select <%= @ref_type %>...
-        </button>
-      <% end %>
-    </div>
-    """
-  end
-
-  defp render_input(assigns, %{"type" => "image", "name" => name}) do
-    val = Map.get(assigns.editor_form, name, "")
-    has_image = val != "" and val != nil
-    assigns = assign(assigns, n: name, v: val, has_image: has_image)
-
-    ~H"""
-    <input type="hidden" name={"doc[#{@n}]"} value={@v} />
-    <div class="image-field">
-      <%= if @has_image do %>
-        <div class="image-preview">
-          <img src={@v} alt="" />
-          <div class="image-preview-actions">
-            <button type="button" class="btn btn-sm" phx-click="open-image-picker" phx-value-field={@n}>Change</button>
-            <button type="button" class="btn btn-destructive btn-sm" phx-click="clear-image" phx-value-field={@n}>Remove</button>
-          </div>
-        </div>
-      <% else %>
-        <div class="image-upload-zone" phx-click="open-image-picker" phx-value-field={@n}>
-          <div class="image-upload-icon">+</div>
-          <div class="image-upload-text">Select or upload image</div>
-        </div>
-      <% end %>
-    </div>
-    """
-  end
-
-  defp render_input(assigns, %{"name" => name}) do
-    val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
-
-    ~H"""
-    <input type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
     """
   end
 
