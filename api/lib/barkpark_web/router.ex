@@ -68,6 +68,7 @@ defmodule BarkparkWeb.Router do
 
     live_session :admin_ops, on_mount: [{BarkparkWeb.LiveAuth, :ops}] do
       live "/bokbasen", BokbasenLive
+      live "/onixedit/staleness", OnixeditStalenessLive, :index
     end
   end
 
