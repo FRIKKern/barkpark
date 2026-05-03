@@ -64,7 +64,9 @@ defmodule BarkparkWeb.Router do
   scope "/studio", BarkparkWeb.Studio do
     pipe_through :browser
 
-    live_session :admin_studio, on_mount: [{BarkparkWeb.LiveAuth, :admin}] do
+    live_session :admin_studio,
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      layout: {BarkparkWeb.Layouts, :studio} do
       live "/settings", SettingsLive
     end
   end
@@ -76,7 +78,9 @@ defmodule BarkparkWeb.Router do
   scope "/admin", BarkparkWeb.Admin do
     pipe_through :browser
 
-    live_session :admin_ops, on_mount: [{BarkparkWeb.LiveAuth, :ops}] do
+    live_session :admin_ops,
+      on_mount: [{BarkparkWeb.LiveAuth, :ops}],
+      layout: {BarkparkWeb.Layouts, :studio} do
       live "/bokbasen", BokbasenLive
       live "/onixedit/staleness", OnixeditStalenessLive, :index
     end
@@ -86,7 +90,9 @@ defmodule BarkparkWeb.Router do
   scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser
 
-    live_session :studio_public, on_mount: [{BarkparkWeb.LiveAuth, :fetch_api_token}] do
+    live_session :studio_public,
+      on_mount: [{BarkparkWeb.LiveAuth, :fetch_api_token}],
+      layout: {BarkparkWeb.Layouts, :studio} do
       live "/", StudioLive
       live "/media", MediaLive
       live "/api-tester", ApiTesterLive
