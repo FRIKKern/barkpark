@@ -623,6 +623,9 @@
        visible footprint before customElements.define upgrades the tag
        (Task #11 WI4). Inner contenteditable is styled by the WC. */
     bp-rich-text-editor { display: block; min-height: 80px; padding: 8px; border: 1px solid var(--input); border-radius: var(--radius-sm); font-family: inherit; }
+    bp-reference-picker { display: block; }
+    bp-reference-picker .bp-ref-search-input { width: 100%; }
+    bp-reference-picker .bp-ref-dropdown-item:hover { background: var(--bg-accent); }
 
     /* ── Scrollbar ─────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
@@ -647,6 +650,7 @@
   {@inner_content}
   <script src="/assets/bp-rich-text-editor.js" defer></script>
   <script src="/assets/bp-media-picker.js" defer></script>
+  <script src="/assets/bp-reference-picker.js" defer></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <script>

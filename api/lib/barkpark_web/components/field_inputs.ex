@@ -12,31 +12,21 @@ defmodule BarkparkWeb.Components.FieldInputs do
     * `id_prefix` (default `""`): when non-empty, emits `id="<prefix><name>"`
       on the leaf control; when empty, the `id` attribute is omitted entirely
       (Phoenix drops `id={nil}`), matching the legacy DOM exactly.
-    * `dataset` (default `"production"`): plumbed through to
-      `Barkpark.Content.get_document/3` calls in the reference clause. Legacy
-      hard-coded `"production"`; default keeps byte-identity.
+    * `dataset` (default `"production"`): plumbed through to the
+      `bp-reference-picker` Web Component as a `dataset` attribute so the
+      WC's typeahead query hits the right dataset. Legacy hard-coded
+      `"production"`; default keeps byte-identity.
 
   ## Caller contract — `phx-click` events
 
-  The `reference` clause emits `phx-click` events that the parent LiveView
-  must handle in its `handle_event/3`. StudioLive implements them at these
-  origin/main locations:
-
-    * `"open-ref-picker"` — studio_live.ex:417 — loads ref candidates and opens
-      ref picker modal. Payload: `%{"field" => name, "ref-type" => ref_type}`.
-    * `"clear-ref"` — studio_live.ex:569 — sets the field to `""` in
-      `editor_form`. Payload: `%{"field" => name}`.
-
-  A LiveView that hosts this component for `reference` fields must
-  implement those two events and the corresponding picker-modal markup.
-
-  Image fields (Task #12 WI1) are rendered by the `<bp-media-picker>` Web
-  Component which owns the entire UX (browse / upload / select / clear).
-  The WC bridges its value through `BarkparkFieldBridge`; no per-LV
-  events are required. The legacy `open-image-picker` / `clear-image`
-  / `select-media` / `upload-image` handlers and the
-  `image_picker_modal` remain in StudioLive for the legacy modal flow
-  but are no longer invoked from this component.
+  Both `image` (Task #12 WI1) and `reference` (Task #12 WI2) fields are
+  rendered by Web Components — `<bp-media-picker>` and `<bp-reference-picker>`
+  respectively — which own the entire UX (browse / upload / select / search /
+  clear). They bridge their value through `BarkparkFieldBridge`; no per-LV
+  events are required. The legacy `"open-image-picker"` / `"clear-image"` /
+  `"select-media"` / `"upload-image"` / `"open-ref-picker"` / `"clear-ref"`
+  handlers and the legacy picker-modal markup remain in StudioLive but are no
+  longer invoked from this component (orphaned-but-harmless until v2 cleanup).
 
   ## Field types
 
@@ -52,8 +42,6 @@ defmodule BarkparkWeb.Components.FieldInputs do
   """
 
   use Phoenix.Component
-
-  alias Barkpark.Content
 
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
@@ -124,46 +112,21 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # reference: bp-reference-picker Web Component (Task #12 WI2) bridged
+  # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
+  # phx-update="ignore" gives the WC sole ownership of its inner DOM.
+  # The WC owns search + select + clear; the legacy phx-click=
+  # "open-ref-picker"/"clear-ref" modal flow is bypassed. The hidden
+  # input persists the ref doc id as a string, matching the v1
+  # reference-field persistence model exactly.
   def input(%{field: %{"type" => "reference", "name" => name, "refType" => ref_type}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    has_ref = val != "" and val != nil
-    # Resolve the referenced doc title for display
-    ref_title =
-      if has_ref do
-        case Content.get_document(val, ref_type, assigns.dataset) do
-          {:ok, doc} ->
-            doc.title || val
-
-          _ ->
-            case Content.get_document("drafts.#{val}", ref_type, assigns.dataset) do
-              {:ok, doc} -> doc.title || val
-              _ -> val
-            end
-        end
-      end
-
-    assigns =
-      assign(assigns, n: name, v: val, has_ref: has_ref, ref_title: ref_title, ref_type: ref_type)
+    assigns = assign(assigns, n: name, v: val, ref_type: ref_type)
 
     ~H"""
-    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="hidden" name={"doc[#{@n}]"} value={@v} />
-    <div class="ref-field">
-      <%= if @has_ref do %>
-        <div class="ref-selected">
-          <div class="ref-selected-info">
-            <span class="ref-selected-title"><%= @ref_title %></span>
-            <span class="ref-selected-type"><%= @ref_type %></span>
-          </div>
-          <div style="display: flex; gap: 6px;">
-            <button type="button" class="btn btn-sm" phx-click="open-ref-picker" phx-value-field={@n} phx-value-ref-type={@ref_type}>Change</button>
-            <button type="button" class="btn btn-destructive btn-sm" phx-click="clear-ref" phx-value-field={@n}>Remove</button>
-          </div>
-        </div>
-      <% else %>
-        <button type="button" class="btn btn-sm" phx-click="open-ref-picker" phx-value-field={@n} phx-value-ref-type={@ref_type} style="width: 100%; justify-content: flex-start; color: var(--fg-muted);">
-          Select <%= @ref_type %>...
-        </button>
-      <% end %>
+    <div id={"bp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <bp-reference-picker value={@v} ref-type={@ref_type} dataset={@dataset} data-bridge-target={"bp-ref-hidden-#{@n}"}></bp-reference-picker>
     </div>
     """
   end
