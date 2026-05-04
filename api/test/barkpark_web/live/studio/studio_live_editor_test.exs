@@ -14,8 +14,8 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
     * boolean: hidden(value="false") FIRST, checkbox(value="true") SECOND,
                phx-debounce="100"
     * color:  default `#3b82f6`, phx-debounce="300", mono hex span
-    * reference (empty): `class="ref-field"`, `phx-click="open-ref-picker"`,
-               `phx-value-ref-type` matches schema
+    * reference (empty): `<bp-reference-picker>` WC bridged via
+               `BarkparkFieldBridge` (Task #12 WI2 replaced server modal flow)
     * image (empty): `class="image-field"` + `class="image-upload-zone"
                      phx-click="open-image-picker"` (whole-div click target)
     * default fallback: `<input type="text" class="form-input"
@@ -208,12 +208,16 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       assert html =~ ~s(<option value="draft">draft</option>)
       assert html =~ ~r{<option value="published"[^>]*selected[^>]*>published</option>}
 
-      # ── reference clause (empty value): trigger button + ref-type ──────────
-      assert html =~ ~s(class="ref-field")
-      assert html =~ ~s(phx-click="open-ref-picker")
-      assert html =~ ~s(phx-value-field="author")
-      assert html =~ ~s(phx-value-ref-type="author")
-      assert html =~ "Select author..."
+      # ── reference clause (empty value): bp-reference-picker WC + bridge ────
+      # Task #12 WI2 replaced the server modal flow with a client-owned WC.
+      assert html =~
+               ~r{<div[^>]*id="bp-ref-wrap-author"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+
+      assert html =~
+               ~r{<input type="hidden"[^>]*id="bp-ref-hidden-author"[^>]*name="doc\[author\]"[^>]*phx-debounce="500"}
+
+      assert html =~
+               ~r{<bp-reference-picker[^>]*ref-type="author"[^>]*dataset="production"[^>]*data-bridge-target="bp-ref-hidden-author"}
 
       # ── image clause (empty value): whole-div click target ─────────────────
       assert html =~ ~s(class="image-field")
