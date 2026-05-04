@@ -619,6 +619,11 @@
     .dataset-switcher-select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; cursor: pointer; }
     .dataset-switcher-select:hover { border-color: var(--fg-muted); }
 
+    /* Web Components — host element placeholder so the area has a
+       visible footprint before customElements.define upgrades the tag
+       (Task #11 WI4). Inner contenteditable is styled by the WC. */
+    bp-rich-text-editor { display: block; min-height: 80px; padding: 8px; border: 1px solid var(--input); border-radius: var(--radius-sm); font-family: inherit; }
+
     /* ── Scrollbar ─────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -640,6 +645,7 @@
 </head>
 <body>
   {@inner_content}
+  <script src="/assets/bp-rich-text-editor.js" defer></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <script>
@@ -679,6 +685,32 @@
           a.click();
           document.body.removeChild(a);
         });
+      }
+    };
+
+    // BarkparkFieldBridge — generic LV↔WC bridge (Task #11 WI4).
+    // Mounted on a wrapper div containing a hidden <input> + a bp-*
+    // custom element. Listens for bubbled `bp-change` events, mirrors
+    // detail.value into the hidden input identified by the WC's
+    // data-bridge-target, and dispatches a synthetic `input` event so
+    // Phoenix's existing phx-change="autosave" debounce + form
+    // serialise + push round-trip fires exactly as for native inputs.
+    // Reusable for future bp-media-picker / bp-reference-picker /
+    // bp-document-preview / bp-json-inspector — no per-widget hook.
+    Hooks.BarkparkFieldBridge = {
+      mounted() {
+        this._on = (e) => {
+          const targetId = e.target.dataset.bridgeTarget;
+          if (!targetId) return;
+          const input = document.getElementById(targetId);
+          if (!input) return;
+          input.value = e.detail.value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        this.el.addEventListener("bp-change", this._on);
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-change", this._on);
       }
     };
 
