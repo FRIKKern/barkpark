@@ -177,21 +177,51 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
     end
   end
 
-  describe "reference clause (empty value)" do
-    test "renders Select trigger button with phx-click + ref-type" do
+  describe "reference clause (Task #12 WI2 — bp-reference-picker)" do
+    test "empty value: wrapper + hidden input + bp-reference-picker bridged via BarkparkFieldBridge" do
       html =
         render_input(%{
           field: %{"type" => "reference", "name" => "author", "refType" => "author"},
           editor_form: %{}
         })
 
-      assert html =~ ~s(type="hidden")
-      assert html =~ ~s(name="doc[author]")
-      assert html =~ ~s(class="ref-field")
-      assert html =~ ~s(phx-click="open-ref-picker")
-      assert html =~ ~s(phx-value-field="author")
-      assert html =~ ~s(phx-value-ref-type="author")
-      assert html =~ "Select author..."
+      # Wrapper carries the hook + phx-update=ignore + stable id
+      assert html =~
+               ~r{<div[^>]*id="bp-ref-wrap-author"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+
+      # Hidden input holds the form payload value + debounce
+      assert html =~
+               ~r{<input type="hidden"[^>]*id="bp-ref-hidden-author"[^>]*name="doc\[author\]"[^>]*phx-debounce="500"}
+
+      # Custom element receives ref-type + dataset and points at the hidden input
+      assert html =~
+               ~r{<bp-reference-picker[^>]*ref-type="author"[^>]*dataset="production"[^>]*data-bridge-target="bp-ref-hidden-author"}
+
+      # Legacy modal-trigger phx-click events are gone — the WC owns search/select/clear
+      refute html =~ ~s(phx-click="open-ref-picker")
+      refute html =~ ~s(phx-click="clear-ref")
+    end
+
+    test "populated value: hidden input carries the doc id, WC mirrors it via value attribute" do
+      html =
+        render_input(%{
+          field: %{"type" => "reference", "name" => "author", "refType" => "author"},
+          editor_form: %{"author" => "a1"}
+        })
+
+      assert html =~ ~r{<input type="hidden"[^>]*id="bp-ref-hidden-author"[^>]*value="a1"}
+      assert html =~ ~r{<bp-reference-picker[^>]*value="a1"[^>]*ref-type="author"}
+    end
+
+    test "non-default dataset propagates to the WC attribute" do
+      html =
+        render_input(%{
+          field: %{"type" => "reference", "name" => "author", "refType" => "author"},
+          editor_form: %{},
+          dataset: "staging"
+        })
+
+      assert html =~ ~r{<bp-reference-picker[^>]*dataset="staging"}
     end
   end
 
