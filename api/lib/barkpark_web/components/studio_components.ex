@@ -313,6 +313,50 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
+  Read-only document preview pane (Task #12 WI3). Wraps the
+  `<bp-document-preview>` Web Component with `phx-update="ignore"` so
+  LiveView leaves the rendered child DOM alone. The WC owns its own
+  rendering — it observes `document-json` + `schema-name` attribute
+  changes and re-renders client-side.
+
+  Unlike the other three Studio Web Components (`bp-rich-text-editor`,
+  `bp-media-picker`, `bp-reference-picker`), this one is read-only.
+  It does NOT emit `bp-change` and does NOT participate in the
+  `BarkparkFieldBridge` form-mirror pipeline; there is no hidden input.
+
+  Attrs:
+    * `:document` — (required) the document map (will be JSON-encoded).
+    * `:schema_name` — (default `""`) schema name used to pick a
+      curated renderer in the WC. Anything the WC does not recognise
+      falls back to a pretty-printed JSON dump.
+    * `:id` — (default `"bp-dp-default"`) DOM id for the wrapper. Must
+      be unique per page; phx-hook lifecycle and phx-update="ignore"
+      both rely on a stable id.
+  """
+  attr :document, :any, required: true
+  attr :schema_name, :string, default: ""
+  attr :id, :string, default: "bp-dp-default"
+
+  def document_preview(assigns) do
+    json =
+      case assigns.document do
+        nil -> ""
+        v -> Jason.encode!(v)
+      end
+
+    assigns = Phoenix.Component.assign(assigns, :json, json)
+
+    ~H"""
+    <div id={@id} phx-update="ignore" class="bp-dp-wrap">
+      <bp-document-preview
+        document-json={@json}
+        schema-name={@schema_name}
+      ></bp-document-preview>
+    </div>
+    """
+  end
+
+  @doc """
   Placeholder rendered when there's nothing to show in a pane column.
   """
   attr :message, :string, required: true
