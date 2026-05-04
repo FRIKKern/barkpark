@@ -162,8 +162,16 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
 
       assert html =~ ">the quick brown fox</textarea>"
 
-      # ── richText clause (rows=6 default) ───────────────────────────────────
-      assert html =~ ~r{<textarea[^>]*name="doc\[summary\]"[^>]*rows="6"}
+      # ── richText clause: bp-rich-text-editor Web Component bridged via
+      # hidden input + BarkparkFieldBridge hook (Task #11 WI4) ───────────────
+      assert html =~
+               ~r{<div[^>]*id="bp-rt-wrap-summary"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+
+      assert html =~
+               ~r{<input type="hidden"[^>]*id="bp-rt-hidden-summary"[^>]*name="doc\[summary\]"[^>]*phx-debounce="500"}
+
+      assert html =~
+               ~r{<bp-rich-text-editor[^>]*value="[^"]*"[^>]*data-bridge-target="bp-rt-hidden-summary"}
 
       # ── boolean clause: hidden FIRST, checkbox SECOND, phx-debounce="100" ─
       hidden_idx =

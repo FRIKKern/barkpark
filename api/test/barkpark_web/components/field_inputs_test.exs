@@ -60,14 +60,24 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       assert html =~ ">hello</textarea>"
     end
 
-    test "richText defaults to rows=6" do
+    test "richText renders bp-rich-text-editor Web Component bridged via hidden input (Task #11 WI4)" do
       html =
         render_input(%{
           field: %{"type" => "richText", "name" => "body"},
-          editor_form: %{}
+          editor_form: %{"body" => "hello"}
         })
 
-      assert html =~ ~s(rows="6")
+      # Wrapper carries the hook + phx-update=ignore + stable id
+      assert html =~
+               ~r{<div[^>]*id="bp-rt-wrap-body"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+
+      # Hidden input holds the form payload value + debounce
+      assert html =~
+               ~r{<input type="hidden"[^>]*id="bp-rt-hidden-body"[^>]*name="doc\[body\]"[^>]*phx-debounce="500"}
+
+      # Custom element points at the hidden input via data-bridge-target
+      assert html =~
+               ~r{<bp-rich-text-editor[^>]*value="[^"]*"[^>]*data-bridge-target="bp-rt-hidden-body"}
     end
 
     test "explicit rows override wins" do
