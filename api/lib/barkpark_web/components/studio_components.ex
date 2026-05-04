@@ -1104,7 +1104,10 @@ defmodule BarkparkWeb.StudioComponents do
 
   Events bubble to StudioLive: save, autosave, show-history, delete-doc,
   publish, unpublish, plus the studio_field_renderer phx-click events
-  (open-image-picker, clear-image, open-ref-picker, clear-ref).
+  (open-image-picker, clear-image). The reference field is now owned
+  client-side by `<bp-reference-picker>` (Task #12 WI2) and bridges
+  through autosave; open-ref-picker / clear-ref handlers in StudioLive
+  are orphaned-but-harmless until v2 cleanup.
 
   Slots:
     * `:extra_actions` — (optional) appended after Publish/Unpublish.
