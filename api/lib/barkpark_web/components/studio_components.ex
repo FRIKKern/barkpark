@@ -667,7 +667,12 @@ defmodule BarkparkWeb.StudioComponents do
       <%= if PluginAdapter.v2?(@field) do %>
         <%= PluginAdapter.render(@parent_assigns, @field) %>
       <% else %>
-        <FieldInputs.input field={@field} editor_form={@editor_form} dataset={@dataset} />
+        <FieldInputs.input
+          field={@field}
+          editor_form={@editor_form}
+          dataset={@dataset}
+          api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+        />
       <% end %>
     </.editor_field>
     """
