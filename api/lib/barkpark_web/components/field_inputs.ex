@@ -18,21 +18,25 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   ## Caller contract — `phx-click` events
 
-  The `reference` and `image` clauses emit `phx-click` events that the parent
-  LiveView must handle in its `handle_event/3`. StudioLive implements them at
-  these origin/main locations:
+  The `reference` clause emits `phx-click` events that the parent LiveView
+  must handle in its `handle_event/3`. StudioLive implements them at these
+  origin/main locations:
 
-    * `"open-image-picker"` — studio_live.ex:360 — opens media picker modal.
-      Payload: `%{"field" => name}`.
-    * `"clear-image"` — studio_live.ex:377 — sets the field to `""` in
-      `editor_form`. Payload: `%{"field" => name}`.
     * `"open-ref-picker"` — studio_live.ex:417 — loads ref candidates and opens
       ref picker modal. Payload: `%{"field" => name, "ref-type" => ref_type}`.
     * `"clear-ref"` — studio_live.ex:569 — sets the field to `""` in
       `editor_form`. Payload: `%{"field" => name}`.
 
-  A LiveView that hosts this component for `reference` or `image` fields must
-  implement those four events and the corresponding picker-modal markup.
+  A LiveView that hosts this component for `reference` fields must
+  implement those two events and the corresponding picker-modal markup.
+
+  Image fields (Task #12 WI1) are rendered by the `<bp-media-picker>` Web
+  Component which owns the entire UX (browse / upload / select / clear).
+  The WC bridges its value through `BarkparkFieldBridge`; no per-LV
+  events are required. The legacy `open-image-picker` / `clear-image`
+  / `select-media` / `upload-image` handlers and the
+  `image_picker_modal` remain in StudioLive for the legacy modal flow
+  but are no longer invoked from this component.
 
   ## Field types
 
@@ -55,6 +59,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
   attr :id_prefix, :string, default: ""
+  attr :api_token_raw, :string, default: ""
 
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts}} = assigns)
       when is_list(opts) do
@@ -163,28 +168,21 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # image: bp-media-picker Web Component (Task #12 WI1) bridged via the
+  # hidden input + BarkparkFieldBridge hook (root.html.heex). The WC owns
+  # browse / upload / select / clear; no parent phx-click events are
+  # required. `data-token` carries the raw bearer token plumbed from
+  # session via LiveAuth.:fetch_api_token (empty string disables uploads).
+  # phx-update="ignore" gives the WC sole ownership of its inner DOM.
+  # See docs/studio/web-components.md for the full contract.
   def input(%{field: %{"type" => "image", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    has_image = val != "" and val != nil
-    assigns = assign(assigns, n: name, v: val, has_image: has_image)
+    assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="hidden" name={"doc[#{@n}]"} value={@v} />
-    <div class="image-field">
-      <%= if @has_image do %>
-        <div class="image-preview">
-          <img src={@v} alt="" />
-          <div class="image-preview-actions">
-            <button type="button" class="btn btn-sm" phx-click="open-image-picker" phx-value-field={@n}>Change</button>
-            <button type="button" class="btn btn-destructive btn-sm" phx-click="clear-image" phx-value-field={@n}>Remove</button>
-          </div>
-        </div>
-      <% else %>
-        <div class="image-upload-zone" phx-click="open-image-picker" phx-value-field={@n}>
-          <div class="image-upload-icon">+</div>
-          <div class="image-upload-text">Select or upload image</div>
-        </div>
-      <% end %>
+    <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <bp-media-picker value={@v} data-bridge-target={"bp-mp-hidden-#{@n}"} data-token={@api_token_raw}></bp-media-picker>
     </div>
     """
   end
