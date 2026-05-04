@@ -215,13 +215,20 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       assert html =~ ~s(phx-value-ref-type="author")
       assert html =~ "Select author..."
 
-      # ── image clause (empty value): whole-div click target ─────────────────
-      assert html =~ ~s(class="image-field")
+      # ── image clause (Task #12 WI1): bp-media-picker Web Component
+      # bridged via hidden input + BarkparkFieldBridge hook ────────────────
+      assert html =~
+               ~r{<div[^>]*id="bp-mp-wrap-cover"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       assert html =~
-               ~s(class="image-upload-zone" phx-click="open-image-picker" phx-value-field="cover")
+               ~r{<input type="hidden"[^>]*id="bp-mp-hidden-cover"[^>]*name="doc\[cover\]"[^>]*phx-debounce="500"}
 
-      assert html =~ "Select or upload image"
+      assert html =~
+               ~r{<bp-media-picker[^>]*data-bridge-target="bp-mp-hidden-cover"}
+
+      # No legacy phx-click events emitted from the image clause
+      refute html =~ ~s(phx-click="open-image-picker")
+      refute html =~ ~s(phx-click="clear-image")
 
       # ── editor chrome preserved (PR-A document_header / editor_field) ──────
       assert html =~ ~s(class="editor-panel")

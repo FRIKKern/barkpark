@@ -200,37 +200,63 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
   # in-render Content.get_document/3 call). The Change/Remove + ref-selected
   # branch is byte-identical to legacy, deferred to integration coverage.
 
-  describe "image clause" do
-    test "empty value renders upload zone with phx-click on outer div" do
+  describe "image clause (Task #12 WI1 — bp-media-picker Web Component)" do
+    test "renders bp-media-picker bridged via hidden input wrapper" do
+      html =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover"},
+          editor_form: %{"cover" => "/media/files/x.jpg"}
+        })
+
+      # Wrapper carries hook + phx-update=ignore + stable id
+      assert html =~
+               ~r{<div[^>]*id="bp-mp-wrap-cover"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+
+      # Hidden input holds the form payload (URL string) + debounce
+      assert html =~
+               ~r{<input type="hidden"[^>]*id="bp-mp-hidden-cover"[^>]*name="doc\[cover\]"[^>]*value="/media/files/x.jpg"[^>]*phx-debounce="500"}
+
+      # Custom element points at the hidden input via data-bridge-target
+      assert html =~
+               ~r{<bp-media-picker[^>]*value="/media/files/x.jpg"[^>]*data-bridge-target="bp-mp-hidden-cover"}
+
+      # No legacy phx-click events emitted from the image clause
+      refute html =~ ~s(phx-click="open-image-picker")
+      refute html =~ ~s(phx-click="clear-image")
+      refute html =~ ~s(class="image-field")
+    end
+
+    test "empty value still renders the WC wrapper (WC owns empty UX)" do
       html =
         render_input(%{
           field: %{"type" => "image", "name" => "cover"},
           editor_form: %{}
         })
 
-      assert html =~ ~s(class="image-field")
-
-      assert html =~
-               ~s(class="image-upload-zone" phx-click="open-image-picker" phx-value-field="cover")
-
-      assert html =~ ">+</div>"
-      assert html =~ "Select or upload image"
+      assert html =~ ~r{<bp-media-picker[^>]*value=""}
+      assert html =~ ~r{<input type="hidden"[^>]*name="doc\[cover\]"[^>]*value=""}
+      refute html =~ "image-upload-zone"
     end
 
-    test "populated value renders preview img with empty alt + Change/Remove" do
+    test "api_token_raw is passed to the WC as data-token" do
       html =
         render_input(%{
           field: %{"type" => "image", "name" => "cover"},
-          editor_form: %{"cover" => "/uploads/x.jpg"}
+          editor_form: %{},
+          api_token_raw: "barkpark-dev-token"
         })
 
-      assert html =~ ~s(class="image-preview")
+      assert html =~ ~s(data-token="barkpark-dev-token")
+    end
 
-      assert html =~ ~s(<img src="/uploads/x.jpg" alt="">) or
-               html =~ ~s(<img src="/uploads/x.jpg" alt=""/>)
+    test "missing api_token_raw defaults to empty string (uploads disabled)" do
+      html =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover"},
+          editor_form: %{}
+        })
 
-      assert html =~ ~s(phx-click="open-image-picker" phx-value-field="cover">Change</button>)
-      assert html =~ ~s(phx-click="clear-image" phx-value-field="cover">Remove</button>)
+      assert html =~ ~s(data-token="")
     end
   end
 
