@@ -68,10 +68,26 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
-  def input(%{field: %{"type" => t, "name" => name} = f} = assigns)
-      when t in ["text", "richText"] do
+  # richText: bp-rich-text-editor Web Component (Task #11 WI4) bridged
+  # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
+  # phx-update="ignore" gives the WC sole ownership of its inner DOM.
+  # See docs/studio/web-components.md for the full contract.
+  def input(%{field: %{"type" => "richText", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    rows = Map.get(f, "rows") || if(t == "richText", do: 6, else: 3)
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <div id={"bp-rt-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
+    </div>
+    """
+  end
+
+  def input(%{field: %{"type" => t, "name" => name} = f} = assigns)
+      when t == "text" do
+    val = Map.get(assigns.editor_form, name, "")
+    rows = Map.get(f, "rows") || 3
     assigns = assign(assigns, n: name, v: val, rows: rows)
 
     ~H"""
