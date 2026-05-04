@@ -46,12 +46,24 @@ defmodule BarkparkWeb.LiveAuth do
     case session["api_token"] do
       raw when is_binary(raw) ->
         case Auth.verify_token(raw) do
-          {:ok, api_token} -> {:cont, assign(socket, :api_token, api_token)}
-          _ -> {:cont, assign(socket, :api_token, nil)}
+          {:ok, api_token} ->
+            {:cont,
+             socket
+             |> assign(:api_token, api_token)
+             |> assign(:api_token_raw, raw)}
+
+          _ ->
+            {:cont,
+             socket
+             |> assign(:api_token, nil)
+             |> assign(:api_token_raw, "")}
         end
 
       _ ->
-        {:cont, assign(socket, :api_token, nil)}
+        {:cont,
+         socket
+         |> assign(:api_token, nil)
+         |> assign(:api_token_raw, "")}
     end
   end
 
