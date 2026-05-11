@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
     * `:errors` — `%{language => [error_message, ...]}` (defaults to `%{}`)
     * `:on_change` — `phx-change` event name
     * `:path` — input name path (optional)
+    * `:readonly` — disable each language's `<textarea>` (defaults to `false`).
   """
 
   use Phoenix.Component
@@ -37,6 +38,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   attr :errors, :map, default: %{}
   attr :on_change, :string, default: nil
   attr :path, :string, default: ""
+  attr :readonly, :boolean, default: false
 
   def localized_text_field(assigns) do
     assigns =
@@ -45,6 +47,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
       |> Map.put_new(:errors, %{})
       |> Map.put_new(:on_change, nil)
       |> Map.put_new(:path, "")
+      |> Map.put_new(:readonly, false)
 
     field = assigns.field
     value_map = assigns.value || %{}
@@ -94,6 +97,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
             id={"#{@base_id}-#{lang}"}
             name={input_name(@base_path, lang)}
             phx-change={@on_change}
+            disabled={@readonly}
             data-lang={lang}
           ><%= Map.get(@value_map, lang, "") %></textarea>
           <%= for err <- lang_errors(@errors, lang) do %>

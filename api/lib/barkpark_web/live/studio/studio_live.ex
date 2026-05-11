@@ -6,6 +6,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.{Content, Media, Structure}
+  alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Presence
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
 
@@ -51,7 +52,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
        user_color: user_color,
        presences: [],
        show_profile: false,
-       validation_errors: %{}
+       validation_errors: %{},
+       confirm_modal: nil
      )
      |> allow_upload(:image,
        accept: ~w(.jpg .jpeg .png .gif .webp .svg),
@@ -80,32 +82,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> subscribe_to_doc()
       |> track_presence()
 
-    case specialized_editor_redirect(socket) do
-      nil -> {:noreply, socket}
-      to -> {:noreply, push_navigate(socket, to: to)}
-    end
-  end
-
-  # ── Plugin-owned dedicated editors (Phase 5 dispatch) ─────────────────────
-  #
-  # When the resolved editor's type matches a plugin-owned dedicated editor,
-  # navigate the user there instead of rendering inline. v1 schemas (post,
-  # page, …) and v2 schemas without a dedicated editor are unaffected.
-  defp specialized_editor_redirect(socket) do
-    case socket.assigns[:editor_type] do
-      "book" ->
-        case socket.assigns[:editor_doc] do
-          %{doc_id: doc_id} ->
-            pub_id = Content.published_id(doc_id)
-            "/studio/#{socket.assigns.dataset}/onixedit/book/#{pub_id}/view"
-
-          _ ->
-            nil
-        end
-
-      _ ->
-        nil
-    end
+    {:noreply, socket}
   end
 
   # Doc-specific update — just patch the editor form, no rebuild
@@ -258,6 +235,45 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("autosave", _params, socket) do
     {:noreply, socket}
+  end
+
+  # ── ArrayField reorder / add / remove events ───────────────────────────────
+  #
+  # ArrayField buttons (`+ Add`, `▲`, `▼`, `×`) all fire phx-click="array_op"
+  # with phx-value-action ∈ {add_row, remove_row, move_up, move_down},
+  # phx-value-field, and (for non-add ops) phx-value-index. This handler is
+  # the bridge from those clicks into the public list helpers in
+  # `BarkparkWeb.Components.Fields.ArrayField`, then autosaves the document
+  # so the new structure lands in the DB.
+  def handle_event(
+        "array_op",
+        %{"action" => action, "field" => field_name} = params,
+        socket
+      ) do
+    field = find_field(socket, field_name)
+
+    if is_nil(field) do
+      {:noreply, socket}
+    else
+      idx = parse_idx(params["index"])
+      form = socket.assigns[:editor_form] || %{}
+      current = list_value(form, field_name)
+
+      new_list =
+        case action do
+          "add_row" -> ArrayField.add_row(current, empty_for_of(field))
+          "remove_row" -> ArrayField.remove_row(current, idx)
+          "move_up" -> ArrayField.move_up(current, idx)
+          "move_down" -> ArrayField.move_down(current, idx)
+          _ -> current
+        end
+
+      new_form = Map.put(form, field_name, new_list)
+      # Persist via the same path as autosave so panes + DB + validation all
+      # stay in sync. do_autosave/2 assigns editor_form: new_form, so we
+      # don't need a separate assign call.
+      {:noreply, do_autosave(socket, new_form)}
+    end
   end
 
   # ── Image field events ──────────────────────────────────────────────────────
@@ -497,6 +513,89 @@ defmodule BarkparkWeb.Studio.StudioLive do
     )
   end
 
+  # ── Schema-declared document actions (Task #16 — action registry) ──────────
+  #
+  # Schemas advertise document-level actions via the `:actions` array on the
+  # SchemaDefinition row. The editor pane renders a button per action; clicking
+  # a `kind: "modal"` action lands here. The generic ConfirmModal opens with
+  # the action's metadata; dry-run and real confirmations route through
+  # `confirm-modal-dryrun` / `confirm-modal-real` below, each of which
+  # dispatches into the plugin-owned action handler (e.g.
+  # `Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3`). `kind: "link"`
+  # actions never hit this handler — they're rendered as anchor tags
+  # interpolated with `interpolate_action_href/3`, so a click is a plain
+  # HTTP navigation.
+  def handle_event("schema_action", %{"name" => name}, socket) do
+    action = find_schema_action(socket.assigns[:editor_schema], name)
+
+    case action do
+      %{"kind" => "modal"} = a ->
+        {:noreply,
+         assign(socket,
+           confirm_modal: %{
+             action: a,
+             stage: "initial",
+             doc_id: doc_id_for_action(socket),
+             dataset: socket.assigns[:dataset],
+             preview: nil
+           }
+         )}
+
+      _ ->
+        {:noreply, put_flash(socket, :info, "Action #{name} not yet wired")}
+    end
+  end
+
+  def handle_event("close-confirm-modal", _, socket) do
+    {:noreply, assign(socket, confirm_modal: nil)}
+  end
+
+  # Dry-run confirmation — dispatch to the plugin action with `:dryrun`,
+  # surface the preview in the modal without closing it. Errors are
+  # rendered as a preview slice tagged `:error` so the user can fix and
+  # retry without leaving the modal.
+  def handle_event("confirm-modal-dryrun", _, socket) do
+    case socket.assigns[:confirm_modal] do
+      %{action: %{"name" => name}, doc_id: doc_id, dataset: dataset} = modal
+      when is_binary(doc_id) and is_binary(dataset) ->
+        result = dispatch_action(name, doc_id, dataset, :dryrun)
+        preview = preview_from_result(result)
+
+        {:noreply,
+         assign(socket, confirm_modal: Map.merge(modal, %{stage: "dryrun", preview: preview}))}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  # Real confirmation — dispatch with `:real`, close the modal, flash the
+  # outcome. On success we also rebuild panes so any pill / status that
+  # reads from the document picks up the freshly-written `pending` marker.
+  def handle_event("confirm-modal-real", _, socket) do
+    case socket.assigns[:confirm_modal] do
+      %{action: %{"name" => name}, doc_id: doc_id, dataset: dataset}
+      when is_binary(doc_id) and is_binary(dataset) ->
+        case dispatch_action(name, doc_id, dataset, :real) do
+          {:ok, _result} ->
+            {:noreply,
+             socket
+             |> assign(confirm_modal: nil)
+             |> put_flash(:info, "#{name} enqueued")
+             |> rebuild_panes()}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(confirm_modal: nil)
+             |> put_flash(:error, "#{name} failed: #{format_action_error(reason)}")}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   # Single autosave path consumed by handle_event "autosave",
   # handle_event "save", and handle_info :autosave_form. Delegates to
   # Content.upsert_draft/5 (validation + upsert + errors map) and
@@ -553,6 +652,132 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp studio_path(path, dataset), do: studio_path_for(path, dataset)
   defp studio_path_for([], dataset), do: "/studio/#{dataset}"
   defp studio_path_for(segments, dataset), do: "/studio/#{dataset}/" <> Enum.join(segments, "/")
+
+  # ── Schema-action helpers (Task #16 — action registry) ─────────────────────
+
+  defp schema_actions(nil), do: []
+
+  defp schema_actions(schema) do
+    case Map.get(schema, :actions) || Map.get(schema, "actions") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp find_schema_action(schema, name) do
+    schema
+    |> schema_actions()
+    |> Enum.find(fn a -> Map.get(a, "name") == name end)
+  end
+
+  # Dispatch a named schema action to the plugin-owned handler. The
+  # registry only points at modal actions today (publish_to_bokbasen); the
+  # `_` clause is the safety net so an unknown name returns a structured
+  # error instead of a function-clause crash.
+  defp dispatch_action("publish_to_bokbasen", doc_id, dataset, mode) do
+    Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode)
+  end
+
+  defp dispatch_action(name, _doc_id, _dataset, _mode) do
+    {:error, {:unknown_action, name}}
+  end
+
+  # Pull the canonical doc_id for the currently-open editor. Modal actions
+  # always target the editor's open doc — there's no multi-select dispatch.
+  defp doc_id_for_action(socket) do
+    case socket.assigns[:editor_doc] do
+      %{doc_id: doc_id} -> doc_id
+      _ -> nil
+    end
+  end
+
+  defp preview_from_result({:ok, %{kind: :xml} = preview}), do: preview
+
+  defp preview_from_result({:error, reason}),
+    do: %{kind: :error, message: format_action_error(reason)}
+
+  defp preview_from_result(_), do: nil
+
+  defp format_action_error({:xsd_invalid, reasons}) when is_list(reasons) do
+    "ONIX failed XSD validation: " <> Enum.join(Enum.take(reasons, 3), "; ")
+  end
+
+  defp format_action_error(:no_doc), do: "No document loaded"
+
+  defp format_action_error({:unknown_action, name}), do: "Unknown action: #{name}"
+
+  defp format_action_error(other), do: inspect(other, limit: 100)
+
+  # Substitute `:dataset` and `:id` in an href template. The published id is
+  # used (drafts. prefix stripped) so links always target the canonical URL.
+  defp interpolate_action_href(nil, _doc, _dataset), do: "#"
+
+  defp interpolate_action_href(href, doc, dataset) when is_binary(href) do
+    id =
+      case doc do
+        %{doc_id: doc_id} -> Content.published_id(doc_id)
+        _ -> ""
+      end
+
+    href
+    |> String.replace(":dataset", to_string(dataset || ""))
+    |> String.replace(":id", id)
+  end
+
+  # ── ArrayField helpers (Studio reorder/add/remove wiring) ───────────────────
+  #
+  # `editor_schema.fields` is `{:array, :map}` — string-keyed raw maps as
+  # stored on disk (SchemaDefinition). We never see %Field{} structs here.
+
+  defp find_field(socket, field_name) do
+    fields =
+      case socket.assigns[:editor_schema] do
+        %{fields: list} when is_list(list) -> list
+        _ -> []
+      end
+
+    Enum.find(fields, fn f -> Map.get(f, "name") == field_name end)
+  end
+
+  defp parse_idx(idx) when is_integer(idx), do: idx
+
+  defp parse_idx(idx) when is_binary(idx) do
+    case Integer.parse(idx) do
+      {n, _} -> n
+      :error -> 0
+    end
+  end
+
+  defp parse_idx(_), do: 0
+
+  defp list_value(form, field_name) do
+    case Map.get(form, field_name) do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  # Empty-element factory — picks a sensible default for a freshly-added row
+  # based on the arrayOf element's declared type. composite → empty map;
+  # arrayOf → empty list; localizedText → empty map; everything else → nil.
+  defp empty_for_of(%{"of" => %{"type" => "composite"} = of}) do
+    Enum.reduce(of["fields"] || [], %{}, fn sub, acc ->
+      Map.put(acc, sub["name"], empty_for_type(sub["type"]))
+    end)
+  end
+
+  defp empty_for_of(%{"of" => %{"type" => "arrayOf"}}), do: []
+  defp empty_for_of(%{"of" => %{"type" => "codelist"}}), do: nil
+  defp empty_for_of(%{"of" => %{"type" => "localizedText"}}), do: %{}
+  defp empty_for_of(%{"of" => %{"type" => _}}), do: nil
+  defp empty_for_of(_), do: nil
+
+  defp empty_for_type("composite"), do: %{}
+  defp empty_for_type("arrayOf"), do: []
+  defp empty_for_type("localizedText"), do: %{}
+  # strings, codelists, booleans, datetimes, etc. — all start as nil so the
+  # validator surfaces "required" errors instead of fake-empty values.
+  defp empty_for_type(_), do: nil
 
   # ── Pane builder ───────────────────────────────────────────────────────────
 
@@ -674,7 +899,46 @@ defmodule BarkparkWeb.Studio.StudioLive do
         save_status={@save_status}
         presences={@presences}
         parent_assigns={assigns}
-      />
+      >
+        <:extra_actions>
+          <%= for action <- schema_actions(@editor_schema) do %>
+            <%= case action["kind"] do %>
+              <% "link" -> %>
+                <a
+                  href={interpolate_action_href(action["href"], @editor_doc, @dataset)}
+                  class="btn btn-ghost btn-sm"
+                  data-test-id={"schema-action-#{action["name"]}"}
+                >
+                  <%= action["label"] %>
+                </a>
+              <% _ -> %>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  phx-click="schema_action"
+                  phx-value-name={action["name"]}
+                  data-test-id={"schema-action-#{action["name"]}"}
+                >
+                  <%= action["label"] %>
+                </button>
+            <% end %>
+          <% end %>
+        </:extra_actions>
+      </.studio_editor_shell>
+
+      <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
+      <%= if @confirm_modal do %>
+        <% modal = @confirm_modal.action["modal"] || %{} %>
+        <BarkparkWeb.Components.ConfirmModal.confirm_modal
+          id="schema-action-confirm-modal"
+          title={modal["title"] || @confirm_modal.action["label"]}
+          body={modal["body"]}
+          stage={@confirm_modal.stage}
+          on_cancel="close-confirm-modal"
+          on_confirm="confirm-modal-dryrun"
+          on_real="confirm-modal-real"
+        />
+      <% end %>
 
       <!-- Profile + 4 content modals; all gated by their show/picker assigns -->
       <.studio_modals

@@ -274,7 +274,7 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
                       </button>
                     <% end %>
                     <.link
-                      navigate={"/studio/#{sub.dataset}/onixedit/book/#{sub.doc_id}"}
+                      navigate={"/studio/#{sub.dataset}/book/#{sub.doc_id}"}
                       data-test-action="view"
                     >
                       View Document

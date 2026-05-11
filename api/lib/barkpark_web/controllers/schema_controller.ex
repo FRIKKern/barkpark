@@ -42,7 +42,8 @@ defmodule BarkparkWeb.SchemaController do
       title: schema.title,
       icon: schema.icon,
       visibility: schema.visibility,
-      fields: schema.fields
+      fields: schema.fields,
+      actions: schema.actions || []
     }
   end
 end
