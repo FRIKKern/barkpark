@@ -73,6 +73,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-click={@on_reorder}
                   phx-value-action="move_up"
                   phx-value-field={@field.name}
+                  phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == 0}
                   aria-label="Move up"
@@ -83,6 +84,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-click={@on_reorder}
                   phx-value-action="move_down"
                   phx-value-field={@field.name}
+                  phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == length(@rows) - 1}
                   aria-label="Move down"
@@ -94,6 +96,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                 phx-click={@on_reorder}
                 phx-value-action="remove_row"
                 phx-value-field={@field.name}
+                phx-value-path={@path}
                 phx-value-index={idx}
                 disabled={@readonly}
                 aria-label="Remove row"
@@ -111,6 +114,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-click={@on_reorder}
         phx-value-action="add_row"
         phx-value-field={@field.name}
+        phx-value-path={@path}
         disabled={@readonly}
       >+ Add</button>
     </fieldset>
