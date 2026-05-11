@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "barkpark",
+  "project_id": "684103c5-3b0c-4507-a5d3-2bcc739d992a"
+}
