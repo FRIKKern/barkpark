@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
     * `:path` — input name path (optional)
     * `:codelist_loader` — function `(plugin_name, list_id) -> codelist | nil`;
       defaults to `&Barkpark.Content.Codelists.get/2`. Test seam.
+    * `:readonly` — disable the `<select>` (defaults to `false`).
   """
 
   use Phoenix.Component
@@ -42,6 +43,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
   attr :codelist_loader, :any, default: nil
+  attr :readonly, :boolean, default: false
 
   def codelist_field(assigns) do
     assigns =
@@ -52,6 +54,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put_new(:plugin_name, "core")
       |> Map.put_new(:path, "")
       |> Map.put_new(:codelist_loader, nil)
+      |> Map.put_new(:readonly, false)
 
     list_id = assigns.field.codelist_id || ""
     plugin_name = assigns.plugin_name
@@ -89,6 +92,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
           id={@input_id}
           name={@input_name}
           phx-change={@on_change}
+          disabled={@readonly}
           data-codelist-id={"#{@plugin_name}:#{@list_id}"}
           data-codelist-version={@field.version && to_string(@field.version)}
         >

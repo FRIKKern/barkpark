@@ -73,7 +73,49 @@ defmodule Barkpark.Plugins.OnixEdit do
         icon: Map.get(parsed.raw, "icon"),
         visibility: Map.get(parsed.raw, "visibility", "private"),
         fields: Map.get(parsed.raw, "fields", []),
-        dataset: "production"
+        dataset: "production",
+        actions: document_actions()
+      }
+    ]
+  end
+
+  @doc """
+  Document-level actions advertised by the `book` schema (Task #16 — schema
+  action registry). Each entry is a string-keyed map that Studio's generic
+  action-bar renderer understands:
+
+    * `kind: "link"`  — render `<a href=...>`; `:dataset` and `:id` get
+      substituted at render time.
+    * `kind: "modal"` — render `<button phx-click="schema_action" ...>`;
+      Studio opens a `ConfirmModal` with the two-step dry-run-then-real flow.
+
+  These replace the `phx-click="export_onix"` / `phx-click="publish_to_bokbasen"`
+  buttons that previously only existed inside the dedicated `book_editor`
+  LiveView. With these landing in the schema row, the generic Studio editor
+  pane renders the same affordances — no plugin LiveView needed to expose
+  document-level actions.
+  """
+  @spec document_actions() :: [map()]
+  def document_actions do
+    [
+      %{
+        "name" => "export_onix",
+        "label" => "Export ONIX",
+        "kind" => "link",
+        "href" => "/v1/plugins/onixedit/export/:dataset/:id.onix",
+        "icon" => "download"
+      },
+      %{
+        "name" => "publish_to_bokbasen",
+        "label" => "Publish to Bokbasen",
+        "kind" => "modal",
+        "modal" => %{
+          "title" => "Publish to Bokbasen?",
+          "body" =>
+            "We'll run a dry-run first, then ask again before sending for real.",
+          "steps" => ["dryrun", "real"]
+        },
+        "icon" => "send"
       }
     ]
   end

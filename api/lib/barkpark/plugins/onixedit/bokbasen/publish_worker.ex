@@ -87,6 +87,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.ExternalSync
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Client
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Errors.AuthError
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Errors.HTTPError
@@ -137,7 +138,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   # ---------------------------------------------------------------------------
 
   defp stage_step(%Document{} = doc, attempt, client_opts) do
-    Status.write(doc, %{
+    write_status(doc, %{
       "state" => "staging",
       "submitted_at" => DateTime.utc_now()
     })
@@ -150,7 +151,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         do_stage(doc, binary, attempt, client_opts)
 
       {:error, {:xsd_invalid, reasons}} ->
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "failed",
           "last_error" => %{
             "type" => "xsd_invalid",
@@ -175,7 +176,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         # no-JSON-body path).
         effective_id = extract_submission_id(sub_id) || extract_submission_id(poll_url) || sub_id
 
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "staged",
           "submission_id" => effective_id,
           "poll_url" => poll_url,
@@ -198,7 +199,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "rate_limited_exhausted")
           {:cancel, :exhausted}
         else
-          Status.write(doc, %{
+          write_status(doc, %{
             "state" => "staging",
             "retry_at" => DateTime.utc_now() |> DateTime.add(secs, :second),
             "last_error" => %{
@@ -217,7 +218,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "network_exhausted")
           {:cancel, :exhausted}
         else
-          Status.write(doc, %{
+          write_status(doc, %{
             "state" => "staging",
             "last_error" => %{
               "type" => "network",
@@ -235,7 +236,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
           terminal_failure(doc, err, "http_exhausted")
           {:cancel, :exhausted}
         else
-          Status.write(doc, %{
+          write_status(doc, %{
             "state" => "staging",
             "last_error" => %{
               "type" => "http",
@@ -269,7 +270,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         current = Status.read(doc)
         next_count = (current["attempt_count"] || 0) + 1
 
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "polling",
           "submission_id" => sub_id,
           "poll_url" => poll_url,
@@ -281,7 +282,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         {:snooze, poll_backoff(attempt)}
 
       {:ok, %{status: :accepted, details: details}} ->
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "accepted",
           "submission_id" => sub_id,
           "poll_url" => poll_url,
@@ -293,7 +294,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         :ok
 
       {:ok, %{status: :rejected, details: details}} ->
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "rejected",
           "submission_id" => sub_id,
           "poll_url" => poll_url,
@@ -322,7 +323,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
               :error -> nil
             end
 
-          Status.write(doc, %{
+          write_status(doc, %{
             "state" => "polling",
             "submission_id" => sub_id,
             "poll_url" => poll_url,
@@ -351,7 +352,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         # Treat as terminal :rejected with parse-error context — we already
         # have a submission, but the response payload is unintelligible and
         # retrying the same poll won't change that.
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "rejected",
           "submission_id" => sub_id,
           "poll_url" => poll_url,
@@ -416,7 +417,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         # have no server-side cancellation timestamp to record. Per the WI2
         # contract `cancelled_at` remains nil; only `state` and the merged
         # `updated_at` (auto-stamped by Status.write/2) change.
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "cancelled",
           "submission_id" => sub_id,
           "last_error" => nil
@@ -431,7 +432,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
             "<NotificationType>05</NotificationType> to mark the record as withdrawn."
         )
 
-        Status.write(doc, %{
+        write_status(doc, %{
           "state" => "cannot_cancel",
           "submission_id" => sub_id,
           "last_error" => %{
@@ -454,6 +455,30 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   # Persistence helpers (Phase 8 WI1: thin wrappers over Status)
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # write_status/2 — persist + broadcast on the generic external-sync topic
+  # ---------------------------------------------------------------------------
+  #
+  # Every Bokbasen state transition flows through here. `Status.write/2`
+  # persists the composite and emits the legacy `{:bokbasen_status_update, …}`
+  # broadcast on `bokbasen:document:<doc_id>` (consumed by BookEditor /
+  # AdminLive). We then emit the plugin-agnostic
+  # `{:external_sync_status, …}` broadcast on
+  # `external_sync:bokbasen:<doc_id>` so any consumer that uses the new
+  # `ExternalSync` contract (e.g. the upcoming `ExternalSyncPill` mounted
+  # by StudioLive) refreshes without knowing about Bokbasen specifically.
+  #
+  # Both topics co-exist intentionally for the cross-over period. Step 7
+  # of the OnixEdit-native migration drops the legacy consumers when
+  # `BookEditor` is deleted; at that point `Status.write/2` can stop
+  # broadcasting too.
+  defp write_status(%Document{doc_id: doc_id} = doc, %{} = patch) do
+    updated = Status.write(doc, patch)
+    new_state = Map.get(patch, "state") || Map.get(patch, :state)
+    ExternalSync.broadcast("bokbasen", doc_id, new_state, patch)
+    updated
+  end
+
   @doc """
   Phase 7 compat shim — `Status.read/1` is the canonical path. Kept so any
   out-of-tree caller continues to compile; new code should call
@@ -470,7 +495,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
     do: Status.write(doc, patch)
 
   defp terminal_failure(doc, err, kind) do
-    Status.write(doc, %{
+    write_status(doc, %{
       "state" => "failed",
       "last_error" => %{
         "type" => kind,

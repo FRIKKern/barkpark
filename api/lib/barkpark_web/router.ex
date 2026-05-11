@@ -86,6 +86,18 @@ defmodule BarkparkWeb.Router do
     end
   end
 
+  # ── Back-compat redirects (must come BEFORE the StudioLive catch-all) ───
+  # The dedicated OnixEdit BookEditor / BookView LiveViews were removed in
+  # Goal barkpark-zdy. `book` documents now open in native StudioLive at
+  # `/studio/:dataset/book/:doc_id`. These two redirects keep old deep links
+  # working — including the `?tab=…` query string the old editor used.
+  scope "/studio/:dataset", BarkparkWeb do
+    pipe_through :browser
+
+    get "/onixedit/book/:doc_id", OnixeditRedirectController, :show
+    get "/onixedit/book/:doc_id/view", OnixeditRedirectController, :show
+  end
+
   # ── Studio (LiveView) ─────────────────────────────────────────────────────
   scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser
@@ -96,12 +108,6 @@ defmodule BarkparkWeb.Router do
       live "/", StudioLive
       live "/media", MediaLive
       live "/api-tester", ApiTesterLive
-
-      # Plugin-owned dedicated editors. Must come BEFORE the catch-all below.
-      # OnixEdit `book` documents (Phase 5 WI1).
-      live "/onixedit/book/:doc_id", Plugins.OnixEdit.BookEditor
-      # Phase 8 WI3 — read-only book view, default click target from Structure nav.
-      live "/onixedit/book/:doc_id/view", Plugins.OnixEdit.BookView
 
       live "/*path", StudioLive
     end

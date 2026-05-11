@@ -24,6 +24,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       (defaults to `"array_op"`)
     * `:plugin_name` — codelist plugin scope (optional)
     * `:path` — dotted path prefix (optional)
+    * `:readonly` — disable add/remove/reorder buttons and pass-through to
+      element renderers (defaults to `false`).
   """
 
   use Phoenix.Component
@@ -37,6 +39,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :on_reorder, :string, default: "array_op"
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
+  attr :readonly, :boolean, default: false
 
   def array_field(assigns) do
     assigns =
@@ -47,6 +50,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put_new(:on_reorder, "array_op")
       |> Map.put_new(:plugin_name, "core")
       |> Map.put_new(:path, "")
+      |> Map.put_new(:readonly, false)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
       |> Map.put(:ordered?, !!assigns.field.ordered)
@@ -70,7 +74,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-action="move_up"
                   phx-value-field={@field.name}
                   phx-value-index={idx}
-                  disabled={idx == 0}
+                  disabled={@readonly or idx == 0}
                   aria-label="Move up"
                 >▲</button>
                 <button
@@ -80,7 +84,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-action="move_down"
                   phx-value-field={@field.name}
                   phx-value-index={idx}
-                  disabled={idx == length(@rows) - 1}
+                  disabled={@readonly or idx == length(@rows) - 1}
                   aria-label="Move down"
                 >▼</button>
               <% end %>
@@ -91,6 +95,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                 phx-value-action="remove_row"
                 phx-value-field={@field.name}
                 phx-value-index={idx}
+                disabled={@readonly}
                 aria-label="Remove row"
               >×</button>
             </div>
@@ -106,6 +111,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-click={@on_reorder}
         phx-value-action="add_row"
         phx-value-field={@field.name}
+        disabled={@readonly}
       >+ Add</button>
     </fieldset>
     """
@@ -166,7 +172,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           errors: row_subfield_errors(assigns.errors, idx),
           on_change: assigns.on_change,
           plugin_name: assigns.plugin_name,
-          path: row_path
+          path: row_path,
+          readonly: assigns.readonly
         })
 
       "arrayOf" ->
@@ -177,7 +184,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           on_change: assigns.on_change,
           on_reorder: assigns.on_reorder,
           plugin_name: assigns.plugin_name,
-          path: row_path
+          path: row_path,
+          readonly: assigns.readonly
         })
 
       "codelist" ->
@@ -187,7 +195,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           errors: row_subfield_errors(assigns.errors, idx),
           on_change: assigns.on_change,
           plugin_name: assigns.plugin_name,
-          path: row_path
+          path: row_path,
+          readonly: assigns.readonly
         })
 
       "localizedText" ->
@@ -196,7 +205,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           value: row_value || %{},
           errors: row_subfield_errors(assigns.errors, idx),
           on_change: assigns.on_change,
-          path: row_path
+          path: row_path,
+          readonly: assigns.readonly
         })
 
       _ ->
@@ -204,7 +214,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           input_id: "f-#{assigns.field.name}-#{idx}",
           input_name: row_path,
           row_value: row_value,
-          on_change: assigns.on_change
+          on_change: assigns.on_change,
+          readonly: assigns.readonly
         }
 
         leaf_input(leaf_assigns)
@@ -220,6 +231,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       name={@input_name}
       value={to_string(@row_value || "")}
       phx-change={@on_change}
+      disabled={@readonly}
     />
     """
   end
