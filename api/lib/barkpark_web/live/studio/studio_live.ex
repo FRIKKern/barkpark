@@ -245,19 +245,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # the bridge from those clicks into the public list helpers in
   # `BarkparkWeb.Components.Fields.ArrayField`, then autosaves the document
   # so the new structure lands in the DB.
-  def handle_event(
-        "array_op",
-        %{"action" => action, "field" => field_name} = params,
-        socket
-      ) do
-    field = find_field(socket, field_name)
+  def handle_event("array_op", %{"action" => action} = params, socket) do
+    path = parse_path(params["path"] || "")
 
-    if is_nil(field) do
+    # path = [] means either path missing or path was just "doc[...]" with no
+    # inner — fall back to flat field-name lookup so the original top-level
+    # array op contract still works.
+    {field, key_path} =
+      case path do
+        [] ->
+          case params["field"] do
+            name when is_binary(name) -> {find_field(socket, name), [name]}
+            _ -> {nil, []}
+          end
+
+        _ ->
+          {find_field_by_path(socket, path), path}
+      end
+
+    if is_nil(field) or key_path == [] do
       {:noreply, socket}
     else
       idx = parse_idx(params["index"])
       form = socket.assigns[:editor_form] || %{}
-      current = list_value(form, field_name)
+      current = list_value_at(form, key_path)
 
       new_list =
         case action do
@@ -268,7 +279,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           _ -> current
         end
 
-      new_form = Map.put(form, field_name, new_list)
+      new_form = put_value_at(form, key_path, new_list)
       # Persist via the same path as autosave so panes + DB + validation all
       # stay in sync. do_autosave/2 assigns editor_form: new_form, so we
       # don't need a separate assign call.
@@ -750,11 +761,116 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp parse_idx(_), do: 0
 
-  defp list_value(form, field_name) do
-    case Map.get(form, field_name) do
+  # ── Path-based navigation for nested arrayOf inside composites ─────────────
+  #
+  # The ArrayField component emits `phx-value-path` on every reorder button.
+  # The string has the shape `doc[a][b].c[d]` — top-level uses bracket form
+  # (from adapter.ex line 72: `"doc[#{name}]"`), composite descents use dot
+  # form (from composite_field.ex `child_path`: `"#{parent}.#{child}"`),
+  # and array rows append `[#{idx}]`. We strip the `doc[` envelope, then
+  # tokenize on `]` / `.` / `[` to recover the key list. Numeric segments
+  # (array row indices) are dropped because the schema descent only walks
+  # named fields — the empty_for_of factory determines what a new row holds,
+  # not the path.
+
+  @doc false
+  def parse_path("doc[" <> rest), do: parse_brackets(rest, [])
+  def parse_path(_), do: []
+
+  defp parse_brackets("", acc), do: Enum.reverse(drop_empties_and_indices(acc))
+
+  defp parse_brackets(rest, acc) do
+    case String.split(rest, "]", parts: 2) do
+      [key, "[" <> more] -> parse_brackets(more, [key | acc])
+      [key, "." <> more] -> parse_dots(more, [key | acc])
+      [key, ""] -> Enum.reverse(drop_empties_and_indices([key | acc]))
+      _ -> Enum.reverse(drop_empties_and_indices(acc))
+    end
+  end
+
+  defp parse_dots(rest, acc) do
+    case String.split(rest, ~r/[\.\[]/, parts: 2, include_captures: true) do
+      [key, ".", more] -> parse_dots(more, [key | acc])
+      [key, "[", more] -> parse_brackets(more, [key | acc])
+      [key] when key != "" -> Enum.reverse(drop_empties_and_indices([key | acc]))
+      _ -> Enum.reverse(drop_empties_and_indices(acc))
+    end
+  end
+
+  defp drop_empties_and_indices(acc), do: Enum.reject(acc, &(&1 == "" or numeric?(&1)))
+
+  # Array row indices (numeric segments) carry no schema meaning — the field
+  # at the deepest *named* position is what we need to resolve. Empty
+  # segments come from malformed input like `doc[]` and are dropped too.
+  defp numeric?(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {_, ""} -> true
+      _ -> false
+    end
+  end
+
+  defp numeric?(_), do: false
+
+  # Walk `editor_schema.fields` by string-keyed name to find the field at the
+  # deepest path position. `descend_field` traverses composite → fields and
+  # arrayOf → of transparently so the caller's path doesn't need to mention
+  # the `of` envelope.
+  defp find_field_by_path(socket, [head | rest]) do
+    fields =
+      case socket.assigns[:editor_schema] do
+        %{fields: list} when is_list(list) -> list
+        _ -> []
+      end
+
+    case Enum.find(fields, fn f -> Map.get(f, "name") == head end) do
+      nil -> nil
+      f -> descend_field(f, rest)
+    end
+  end
+
+  defp find_field_by_path(_, []), do: nil
+
+  defp descend_field(field, []), do: field
+
+  defp descend_field(%{"type" => "composite", "fields" => subs}, [head | rest])
+       when is_list(subs) do
+    case Enum.find(subs, fn s -> Map.get(s, "name") == head end) do
+      nil -> nil
+      s -> descend_field(s, rest)
+    end
+  end
+
+  defp descend_field(%{"type" => "arrayOf", "of" => of}, path), do: descend_field(of, path)
+  defp descend_field(_, _), do: nil
+
+  # Read the list value at the path from editor_form.
+  defp list_value_at(form, path) when is_list(path) do
+    case do_get_in(form, path) do
       list when is_list(list) -> list
       _ -> []
     end
+  end
+
+  # Hand-rolled get_in that tolerates nil/non-map intermediates.
+  defp do_get_in(value, []), do: value
+  defp do_get_in(map, [key | rest]) when is_map(map), do: do_get_in(Map.get(map, key), rest)
+  defp do_get_in(_, _), do: nil
+
+  # Write the list value at the path in editor_form. Initializes missing
+  # intermediate maps along the way so adding a row to a yet-unset nested
+  # arrayOf works on first click.
+  defp put_value_at(form, [], _value), do: form
+  defp put_value_at(form, [key], value), do: Map.put(form || %{}, key, value)
+
+  defp put_value_at(form, [head | rest], value) do
+    inner =
+      case form do
+        %{} -> Map.get(form, head, %{})
+        _ -> %{}
+      end
+
+    inner = if is_map(inner), do: inner, else: %{}
+    Map.put(form || %{}, head, put_value_at(inner, rest, value))
   end
 
   # Empty-element factory — picks a sensible default for a freshly-added row
