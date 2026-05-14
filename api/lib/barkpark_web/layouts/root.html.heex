@@ -790,6 +790,55 @@
     bp-reference-picker .bp-ref-search-input { width: 100%; }
     bp-reference-picker .bp-ref-dropdown-item:hover { background: var(--bg-accent); }
 
+    /* bp-overflow-menu — priority+ pattern (Task barkpark-smn).
+       Host is a single-row flex container; rightmost items get
+       data-overflowed when the row exceeds host width, the WC reveals
+       a "•••" trigger that opens a fixed-position popover. */
+    bp-overflow-menu {
+      display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+      overflow: hidden; min-width: 0; flex: 1; justify-content: flex-end;
+    }
+    bp-overflow-menu > [data-overflowed] { display: none !important; }
+    .bp-overflow-trigger {
+      appearance: none; background: transparent;
+      border: 1px solid var(--border-muted); color: var(--fg-muted);
+      border-radius: var(--radius-sm); padding: 4px 10px;
+      font-size: 14px; line-height: 1; cursor: pointer;
+      font-family: inherit;
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 32px; height: 28px; flex: 0 0 auto;
+      transition: color 0.1s, border-color 0.1s, background 0.1s;
+    }
+    .bp-overflow-trigger:hover {
+      color: var(--fg); border-color: var(--border); background: var(--bg-muted);
+    }
+    .bp-overflow-trigger[aria-expanded="true"] {
+      color: var(--fg); background: var(--bg-muted); border-color: var(--border);
+    }
+    .bp-overflow-popover {
+      z-index: 100;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 4px; min-width: 180px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      display: flex; flex-direction: column;
+    }
+    .bp-overflow-popover .bp-overflow-menuitem {
+      text-align: left; justify-content: flex-start;
+      padding: 6px 10px; border-radius: 4px;
+      background: transparent !important;
+      border: none !important;
+      color: var(--fg) !important;
+      cursor: pointer; font-family: inherit; font-size: 13px;
+      width: 100%;
+    }
+    .bp-overflow-popover .bp-overflow-menuitem:hover {
+      background: var(--bg-muted) !important;
+    }
+    .bp-overflow-popover .bp-overflow-menuitem.btn-primary { color: var(--primary) !important; }
+    .bp-overflow-popover .bp-overflow-menuitem.btn-danger { color: var(--destructive) !important; }
+
     /* ── Plugin field widgets (composite / arrayOf / codelist / localizedText) ──
        Dark-theme chrome for bp-* form widgets. Mirrors .form-input /
        .editor-field-label / .dataset-switcher-select. */
@@ -1114,6 +1163,7 @@
   <script src="/assets/bp-media-picker.js" defer></script>
   <script src="/assets/bp-reference-picker.js" defer></script>
   <script src="/assets/bp-document-preview.js" defer></script>
+  <script src="/assets/bp-overflow-menu.js" defer></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <script>

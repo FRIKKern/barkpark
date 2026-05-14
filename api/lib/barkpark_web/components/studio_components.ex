@@ -241,7 +241,7 @@ defmodule BarkparkWeb.StudioComponents do
           </div>
         <% end %>
       </div>
-      <div style="display: flex; gap: 6px;">
+      <div style="display: flex; gap: 6px; min-width: 0; flex: 1; justify-content: flex-end;">
         <%= render_slot(@actions) %>
       </div>
     </div>
@@ -1277,28 +1277,30 @@ defmodule BarkparkWeb.StudioComponents do
             <% end %>
           </:presence>
           <:actions>
-            <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
-            <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
-            <%= if @editor_is_draft do %>
-              <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
-            <% else %>
-              <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
-            <% end %>
-            <button
-              :if={@editor_type == "book"}
-              type="button"
-              phx-click="toggle-onix-preview"
-              class="btn btn-ghost btn-sm"
-              data-test-id="onix-preview-toggle"
-            ><%= if @onix_preview_visible, do: "Hide XML", else: "Show XML" %></button>
-            <button
-              :if={@show_diff_toggle}
-              type="button"
-              phx-click="toggle-diff"
-              class="btn btn-ghost btn-sm"
-              data-test-id="draft-diff-toggle"
-            ><%= if @diff_visible, do: "Edit", else: "Diff" %></button>
-            <%= render_slot(@extra_actions) %>
+            <bp-overflow-menu class="bp-overflow-menu">
+              <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
+              <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
+              <%= if @editor_is_draft do %>
+                <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
+              <% else %>
+                <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
+              <% end %>
+              <button
+                :if={@editor_type == "book"}
+                type="button"
+                phx-click="toggle-onix-preview"
+                class="btn btn-ghost btn-sm"
+                data-test-id="onix-preview-toggle"
+              ><%= if @onix_preview_visible, do: "Hide XML", else: "Show XML" %></button>
+              <button
+                :if={@show_diff_toggle}
+                type="button"
+                phx-click="toggle-diff"
+                class="btn btn-ghost btn-sm"
+                data-test-id="draft-diff-toggle"
+              ><%= if @diff_visible, do: "Edit", else: "Diff" %></button>
+              <%= render_slot(@extra_actions) %>
+            </bp-overflow-menu>
           </:actions>
         </.document_header>
 
