@@ -4,9 +4,10 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   (masterplan-20260425-085425, Phase 0 lines 55+58, Decision 15).
 
   One input per language listed in `field.languages`. Plain format renders
-  a `<textarea>`; rich format renders a `<textarea>` with a marker class
-  (`bp-localized-rich`) — a richer widget is a Phase 5+ concern, not a
-  Phase 0 blocker.
+  a `<textarea>`; rich format renders a `<bp-rich-text-editor>` Web
+  Component (Task #11 WI4) bridged via a hidden input + `BarkparkFieldBridge`
+  hook, mirroring the v1 `richText` clause in
+  `BarkparkWeb.Components.FieldInputs.input/1`.
 
   ## Fallback chain wiring
 
@@ -92,14 +93,33 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
           <label class="bp-field-label" for={"#{@base_id}-#{lang}"}>
             <%= lang %><%= if @warning && @warning.primary == lang, do: " (primary, missing)" %>
           </label>
-          <textarea
-            class={textarea_class(@format)}
-            id={"#{@base_id}-#{lang}"}
-            name={input_name(@base_path, lang)}
-            phx-change={@on_change}
-            disabled={@readonly}
-            data-lang={lang}
-          ><%= Map.get(@value_map, lang, "") %></textarea>
+          <%= if @format == :rich do %>
+            <div id={"bp-rt-wrap-#{@field.name}-#{lang}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+              <input
+                type="hidden"
+                id={"#{@base_id}-#{lang}"}
+                name={input_name(@base_path, lang)}
+                value={Map.get(@value_map, lang, "")}
+                phx-debounce="500"
+                data-lang={lang}
+              />
+              <bp-rich-text-editor
+                value={Map.get(@value_map, lang, "")}
+                data-bridge-target={"#{@base_id}-#{lang}"}
+                data-lang={lang}
+                class="bp-localized-rich"
+              ></bp-rich-text-editor>
+            </div>
+          <% else %>
+            <textarea
+              class={textarea_class(@format)}
+              id={"#{@base_id}-#{lang}"}
+              name={input_name(@base_path, lang)}
+              phx-change={@on_change}
+              disabled={@readonly}
+              data-lang={lang}
+            ><%= Map.get(@value_map, lang, "") %></textarea>
+          <% end %>
           <%= for err <- lang_errors(@errors, lang) do %>
             <span class="error" data-error-for={lang}><%= err %></span>
           <% end %>

@@ -33,6 +33,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :readonly, :boolean, default: false
 
   def composite_field(assigns) do
+    path = Map.get(assigns, :path, "")
+
     assigns =
       assigns
       |> Map.put_new(:value, %{})
@@ -43,24 +45,44 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:readonly, false)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
+      |> Map.put(:depth, path_depth(path))
 
     ~H"""
-    <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name}>
-      <legend class="bp-field-title"><%= @title %></legend>
-      <div class="bp-field-body">
-        <%= for sub <- @subfields do %>
-          <div class="bp-subfield" data-subfield-name={sub.name}>
-            <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
-              <%= title_for(sub) %>
-            </label>
-            <%= render_subfield(assigns, sub) %>
-            <%= for err <- Map.get(@errors, sub.name, []) do %>
-              <span class="error" data-error-for={sub.name}><%= err %></span>
-            <% end %>
-          </div>
-        <% end %>
-      </div>
-    </fieldset>
+    <%= if @depth >= 2 do %>
+      <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
+        <summary class="bp-field-title"><%= @title %></summary>
+        <div class="bp-field-body">
+          <%= for sub <- @subfields do %>
+            <div class="bp-subfield" data-subfield-name={sub.name}>
+              <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
+                <%= title_for(sub) %>
+              </label>
+              <%= render_subfield(assigns, sub) %>
+              <%= for err <- Map.get(@errors, sub.name, []) do %>
+                <span class="error" data-error-for={sub.name}><%= err %></span>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </details>
+    <% else %>
+      <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth}>
+        <legend class="bp-field-title"><%= @title %></legend>
+        <div class="bp-field-body">
+          <%= for sub <- @subfields do %>
+            <div class="bp-subfield" data-subfield-name={sub.name}>
+              <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
+                <%= title_for(sub) %>
+              </label>
+              <%= render_subfield(assigns, sub) %>
+              <%= for err <- Map.get(@errors, sub.name, []) do %>
+                <span class="error" data-error-for={sub.name}><%= err %></span>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </fieldset>
+    <% end %>
     """
   end
 
@@ -164,6 +186,26 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     leaf_input(leaf_assigns)
   end
 
+  defp leaf_input(%{field: %{type: "boolean"}} = assigns) do
+    assigns = Map.put(assigns, :checked, truthy?(assigns.value))
+
+    ~H"""
+    <div class="bp-input-checkbox">
+      <input type="hidden" name={@input_name} value="false" />
+      <input
+        type="checkbox"
+        class="bp-input"
+        id={@input_id}
+        name={@input_name}
+        value="true"
+        checked={@checked}
+        phx-change={@on_change}
+        disabled={@readonly}
+      />
+    </div>
+    """
+  end
+
   defp leaf_input(assigns) do
     ~H"""
     <input
@@ -177,6 +219,32 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     />
     """
   end
+
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?(1), do: true
+  defp truthy?("1"), do: true
+  defp truthy?("on"), do: true
+  defp truthy?(_), do: false
+
+  # Depth of the current composite within the form. Splits on `.` and `[`,
+  # drops the `doc` envelope, counts remaining segments. Examples:
+  #
+  #   ""                                   -> 0
+  #   "doc[titleDetail]"                   -> 1
+  #   "doc[contributors][0]"               -> 2
+  #   "doc[productSupplies][0].market"     -> 3
+  defp path_depth(""), do: 0
+
+  defp path_depth(path) when is_binary(path) do
+    path
+    |> String.split(["[", "."], trim: true)
+    |> Enum.map(&String.trim_trailing(&1, "]"))
+    |> Enum.reject(&(&1 == "" or &1 == "doc"))
+    |> length()
+  end
+
+  defp path_depth(_), do: 0
 
   defp select_input(assigns) do
     ~H"""
