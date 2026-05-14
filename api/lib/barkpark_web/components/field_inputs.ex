@@ -35,10 +35,11 @@ defmodule BarkparkWeb.Components.FieldInputs do
     1. `select` (with `options` list)
     2. `text` / `richText` (textarea)
     3. `boolean` (hidden + checkbox pair)
-    4. `color`
-    5. `reference` (`refType` required)
-    6. `image`
-    7. default fallback (string, slug, datetime, unknown — text input)
+    4. `datetime` (datetime-local input)
+    5. `color`
+    6. `reference` (`refType` required)
+    7. `image`
+    8. default fallback (string, slug, unknown — text input)
   """
 
   use Phoenix.Component
@@ -97,6 +98,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <input type="hidden" name={"doc[#{@n}]"} value="false" />
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
     </div>
+    """
+  end
+
+  def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
+    val = Map.get(assigns.editor_form, name, "")
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="datetime-local" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="300" />
     """
   end
 

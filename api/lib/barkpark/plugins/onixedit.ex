@@ -32,6 +32,7 @@ defmodule Barkpark.Plugins.OnixEdit do
     manifest_path: "../../../priv/plugins/onixedit/plugin.json"
 
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Plugins.OnixEdit.Schemas.{Contributor, TextContent}
 
   @plugin_name "onixedit"
   @schemas_dir Path.expand("../../../priv/plugins/onixedit/schemas", __DIR__)
@@ -48,14 +49,17 @@ defmodule Barkpark.Plugins.OnixEdit do
   Raises if the JSON file is missing or fails v2 parsing — we want this loud
   in dev/test so a malformed schema is caught at first use, not at request
   time.
+
+  The raw book.json declares `contributors.of.fields: []` and a partial
+  `textContents.of.fields` placeholder; this function splices in the full
+  shapes from `Contributor.definition_map/0` and `TextContent.definition_map/0`
+  before handing the merged map to `SchemaDefinition.parse/2`. That way both
+  this parsed view and `register_schemas/1` (which derives off the same
+  pipeline) see the same enriched contributors / textContents subfields.
   """
   @spec book_schema!() :: SchemaDefinition.Parsed.t()
   def book_schema! do
-    path = Path.join(@schemas_dir, "book.json")
-
-    case path
-         |> File.read!()
-         |> Jason.decode!()
+    case book_raw_with_subschemas()
          |> SchemaDefinition.parse(plugin: @plugin_name) do
       {:ok, parsed} -> parsed
       {:error, reason} -> raise "OnixEdit book schema failed to parse: #{inspect(reason)}"
@@ -64,19 +68,81 @@ defmodule Barkpark.Plugins.OnixEdit do
 
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
+    raw = book_raw_with_subschemas()
+
+    # Force a parse round-trip up front: we want the same loud failure as
+    # `book_schema!/0` if the spliced shape is malformed, even though we
+    # persist the raw (string-keyed) map.
     parsed = book_schema!()
 
     [
       %SchemaDefinition{
         name: parsed.name,
         title: parsed.title,
-        icon: Map.get(parsed.raw, "icon"),
-        visibility: Map.get(parsed.raw, "visibility", "private"),
-        fields: Map.get(parsed.raw, "fields", []),
+        icon: Map.get(raw, "icon"),
+        visibility: Map.get(raw, "visibility", "private"),
+        fields: Map.get(raw, "fields", []),
         dataset: "production",
         actions: document_actions()
       }
     ]
+  end
+
+  # ─── sub-schema splicing ──────────────────────────────────────────────────
+
+  # Reads book.json from disk, then walks the `fields` tree and replaces the
+  # empty `contributors.of.fields` and the partial `textContents.of.fields`
+  # placeholders with the full string-keyed sub-schemas exposed by
+  # `Contributor.definition_map/0` / `TextContent.definition_map/0`. Both
+  # sources are `Jason.decode!`'d JSON, so the keys are already strings — no
+  # atom/string normalisation is needed (decision recorded in the task brief).
+  @spec book_raw_with_subschemas() :: map()
+  defp book_raw_with_subschemas do
+    path = Path.join(@schemas_dir, "book.json")
+
+    path
+    |> File.read!()
+    |> Jason.decode!()
+    |> Map.update("fields", [], &splice_subschemas/1)
+  end
+
+  @spec splice_subschemas([map()]) :: [map()]
+  defp splice_subschemas(fields) when is_list(fields) do
+    Enum.map(fields, &splice_field/1)
+  end
+
+  defp splice_field(%{"name" => "contributors", "type" => "arrayOf"} = field) do
+    put_inner_fields(field, fetch_subschema_fields(Contributor))
+  end
+
+  defp splice_field(%{"name" => "textContents", "type" => "arrayOf"} = field) do
+    put_inner_fields(field, fetch_subschema_fields(TextContent))
+  end
+
+  defp splice_field(%{"type" => "composite", "fields" => inner} = field) when is_list(inner) do
+    %{field | "fields" => splice_subschemas(inner)}
+  end
+
+  defp splice_field(%{"type" => "arrayOf", "of" => %{"type" => "composite", "fields" => inner} = of} = field)
+       when is_list(inner) do
+    %{field | "of" => %{of | "fields" => splice_subschemas(inner)}}
+  end
+
+  defp splice_field(field), do: field
+
+  # Replace the inner `of.fields` while preserving every other key the book
+  # schema sets on the `of` composite (title, name, type, etc.).
+  defp put_inner_fields(%{"of" => of} = field, replacement_fields) when is_map(of) do
+    %{field | "of" => Map.put(of, "fields", replacement_fields)}
+  end
+
+  # Sub-schemas declare their full shape at the top level (name, title,
+  # fields, …). We only want the `fields` list — the surrounding metadata
+  # belongs to the sub-schema as a standalone document; the book composite
+  # already carries its own name/title.
+  defp fetch_subschema_fields(module) do
+    module.definition_map()
+    |> Map.get("fields", [])
   end
 
   @doc """

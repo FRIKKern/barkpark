@@ -306,8 +306,8 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       assert html =~ ~s(phx-debounce="500")
     end
 
-    test "slug, datetime, and unknown all hit the same fallback" do
-      for type <- ["slug", "datetime", "weirdo"] do
+    test "slug and unknown types hit the text fallback" do
+      for type <- ["slug", "weirdo"] do
         html =
           render_input(%{
             field: %{"type" => type, "name" => "f"},
@@ -319,6 +319,19 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         assert html =~ ~s(class="form-input")
         assert html =~ ~s(phx-debounce="500")
       end
+    end
+
+    test "datetime renders as datetime-local (Goal barkpark-mwr G1)" do
+      html =
+        render_input(%{
+          field: %{"type" => "datetime", "name" => "publishedAt"},
+          editor_form: %{}
+        })
+
+      assert html =~ ~s(<input)
+      assert html =~ ~s(type="datetime-local")
+      assert html =~ ~s(name="doc[publishedAt]")
+      assert html =~ ~s(class="form-input")
     end
 
     test "no id by default; id_prefix lands when set" do
