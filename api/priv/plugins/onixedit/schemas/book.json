@@ -13,6 +13,42 @@
     { "name": "supply",       "title": "Supply & Pricing" },
     { "name": "status",       "title": "Status" }
   ],
+  "deskGroups": [
+    { "name": "drafts",  "title": "Drafts",  "filter": { "doc_id": { "starts_with": "drafts." } } },
+    { "name": "pending", "title": "Pending", "filter": { "content.bp_export_status.state": { "in": ["pending", "staging", "polling"] } } },
+    { "name": "synced",  "title": "Synced",  "filter": { "content.bp_export_status.state": { "in": ["staged", "accepted"] } } },
+    { "name": "failed",  "title": "Failed",  "filter": { "content.bp_export_status.state": { "in": ["rejected", "failed"] } } },
+    { "name": "all",     "title": "All",     "filter": {} }
+  ],
+  "initial_values": {
+    "notificationType": "03",
+    "productForm": "BB",
+    "publishingDetail": {
+      "copyrightStatement": { "copyrightYear": "$today.year" }
+    },
+    "bp_export_status": { "state": "draft" }
+  },
+  "cross_validations": [
+    {
+      "name": "isbn_xor_gtin",
+      "title": "At least one product identifier (ISBN, GTIN, DOI…) is required",
+      "rule": { "any": [
+        { "field": "productIdentifiers", "operator": "non_empty" }
+      ]},
+      "level": "error",
+      "fields": ["productIdentifiers"]
+    },
+    {
+      "name": "price_currency_required",
+      "title": "A price amount requires a currency code",
+      "rule": { "any": [
+        { "field": "productSupplies.supplyDetails.prices.priceAmount", "operator": "empty" },
+        { "field": "productSupplies.supplyDetails.prices.currencyCode", "operator": "non_empty" }
+      ]},
+      "level": "warning",
+      "fields": ["productSupplies.supplyDetails.prices.currencyCode"]
+    }
+  ],
   "fields": [
     {
       "name": "notificationType",

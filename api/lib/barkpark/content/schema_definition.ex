@@ -14,6 +14,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :cors_origins, {:array, :string}, default: []
     field :actions, {:array, :map}, default: []
     field :groups, {:array, :map}, default: []
+    field :desk_groups, {:array, :map}, default: []
+    field :initial_values, :map, default: %{}
+    field :cross_validations, {:array, :map}, default: []
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -29,7 +32,10 @@ defmodule Barkpark.Content.SchemaDefinition do
       :dataset,
       :cors_origins,
       :actions,
-      :groups
+      :groups,
+      :desk_groups,
+      :initial_values,
+      :cross_validations
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
