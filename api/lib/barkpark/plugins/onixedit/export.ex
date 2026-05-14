@@ -137,9 +137,9 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   `{:error, {:xsd_invalid, reasons}}` otherwise so callers can never emit
   schema-invalid XML downstream.
   """
-  @spec to_iodata(map()) :: {:ok, iodata()} | {:error, {:xsd_invalid, [String.t()]}}
-  def to_iodata(book_doc) when is_map(book_doc) do
-    iodata = to_xml(book_doc)
+  @spec to_iodata(map(), keyword()) :: {:ok, iodata()} | {:error, {:xsd_invalid, [String.t()]}}
+  def to_iodata(book_doc, opts \\ []) when is_map(book_doc) do
+    iodata = to_xml(book_doc, opts)
     binary = IO.iodata_to_binary(iodata)
 
     case Validator.validate_xsd(binary) do
@@ -152,9 +152,9 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   Render a book document to a UTF-8 ONIX 3.0 XML binary, gated on XSD
   validation. Same error envelope as `to_iodata/1`.
   """
-  @spec to_string(map()) :: {:ok, binary()} | {:error, {:xsd_invalid, [String.t()]}}
-  def to_string(book_doc) when is_map(book_doc) do
-    case to_iodata(book_doc) do
+  @spec to_string(map(), keyword()) :: {:ok, binary()} | {:error, {:xsd_invalid, [String.t()]}}
+  def to_string(book_doc, opts \\ []) when is_map(book_doc) do
+    case to_iodata(book_doc, opts) do
       {:ok, iodata} -> {:ok, IO.iodata_to_binary(iodata)}
       {:error, _} = err -> err
     end

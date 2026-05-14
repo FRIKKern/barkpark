@@ -17,8 +17,12 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Message do
     products_list = if is_list(products), do: products, else: [products]
     children = [header | products_list]
 
+    # NB: attrs are a keyword list, not a map. Erlang's small-map enumeration
+    # order is non-deterministic across VM starts (Goal barkpark-mgu surfaced
+    # this as proof-artifact drift between `mix onix.export_proof` regens),
+    # so we pass an ordered keyword list to keep attribute order byte-stable.
     :ONIXMessage
-    |> XmlBuilder.document(%{release: @release, xmlns: @xmlns}, children)
+    |> XmlBuilder.document([release: @release, xmlns: @xmlns], children)
     |> XmlBuilder.generate()
   end
 end

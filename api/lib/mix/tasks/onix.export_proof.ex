@@ -41,6 +41,12 @@ defmodule Mix.Tasks.Onix.ExportProof do
   @default_fixture "test/fixtures/onix/full-book.json"
   @default_output "../proof/onix-sample.xml"
 
+  # Pinned to keep the regenerated proof artifact byte-stable across runs.
+  # The exporter stamps `<SentDateTime>` with `DateTime.utc_now/0` by default;
+  # passing an explicit timestamp here means repeated `mix onix.export_proof`
+  # invocations produce identical bytes.
+  @pinned_sent_at ~U[2026-04-29 12:00:00Z]
+
   @impl Mix.Task
   def run(args) do
     {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)
@@ -70,7 +76,7 @@ defmodule Mix.Tasks.Onix.ExportProof do
 
     Mix.shell().info("==> exporting via Barkpark.Plugins.OnixEdit.Export.to_string/1")
 
-    case Barkpark.Plugins.OnixEdit.Export.to_string(book) do
+    case Barkpark.Plugins.OnixEdit.Export.to_string(book, sent_at: @pinned_sent_at) do
       {:ok, xml} ->
         File.mkdir_p!(Path.dirname(output_path))
         File.write!(output_path, xml)

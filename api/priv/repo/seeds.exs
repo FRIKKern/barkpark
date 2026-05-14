@@ -497,3 +497,25 @@ case Barkpark.Codelists.EDItEUR.seed_bundled() do
   {:error, reason} ->
     IO.puts(:stderr, "Codelist seed reported errors: #{inspect(reason)}")
 end
+
+# ── Thema Codelist (Bootstrap) ──────────────────────────────────────────────
+#
+# Task barkpark-ufw: seed the Thema subject classification (EDItEUR
+# Thema v1.6) from the bundled JSON snapshot at
+# `priv/codelists/thema-1.6/thema-v1.6-en.json`. Thema is published
+# separately from the ONIX codelist bundle — see
+# `priv/codelists/thema-1.6/README.md`. Idempotent on
+# `(onixedit, onixedit:thema, "1.6")`.
+
+IO.puts("\n=== Seeding Thema codelist from bundled EDItEUR snapshot ===")
+
+case Barkpark.Codelists.EDItEUR.seed_thema() do
+  {:ok, :no_snapshot} ->
+    IO.puts(:stderr, "Bundled Thema snapshot missing — skipped (see api/priv/codelists/thema-1.6/README.md)")
+
+  {:ok, count} ->
+    IO.puts("Seeded #{count} Thema codelist(s)")
+
+  {:error, reason} ->
+    IO.puts(:stderr, "Thema seed reported errors: #{inspect(reason)}")
+end

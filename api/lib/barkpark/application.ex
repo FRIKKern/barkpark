@@ -67,6 +67,11 @@ defmodule Barkpark.Application do
           # `onix.codelistId: N` metadata) available the moment the first
           # render hits the registry. Never raises; logs + soldiers on.
           Barkpark.Codelists.EDItEUR.seed_bundled()
+          # Task barkpark-ufw: seed the Thema subject classification
+          # (EDItEUR Thema v1.6, ~9k hierarchical codes) — published
+          # separately from the ONIX codelist bundle. Idempotent on
+          # `(onixedit, onixedit:thema, "1.6")`. Never raises.
+          Barkpark.Codelists.EDItEUR.seed_thema()
         end)
 
         ok

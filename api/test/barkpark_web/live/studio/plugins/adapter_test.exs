@@ -204,6 +204,97 @@ defmodule BarkparkWeb.Studio.Plugins.AdapterTest do
       html = rendered_to_string(Adapter.render(assigns, field))
       assert html =~ "fieldplugin"
     end
+
+    test "composite containing a codelist inherits the nested codelist's plugin prefix" do
+      # Top-level composite has no codelistId of its own. The adapter must
+      # walk the subtree and use the nested codelist's prefix ("onixedit"),
+      # not fall through to "core". Otherwise the nested CodelistField looks
+      # up `core:onixedit:product_form` → MISS → "no codelist registered".
+      field = %{
+        "type" => "composite",
+        "name" => "productForm",
+        "title" => "Product form",
+        "fields" => [
+          %{
+            "type" => "codelist",
+            "name" => "code",
+            "title" => "Code",
+            "codelistId" => "onixedit:product_form",
+            "version" => 73
+          }
+        ]
+      }
+
+      assigns = %{
+        editor_form: %{"productForm" => %{"code" => nil}},
+        editor_schema: nil,
+        validation_errors: %{}
+      }
+
+      html = rendered_to_string(Adapter.render(assigns, field))
+
+      # plugin_name "onixedit" is propagated to the nested CodelistField.
+      # Without the fix this would render the empty-registry placeholder with
+      # `core:onixedit:product_form` as the missing id.
+      assert html =~ "onixedit:product_form"
+      refute html =~ "no codelist registered: core:onixedit:product_form"
+    end
+
+    test "arrayOf of composite of codelist inherits the deep codelist's plugin prefix" do
+      field = %{
+        "type" => "arrayOf",
+        "name" => "contributors",
+        "title" => "Contributors",
+        "of" => %{
+          "type" => "composite",
+          "name" => "contributor",
+          "fields" => [
+            %{
+              "type" => "codelist",
+              "name" => "role",
+              "codelistId" => "onixedit:contributor_role",
+              "version" => 73
+            }
+          ]
+        }
+      }
+
+      assigns = %{
+        editor_form: %{"contributors" => []},
+        editor_schema: nil,
+        validation_errors: %{}
+      }
+
+      html = rendered_to_string(Adapter.render(assigns, field))
+
+      # arrayOf renders the type wrapper; the deep codelist plugin propagates
+      # to the array's plugin_name so when items render they hit the right
+      # registry scope.
+      assert html =~ ~s(data-field-type="arrayOf")
+      refute html =~ "no codelist registered: core:onixedit:contributor_role"
+    end
+
+    test "composite with no nested codelists falls back to core (back-compat)" do
+      field = %{
+        "type" => "composite",
+        "name" => "address",
+        "fields" => [
+          %{"type" => "string", "name" => "street"},
+          %{"type" => "string", "name" => "city"}
+        ]
+      }
+
+      assigns = %{
+        editor_form: %{"address" => %{"street" => "Karl Johans gate 1", "city" => "Oslo"}},
+        editor_schema: nil,
+        validation_errors: %{}
+      }
+
+      # Should render without crashing; no codelist machinery involved.
+      html = rendered_to_string(Adapter.render(assigns, field))
+      assert html =~ ~s(data-field-type="composite")
+      assert html =~ "Karl Johans gate 1"
+    end
   end
 
   describe "no-regression: v1 schemas" do
