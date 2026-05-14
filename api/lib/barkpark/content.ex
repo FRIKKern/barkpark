@@ -150,11 +150,47 @@ defmodule Barkpark.Content do
   defp apply_field_op(query, "status", "in", vs) when is_list(vs),
     do: where(query, [d], d.status in ^vs)
 
-  defp apply_field_op(query, field, "eq", v),
-    do: where(query, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+  # doc_id operators — desk-group filters (e.g. drafts. prefix) need this.
+  defp apply_field_op(query, "doc_id", "eq", v), do: where(query, [d], d.doc_id == ^v)
 
-  defp apply_field_op(query, field, "in", vs) when is_list(vs),
-    do: where(query, [d], fragment("?->>? = ANY(?)", d.content, ^field, ^vs))
+  defp apply_field_op(query, "doc_id", "starts_with", v),
+    do: where(query, [d], like(d.doc_id, ^"#{v}%"))
+
+  defp apply_field_op(query, "doc_id", "not_starts_with", v),
+    do: where(query, [d], not like(d.doc_id, ^"#{v}%"))
+
+  defp apply_field_op(query, field, "eq", v) do
+    if nested_path?(field) do
+      segs = nested_segments(field)
+
+      where(
+        query,
+        [d],
+        fragment("jsonb_extract_path_text(?, VARIADIC ?) = ?", d.content, ^segs, ^v)
+      )
+    else
+      where(query, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+    end
+  end
+
+  defp apply_field_op(query, field, "in", vs) when is_list(vs) do
+    if nested_path?(field) do
+      segs = nested_segments(field)
+
+      where(
+        query,
+        [d],
+        fragment(
+          "jsonb_extract_path_text(?, VARIADIC ?) = ANY(?)",
+          d.content,
+          ^segs,
+          ^vs
+        )
+      )
+    else
+      where(query, [d], fragment("?->>? = ANY(?)", d.content, ^field, ^vs))
+    end
+  end
 
   defp apply_field_op(query, field, "contains", v),
     do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^"%#{v}%"))
@@ -172,6 +208,21 @@ defmodule Barkpark.Content do
     do: where(query, [d], fragment("?->>? <= ?", d.content, ^field, ^v))
 
   defp apply_field_op(query, _field, _op, _value), do: query
+
+  defp nested_path?(field) when is_binary(field), do: String.contains?(field, ".")
+  defp nested_path?(_), do: false
+
+  # Split a dot-delimited content path into segments for
+  # `jsonb_extract_path_text(content, VARIADIC …)`. The `content.` prefix
+  # is conventional (desk-group filters in schema JSON write e.g.
+  # `"content.bp_export_status.state"`) but the JSONB column is already
+  # `d.content`, so we strip it before splitting — otherwise we'd
+  # descend into `content.content.…`.
+  defp nested_segments(field) when is_binary(field) do
+    field
+    |> String.replace_prefix("content.", "")
+    |> String.split(".")
+  end
 
   defp apply_order(q, :updated_at_desc), do: order_by(q, [d], desc: d.updated_at)
   defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
@@ -342,12 +393,105 @@ defmodule Barkpark.Content do
         |> tap_broadcast(dataset, type, "update", existing.rev)
 
       _ ->
+        attrs = apply_initial_values(attrs, type, dataset)
+
         %Document{}
         |> Document.changeset(attrs)
         |> Repo.insert()
         |> tap_broadcast(dataset, type, "create", nil)
     end
   end
+
+  @doc """
+  Clone a document into a fresh draft. Copies `title` (with " (copy)"
+  suffix) and the full `content` map verbatim, assigns a new generated
+  id, and inserts via `create_document/3` so the draft prefix, status,
+  and PubSub broadcast all go through the canonical write path.
+
+  Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
+  insert failure. Used by the Studio's "Duplicate" header action.
+  """
+  @spec clone_document(map(), String.t(), String.t()) :: {:ok, Document.t()} | {:error, term()}
+  def clone_document(doc, type, dataset)
+      when is_map(doc) and is_binary(type) and is_binary(dataset) do
+    new_id = generate_id(type)
+    src_title = Map.get(doc, :title) || "Untitled"
+    src_content = Map.get(doc, :content) || %{}
+
+    create_document(
+      type,
+      %{
+        "doc_id" => new_id,
+        "title" => "#{src_title} (copy)",
+        "status" => "draft",
+        "content" => src_content
+      },
+      dataset
+    )
+  end
+
+  # ── Initial values (Sanity-style schema-declared defaults) ────────────────
+  #
+  # When a schema declares an `initial_values` map, those keys pre-fill the
+  # content of a newly created document. Provided values always win — the
+  # initial_values map is a FLOOR, never a ceiling.
+  #
+  # Maps merge deeply. Lists do NOT merge (a provided list replaces the
+  # initial list wholesale — recursive list merging is ambiguous and a
+  # publisher who provides a list almost always means "use exactly this").
+  #
+  # Dynamic tokens resolved at create time only:
+  #   * `"$today"`      → today's ISO-8601 date string (e.g. "2026-05-14")
+  #   * `"$today.year"` → today's year as a 4-digit string (e.g. "2026")
+
+  defp apply_initial_values(attrs, type, dataset)
+       when is_binary(type) and is_binary(dataset) do
+    initial =
+      case get_schema(type, dataset) do
+        {:ok, %SchemaDefinition{initial_values: iv}} when is_map(iv) and map_size(iv) > 0 ->
+          resolve_dynamics(iv)
+
+        _ ->
+          nil
+      end
+
+    case initial do
+      nil ->
+        attrs
+
+      iv ->
+        provided = Map.get(attrs, "content") || %{}
+        Map.put(attrs, "content", deep_merge(iv, provided))
+    end
+  end
+
+  defp apply_initial_values(attrs, _type, _dataset), do: attrs
+
+  @doc false
+  def deep_merge(a, b) when is_map(a) and is_map(b) do
+    Map.merge(a, b, fn _k, av, bv ->
+      cond do
+        is_map(av) and is_map(bv) -> deep_merge(av, bv)
+        true -> bv
+      end
+    end)
+  end
+
+  def deep_merge(_a, b), do: b
+
+  @doc false
+  def resolve_dynamics(term) when is_map(term) do
+    Map.new(term, fn {k, v} -> {k, resolve_dynamics(v)} end)
+  end
+
+  def resolve_dynamics(list) when is_list(list), do: Enum.map(list, &resolve_dynamics/1)
+
+  def resolve_dynamics("$today"), do: Date.utc_today() |> Date.to_iso8601()
+
+  def resolve_dynamics("$today.year"),
+    do: Date.utc_today().year |> Integer.to_string()
+
+  def resolve_dynamics(other), do: other
 
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
@@ -882,7 +1026,9 @@ defmodule Barkpark.Content do
       schemaHash: schema_hash_for_schema(schema),
       fields: Enum.map(schema.fields || [], &serialize_field/1),
       actions: schema.actions || [],
-      groups: schema.groups || []
+      groups: schema.groups || [],
+      deskGroups: schema.desk_groups || [],
+      crossValidations: schema.cross_validations || []
     }
   end
 

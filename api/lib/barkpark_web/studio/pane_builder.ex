@@ -18,9 +18,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   Build the full pane tree for `dataset` along `nav_path`. Returns
   `{panes, editor}` where `panes` is a list of pane maps and `editor`
   is either `nil` or a map describing the open document editor.
+
+  Optional `opts`:
+
+    * `:desk` — name of the active desk-group filter on a
+      `:document_type_list` pane (read from `?desk=…` URL param by
+      StudioLive). Looked up in the schema's `desk_groups` array. If
+      the schema declares none (or the named group is absent), the
+      pane renders unfiltered — back-compat with v1 schemas.
   """
   @spec build(String.t(), [String.t()]) :: {[map()], map() | nil}
-  def build(dataset, nav_path) do
+  def build(dataset, nav_path), do: build(dataset, nav_path, [])
+
+  @spec build(String.t(), [String.t()], keyword()) :: {[map()], map() | nil}
+  def build(dataset, nav_path, opts) do
     structure = Structure.build(dataset)
 
     root_pane = %{
@@ -29,7 +40,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       selected: Enum.at(nav_path, 0)
     }
 
-    walk_path(nav_path, 0, structure, [root_pane], nil, dataset)
+    walk_path(nav_path, 0, structure, [root_pane], nil, dataset, opts)
   end
 
   @doc """
@@ -39,9 +50,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   """
   @spec walk_path([String.t()], non_neg_integer(), map(), [map()], map() | nil, String.t()) ::
           {[map()], map() | nil}
-  def walk_path([], _depth, _current, panes, editor, _dataset), do: {panes, editor}
+  def walk_path(path, depth, current, panes, editor, dataset),
+    do: walk_path(path, depth, current, panes, editor, dataset, [])
 
-  def walk_path([id | rest], depth, current, panes, _editor, dataset) do
+  @spec walk_path(
+          [String.t()],
+          non_neg_integer(),
+          map(),
+          [map()],
+          map() | nil,
+          String.t(),
+          keyword()
+        ) :: {[map()], map() | nil}
+  def walk_path([], _depth, _current, panes, editor, _dataset, _opts), do: {panes, editor}
+
+  def walk_path([id | rest], depth, current, panes, _editor, dataset, opts) do
     found =
       Enum.find(current.items, fn node ->
         node.id == id || node.type_name == id
@@ -58,7 +81,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           selected: Enum.at(rest, 0)
         }
 
-        walk_path(rest, depth + 1, node, panes ++ [list_pane], nil, dataset)
+        walk_path(rest, depth + 1, node, panes ++ [list_pane], nil, dataset, opts)
 
       %{type: :document_type_list, type_name: type_name} = node ->
         schema =
@@ -67,19 +90,36 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             _ -> nil
           end
 
-        opts = [perspective: :drafts]
+        desk_groups = schema_desk_groups(schema)
+        active_desk = Keyword.get(opts, :desk)
+        active_group = find_desk_group(desk_groups, active_desk)
 
-        opts =
+        list_opts = [perspective: :drafts]
+
+        list_opts =
           if node.filter,
-            do: opts ++ [filter_map: Structure.parse_filter(node.filter)],
-            else: opts
+            do: list_opts ++ [filter_map: Structure.parse_filter(node.filter)],
+            else: list_opts
 
-        docs = Content.list_documents(type_name, dataset, opts)
+        list_opts =
+          if active_group,
+            do:
+              Keyword.update(
+                list_opts,
+                :filter_map,
+                desk_filter_map(active_group),
+                &Map.merge(&1, desk_filter_map(active_group))
+              ),
+            else: list_opts
+
+        docs = Content.list_documents(type_name, dataset, list_opts)
 
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          desk_groups: desk_groups,
+          active_desk: active_group && Map.get(active_group, "name"),
           items:
             Enum.map(docs, fn doc ->
               pub_id = Content.published_id(doc.doc_id)
@@ -146,6 +186,41 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       _ ->
         {panes, nil}
+    end
+  end
+
+  # ── desk_groups helpers ────────────────────────────────────────────────────
+  #
+  # A schema may declare `desk_groups: [%{"name" => …, "title" => …,
+  # "filter" => %{<path> => %{<op> => <val>}}}, …]`. PaneBuilder treats
+  # them as alternative chip-style filters on a single `:document_type_list`
+  # pane. Schemas without `desk_groups` (or with `[]`) render the existing
+  # single flat list — back-compat lock.
+
+  defp schema_desk_groups(nil), do: []
+
+  defp schema_desk_groups(schema) do
+    case Map.get(schema, :desk_groups) || Map.get(schema, "desk_groups") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp find_desk_group(_groups, nil), do: nil
+  defp find_desk_group(_groups, ""), do: nil
+
+  defp find_desk_group(groups, name) when is_binary(name) do
+    Enum.find(groups, fn g ->
+      to_string(Map.get(g, "name") || Map.get(g, :name)) == name
+    end)
+  end
+
+  # Pull the `filter` map off a desk-group spec. Returns `%{}` (no filter)
+  # when the group is the "all" bucket or simply omits the key.
+  defp desk_filter_map(group) when is_map(group) do
+    case Map.get(group, "filter") || Map.get(group, :filter) do
+      m when is_map(m) -> m
+      _ -> %{}
     end
   end
 

@@ -53,6 +53,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
        presences: [],
        show_profile: false,
        validation_errors: %{},
+       # ── Cross-field validations (Task barkpark-cgn) ──────────────────
+       # Populated after every autosave by `Barkpark.Content.CrossValidator
+       # .violations/2`. Each entry is a string-keyed map carrying name,
+       # title, level (error|warning), and fields. The editor banner reads
+       # this assign directly; non-rule schemas keep `[]` and never render
+       # the banner row.
+       cross_violations: [],
        confirm_modal: nil,
        nav_group: nil,
        # ── ONIX preview side-pane (Task #16) ────────────────────────────
@@ -61,7 +68,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # hit a missing-key surprise on non-book schemas.
        onix_preview_xml: nil,
        onix_preview_error: nil,
-       onix_preview_visible: true
+       onix_preview_visible: true,
+       # ── Document actions (Task barkpark-3yq) ─────────────────────────
+       # E2 split-view: read-only secondary editor pane.
+       secondary_doc: nil,
+       secondary_schema: nil,
+       secondary_type: nil,
+       show_secondary_picker: false,
+       secondary_search: "",
+       secondary_candidates: [],
+       # E3 bulk publish: per-pane multi-select MapSet of published ids.
+       selected_doc_ids: MapSet.new(),
+       bulk_status: nil,
+       # ── Draft-vs-Published diff view (Task barkpark-uix) ─────────────
+       # `diff_visible` toggles the editor pane between the form and the
+       # field-level diff table. `published_doc` is the fetched published
+       # twin of the current draft (nil when no draft is open, or when
+       # the draft has no published counterpart). The toggle button in
+       # the editor header only surfaces when both sides exist.
+       diff_visible: false,
+       published_doc: nil
      )
      |> allow_upload(:image,
        accept: ~w(.jpg .jpeg .png .gif .webp .svg),
@@ -74,6 +100,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_params(params, _uri, socket) do
     dataset = params["dataset"] || "production"
     path = Map.get(params, "path", [])
+    desk = params["desk"]
 
     if connected?(socket) and socket.assigns[:dataset] != dataset do
       if old = socket.assigns[:dataset] do
@@ -85,7 +112,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket =
       socket
-      |> assign(dataset: dataset, nav_path: path)
+      |> assign(dataset: dataset, nav_path: path, nav_desk: desk)
       |> rebuild_panes()
       |> subscribe_to_doc()
       |> track_presence()
@@ -202,6 +229,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, assign(socket, nav_group: name)}
   end
 
+  # Schema-declared desk groups (custom column filter chips on the
+  # `:document_type_list` pane). The desk lives in the `?desk=…` query
+  # param so the view is shareable/bookmarkable — switching desk
+  # `push_patch`'s a new URL with the same nav_path. An empty/absent
+  # desk drops the chip filter and reverts to the default flat list.
+  def handle_event("select-desk", %{"desk" => name}, socket) do
+    desk = if name == "" or name == socket.assigns[:nav_desk], do: nil, else: name
+
+    {:noreply,
+     push_patch(socket,
+       to: studio_path(socket.assigns.nav_path, socket.assigns.dataset, desk: desk)
+     )}
+  end
+
   def handle_event("expand-pane", %{"idx" => idx_str}, socket) do
     # "Expand" a collapsed pane = truncate the nav path so this pane
     # becomes the active focus. Deeper drill-down (and the editor) drop
@@ -254,6 +295,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("toggle-onix-preview", _, socket) do
     {:noreply,
      assign(socket, onix_preview_visible: !socket.assigns.onix_preview_visible)}
+  end
+
+  # Toggle the draft-vs-published diff view (Task barkpark-uix). The
+  # button itself is rendered only when both a draft AND a published
+  # twin exist (see studio_components.studio_editor_shell), so a stray
+  # event when nothing is loaded just flips a hidden assign.
+  def handle_event("toggle-diff", _, socket) do
+    {:noreply, assign(socket, diff_visible: !socket.assigns.diff_visible)}
   end
 
   def handle_event("autosave", _params, socket) do
@@ -547,6 +596,133 @@ defmodule BarkparkWeb.Studio.StudioLive do
     )
   end
 
+  # ── E1. Duplicate ──────────────────────────────────────────────────────────
+  # Clone the editor's currently-loaded doc into a fresh draft and patch
+  # the nav path to land on it. The duplicate's published id replaces
+  # the tail of nav_path so the editor pane reuses the same list pane.
+  def handle_event("duplicate-doc", _, socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+
+    if doc && type do
+      case Content.clone_document(doc, type, socket.assigns.dataset) do
+        {:ok, new_doc} ->
+          pub_id = Content.published_id(new_doc.doc_id)
+          base = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+          new_path = base ++ [pub_id]
+
+          {:noreply,
+           socket
+           |> put_flash(:info, "Duplicated as #{pub_id}")
+           |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to duplicate")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # ── E2. Open in new pane (read-only secondary editor) ──────────────────────
+  # Picker opens a doc-search modal scoped to the editor_type. Selecting
+  # an entry assigns secondary_doc and renders a read-only card next to
+  # the primary editor. v1 is read-only — primary autosave still wins;
+  # simultaneous-edit is a deliberate follow-up.
+  def handle_event("open-secondary-picker", _, socket) do
+    type = socket.assigns[:editor_type]
+
+    candidates =
+      if type do
+        type
+        |> Content.list_documents(socket.assigns.dataset, perspective: :drafts)
+        |> Enum.map(fn d ->
+          pub = Content.published_id(d.doc_id)
+          %{id: pub, title: d.title || "Untitled", type: type}
+        end)
+        |> Enum.reject(fn c ->
+          socket.assigns[:editor_doc] &&
+            c.id == Content.published_id(socket.assigns.editor_doc.doc_id)
+        end)
+      else
+        []
+      end
+
+    {:noreply,
+     assign(socket,
+       show_secondary_picker: true,
+       secondary_search: "",
+       secondary_candidates: candidates
+     )}
+  end
+
+  def handle_event("close-secondary-picker", _, socket) do
+    {:noreply, assign(socket, show_secondary_picker: false, secondary_search: "")}
+  end
+
+  def handle_event("secondary-search", %{"value" => q}, socket) do
+    {:noreply, assign(socket, secondary_search: q)}
+  end
+
+  def handle_event("select-secondary", %{"id" => doc_id}, socket) do
+    type = socket.assigns[:editor_type]
+    dataset = socket.assigns.dataset
+
+    case Content.fetch_doc_with_draft(type, doc_id, dataset) do
+      {nil, _, _} ->
+        {:noreply, put_flash(socket, :error, "Document not found")}
+
+      {doc, _, _} ->
+        schema =
+          case Content.get_schema(type, dataset) do
+            {:ok, s} -> s
+            _ -> nil
+          end
+
+        {:noreply,
+         assign(socket,
+           secondary_doc: doc,
+           secondary_schema: schema,
+           secondary_type: type,
+           show_secondary_picker: false,
+           secondary_search: ""
+         )}
+    end
+  end
+
+  def handle_event("close-secondary", _, socket) do
+    {:noreply,
+     assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)}
+  end
+
+  # ── E3. Bulk publish (list pane multi-select) ──────────────────────────────
+  # Checkboxes on each :doc list item toggle a MapSet of published ids.
+  # The floating action bar appears when the set is non-empty and runs
+  # the action over every selected id. Cross-pane selection isn't
+  # gated — the active list pane is the only one rendering :doc rows.
+  def handle_event("toggle-doc-checkbox", %{"id" => id}, socket) do
+    current = socket.assigns.selected_doc_ids
+
+    new =
+      if MapSet.member?(current, id),
+        do: MapSet.delete(current, id),
+        else: MapSet.put(current, id)
+
+    {:noreply, assign(socket, selected_doc_ids: new)}
+  end
+
+  def handle_event("bulk-clear", _, socket) do
+    {:noreply, assign(socket, selected_doc_ids: MapSet.new())}
+  end
+
+  def handle_event("bulk-publish", _, socket) do
+    {:noreply, bulk_action(socket, :publish)}
+  end
+
+  def handle_event("bulk-unpublish", _, socket) do
+    {:noreply, bulk_action(socket, :unpublish)}
+  end
+
   # ── Schema-declared document actions (Task #16 — action registry) ──────────
   #
   # Schemas advertise document-level actions via the `:actions` array on the
@@ -658,7 +834,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
             editor_is_draft: Content.draft?(saved_doc.doc_id),
             editor_form: params,
             save_status: "Saved",
-            validation_errors: errs
+            validation_errors: errs,
+            cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_onix_preview()
 
@@ -725,9 +902,84 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp studio_path(path, dataset), do: studio_path_for(path, dataset)
-  defp studio_path_for([], dataset), do: "/studio/#{dataset}"
-  defp studio_path_for(segments, dataset), do: "/studio/#{dataset}/" <> Enum.join(segments, "/")
+  # ── Bulk publish helpers (Task barkpark-3yq) ─────────────────────────────
+  #
+  # `bulk_action/2` iterates `selected_doc_ids`, dispatches the per-doc
+  # publish/unpublish call, aggregates {ok, err} counts and surfaces a
+  # single flash. `list_pane_type/1` finds the rightmost pane carrying a
+  # `:type_name` — that's the document-list pane (PaneBuilder only puts
+  # `:type_name` on `:document_type_list` panes), and is the implicit
+  # scope of the selection set.
+  defp bulk_action(socket, kind) do
+    ids = MapSet.to_list(socket.assigns.selected_doc_ids)
+    type = list_pane_type(socket)
+    dataset = socket.assigns.dataset
+
+    if type == nil or ids == [] do
+      assign(socket, selected_doc_ids: MapSet.new())
+    else
+      {ok, err} =
+        Enum.reduce(ids, {0, 0}, fn id, {ok, err} ->
+          result =
+            case kind do
+              :publish -> Content.publish_document(id, type, dataset)
+              :unpublish -> Content.unpublish_document(id, type, dataset)
+            end
+
+          case result do
+            {:ok, _} -> {ok + 1, err}
+            _ -> {ok, err + 1}
+          end
+        end)
+
+      verb = if kind == :publish, do: "Published", else: "Unpublished"
+
+      flash =
+        if err == 0,
+          do: "#{verb} #{ok} of #{length(ids)}",
+          else: "#{verb} #{ok} of #{length(ids)} (#{err} failed)"
+
+      socket
+      |> assign(selected_doc_ids: MapSet.new())
+      |> put_flash(:info, flash)
+      |> rebuild_panes()
+    end
+  end
+
+  defp list_pane_type(socket) do
+    socket.assigns
+    |> Map.get(:panes, [])
+    |> Enum.reverse()
+    |> Enum.find_value(fn pane -> Map.get(pane, :type_name) end)
+  end
+
+  defp studio_path(path, dataset, opts \\ []), do: studio_path_for(path, dataset, opts)
+
+  defp studio_path_for([], dataset, opts),
+    do: append_desk_query("/studio/#{dataset}", opts)
+
+  defp studio_path_for(segments, dataset, opts),
+    do:
+      append_desk_query(
+        "/studio/#{dataset}/" <> Enum.join(segments, "/"),
+        opts
+      )
+
+  defp append_desk_query(path, opts) do
+    case Keyword.get(opts, :desk) do
+      nil -> path
+      "" -> path
+      desk -> path <> "?desk=" <> URI.encode_www_form(to_string(desk))
+    end
+  end
+
+  # Render-side helper — the chip href shows the URL the user would
+  # land on if they clicked. (The actual navigation goes through
+  # `phx-click="select-desk"` → `push_patch`, so JS isn't required;
+  # the href makes the chip bookmarkable + middle-clickable.)
+  defp desk_chip_href(nav_path, dataset, desk) do
+    studio_path(nav_path, dataset, desk: desk)
+  end
 
   # ── Schema-action helpers (Task #16 — action registry) ─────────────────────
 
@@ -967,23 +1219,72 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── Pane builder ───────────────────────────────────────────────────────────
 
   defp rebuild_panes(socket) do
-    {panes, editor} = PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path)
+    {panes, editor} =
+      PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path,
+        desk: socket.assigns[:nav_desk]
+      )
     new_schema = editor && editor[:schema]
     old_schema = socket.assigns[:editor_schema]
     nav_group = resolve_nav_group(socket.assigns[:nav_group], old_schema, new_schema)
 
+    new_form = (editor && editor[:form]) || %{}
+
+    editor_doc = editor && editor[:doc]
+    editor_type = editor && editor[:type]
+    is_draft = (editor && editor[:is_draft]) || false
+    has_published = (editor && editor[:has_published]) || false
+
     assign(socket,
       panes: panes,
-      editor_doc: editor && editor[:doc],
+      editor_doc: editor_doc,
       editor_schema: new_schema,
-      editor_type: editor && editor[:type],
-      editor_is_draft: (editor && editor[:is_draft]) || false,
-      editor_has_published: (editor && editor[:has_published]) || false,
-      editor_form: (editor && editor[:form]) || %{},
+      editor_type: editor_type,
+      editor_is_draft: is_draft,
+      editor_has_published: has_published,
+      editor_form: new_form,
       save_status: socket.assigns[:save_status] || "",
-      nav_group: nav_group
+      nav_group: nav_group,
+      cross_violations: compute_cross_violations(new_schema, new_form),
+      published_doc: fetch_published_twin(editor_doc, editor_type, socket.assigns.dataset, is_draft, has_published),
+      diff_visible:
+        socket.assigns[:diff_visible] &&
+          editor_doc != nil && is_draft && has_published
     )
     |> maybe_refresh_onix_preview()
+  end
+
+  # Fetch the published twin of the currently-open draft, if any. Returns
+  # nil when the editor is closed, the open doc is not a draft, or no
+  # published version exists (the toggle button is gated on these same
+  # flags so the diff view never opens without both sides).
+  #
+  # Called from `rebuild_panes/1` so the data is ready on first render —
+  # we deliberately don't refresh `published_doc` on autosave: the
+  # published twin doesn't change while the user types, so refetching on
+  # every keystroke would just burn DB round-trips.
+  defp fetch_published_twin(nil, _type, _dataset, _is_draft, _has_published), do: nil
+  defp fetch_published_twin(_doc, nil, _dataset, _is_draft, _has_published), do: nil
+  defp fetch_published_twin(_doc, _type, _dataset, false, _has_published), do: nil
+  defp fetch_published_twin(_doc, _type, _dataset, _is_draft, false), do: nil
+
+  defp fetch_published_twin(doc, type, dataset, true, true) do
+    case Content.get_document(Content.published_id(doc.doc_id), type, dataset) do
+      {:ok, pub} -> pub
+      _ -> nil
+    end
+  end
+
+  # ── Cross-field validations (Task barkpark-cgn) ─────────────────────────────
+  # Computes the list of unsatisfied cross-validations against the current
+  # editor form using `Barkpark.Content.CrossValidator`. The form may be `nil`
+  # or empty when no document is in scope — the validator already short-circuits
+  # on `validate(_, doc)` non-map docs, but we hard-gate `nil` here to keep
+  # the assign always a list (LiveView templates rely on enumeration).
+  defp compute_cross_violations(nil, _), do: []
+  defp compute_cross_violations(_, form) when not is_map(form), do: []
+
+  defp compute_cross_violations(schema, form) do
+    Barkpark.Content.CrossValidator.violations(schema, form)
   end
 
   # Pick the active tab when the editor pane re-renders. Sanity-Studio
@@ -1048,6 +1349,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
             <% end %>
           </:header_actions>
 
+          <%= if Map.get(pane, :desk_groups, []) != [] do %>
+            <div class="bp-desk-filter" role="tablist" aria-label="Desk filters">
+              <%= for grp <- pane.desk_groups do %>
+                <% gname = Map.get(grp, "name") || Map.get(grp, :name) %>
+                <% gtitle = Map.get(grp, "title") || Map.get(grp, :title) || gname %>
+                <% active = to_string(gname) == to_string(pane[:active_desk] || "") %>
+                <a
+                  class={"bp-desk-chip " <> if(active, do: "is-active", else: "")}
+                  role="tab"
+                  aria-selected={active}
+                  href={desk_chip_href(@nav_path, @dataset, gname)}
+                  phx-click="select-desk"
+                  phx-value-desk={gname}
+                ><%= gtitle %></a>
+              <% end %>
+            </div>
+          <% end %>
+
           <div class="pane-body">
             <%= for item <- pane.items do %>
               <%= case item.type do %>
@@ -1071,6 +1390,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     status={item.status || ""}
                     is_draft={item.is_draft}
                     selected={item.id == pane[:selected]}
+                    selectable={pane[:type_name] != nil}
+                    checked={MapSet.member?(@selected_doc_ids, item.id)}
                   >
                     <:trailing :if={item_presences != []}>
                       <%= for p <- item_presences do %>
@@ -1113,6 +1434,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         editor_is_draft={@editor_is_draft}
         dataset={@dataset}
         validation_errors={@validation_errors}
+        cross_violations={@cross_violations}
         save_status={@save_status}
         presences={@presences}
         parent_assigns={assigns}
@@ -1120,8 +1442,23 @@ defmodule BarkparkWeb.Studio.StudioLive do
         onix_preview_xml={@onix_preview_xml}
         onix_preview_error={@onix_preview_error}
         onix_preview_visible={@onix_preview_visible}
+        diff_visible={@diff_visible}
+        published_doc={@published_doc}
       >
         <:extra_actions>
+          <!-- E1 Duplicate + E2 Open-another buttons (Task barkpark-3yq) -->
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="duplicate-doc"
+            data-test-id="duplicate-doc"
+          >Duplicate</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="open-secondary-picker"
+            data-test-id="open-secondary-picker"
+          >Open another</button>
           <%= for action <- schema_actions(@editor_schema) do %>
             <%= case action["kind"] do %>
               <% "link" -> %>
@@ -1146,6 +1483,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <% end %>
         </:extra_actions>
       </.studio_editor_shell>
+
+      <!-- E2 secondary editor (read-only) — sits in the layout flex
+           row so it lands to the right of the primary editor pane. -->
+      <.secondary_editor_card
+        secondary_doc={@secondary_doc}
+        secondary_schema={@secondary_schema}
+        secondary_type={@secondary_type}
+      />
+
+      <!-- E2 secondary picker modal -->
+      <.secondary_picker_modal
+        show_secondary_picker={@show_secondary_picker}
+        secondary_search={@secondary_search}
+        secondary_candidates={@secondary_candidates}
+      />
+
+      <!-- E3 bulk publish floating action bar -->
+      <.bulk_action_bar selected_doc_ids={@selected_doc_ids} />
 
       <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
       <%= if @confirm_modal do %>

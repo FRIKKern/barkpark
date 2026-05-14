@@ -530,6 +530,14 @@ defmodule BarkparkWeb.StudioComponents do
   attr :status, :string, required: true
   attr :is_draft, :boolean, default: false
   attr :selected, :boolean, default: false
+  # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────
+  # When `selectable` is true, the row renders a left-anchored checkbox
+  # whose `phx-click="toggle-doc-checkbox"` event toggles inclusion in
+  # the parent LV's `selected_doc_ids` MapSet. `checked` reflects whether
+  # this row's id is in the set. Default false → no checkbox, no
+  # behavioural change on legacy callers.
+  attr :selectable, :boolean, default: false
+  attr :checked, :boolean, default: false
   attr :id, :string, default: nil
 
   slot :trailing
@@ -538,19 +546,39 @@ defmodule BarkparkWeb.StudioComponents do
     ~H"""
     <div
       id={@id}
-      class={["pane-doc-item", @selected && "selected"] |> Enum.filter(& &1) |> Enum.join(" ")}
-      phx-click={@phx_click}
-      phx-value-pane={@phx_value_pane}
-      phx-value-id={@phx_value_id}
+      class={
+        ["pane-doc-item", @selected && "selected", @checked && "is-bulk-checked"]
+        |> Enum.filter(& &1)
+        |> Enum.join(" ")
+      }
     >
-      <div class="pane-doc-title">
-        <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
-        <%= @title %>
-        <%= if @trailing != [] do %>
-          <%= render_slot(@trailing) %>
-        <% end %>
+      <%= if @selectable do %>
+        <span
+          class="bp-doc-checkbox"
+          phx-click="toggle-doc-checkbox"
+          phx-value-id={@phx_value_id}
+          data-test-id={"doc-checkbox-#{@phx_value_id}"}
+        >
+          <span class={"bp-doc-checkbox-box " <> if(@checked, do: "is-checked", else: "")}>
+            <%= if @checked, do: "✓" %>
+          </span>
+        </span>
+      <% end %>
+      <div
+        class="bp-doc-row-body"
+        phx-click={@phx_click}
+        phx-value-pane={@phx_value_pane}
+        phx-value-id={@phx_value_id}
+      >
+        <div class="pane-doc-title">
+          <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
+          <%= @title %>
+          <%= if @trailing != [] do %>
+            <%= render_slot(@trailing) %>
+          <% end %>
+        </div>
+        <div class="pane-doc-id"><%= @doc_id %></div>
       </div>
-      <div class="pane-doc-id"><%= @doc_id %></div>
     </div>
     """
   end
@@ -1190,21 +1218,42 @@ defmodule BarkparkWeb.StudioComponents do
   attr :presences, :list, default: []
   attr :parent_assigns, :map, default: %{}
   attr :nav_group, :string, default: nil
+  # ── Cross-field validations (Task barkpark-cgn) ────────────────────
+  # List of unsatisfied rule maps (string-keyed: name, title, level,
+  # fields). Empty list → banner not rendered, no visual cost on
+  # schemas that declare no rules.
+  attr :cross_violations, :list, default: []
   # ── ONIX preview side-pane (Task #16) — book-only ──────────────────
   attr :onix_preview_xml, :string, default: nil
   attr :onix_preview_error, :any, default: nil
   attr :onix_preview_visible, :boolean, default: true
+  # ── Draft-vs-Published diff view (Task barkpark-uix) ───────────────
+  # `diff_visible` flips the editor body between the form and the
+  # field-level diff. `published_doc` is the published twin of the open
+  # draft (nil when no draft is open, or when the draft has no
+  # published counterpart). The toggle button is gated on both
+  # editor_is_draft AND a non-nil published_doc — i.e. exactly the
+  # case where a meaningful diff exists.
+  attr :diff_visible, :boolean, default: false
+  attr :published_doc, :map, default: nil
 
   slot :extra_actions
   slot :empty_state
 
   def studio_editor_shell(assigns) do
+    show_diff_toggle =
+      assigns.editor_doc != nil and assigns.editor_is_draft and
+        assigns.published_doc != nil
+
     assigns =
-      assign(
-        assigns,
+      assigns
+      |> assign(
         :show_onix_preview,
-        assigns.editor_type == "book" and assigns.onix_preview_visible
+        assigns.editor_type == "book" and assigns.onix_preview_visible and
+          not (assigns.diff_visible and show_diff_toggle)
       )
+      |> assign(:show_diff_toggle, show_diff_toggle)
+      |> assign(:show_diff, show_diff_toggle and assigns.diff_visible)
     ~H"""
     <%= if @editor_doc do %>
       <div class="editor-panel">
@@ -1242,6 +1291,13 @@ defmodule BarkparkWeb.StudioComponents do
               class="btn btn-ghost btn-sm"
               data-test-id="onix-preview-toggle"
             ><%= if @onix_preview_visible, do: "Hide XML", else: "Show XML" %></button>
+            <button
+              :if={@show_diff_toggle}
+              type="button"
+              phx-click="toggle-diff"
+              class="btn btn-ghost btn-sm"
+              data-test-id="draft-diff-toggle"
+            ><%= if @diff_visible, do: "Edit", else: "Diff" %></button>
             <%= render_slot(@extra_actions) %>
           </:actions>
         </.document_header>
@@ -1254,45 +1310,55 @@ defmodule BarkparkWeb.StudioComponents do
             </div>
           <% end %>
 
-          <%= if schema_groups(@editor_schema) != [] do %>
-            <div class="bp-tab-bar" role="tablist">
-              <%= for grp <- schema_groups(@editor_schema) do %>
-                <button
-                  type="button"
-                  phx-click="select-group"
-                  phx-value-group={grp["name"]}
-                  role="tab"
-                  aria-selected={@nav_group == grp["name"]}
-                  class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
-                ><%= grp["title"] %></button>
-              <% end %>
-            </div>
-          <% end %>
+          <.cross_violations_banner violations={@cross_violations} />
 
-          <form phx-submit="save" phx-change="autosave" id="editor-form">
-            <.editor_field
-              label="Title"
-              required={(get_title_validation(@editor_schema) || %{})["required"] == true}
-              errors={Map.get(@validation_errors, "title", [])}
-            >
-              <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
-            </.editor_field>
-            <%= if @editor_schema do %>
-              <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
-                      Visibility.visible?(field, @editor_form) do %>
-                <.studio_field_renderer
-                  field={field}
-                  editor_form={@editor_form}
-                  dataset={@dataset}
-                  validation_errors={@validation_errors}
-                  parent_assigns={@parent_assigns}
-                />
-              <% end %>
+          <%= if @show_diff do %>
+            <BarkparkWeb.Components.DraftDiff.draft_diff
+              draft={@editor_doc}
+              published={@published_doc}
+              schema={@editor_schema}
+            />
+          <% else %>
+            <%= if schema_groups(@editor_schema) != [] do %>
+              <div class="bp-tab-bar" role="tablist">
+                <%= for grp <- schema_groups(@editor_schema) do %>
+                  <button
+                    type="button"
+                    phx-click="select-group"
+                    phx-value-group={grp["name"]}
+                    role="tab"
+                    aria-selected={@nav_group == grp["name"]}
+                    class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
+                  ><%= grp["title"] %></button>
+                <% end %>
+              </div>
             <% end %>
-            <div class="editor-actions">
-              <span class="save-status"><%= @save_status %></span>
-            </div>
-          </form>
+
+            <form phx-submit="save" phx-change="autosave" id="editor-form">
+              <.editor_field
+                label="Title"
+                required={(get_title_validation(@editor_schema) || %{})["required"] == true}
+                errors={Map.get(@validation_errors, "title", [])}
+              >
+                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
+              </.editor_field>
+              <%= if @editor_schema do %>
+                <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
+                        Visibility.visible?(field, @editor_form) do %>
+                  <.studio_field_renderer
+                    field={field}
+                    editor_form={@editor_form}
+                    dataset={@dataset}
+                    validation_errors={@validation_errors}
+                    parent_assigns={@parent_assigns}
+                  />
+                <% end %>
+              <% end %>
+              <div class="editor-actions">
+                <span class="save-status"><%= @save_status %></span>
+              </div>
+            </form>
+          <% end %>
         </div>
         <BarkparkWeb.Components.OnixPreview.onix_preview
           :if={@show_onix_preview}
@@ -1317,6 +1383,62 @@ defmodule BarkparkWeb.StudioComponents do
 
   defp presences_on_doc(presences, doc_id) do
     Enum.filter(presences, &(&1.doc_id == doc_id))
+  end
+
+  @doc """
+  Renders the cross-field validation banner at the top of the editor pane
+  (Task barkpark-cgn). Empty list → nothing renders. Each violation
+  surfaces its title and level (error|warning) plus the first involved
+  field as a hint.
+
+  This is the first-pass UI from the task spec — count + per-rule rows.
+  The inline-per-field highlight pass lives behind future work, gated on
+  stable per-field DOM ids (currently absent from `editor_field`).
+  """
+  attr :violations, :list, default: []
+
+  def cross_violations_banner(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :counts,
+        %{
+          error: Enum.count(assigns.violations, &(&1["level"] == "error")),
+          warning: Enum.count(assigns.violations, &(&1["level"] == "warning"))
+        }
+      )
+
+    ~H"""
+    <%= if @violations != [] do %>
+      <div class="bp-violations" role="status" aria-live="polite" data-test-id="cross-violations">
+        <div class="bp-violations-summary">
+          <span class="bp-violations-count">
+            <%= length(@violations) %> issue<%= if length(@violations) != 1, do: "s" %>:
+          </span>
+          <%= if @counts.error > 0 do %>
+            <span class="bp-violations-error"><%= @counts.error %> error<%= if @counts.error != 1, do: "s" %></span>
+          <% end %>
+          <%= if @counts.error > 0 and @counts.warning > 0 do %>
+            <span>·</span>
+          <% end %>
+          <%= if @counts.warning > 0 do %>
+            <span class="bp-violations-warning"><%= @counts.warning %> warning<%= if @counts.warning != 1, do: "s" %></span>
+          <% end %>
+        </div>
+        <ul class="bp-violations-list">
+          <%= for v <- @violations do %>
+            <li class={"bp-violation-item bp-violations-#{v["level"] || "error"}"}
+                data-test-id={"cross-violation-#{v["name"]}"}>
+              <span class="bp-violation-title"><%= v["title"] || v["name"] %></span>
+              <%= if is_list(v["fields"]) and v["fields"] != [] do %>
+                <span class="bp-violation-fields">&nbsp;— <%= List.first(v["fields"]) %></span>
+              <% end %>
+            </li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+    """
   end
 
   defp get_title_validation(nil), do: nil
@@ -1358,5 +1480,188 @@ defmodule BarkparkWeb.StudioComponents do
 
   def visible_fields(fields, group_name) when is_binary(group_name) do
     Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
+  end
+
+  # ── Document actions chrome (Task barkpark-3yq) ───────────────────────────
+  # Three small components for the Sanity-style document actions: bulk
+  # publish floating action bar, read-only secondary editor card, and the
+  # secondary-doc picker modal. Kept here next to the other Studio chrome.
+
+  @doc """
+  Floating action bar shown at the bottom of the viewport when one or
+  more documents are checkbox-selected on the active list pane. Hidden
+  entirely when the set is empty so the bar never crowds normal browsing.
+
+  Buttons emit `phx-click="bulk-publish"` / `"bulk-unpublish"` /
+  `"bulk-clear"` against the parent LV. The "Selected" count comes from
+  `MapSet.size(@selected_doc_ids)`.
+  """
+  attr :selected_doc_ids, :any, required: true
+
+  def bulk_action_bar(assigns) do
+    count = MapSet.size(assigns.selected_doc_ids)
+    assigns = assign(assigns, :count, count)
+
+    ~H"""
+    <%= if @count > 0 do %>
+      <div class="bp-bulk-action-bar" role="region" aria-label="Bulk actions" data-test-id="bulk-action-bar">
+        <span class="bp-bulk-action-count">
+          <%= @count %> selected
+        </span>
+        <div class="bp-bulk-action-buttons">
+          <button
+            type="button"
+            class="btn btn-primary btn-sm"
+            phx-click="bulk-publish"
+            data-test-id="bulk-publish"
+          >Publish selected</button>
+          <button
+            type="button"
+            class="btn btn-sm"
+            phx-click="bulk-unpublish"
+            data-test-id="bulk-unpublish"
+          >Unpublish selected</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="bulk-clear"
+            data-test-id="bulk-clear"
+          >Clear</button>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Read-only secondary editor card — the "Open in new pane" target. Shows
+  the secondary doc's title, type, status pill, and a flat key-value
+  table of its content fields. v1 is deliberately read-only so primary
+  autosave never collides with a secondary edit (decision in task brief).
+  The Close button reveals the floating "Open another" button again via
+  the `close-secondary` event.
+  """
+  attr :secondary_doc, :map, default: nil
+  attr :secondary_schema, :map, default: nil
+  attr :secondary_type, :string, default: nil
+
+  def secondary_editor_card(assigns) do
+    ~H"""
+    <%= if @secondary_doc do %>
+      <aside class="bp-secondary-pane" data-test-id="secondary-pane">
+        <header class="bp-secondary-pane-header">
+          <div class="bp-secondary-pane-title">
+            <span class="badge badge-draft" :if={Barkpark.Content.draft?(@secondary_doc.doc_id)}>
+              draft
+            </span>
+            <span class="badge" :if={!Barkpark.Content.draft?(@secondary_doc.doc_id)}>
+              <%= @secondary_doc.status %>
+            </span>
+            <span class="bp-secondary-pane-type"><%= @secondary_type %></span>
+            <strong><%= @secondary_doc.title || "Untitled" %></strong>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="close-secondary"
+            data-test-id="close-secondary"
+            aria-label="Close secondary pane"
+          >×</button>
+        </header>
+        <div class="bp-secondary-pane-body">
+          <dl class="bp-secondary-pane-fields">
+            <%= for field <- secondary_visible_fields(@secondary_schema) do %>
+              <% key = field["name"] %>
+              <dt><%= field["title"] || key %></dt>
+              <dd><%= secondary_format_value(get_in(@secondary_doc.content || %{}, [key])) %></dd>
+            <% end %>
+          </dl>
+          <p class="bp-secondary-pane-readonly">Read-only — edit via primary pane.</p>
+        </div>
+      </aside>
+    <% end %>
+    """
+  end
+
+  defp secondary_visible_fields(nil), do: []
+
+  defp secondary_visible_fields(%{fields: fields}) when is_list(fields) do
+    Enum.reject(fields, &(&1["name"] in ["title", "status"]))
+  end
+
+  defp secondary_visible_fields(_), do: []
+
+  defp secondary_format_value(nil), do: "—"
+  defp secondary_format_value(""), do: "—"
+  defp secondary_format_value(v) when is_binary(v), do: v
+  defp secondary_format_value(v) when is_boolean(v), do: to_string(v)
+  defp secondary_format_value(v) when is_number(v), do: to_string(v)
+  defp secondary_format_value(v), do: inspect(v, limit: 50)
+
+  @doc """
+  Secondary-doc picker modal — reuses the reference-picker visual
+  treatment so users get a familiar interaction. Filter is client-side
+  string-contains against the candidates list bound on `open-secondary-picker`.
+  Selecting a row fires `select-secondary`; clicking the backdrop or the
+  ✕ fires `close-secondary-picker`.
+  """
+  attr :show_secondary_picker, :boolean, default: false
+  attr :secondary_search, :string, default: ""
+  attr :secondary_candidates, :list, default: []
+
+  def secondary_picker_modal(assigns) do
+    filtered =
+      if assigns.secondary_search == "" do
+        assigns.secondary_candidates
+      else
+        q = String.downcase(assigns.secondary_search)
+
+        Enum.filter(assigns.secondary_candidates, fn c ->
+          String.contains?(String.downcase(c.title || ""), q) or
+            String.contains?(String.downcase(c.id || ""), q)
+        end)
+      end
+
+    assigns = assign(assigns, :filtered, filtered)
+
+    ~H"""
+    <%= if @show_secondary_picker do %>
+      <div class="modal-backdrop" phx-click="close-secondary-picker" data-test-id="secondary-picker-modal">
+        <div class="modal-card" phx-click-away="close-secondary-picker" onclick="event.stopPropagation()">
+          <div class="modal-header">
+            <h3>Open in new pane</h3>
+            <button class="btn btn-ghost btn-sm" phx-click="close-secondary-picker" aria-label="Close">×</button>
+          </div>
+          <div class="modal-body">
+            <input
+              type="text"
+              class="form-input"
+              placeholder="Search documents…"
+              value={@secondary_search}
+              phx-keyup="secondary-search"
+              phx-debounce="150"
+              autofocus
+            />
+            <ul class="bp-secondary-candidates">
+              <%= for c <- @filtered do %>
+                <li
+                  class="bp-secondary-candidate"
+                  phx-click="select-secondary"
+                  phx-value-id={c.id}
+                  data-test-id={"secondary-candidate-#{c.id}"}
+                >
+                  <strong><%= c.title %></strong>
+                  <span class="bp-secondary-candidate-id"><%= c.id %></span>
+                </li>
+              <% end %>
+              <%= if @filtered == [] do %>
+                <li class="bp-secondary-empty">No matches.</li>
+              <% end %>
+            </ul>
+          </div>
+        </div>
+      </div>
+    <% end %>
+    """
   end
 end

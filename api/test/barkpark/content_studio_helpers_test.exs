@@ -160,4 +160,44 @@ defmodule Barkpark.ContentStudioHelpersTest do
       assert is_map(errs)
     end
   end
+
+  describe "clone_document/3 (Task barkpark-3yq E1)" do
+    test "creates a fresh draft with a new id and the source content" do
+      src = seed_post("c1", title: "Original", body: "body text")
+
+      assert {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+      assert copy.doc_id != src.doc_id
+      assert Content.draft?(copy.doc_id)
+      assert copy.title == "Original (copy)"
+      assert copy.content["body"] == "body text"
+      assert copy.status == "draft"
+    end
+
+    test "copy is independent of source — editing source does not affect copy" do
+      src = seed_post("c2", title: "Source", body: "S")
+      {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+
+      # Re-fetch the copy directly (avoid in-memory aliasing)
+      {:ok, fetched} = Content.get_document(copy.doc_id, @doc_type, @dataset)
+
+      # Mutate source's content map; copy must not reflect it.
+      _ = seed_post("c2", title: "Mutated", body: "M")
+
+      {:ok, refetched} = Content.get_document(fetched.doc_id, @doc_type, @dataset)
+      assert refetched.content["body"] == "S"
+      assert refetched.title == "Source (copy)"
+    end
+
+    test "untitled source clones to 'Untitled (copy)'" do
+      {:ok, src} =
+        Content.create_document(
+          @doc_type,
+          %{"_id" => "c3", "title" => nil, "content" => %{}},
+          @dataset
+        )
+
+      assert {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+      assert copy.title == "Untitled (copy)"
+    end
+  end
 end

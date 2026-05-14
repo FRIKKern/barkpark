@@ -83,6 +83,9 @@ defmodule Barkpark.Plugins.OnixEdit do
         visibility: Map.get(raw, "visibility", "private"),
         fields: Map.get(raw, "fields", []),
         groups: Map.get(raw, "groups", []),
+        desk_groups: Map.get(raw, "deskGroups", []),
+        initial_values: Map.get(raw, "initial_values", %{}),
+        cross_validations: Map.get(raw, "cross_validations", []),
         dataset: "production",
         actions: document_actions()
       }
