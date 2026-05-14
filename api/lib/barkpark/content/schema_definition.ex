@@ -13,6 +13,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :dataset, :string, default: "production"
     field :cors_origins, {:array, :string}, default: []
     field :actions, {:array, :map}, default: []
+    field :groups, {:array, :map}, default: []
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -27,7 +28,8 @@ defmodule Barkpark.Content.SchemaDefinition do
       :fields,
       :dataset,
       :cors_origins,
-      :actions
+      :actions,
+      :groups
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))

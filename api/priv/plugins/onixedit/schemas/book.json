@@ -3,6 +3,16 @@
   "title": "Book (ONIX 3.0)",
   "icon": "book",
   "visibility": "private",
+  "groups": [
+    { "name": "core",         "title": "Core" },
+    { "name": "descriptive",  "title": "Descriptive" },
+    { "name": "contributors", "title": "Contributors" },
+    { "name": "subjects",     "title": "Subjects" },
+    { "name": "marketing",    "title": "Marketing" },
+    { "name": "publishing",   "title": "Publishing" },
+    { "name": "supply",       "title": "Supply & Pricing" },
+    { "name": "status",       "title": "Status" }
+  ],
   "fields": [
     {
       "name": "notificationType",
@@ -14,7 +24,8 @@
         "element": "NotificationType",
         "codelistId": 1
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "core"
     },
     {
       "name": "deletionText",
@@ -22,7 +33,8 @@
       "type": "text",
       "onix": {
         "element": "DeletionText"
-      }
+      },
+      "group": "core"
     },
     {
       "name": "recordSourceType",
@@ -34,12 +46,14 @@
         "element": "RecordSourceType",
         "codelistId": 3
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "core"
     },
     {
       "name": "recordSourceIdentifier",
       "title": "Record source identifier",
       "type": "composite",
+      "group": "core",
       "fields": [
         {
           "name": "recordSourceIdentifierType",
@@ -67,13 +81,15 @@
       "type": "string",
       "onix": {
         "element": "RecordSourceName"
-      }
+      },
+      "group": "core"
     },
     {
       "name": "productIdentifiers",
       "title": "Product identifiers (ISBN, GTIN, DOI…)",
       "type": "arrayOf",
       "ordered": false,
+      "group": "core",
       "of": {
         "name": "productIdentifier",
         "type": "composite",
@@ -108,7 +124,8 @@
       "onix": {
         "codelistId": 141
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "core"
     },
     {
       "name": "productForm",
@@ -120,7 +137,8 @@
         "element": "ProductForm",
         "codelistId": 150
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "descriptive"
     },
     {
       "name": "productFormDetail",
@@ -131,13 +149,15 @@
       "onix": {
         "codelistId": 175
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "descriptive"
     },
     {
       "name": "productFormFeatures",
       "title": "Product form features",
       "type": "arrayOf",
       "ordered": false,
+      "group": "descriptive",
       "of": {
         "name": "productFormFeature",
         "type": "composite",
@@ -172,23 +192,27 @@
       "onix": {
         "codelistId": 80
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "descriptive"
     },
     {
       "name": "productFormDescription",
       "title": "Product form description",
-      "type": "text"
+      "type": "text",
+      "group": "descriptive"
     },
     {
       "name": "productPartCount",
       "title": "Number of items in pack",
-      "type": "string"
+      "type": "string",
+      "group": "descriptive"
     },
     {
       "name": "productParts",
       "title": "Product parts",
       "type": "arrayOf",
       "ordered": true,
+      "group": "descriptive",
       "of": {
         "name": "productPart",
         "type": "composite",
@@ -240,13 +264,15 @@
       "onix": {
         "codelistId": 144
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "descriptive"
     },
     {
       "name": "epubUsageConstraints",
       "title": "E-publication usage constraints",
       "type": "arrayOf",
       "ordered": false,
+      "group": "descriptive",
       "of": {
         "name": "epubUsageConstraint",
         "type": "composite",
@@ -299,6 +325,7 @@
       "title": "Extents (page count, duration, file size…)",
       "type": "arrayOf",
       "ordered": false,
+      "group": "subjects",
       "of": {
         "name": "extent",
         "type": "composite",
@@ -337,13 +364,15 @@
     {
       "name": "illustrationsNote",
       "title": "Illustrations note",
-      "type": "text"
+      "type": "text",
+      "group": "subjects"
     },
     {
       "name": "ancillaryContents",
       "title": "Ancillary content",
       "type": "arrayOf",
       "ordered": false,
+      "group": "subjects",
       "of": {
         "name": "ancillaryContent",
         "type": "composite",
@@ -374,6 +403,7 @@
       "title": "Product classifications (HS / Schedule B…)",
       "type": "arrayOf",
       "ordered": false,
+      "group": "descriptive",
       "of": {
         "name": "productClassification",
         "type": "composite",
@@ -404,6 +434,7 @@
       "title": "Title detail",
       "type": "arrayOf",
       "ordered": true,
+      "group": "descriptive",
       "of": {
         "name": "titleDetail",
         "type": "composite",
@@ -478,6 +509,11 @@
       "name": "thesis",
       "title": "Thesis",
       "type": "composite",
+      "group": "descriptive",
+      "visibleWhen": {
+        "field": "editionType",
+        "operator": "non_empty"
+      },
       "fields": [
         {
           "name": "thesisType",
@@ -508,6 +544,7 @@
       "title": "Contributors (WI2 fills in inner shape — author / editor / illustrator etc.)",
       "type": "arrayOf",
       "ordered": true,
+      "group": "contributors",
       "of": {
         "name": "contributor",
         "type": "composite",
@@ -518,17 +555,20 @@
     {
       "name": "contributorStatement",
       "title": "Contributor statement",
-      "type": "text"
+      "type": "text",
+      "group": "contributors"
     },
     {
       "name": "noContributor",
       "title": "No contributor (anonymous)",
-      "type": "boolean"
+      "type": "boolean",
+      "group": "contributors"
     },
     {
       "name": "conference",
       "title": "Conference",
       "type": "composite",
+      "group": "contributors",
       "fields": [
         {
           "name": "conferenceRole",
@@ -623,32 +663,38 @@
       "onix": {
         "codelistId": 21
       },
-      "issue_version": "73"
+      "issue_version": "73",
+      "group": "descriptive"
     },
     {
       "name": "editionNumber",
       "title": "Edition number",
-      "type": "string"
+      "type": "string",
+      "group": "descriptive"
     },
     {
       "name": "editionVersionNumber",
       "title": "Edition version number",
-      "type": "string"
+      "type": "string",
+      "group": "descriptive"
     },
     {
       "name": "editionStatement",
       "title": "Edition statement",
-      "type": "string"
+      "type": "string",
+      "group": "descriptive"
     },
     {
       "name": "noEdition",
       "title": "No edition (one-off)",
-      "type": "boolean"
+      "type": "boolean",
+      "group": "descriptive"
     },
     {
       "name": "religiousText",
       "title": "Religious text",
       "type": "composite",
+      "group": "descriptive",
       "fields": [
         {
           "name": "bibleContents",
@@ -707,6 +753,7 @@
       "title": "Languages",
       "type": "arrayOf",
       "ordered": true,
+      "group": "subjects",
       "of": {
         "name": "language",
         "type": "composite",
@@ -769,6 +816,7 @@
       "title": "Subjects",
       "type": "arrayOf",
       "ordered": true,
+      "group": "subjects",
       "of": {
         "name": "subject",
         "type": "composite",
@@ -811,6 +859,7 @@
       "title": "Thema subject categories (main + qualifiers; ONIX list 93)",
       "type": "arrayOf",
       "ordered": false,
+      "group": "subjects",
       "of": {
         "name": "themaCode",
         "type": "codelist",
@@ -828,6 +877,7 @@
       "title": "Audience codes",
       "type": "arrayOf",
       "ordered": false,
+      "group": "subjects",
       "of": {
         "name": "audienceCode",
         "type": "composite",
@@ -864,6 +914,11 @@
       "title": "Audience range (school grade, age, BISAC reading level…)",
       "type": "arrayOf",
       "ordered": false,
+      "group": "subjects",
+      "visibleWhen": {
+        "field": "audienceCodes",
+        "operator": "non_empty"
+      },
       "of": {
         "name": "audienceRange",
         "type": "composite",
@@ -898,12 +953,18 @@
     {
       "name": "audienceDescription",
       "title": "Audience description",
-      "type": "text"
+      "type": "text",
+      "group": "subjects",
+      "visibleWhen": {
+        "field": "audienceCodes",
+        "operator": "non_empty"
+      }
     },
     {
       "name": "complexity",
       "title": "Complexity",
       "type": "composite",
+      "group": "subjects",
       "fields": [
         {
           "name": "complexitySchemeIdentifier",
@@ -925,6 +986,7 @@
       "name": "collateralDetail",
       "title": "Collateral detail",
       "type": "composite",
+      "group": "marketing",
       "fields": [
         {
           "name": "textContents",
@@ -1203,6 +1265,7 @@
       "name": "contentDetail",
       "title": "Content detail (chapters, articles, etc.)",
       "type": "composite",
+      "group": "marketing",
       "fields": [
         {
           "name": "contentItems",
@@ -1278,6 +1341,7 @@
       "name": "publishingDetail",
       "title": "Publishing detail",
       "type": "composite",
+      "group": "publishing",
       "fields": [
         {
           "name": "imprint",
@@ -1578,6 +1642,7 @@
       "name": "relatedMaterial",
       "title": "Related material",
       "type": "composite",
+      "group": "marketing",
       "fields": [
         {
           "name": "relatedWorks",
@@ -1672,6 +1737,7 @@
       "title": "Product supply",
       "type": "arrayOf",
       "ordered": false,
+      "group": "supply",
       "of": {
         "name": "productSupply",
         "type": "composite",
@@ -2042,12 +2108,14 @@
     {
       "name": "bp_internal_note",
       "title": "Internal note",
-      "type": "text"
+      "type": "text",
+      "group": "status"
     },
     {
       "name": "bp_export_status",
       "title": "Export status (workflow)",
       "type": "composite",
+      "group": "status",
       "fields": [
         {
           "name": "state",
@@ -2127,7 +2195,8 @@
     {
       "name": "bp_last_exported_at",
       "title": "Last ONIX export at",
-      "type": "datetime"
+      "type": "datetime",
+      "group": "status"
     }
   ],
   "validations": []
