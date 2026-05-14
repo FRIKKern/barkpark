@@ -10,12 +10,13 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
   ## Single-select contract
 
-  Unlike the legacy `ThemaTreePicker` (multi-select via MapSet), this
-  component is **single-select** — its purpose is to slot into the same
-  surface as `CodelistField`'s `<select>`. The picked value rides home via
-  a hidden `<input type="hidden" name={@input_name} value={@selected}>`
-  inside the editor form; clicks on tree rows update that hidden input
-  and the autosave path picks it up like any other form change.
+  This component is **single-select** — its purpose is to slot into the
+  same surface as `CodelistField`'s `<select>`. (An earlier ThemaTreePicker
+  prototype was multi-select via MapSet; it was removed with the plugin
+  LVs in Goal `barkpark-zdy`.) The picked value rides home via a hidden
+  `<input type="hidden" name={@input_name} value={@selected}>` inside
+  the editor form; clicks on tree rows update that hidden input and
+  the autosave path picks it up like any other form change.
 
   Multi-value scenarios (a publisher wanting `themaSubjectCategory` as
   `arrayOf(codelist)`) belong upstream — `ArrayField` is responsible for

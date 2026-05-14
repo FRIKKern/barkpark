@@ -57,6 +57,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
               <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
                 <%= title_for(sub) %>
               </label>
+              <%= if onix_el = onix_element(sub) do %>
+                <span class="bp-onix-hint" data-onix-element>
+                  ONIX: <code><%= onix_el %></code>
+                </span>
+              <% end %>
               <%= render_subfield(assigns, sub) %>
               <%= for err <- Map.get(@errors, sub.name, []) do %>
                 <span class="error" data-error-for={sub.name}><%= err %></span>
@@ -74,6 +79,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
               <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
                 <%= title_for(sub) %>
               </label>
+              <%= if onix_el = onix_element(sub) do %>
+                <span class="bp-onix-hint" data-onix-element>
+                  ONIX: <code><%= onix_el %></code>
+                </span>
+              <% end %>
               <%= render_subfield(assigns, sub) %>
               <%= for err <- Map.get(@errors, sub.name, []) do %>
                 <span class="error" data-error-for={sub.name}><%= err %></span>
@@ -206,6 +216,36 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     """
   end
 
+  defp leaf_input(%{field: %{type: "string", name: name}} = assigns) do
+    if numeric_name?(name) do
+      ~H"""
+      <input
+        type="text"
+        inputmode="numeric"
+        pattern="-?[0-9]+(\.[0-9]+)?"
+        class="bp-input bp-input-numeric"
+        id={@input_id}
+        name={@input_name}
+        value={to_string(@value || "")}
+        phx-change={@on_change}
+        disabled={@readonly}
+      />
+      """
+    else
+      ~H"""
+      <input
+        type="text"
+        class="bp-input"
+        id={@input_id}
+        name={@input_name}
+        value={to_string(@value || "")}
+        phx-change={@on_change}
+        disabled={@readonly}
+      />
+      """
+    end
+  end
+
   defp leaf_input(assigns) do
     ~H"""
     <input
@@ -219,6 +259,24 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     />
     """
   end
+
+  # Name-based heuristic: ONIX types numeric fields as `string` (e.g.
+  # `priceAmount`, `editionNumber`, `prizeYear`, ~30 fields). Renderer
+  # detects them by name suffix or exact match and emits `inputmode="numeric"`
+  # + a `.bp-input-numeric` class hook so mobile keyboards switch to digits
+  # and CSS can render the input visually distinct (monospace, right-aligned).
+  # The pattern is a soft hint enforced on submit, not blur — won't block
+  # typing. This is a renderer-only heuristic: schema does NOT declare a
+  # `numeric:` flag; deleting this helper fully reverts behaviour.
+  @numeric_suffixes ~w(Count Number Year Amount Percent)
+  @numeric_names ~w(quantity weeks days pageRun extentValue priceAmount taxRate)
+
+  defp numeric_name?(name) when is_binary(name) do
+    name in @numeric_names or
+      Enum.any?(@numeric_suffixes, fn suf -> String.ends_with?(name, suf) end)
+  end
+
+  defp numeric_name?(_), do: false
 
   defp truthy?(true), do: true
   defp truthy?("true"), do: true
@@ -310,6 +368,14 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   defp title_for(%{title: t}) when is_binary(t) and t != "", do: t
   defp title_for(%{name: n}) when is_binary(n), do: humanize(n)
   defp title_for(_), do: ""
+
+  # Extracts the ONIX element name from a sub-field. Handles atom-keyed
+  # `%Field{}` structs (post-adapter, the normal v2 path) and string-keyed
+  # raw maps (book.json passthrough). Returns nil when no onix.element is
+  # declared so the caller can render conditionally.
+  defp onix_element(%{onix: %{} = o}), do: Map.get(o, "element") || Map.get(o, :element)
+  defp onix_element(%{"onix" => %{} = o}), do: Map.get(o, "element") || Map.get(o, :element)
+  defp onix_element(_), do: nil
 
   defp humanize(name) do
     name

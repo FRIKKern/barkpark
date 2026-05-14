@@ -5,10 +5,12 @@ defmodule BarkparkWeb.OnixeditExportController do
       GET /v1/plugins/onixedit/export/:dataset/:id.onix
 
   Mounted under the same `:require_admin` pipeline as `/v1/schemas/*`. Loads
-  the document by id from the given dataset (preferring the latest draft over
-  the published variant — same selection precedence as the BookEditor live
-  view), enforces `_type == "book"`, then delegates to
-  `Barkpark.Plugins.OnixEdit.Export.to_iodata/1` for the XSD-gated render.
+  the document by id from the given dataset (preferring the latest draft
+  over the published variant — same selection precedence used by
+  `Plugins.OnixEdit.Actions.publish_to_bokbasen/3` and, historically, by
+  the removed BookEditor LV), enforces `_type == "book"`, then delegates
+  to `Barkpark.Plugins.OnixEdit.Export.to_iodata/1` for the XSD-gated
+  render.
   """
 
   use BarkparkWeb, :controller

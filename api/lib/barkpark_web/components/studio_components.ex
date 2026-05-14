@@ -119,14 +119,16 @@ defmodule BarkparkWeb.StudioComponents do
 
   @doc """
   Passive Studio sidebar — renders the top-level structure tree as plain
-  anchor links. Used by plugin LiveViews (BookView, BookEditor) that
-  render outside StudioLive's interactive `<.pane_layout>` so the user
-  retains a way to navigate back into Studio.
+  anchor links. Originally built for plugin LiveViews (the now-removed
+  BookView / BookEditor in Goal `barkpark-zdy`) that rendered outside
+  StudioLive's interactive `<.pane_layout>` so the user retained a way
+  to navigate back into Studio. Kept available for any future
+  out-of-StudioLive surface with the same need.
 
-  Intentionally has NO `phx-click` — events would otherwise route to the
-  enclosing LiveView (BookView etc.) which has no matching handler. Each
-  item is an `<a href>` that triggers a normal LiveView navigation back
-  into StudioLive.
+  Intentionally has NO `phx-click` — events would otherwise route to an
+  enclosing LiveView with no matching handler. Each item is an
+  `<a href>` that triggers a normal LiveView navigation back into
+  StudioLive.
 
   Attributes:
     * `:dataset`       — (required) string, current dataset name
@@ -184,8 +186,9 @@ defmodule BarkparkWeb.StudioComponents do
   Sanity-style document chrome header for the editor pane. Emits the
   legacy `<div class="pane-header editor-header">` markup so it can
   replace StudioLive's hand-rolled header at studio_live.ex:1107
-  byte-identically and also be reused by plugin LiveViews
-  (BookView, BookEditor). The corresponding CSS lives in
+  byte-identically. The component was originally also consumed by the
+  plugin BookView / BookEditor LVs (removed in Goal `barkpark-zdy`);
+  StudioLive is the sole caller today. The corresponding CSS lives in
   `root.html.heex` (hoisted from StudioLive's inline `<style>`).
 
   Attributes:
@@ -208,10 +211,10 @@ defmodule BarkparkWeb.StudioComponents do
                        StudioLive (no rendered output) so byte-identity
                        holds.
     * `:actions`     — top-right action buttons (History/Delete/
-                       Publish in StudioLive; Bokbasen/ONIX export in
-                       BookEditor; Open-in-editor in BookView). Slot
-                       contents render verbatim — preserve any
-                       `data-test-id` attributes.
+                       Publish in StudioLive; previously Bokbasen/
+                       ONIX export and Open-in-editor in the removed
+                       plugin LVs). Slot contents render verbatim —
+                       preserve any `data-test-id` attributes.
   """
   attr :dataset, :string, required: true
   attr :title, :string, required: true
@@ -268,6 +271,7 @@ defmodule BarkparkWeb.StudioComponents do
   attr :type, :string, default: nil
   attr :required, :boolean, default: false
   attr :errors, :list, default: []
+  attr :onix_element, :string, default: nil
   slot :inner_block, required: true
 
   def editor_field(assigns) do
@@ -278,6 +282,11 @@ defmodule BarkparkWeb.StudioComponents do
         <%= if @required do %><span class="field-required">*</span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label>
+      <%= if @onix_element do %>
+        <span class="bp-onix-hint" data-onix-element>
+          ONIX: <code><%= @onix_element %></code>
+        </span>
+      <% end %>
       <%= render_slot(@inner_block) %>
       <%= if @errors != [] do %>
         <div class="field-errors"><%= Enum.join(@errors, ", ") %></div>
@@ -285,6 +294,14 @@ defmodule BarkparkWeb.StudioComponents do
     </div>
     """
   end
+
+  @doc false
+  # Extract the ONIX element name from a field. Handles both atom-keyed
+  # `%Field{}` structs (post-adapter) and string-keyed raw maps (book.json
+  # passthrough). Returns the element string, or nil if not present.
+  def onix_element(%{onix: %{} = o}), do: Map.get(o, "element") || Map.get(o, :element)
+  def onix_element(%{"onix" => %{} = o}), do: Map.get(o, "element") || Map.get(o, :element)
+  def onix_element(_), do: nil
 
   @doc """
   Centered placeholder for the editor pane when no document is loaded
@@ -707,6 +724,7 @@ defmodule BarkparkWeb.StudioComponents do
       type={@field["type"]}
       required={rules["required"] == true}
       errors={Map.get(@validation_errors, field_name, [])}
+      onix_element={onix_element(@field)}
     >
       <%= if PluginAdapter.v2?(@field) do %>
         <%= PluginAdapter.render(@parent_assigns, @field) %>
@@ -1141,10 +1159,11 @@ defmodule BarkparkWeb.StudioComponents do
   `<.pane_column>` API change tracked in
   `docs/superpowers/plans/2026-04-14-unified-pane-components.md`.
 
-  Plugin LVs (BookView, BookEditor) do NOT consume this component —
-  their action sets diverge enough (Bokbasen pills, ONIX export, custom
-  tab nav) that wrapping forces endless slots. They call
-  `<.document_header>` directly and stay decoupled.
+  Historical note: the plugin BookView / BookEditor LVs (removed in
+  Goal `barkpark-zdy`) deliberately did NOT consume this component —
+  their action sets diverged enough (Bokbasen pills, ONIX export,
+  custom tab nav) that wrapping forced endless slots. They called
+  `<.document_header>` directly. StudioLive is the only consumer today.
 
   Events bubble to StudioLive: save, autosave, show-history, delete-doc,
   publish, unpublish, plus the studio_field_renderer phx-click events

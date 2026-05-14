@@ -461,17 +461,17 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   #
   # Every Bokbasen state transition flows through here. `Status.write/2`
   # persists the composite and emits the legacy `{:bokbasen_status_update, …}`
-  # broadcast on `bokbasen:document:<doc_id>` (consumed by BookEditor /
-  # AdminLive). We then emit the plugin-agnostic
-  # `{:external_sync_status, …}` broadcast on
-  # `external_sync:bokbasen:<doc_id>` so any consumer that uses the new
-  # `ExternalSync` contract (e.g. the upcoming `ExternalSyncPill` mounted
-  # by StudioLive) refreshes without knowing about Bokbasen specifically.
+  # broadcast on `bokbasen:document:<doc_id>` (historically consumed by
+  # the now-removed BookEditor LV, and still by AdminLive). We then emit
+  # the plugin-agnostic `{:external_sync_status, …}` broadcast on
+  # `external_sync:bokbasen:<doc_id>` so any consumer that uses the
+  # `ExternalSync` contract (e.g. the `ExternalSyncPill` mounted by
+  # StudioLive) refreshes without knowing about Bokbasen specifically.
   #
-  # Both topics co-exist intentionally for the cross-over period. Step 7
-  # of the OnixEdit-native migration drops the legacy consumers when
-  # `BookEditor` is deleted; at that point `Status.write/2` can stop
-  # broadcasting too.
+  # Both topics co-exist for the remaining AdminLive consumer. Once
+  # AdminLive migrates to the `ExternalSync` contract, `Status.write/2`
+  # can stop emitting the legacy topic. (BookEditor was already deleted
+  # in Goal `barkpark-zdy`.)
   defp write_status(%Document{doc_id: doc_id} = doc, %{} = patch) do
     updated = Status.write(doc, patch)
     new_state = Map.get(patch, "state") || Map.get(patch, :state)

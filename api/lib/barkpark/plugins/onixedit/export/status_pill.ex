@@ -2,10 +2,11 @@ defmodule Barkpark.Plugins.OnixEdit.Export.StatusPill do
   @moduledoc """
   Shared color/label mapping for Bokbasen export status — 5 buckets over 9 states.
 
-  Phase 8 WI5 carryover from Phase 7 WI5 (`BookEditor`) and Phase 7 WI6
-  (`BokbasenLive`), each of which carried its own copy of the same mapping.
-  Both sites now route through `color_class/1` and `label/1` so the pill
-  palette is defined in exactly one place.
+  Phase 8 WI5 consolidation. Two earlier call sites carried their own
+  copies of the same mapping — Phase 7 WI5's plugin `BookEditor` LV
+  (removed in Goal `barkpark-zdy`) and Phase 7 WI6's `BokbasenLive`.
+  All remaining call sites now route through `color_class/1` and
+  `label/1` so the pill palette is defined in exactly one place.
 
   ## Buckets
 

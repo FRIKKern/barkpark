@@ -415,11 +415,13 @@
     }
     .pane-column--collapsed:hover .pane-column-collapsed-label { color: var(--fg); }
 
-    /* ── Editor pane (used by StudioLive + plugin LVs via document_header /
+    /* ── Editor pane (used by StudioLive via document_header /
        editor_field / empty_editor in BarkparkWeb.StudioComponents).
-       Hoisted from StudioLive's inline <style> so plugin LiveViews
-       (BookView, BookEditor) render correctly on cold-load direct
-       navigation without first visiting StudioLive. ──────────────────── */
+       Originally hoisted from StudioLive's inline <style> so the now-
+       removed plugin LiveViews (BookView, BookEditor — deleted in
+       Goal `barkpark-zdy`) could render on cold-load direct navigation
+       without first visiting StudioLive. Kept here as the canonical
+       location for the editor-pane palette. ──────────────────── */
     .editor-panel { flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
     .editor-header { justify-content: space-between; background: var(--bg); }
     .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
@@ -645,6 +647,25 @@
       font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.04em; color: var(--fg-dim);
     }
+    /* ONIX 3.0 element hint — small muted helper under the field label. Surfaces
+       the `onix.element` declared on the schema field so editors know which
+       ONIX XML element this value maps to. Used by `editor_field/1` (v1 + top-
+       level v2 fields via studio_components) and by composite sub-fields. */
+    .bp-onix-hint {
+      display: block;
+      font-size: 10px;
+      color: var(--fg-dim);
+      margin-bottom: 4px;
+      letter-spacing: 0.02em;
+    }
+    .bp-onix-hint code {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--fg-muted);
+      background: var(--bg-card);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
 
     .bp-input {
       width: 100%; height: 32px; padding: 0 10px;
@@ -669,9 +690,107 @@
     .bp-input[type="datetime-local"], .bp-input[type="date"],
     .bp-input[type="time"], .bp-input[type="color"] { color-scheme: dark; }
 
+    /* Numeric-string fields (ONIX prices, years, counts — ~30 fields typed
+       as string). The renderer adds .bp-input-numeric + inputmode="numeric"
+       by name heuristic; CSS turns it into a monospace, right-aligned input
+       so the affordance is visible without an extra DOM hint. */
+    .bp-input-numeric, .form-input.bp-input-numeric {
+      font-family: var(--font-mono);
+      text-align: right;
+      max-width: 200px;
+    }
+
     .bp-codelist-empty {
       background: var(--bg-card); color: var(--fg-dim);
       font-style: italic; opacity: 0.75;
+    }
+
+    /* ── Combobox (G5 datalist path) ──────────────────────────────────────
+       Flat codelists >100 entries render as <input list=…> rather than a
+       giant <select>. Selector targets the data-attribute so we don't have
+       to fight the .bp-input-codelist chevron rule above. */
+    .bp-input-codelist[data-codelist-combobox="true"] {
+      background-image: none;
+      padding-right: 10px;
+      background: linear-gradient(to bottom, var(--bg-card), var(--bg));
+      border-color: var(--border);
+    }
+    .bp-input-codelist[data-codelist-combobox="true"]:focus {
+      background: var(--bg-card);
+    }
+
+    /* ── Tree codelist picker (G4 hierarchical path) ──────────────────────
+       Hierarchical codelists >100 raw entries render via TreeCodelistField.
+       Indent depth is supplied inline by the LiveComponent (style="padding-
+       left: Npx") so no .bp-tree-indent-N rules are needed. */
+    .bp-tree-codelist {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .bp-tree-toolbar { display: flex; align-items: center; gap: 6px; }
+    .bp-tree-search { flex: 1 1 auto; }
+    .bp-tree-search-clear {
+      flex: 0 0 auto; height: 32px; padding: 0 10px;
+      background: transparent; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--fg-muted);
+      font-size: 12px; font-family: inherit; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .bp-tree-search-clear:hover {
+      background: var(--bg-accent); color: var(--fg); border-color: var(--fg-muted);
+    }
+    .bp-tree-list {
+      list-style: none; margin: 0; padding: 6px;
+      background: var(--bg); border: 1px solid var(--border-muted);
+      border-radius: var(--radius-sm);
+      max-height: 360px; overflow-y: auto;
+    }
+    .bp-tree-row {
+      display: flex; align-items: center; gap: 4px;
+      padding: 2px 4px; border-radius: 4px;
+      font-size: 13px; color: var(--fg-muted);
+      user-select: none;
+      transition: background 0.08s, color 0.08s;
+    }
+    .bp-tree-row:hover { background: var(--bg-muted); color: var(--fg); }
+    .bp-tree-row-selected {
+      background: hsl(217.2 91.2% 59.8% / 0.15);
+      color: var(--fg);
+    }
+    .bp-tree-row-matched .bp-tree-label { color: var(--fg); font-weight: 500; }
+    .bp-tree-toggle {
+      flex: 0 0 auto;
+      appearance: none; background: transparent; border: none;
+      color: var(--fg-dim); cursor: pointer; padding: 0;
+      width: 18px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 9px; line-height: 1;
+      transition: color 0.08s;
+    }
+    .bp-tree-toggle:hover { color: var(--fg); }
+    .bp-tree-toggle-leaf { visibility: hidden; cursor: default; }
+    .bp-tree-row-button {
+      flex: 1 1 auto; min-width: 0;
+      display: flex; align-items: center; gap: 8px;
+      appearance: none; background: transparent; border: none;
+      padding: 2px 4px; color: inherit; font: inherit; text-align: left;
+      cursor: pointer; border-radius: 3px;
+    }
+    .bp-tree-row-button:disabled { cursor: not-allowed; opacity: 0.6; }
+    .bp-tree-row-button-selected { font-weight: 500; }
+    .bp-tree-code {
+      flex: 0 0 auto;
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--fg-dim);
+    }
+    .bp-tree-row-selected .bp-tree-code,
+    .bp-tree-row-button-selected .bp-tree-code { color: var(--primary); }
+    .bp-tree-label {
+      flex: 1 1 auto; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bp-tree-empty {
+      padding: 20px; text-align: center;
+      color: var(--fg-dim); font-style: italic; font-size: 12px;
     }
 
     /* Array layout — rows stack with body taking the bulk, small actions on the right. */

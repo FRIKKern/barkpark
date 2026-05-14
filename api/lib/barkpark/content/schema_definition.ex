@@ -196,9 +196,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     type = Map.get(f, "type")
 
     with :ok <- validate_field_name(name, plugin),
-         {:ok, base} <- parse_field_type(type, f, plugin) do
+         {:ok, %Field{} = base} <- parse_field_type(type, f, plugin) do
       {:ok,
-       %Field{
+       %{
          base
          | name: name,
            type: type,

@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Bokbasen.Replay do
         lines = binary |> String.split("\n") |> Enum.take(20)
 
         Mix.shell().info("==> dry-run XML render (first 20 lines):")
-        Enum.each(lines, &Mix.shell().info/1)
+        Enum.each(lines, fn msg -> Mix.shell().info(msg) end)
 
         Mix.shell().info("")
         Mix.shell().info("==> summary")

@@ -96,8 +96,9 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
 
   # ── doc resolution ────────────────────────────────────────────────────────
 
-  # Prefer draft over published, matching the BookEditor selection precedence
-  # (and OnixeditExportController). Both branches return `_type == "book"`
+  # Prefer draft over published, matching the OnixeditExportController
+  # selection precedence (the historical BookEditor LV used the same
+  # precedence before its removal). Both branches return `_type == "book"`
   # by virtue of the document carrying its own type; callers may still
   # surface a non-book error if they want stricter contracts.
   defp load_book(doc_id, dataset) do
