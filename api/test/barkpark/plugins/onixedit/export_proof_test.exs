@@ -7,22 +7,14 @@ defmodule Barkpark.Plugins.OnixEdit.ExportProofTest do
   @proof_path Path.expand("../../../../../proof/onix-sample.xml", __DIR__)
   @fixture_path Path.expand("../../../fixtures/onix/full-book.json", __DIR__)
 
-  # `<SentDateTime>` is stamped with `DateTime.utc_now/0` on every export, so
-  # we normalize it to a fixed token before byte-for-byte comparison. Every
-  # other byte still gates drift between the live exporter and the committed
-  # proof artifact.
+  # `<SentDateTime>` is stamped with `DateTime.utc_now/0` by default. The
+  # proof regen mix task (`mix onix.export_proof`) pins it to a fixed
+  # timestamp so the committed artifact is byte-stable; this normalization
+  # keeps the assertion robust if someone runs the exporter live without
+  # `sent_at`, or if a future regen uses a different pinned date.
   @sent_dt_pattern ~r{<SentDateTime>[^<]*</SentDateTime>}
   @sent_dt_token "<SentDateTime>NORMALIZED</SentDateTime>"
 
-  # Tagged :flaky in Goal barkpark-mgu. Two consecutive `mix onix.export_proof`
-  # regens of the proof artifact produced different sha256 hashes, indicating
-  # non-determinism in the exporter — likely Map.keys/1 ordering somewhere in
-  # the v2 composite walk, surfaced after the codelist registry seed Task
-  # populates labels at boot. The XSD validation test below still passes
-  # cleanly; the export output is correct ONIX 3.0, just not byte-stable.
-  # Investigate determinism source separately — track via a follow-up Goal.
-  # Default `mix test` excludes :flaky; run with `mix test --include flaky`.
-  @tag :flaky
   test "Export.to_string/1 of full-book.json matches proof/onix-sample.xml byte-for-byte (modulo SentDateTime)" do
     book = @fixture_path |> File.read!() |> Jason.decode!()
     assert {:ok, xml} = Export.to_string(book)

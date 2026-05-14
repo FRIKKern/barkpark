@@ -60,6 +60,30 @@ defmodule Barkpark.Content.Codelists do
   @alias_cache_key __MODULE__.AliasCache
   @alias_cache_ttl_ms 60_000
 
+  # Friendly codelist names that declare an `onix.codelistId` value which
+  # is NOT a pointer to an EDItEUR ONIX codelist — it's a value from ONIX
+  # list 27 (SubjectSchemeIdentifier) naming an *external* scheme. The
+  # alias resolver must NOT rewrite these to `onixedit:list_<N>` (which
+  # would resolve to an unrelated ONIX list, e.g. value 93 → "Supplier
+  # role"). Instead the friendly name is the canonical key — Thema is
+  # seeded directly under `onixedit:thema` (see
+  # `Barkpark.Codelists.EDItEUR.seed_thema/1`).
+  #
+  # The qualifier names below are listed even though they aren't yet
+  # referenced from `book.json` — they're the documented Thema qualifier
+  # lists (place, language, time-period, educational-purpose,
+  # interest-age, style) and adding them up front keeps the allowlist
+  # complete the moment any future plugin schema declares them.
+  @external_scheme_friendlies ~w(
+    onixedit:thema
+    onixedit:thema_place_qualifier
+    onixedit:thema_language_qualifier
+    onixedit:thema_time_period_qualifier
+    onixedit:thema_educational_purpose_qualifier
+    onixedit:thema_interest_age_qualifier
+    onixedit:thema_style_qualifier
+  )
+
   @typedoc """
   Input value tree node accepted by `register/3`.
 
@@ -512,6 +536,11 @@ defmodule Barkpark.Content.Codelists do
 
     with true <- is_binary(friendly),
          true <- String.starts_with?(friendly, plugin_name <> ":"),
+         # External-scheme allowlist (e.g. Thema): the field's
+         # `onix.codelistId` is an ONIX list 27 value, NOT a pointer
+         # to an EDItEUR codelist. Skip alias recording so the direct
+         # lookup hits the friendly-keyed registry row.
+         false <- friendly in @external_scheme_friendlies,
          %{} = onix_map <- (is_map(onix) && onix) || nil,
          num when is_integer(num) <- fetch_either(onix_map, "codelistId", :codelistId) do
       numeric_list_id = "#{plugin_name}:list_#{num}"

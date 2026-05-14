@@ -64,6 +64,26 @@ defmodule Barkpark.Codelists.EDItEUR do
   @bundled_issue "73"
   @bundled_filename "onix-issue-73.xml"
 
+  # ── Bundled Thema fixture (Task barkpark-ufw) ───────────────────────────
+  #
+  # `seed_thema/1` reads the checked-in EDItEUR Thema JSON snapshot at
+  # `priv/codelists/thema-1.6/thema-v1.6-en.json` and registers it as a
+  # single codelist `onixedit:thema` issue `"1.6"`. Driven by
+  # `Barkpark.Application` at boot and by `priv/repo/seeds.exs` on
+  # `mix ecto.reset` — sibling to `seed_bundled/1`. Idempotent on
+  # `(plugin_name, list_id, issue)`.
+  #
+  # Thema is published *separately* from the ONIX codelist bundle (the
+  # numeric `list_93` in ONIX is "Supplier role", NOT Thema — see
+  # `priv/codelists/thema-1.6/README.md` for the full diagnosis). The
+  # friendly key `onixedit:thema` is exempted from the alias resolver's
+  # numeric rewrite in `Barkpark.Content.Codelists.@external_scheme_friendlies`.
+
+  @thema_issue "1.6"
+  @thema_list_id "onixedit:thema"
+  @thema_bundled_path "thema-1.6/thema-v1.6-en.json"
+  @thema_default_language "eng"
+
   @typedoc "One parsed codelist, as returned by `parse_xml/1`."
   @type parsed_list :: %{
           list_id: String.t(),
@@ -237,6 +257,90 @@ defmodule Barkpark.Codelists.EDItEUR do
   def seed_from_json(opts) when is_list(opts), do: seed_bundled(opts)
 
   @doc """
+  Seed the codelist registry from the EDItEUR Thema JSON snapshot bundled
+  at `api/priv/codelists/thema-1.6/thema-v1.6-en.json`.
+
+  Sibling to `seed_bundled/1`: same boot-time entry-point contract,
+  same idempotent `(plugin_name, list_id, issue)` upsert via
+  `Codelists.register/3`, same `{:ok, count} | {:ok, :no_snapshot} | {:error, reason}`
+  return shape.
+
+  Thema is NOT in the bundled ONIX codelist XML — EDItEUR publishes it
+  separately. The numeric ONIX list 93 is "Supplier role", unrelated to
+  Thema; the value 93 next to Thema in book.json is the
+  `SubjectSchemeIdentifier` value inside ONIX list 27, not a pointer to
+  an ONIX codelist. See `Barkpark.Content.Codelists.@external_scheme_friendlies`
+  for the resolver allowlist that prevents `onixedit:thema` from being
+  mis-aliased to `onixedit:list_93`.
+
+  ## Options
+
+    * `:plugin` — plugin discriminator. Defaults to `"onixedit"`.
+    * `:issue` — overrides the snapshot's pinned issue (`"1.6"`).
+
+  Never raises.
+  """
+  @spec seed_thema(keyword()) ::
+          {:ok, non_neg_integer()} | {:ok, :no_snapshot} | {:error, term()}
+  def seed_thema(opts \\ []) do
+    plugin = Keyword.get(opts, :plugin, @plugin_default)
+    issue = Keyword.get(opts, :issue, @thema_issue)
+
+    case thema_bundled_path() do
+      {:error, :not_found} ->
+        Logger.info(
+          "Codelists.EDItEUR: bundled Thema snapshot #{@thema_bundled_path} not found on disk — skipping seed"
+        )
+
+        {:ok, :no_snapshot}
+
+      {:ok, path} ->
+        Logger.info(
+          "Codelists.EDItEUR: seeding bundled Thema snapshot #{path} (plugin=#{plugin}, issue=#{issue})"
+        )
+
+        with {:ok, raw} <- File.read(path),
+             {:ok, parsed} <- Jason.decode(raw),
+             {:ok, list} <- parse_thema_json(parsed),
+             attrs = %{issue: to_string(issue), name: list.name, values: list.values},
+             {:ok, _codelist} <- Codelists.register(plugin, @thema_list_id, attrs) do
+          Logger.info(
+            "Codelists.EDItEUR: seeded Thema codelist (plugin=#{plugin}, list_id=#{@thema_list_id}, issue=#{issue})"
+          )
+
+          {:ok, 1}
+        else
+          {:error, reason} = err ->
+            Logger.error("Codelists.EDItEUR: Thema seed failed — #{inspect(reason)}")
+            err
+        end
+    end
+  rescue
+    e ->
+      Logger.error("Codelists.EDItEUR: Thema seed raised — #{Exception.message(e)}")
+      {:error, {:raised, Exception.message(e)}}
+  end
+
+  @doc """
+  Locate the bundled Thema JSON snapshot on disk via `:code.priv_dir/1`.
+
+  Returns `{:ok, abs_path}` when the file exists, `{:error, :not_found}`
+  otherwise.
+  """
+  @spec thema_bundled_path() :: {:ok, Path.t()} | {:error, :not_found}
+  def thema_bundled_path do
+    case :code.priv_dir(:barkpark) do
+      {:error, _} = err ->
+        Logger.warning("Codelists.EDItEUR: :code.priv_dir(:barkpark) failed — #{inspect(err)}")
+        {:error, :not_found}
+
+      priv when is_list(priv) ->
+        path = Path.join([List.to_string(priv), "codelists", @thema_bundled_path])
+        if File.exists?(path), do: {:ok, path}, else: {:error, :not_found}
+    end
+  end
+
+  @doc """
   Locate the bundled XML snapshot on disk via `:code.priv_dir/1`.
 
   Returns `{:ok, abs_path}` when the file exists, `{:error, :not_found}`
@@ -278,6 +382,71 @@ defmodule Barkpark.Codelists.EDItEUR do
         lookup_settings_path(plugin)
     end
   end
+
+  # ── Internals — Thema JSON ──────────────────────────────────────────────
+
+  # Reshape EDItEUR Thema JSON into one `parsed_list` shape so the existing
+  # `build_tree/1` can assemble the hierarchy. JSON entries land flat with
+  # a `CodeParent` string; the builder turns that into a nested
+  # `:children`-tree the registry can recurse into.
+  defp parse_thema_json(%{"CodeList" => %{"ThemaCodes" => %{"Code" => entries}} = code_list})
+       when is_list(entries) do
+    list_name = Map.get(code_list, "CodeListDescription") |> trim_or_nil()
+
+    flat =
+      entries
+      |> Enum.with_index()
+      |> Enum.map(fn {entry, position} -> parse_thema_entry(entry, position) end)
+      |> Enum.reject(&is_nil/1)
+
+    {:ok,
+     %{
+       list_id: @thema_list_id,
+       list_number: "214",
+       issue: @thema_issue,
+       name: list_name || "Thema Subject Codes",
+       values: build_tree(flat)
+     }}
+  end
+
+  defp parse_thema_json(_), do: {:error, :unexpected_thema_shape}
+
+  defp parse_thema_entry(entry, position) when is_map(entry) do
+    code = entry |> Map.get("CodeValue") |> to_thema_string() |> trim_or_nil()
+
+    if is_nil(code) do
+      nil
+    else
+      # `CodeParent` is normally a string ("AB", "FV"), but the qualifier
+      # subtrees use integer roots ("1", "2", "3", "4", "5", "6") that
+      # come over the wire as JSON numbers. Coerce so children of those
+      # roots resolve correctly during tree assembly.
+      parent_code = entry |> Map.get("CodeParent") |> to_thema_string() |> trim_or_nil()
+      label = entry |> Map.get("CodeDescription") |> to_thema_string() |> trim_or_nil()
+      notes = entry |> Map.get("CodeNotes") |> to_thema_string() |> trim_or_nil()
+
+      translations =
+        case label do
+          nil -> []
+          _ -> [%{language: @thema_default_language, label: label, description: notes}]
+        end
+
+      %{
+        code: code,
+        parent_code: parent_code,
+        position: position,
+        translations: translations
+      }
+    end
+  end
+
+  defp parse_thema_entry(_, _), do: nil
+
+  defp to_thema_string(nil), do: nil
+  defp to_thema_string(v) when is_binary(v), do: v
+  defp to_thema_string(v) when is_integer(v), do: Integer.to_string(v)
+  defp to_thema_string(v) when is_float(v), do: Float.to_string(v)
+  defp to_thema_string(_), do: nil
 
   # ── Internals — tree assembly ───────────────────────────────────────────
 

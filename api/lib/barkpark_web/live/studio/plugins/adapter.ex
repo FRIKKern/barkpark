@@ -137,10 +137,44 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           _ -> "core"
         end
 
+      # Composite / arrayOf top-level fields don't carry `codelistId` themselves;
+      # walk the subtree and inherit the plugin prefix from the first nested
+      # codelist. Without this, nested codelists default to `"core"` and look
+      # up `core:<plugin>:<list>` → MISS → "(no codelist registered)" placeholder.
+      raw_field["type"] in ["composite", "arrayOf"] ->
+        case find_nested_codelist_plugin(raw_field) do
+          nil -> "core"
+          plugin -> plugin
+        end
+
       true ->
         "core"
     end
   end
+
+  # Walks composite / arrayOf subtrees for the first nested codelist's plugin
+  # prefix. Returns `nil` when no nested codelist is found (the caller falls
+  # back to `"core"`). For composites with codelists from multiple plugins
+  # (rare polymorphic case) the first encountered prefix wins — documented
+  # limitation.
+  defp find_nested_codelist_plugin(%{"type" => "composite", "fields" => fields})
+       when is_list(fields) do
+    Enum.find_value(fields, &find_nested_codelist_plugin/1)
+  end
+
+  defp find_nested_codelist_plugin(%{"type" => "arrayOf", "of" => of}) when is_map(of) do
+    find_nested_codelist_plugin(of)
+  end
+
+  defp find_nested_codelist_plugin(%{"type" => "codelist", "codelistId" => id})
+       when is_binary(id) do
+    case String.split(id, ":", parts: 2) do
+      [plugin, _] when plugin != "" -> plugin
+      _ -> nil
+    end
+  end
+
+  defp find_nested_codelist_plugin(_), do: nil
 
   defp schema_plugin(%{editor_schema: %{plugin: plugin}}) when is_binary(plugin) and plugin != "",
     do: plugin
