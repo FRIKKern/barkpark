@@ -53,7 +53,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
        presences: [],
        show_profile: false,
        validation_errors: %{},
-       confirm_modal: nil
+       confirm_modal: nil,
+       nav_group: nil,
+       # ── ONIX preview side-pane (Task #16) ────────────────────────────
+       # Pane is rendered only when editor_type == "book"; assigns are
+       # mounted unconditionally so toggle / first-autosave paths never
+       # hit a missing-key surprise on non-book schemas.
+       onix_preview_xml: nil,
+       onix_preview_error: nil,
+       onix_preview_visible: true
      )
      |> allow_upload(:image,
        accept: ~w(.jpg .jpeg .png .gif .webp .svg),
@@ -187,6 +195,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
   end
 
+  # Schema-driven field-group tabs (Sanity Studio parity). Pure LV state —
+  # no URL patch (decided against `?group=` in the task brief to keep the
+  # route surface tight; the editor URL still uniquely identifies the doc).
+  def handle_event("select-group", %{"group" => name}, socket) do
+    {:noreply, assign(socket, nav_group: name)}
+  end
+
   def handle_event("expand-pane", %{"idx" => idx_str}, socket) do
     # "Expand" a collapsed pane = truncate the nav path so this pane
     # becomes the active focus. Deeper drill-down (and the editor) drop
@@ -231,6 +246,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("autosave", %{"doc" => params}, socket) do
     {:noreply, do_autosave(socket, params)}
+  end
+
+  # Toggle the ONIX preview side-pane (Task #16). Book editor only —
+  # the button itself is gated on `editor_type == "book"` so a stray
+  # event on a non-book schema just flips a hidden assign.
+  def handle_event("toggle-onix-preview", _, socket) do
+    {:noreply,
+     assign(socket, onix_preview_visible: !socket.assigns.onix_preview_visible)}
   end
 
   def handle_event("autosave", _params, socket) do
@@ -637,12 +660,54 @@ defmodule BarkparkWeb.Studio.StudioLive do
             save_status: "Saved",
             validation_errors: errs
           )
+          |> maybe_refresh_onix_preview()
 
         {:error, _} ->
           assign(socket, save_status: "Save failed")
       end
     else
       socket
+    end
+  end
+
+  # ── ONIX preview side-pane (Task #16) ────────────────────────────────
+  # Recompute the ONIX 3.0 XML preview for the open book document.
+  # Runs at the end of `do_autosave/2`'s success branch, and again from
+  # `rebuild_panes/1` so the preview lands on first-mount (before any
+  # input event has fired). Non-book schemas short-circuit unchanged —
+  # the side pane is book-only by declared scope (project CLAUDE.md
+  # v1 ONIX-only constraint). `Export.to_string/2` runs in <100ms for
+  # a typical book; if it ever grows we'll dispatch to a Task, but for
+  # v1 the inline call keeps the autosave round-trip predictable.
+  defp maybe_refresh_onix_preview(socket) do
+    case socket.assigns[:editor_type] do
+      "book" ->
+        content = socket.assigns[:editor_form] || %{}
+
+        # Wrap in try/rescue: in-progress edits routinely fail the XSD
+        # gate AND can blow up before validation if a string slipped
+        # into a slot the exporter expects to enumerate (e.g. a list-
+        # backed field that's still a stringly-typed scratch value).
+        # Either way the right behaviour is identical: surface a soft
+        # "export failed" badge and leave the previous XML in place so
+        # a transient miss never blanks the pane.
+        try do
+          case Barkpark.Plugins.OnixEdit.Export.to_string(content) do
+            {:ok, xml} ->
+              assign(socket, onix_preview_xml: xml, onix_preview_error: nil)
+
+            {:error, reason} ->
+              assign(socket, onix_preview_error: reason)
+          end
+        rescue
+          e -> assign(socket, onix_preview_error: {:export_raised, e.__struct__})
+        end
+
+      _ ->
+        # Non-book schemas: keep assigns at their default `nil` so the
+        # pane is never rendered for them (back-compat for post/page/
+        # author/etc.). Also clear any stale state from a previous book.
+        assign(socket, onix_preview_xml: nil, onix_preview_error: nil)
     end
   end
 
@@ -903,17 +968,48 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp rebuild_panes(socket) do
     {panes, editor} = PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path)
+    new_schema = editor && editor[:schema]
+    old_schema = socket.assigns[:editor_schema]
+    nav_group = resolve_nav_group(socket.assigns[:nav_group], old_schema, new_schema)
 
     assign(socket,
       panes: panes,
       editor_doc: editor && editor[:doc],
-      editor_schema: editor && editor[:schema],
+      editor_schema: new_schema,
       editor_type: editor && editor[:type],
       editor_is_draft: (editor && editor[:is_draft]) || false,
       editor_has_published: (editor && editor[:has_published]) || false,
       editor_form: (editor && editor[:form]) || %{},
-      save_status: socket.assigns[:save_status] || ""
+      save_status: socket.assigns[:save_status] || "",
+      nav_group: nav_group
     )
+    |> maybe_refresh_onix_preview()
+  end
+
+  # Pick the active tab when the editor pane re-renders. Sanity-Studio
+  # default-tab semantics: when the schema changes (or first loads), reset
+  # to the schema's first declared group; when the schema is unchanged,
+  # keep whatever tab the user was on so autosave round-trips don't
+  # snap them back to "Core" mid-edit. Schemas with no `groups:` get
+  # `nil` here — that's the legacy/no-tab-bar path, and visible_fields/2
+  # turns it into "show all fields" for back-compat.
+  defp resolve_nav_group(_current, _old, nil), do: nil
+
+  defp resolve_nav_group(current, old, new_schema) do
+    cond do
+      schema_id(new_schema) == schema_id(old) and current != nil -> current
+      true -> first_group_name(new_schema)
+    end
+  end
+
+  defp schema_id(nil), do: nil
+  defp schema_id(schema), do: Map.get(schema, :name) || Map.get(schema, "name")
+
+  defp first_group_name(schema) do
+    case BarkparkWeb.StudioComponents.schema_groups(schema) do
+      [%{"name" => name} | _] -> name
+      _ -> nil
+    end
   end
 
   # ── Render ─────────────────────────────────────────────────────────────────
@@ -1012,6 +1108,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       <.studio_editor_shell
         editor_doc={@editor_doc}
         editor_schema={@editor_schema}
+        editor_type={@editor_type}
         editor_form={@editor_form}
         editor_is_draft={@editor_is_draft}
         dataset={@dataset}
@@ -1019,6 +1116,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
         save_status={@save_status}
         presences={@presences}
         parent_assigns={assigns}
+        nav_group={@nav_group}
+        onix_preview_xml={@onix_preview_xml}
+        onix_preview_error={@onix_preview_error}
+        onix_preview_visible={@onix_preview_visible}
       >
         <:extra_actions>
           <%= for action <- schema_actions(@editor_schema) do %>

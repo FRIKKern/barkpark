@@ -82,6 +82,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         icon: Map.get(raw, "icon"),
         visibility: Map.get(raw, "visibility", "private"),
         fields: Map.get(raw, "fields", []),
+        groups: Map.get(raw, "groups", []),
         dataset: "production",
         actions: document_actions()
       }

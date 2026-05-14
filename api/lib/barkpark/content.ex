@@ -881,7 +881,8 @@ defmodule Barkpark.Content do
       visibility: schema.visibility,
       schemaHash: schema_hash_for_schema(schema),
       fields: Enum.map(schema.fields || [], &serialize_field/1),
-      actions: schema.actions || []
+      actions: schema.actions || [],
+      groups: schema.groups || []
     }
   end
 

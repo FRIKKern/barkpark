@@ -22,7 +22,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   use Phoenix.Component
 
-  alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField}
+  alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
 
   attr :field, :map, required: true
   attr :value, :map, default: %{}
@@ -52,7 +52,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
         <summary class="bp-field-title"><%= @title %></summary>
         <div class="bp-field-body">
-          <%= for sub <- @subfields do %>
+          <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
             <div class="bp-subfield" data-subfield-name={sub.name}>
               <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
                 <%= title_for(sub) %>
@@ -74,7 +74,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth}>
         <legend class="bp-field-title"><%= @title %></legend>
         <div class="bp-field-body">
-          <%= for sub <- @subfields do %>
+          <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
             <div class="bp-subfield" data-subfield-name={sub.name}>
               <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
                 <%= title_for(sub) %>

@@ -687,6 +687,7 @@ defmodule BarkparkWeb.StudioComponents do
   # snapshot tests and the Task #10 byte-identity test stay green.
 
   alias BarkparkWeb.Components.FieldInputs
+  alias BarkparkWeb.Components.Fields.Visibility
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
 
   @doc """
@@ -1180,6 +1181,7 @@ defmodule BarkparkWeb.StudioComponents do
   """
   attr :editor_doc, :map, default: nil
   attr :editor_schema, :map, default: nil
+  attr :editor_type, :string, default: nil
   attr :editor_form, :map, required: true
   attr :editor_is_draft, :boolean, default: false
   attr :dataset, :string, required: true
@@ -1187,11 +1189,22 @@ defmodule BarkparkWeb.StudioComponents do
   attr :save_status, :string, default: ""
   attr :presences, :list, default: []
   attr :parent_assigns, :map, default: %{}
+  attr :nav_group, :string, default: nil
+  # ── ONIX preview side-pane (Task #16) — book-only ──────────────────
+  attr :onix_preview_xml, :string, default: nil
+  attr :onix_preview_error, :any, default: nil
+  attr :onix_preview_visible, :boolean, default: true
 
   slot :extra_actions
   slot :empty_state
 
   def studio_editor_shell(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :show_onix_preview,
+        assigns.editor_type == "book" and assigns.onix_preview_visible
+      )
     ~H"""
     <%= if @editor_doc do %>
       <div class="editor-panel">
@@ -1222,14 +1235,37 @@ defmodule BarkparkWeb.StudioComponents do
             <% else %>
               <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
             <% end %>
+            <button
+              :if={@editor_type == "book"}
+              type="button"
+              phx-click="toggle-onix-preview"
+              class="btn btn-ghost btn-sm"
+              data-test-id="onix-preview-toggle"
+            ><%= if @onix_preview_visible, do: "Hide XML", else: "Show XML" %></button>
             <%= render_slot(@extra_actions) %>
           </:actions>
         </.document_header>
 
-        <div class="editor-body">
+        <div class={"editor-with-preview " <> if(@show_onix_preview, do: "has-onix-preview", else: "")}>
+        <div class="editor-body editor-panel-main">
           <%= if @editor_schema do %>
             <div class="editor-meta">
               <.icon name={@editor_schema.icon} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+            </div>
+          <% end %>
+
+          <%= if schema_groups(@editor_schema) != [] do %>
+            <div class="bp-tab-bar" role="tablist">
+              <%= for grp <- schema_groups(@editor_schema) do %>
+                <button
+                  type="button"
+                  phx-click="select-group"
+                  phx-value-group={grp["name"]}
+                  role="tab"
+                  aria-selected={@nav_group == grp["name"]}
+                  class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
+                ><%= grp["title"] %></button>
+              <% end %>
             </div>
           <% end %>
 
@@ -1242,7 +1278,8 @@ defmodule BarkparkWeb.StudioComponents do
               <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
             </.editor_field>
             <%= if @editor_schema do %>
-              <%= for field <- Enum.reject(@editor_schema.fields, & &1["name"] == "title") do %>
+              <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
+                      Visibility.visible?(field, @editor_form) do %>
                 <.studio_field_renderer
                   field={field}
                   editor_form={@editor_form}
@@ -1256,6 +1293,14 @@ defmodule BarkparkWeb.StudioComponents do
               <span class="save-status"><%= @save_status %></span>
             </div>
           </form>
+        </div>
+        <BarkparkWeb.Components.OnixPreview.onix_preview
+          :if={@show_onix_preview}
+          doc={@editor_form || %{}}
+          type={@editor_type}
+          xml={@onix_preview_xml}
+          error={@onix_preview_error}
+        />
         </div>
       </div>
     <% else %>
@@ -1281,5 +1326,37 @@ defmodule BarkparkWeb.StudioComponents do
       %{"validation" => v} -> v
       _ -> nil
     end
+  end
+
+  @doc """
+  Read the `groups` declaration from a schema map (Sanity-style field-group
+  tabs). Tolerates atom or string keys; returns `[]` for legacy schemas that
+  never declared any groups so the editor's tab bar is hidden entirely
+  (back-compat invariant — post/page/author/etc. render unchanged).
+  """
+  def schema_groups(nil), do: []
+
+  def schema_groups(schema) do
+    case Map.get(schema, :groups) || Map.get(schema, "groups") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  @doc """
+  Filter top-level fields to those visible on the currently selected tab.
+
+  `nav_group == nil` — no active tab → show everything (legacy / no-groups
+  schemas, plus the back-compat path while StudioLive is mounting).
+
+  `nav_group` set — keep only fields whose `"group"` attribute matches the
+  active tab. Fields without a `"group"` are not surfaced on any tab; the
+  ONIX book schema tags every top-level field explicitly so this is a
+  deliberate signal, not an oversight (decision recorded in this task).
+  """
+  def visible_fields(fields, nil), do: fields
+
+  def visible_fields(fields, group_name) when is_binary(group_name) do
+    Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
   end
 end
