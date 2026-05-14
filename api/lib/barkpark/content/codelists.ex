@@ -35,8 +35,30 @@ defmodule Barkpark.Content.Codelists do
 
   alias Barkpark.Repo
   alias Barkpark.Content.Codelists.{Codelist, Translation, Value}
+  alias Barkpark.Content.SchemaDefinition
+
+  require Logger
 
   @default_languages ["nob", "eng"]
+
+  # ── Friendly-name alias resolver (Task barkpark-2nw) ─────────────────────
+  #
+  # The OnixEdit `book` schema declares codelist refs by friendly name
+  # (e.g. `"onixedit:contributor_role"`) with a sibling `onix.codelistId: 17`.
+  # `Barkpark.Codelists.EDItEUR.parse_xml/1` writes registry rows under the
+  # numeric `list_id` (`"onixedit:list_17"`). The alias map closes that gap
+  # by walking SchemaDefinition rows once per dataset, building a
+  # `friendly => "onixedit:list_<N>"` table, and consulting it from `get/2`
+  # whenever the direct lookup misses.
+  #
+  # Cached in `:persistent_term` keyed by plugin_name with a TTL — schema
+  # upserts at boot don't invalidate the cache themselves; the next call
+  # after `@alias_cache_ttl_ms` rebuilds. Boot does a single sweep, then
+  # subsequent rebuilds are cheap (one query against schema_definitions,
+  # in-memory walk).
+
+  @alias_cache_key __MODULE__.AliasCache
+  @alias_cache_ttl_ms 60_000
 
   @typedoc """
   Input value tree node accepted by `register/3`.
@@ -110,6 +132,23 @@ defmodule Barkpark.Content.Codelists do
   """
   @spec get(String.t(), String.t()) :: %Codelist{} | nil
   def get(plugin_name, list_id) do
+    case do_get(plugin_name, list_id) do
+      nil ->
+        # Friendly-name fallback. `book.json` references codelists by
+        # human-readable names (`onixedit:contributor_role`) while the
+        # EDItEUR parser writes numeric rows (`onixedit:list_17`). Walk
+        # the cached alias table built from schema metadata to resolve.
+        case resolve_alias(plugin_name, list_id) do
+          nil -> nil
+          aliased_list_id -> do_get(plugin_name, aliased_list_id)
+        end
+
+      %Codelist{} = codelist ->
+        codelist
+    end
+  end
+
+  defp do_get(plugin_name, list_id) do
     Codelist
     |> where([c], c.plugin_name == ^plugin_name and c.list_id == ^list_id)
     |> order_by([c], desc: c.issue)
@@ -119,6 +158,20 @@ defmodule Barkpark.Content.Codelists do
       nil -> nil
       codelist -> Repo.preload(codelist, values: :translations)
     end
+  end
+
+  @doc """
+  Force-rebuild the friendly-name alias cache.
+
+  Useful right after a schema upsert when you want the new mapping to
+  land immediately (the TTL-based rebuild kicks in after
+  `#{@alias_cache_ttl_ms}` ms otherwise). Returns the freshly built map.
+  """
+  @spec rebuild_alias_cache(String.t()) :: map()
+  def rebuild_alias_cache(plugin_name) when is_binary(plugin_name) do
+    aliases = build_alias_map(plugin_name)
+    store_alias_cache(plugin_name, aliases)
+    aliases
   end
 
   @doc """
@@ -345,4 +398,143 @@ defmodule Barkpark.Content.Codelists do
       {pos, v.code}
     end)
   end
+
+  # ── Alias resolver internals ────────────────────────────────────────────
+
+  # Look up `list_id` in the friendly-name alias cache for `plugin_name`.
+  # Returns the numeric `list_id` (e.g. `"onixedit:list_17"`) to retry
+  # with, or `nil` when no alias exists. Quietly rebuilds the cache when
+  # the entry is stale.
+  defp resolve_alias(plugin_name, list_id) do
+    aliases = get_alias_cache(plugin_name)
+    Map.get(aliases, list_id)
+  end
+
+  defp get_alias_cache(plugin_name) do
+    case :persistent_term.get({@alias_cache_key, plugin_name}, :missing) do
+      :missing ->
+        rebuild_alias_cache(plugin_name)
+
+      {map, built_at_ms} ->
+        now = System.monotonic_time(:millisecond)
+
+        if now - built_at_ms > @alias_cache_ttl_ms do
+          rebuild_alias_cache(plugin_name)
+        else
+          map
+        end
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Codelists.get_alias_cache failed (plugin=#{plugin_name}): #{Exception.message(e)} — returning empty"
+      )
+
+      %{}
+  end
+
+  defp store_alias_cache(plugin_name, map) do
+    :persistent_term.put(
+      {@alias_cache_key, plugin_name},
+      {map, System.monotonic_time(:millisecond)}
+    )
+  end
+
+  # Walk every `SchemaDefinition` row in the DB, recursively descend its
+  # `:fields` tree, and collect mappings:
+  #
+  #     "onixedit:contributor_role" => "onixedit:list_17"
+  #
+  # Fields with both `codelistId == "<plugin>:<friendly>"` AND a sibling
+  # `onix.codelistId: <integer>` contribute one entry. The integer is
+  # rendered into the canonical numeric list_id format used by the
+  # EDItEUR parser. Dataset is not filtered — schemas may live in any
+  # dataset, and the OnixEdit `book` schema is in `production` by
+  # default, but the alias is plugin-scoped, so any dataset's schema
+  # works.
+  defp build_alias_map(plugin_name) do
+    schemas =
+      SchemaDefinition
+      |> Repo.all()
+
+    Enum.reduce(schemas, %{}, fn schema, acc ->
+      walk_fields_for_aliases(schema.fields || [], plugin_name, acc)
+    end)
+  rescue
+    # In test envs the DB may not be set up; treat as empty cache.
+    e ->
+      Logger.warning(
+        "Codelists.build_alias_map failed (plugin=#{plugin_name}): #{Exception.message(e)} — returning empty"
+      )
+
+      %{}
+  end
+
+  defp walk_fields_for_aliases(fields, plugin_name, acc) when is_list(fields) do
+    Enum.reduce(fields, acc, &walk_field_for_aliases(&1, plugin_name, &2))
+  end
+
+  defp walk_fields_for_aliases(_, _plugin_name, acc), do: acc
+
+  defp walk_field_for_aliases(field, plugin_name, acc) when is_map(field) do
+    acc = maybe_record_alias(field, plugin_name, acc)
+
+    # Descend into composite, arrayOf, and any other field that carries
+    # nested fields. Fields are persisted as plain maps with string keys
+    # (the `SchemaDefinition.fields` Ecto type is `{:array, :map}`), but
+    # in-memory plugin builds may still hand atom keys — handle both.
+    acc =
+      case fetch_either(field, "fields", :fields) do
+        nil -> acc
+        inner -> walk_fields_for_aliases(inner, plugin_name, acc)
+      end
+
+    case fetch_either(field, "of", :of) do
+      nil ->
+        acc
+
+      of when is_map(of) ->
+        # `arrayOf` carries one inner field map under `of`; descend it.
+        # If `of` carries its own nested `fields` (composite-of-composite),
+        # `walk_field_for_aliases` recurses correctly.
+        walk_field_for_aliases(of, plugin_name, acc)
+
+      _ ->
+        acc
+    end
+  end
+
+  defp walk_field_for_aliases(_, _plugin_name, acc), do: acc
+
+  defp maybe_record_alias(field, plugin_name, acc) do
+    friendly = fetch_either(field, "codelistId", :codelistId)
+    onix = fetch_either(field, "onix", :onix)
+
+    with true <- is_binary(friendly),
+         true <- String.starts_with?(friendly, plugin_name <> ":"),
+         %{} = onix_map <- (is_map(onix) && onix) || nil,
+         num when is_integer(num) <- fetch_either(onix_map, "codelistId", :codelistId) do
+      numeric_list_id = "#{plugin_name}:list_#{num}"
+
+      # Only add when the friendly key differs from the numeric — saves
+      # the resolver from doing a no-op retry, and avoids shadowing in
+      # the unlikely case schemas use the numeric form directly.
+      if friendly == numeric_list_id do
+        acc
+      else
+        Map.put(acc, friendly, numeric_list_id)
+      end
+    else
+      _ -> acc
+    end
+  end
+
+  defp fetch_either(map, str_key, atom_key) when is_map(map) do
+    case Map.fetch(map, str_key) do
+      {:ok, v} -> v
+      :error -> Map.get(map, atom_key)
+    end
+  end
+
+  defp fetch_either(_, _, _), do: nil
 end

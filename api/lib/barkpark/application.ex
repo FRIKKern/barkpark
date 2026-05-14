@@ -60,6 +60,13 @@ defmodule Barkpark.Application do
           # registered above and namespace them as
           # `plugin:<name>:<checker>` in the value-checker registry.
           Barkpark.Validation.Registry.reload_plugin_checkers()
+          # Task barkpark-2nw: seed the codelist registry from the bundled
+          # EDItEUR XML snapshot at `priv/codelists/onix-issue-73.xml`.
+          # Runs after `register_all_schemas/0` so the alias resolver in
+          # `Codelists.get/2` has the OnixEdit `book` schema (and its
+          # `onix.codelistId: N` metadata) available the moment the first
+          # render hits the registry. Never raises; logs + soldiers on.
+          Barkpark.Codelists.EDItEUR.seed_bundled()
         end)
 
         ok

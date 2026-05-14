@@ -475,3 +475,25 @@ case Barkpark.Plugins.Bootstrap.register_all_schemas() do
   {:error, reason} ->
     IO.puts(:stderr, "Plugin schema bootstrap reported errors: #{inspect(reason)}")
 end
+
+# ── Codelist Registry (Bootstrap) ───────────────────────────────────────────
+#
+# Task barkpark-2nw: seed the codelist registry from the bundled EDItEUR
+# XML snapshot at `priv/codelists/onix-issue-73.xml`. Mirrors the post-boot
+# Task in `Barkpark.Application` so `mix ecto.reset` produces a fully
+# populated DB without a separate `mix barkpark.codelists.seed` step.
+# Idempotent: re-running upserts the codelist + values, with no duplicate
+# rows. Soldiers on if the bundled file is missing.
+
+IO.puts("\n=== Seeding codelist registry from bundled EDItEUR snapshot ===")
+
+case Barkpark.Codelists.EDItEUR.seed_bundled() do
+  {:ok, :no_snapshot} ->
+    IO.puts(:stderr, "Bundled codelist snapshot missing — skipped (see api/priv/codelists/README.md)")
+
+  {:ok, count} ->
+    IO.puts("Seeded #{count} codelist(s) from bundled snapshot")
+
+  {:error, reason} ->
+    IO.puts(:stderr, "Codelist seed reported errors: #{inspect(reason)}")
+end

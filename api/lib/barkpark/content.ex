@@ -198,8 +198,9 @@ defmodule Barkpark.Content do
   Fetch a document with draft-first preference. Returns the draft if it
   exists, otherwise falls back to the published row, plus flags for
   whether the returned doc is the draft and whether a published version
-  exists. Used by the Studio editor and plugin LVs (BookView,
-  BookEditor) — consolidated in Task #11 WI3 from prior duplicates.
+  exists. Used by StudioLive's native editor pane — consolidated in
+  Task #11 WI3 from prior duplicates (the plugin LVs that originally
+  shared this helper were removed in Goal `barkpark-zdy`).
 
       {doc | nil, is_draft :: boolean, has_published :: boolean}
   """
@@ -228,10 +229,10 @@ defmodule Barkpark.Content do
   @doc """
   Build a form map from a document and its schema. Returns a map keyed
   by field name with string values, including `"title"` and `"status"`
-  baseline keys. Returns `%{}` when `doc` is nil. Used by the Studio
-  editor + plugin LVs — consolidated in Task #11 WI3 from prior
+  baseline keys. Returns `%{}` when `doc` is nil. Used by StudioLive's
+  native editor pane — consolidated in Task #11 WI3 from prior
   duplicates in StudioLive (`doc_to_form`, `doc_data_to_form`),
-  DocumentEditLive (orphan), and BookEditor.
+  DocumentEditLive (orphan), and the deleted plugin BookEditor.
   """
   @spec doc_to_form(map() | nil, map() | nil) :: map()
   def doc_to_form(nil, _schema), do: %{}
@@ -259,8 +260,9 @@ defmodule Barkpark.Content do
   Build a `content` map from a form params map by reducing schema
   fields. Excludes `"title"` and `"status"` (those live on the
   document row, not under `content`). Empty-string values are dropped.
-  Returns `%{}` when `schema` is nil. Used by the Studio editor +
-  BookEditor — consolidated in Task #11 WI3.
+  Returns `%{}` when `schema` is nil. Used by StudioLive's native
+  editor pane — consolidated in Task #11 WI3 (the plugin BookEditor
+  that originally shared this helper was removed in Goal `barkpark-zdy`).
   """
   @spec build_content(map(), map() | nil) :: map()
   def build_content(_params, nil), do: %{}

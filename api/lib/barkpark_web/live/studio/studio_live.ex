@@ -815,7 +815,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # deepest path position. `descend_field` traverses composite → fields and
   # arrayOf → of transparently so the caller's path doesn't need to mention
   # the `of` envelope.
-  defp find_field_by_path(socket, [head | rest]) do
+  @doc false
+  def find_field_by_path(socket, [head | rest]) do
     fields =
       case socket.assigns[:editor_schema] do
         %{fields: list} when is_list(list) -> list
@@ -828,7 +829,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp find_field_by_path(_, []), do: nil
+  def find_field_by_path(_, []), do: nil
 
   defp descend_field(field, []), do: field
 
@@ -844,7 +845,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp descend_field(_, _), do: nil
 
   # Read the list value at the path from editor_form.
-  defp list_value_at(form, path) when is_list(path) do
+  @doc false
+  def list_value_at(form, path) when is_list(path) do
     case do_get_in(form, path) do
       list when is_list(list) -> list
       _ -> []
@@ -859,10 +861,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Write the list value at the path in editor_form. Initializes missing
   # intermediate maps along the way so adding a row to a yet-unset nested
   # arrayOf works on first click.
-  defp put_value_at(form, [], _value), do: form
-  defp put_value_at(form, [key], value), do: Map.put(form || %{}, key, value)
+  @doc false
+  def put_value_at(form, [], _value), do: form
+  def put_value_at(form, [key], value), do: Map.put(form || %{}, key, value)
 
-  defp put_value_at(form, [head | rest], value) do
+  def put_value_at(form, [head | rest], value) do
     inner =
       case form do
         %{} -> Map.get(form, head, %{})
@@ -876,17 +879,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Empty-element factory — picks a sensible default for a freshly-added row
   # based on the arrayOf element's declared type. composite → empty map;
   # arrayOf → empty list; localizedText → empty map; everything else → nil.
-  defp empty_for_of(%{"of" => %{"type" => "composite"} = of}) do
+  @doc false
+  def empty_for_of(%{"of" => %{"type" => "composite"} = of}) do
     Enum.reduce(of["fields"] || [], %{}, fn sub, acc ->
       Map.put(acc, sub["name"], empty_for_type(sub["type"]))
     end)
   end
 
-  defp empty_for_of(%{"of" => %{"type" => "arrayOf"}}), do: []
-  defp empty_for_of(%{"of" => %{"type" => "codelist"}}), do: nil
-  defp empty_for_of(%{"of" => %{"type" => "localizedText"}}), do: %{}
-  defp empty_for_of(%{"of" => %{"type" => _}}), do: nil
-  defp empty_for_of(_), do: nil
+  def empty_for_of(%{"of" => %{"type" => "arrayOf"}}), do: []
+  def empty_for_of(%{"of" => %{"type" => "codelist"}}), do: nil
+  def empty_for_of(%{"of" => %{"type" => "localizedText"}}), do: %{}
+  def empty_for_of(%{"of" => %{"type" => _}}), do: nil
+  def empty_for_of(_), do: nil
 
   defp empty_for_type("composite"), do: %{}
   defp empty_for_type("arrayOf"), do: []

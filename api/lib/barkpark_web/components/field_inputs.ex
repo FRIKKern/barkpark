@@ -162,10 +162,31 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def input(%{field: %{"name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+    assigns = assign(assigns, n: name, v: val, numeric: numeric_name?(name))
 
     ~H"""
-    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
+    <%= if @numeric do %>
+      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" phx-debounce="500" />
+    <% else %>
+      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
+    <% end %>
     """
   end
+
+  # Name-based heuristic: ONIX types numeric fields as `string` (e.g.
+  # `priceAmount`, `editionNumber`, `attempt_count`, ~30 fields). Renderer
+  # detects them by name suffix or exact match and emits `inputmode="numeric"`
+  # + a `.bp-input-numeric` class hook so mobile keyboards switch to digits
+  # and CSS can render the input visually distinct (monospace, right-aligned).
+  # Mirrors the helper in `Components.Fields.CompositeField`; kept private here
+  # to preserve module isolation. Renderer-only — deleting fully reverts.
+  @numeric_suffixes ~w(Count Number Year Amount Percent)
+  @numeric_names ~w(quantity weeks days pageRun extentValue priceAmount taxRate)
+
+  defp numeric_name?(name) when is_binary(name) do
+    name in @numeric_names or
+      Enum.any?(@numeric_suffixes, fn suf -> String.ends_with?(name, suf) end)
+  end
+
+  defp numeric_name?(_), do: false
 end

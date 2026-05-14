@@ -49,7 +49,20 @@ defmodule Barkpark.Codelists.EDItEUR do
 
   import SweetXml
 
+  require Logger
+
   @plugin_default "onixedit"
+
+  # ── Bundled fixture (Task barkpark-2nw) ─────────────────────────────────
+  #
+  # `seed_bundled/1` reads the checked-in EDItEUR XML snapshot at
+  # `priv/codelists/onix-issue-73.xml` and registers every list. Driven by
+  # `Barkpark.Application` at boot and by `priv/repo/seeds.exs` on
+  # `mix ecto.reset`. Idempotent — re-running on a populated DB upserts the
+  # codelist rows with no duplicate-key churn.
+
+  @bundled_issue "73"
+  @bundled_filename "onix-issue-73.xml"
 
   @typedoc "One parsed codelist, as returned by `parse_xml/1`."
   @type parsed_list :: %{
@@ -143,6 +156,102 @@ defmodule Barkpark.Codelists.EDItEUR do
     |> case do
       {:ok, ids} -> {:ok, Enum.reverse(ids)}
       other -> other
+    end
+  end
+
+  @doc """
+  Seed the codelist registry from the EDItEUR XML snapshot bundled at
+  `api/priv/codelists/onix-issue-#{@bundled_issue}.xml`.
+
+  This is the boot-time entry point — `Barkpark.Application` runs it in a
+  post-boot `Task`, and `priv/repo/seeds.exs` calls the same helper after
+  schema bootstrap. Idempotent on `(plugin_name, list_id, issue)` via
+  `Codelists.register/3` — re-running is a no-op.
+
+  Returns:
+
+    * `{:ok, count}` when seeding succeeded (count = number of lists
+      registered).
+    * `{:ok, :no_snapshot}` when the bundled XML is missing on disk (rare
+      — e.g. a stripped-down install). Boots keep moving; the Studio just
+      stays in its "(no codelist registered)" state.
+    * `{:error, reason}` on parse / register failure.
+
+  Never raises.
+  """
+  @spec seed_bundled(keyword()) ::
+          {:ok, non_neg_integer()} | {:ok, :no_snapshot} | {:error, term()}
+  def seed_bundled(opts \\ []) do
+    plugin = Keyword.get(opts, :plugin, @plugin_default)
+    issue = Keyword.get(opts, :issue, @bundled_issue)
+
+    case bundled_path() do
+      {:error, :not_found} ->
+        Logger.info(
+          "Codelists.EDItEUR: bundled snapshot #{@bundled_filename} not found on disk — skipping seed"
+        )
+
+        {:ok, :no_snapshot}
+
+      {:ok, path} ->
+        Logger.info(
+          "Codelists.EDItEUR: seeding bundled snapshot #{path} (plugin=#{plugin}, issue=#{issue})"
+        )
+
+        with {:ok, parsed} <- parse_xml(path, plugin: plugin),
+             {:ok, ids} <- seed(parsed, plugin: plugin, issue: issue) do
+          Logger.info("Codelists.EDItEUR: seeded #{length(ids)} list(s) from bundled snapshot")
+          {:ok, length(ids)}
+        else
+          {:error, reason} = err ->
+            Logger.error(
+              "Codelists.EDItEUR: bundled seed failed — #{inspect(reason)}"
+            )
+
+            err
+        end
+    end
+  rescue
+    e ->
+      Logger.error(
+        "Codelists.EDItEUR: bundled seed raised — #{Exception.message(e)}"
+      )
+
+      {:error, {:raised, Exception.message(e)}}
+  end
+
+  @doc """
+  Backwards-compat alias for `seed_bundled/1`.
+
+  The task brief (Task barkpark-2nw) named this `seed_from_json/1` on the
+  expectation that EDItEUR published codelists as JSON. In practice
+  EDItEUR ships the codelist data file only as XML, so the bundled
+  snapshot at `priv/codelists/onix-issue-73.xml` is XML. The honest name
+  is `seed_bundled/1`; this alias remains so the brief's verification
+  commands keep working.
+  """
+  @spec seed_from_json(keyword() | atom()) ::
+          {:ok, non_neg_integer()} | {:ok, :no_snapshot} | {:error, term()}
+  def seed_from_json(opts \\ [])
+  def seed_from_json(dataset) when is_atom(dataset), do: seed_bundled([])
+  def seed_from_json(opts) when is_list(opts), do: seed_bundled(opts)
+
+  @doc """
+  Locate the bundled XML snapshot on disk via `:code.priv_dir/1`.
+
+  Returns `{:ok, abs_path}` when the file exists, `{:error, :not_found}`
+  otherwise. Used by `seed_bundled/1`; also exposed for tests.
+  """
+  @spec bundled_path() :: {:ok, Path.t()} | {:error, :not_found}
+  def bundled_path do
+    case :code.priv_dir(:barkpark) do
+      {:error, _} = err ->
+        Logger.warning("Codelists.EDItEUR: :code.priv_dir(:barkpark) failed — #{inspect(err)}")
+        {:error, :not_found}
+
+      priv when is_list(priv) ->
+        path = Path.join([List.to_string(priv), "codelists", @bundled_filename])
+        if File.exists?(path), do: {:ok, path}, else: {:error, :not_found}
     end
   end
 

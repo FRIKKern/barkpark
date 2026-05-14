@@ -5,7 +5,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
   Phase 7 WI4 stored status as a JSON-encoded string. Phase 8 WI1 promoted
   the field to a native composite map. This module is the only sanctioned
   entry point for reading or writing the field — all callers (PublishWorker,
-  BookEditor, AdminLive, mix tasks) go through `read/1` and `write/2`.
+  AdminLive, StudioLive's native editor, mix tasks) go through `read/1`
+  and `write/2`. (The plugin BookEditor LV that originally shared this
+  façade was removed in Goal `barkpark-zdy`.)
 
   ## Backwards compatibility
 
