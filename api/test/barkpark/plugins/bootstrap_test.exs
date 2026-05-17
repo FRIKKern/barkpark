@@ -243,6 +243,11 @@ defmodule Barkpark.Plugins.BootstrapTest do
   # exactly like this. Registered via `on_exit/2` so cleanup runs even when
   # the body's assertions fail.
   #
+  # The Registry caches reads in `:persistent_term` (key
+  # `{Barkpark.Plugins.Registry, :snapshot}`); a raw `:sys.replace_state`
+  # bypasses the GenServer's `handle_call`, so we manually purge the cache
+  # too. Once `Registry.unregister/1` lands, both pokes go away.
+  #
   # TODO: if more tests start needing this pattern, promote a public
   # `Barkpark.Plugins.Registry.unregister/1` and drop the direct state poke.
   defp cleanup_stub_on_exit(plugin_name) do
@@ -250,6 +255,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
       :sys.replace_state(Barkpark.Plugins.Registry, fn state ->
         %{state | plugins: Map.delete(state.plugins, plugin_name)}
       end)
+
+      :persistent_term.erase({Barkpark.Plugins.Registry, :snapshot})
     end)
   end
 end

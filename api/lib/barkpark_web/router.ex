@@ -98,6 +98,24 @@ defmodule BarkparkWeb.Router do
     get "/onixedit/book/:doc_id/view", OnixeditRedirectController, :show
   end
 
+  # ── Studio admin LV — dataset-scoped, admin-gated ─────────────────────
+  # Task barkpark-otv: plugin admin LV at `/studio/:dataset/_plugins`.
+  # MUST come before the studio_public scope below — the catch-all
+  # `live "/*path", StudioLive` inside `:studio_public` would otherwise
+  # swallow the `_plugins` path. The leading underscore is a convention
+  # signalling "admin / system route" (mirrors `_/` patterns in many
+  # CMSes) and keeps the namespace clear of any future schema-named
+  # path collisions.
+  scope "/studio/:dataset", BarkparkWeb.Admin do
+    pipe_through :browser
+
+    live_session :admin_studio_dataset,
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      live "/_plugins", PluginsLive
+    end
+  end
+
   # ── Studio (LiveView) ─────────────────────────────────────────────────────
   scope "/studio/:dataset", BarkparkWeb.Studio do
     pipe_through :browser

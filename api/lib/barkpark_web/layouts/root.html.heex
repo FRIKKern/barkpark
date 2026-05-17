@@ -1138,6 +1138,99 @@
       text-align: center;
     }
 
+    /* ── Plugin admin LV (Task barkpark-otv) ─────────────────────────────
+       Per-plugin cards on `/studio/:dataset/_plugins`. Mirrors the
+       shadcn-card palette (.card / .schema-card) but adds a callbacks
+       list with impl (✓) / default (—) markers so the publisher can
+       see at a glance which `Barkpark.Plugin` callbacks each plugin
+       overrides. */
+    .bp-plugins-admin { padding: 16px 24px; }
+    .bp-plugins-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px; gap: 12px;
+    }
+    .bp-plugins-actions { display: flex; gap: 8px; align-items: center; }
+    .bp-plugins-meta { margin-bottom: 20px; }
+    .bp-plugins-meta code {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--fg-muted); background: var(--bg-card);
+      padding: 1px 5px; border-radius: 3px;
+    }
+    .bp-plugins-empty {
+      padding: 36px 16px; text-align: center;
+      color: var(--fg-muted); border: 1px dashed var(--border-muted);
+      border-radius: var(--radius-lg);
+    }
+    .bp-plugin-cards {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 16px;
+    }
+    .bp-plugin-card {
+      background: var(--bg-card); border: 1px solid var(--border-muted);
+      border-radius: var(--radius-lg);
+      padding: 16px 18px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .bp-plugin-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px;
+    }
+    .bp-plugin-card-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .bp-plugin-card-title strong { font-size: 15px; }
+    .bp-plugin-card-version {
+      font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim);
+    }
+    .bp-plugin-rows {
+      display: grid; grid-template-columns: max-content 1fr;
+      gap: 4px 12px; margin: 0;
+    }
+    .bp-plugin-row { display: contents; }
+    .bp-plugin-row dt {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--fg-muted); padding-top: 1px;
+    }
+    .bp-plugin-row dd {
+      margin: 0; font-size: 13px; color: var(--fg);
+      word-break: break-word;
+    }
+    .bp-plugin-row dd code {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--fg-muted);
+    }
+    .bp-plugin-desc { color: var(--fg-muted); font-size: 12px; }
+    .bp-plugin-callbacks { display: flex; flex-direction: column; gap: 6px; }
+    .bp-callback-list {
+      list-style: none; margin: 0; padding: 8px 10px;
+      background: var(--bg); border: 1px solid var(--border-muted);
+      border-radius: var(--radius-sm);
+      font-size: 12px; line-height: 1.5;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .bp-callback-item {
+      display: grid; grid-template-columns: 200px 20px 1fr;
+      align-items: center; gap: 6px;
+    }
+    .bp-callback-item code {
+      font-family: var(--font-mono); font-size: 11px;
+      color: inherit; background: transparent;
+    }
+    .bp-callback-mark {
+      text-align: center; font-weight: 600; font-family: var(--font-mono);
+    }
+    .bp-callback-detail { color: var(--fg-muted); font-size: 11px; }
+    .bp-callback-impl { color: var(--fg); }
+    .bp-callback-impl .bp-callback-mark { color: var(--success); }
+    .bp-callback-default { color: var(--fg-dim); }
+    .bp-callback-default .bp-callback-mark { color: var(--fg-dim); }
+    .bp-plugin-runs {
+      display: flex; flex-direction: column; gap: 4px;
+      padding-top: 8px; border-top: 1px solid var(--border-muted);
+      font-size: 12px;
+    }
+    .bp-plugin-run-row { display: flex; gap: 8px; align-items: baseline; }
+    .bp-plugin-run-label { color: var(--fg-muted); min-width: 140px; }
+    .bp-plugin-run-value { color: var(--fg); font-family: var(--font-mono); font-size: 11px; }
+
     /* ── Scrollbar ─────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }

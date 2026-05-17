@@ -15,6 +15,12 @@ defmodule Barkpark.Application do
       # WI1: plugin registry — must come up before workers/endpoint so any
       # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
       Barkpark.Plugins.Registry,
+      # Task barkpark-otv: in-memory run-status tracker the plugin admin LV
+      # reads to surface "last bootstrap" / "last seed" timestamps. Must
+      # come up before the post-boot Task that calls Bootstrap +
+      # codelist seeders so the very first sweep's results land in the
+      # map. Empty-state if absent — never crashes the caller.
+      Barkpark.Plugins.RunStatus,
       # Phase 3 WI1: cross-field validation kernel — registry of value-
       # checkers (ETS-backed) and per-schema rule cache. Both must be up
       # before the endpoint can serve mutate/export traffic.
