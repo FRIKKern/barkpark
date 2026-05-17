@@ -785,7 +785,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     case socket.assigns[:confirm_modal] do
       %{action: %{"name" => name}, doc_id: doc_id, dataset: dataset} = modal
       when is_binary(doc_id) and is_binary(dataset) ->
-        result = dispatch_action(name, doc_id, dataset, :dryrun)
+        result = dispatch_action(socket, name, doc_id, dataset, :dryrun)
         preview = preview_from_result(result)
 
         {:noreply,
@@ -803,7 +803,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     case socket.assigns[:confirm_modal] do
       %{action: %{"name" => name}, doc_id: doc_id, dataset: dataset}
       when is_binary(doc_id) and is_binary(dataset) ->
-        case dispatch_action(name, doc_id, dataset, :real) do
+        case dispatch_action(socket, name, doc_id, dataset, :real) do
           {:ok, _result} ->
             {:noreply,
              socket
@@ -1017,14 +1017,55 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Dispatch a named schema action to the plugin-owned handler. Each
   # plugin declares its handlers via the `Barkpark.Plugin.action_handlers/0`
-  # callback; `Plugins.Registry.collect_action_handlers/0` merges them into
-  # a single name → fun/3 map at call time. Unknown names return a
-  # structured error so the caller can format a flash instead of crashing.
-  defp dispatch_action(name, doc_id, dataset, mode) do
-    case Map.get(Barkpark.Plugins.Registry.collect_action_handlers(), name) do
+  # callback (additive form) or `resolve_action_handlers/2` (resolver form);
+  # `Plugins.Registry.collect_action_handlers/1` drives the resolver chain
+  # seeded with the host's built-in handlers as `:baseline` (currently an
+  # empty map — the host ships no built-in action handlers; the empty
+  # map still flows so plugins can rely on `prev` being map-shaped).
+  # Unknown names return a structured error so the caller can format a
+  # flash instead of crashing.
+  #
+  # `:ctx` carries the dispatch identity (`%{dataset, doc_id, doc_type,
+  # doc}`) sourced from `socket.assigns` so resolver plugins can return a
+  # different handler — or no handler at all — depending on the live
+  # document. `doc_type` and `doc` are read straight off
+  # `:editor_type` / `:editor_doc`; modal dispatch always targets the
+  # currently-open editor doc, so the assigns are guaranteed in scope.
+  defp dispatch_action(socket, name, doc_id, dataset, mode) do
+    ctx = action_handler_ctx(socket, doc_id, dataset)
+
+    handlers =
+      Barkpark.Plugins.Registry.collect_action_handlers(
+        baseline: default_action_handlers(ctx),
+        ctx: ctx
+      )
+
+    case Map.get(handlers, name) do
       handler when is_function(handler, 3) -> handler.(doc_id, dataset, mode)
       _ -> {:error, {:unknown_action, name}}
     end
+  end
+
+  # Host's built-in action handlers, seeded as `:baseline` for the
+  # `resolve_action_handlers/2` resolver chain. Currently empty — every
+  # production action handler today is plugin-owned (OnixEdit) — but
+  # extracted to its own fn so the chain is wired symmetrically and a
+  # future host-owned action lands here without touching the dispatch
+  # call site.
+  defp default_action_handlers(_ctx), do: %{}
+
+  # Build the resolver `:ctx` for `collect_action_handlers/1`. The doc
+  # type and doc payload come directly off `socket.assigns` — the modal
+  # dispatch always fires against the currently-open editor pane, so
+  # `:editor_type` / `:editor_doc` are the right values without a
+  # separate DB lookup.
+  defp action_handler_ctx(socket, doc_id, dataset) do
+    %{
+      dataset: dataset,
+      doc_id: doc_id,
+      doc_type: socket.assigns[:editor_type],
+      doc: socket.assigns[:editor_doc]
+    }
   end
 
   # Pull the canonical doc_id for the currently-open editor. Modal actions
