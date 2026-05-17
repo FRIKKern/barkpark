@@ -1,0 +1,18 @@
+defmodule <%= @module_path %>.Client do
+  @moduledoc """
+  HTTP client for the <%= @module_name %> external system. Uses Req
+  (already a dependency); read environment via
+  `Application.get_env(:barkpark, <%= @module_path %>)` so credentials
+  can come from `runtime.exs` or the `plugin_settings` table.
+  """
+
+  @doc "Fetch an auth token. Returns `{:ok, token}` or `{:error, reason}`."
+  def fetch_token do
+    {:error, :not_implemented}
+  end
+
+  @doc "Submit a document. Returns `{:ok, response}` or `{:error, reason}`."
+  def submit(_doc_xml_or_json) do
+    {:error, :not_implemented}
+  end
+end

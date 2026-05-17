@@ -1,0 +1,463 @@
+# Plugin Architecture — formal contract
+
+> The forward-looking contract for building a new Barkpark plugin. Pair with
+> [INTEGRATION_LESSONS.md](INTEGRATION_LESSONS.md) for the retrospective on
+> *why* the contract looks the way it does, and [RECIPE.md](RECIPE.md) for a
+> file-by-file worked example.
+
+## Purpose
+
+A Barkpark plugin is **schemas + business logic**. It contributes document
+shapes, transformation pipelines, external-system clients, async workers, and
+optional codelist data. It does not contribute UI. The host owns Studio, the
+Studio editor pane, every field renderer, every pill, every modal, every
+route. Plugins extend the host by **declaring metadata on schemas** and by
+**exporting pure-function modules** the host calls into.
+
+This is the headline lesson of the OnixEdit refactor (see
+INTEGRATION_LESSONS.md). Every time a plugin tried to ship its own LiveView,
+it drifted from the host's chrome, accumulated dead code, and confused users.
+Treat the host as the canvas; treat schema metadata as the API.
+
+## The Plugin contract
+
+A plugin **MUST**:
+
+- Ship a manifest at `priv/plugins/<plugin_name>/plugin.json` declaring
+  `plugin_name`, `module`, `version`, and `capabilities`.
+- Implement a top-level module that `use Barkpark.Plugin`s the manifest and
+  exports `register_schemas/1` (returning a list of
+  `%Barkpark.Content.SchemaDefinition{}` structs, possibly empty).
+- Use the `<plugin_name>:<list_id>` codelist naming convention for every
+  codelist it references (e.g. `vlie:status_code`).
+- Use the `bp_<field>` prefix for any non-standard fields it stashes on
+  documents (e.g. `bp_export_status`).
+
+A plugin **MAY**:
+
+- Ship JSON schema files under `priv/plugins/<plugin_name>/schemas/`.
+- Ship pure-function transformation modules (exporters, parsers, validators).
+- Ship HTTP clients to external systems.
+- Ship Oban workers for async processing, polling, retries.
+- Ship codelist data as JSON/XML under `priv/codelists/<plugin_name>/` and a
+  `seed_*/0` helper that calls `Barkpark.Content.Codelists.register/3`.
+- Ship sub-schema modules that splice into top-level schemas at
+  `register_schemas/1` time.
+- Ship a thin `<Plugin>.Actions` module exporting plain functions the host
+  dispatches to via `handle_event("schema_action", ...)`.
+- Use `Barkpark.Plugins.Settings` (encrypted at rest) for credentials.
+
+A plugin **MUST NOT**:
+
+- Ship LiveViews, HEEx templates, or function components.
+- Ship CSS files or JavaScript / Web Components.
+- Ship routes (except controller-mounted file-download endpoints under
+  `/v1/plugins/<plugin_name>/...`).
+- Ship plugin-specific field renderers — extend the four native v2
+  field components for all plugins, not just yours.
+- Broadcast plugin-specific PubSub messages when the generic
+  `external_sync:<system>:<doc_id>` topic fits.
+- Reach into `studio_live.ex` assigns or socket state directly. Use
+  schema-declared actions; never a `phx-click` rooted in plugin code.
+
+## File layout
+
+Canonical directory structure for a plugin named `<plugin>`:
+
+```
+api/
+├── lib/barkpark/plugins/<plugin>.ex             # entry module
+├── lib/barkpark/plugins/<plugin>/
+│   ├── actions.ex                               # optional: schema-action handlers
+│   ├── schemas/                                 # optional: sub-schema modules
+│   │   └── <sub>.ex
+│   └── <subsystem>/                             # optional: business-logic groupings
+│       ├── client.ex                            #   HTTP client
+│       ├── publish_worker.ex                    #   Oban worker
+│       ├── status.ex                            #   status read/write facade
+│       └── settings.ex                          #   typed wrapper around Plugins.Settings
+├── priv/plugins/<plugin>/
+│   ├── plugin.json                              # manifest (required)
+│   └── schemas/
+│       ├── <doc_type>.json                      # one per top-level schema
+│       └── <sub_type>.json                      # one per sub-schema
+├── priv/codelists/<plugin>/                     # optional: codelist data
+│   └── <list_id>.json
+└── test/barkpark/plugins/<plugin>/
+    ├── <plugin>_test.exs
+    └── ...
+```
+
+The OnixEdit plugin is the canonical example. Mirror its layout for any
+non-trivial integration; trim modules whose role you don't need.
+
+## The schema-metadata contract
+
+Every column on `Barkpark.Content.SchemaDefinition` that a plugin can populate.
+The host reads these declaratively and renders generically.
+
+| Column | Type | What it drives |
+|---|---|---|
+| `fields` | `{:array, :map}` | Field definitions. v1 primitives + v2 nested types (composite, arrayOf, codelist, localizedText). See [SCHEMA_V2.md](SCHEMA_V2.md). |
+| `groups` | `{:array, :map}` | Tab bar in the editor pane. Each entry: `%{"name" => "core", "title" => "Core"}`. Fields tag themselves with one `group`. |
+| `desk_groups` | `{:array, :map}` | Filter chips on the document-list pane. Bookmarkable via `?desk=...` URL. |
+| `actions` | `{:array, :map}` | Action-bar buttons in the editor header. Three `kind`s: `link`, `event`, `modal`. |
+| `initial_values` | `:map` | Deep-merged into new documents at create time. Resolves the `$today.year` token. |
+| `cross_validations` | `{:array, :map}` | `any`/`all` predicate rules; banner display in the editor header. |
+| `visibility` | `:string` | `"public"` (no auth on `GET /v1/data/query/...`) or `"private"` (admin-token required). |
+
+### `desk_groups`
+
+```json
+{
+  "name": "pending",
+  "title": "Pending",
+  "filter": {
+    "content.bp_export_status.state": { "in": ["pending", "staging", "polling"] }
+  }
+}
+```
+
+Filter operators supported by `Content.list_documents/3`:
+
+- `eq` — exact match: `{"status": {"eq": "draft"}}`
+- `in` — set membership: `{"state": {"in": ["a", "b"]}}`
+- `starts_with` — prefix match: `{"doc_id": {"starts_with": "drafts."}}`
+
+Paths into JSONB fields use dot notation: `content.bp_export_status.state`.
+
+### `actions`
+
+Three flavours of action declaration. The host renders each kind differently.
+
+**`kind: "link"`** — a plain `<a href>` with `:dataset` and `:id`
+interpolated. No LiveView round-trip.
+
+```json
+{
+  "name": "export_onix",
+  "label": "Export ONIX",
+  "kind": "link",
+  "href": "/v1/plugins/onixedit/export/:dataset/:id.onix",
+  "icon": "download"
+}
+```
+
+**`kind: "event"`** — fires `phx-click="schema_action" phx-value-name="<name>"`
+into StudioLive. The host calls back into `dispatch_action/4` (see "The
+action-dispatch contract" below).
+
+**`kind: "modal"`** — opens the generic `ConfirmModal` with an optional
+two-stage `steps: ["dryrun", "real"]` flow. The host dispatches `:dryrun`
+when the user clicks "Dry run", shows the preview, then dispatches `:real`
+on confirmation.
+
+```json
+{
+  "name": "publish_to_bokbasen",
+  "label": "Publish to Bokbasen",
+  "kind": "modal",
+  "modal": {
+    "title": "Publish to Bokbasen?",
+    "body": "We'll run a dry-run first, then ask again before sending for real.",
+    "steps": ["dryrun", "real"]
+  },
+  "icon": "send"
+}
+```
+
+### `initial_values`
+
+```json
+{
+  "notificationType": "03",
+  "publishingDetail": {
+    "copyrightStatement": { "copyrightYear": "$today.year" }
+  },
+  "bp_export_status": { "state": "draft" }
+}
+```
+
+The token `$today.year` resolves at `Content.create_document/3` time via
+`apply_initial_values/3`. Nested maps are deep-merged.
+
+### `cross_validations`
+
+```json
+{
+  "name": "isbn_xor_gtin",
+  "title": "At least one product identifier is required",
+  "rule": { "any": [
+    { "field": "productIdentifiers", "operator": "non_empty" }
+  ]},
+  "level": "error",
+  "fields": ["productIdentifiers"]
+}
+```
+
+Predicate operators mirror `visibleWhen`: `eq`, `in`, `non_empty`, `empty`.
+`level` is `"error"` or `"warning"`. The Phase 3 evaluator
+(`Content.CrossValidator`) wraps `Components.Fields.Visibility.visible?` per
+predicate and folds `any` / `all` over them.
+
+## Per-field attributes plugins can declare
+
+These attach to individual entries inside `fields`:
+
+| Attribute | What it drives |
+|---|---|
+| `group` | Which tab the field renders in. Must match a `groups` entry. |
+| `visibleWhen` | Predicate map referencing other fields. Same DSL as `cross_validations`. |
+| `validations` | Per-field constraint list (currently surfaced post-save only). |
+| `onix.element` | Small grey hint text under the label, e.g. `ONIX: <code>NotificationType</code>`. Generic enough that any plugin can do `<plugin>.element`; only `onix` is renderered today. |
+| `bp_*` | Plugin custom fields stashed on documents. Locked prefix — see SCHEMA_V2.md. |
+| `plugin:<name>:<field>` | Plugin-private fields. Rejected unless `parse/2` is called with `plugin: "<name>"`. |
+
+## Plugin lifecycle
+
+Startup sequence from BEAM boot to first request:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Barkpark.Application
+    participant Sup as Supervisor
+    participant Task as TaskSupervisor
+    participant Reg as Plugins.Registry
+    participant Boot as Plugins.Bootstrap
+    participant Plug as <Plugin>
+    participant Cont as Content
+    participant CL as Codelists.EDItEUR
+
+    App->>Sup: start_link(children)
+    Sup->>Reg: start (GenServer)
+    Sup-->>App: {:ok, _pid}
+    App->>Task: start_child(boot_task)
+    Task->>Reg: discover_and_register()
+    Reg-->>Task: plugins indexed
+    Task->>Boot: register_all_schemas()
+    Boot->>Plug: register_schemas([])
+    Plug-->>Boot: [%SchemaDefinition{}, ...]
+    Boot->>Cont: upsert_schema(attrs, dataset) per row
+    Cont-->>Boot: {:ok, %SchemaDefinition{}}
+    Task->>CL: seed_bundled() / seed_thema()
+    CL->>Cont: Codelists.register(...) per list
+```
+
+The boot Task is supervised by `Barkpark.TaskSupervisor` and runs **after**
+the endpoint is up, so a slow filesystem walk or a misbehaving plugin never
+blocks request serving. Per-plugin `try/rescue` inside `Bootstrap` keeps a
+bad plugin from tanking the whole sweep.
+
+Idempotency: `Content.upsert_schema/2` reads first via `get_schema(name,
+dataset)`, then routes to `Repo.update` for existing rows or `Repo.insert`
+for new ones. Re-running `register_all_schemas/0` produces zero new rows on
+an already-bootstrapped database — field values are refreshed from the
+plugin's current code on every boot.
+
+Two callers invoke `register_all_schemas/0`:
+
+1. `Barkpark.Application.start/2` post-boot Task — every server start.
+2. `priv/repo/seeds.exs` — `mix ecto.reset` / `mix run priv/repo/seeds.exs`.
+
+Both paths converge on the same function so behaviour stays in sync.
+
+## The action-dispatch contract
+
+A plugin declares actions in its schema's `actions` column. The host renders
+them in the editor header and routes clicks back through one of three paths,
+depending on `kind`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant SL as StudioLive
+    participant Mod as ConfirmModal
+    participant Disp as dispatch_action/4
+    participant Act as <Plugin>.Actions
+
+    U->>SL: click "Publish to Bokbasen" (kind:modal)
+    SL->>SL: handle_event("schema_action", %{"name" => name})
+    SL->>Mod: assign(confirm_modal: %{action, stage: "initial", ...})
+    U->>SL: click "Dry run"
+    SL->>SL: handle_event("confirm-modal-dryrun", ...)
+    SL->>Disp: dispatch_action(name, doc_id, dataset, :dryrun)
+    Disp->>Act: <Plugin>.Actions.publish_to_bokbasen(doc_id, dataset, :dryrun)
+    Act-->>Disp: {:ok, %{kind: :xml, xml, summary}}
+    Disp-->>SL: preview
+    SL->>Mod: assign(confirm_modal: Map.merge(modal, %{stage: "dryrun", preview}))
+    U->>SL: click "Confirm"
+    SL->>Disp: dispatch_action(name, doc_id, dataset, :real)
+    Disp->>Act: publish_to_bokbasen(..., :real)
+    Act-->>Disp: {:ok, %{status, job}}
+    Disp-->>SL: flash + rebuild_panes
+```
+
+### `dispatch_action/4` — the registry
+
+`StudioLive.dispatch_action/4` is a clause-keyed table mapping action names
+to plugin function calls:
+
+```elixir
+defp dispatch_action("publish_to_bokbasen", doc_id, dataset, mode) do
+  Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode)
+end
+
+defp dispatch_action(name, _doc_id, _dataset, _mode) do
+  {:error, {:unknown_action, name}}
+end
+```
+
+**Adding a new plugin action today requires editing `studio_live.ex`** —
+one new clause per action name. The convention is plugin-prefixed names
+(`publish_to_vlie`, `validate_with_onyx`) so collisions across plugins are
+impossible. A future refactor may lift this to a runtime registry; until
+then, the single new clause is the integration point.
+
+Action handler return contract:
+
+- `{:ok, %{kind: :xml, xml: binary, summary: map}}` — dry-run preview
+- `{:ok, %{status: map, job: Oban.Job.t()}}` — real enqueue
+- `{:error, reason}` — anything else; the host formats via
+  `format_action_error/1`
+
+## External-sync pattern
+
+When a plugin needs status UI on a document — pending, accepted, rejected,
+synced — it plugs into the generic `external_sync:<system>:<doc_id>`
+contract. **No plugin UI required.**
+
+Three pieces:
+
+1. **Registry entry** in `Barkpark.ExternalSync.@entries` (compile-time
+   map). Declares the system label and per-state color/label table.
+
+   ```elixir
+   "vlie" => %{
+     label: "Vlie",
+     states: %{
+       "pending"  => %{color: "gray",  label: "Pending"},
+       "accepted" => %{color: "green", label: "Accepted"},
+       "rejected" => %{color: "red",   label: "Rejected"},
+       nil        => %{color: "gray",  label: "Not synced"}
+     }
+   }
+   ```
+
+2. **Broadcast on state transitions** from the plugin's worker:
+
+   ```elixir
+   ExternalSync.broadcast("vlie", doc_id, "accepted", patch)
+   ```
+
+3. **The host renders the pill automatically** via
+   `BarkparkWeb.Components.ExternalSyncPill` — it reads the registry, no
+   plugin component needed.
+
+The `@entries` map is the integration point. Adding a new plugin's system
+**requires editing `external_sync.ex`** today; a future change may lift it
+to runtime registration, but the compile-time map keeps the hot path
+allocation-free and unknown-system detection fast (`get/1 → nil`).
+
+## Codelist contribution
+
+When a plugin owns codelist data (controlled vocabularies, taxonomies):
+
+1. **Ship the data** as a static JSON/XML file under
+   `api/priv/codelists/<plugin>/`. Per the bring-your-own-snapshot
+   convention (Decision 21), plugins do **not** bundle EDItEUR-licensed data
+   — the publisher provides their licensed snapshot at install time.
+
+2. **Add a seed call** to the post-boot Task list in
+   `Barkpark.Application.start/2`. The current implementation hardcodes
+   `EDItEUR.seed_bundled/0` and `EDItEUR.seed_thema/0`. **Adding a third
+   codelist source today requires editing `application.ex`** to call
+   `<Plugin>.Codelists.seed_*/0`. The seed function is the plugin's
+   responsibility; the helper is just an `application.ex` line.
+
+3. **Reference codelists from schema fields** by their `<plugin>:<list_id>`
+   friendly name:
+
+   ```json
+   {
+     "name": "status",
+     "type": "codelist",
+     "codelistId": "vlie:status_code",
+     "version": "2026"
+   }
+   ```
+
+   The codelist registry (`Barkpark.Content.Codelists`) uses
+   `(plugin_name, list_id, issue)` as its uniqueness key, so two plugins can
+   register a list named `language` without colliding.
+
+4. **Alias resolution.** If a schema declares
+   `onix.codelistId: <integer>`, the alias resolver
+   (`Codelists.Adapter.resolve_plugin/2`) falls back to the EDItEUR ONIX
+   list number — useful for ONIX-flavoured plugins. Non-ONIX plugins use
+   the `<plugin>:<list_id>` friendly name exclusively.
+
+## What's NOT in the contract
+
+Plugins explicitly must not touch:
+
+- **LiveViews / HEEx / function components.** The host owns Studio, the
+  editor pane, all field renderers, all modals.
+- **Routes** beyond controller-mounted file endpoints under
+  `/v1/plugins/<plugin>/...` (e.g. `/v1/plugins/onixedit/export/.../X.onix`).
+  Document edit URLs are always `/studio/:dataset/:type/:id` — host-owned.
+- **CSS files.** Inline styles in `root.html.heex` using existing
+  `--bg` / `--fg` / `--border` CSS variables. If a plugin needs a new
+  style, it's a host-level addition.
+- **JavaScript / Web Components.** The `bp-*` custom elements are
+  host-owned. A plugin proposing one is proposing a host feature.
+- **Migrations beyond plugin-specific tables.** `plugin_settings` is the
+  host-owned encrypted store accessed via `Barkpark.Plugins.Settings`.
+- **Direct `studio_live.ex` socket assigns.** Use schema-declared actions
+  and the `dispatch_action/4` clause; never `phx-click` from plugin code.
+- **Plugin-specific PubSub topics** when `external_sync:<system>:<doc_id>`
+  fits. Generic topics work for any future plugin.
+
+## Testing a plugin
+
+Patterns proven on OnixEdit:
+
+- **Pure-function tests** for transformation modules (exporters, parsers,
+  validators, formatters). No DB, no LiveView. Lives at
+  `test/barkpark/plugins/<plugin>/export/*_test.exs`.
+- **Round-trip byte-for-byte tests** if the plugin parses + emits data.
+  Catches non-determinism in encoders (Erlang's small-map ordering
+  surprised the OnixEdit Message wrapper — fix was keyword lists).
+- **Bootstrap integration test** if the plugin contributes schemas +
+  codelists. Asserts `register_all_schemas/0` returns `{:ok, _}` and the
+  expected rows are in `schema_definitions` / `codelist_values`.
+- **Action smoke tests** at `test/barkpark/plugins/<plugin>/actions_test.exs`
+  — call `<Plugin>.Actions.<action>/3` directly with a fixture document.
+
+**LiveView tests are host tests, not plugin tests.** A plugin must not
+write `studio_live_test`. If a schema-declared action breaks the host
+editor, the failure surfaces in the host's StudioLive test suite, not in
+the plugin's.
+
+## Pointer index
+
+| Concern | File |
+|---|---|
+| Plugin behaviour | `api/lib/barkpark/plugin.ex` |
+| Plugin discovery | `api/lib/barkpark/plugins/registry.ex` |
+| Schema bootstrap | `api/lib/barkpark/plugins/bootstrap.ex` |
+| Schema definition | `api/lib/barkpark/content/schema_definition.ex` |
+| Codelist registry | `api/lib/barkpark/content/codelists.ex` |
+| External-sync registry | `api/lib/barkpark/external_sync.ex` |
+| External-sync pill | `api/lib/barkpark_web/components/external_sync_pill.ex` |
+| Schema-action dispatch | `api/lib/barkpark_web/live/studio/studio_live.ex` (`dispatch_action/4` near line 1005) |
+| ConfirmModal | `api/lib/barkpark_web/components/confirm_modal.ex` |
+| Plugin settings (encrypted) | `api/lib/barkpark/plugins/settings.ex` |
+| OnixEdit reference plugin | `api/lib/barkpark/plugins/onixedit.ex` and subtree |
+| OnixEdit manifest | `api/priv/plugins/onixedit/plugin.json` |
+| OnixEdit book schema | `api/priv/plugins/onixedit/schemas/book.json` |
+| Application boot hook | `api/lib/barkpark/application.ex` |
+
+For a worked file-by-file example of building a plugin from this contract,
+see [RECIPE.md](RECIPE.md).

@@ -1,0 +1,24 @@
+defmodule <%= @module_path %>.Actions do
+  @moduledoc """
+  Schema-action handlers for <%= @module_name %>. Wired into
+  `BarkparkWeb.Studio.StudioLive`'s `handle_event("schema_action", ...)`
+  dispatch (add a clause there matching your action's `name`).
+
+  Each function takes `(doc_id, dataset, mode)` where `mode` is
+  `:dryrun` or `:real`. Return `{:ok, result}` or `{:error, reason}`.
+  """
+
+  @doc """
+  Placeholder for a real action. Replace with your plugin's logic.
+  """
+  def example_action(doc_id, dataset, mode \\ :dryrun)
+
+  def example_action(doc_id, dataset, :dryrun) when is_binary(doc_id) and is_binary(dataset) do
+    {:ok,
+     %{mode: :dryrun, doc_id: doc_id, dataset: dataset, message: "Dry-run not yet implemented"}}
+  end
+
+  def example_action(doc_id, dataset, :real) when is_binary(doc_id) and is_binary(dataset) do
+    {:error, :not_implemented}
+  end
+end
