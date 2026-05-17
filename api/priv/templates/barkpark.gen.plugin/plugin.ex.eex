@@ -67,4 +67,40 @@ defmodule <%= @module_path %> do
   #     #   hint: "Stored encrypted at rest via BARKPARK_CLOAK_KEY"}
   #   ]
   # end
+  #
+  # @impl Barkpark.Plugin
+  # def top_menu_entries do
+  #   # Contributes one or more tabs to the Studio topbar (rendered after the
+  #   # built-in Structure · Media · API tabs). Built-in tabs use :order
+  #   # 10/20/30 — plugins default to 100; lower numbers sort earlier.
+  #   # `:active_when` is a string-prefix or `Regex` matched against the
+  #   # current request path; when absent the tab is only active on an exact
+  #   # path match.
+  #   [
+  #     # %{label: "<%= @module_name %>",
+  #     #   path: "/studio/production/<%= @snake_name %>/dashboard",
+  #     #   icon: "send",
+  #     #   order: 50,
+  #     #   active_when: "/studio/production/<%= @snake_name %>/"}
+  #   ]
+  # end
+  #
+  # @impl Barkpark.Plugin
+  # def desk_items(_dataset) do
+  #   # Contributes structural items to the root Structure pane (rendered
+  #   # after the host's auto-generated schema items). Item types:
+  #   #
+  #   #   * :link           — clickable row that navigates to :path
+  #   #   * :divider        — section break with optional :label
+  #   #   * :document_list  — pre-filtered doc list pane for :doc_type
+  #   #                       (filter map matches Content.list_documents/3's
+  #   #                       :filter_map option)
+  #   #   * :nested         — collapsible folder containing :items
+  #   [
+  #     # %{type: :divider, label: "<%= @module_name %>"},
+  #     # %{type: :link, label: "Dashboard",
+  #     #   path: "/studio/production/<%= @snake_name %>/dashboard",
+  #     #   icon: "layout-dashboard"}
+  #   ]
+  # end
 end

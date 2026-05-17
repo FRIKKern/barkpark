@@ -13,7 +13,11 @@
       </div>
     </:brand>
     <:tabs :if={assigns[:dataset]}>
-      <.studio_tabs dataset={@dataset} nav_section={assigns[:nav_section]} />
+      <.studio_tabs
+        dataset={@dataset}
+        nav_section={assigns[:nav_section]}
+        current_path={assigns[:current_path]}
+      />
     </:tabs>
     <:actions :if={assigns[:nav_section] == :api_tester}>
       <div class="studio-bar-actions">

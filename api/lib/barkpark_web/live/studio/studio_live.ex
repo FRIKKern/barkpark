@@ -97,7 +97,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     dataset = params["dataset"] || "production"
     path = Map.get(params, "path", [])
     desk = params["desk"]
@@ -110,9 +110,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
     end
 
+    current_path =
+      case uri do
+        u when is_binary(u) ->
+          case URI.parse(u) do
+            %URI{path: p} when is_binary(p) -> p
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
     socket =
       socket
-      |> assign(dataset: dataset, nav_path: path, nav_desk: desk)
+      |> assign(
+        dataset: dataset,
+        nav_path: path,
+        nav_desk: desk,
+        current_path: current_path
+      )
       |> rebuild_panes()
       |> subscribe_to_doc()
       |> track_presence()
@@ -1371,12 +1388,31 @@ defmodule BarkparkWeb.Studio.StudioLive do
             <%= for item <- pane.items do %>
               <%= case item.type do %>
                 <% :divider -> %>
-                  <.pane_divider />
+                  <%= if item[:label] && item[:label] != "" do %>
+                    <div class="pane-divider pane-divider--labelled" role="separator" aria-label={item[:label]}>
+                      <span class="pane-divider-label"><%= item[:label] %></span>
+                    </div>
+                  <% else %>
+                    <.pane_divider />
+                  <% end %>
 
                 <% :header -> %>
                   <.pane_section_header>
                     <.icon name={item.icon} size={12} /> <%= item.title %>
                   </.pane_section_header>
+
+                <% :plugin_link -> %>
+                  <a
+                    id={"plugin-link-#{item.id}"}
+                    href={item.href}
+                    class="pane-item nav-plugin-entry"
+                    data-test-id="nav-plugin-entry"
+                  >
+                    <%= if item.icon do %>
+                      <span class="pane-item-icon"><.icon name={item.icon} size={16} /></span>
+                    <% end %>
+                    <span class="pane-item-label"><%= item.title %></span>
+                  </a>
 
                 <% :doc -> %>
                   <% item_presences = PresenceState.on_doc(@presences, item.id) %>

@@ -50,6 +50,62 @@ defmodule Barkpark.Plugin do
           optional(:group) => String.t()
         }
 
+  @typedoc """
+  A top-menu tab contributed by a plugin. Rendered in the Studio topbar
+  after the host's built-in tabs (Structure · Media · API). The
+  `:active_when` field is matched against the current request path —
+  use a string for a prefix match or a `Regex` for richer rules. When
+  absent, the tab is active only when the current path equals `:path`.
+
+  Built-in host tabs use `:order` values 10/20/30; plugin tabs default
+  to 100 so they sort after the host's tabs unless overridden.
+  """
+  @type top_menu_entry :: %{
+          required(:label) => String.t(),
+          required(:path) => String.t(),
+          optional(:icon) => String.t(),
+          optional(:order) => integer(),
+          optional(:active_when) => String.t() | Regex.t()
+        }
+
+  @typedoc """
+  A structural desk item contributed by a plugin. Rendered in the root
+  Structure pane after the host's auto-generated schema items. The
+  shape is a tagged map keyed by `:type` so PaneBuilder can dispatch:
+
+    * `:link`           — clickable row that navigates to `:path`
+    * `:document_list`  — renders a regular doc-list pane for `:doc_type`,
+                          pre-filtered via the optional `:filter` map
+                          (shape matches `Content.list_documents/3`'s
+                          `:filter_map` option)
+    * `:divider`        — visual separator with optional `:label`
+    * `:nested`         — collapsible folder containing `:items`
+  """
+  @type desk_item ::
+          %{
+            required(:type) => :link,
+            required(:label) => String.t(),
+            required(:path) => String.t(),
+            optional(:icon) => String.t()
+          }
+          | %{
+              required(:type) => :document_list,
+              required(:label) => String.t(),
+              required(:doc_type) => String.t(),
+              optional(:filter) => map(),
+              optional(:icon) => String.t()
+            }
+          | %{
+              required(:type) => :divider,
+              optional(:label) => String.t()
+            }
+          | %{
+              required(:type) => :nested,
+              required(:label) => String.t(),
+              required(:items) => [map()],
+              optional(:icon) => String.t()
+            }
+
   @callback manifest() :: map()
   @callback register_routes(any()) :: any()
   @callback register_workers(any()) :: [Supervisor.child_spec()]
@@ -60,6 +116,8 @@ defmodule Barkpark.Plugin do
   @callback external_sync_entries() :: %{optional(String.t()) => map()}
   @callback codelist_seeders() :: [(-> any())]
   @callback settings_schema() :: [setting_field()]
+  @callback top_menu_entries() :: [top_menu_entry()]
+  @callback desk_items(dataset :: String.t()) :: [desk_item()]
 
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
@@ -69,7 +127,9 @@ defmodule Barkpark.Plugin do
                       action_handlers: 0,
                       external_sync_entries: 0,
                       codelist_seeders: 0,
-                      settings_schema: 0
+                      settings_schema: 0,
+                      top_menu_entries: 0,
+                      desk_items: 1
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -122,6 +182,12 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def settings_schema, do: []
 
+      @impl Barkpark.Plugin
+      def top_menu_entries, do: []
+
+      @impl Barkpark.Plugin
+      def desk_items(_dataset), do: []
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -131,7 +197,9 @@ defmodule Barkpark.Plugin do
                      action_handlers: 0,
                      external_sync_entries: 0,
                      codelist_seeders: 0,
-                     settings_schema: 0
+                     settings_schema: 0,
+                     top_menu_entries: 0,
+                     desk_items: 1
     end
   end
 end

@@ -421,6 +421,34 @@
     }
     .pane-section-header-chevron.collapsed { transform: rotate(0deg); }
     .pane-divider { border-top: 1px solid var(--border-muted); margin: 4px 0; }
+    .pane-divider--labelled {
+      border-top: none;
+      margin: 10px 0 4px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pane-divider--labelled::after {
+      content: "";
+      flex: 1;
+      border-top: 1px solid var(--border-muted);
+    }
+    .pane-divider-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      font-weight: 600;
+    }
+    /* Plugin-contributed nav rows render as <a> instead of phx-click; keep
+       the visual rhythm consistent with .pane-item. */
+    a.pane-item.nav-plugin-entry {
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+      align-items: center;
+    }
 
     .pane-doc-item {
       padding: 10px 14px; cursor: pointer;

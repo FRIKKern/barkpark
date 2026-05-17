@@ -160,6 +160,53 @@ defmodule Barkpark.Plugins.OnixEdit do
     ]
   end
 
+  @doc """
+  Plugin-contributed top-menu tab — surfaces "Bokbasen" in the Studio
+  topbar next to Structure / Media / API. Points at the existing
+  staleness console which lives at `/admin/onixedit/staleness` (the
+  console is admin-gated; the tab is rendered to everyone but the
+  route enforces). Active for any path that begins with
+  `/admin/onixedit/`.
+  """
+  @impl Barkpark.Plugin
+  def top_menu_entries do
+    [
+      %{
+        label: "Bokbasen",
+        path: "/admin/onixedit/staleness",
+        icon: "send",
+        order: 50,
+        active_when: "/admin/onixedit/"
+      }
+    ]
+  end
+
+  @doc """
+  Plugin-contributed desk items — appended after the host's auto-
+  generated schema items in the root Structure pane. Two entries:
+
+    * A divider labelled "Bokbasen" that visually anchors the group.
+    * A `:link` row that jumps to the staleness console.
+
+  `:document_list` / `:nested` shapes are accepted by the host
+  PaneBuilder (see `BarkparkWeb.Studio.PaneBuilder`) but OnixEdit
+  v1 only contributes the simpler two — the `book` schema already
+  appears via the standard schema-discovery path, and adding extra
+  pre-filtered views from the plugin side would duplicate it.
+  """
+  @impl Barkpark.Plugin
+  def desk_items(_dataset) do
+    [
+      %{type: :divider, label: "Bokbasen"},
+      %{
+        type: :link,
+        label: "Pending submissions",
+        path: "/admin/onixedit/staleness",
+        icon: "clock"
+      }
+    ]
+  end
+
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
     raw = book_raw_with_subschemas()
