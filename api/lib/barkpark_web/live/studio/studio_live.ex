@@ -749,11 +749,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # `confirm-modal-dryrun` / `confirm-modal-real` below, each of which
   # dispatches into the plugin-owned action handler (e.g.
   # `Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3`). `kind: "link"`
-  # actions never hit this handler — they're rendered as anchor tags
-  # interpolated with `interpolate_action_href/3`, so a click is a plain
-  # HTTP navigation.
+  # actions never hit this handler — they're rendered as anchor tags by
+  # `StudioComponents.doc_action_button/1`, so a click is a plain HTTP
+  # navigation.
   def handle_event("schema_action", %{"name" => name}, socket) do
-    action = find_schema_action(socket.assigns[:editor_schema], name)
+    # Resolve the post-plugin doc-actions list and look the action up there
+    # — a plugin's `resolve_doc_actions/2` may have rewritten or dropped it
+    # since the button was rendered. If the action no longer exists in the
+    # resolved list (e.g. a plugin filtered it out between render and click),
+    # fall back to a no-op flash.
+    action = find_resolved_doc_action(socket, name)
 
     case action do
       %{"kind" => "modal"} = a ->
@@ -1009,9 +1014,189 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp find_schema_action(schema, name) do
-    schema
-    |> schema_actions()
+  # ── Doc-actions registry (Goal barkpark-cjs, s4) ───────────────────────────
+  #
+  # The editor-header action bar (Publish, Unpublish, Delete, History, Diff
+  # toggle, Show/Hide XML, Duplicate, Open another, plus schema-declared
+  # plugin actions like Export ONIX / Publish to Bokbasen) flows through
+  # `Barkpark.Plugins.Registry.collect_doc_actions/1`. The host builds its
+  # built-in list via `default_doc_actions/1`, passes it as `:baseline`, and
+  # the resolver chain (each plugin's `resolve_doc_actions/2`) can drop,
+  # reorder, or amend entries based on the live document payload.
+  #
+  # The proof for the refactor lands in s5: OnixEdit's resolver hides
+  # "Publish to Bokbasen" when the book is mid-Bokbasen-submission
+  # (`doc.content.bp_export_status.state` in
+  # `~w(pending staging staged polling)`).
+  #
+  # Each action is a string-keyed map matching the `Barkpark.Plugin.doc_action`
+  # typespec: `"name"`, `"label"`, `"kind"` (`"event"` | `"modal"` | `"link"`),
+  # plus optional `"opts"` (per-kind payload — `"event"` name for `:event`,
+  # `"href"` for `:link`, `"modal"` body for `:modal`).
+  # Accepts either `%Phoenix.LiveView.Socket{}` (handle_event paths) or a
+  # raw assigns map (render paths). Both flow through the same baseline +
+  # resolver call so a plugin's filter applies whether the action is being
+  # rendered or dispatched.
+  defp resolved_doc_actions(socket_or_assigns) do
+    assigns = socket_to_assigns(socket_or_assigns)
+    ctx = doc_actions_ctx(assigns)
+    baseline = default_doc_actions(assigns, ctx)
+    Barkpark.Plugins.Registry.collect_doc_actions(baseline: baseline, ctx: ctx)
+  end
+
+  defp socket_to_assigns(%{assigns: assigns}), do: assigns
+  defp socket_to_assigns(assigns) when is_map(assigns), do: assigns
+
+  defp doc_actions_ctx(assigns) do
+    %{
+      dataset: assigns[:dataset],
+      doc_id: doc_id_from_assigns(assigns),
+      doc_type: assigns[:editor_type],
+      doc: assigns[:editor_doc]
+    }
+  end
+
+  defp doc_id_from_assigns(assigns) do
+    case assigns[:editor_doc] do
+      %{doc_id: doc_id} -> doc_id
+      _ -> nil
+    end
+  end
+
+  # Host's built-in editor-header doc-actions, seeded as `:baseline` for the
+  # `resolve_doc_actions/2` resolver chain. The list mirrors what the editor
+  # shell rendered as hardcoded HEEx before the refactor (History, Delete,
+  # Publish/Unpublish, Show/Hide XML for books, Diff/Edit when a draft has a
+  # published twin) plus the per-doc Duplicate / Open another buttons from
+  # `:extra_actions` and the schema-declared actions (which the schema
+  # author — including plugins like OnixEdit — registered via the schema's
+  # `:actions` array). The conditional gating (draft vs published, book-only
+  # XML toggle, diff-toggle availability) is expressed as the action being
+  # in or out of the returned list.
+  #
+  # Order is rendering-order inside the editor-header `bp-overflow-menu`:
+  # History → Delete → Publish/Unpublish → Show/Hide XML → Diff toggle →
+  # Duplicate → Open another → schema actions.
+  defp default_doc_actions(assigns, _ctx) do
+    assigns = socket_to_assigns(assigns)
+    editor_doc = assigns[:editor_doc]
+    editor_schema = assigns[:editor_schema]
+    editor_type = assigns[:editor_type]
+    is_draft = assigns[:editor_is_draft] == true
+    published_doc = assigns[:published_doc]
+    onix_preview_visible = assigns[:onix_preview_visible] == true
+    diff_visible = assigns[:diff_visible] == true
+
+    has_published_twin = is_draft and not is_nil(published_doc)
+    is_book = editor_type == "book"
+
+    base = [
+      %{
+        "name" => "show-history",
+        "label" => "History",
+        "kind" => "event",
+        "scope" => "editor_header",
+        "opts" => %{"event" => "show-history", "class" => "btn btn-ghost btn-sm"}
+      },
+      %{
+        "name" => "delete-doc",
+        "label" => "Delete",
+        "kind" => "event",
+        "scope" => "editor_header",
+        "opts" => %{
+          "event" => "delete-doc",
+          "class" => "btn btn-ghost btn-sm",
+          "style" => "color: var(--destructive);"
+        }
+      },
+      if is_draft do
+        %{
+          "name" => "publish",
+          "label" => "Publish",
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{"event" => "publish", "class" => "btn btn-primary btn-sm"}
+        }
+      else
+        %{
+          "name" => "unpublish",
+          "label" => "Unpublish",
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{"event" => "unpublish", "class" => "btn btn-sm"}
+        }
+      end,
+      if is_book do
+        %{
+          "name" => "toggle-onix-preview",
+          "label" => if(onix_preview_visible, do: "Hide XML", else: "Show XML"),
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "toggle-onix-preview",
+            "class" => "btn btn-ghost btn-sm",
+            "data_test_id" => "onix-preview-toggle"
+          }
+        }
+      end,
+      if has_published_twin do
+        %{
+          "name" => "toggle-diff",
+          "label" => if(diff_visible, do: "Edit", else: "Diff"),
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "toggle-diff",
+            "class" => "btn btn-ghost btn-sm",
+            "data_test_id" => "draft-diff-toggle"
+          }
+        }
+      end,
+      if editor_doc do
+        %{
+          "name" => "duplicate-doc",
+          "label" => "Duplicate",
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "duplicate-doc",
+            "class" => "btn btn-ghost btn-sm",
+            "data_test_id" => "duplicate-doc"
+          }
+        }
+      end,
+      if editor_doc do
+        %{
+          "name" => "open-secondary-picker",
+          "label" => "Open another",
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "open-secondary-picker",
+            "class" => "btn btn-ghost btn-sm",
+            "data_test_id" => "open-secondary-picker"
+          }
+        }
+      end
+    ]
+
+    # Schema-declared actions land last. These are the entries plugins
+    # already register today via SchemaDefinition `:actions` (e.g.
+    # OnixEdit's `export_onix` link + `publish_to_bokbasen` modal). The
+    # resolver chain runs over the combined list, so a plugin can still
+    # filter its own schema-declared actions based on live doc state.
+    schema_entries =
+      editor_schema
+      |> schema_actions()
+      |> Enum.map(&Map.put(&1, "scope", "editor_header"))
+
+    (base ++ schema_entries)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp find_resolved_doc_action(socket, name) do
+    socket
+    |> resolved_doc_actions()
     |> Enum.find(fn a -> Map.get(a, "name") == name end)
   end
 
@@ -1094,21 +1279,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp format_action_error(other), do: inspect(other, limit: 100)
 
-  # Substitute `:dataset` and `:id` in an href template. The published id is
-  # used (drafts. prefix stripped) so links always target the canonical URL.
-  defp interpolate_action_href(nil, _doc, _dataset), do: "#"
-
-  defp interpolate_action_href(href, doc, dataset) when is_binary(href) do
-    id =
-      case doc do
-        %{doc_id: doc_id} -> Content.published_id(doc_id)
-        _ -> ""
-      end
-
-    href
-    |> String.replace(":dataset", to_string(dataset || ""))
-    |> String.replace(":id", id)
-  end
+  # NOTE (Goal barkpark-cjs, s4): href interpolation for schema-declared
+  # `"link"` actions now lives in `BarkparkWeb.Components.StudioComponents`
+  # alongside `doc_action_button/1` — the editor shell renders link actions
+  # directly from the resolved doc-action list. The old
+  # `interpolate_action_href/3` private helper was removed; if a future
+  # caller needs the same substitution, reuse the component-level helper.
 
   # ── ArrayField helpers (Studio reorder/add/remove wiring) ───────────────────
   #
@@ -1521,45 +1697,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
         onix_preview_visible={@onix_preview_visible}
         diff_visible={@diff_visible}
         published_doc={@published_doc}
-      >
-        <:extra_actions>
-          <!-- E1 Duplicate + E2 Open-another buttons (Task barkpark-3yq) -->
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            phx-click="duplicate-doc"
-            data-test-id="duplicate-doc"
-          >Duplicate</button>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            phx-click="open-secondary-picker"
-            data-test-id="open-secondary-picker"
-          >Open another</button>
-          <%= for action <- schema_actions(@editor_schema) do %>
-            <%= case action["kind"] do %>
-              <% "link" -> %>
-                <a
-                  href={interpolate_action_href(action["href"], @editor_doc, @dataset)}
-                  class="btn btn-ghost btn-sm"
-                  data-test-id={"schema-action-#{action["name"]}"}
-                >
-                  <%= action["label"] %>
-                </a>
-              <% _ -> %>
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-sm"
-                  phx-click="schema_action"
-                  phx-value-name={action["name"]}
-                  data-test-id={"schema-action-#{action["name"]}"}
-                >
-                  <%= action["label"] %>
-                </button>
-            <% end %>
-          <% end %>
-        </:extra_actions>
-      </.studio_editor_shell>
+        doc_actions={resolved_doc_actions(assigns)}
+      />
+      <!-- doc_actions flows through Registry.collect_doc_actions/1 with
+           the host's `default_doc_actions/2` as :baseline. Plugins
+           implementing resolve_doc_actions/2 can hide, reorder, or extend
+           the editor-header action list. See Goal barkpark-cjs s4. -->
 
       <!-- E2 secondary editor (read-only) — sits in the layout flex
            row so it lands to the right of the primary editor pane. -->
