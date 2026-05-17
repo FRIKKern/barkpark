@@ -1343,6 +1343,18 @@ defmodule BarkparkWeb.StudioComponents do
   attr :diff_visible, :boolean, default: false
   attr :published_doc, :map, default: nil
 
+  # ── Editor-header doc actions (Goal barkpark-cjs, s4) ──────────────────
+  # List of resolved doc-action maps from
+  # `StudioLive.resolved_doc_actions/1`. Each entry is a string-keyed map
+  # matching the `Barkpark.Plugin.doc_action` typespec — `"name"`,
+  # `"label"`, `"kind"` (`"event"` | `"modal"` | `"link"`), `"scope"`
+  # (`"editor_header"` | `"overflow"`), and an `"opts"` map carrying
+  # per-kind payload (the phx-click event for `"event"`, an href template
+  # for `"link"`, a modal payload for `"modal"`). When empty (e.g. legacy
+  # callers that haven't been migrated yet), the editor header renders no
+  # action buttons — the action bar should be considered authoritative.
+  attr :doc_actions, :list, default: []
+
   slot :extra_actions
   slot :empty_state
 
@@ -1384,27 +1396,13 @@ defmodule BarkparkWeb.StudioComponents do
           </:presence>
           <:actions>
             <bp-overflow-menu class="bp-overflow-menu">
-              <button class="btn btn-ghost btn-sm" phx-click="show-history">History</button>
-              <button class="btn btn-ghost btn-sm" phx-click="delete-doc" style="color: var(--destructive);">Delete</button>
-              <%= if @editor_is_draft do %>
-                <button class="btn btn-primary btn-sm" phx-click="publish">Publish</button>
-              <% else %>
-                <button class="btn btn-sm" phx-click="unpublish">Unpublish</button>
+              <%= for action <- @doc_actions do %>
+                <.doc_action_button
+                  action={action}
+                  editor_doc={@editor_doc}
+                  dataset={@dataset}
+                />
               <% end %>
-              <button
-                :if={@editor_type == "book"}
-                type="button"
-                phx-click="toggle-onix-preview"
-                class="btn btn-ghost btn-sm"
-                data-test-id="onix-preview-toggle"
-              ><%= if @onix_preview_visible, do: "Hide XML", else: "Show XML" %></button>
-              <button
-                :if={@show_diff_toggle}
-                type="button"
-                phx-click="toggle-diff"
-                class="btn btn-ghost btn-sm"
-                data-test-id="draft-diff-toggle"
-              ><%= if @diff_visible, do: "Edit", else: "Diff" %></button>
               <%= render_slot(@extra_actions) %>
             </bp-overflow-menu>
           </:actions>
@@ -1491,6 +1489,120 @@ defmodule BarkparkWeb.StudioComponents do
 
   defp presences_on_doc(presences, doc_id) do
     Enum.filter(presences, &(&1.doc_id == doc_id))
+  end
+
+  @doc """
+  Renders a single editor-header doc-action — `"event"`, `"modal"`, or
+  `"link"` — from a resolved doc-action map (see
+  `Barkpark.Plugin.doc_action` typespec + `StudioLive.default_doc_actions/2`).
+
+  Used by `studio_editor_shell/1` to walk the resolved list inside
+  `<bp-overflow-menu>`. Splits out so the case statement stays out of the
+  shell's main HEEx.
+
+    * `"event"` → `<button phx-click=<opts.event>>`
+    * `"modal"` → `<button phx-click="schema_action" phx-value-name=<name>>`
+    * `"link"`  → `<a href=<interpolated-href>>`
+
+  Class / style / `data-test-id` are read off `opts` so the host's built-in
+  buttons preserve their existing attrs (`btn btn-primary btn-sm` on
+  Publish, `color: var(--destructive)` on Delete, `data-test-id` on
+  Duplicate / Open another / schema actions). Plugin-contributed actions
+  without those opts fall back to `btn btn-ghost btn-sm`.
+  """
+  attr :action, :map, required: true
+  attr :editor_doc, :map, default: nil
+  attr :dataset, :string, required: true
+
+  def doc_action_button(assigns) do
+    ~H"""
+    <%= case @action["kind"] do %>
+      <% "link" -> %>
+        <a
+          href={interpolate_doc_action_href(@action, @editor_doc, @dataset)}
+          class={action_button_class(@action)}
+          data-test-id={doc_action_test_id(@action)}
+        ><%= @action["label"] %></a>
+      <% "modal" -> %>
+        <button
+          type="button"
+          class={action_button_class(@action)}
+          style={action_button_style(@action)}
+          data-test-id={doc_action_test_id(@action)}
+          phx-click="schema_action"
+          phx-value-name={@action["name"]}
+        ><%= @action["label"] %></button>
+      <% _ -> %>
+        <%!-- default: "event" — dispatch the named phx-click event --%>
+        <button
+          type="button"
+          class={action_button_class(@action)}
+          style={action_button_style(@action)}
+          data-test-id={doc_action_test_id(@action)}
+          phx-click={doc_action_event(@action)}
+        ><%= @action["label"] %></button>
+    <% end %>
+    """
+  end
+
+  defp doc_action_event(action) do
+    case action["opts"] do
+      %{"event" => ev} when is_binary(ev) -> ev
+      _ -> action["name"]
+    end
+  end
+
+  defp action_button_class(action) do
+    case action["opts"] do
+      %{"class" => c} when is_binary(c) -> c
+      _ -> "btn btn-ghost btn-sm"
+    end
+  end
+
+  defp action_button_style(action) do
+    case action["opts"] do
+      %{"style" => s} when is_binary(s) -> s
+      _ -> nil
+    end
+  end
+
+  defp doc_action_test_id(action) do
+    case action["opts"] do
+      %{"data_test_id" => id} when is_binary(id) -> id
+      _ ->
+        case action["kind"] do
+          k when k in ["modal", "link"] -> "schema-action-#{action["name"]}"
+          _ -> nil
+        end
+    end
+  end
+
+  # Same interpolation StudioLive used for schema-declared `"link"`
+  # actions. Falls back to `"#"` when href is missing. Substitutes
+  # `:dataset` and `:id` (published id — drafts. prefix stripped).
+  defp interpolate_doc_action_href(action, doc, dataset) do
+    case action["opts"] do
+      %{"href" => href} when is_binary(href) ->
+        do_interpolate_href(href, doc, dataset)
+
+      _ ->
+        case action["href"] do
+          href when is_binary(href) -> do_interpolate_href(href, doc, dataset)
+          _ -> "#"
+        end
+    end
+  end
+
+  defp do_interpolate_href(href, doc, dataset) do
+    id =
+      case doc do
+        %{doc_id: doc_id} -> Barkpark.Content.published_id(doc_id)
+        _ -> ""
+      end
+
+    href
+    |> String.replace(":dataset", to_string(dataset || ""))
+    |> String.replace(":id", id)
   end
 
   @doc """
