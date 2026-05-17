@@ -214,7 +214,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
     supplier = build_supplier(Map.get(detail, "supplier"), ctx)
     availability = build_product_availability(Map.get(detail, "productAvailability"))
     prices = build_prices(Map.get(detail, "prices", []))
-    unpriced = build_unpriced_when_synthesized(prices, ctx)
+    unpriced = build_unpriced(Map.get(detail, "unpricedItemType"), prices, ctx)
 
     children =
       ([supplier, availability] ++ prices ++ List.wrap(unpriced))
@@ -256,17 +256,25 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
     ])
   end
 
-  # Emit `<UnpricedItemType>` only on the synthesized SupplyDetail when no
-  # `<Price>` children were produced. ONIX 3.0 SupplyDetail content model
-  # forces `(UnpricedItemType | Price+)`; without this the synthesized envelope
-  # fails XSD validation. Real supplyDetails entries with empty `prices` are
-  # left as-is — the publisher must add either a Price or an explicit
-  # UnpricedItemType to book.json (out-of-scope fixup for WI5.5).
-  defp build_unpriced_when_synthesized([], %{synthesized: true}) do
+  # Emit `<UnpricedItemType>` to satisfy ONIX 3.0's
+  # `(UnpricedItemType | Price+)` content model on SupplyDetail. Three cases:
+  #
+  #   1. Document explicitly declares `unpricedItemType` AND has no prices →
+  #      emit the declared value (round-trip preservation for documents
+  #      imported from ONIX that came in with UnpricedItemType set).
+  #   2. Synthesized SupplyDetail (no real supplyDetails entry) → emit the
+  #      default `01` (Free of charge) placeholder.
+  #   3. Real entry with prices, or with neither prices nor declared
+  #      unpricedItemType → emit nothing; the publisher must add data.
+  defp build_unpriced(declared, [], _ctx) when is_binary(declared) and declared != "" do
+    XmlBuilder.element(:UnpricedItemType, declared)
+  end
+
+  defp build_unpriced(_declared, [], %{synthesized: true}) do
     XmlBuilder.element(:UnpricedItemType, @default_unpriced_item_type)
   end
 
-  defp build_unpriced_when_synthesized(_, _), do: nil
+  defp build_unpriced(_declared, _prices, _ctx), do: nil
 
   defp build_product_availability(code) when is_binary(code) and code != "" do
     {:ok, c} = Codelists.product_availability(code)

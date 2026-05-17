@@ -60,6 +60,8 @@ The active chip is reflected in the URL (`?desk=drafts`) — bookmarkable, share
 
 Click a tab to filter the form to just those fields. The active tab persists across autosaves — you don't lose your place every time you type.
 
+**Note on shareable URLs**: the active tab lives in the LiveView socket, not the URL. If you share a deep-link like `/studio/production/book/book-22209` with a colleague, they'll land on the default **Core** tab regardless of what tab you had open. Desk filters (the `?desk=drafts` chips on the document-list pane) DO live in the URL and are sharable.
+
 ### Conditional fields
 
 Some fields hide themselves until they're relevant:
