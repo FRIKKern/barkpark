@@ -15,12 +15,23 @@ defmodule Barkpark.Plugins.Registry do
   present, otherwise from `plugin_name` (PascalCased under
   `Barkpark.Plugins.<Name>`). Modules that fail to load are logged and
   skipped — discovery NEVER raises.
+
+  ## Caching
+
+  Reads (`all/0`, `collect_action_handlers/0`, `collect_external_sync_entries/0`)
+  short-circuit through a `:persistent_term` snapshot. The snapshot is
+  refreshed on every state mutation (currently: `register/2`). Because
+  `:persistent_term.put/2` triggers a global GC scan of all live data,
+  we only write on mutation — never on read. `lookup/1` and
+  `run_all_codelist_seeders/0` still go through the GenServer (lookups
+  are O(1) on the GenServer state, seeders run once at boot/admin).
   """
 
   use GenServer
   require Logger
 
   @name __MODULE__
+  @snapshot_key {__MODULE__, :snapshot}
 
   # ─── Public API ─────────────────────────────────────────────────────────
 
@@ -51,7 +62,10 @@ defmodule Barkpark.Plugins.Registry do
 
   @spec all() :: [%{module: module(), manifest: map(), name: String.t()}]
   def all do
-    GenServer.call(@name, :all)
+    case :persistent_term.get(@snapshot_key, nil) do
+      %{plugins: plugins} -> plugins
+      nil -> GenServer.call(@name, :all)
+    end
   end
 
   @doc """
@@ -63,15 +77,18 @@ defmodule Barkpark.Plugins.Registry do
 
   Plugins that don't implement the optional callback (or whose callback
   raises) contribute nothing.
+
+  Cached via `:persistent_term` — see module doc.
   """
   @spec collect_action_handlers() :: %{optional(String.t()) => Barkpark.Plugin.action_handler()}
   def collect_action_handlers do
-    all()
-    |> Enum.sort_by(& &1.name)
-    |> Enum.reduce(%{}, fn entry, acc ->
-      handlers = safe_call(entry.module, :action_handlers, [], %{})
-      if is_map(handlers), do: Map.merge(acc, handlers), else: acc
-    end)
+    case :persistent_term.get(@snapshot_key, nil) do
+      %{action_handlers: handlers} ->
+        handlers
+
+      nil ->
+        compute_action_handlers(GenServer.call(@name, :all))
+    end
   end
 
   @doc """
@@ -84,15 +101,18 @@ defmodule Barkpark.Plugins.Registry do
 
   Plugins that don't implement the optional callback (or whose callback
   raises) contribute nothing.
+
+  Cached via `:persistent_term` — see module doc.
   """
   @spec collect_external_sync_entries() :: %{optional(String.t()) => map()}
   def collect_external_sync_entries do
-    all()
-    |> Enum.sort_by(& &1.name)
-    |> Enum.reduce(%{}, fn entry, acc ->
-      entries = safe_call(entry.module, :external_sync_entries, [], %{})
-      if is_map(entries), do: Map.merge(acc, entries), else: acc
-    end)
+    case :persistent_term.get(@snapshot_key, nil) do
+      %{external_sync_entries: entries} ->
+        entries
+
+      nil ->
+        compute_external_sync_entries(GenServer.call(@name, :all))
+    end
   end
 
   @doc """
@@ -102,39 +122,92 @@ defmodule Barkpark.Plugins.Registry do
 
   Each seeder is wrapped in `try/rescue` so one failing plugin's seeder
   doesn't abort the rest. Failures log a warning. Returns `:ok` always.
+
+  Not cached — seeders are run for side-effects at boot / admin reload,
+  not on hot paths.
   """
   @spec run_all_codelist_seeders() :: :ok
   def run_all_codelist_seeders do
     all()
     |> Enum.sort_by(& &1.name)
-    |> Enum.each(fn entry ->
-      seeders = safe_call(entry.module, :codelist_seeders, [], [])
-
-      if is_list(seeders) do
-        Enum.each(seeders, fn seeder ->
-          try do
-            cond do
-              is_function(seeder, 0) -> seeder.()
-              true -> :noop
-            end
-          rescue
-            e ->
-              Logger.warning(
-                "Barkpark.Plugins.Registry: codelist seeder #{inspect(seeder)} from plugin " <>
-                  "#{entry.name} raised — #{Exception.message(e)}"
-              )
-          catch
-            kind, reason ->
-              Logger.warning(
-                "Barkpark.Plugins.Registry: codelist seeder #{inspect(seeder)} from plugin " <>
-                  "#{entry.name} threw #{kind} #{inspect(reason)}"
-              )
-          end
-        end)
-      end
-    end)
+    |> Enum.each(&run_codelist_seeders_for_entry/1)
 
     :ok
+  end
+
+  @doc """
+  Looks up a single plugin by name and runs its codelist seeders. Used by
+  the plugin admin LV's per-plugin Reload button. Returns `:ok` when the
+  plugin was found (per-seeder failures are logged, not raised, matching
+  `run_all_codelist_seeders/0`); `{:error, :unknown_plugin}` when not
+  registered.
+
+  Records the result into `Barkpark.Plugins.RunStatus` under `:seed`.
+  """
+  @spec run_codelist_seeders_by_name(String.t()) :: :ok | {:error, :unknown_plugin}
+  def run_codelist_seeders_by_name(plugin_name) when is_binary(plugin_name) do
+    case lookup(plugin_name) do
+      {:ok, entry} ->
+        run_codelist_seeders_for_entry(entry)
+        :ok
+
+      :error ->
+        {:error, :unknown_plugin}
+    end
+  end
+
+  defp run_codelist_seeders_for_entry(%{name: name, module: module}) do
+    seeders = safe_call(module, :codelist_seeders, [], [])
+
+    {ok_count, errors} =
+      if is_list(seeders) do
+        Enum.reduce(seeders, {0, []}, fn seeder, {ok_acc, err_acc} ->
+          case invoke_seeder(seeder, name) do
+            :ok -> {ok_acc + 1, err_acc}
+            {:error, reason} -> {ok_acc, [reason | err_acc]}
+          end
+        end)
+      else
+        {0, []}
+      end
+
+    result =
+      case errors do
+        [] -> {:ok, ok_count}
+        _ -> {:error, Enum.reverse(errors)}
+      end
+
+    Barkpark.Plugins.RunStatus.record(:seed, name, result)
+    result
+  end
+
+  defp invoke_seeder(seeder, plugin_name) do
+    try do
+      cond do
+        is_function(seeder, 0) ->
+          seeder.()
+          :ok
+
+        true ->
+          {:error, {:not_a_zero_arity_function, seeder}}
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry: codelist seeder #{inspect(seeder)} from plugin " <>
+            "#{plugin_name} raised — #{Exception.message(e)}"
+        )
+
+        {:error, {:raised, Exception.message(e)}}
+    catch
+      kind, reason ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry: codelist seeder #{inspect(seeder)} from plugin " <>
+            "#{plugin_name} threw #{kind} #{inspect(reason)}"
+        )
+
+        {:error, {kind, inspect(reason)}}
+    end
   end
 
   # Invoke `module.function(args)` only when exported. Errors / non-export
@@ -156,6 +229,40 @@ defmodule Barkpark.Plugins.Registry do
 
         default
     end
+  end
+
+  # Derive `%{action_name => handler_fn}` from a list of plugin entries.
+  # Used by both the cached read path and the snapshot refresh.
+  defp compute_action_handlers(entries) do
+    entries
+    |> Enum.sort_by(& &1.name)
+    |> Enum.reduce(%{}, fn entry, acc ->
+      handlers = safe_call(entry.module, :action_handlers, [], %{})
+      if is_map(handlers), do: Map.merge(acc, handlers), else: acc
+    end)
+  end
+
+  defp compute_external_sync_entries(entries) do
+    entries
+    |> Enum.sort_by(& &1.name)
+    |> Enum.reduce(%{}, fn entry, acc ->
+      entries = safe_call(entry.module, :external_sync_entries, [], %{})
+      if is_map(entries), do: Map.merge(acc, entries), else: acc
+    end)
+  end
+
+  # Re-snapshot the cache from the GenServer state. Called from every
+  # mutation handler. Single `:persistent_term.put/2` ⇒ one global GC.
+  defp refresh_snapshot(state) do
+    plugins = Map.values(state.plugins)
+
+    :persistent_term.put(@snapshot_key, %{
+      plugins: plugins,
+      action_handlers: compute_action_handlers(plugins),
+      external_sync_entries: compute_external_sync_entries(plugins)
+    })
+
+    state
   end
 
   @doc """
@@ -259,7 +366,8 @@ defmodule Barkpark.Plugins.Registry do
     case manifest["plugin_name"] do
       name when is_binary(name) and name != "" ->
         entry = %{name: name, module: module, manifest: manifest}
-        {:reply, :ok, %{state | plugins: Map.put(state.plugins, name, entry)}}
+        new_state = %{state | plugins: Map.put(state.plugins, name, entry)}
+        {:reply, :ok, refresh_snapshot(new_state)}
 
       _ ->
         {:reply, {:error, :no_plugin_name}, state}

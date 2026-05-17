@@ -36,6 +36,7 @@ defmodule Barkpark.Plugins.Bootstrap do
   alias Barkpark.Content
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.Registry
+  alias Barkpark.Plugins.RunStatus
 
   @drop_keys [:__meta__, :id, :inserted_at, :updated_at]
 
@@ -72,9 +73,40 @@ defmodule Barkpark.Plugins.Bootstrap do
     end
   end
 
+  @doc """
+  Looks up `plugin_name` in the registry and runs `register_schemas/1`
+  against just that plugin. Used by the plugin admin LV to power the
+  per-plugin Reload button.
+
+  Returns the same shape as `register_all_schemas/0`'s per-plugin result:
+  `{:ok, count}` or `{:error, reason}`. The result is also recorded into
+  `Barkpark.Plugins.RunStatus` keyed by plugin name.
+  """
+  @spec install_by_name(String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def install_by_name(plugin_name) when is_binary(plugin_name) do
+    case Registry.lookup(plugin_name) do
+      {:ok, entry} -> install_for_plugin(entry)
+      :error -> {:error, :unknown_plugin}
+    end
+  end
+
   # ─── Per-plugin install ────────────────────────────────────────────────
 
-  defp install_for_plugin(%{name: name, module: module}) do
+  @doc """
+  Runs the given plugin's `register_schemas/1` callback and upserts every
+  emitted schema. Public so the plugin admin LV can call it directly for
+  one plugin without re-walking the whole registry.
+
+  Records the result into `RunStatus` under `:bootstrap`.
+  """
+  @spec install_for_plugin(map()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def install_for_plugin(%{name: name, module: module}) do
+    result = do_install_for_plugin(name, module)
+    RunStatus.record(:bootstrap, name, result)
+    result
+  end
+
+  defp do_install_for_plugin(name, module) do
     cond do
       not Code.ensure_loaded?(module) ->
         Logger.warning(
