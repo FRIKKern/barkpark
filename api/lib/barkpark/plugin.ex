@@ -151,6 +151,72 @@ defmodule Barkpark.Plugin do
   """
   @type checker :: {String.t() | atom(), module()}
 
+  # ── Lifecycle hook types (Goal barkpark-9lq) ─────────────────────────
+
+  @typedoc """
+  Document lifecycle event a plugin may listen to. The eight events
+  bracket the four mutating Content operations (save/publish/unpublish/
+  delete) — `before_*` runs synchronously and may halt the operation,
+  `after_*` runs asynchronously and its return value is discarded.
+  """
+  @type lifecycle_event ::
+          :before_save
+          | :after_save
+          | :before_publish
+          | :after_publish
+          | :before_unpublish
+          | :after_unpublish
+          | :before_delete
+          | :after_delete
+
+  @typedoc """
+  The payload passed to every lifecycle hook function.
+
+  * `:event`     — which lifecycle event fired
+  * `:doc`       — the document being acted on (post-change for after_*,
+                    proposed shape for before_*)
+  * `:dataset`   — dataset name (e.g. `"production"`)
+  * `:prev_doc`  — previous on-disk shape, or `nil` for creates
+  * `:ctx`       — call-site metadata; `:source` lets workers bail out
+                    of their own re-fired hooks via the recursion guard
+  """
+  @type hook_payload :: %{
+          event: lifecycle_event(),
+          doc: map(),
+          dataset: String.t(),
+          prev_doc: map() | nil,
+          ctx: %{source: :studio | :api | :cli | :worker, user_id: String.t() | nil}
+        }
+
+  @typedoc """
+  Return value of a `before_*` hook. `:ok` lets the operation proceed;
+  `{:halt, reason}` cancels it — the host surfaces
+  `{:error, {:halted, reason}}` to the caller. Per plan §0 Q2 there is
+  NO `{:ok, map()}` mutation variant.
+  """
+  @type before_hook_result :: :ok | {:halt, String.t()}
+
+  @typedoc """
+  Return value of an `after_*` hook. Always discarded; declared as
+  `any()` so plugins may return whatever they want without typespec
+  noise.
+  """
+  @type after_hook_result :: :ok | any()
+
+  @typedoc """
+  A lifecycle hook function. Per plan §0 Q3 plugins register **capture
+  references** (`&MyMod.fun/1`), not `{module, function}` tuples — the
+  host invokes them directly.
+  """
+  @type hook_fn :: (hook_payload() -> before_hook_result() | after_hook_result())
+
+  @typedoc """
+  The map a plugin returns from `lifecycle_hooks/0`. Each key is an
+  event; each value is the ordered list of hook functions to invoke
+  when that event fires.
+  """
+  @type lifecycle_hooks :: %{optional(lifecycle_event()) => [hook_fn()]}
+
   @callback manifest() :: map()
   @callback register_routes(any()) :: any()
   @callback register_workers(any()) :: [Supervisor.child_spec()]
@@ -287,6 +353,29 @@ defmodule Barkpark.Plugin do
               }
             ) :: [doc_action()]
 
+  # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
+
+  @doc """
+  Declare lifecycle event listeners.
+
+  Returns a map of `lifecycle_event() => [hook_fn()]`. Each hook function
+  receives `hook_payload()` and returns:
+
+  - `:ok` — pass (before_*) or notification (after_*)
+  - `{:halt, reason}` — cancel the operation (before_* only); the host
+    surfaces `{:error, {:halted, reason}}` to the caller
+
+  `after_*` hooks run asynchronously via `Task.async_stream` (5s timeout)
+  and their return values are discarded.
+
+  Recursion guard: the plugin's hook function should inspect
+  `payload.ctx.source` and bail when it equals `:worker` — this prevents
+  a worker like `Bokbasen.PublishWorker` (which calls
+  `Content.publish_document/3` to write final state) from re-firing its
+  own `after_publish` hook.
+  """
+  @callback lifecycle_hooks() :: lifecycle_hooks()
+
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       register_schemas: 1,
@@ -305,7 +394,8 @@ defmodule Barkpark.Plugin do
                       resolve_settings_schema: 2,
                       resolve_top_menu_entries: 2,
                       resolve_desk_items: 2,
-                      resolve_doc_actions: 2
+                      resolve_doc_actions: 2,
+                      lifecycle_hooks: 0
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -445,6 +535,9 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def resolve_doc_actions(prev, _ctx), do: prev
 
+      @impl Barkpark.Plugin
+      def lifecycle_hooks, do: %{}
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -464,7 +557,8 @@ defmodule Barkpark.Plugin do
                      resolve_settings_schema: 2,
                      resolve_top_menu_entries: 2,
                      resolve_desk_items: 2,
-                     resolve_doc_actions: 2
+                     resolve_doc_actions: 2,
+                     lifecycle_hooks: 0
     end
   end
 end
