@@ -50,27 +50,32 @@ defmodule Barkpark.ExternalSync do
   def get(_), do: nil
 
   @doc """
-  Return the full registry map, merging host-owned (`@entries`) and
-  plugin-owned (`Plugins.Registry.collect_external_sync_entries/0`)
-  contributions. Plugin entries win on key collision.
+  Return the full registry map. Seeds the
+  `resolve_external_sync_entries/2` resolver chain with the host-owned
+  compile-time `@entries` map as `:baseline` and threads it through
+  every registered plugin in load order. Plugins implementing the
+  resolver can see / drop / amend host entries symmetric with how they
+  treat sibling-plugin contributions. The default lift (plugin only
+  defines the additive `external_sync_entries/0`) is `Map.merge(prev,
+  result)` — plugin entries still win on key collision.
 
   This is a runtime GenServer call into `Plugins.Registry` — every
-  invocation re-merges. For v1 the call volume is low enough that the
-  simplicity wins over caching; revisit if the pill renderer hot path
-  shows up in a flamegraph.
+  invocation re-runs the chain. For v1 the call volume is low enough
+  that the simplicity wins over caching; revisit if the pill renderer
+  hot path shows up in a flamegraph.
   """
   @spec all() :: map()
-  def all do
-    plugin_entries =
-      try do
-        Barkpark.Plugins.Registry.collect_external_sync_entries()
-      rescue
-        _ -> %{}
-      catch
-        _, _ -> %{}
-      end
-
-    Map.merge(@entries, plugin_entries)
+  def all(dataset \\ nil) do
+    try do
+      Barkpark.Plugins.Registry.collect_external_sync_entries(
+        baseline: @entries,
+        ctx: %{dataset: dataset}
+      )
+    rescue
+      _ -> @entries
+    catch
+      _, _ -> @entries
+    end
   end
 
   @doc """

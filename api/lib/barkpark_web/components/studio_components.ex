@@ -637,14 +637,22 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
-  Studio top-level tab navigation. Reads built-in tab data from
-  `BarkparkWeb.Studio.Nav.tabs/1` (single source of truth) and appends
-  plugin-contributed tabs from
-  `Barkpark.Plugins.Registry.collect_top_menu_entries/0`. Renders the
-  canonical `<div class="studio-bar-tabs">` wrapper with one anchor per
-  tab. The active tab gets the `active` modifier when its `id` matches
-  `nav_section` (built-ins) or when its `active_when` rule matches
-  `current_path` (plugins).
+  Studio top-level tab navigation. Seeds the registry resolver chain
+  with the host's built-in tabs (`default_top_menu_entries/1`,
+  derived from `BarkparkWeb.Studio.Nav.tabs/1`) as `:baseline` and
+  passes `%{dataset, current_path}` as `:ctx`. Plugins that override
+  `resolve_top_menu_entries/2` see the host tabs in `prev` and may
+  drop, reorder, or amend them symmetric with how they treat
+  sibling-plugin entries. Renders the canonical
+  `<div class="studio-bar-tabs">` wrapper with one anchor per tab.
+  The active tab is determined uniformly by `plugin_tab_active?/2` —
+  built-ins carry an explicit `:active_when` rule so the existing
+  highlight behaviour for `/studio/:ds`, `/studio/:ds/media`, and
+  `/studio/:ds/api-tester` is preserved.
+
+  The `:nav_section` assign is preserved for backwards compatibility
+  but no longer drives active-state — `default_top_menu_entries/1`'s
+  `:active_when` rules cover the same routes.
 
   Caller wraps with `:if={assigns[:dataset]}` — the component itself
   does NOT guard, so an empty `<div class="studio-bar-tabs">` does not
@@ -655,39 +663,83 @@ defmodule BarkparkWeb.StudioComponents do
   attr :current_path, :string, default: nil
 
   def studio_tabs(assigns) do
-    plugin_tabs =
+    ctx = %{dataset: assigns.dataset, current_path: assigns[:current_path]}
+    baseline = default_top_menu_entries(assigns.dataset)
+
+    tabs =
       try do
-        Barkpark.Plugins.Registry.collect_top_menu_entries()
+        Barkpark.Plugins.Registry.collect_top_menu_entries(baseline: baseline, ctx: ctx)
       rescue
-        _ -> []
+        _ -> baseline
       catch
-        _, _ -> []
+        _, _ -> baseline
       end
 
-    assigns = assign(assigns, :plugin_tabs, plugin_tabs)
+    assigns = assign(assigns, :tabs, tabs)
 
     ~H"""
     <div class="studio-bar-tabs">
-      <%= for tab <- BarkparkWeb.Studio.Nav.tabs(@dataset) do %>
-        <a
-          href={tab.path}
-          class={"studio-tab #{if @nav_section == tab.id, do: "active"}"}
-          aria-current={if @nav_section == tab.id, do: "page"}
-          data-test-id="top-menu-tab"
-        ><%= tab.label %></a>
-      <% end %>
-      <%= for tab <- @plugin_tabs do %>
+      <%= for tab <- @tabs do %>
         <% active = plugin_tab_active?(tab, @current_path) %>
         <a
           href={tab.path}
           class={"studio-tab #{if active, do: "active"}"}
           aria-current={if active, do: "page"}
           data-test-id="top-menu-tab"
-          data-plugin-tab
         ><%= tab.label %></a>
       <% end %>
     </div>
     """
+  end
+
+  # Host's built-in top-menu tabs in the resolver-compatible shape.
+  # Threaded as `:baseline` through `Registry.collect_top_menu_entries/1`
+  # so plugins can see, reorder, or drop host tabs (Q4 in the plan).
+  #
+  # `:active_when` is set explicitly per tab so the post-resolution
+  # render loop can highlight the active tab uniformly via
+  # `plugin_tab_active?/2`:
+  #
+  #   * Structure: regex matching `/studio/<ds>` and any sub-route
+  #     *except* `/media` and `/api-tester` (those are owned by the
+  #     other two built-ins).
+  #   * Media / API: exact path prefix.
+  #
+  # Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs
+  # (which default to 100 via `normalize_top_menu_entry/1`).
+  defp default_top_menu_entries(dataset) when is_binary(dataset) do
+    ds = URI.encode(dataset)
+    ds_re = Regex.escape(ds)
+
+    structure_active =
+      Regex.compile!("^/studio/#{ds_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
+
+    media_path = "/studio/#{ds}/media"
+    api_path = "/studio/#{ds}/api-tester"
+
+    [
+      %{
+        label: "Structure",
+        path: "/studio/#{ds}",
+        icon: nil,
+        order: 10,
+        active_when: structure_active
+      },
+      %{
+        label: "Media",
+        path: media_path,
+        icon: nil,
+        order: 20,
+        active_when: media_path
+      },
+      %{
+        label: "API",
+        path: api_path,
+        icon: nil,
+        order: 30,
+        active_when: api_path
+      }
+    ]
   end
 
   @doc false

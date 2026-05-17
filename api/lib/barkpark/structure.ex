@@ -29,7 +29,7 @@ defmodule Barkpark.Structure do
   end
 
   @doc "Build the full structure tree for a dataset."
-  def build(dataset \\ "production") do
+  def build(dataset \\ "production", current_path \\ nil) do
     schemas = Content.list_schemas(dataset)
     schema_map = Map.new(schemas, &{&1.name, &1})
 
@@ -37,7 +37,7 @@ defmodule Barkpark.Structure do
       id: "root",
       title: "Structure",
       type: :list,
-      items: build_desk_items(schema_map, dataset)
+      items: build_desk_items(schema_map, dataset, current_path)
     }
   end
 
@@ -45,41 +45,59 @@ defmodule Barkpark.Structure do
   # This is the equivalent of Sanity's deskStructure export.
   # Edit this function to change the navigation tree.
 
-  defp build_desk_items(schemas, dataset) do
-    content_items = build_content_group(schemas)
-    books_items = build_books_group(schemas)
-    taxonomy_items = build_taxonomy_group(schemas)
-    settings_items = build_settings_group(schemas)
-    plugin_items = build_plugin_items(dataset)
+  defp build_desk_items(schemas, dataset, current_path) do
+    host_items =
+      [
+        build_content_group(schemas),
+        build_books_group(schemas),
+        build_taxonomy_group(schemas),
+        build_settings_group(schemas)
+      ]
+      |> maybe_join()
 
-    maybe_join([
-      content_items,
-      books_items,
-      taxonomy_items,
-      settings_items,
-      plugin_items
-    ])
+    # Run the plugin resolver chain seeded with the host's built-in desk
+    # items as `:baseline`. Plugins that override `resolve_desk_items/2`
+    # see the host structure as the leading `%Node{}` slice and can drop
+    # / reorder / amend entries symmetric with how they treat sibling-
+    # plugin contributions. The default lift (no override) simply
+    # appends plugin map entries — behaviour-equivalent to the legacy
+    # host-side concat.
+    #
+    # The chain returns a mixed list of `%Node{}` structs (host
+    # baseline + any plugin overrides that returned them) plus
+    # plugin-shape maps (`%{type: :link | :document_list | :nested |
+    # :divider, …}`). Translate the maps through `plugin_item_to_node/1`
+    # and let host structs pass through. A divider between the host
+    # slice and plugin-contributed nodes is preserved by
+    # `maybe_join/1`'s post-pass on the host/plugin partition.
+    resolved =
+      safe_collect_desk_items(host_items, %{dataset: dataset, current_path: current_path})
+
+    {host_part, plugin_part} =
+      Enum.split_with(resolved, fn
+        %Node{} -> true
+        _ -> false
+      end)
+
+    plugin_nodes =
+      plugin_part
+      |> Enum.map(&plugin_item_to_node/1)
+      |> Enum.reject(&is_nil/1)
+
+    if plugin_nodes == [] do
+      host_part
+    else
+      maybe_join([host_part, plugin_nodes])
+    end
   end
 
-  # Plugin-contributed desk items. Walks `Plugins.Registry.collect_desk_items/1`
-  # and translates each declarative map into a `%Node{}` PaneBuilder can
-  # render. Item types: :link, :divider, :document_list, :nested. Unknown
-  # shapes are silently dropped — keeps a malformed plugin from killing the
-  # whole Structure pane.
-  defp build_plugin_items(dataset) do
-    dataset
-    |> safe_collect_plugin_items()
-    |> Enum.map(&plugin_item_to_node/1)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp safe_collect_plugin_items(dataset) do
+  defp safe_collect_desk_items(baseline, ctx) do
     try do
-      Barkpark.Plugins.Registry.collect_desk_items(dataset)
+      Barkpark.Plugins.Registry.collect_desk_items(baseline: baseline, ctx: ctx)
     rescue
-      _ -> []
+      _ -> baseline
     catch
-      _, _ -> []
+      _, _ -> baseline
     end
   end
 
