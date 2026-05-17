@@ -23,4 +23,35 @@ defmodule <%= @module_path %> do
     #   1
     0
   end
+
+  # ─── Optional Barkpark.Plugin callbacks ─────────────────────────────────
+  #
+  # The host wires plugin contributions through three runtime collectors on
+  # `Barkpark.Plugins.Registry`. Uncomment the callbacks you need and the
+  # host picks them up on the next boot — no edits to studio_live.ex,
+  # external_sync.ex, or application.ex required.
+
+  # @impl Barkpark.Plugin
+  # def action_handlers do
+  #   %{
+  #     "example_action" => &<%= @module_path %>.Actions.example_action/3
+  #   }
+  # end
+  #
+  # @impl Barkpark.Plugin
+  # def external_sync_entries do
+  #   %{
+  #     "<%= @snake_name %>" => %{
+  #       label: "<%= @module_name %>",
+  #       states: %{nil => %{color: "gray", label: "Not synced"}}
+  #     }
+  #   }
+  # end
+  #
+  # @impl Barkpark.Plugin
+  # def codelist_seeders do
+  #   []
+  #   # Add zero-arg seeders here, e.g.:
+  #   #   [&<%= @module_path %>.Codelists.seed/0]
+  # end
 end

@@ -19,7 +19,7 @@ but it does own:
 
 No LiveView. No HEEx. No CSS. No JavaScript. No new route (the host serves
 all Studio pages; Vlie has no file-download endpoint). Eight code files
-and three small edits to host files. The whole feature lights up by
+and **one** small edit to a host file. The whole feature lights up by
 restarting the server.
 
 ## The eight new files
@@ -39,16 +39,20 @@ api/
     └── actions_test.exs
 ```
 
-## The three host edits
+## The one host edit
 
-1. One new entry in `Barkpark.ExternalSync.@entries` (so the pill renders).
-2. One new clause in `StudioLive.dispatch_action/4` (so the schema action
-   routes to Vlie).
-3. One new entry in OnixEdit's `book.json` `actions` array (so the editor
-   header surfaces the button) — OR, if Vlie owns its own schema, one new
-   entry in its own JSON.
+The action button needs to appear in some schema's `actions` array. If
+Vlie rides on OnixEdit's `book` schema, that's a single new entry in
+`api/priv/plugins/onixedit/schemas/book.json` (or the equivalent
+`OnixEdit.document_actions/0` source). If Vlie owns its own document
+type, the entry lives in its own schema JSON and the edit count drops to
+zero.
 
-All three edits are single lines. Total host footprint: ~10 lines.
+Everything else — the dispatch handler, the `ExternalSync` pill entry,
+the codelist seeders — is declared on the plugin module itself via
+`Barkpark.Plugin` callbacks. The host walks the Registry at runtime; no
+edits to `studio_live.ex`, `external_sync.ex`, or `application.ex` are
+required.
 
 ## File 1 — `priv/plugins/vlie/plugin.json`
 
@@ -110,6 +114,38 @@ defmodule Barkpark.Plugins.Vlie do
 
   @impl Barkpark.Plugin
   def register_schemas(_opts), do: []
+
+  # ─── Runtime contributions the host picks up via Plugins.Registry ────
+
+  @impl Barkpark.Plugin
+  def action_handlers do
+    %{
+      "publish_to_vlie" => &Barkpark.Plugins.Vlie.Actions.publish_to_vlie/3
+    }
+  end
+
+  @impl Barkpark.Plugin
+  def external_sync_entries do
+    %{
+      "vlie" => %{
+        label: "Vlie",
+        states: %{
+          "pending"  => %{color: "gray",   label: "Pending"},
+          "staging"  => %{color: "gray",   label: "Staging"},
+          "staged"   => %{color: "blue",   label: "Staged"},
+          "polling"  => %{color: "blue",   label: "Polling"},
+          "accepted" => %{color: "green",  label: "Accepted"},
+          "rejected" => %{color: "red",    label: "Rejected"},
+          "failed"   => %{color: "orange", label: "Failed"},
+          nil        => %{color: "gray",   label: "Not synced"}
+        }
+      }
+    }
+  end
+
+  # Vlie has no codelist data of its own, so we skip the
+  # `codelist_seeders/0` callback entirely — the default impl injected
+  # by `use Barkpark.Plugin` returns `[]`.
 end
 ```
 
@@ -573,49 +609,12 @@ The test exercises the action handler directly — no LiveView, no Phoenix.
 That's the host's job; the plugin asserts its own surface. The real-mode
 test would mock the `Oban.insert` call and is omitted here for brevity.
 
-## The three host edits
+## The one host edit — declaring the action button
 
-### Edit 1 — register Vlie in `ExternalSync`
-
-In `api/lib/barkpark/external_sync.ex`, add one entry to `@entries`:
-
-```elixir
-@entries %{
-  "bokbasen" => %{ ... },
-  "vlie" => %{
-    label: "Vlie",
-    states: %{
-      "pending"  => %{color: "gray",   label: "Pending"},
-      "staging"  => %{color: "gray",   label: "Staging"},
-      "staged"   => %{color: "blue",   label: "Staged"},
-      "polling"  => %{color: "blue",   label: "Polling"},
-      "accepted" => %{color: "green",  label: "Accepted"},
-      "rejected" => %{color: "red",    label: "Rejected"},
-      "failed"   => %{color: "orange", label: "Failed"},
-      nil        => %{color: "gray",   label: "Not synced"}
-    }
-  }
-}
-```
-
-Once compiled, the host's `ExternalSyncPill` renders Vlie status on any
-document that broadcasts `external_sync:vlie:<doc_id>`.
-
-### Edit 2 — dispatch the action in `StudioLive`
-
-In `api/lib/barkpark_web/live/studio/studio_live.ex`, add one clause
-above the fall-through `dispatch_action/4`:
-
-```elixir
-defp dispatch_action("publish_to_vlie", doc_id, dataset, mode) do
-  Barkpark.Plugins.Vlie.Actions.publish_to_vlie(doc_id, dataset, mode)
-end
-```
-
-That's it. No new socket assigns, no new modal markup — the generic
-`ConfirmModal` handles dryrun + real out of the box.
-
-### Edit 3 — declare the action in OnixEdit's `book.json`
+The plugin's `external_sync_entries/0` and `action_handlers/0` callbacks
+(see File 2) wire the pill and the dispatch handler with zero host
+edits. The button still needs to surface in some schema's `actions`
+array — the host renders the editor toolbar from schema metadata.
 
 In `api/priv/plugins/onixedit/schemas/book.json` (or in
 `OnixEdit.document_actions/0` if you prefer the Elixir source of truth),
@@ -636,15 +635,17 @@ add one entry to the `actions` array:
 ```
 
 On the next server restart, `Plugins.Bootstrap.register_all_schemas/0`
-upserts the refreshed schema. The Studio editor's action bar now shows
-"Publish to Vlie" alongside "Publish to Bokbasen" for every `book`
-document. Clicking it opens the `ConfirmModal`, dispatches the dryrun via
-the clause from Edit 2, and (on confirmation) routes the real call to
-`Plugins.Vlie.Actions.publish_to_vlie/3` (Edit 2 again, with `:real`).
+upserts the refreshed schema. The Studio editor's action bar shows
+"Publish to Vlie" alongside "Publish to Bokbasen" on every `book`
+document. Clicking it opens the `ConfirmModal`; the dryrun and real
+clicks dispatch via `StudioLive.dispatch_action/4`, which looks the
+handler up in `Plugins.Registry.collect_action_handlers/0` and calls
+`Plugins.Vlie.Actions.publish_to_vlie/3` — wired by File 2's
+`action_handlers/0` callback, no `studio_live.ex` edit required.
 
-If Vlie owned its own document type, Edit 3 would land in the plugin's
-own schema JSON instead — the host doesn't care which plugin's schema the
-button rides on, as long as one of them declares it.
+If Vlie owned its own document type, this edit would land in the
+plugin's own schema JSON instead — and the host-side footprint drops to
+zero.
 
 ## Configuring credentials
 

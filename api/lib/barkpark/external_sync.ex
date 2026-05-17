@@ -21,31 +21,23 @@ defmodule Barkpark.ExternalSync do
   owns the open document) call `subscribe/2` and pattern-match on the
   shape.
 
-  ## Bokbasen mapping
+  ## Host-owned vs. plugin-owned entries
 
-  Mirrors the bucket logic that previously lived in
-  `Barkpark.Plugins.OnixEdit.Export.StatusPill` so the visual contract
-  is unchanged. Five colors over the nine Bokbasen states plus a
-  `nil` fallback for documents that have never been queued.
+  The compile-time `@entries` map below is the **host-owned** slice — UI
+  pill contracts that ship with Barkpark itself, independent of any
+  plugin. Plugins contribute their own slice via the
+  `Barkpark.Plugin.external_sync_entries/0` callback, which the
+  `Barkpark.Plugins.Registry` exposes as
+  `collect_external_sync_entries/0`. `all/0` merges both on every call —
+  no cache, no boot-time snapshot — so a plugin coming online late still
+  shows up. Plugin entries take precedence on key collision.
+
+  Bokbasen (the original sole entry) now lives in
+  `Barkpark.Plugins.OnixEdit.external_sync_entries/0` since it is
+  plugin-owned territory.
   """
 
-  @entries %{
-    "bokbasen" => %{
-      label: "Bokbasen",
-      states: %{
-        "pending" => %{color: "gray", label: "Pending"},
-        "staging" => %{color: "gray", label: "Staging"},
-        "staged" => %{color: "blue", label: "Staged"},
-        "polling" => %{color: "blue", label: "Polling"},
-        "accepted" => %{color: "green", label: "Accepted"},
-        "rejected" => %{color: "red", label: "Rejected"},
-        "failed" => %{color: "orange", label: "Failed"},
-        "cancelled" => %{color: "orange", label: "Cancelled"},
-        "cannot_cancel" => %{color: "orange", label: "Cannot cancel"},
-        nil => %{color: "gray", label: "Not synced"}
-      }
-    }
-  }
+  @entries %{}
 
   @doc """
   Return the registry entry for `system_name`, or `nil` if not registered.
@@ -54,12 +46,32 @@ defmodule Barkpark.ExternalSync do
   def get(system_name) when is_atom(system_name) and not is_nil(system_name),
     do: get(Atom.to_string(system_name))
 
-  def get(system_name) when is_binary(system_name), do: Map.get(@entries, system_name)
+  def get(system_name) when is_binary(system_name), do: Map.get(all(), system_name)
   def get(_), do: nil
 
-  @doc "Return the full registry map. Stable shape; tests may assert against it."
+  @doc """
+  Return the full registry map, merging host-owned (`@entries`) and
+  plugin-owned (`Plugins.Registry.collect_external_sync_entries/0`)
+  contributions. Plugin entries win on key collision.
+
+  This is a runtime GenServer call into `Plugins.Registry` — every
+  invocation re-merges. For v1 the call volume is low enough that the
+  simplicity wins over caching; revisit if the pill renderer hot path
+  shows up in a flamegraph.
+  """
   @spec all() :: map()
-  def all, do: @entries
+  def all do
+    plugin_entries =
+      try do
+        Barkpark.Plugins.Registry.collect_external_sync_entries()
+      rescue
+        _ -> %{}
+      catch
+        _, _ -> %{}
+      end
+
+    Map.merge(@entries, plugin_entries)
+  end
 
   @doc """
   Resolve the per-state pill metadata (`%{color, label}`) for a system+state

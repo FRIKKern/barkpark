@@ -55,6 +55,110 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  Walks every registered plugin, calls `action_handlers/0`, and merges the
+  results into a single `%{action_name => handler_fn}` map.
+
+  Iteration order is alphabetical by plugin name so collisions are
+  resolved deterministically — the lexicographically latest plugin wins.
+
+  Plugins that don't implement the optional callback (or whose callback
+  raises) contribute nothing.
+  """
+  @spec collect_action_handlers() :: %{optional(String.t()) => Barkpark.Plugin.action_handler()}
+  def collect_action_handlers do
+    all()
+    |> Enum.sort_by(& &1.name)
+    |> Enum.reduce(%{}, fn entry, acc ->
+      handlers = safe_call(entry.module, :action_handlers, [], %{})
+      if is_map(handlers), do: Map.merge(acc, handlers), else: acc
+    end)
+  end
+
+  @doc """
+  Walks every registered plugin, calls `external_sync_entries/0`, and
+  merges the resulting registry maps into one.
+
+  Iteration order is alphabetical by plugin name. On collision, the
+  lexicographically latest plugin wins — host-side entries (passed in
+  via `merge_into/1`) take precedence over plugin-supplied keys.
+
+  Plugins that don't implement the optional callback (or whose callback
+  raises) contribute nothing.
+  """
+  @spec collect_external_sync_entries() :: %{optional(String.t()) => map()}
+  def collect_external_sync_entries do
+    all()
+    |> Enum.sort_by(& &1.name)
+    |> Enum.reduce(%{}, fn entry, acc ->
+      entries = safe_call(entry.module, :external_sync_entries, [], %{})
+      if is_map(entries), do: Map.merge(acc, entries), else: acc
+    end)
+  end
+
+  @doc """
+  Walks every registered plugin, calls `codelist_seeders/0` to get a
+  list of zero-arg functions, and invokes each one in registration
+  order (alphabetical by plugin name).
+
+  Each seeder is wrapped in `try/rescue` so one failing plugin's seeder
+  doesn't abort the rest. Failures log a warning. Returns `:ok` always.
+  """
+  @spec run_all_codelist_seeders() :: :ok
+  def run_all_codelist_seeders do
+    all()
+    |> Enum.sort_by(& &1.name)
+    |> Enum.each(fn entry ->
+      seeders = safe_call(entry.module, :codelist_seeders, [], [])
+
+      if is_list(seeders) do
+        Enum.each(seeders, fn seeder ->
+          try do
+            cond do
+              is_function(seeder, 0) -> seeder.()
+              true -> :noop
+            end
+          rescue
+            e ->
+              Logger.warning(
+                "Barkpark.Plugins.Registry: codelist seeder #{inspect(seeder)} from plugin " <>
+                  "#{entry.name} raised — #{Exception.message(e)}"
+              )
+          catch
+            kind, reason ->
+              Logger.warning(
+                "Barkpark.Plugins.Registry: codelist seeder #{inspect(seeder)} from plugin " <>
+                  "#{entry.name} threw #{kind} #{inspect(reason)}"
+              )
+          end
+        end)
+      end
+    end)
+
+    :ok
+  end
+
+  # Invoke `module.function(args)` only when exported. Errors / non-export
+  # fall back to the supplied default. Centralised so all three collectors
+  # share the same defensive shape.
+  defp safe_call(module, fun, args, default) do
+    try do
+      if Code.ensure_loaded?(module) and function_exported?(module, fun, length(args)) do
+        apply(module, fun, args)
+      else
+        default
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry: #{inspect(module)}.#{fun}/#{length(args)} raised — " <>
+            Exception.message(e)
+        )
+
+        default
+    end
+  end
+
+  @doc """
   Walks the default discovery roots and registers every plugin found.
 
   Safe to call once during boot; logs warnings (never raises) on per-plugin

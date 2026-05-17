@@ -213,6 +213,68 @@ These attach to individual entries inside `fields`:
 | `bp_*` | Plugin custom fields stashed on documents. Locked prefix — see SCHEMA_V2.md. |
 | `plugin:<name>:<field>` | Plugin-private fields. Rejected unless `parse/2` is called with `plugin: "<name>"`. |
 
+## Plugin callbacks
+
+`use Barkpark.Plugin` injects default no-op implementations of every
+optional callback so a freshly-generated plugin compiles without
+declaring anything. Override the callbacks your plugin actually needs.
+All nine callbacks (one required + eight optional) are listed here as a
+single reference — the host walks `Plugins.Registry.all/0` and asks each
+plugin module for its contribution at the relevant lifecycle point.
+
+| Callback | Required? | Returns | Called by |
+|---|---|---|---|
+| `manifest/0` | yes (injected by `__using__`) | the parsed `plugin.json` map | `Plugins.Registry` on register |
+| `register_routes/1` | optional | `:ok` (router hook) | reserved — not invoked today |
+| `register_workers/1` | optional | list of child specs | reserved — not invoked today |
+| `register_schemas/1` | optional | list of `%SchemaDefinition{}` | `Plugins.Bootstrap.register_all_schemas/0` |
+| `validate_settings/1` | optional | `:ok` or `{:error, [{atom, String.t()}]}` | `Plugins.Settings` writes |
+| `checkers/0` | optional | list of `{name, module}` for value-checkers | `Validation.Registry.reload_plugin_checkers/0` |
+| `action_handlers/0` | optional | `%{name => fun/3}` | `Plugins.Registry.collect_action_handlers/0` → `StudioLive.dispatch_action/4` |
+| `external_sync_entries/0` | optional | `%{system_name => %{label, states}}` | `Plugins.Registry.collect_external_sync_entries/0` → `ExternalSync.all/0` |
+| `codelist_seeders/0` | optional | list of zero-arg functions | `Plugins.Registry.run_all_codelist_seeders/0` in the boot Task |
+
+### Example — OnixEdit's three runtime contributions
+
+```elixir
+@impl Barkpark.Plugin
+def action_handlers do
+  %{
+    "publish_to_bokbasen" => &Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3
+  }
+end
+
+@impl Barkpark.Plugin
+def external_sync_entries do
+  %{
+    "bokbasen" => %{
+      label: "Bokbasen",
+      states: %{
+        "pending"  => %{color: "gray",   label: "Pending"},
+        "accepted" => %{color: "green",  label: "Accepted"},
+        "rejected" => %{color: "red",    label: "Rejected"},
+        nil        => %{color: "gray",   label: "Not synced"}
+        # ...
+      }
+    }
+  }
+end
+
+@impl Barkpark.Plugin
+def codelist_seeders do
+  [
+    &Barkpark.Codelists.EDItEUR.seed_bundled/0,
+    &Barkpark.Codelists.EDItEUR.seed_thema/0
+  ]
+end
+```
+
+These three callbacks replaced what used to be three hardcoded
+touchpoints in the host (a `dispatch_action/4` clause in
+`studio_live.ex`, a `@entries` map in `external_sync.ex`, and a pair of
+seed calls in `application.ex`). Declarative plugin metadata; zero host
+edits per integration.
+
 ## Plugin lifecycle
 
 Startup sequence from BEAM boot to first request:
@@ -294,26 +356,28 @@ sequenceDiagram
     Disp-->>SL: flash + rebuild_panes
 ```
 
-### `dispatch_action/4` — the registry
+### `dispatch_action/4` — runtime Registry lookup
 
-`StudioLive.dispatch_action/4` is a clause-keyed table mapping action names
-to plugin function calls:
+`StudioLive.dispatch_action/4` is a one-liner that asks
+`Barkpark.Plugins.Registry.collect_action_handlers/0` for the merged
+`%{action_name => fun/3}` map and calls the matching handler:
 
 ```elixir
-defp dispatch_action("publish_to_bokbasen", doc_id, dataset, mode) do
-  Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode)
-end
-
-defp dispatch_action(name, _doc_id, _dataset, _mode) do
-  {:error, {:unknown_action, name}}
+defp dispatch_action(name, doc_id, dataset, mode) do
+  case Map.get(Barkpark.Plugins.Registry.collect_action_handlers(), name) do
+    handler when is_function(handler, 3) -> handler.(doc_id, dataset, mode)
+    _ -> {:error, {:unknown_action, name}}
+  end
 end
 ```
 
-**Adding a new plugin action today requires editing `studio_live.ex`** —
-one new clause per action name. The convention is plugin-prefixed names
-(`publish_to_vlie`, `validate_with_onyx`) so collisions across plugins are
-impossible. A future refactor may lift this to a runtime registry; until
-then, the single new clause is the integration point.
+**Adding a new plugin action requires NO host edits.** The plugin
+declares its handlers via the `Barkpark.Plugin.action_handlers/0`
+callback (see "Plugin callbacks" below) and the host picks them up
+on the next boot. The convention is still plugin-prefixed names
+(`publish_to_vlie`, `validate_with_onyx`) so collisions across plugins
+are impossible. On collision the lexicographically-latest plugin name
+wins — Registry iteration is alphabetically sorted.
 
 Action handler return contract:
 
@@ -330,19 +394,25 @@ contract. **No plugin UI required.**
 
 Three pieces:
 
-1. **Registry entry** in `Barkpark.ExternalSync.@entries` (compile-time
-   map). Declares the system label and per-state color/label table.
+1. **Registry entry** declared by the plugin's
+   `external_sync_entries/0` callback. Declares the system label and
+   per-state color/label table:
 
    ```elixir
-   "vlie" => %{
-     label: "Vlie",
-     states: %{
-       "pending"  => %{color: "gray",  label: "Pending"},
-       "accepted" => %{color: "green", label: "Accepted"},
-       "rejected" => %{color: "red",   label: "Rejected"},
-       nil        => %{color: "gray",  label: "Not synced"}
+   @impl Barkpark.Plugin
+   def external_sync_entries do
+     %{
+       "vlie" => %{
+         label: "Vlie",
+         states: %{
+           "pending"  => %{color: "gray",  label: "Pending"},
+           "accepted" => %{color: "green", label: "Accepted"},
+           "rejected" => %{color: "red",   label: "Rejected"},
+           nil        => %{color: "gray",  label: "Not synced"}
+         }
+       }
      }
-   }
+   end
    ```
 
 2. **Broadcast on state transitions** from the plugin's worker:
@@ -352,13 +422,17 @@ Three pieces:
    ```
 
 3. **The host renders the pill automatically** via
-   `BarkparkWeb.Components.ExternalSyncPill` — it reads the registry, no
-   plugin component needed.
+   `BarkparkWeb.Components.ExternalSyncPill` — it reads
+   `Barkpark.ExternalSync.all/0`, which merges host-owned entries
+   (`@entries` in `external_sync.ex`, today empty) with every plugin's
+   contribution via `Plugins.Registry.collect_external_sync_entries/0`.
 
-The `@entries` map is the integration point. Adding a new plugin's system
-**requires editing `external_sync.ex`** today; a future change may lift it
-to runtime registration, but the compile-time map keeps the hot path
-allocation-free and unknown-system detection fast (`get/1 → nil`).
+Adding a new system **requires NO host edits** — declare it in
+`external_sync_entries/0` and the next boot picks it up. Plugin entries
+win on key collision so a plugin can override a built-in entry if it
+needs to. The merge is a runtime GenServer call (no boot-time snapshot);
+v1 keeps things simple — if the pill renderer ever shows up hot in a
+flamegraph, this is the obvious cache target.
 
 ## Codelist contribution
 
@@ -369,12 +443,26 @@ When a plugin owns codelist data (controlled vocabularies, taxonomies):
    convention (Decision 21), plugins do **not** bundle EDItEUR-licensed data
    — the publisher provides their licensed snapshot at install time.
 
-2. **Add a seed call** to the post-boot Task list in
-   `Barkpark.Application.start/2`. The current implementation hardcodes
-   `EDItEUR.seed_bundled/0` and `EDItEUR.seed_thema/0`. **Adding a third
-   codelist source today requires editing `application.ex`** to call
-   `<Plugin>.Codelists.seed_*/0`. The seed function is the plugin's
-   responsibility; the helper is just an `application.ex` line.
+2. **Declare seeders via the `codelist_seeders/0` callback.** The post-
+   boot Task in `Barkpark.Application.start/2` calls
+   `Barkpark.Plugins.Registry.run_all_codelist_seeders/0`, which walks
+   every registered plugin and invokes each seeder in a per-seeder
+   `try/rescue`. Adding a new codelist source **requires NO host
+   edits** — the plugin returns a list of zero-arg functions:
+
+   ```elixir
+   @impl Barkpark.Plugin
+   def codelist_seeders do
+     [
+       &Barkpark.Codelists.EDItEUR.seed_bundled/0,
+       &Barkpark.Codelists.EDItEUR.seed_thema/0
+     ]
+   end
+   ```
+
+   Each seeder must be idempotent and non-raising in the happy path;
+   Registry catches anything that escapes, logs a warning, and moves on
+   to the next plugin so one broken plugin can't tank boot.
 
 3. **Reference codelists from schema fields** by their `<plugin>:<list_id>`
    friendly name:
@@ -449,9 +537,10 @@ the plugin's.
 | Schema bootstrap | `api/lib/barkpark/plugins/bootstrap.ex` |
 | Schema definition | `api/lib/barkpark/content/schema_definition.ex` |
 | Codelist registry | `api/lib/barkpark/content/codelists.ex` |
-| External-sync registry | `api/lib/barkpark/external_sync.ex` |
+| External-sync host map | `api/lib/barkpark/external_sync.ex` (empty `@entries`; plugin-owned slice merged at call time) |
 | External-sync pill | `api/lib/barkpark_web/components/external_sync_pill.ex` |
-| Schema-action dispatch | `api/lib/barkpark_web/live/studio/studio_live.ex` (`dispatch_action/4` near line 1005) |
+| Schema-action dispatch | `api/lib/barkpark_web/live/studio/studio_live.ex` (`dispatch_action/4` — one-liner over `Plugins.Registry.collect_action_handlers/0`) |
+| Plugin collectors | `Plugins.Registry.collect_action_handlers/0` · `collect_external_sync_entries/0` · `run_all_codelist_seeders/0` |
 | ConfirmModal | `api/lib/barkpark_web/components/confirm_modal.ex` |
 | Plugin settings (encrypted) | `api/lib/barkpark/plugins/settings.ex` |
 | OnixEdit reference plugin | `api/lib/barkpark/plugins/onixedit.ex` and subtree |

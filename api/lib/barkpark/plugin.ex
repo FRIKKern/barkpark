@@ -21,18 +21,34 @@ defmodule Barkpark.Plugin do
   `manifest_path: "..."` to override.
   """
 
+  @typedoc """
+  An action handler invoked by `StudioLive.dispatch_action/4` for a named
+  schema action. Receives the document id, dataset, and a mode flag
+  (`:dryrun` / `:real`); returns a tagged tuple the host folds into its
+  modal / flash assigns.
+  """
+  @type action_handler ::
+          (doc_id :: String.t(), dataset :: String.t(), mode :: :dryrun | :real ->
+             {:ok, term()} | {:error, term()})
+
   @callback manifest() :: map()
   @callback register_routes(any()) :: any()
   @callback register_workers(any()) :: [Supervisor.child_spec()]
   @callback register_schemas(keyword()) :: [Barkpark.Content.SchemaDefinition.t()]
   @callback validate_settings(map()) :: :ok | {:error, [{atom(), String.t()}]}
   @callback checkers() :: [{String.t() | atom(), module()}]
+  @callback action_handlers() :: %{optional(String.t()) => action_handler()}
+  @callback external_sync_entries() :: %{optional(String.t()) => map()}
+  @callback codelist_seeders() :: [(-> any())]
 
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       register_schemas: 1,
                       validate_settings: 1,
-                      checkers: 0
+                      checkers: 0,
+                      action_handlers: 0,
+                      external_sync_entries: 0,
+                      codelist_seeders: 0
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -73,12 +89,24 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def checkers, do: []
 
+      @impl Barkpark.Plugin
+      def action_handlers, do: %{}
+
+      @impl Barkpark.Plugin
+      def external_sync_entries, do: %{}
+
+      @impl Barkpark.Plugin
+      def codelist_seeders, do: []
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
                      register_schemas: 1,
                      validate_settings: 1,
-                     checkers: 0
+                     checkers: 0,
+                     action_handlers: 0,
+                     external_sync_entries: 0,
+                     codelist_seeders: 0
     end
   end
 end

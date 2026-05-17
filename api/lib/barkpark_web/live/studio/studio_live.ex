@@ -998,16 +998,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
     |> Enum.find(fn a -> Map.get(a, "name") == name end)
   end
 
-  # Dispatch a named schema action to the plugin-owned handler. The
-  # registry only points at modal actions today (publish_to_bokbasen); the
-  # `_` clause is the safety net so an unknown name returns a structured
-  # error instead of a function-clause crash.
-  defp dispatch_action("publish_to_bokbasen", doc_id, dataset, mode) do
-    Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode)
-  end
-
-  defp dispatch_action(name, _doc_id, _dataset, _mode) do
-    {:error, {:unknown_action, name}}
+  # Dispatch a named schema action to the plugin-owned handler. Each
+  # plugin declares its handlers via the `Barkpark.Plugin.action_handlers/0`
+  # callback; `Plugins.Registry.collect_action_handlers/0` merges them into
+  # a single name → fun/3 map at call time. Unknown names return a
+  # structured error so the caller can format a flash instead of crashing.
+  defp dispatch_action(name, doc_id, dataset, mode) do
+    case Map.get(Barkpark.Plugins.Registry.collect_action_handlers(), name) do
+      handler when is_function(handler, 3) -> handler.(doc_id, dataset, mode)
+      _ -> {:error, {:unknown_action, name}}
+    end
   end
 
   # Pull the canonical doc_id for the currently-open editor. Modal actions
