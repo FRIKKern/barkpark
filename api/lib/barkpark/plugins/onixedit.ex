@@ -73,6 +73,49 @@ defmodule Barkpark.Plugins.OnixEdit do
     }
   end
 
+  @doc """
+  Resolve the editor-header doc-action list — drops the
+  `publish_to_bokbasen` entry while the book's Bokbasen submission is
+  in-flight.
+
+  The four in-flight states are `queued`, `staging`, `staged`, and
+  `polling` (per the resolver plan §3). Once the worker moves to
+  `accepted` or `rejected`, the button comes back so the publisher can
+  re-publish (e.g. after a metadata fix).
+
+  Only filters when `doc_type == "book"`; non-book documents are
+  untouched. The companion `action_handlers/0` entry stays registered
+  — the handler still runs whenever the action is NOT hidden.
+
+  This is the concrete proof of the Goal `barkpark-cjs` resolver
+  refactor: a plugin conditionally removes a host-baseline action from
+  the rendered list using nothing but the Plugin behaviour + the
+  Registry resolver chain.
+  """
+  @impl Barkpark.Plugin
+  def resolve_doc_actions(prev, ctx) do
+    if hide_publish_action?(ctx) do
+      Enum.reject(prev, fn action -> action["name"] == "publish_to_bokbasen" end)
+    else
+      prev
+    end
+  end
+
+  # `bp_export_status` lives under the doc's `content` map. The doc may
+  # arrive as a `%Document{}` struct (atom-keyed `:content`) or as a
+  # plain map (string-keyed `"content"`). Read both shapes; if neither
+  # holds an in-flight state, leave the action list untouched.
+  defp hide_publish_action?(%{doc_type: "book", doc: %{} = doc}) do
+    state =
+      get_in(doc, [Access.key(:content, %{}), "bp_export_status", "state"]) ||
+        get_in(doc, ["content", "bp_export_status", "state"]) ||
+        get_in(doc, [Access.key(:content, %{}), :bp_export_status, :state])
+
+    state in ["queued", "staging", "staged", "polling"]
+  end
+
+  defp hide_publish_action?(_), do: false
+
   @impl Barkpark.Plugin
   def external_sync_entries do
     %{
