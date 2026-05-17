@@ -116,6 +116,30 @@ defmodule Barkpark.Plugins.OnixEdit do
 
   defp hide_publish_action?(_), do: false
 
+  @doc """
+  Lifecycle-hook registrations (Goal `barkpark-9lq`).
+
+  One entry today: `:after_publish` runs
+  `Lifecycle.publish_to_bokbasen_if_book/1`, which enqueues
+  `Bokbasen.PublishWorker` whenever a `book` document is published.
+  This collapses the two-click "Publish + Publish-to-Bokbasen" flow
+  into a single click in Studio — Bokbasen submission becomes an
+  automatic side-effect of normal Publish for book documents.
+
+  The hook bails on `ctx.source == :worker` (recursion guard) and on
+  non-book documents. The manual `publish_to_bokbasen` action stays
+  on the editor header because it is still the way to run a dry-run
+  and to retry after a rejection.
+
+  See `Barkpark.Plugins.OnixEdit.Lifecycle` for the hook fn itself.
+  """
+  @impl Barkpark.Plugin
+  def lifecycle_hooks do
+    %{
+      after_publish: [&Barkpark.Plugins.OnixEdit.Lifecycle.publish_to_bokbasen_if_book/1]
+    }
+  end
+
   @impl Barkpark.Plugin
   def external_sync_entries do
     %{
