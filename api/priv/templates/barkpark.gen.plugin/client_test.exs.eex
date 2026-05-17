@@ -1,0 +1,12 @@
+defmodule <%= @module_path %>.ClientTest do
+  use ExUnit.Case, async: true
+  alias <%= @module_path %>.Client
+
+  test "fetch_token stub returns :not_implemented" do
+    assert {:error, :not_implemented} = Client.fetch_token()
+  end
+
+  test "submit stub returns :not_implemented" do
+    assert {:error, :not_implemented} = Client.submit("payload")
+  end
+end

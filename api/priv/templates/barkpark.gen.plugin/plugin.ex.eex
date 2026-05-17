@@ -1,0 +1,26 @@
+defmodule <%= @module_path %> do
+  @moduledoc """
+  <%= @module_name %> — Barkpark plugin.
+
+  Schemas + business logic only. UI lives in the host. See
+  `docs/plugins/INTEGRATION_LESSONS.md` for the formal plugin contract
+  and `docs/plugins/RECIPE.md` for a worked walkthrough.
+  """
+
+  @doc """
+  Called by `Barkpark.Plugins.Bootstrap.register_all_schemas/0` on
+  every app boot. Upsert any schemas this plugin contributes.
+
+  Returns the number of schemas registered.
+  """
+  def register_schemas(dataset \\ "production") do
+    _ = dataset
+    # Example:
+    #   schema_path = Path.join(:code.priv_dir(:barkpark) |> to_string(),
+    #                           "plugins/<%= @snake_name %>/schemas/<%= @snake_name %>_doc.json")
+    #   raw = schema_path |> File.read!() |> Jason.decode!()
+    #   {:ok, _} = Barkpark.Content.upsert_schema(raw, dataset)
+    #   1
+    0
+  end
+end

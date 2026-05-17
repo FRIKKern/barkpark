@@ -1,0 +1,16 @@
+defmodule <%= @module_path %>.ActionsTest do
+  use ExUnit.Case, async: true
+  alias <%= @module_path %>.Actions
+
+  describe "example_action/3" do
+    test "dryrun returns ok stub" do
+      assert {:ok, %{mode: :dryrun}} =
+               Actions.example_action("doc-1", "production", :dryrun)
+    end
+
+    test "real returns :not_implemented" do
+      assert {:error, :not_implemented} =
+               Actions.example_action("doc-1", "production", :real)
+    end
+  end
+end
