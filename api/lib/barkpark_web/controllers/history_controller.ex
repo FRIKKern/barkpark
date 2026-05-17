@@ -28,11 +28,19 @@ defmodule BarkparkWeb.HistoryController do
     type = get_type(conn, params)
 
     with :ok <- validate_uuid(id),
-         {:ok, doc} <- Content.restore_revision(id, type, dataset) do
+         {:ok, doc} <- Content.restore_revision(id, type, dataset, source: :api) do
       json(conn, %{restored: true, document: Envelope.render(doc)})
     else
-      {:error, :invalid_uuid} -> not_found(conn, "revision not found")
-      {:error, :not_found} -> not_found(conn, "revision not found")
+      {:error, :invalid_uuid} ->
+        not_found(conn, "revision not found")
+
+      {:error, :not_found} ->
+        not_found(conn, "revision not found")
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "halted", reason: reason})
     end
   end
 

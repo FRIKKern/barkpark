@@ -69,9 +69,12 @@ defmodule Mix.Tasks.Onix.Import do
     if dry_run do
       Mix.shell().info("would create: drafts.#{doc_id} — #{title}")
     else
-      case Content.create_document("book", attrs, dataset) do
+      case Content.create_document("book", attrs, dataset, source: :cli) do
         {:ok, _doc} ->
           Mix.shell().info("created: drafts.#{doc_id} — #{title}")
+
+        {:error, {:halted, reason}} ->
+          Mix.shell().error("cancelled by plugin: #{doc_id} — #{reason}")
 
         {:error, reason} ->
           Mix.shell().error("failed: #{doc_id} — #{inspect(reason)}")

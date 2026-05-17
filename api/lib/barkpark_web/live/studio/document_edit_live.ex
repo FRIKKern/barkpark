@@ -63,9 +63,15 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
       "content" => content
     }
 
-    case Content.upsert_document(type, attrs, dataset) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Changes saved") |> load_document()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to save")}
+    case Content.upsert_document(type, attrs, dataset, source: :studio) do
+      {:ok, _} ->
+        {:noreply, socket |> put_flash(:info, "Changes saved") |> load_document()}
+
+      {:error, {:halted, reason}} ->
+        {:noreply, put_flash(socket, :error, "Save cancelled: #{reason}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save")}
     end
   end
 
@@ -73,10 +79,17 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     case Content.publish_document(
            socket.assigns.doc_id,
            socket.assigns.type,
-           socket.assigns.dataset
+           socket.assigns.dataset,
+           source: :studio
          ) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Document published") |> load_document()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to publish")}
+      {:ok, _} ->
+        {:noreply, socket |> put_flash(:info, "Document published") |> load_document()}
+
+      {:error, {:halted, reason}} ->
+        {:noreply, put_flash(socket, :error, "Publish cancelled: #{reason}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to publish")}
     end
   end
 
@@ -84,10 +97,14 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     case Content.unpublish_document(
            socket.assigns.doc_id,
            socket.assigns.type,
-           socket.assigns.dataset
+           socket.assigns.dataset,
+           source: :studio
          ) do
       {:ok, _} ->
         {:noreply, socket |> put_flash(:info, "Document unpublished") |> load_document()}
+
+      {:error, {:halted, reason}} ->
+        {:noreply, put_flash(socket, :error, "Unpublish cancelled: #{reason}")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to unpublish")}
