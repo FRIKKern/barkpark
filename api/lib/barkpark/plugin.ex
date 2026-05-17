@@ -19,6 +19,30 @@ defmodule Barkpark.Plugin do
   using module's source file (e.g. `priv/plugins/hello/plugin.json` when the
   module lives at `priv/plugins/hello/lib/hello.ex`). Pass
   `manifest_path: "..."` to override.
+
+  ## Resolver callbacks (Goal barkpark-cjs)
+
+  Eight of the collector callbacks (`checkers/0`, `action_handlers/0`,
+  `external_sync_entries/0`, `codelist_seeders/0`, `settings_schema/0`,
+  `top_menu_entries/0`, `desk_items/1`) and the brand-new `doc_actions`
+  collector have a companion `resolve_X/2` callback of shape
+  `(prev, ctx) -> next`. The host seeds `prev` with its built-in baseline
+  (or, for `doc_actions`, the schema-declared list); each plugin sees the
+  running accumulator and returns a transformed value, so plugins can
+  mutate, reorder, or remove entries — not just append.
+
+  Both the additive form and the resolver form are listed in
+  `@optional_callbacks`. The `__using__/1` macro supplies a `defoverridable`
+  default for every resolver that lifts the additive return value into
+  the resolver shape (concatenation for list-shaped callbacks; `Map.merge`
+  for map-shaped ones — `action_handlers`, `external_sync_entries`,
+  `codelist_seeders` returns a list of zero-arg functions; `settings_schema`
+  returns a list of fields). When neither form is implemented, the default
+  returns `prev` unchanged (identity).
+
+  See `~/docs/paperflow/plans/2026-05-17-plugin-resolvers.html` §0 for the
+  full decision record (Q1 callback shape, Q3 ctx shape, Q4 host seeds
+  prev).
   """
 
   @typedoc """
@@ -106,18 +130,162 @@ defmodule Barkpark.Plugin do
               optional(:icon) => String.t()
             }
 
+  @typedoc """
+  A per-document action shown in the Studio editor header.
+
+  The shape mirrors the schema-declared `:actions` entry that
+  `StudioLive.schema_actions/1` reads today — string-keyed map with
+  `"name"`, `"label"`, `"kind"` (`"link"` or `"modal"`), and optional
+  `"href"`, `"icon"`, `"modal"` payload. `resolve_doc_actions/2` operates
+  on a list of these so plugins can drop, reorder, or amend per-doc
+  actions based on the live document payload (e.g. hide a "Publish"
+  button while the worker is mid-submission).
+  """
+  @type doc_action :: %{
+          required(String.t()) => term()
+        }
+
+  @typedoc """
+  A registered checker — pair of `{name, module}` where `module`
+  implements `Barkpark.Plugins.Checker`.
+  """
+  @type checker :: {String.t() | atom(), module()}
+
   @callback manifest() :: map()
   @callback register_routes(any()) :: any()
   @callback register_workers(any()) :: [Supervisor.child_spec()]
   @callback register_schemas(keyword()) :: [Barkpark.Content.SchemaDefinition.t()]
   @callback validate_settings(map()) :: :ok | {:error, [{atom(), String.t()}]}
-  @callback checkers() :: [{String.t() | atom(), module()}]
+
+  @callback checkers() :: [checker()]
   @callback action_handlers() :: %{optional(String.t()) => action_handler()}
   @callback external_sync_entries() :: %{optional(String.t()) => map()}
   @callback codelist_seeders() :: [(-> any())]
   @callback settings_schema() :: [setting_field()]
   @callback top_menu_entries() :: [top_menu_entry()]
   @callback desk_items(dataset :: String.t()) :: [desk_item()]
+
+  # ── Resolver callbacks (Goal barkpark-cjs) ───────────────────────────
+  #
+  # Each `resolve_X/2` is `(prev, ctx) -> next`. The host seeds prev with
+  # its built-in baseline; plugins thread the accumulator. Default impls
+  # (supplied by `__using__/1` via `defoverridable`) lift the additive
+  # form into the resolver shape — see module doc for details.
+
+  @doc """
+  Resolve the list of registered checkers.
+
+  `ctx` shape: `%{dataset: String.t()}`.
+
+  Default implementation lifts `checkers/0` via `prev ++ result`.
+  """
+  @callback resolve_checkers(prev :: [checker()], ctx :: %{dataset: String.t()}) ::
+              [checker()]
+
+  @doc """
+  Resolve the action-name → handler-fn map.
+
+  `ctx` shape: `%{dataset: String.t(), doc_id: String.t(),
+  doc_type: String.t(), doc: map()}`.
+
+  Default implementation lifts `action_handlers/0` via `Map.merge(prev, result)`.
+  """
+  @callback resolve_action_handlers(
+              prev :: %{optional(String.t()) => action_handler()},
+              ctx :: %{
+                dataset: String.t(),
+                doc_id: String.t(),
+                doc_type: String.t(),
+                doc: map()
+              }
+            ) :: %{optional(String.t()) => action_handler()}
+
+  @doc """
+  Resolve the external-sync entries registry.
+
+  `ctx` shape: `%{dataset: String.t()}`.
+
+  Default implementation lifts `external_sync_entries/0` via
+  `Map.merge(prev, result)`.
+  """
+  @callback resolve_external_sync_entries(
+              prev :: %{optional(String.t()) => map()},
+              ctx :: %{dataset: String.t()}
+            ) :: %{optional(String.t()) => map()}
+
+  @doc """
+  Resolve the list of zero-arg codelist seeder functions.
+
+  `ctx` shape: `%{dataset: String.t()}`.
+
+  Default implementation lifts `codelist_seeders/0` via `prev ++ result`.
+  Note that the additive `codelist_seeders/0` returns a list (not a map)
+  even though seeders run for side-effect — concatenation is the natural
+  lift.
+  """
+  @callback resolve_codelist_seeders(
+              prev :: [(-> any())],
+              ctx :: %{dataset: String.t()}
+            ) :: [(-> any())]
+
+  @doc """
+  Resolve the declarative settings-form field list shown by the admin
+  Plugin Settings LiveView.
+
+  `ctx` shape: `%{plugin_name: String.t()}`.
+
+  Default implementation lifts `settings_schema/0` via `prev ++ result`.
+  """
+  @callback resolve_settings_schema(
+              prev :: [setting_field()],
+              ctx :: %{plugin_name: String.t()}
+            ) :: [setting_field()]
+
+  @doc """
+  Resolve the Studio top-menu tab list.
+
+  `ctx` shape: `%{dataset: String.t(), current_path: String.t()}`.
+
+  Default implementation lifts `top_menu_entries/0` via `prev ++ result`.
+  """
+  @callback resolve_top_menu_entries(
+              prev :: [top_menu_entry()],
+              ctx :: %{dataset: String.t(), current_path: String.t()}
+            ) :: [top_menu_entry()]
+
+  @doc """
+  Resolve the root Structure pane's desk-item list.
+
+  `ctx` shape: `%{dataset: String.t(), current_path: String.t()}`.
+
+  Default implementation lifts `desk_items(ctx.dataset)` via
+  `prev ++ result`.
+  """
+  @callback resolve_desk_items(
+              prev :: [desk_item()],
+              ctx :: %{dataset: String.t(), current_path: String.t()}
+            ) :: [desk_item()]
+
+  @doc """
+  Resolve the per-document action list shown in the Studio editor
+  header.
+
+  `ctx` shape: `%{dataset: String.t(), doc_id: String.t(),
+  doc_type: String.t(), doc: map()}`.
+
+  No additive predecessor — `prev` is seeded by the host with the
+  schema-declared `:actions` list. The default implementation returns
+  `prev` unchanged (identity).
+  """
+  @callback resolve_doc_actions(
+              prev :: [doc_action()],
+              ctx :: %{
+                dataset: String.t(),
+                doc_id: String.t(),
+                doc_type: String.t(),
+                doc: map()
+              }
+            ) :: [doc_action()]
 
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
@@ -129,7 +297,15 @@ defmodule Barkpark.Plugin do
                       codelist_seeders: 0,
                       settings_schema: 0,
                       top_menu_entries: 0,
-                      desk_items: 1
+                      desk_items: 1,
+                      resolve_checkers: 2,
+                      resolve_action_handlers: 2,
+                      resolve_external_sync_entries: 2,
+                      resolve_codelist_seeders: 2,
+                      resolve_settings_schema: 2,
+                      resolve_top_menu_entries: 2,
+                      resolve_desk_items: 2,
+                      resolve_doc_actions: 2
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -188,6 +364,87 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def desk_items(_dataset), do: []
 
+      # ── Resolver defaults ──────────────────────────────────────────
+      #
+      # Each `resolve_X/2` default calls the additive form (when
+      # exported by the plugin module) and lifts the result into the
+      # resolver shape. When the additive form is not exported, the
+      # default returns `prev` unchanged.
+
+      @impl Barkpark.Plugin
+      def resolve_checkers(prev, _ctx) do
+        if function_exported?(__MODULE__, :checkers, 0) do
+          result = __MODULE__.checkers()
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_action_handlers(prev, _ctx) do
+        if function_exported?(__MODULE__, :action_handlers, 0) do
+          result = __MODULE__.action_handlers()
+          if is_map(result), do: Map.merge(prev, result), else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_external_sync_entries(prev, _ctx) do
+        if function_exported?(__MODULE__, :external_sync_entries, 0) do
+          result = __MODULE__.external_sync_entries()
+          if is_map(result), do: Map.merge(prev, result), else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_codelist_seeders(prev, _ctx) do
+        if function_exported?(__MODULE__, :codelist_seeders, 0) do
+          result = __MODULE__.codelist_seeders()
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_settings_schema(prev, _ctx) do
+        if function_exported?(__MODULE__, :settings_schema, 0) do
+          result = __MODULE__.settings_schema()
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_top_menu_entries(prev, _ctx) do
+        if function_exported?(__MODULE__, :top_menu_entries, 0) do
+          result = __MODULE__.top_menu_entries()
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_desk_items(prev, ctx) do
+        if function_exported?(__MODULE__, :desk_items, 1) do
+          dataset = Map.get(ctx, :dataset, "production")
+          result = __MODULE__.desk_items(dataset)
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
+      @impl Barkpark.Plugin
+      def resolve_doc_actions(prev, _ctx), do: prev
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -199,7 +456,15 @@ defmodule Barkpark.Plugin do
                      codelist_seeders: 0,
                      settings_schema: 0,
                      top_menu_entries: 0,
-                     desk_items: 1
+                     desk_items: 1,
+                     resolve_checkers: 2,
+                     resolve_action_handlers: 2,
+                     resolve_external_sync_entries: 2,
+                     resolve_codelist_seeders: 2,
+                     resolve_settings_schema: 2,
+                     resolve_top_menu_entries: 2,
+                     resolve_desk_items: 2,
+                     resolve_doc_actions: 2
     end
   end
 end
