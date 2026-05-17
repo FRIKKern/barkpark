@@ -54,4 +54,17 @@ defmodule <%= @module_path %> do
   #   # Add zero-arg seeders here, e.g.:
   #   #   [&<%= @module_path %>.Codelists.seed/0]
   # end
+  #
+  # @impl Barkpark.Plugin
+  # def settings_schema do
+  #   # Declarative form rendered at /studio/:dataset/_plugins/<plugin>/settings.
+  #   # Field names are dot-namespaced: leading segment selects the
+  #   # `plugin_settings` row, remainder is the flat key inside that row.
+  #   # Types: :string | :password | :url | :select | :boolean.
+  #   [
+  #     # %{name: "<%= @snake_name %>.api_key", type: :password, label: "API key",
+  #     #   required: true, group: "<%= @module_name %>",
+  #     #   hint: "Stored encrypted at rest via BARKPARK_CLOAK_KEY"}
+  #   ]
+  # end
 end

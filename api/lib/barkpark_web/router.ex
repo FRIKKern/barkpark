@@ -113,6 +113,7 @@ defmodule BarkparkWeb.Router do
       on_mount: [{BarkparkWeb.LiveAuth, :admin}],
       layout: {BarkparkWeb.Layouts, :studio} do
       live "/_plugins", PluginsLive
+      live "/_plugins/:plugin/settings", PluginSettingsLive
     end
   end
 
