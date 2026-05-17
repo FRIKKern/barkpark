@@ -371,8 +371,18 @@ defmodule Barkpark.Content do
     end
   end
 
-  @doc "Create or update a document. New docs are always created as drafts."
-  def create_document(type, attrs, dataset) do
+  @doc """
+  Create or update a document. New docs are always created as drafts.
+
+  `opts` is a keyword list carrying hook context:
+    - `:source` — `:studio | :api | :cli | :worker` (default `:api`)
+    - `:user_id` — string id of the acting user, or `nil`
+
+  Fires `:before_save` synchronously before the DB write; on
+  `{:halt, reason}` returns `{:error, {:halted, reason}}` and skips the
+  write. Fires `:after_save` asynchronously after a successful write.
+  """
+  def create_document(type, attrs, dataset, opts \\ []) do
     attrs = from_envelope(attrs)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = draft_id(raw_id)
@@ -385,20 +395,45 @@ defmodule Barkpark.Content do
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
 
-    case get_document(doc_id, type, dataset) do
-      {:ok, existing} ->
-        existing
-        |> Document.changeset(attrs)
-        |> Repo.update()
-        |> tap_broadcast(dataset, type, "update", existing.rev)
+    ctx = build_ctx(opts)
 
-      _ ->
-        attrs = apply_initial_values(attrs, type, dataset)
+    prev_doc =
+      case get_document(doc_id, type, dataset) do
+        {:ok, d} -> d
+        _ -> nil
+      end
 
-        %Document{}
-        |> Document.changeset(attrs)
-        |> Repo.insert()
-        |> tap_broadcast(dataset, type, "create", nil)
+    payload = %{
+      event: :before_save,
+      doc: attrs,
+      dataset: dataset,
+      prev_doc: prev_doc,
+      ctx: ctx
+    }
+
+    case Barkpark.Plugins.Hooks.fire(:before_save, payload) do
+      {:halt, reason} ->
+        {:error, {:halted, reason}}
+
+      :ok ->
+        result =
+          case prev_doc do
+            %Document{} = existing ->
+              existing
+              |> Document.changeset(attrs)
+              |> Repo.update()
+              |> tap_broadcast(dataset, type, "update", existing.rev)
+
+            _ ->
+              attrs = apply_initial_values(attrs, type, dataset)
+
+              %Document{}
+              |> Document.changeset(attrs)
+              |> Repo.insert()
+              |> tap_broadcast(dataset, type, "create", nil)
+          end
+
+        fire_after(result, :after_save, payload)
     end
   end
 
@@ -496,41 +531,63 @@ defmodule Barkpark.Content do
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
   If no draft exists, returns error.
+
+  `opts` accepts `:source` and `:user_id` for lifecycle-hook context.
+  Fires `:before_publish` (halt-capable) and `:after_publish` (async).
   """
-  def publish_document(published_doc_id, type, dataset) do
+  def publish_document(published_doc_id, type, dataset, opts \\ []) do
     did = draft_id(published_doc_id)
     pid = published_id(published_doc_id)
 
     case get_document(did, type, dataset) do
       {:ok, draft} ->
-        # Upsert the published version with draft's content
-        pub_attrs = %{
-          "doc_id" => pid,
-          "type" => type,
-          "dataset" => dataset,
-          "title" => draft.title,
-          "status" => "published",
-          "content" => draft.content,
-          "rev" => generate_rev()
+        ctx = build_ctx(opts)
+
+        payload = %{
+          event: :before_publish,
+          doc: draft,
+          dataset: dataset,
+          prev_doc: draft,
+          ctx: ctx
         }
 
-        {pub_result, prev_pub_rev} =
-          case get_document(pid, type, dataset) do
-            {:ok, existing} ->
-              {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+        case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
+          {:halt, reason} ->
+            {:error, {:halted, reason}}
 
-            _ ->
-              {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-          end
+          :ok ->
+            # Upsert the published version with draft's content
+            pub_attrs = %{
+              "doc_id" => pid,
+              "type" => type,
+              "dataset" => dataset,
+              "title" => draft.title,
+              "status" => "published",
+              "content" => draft.content,
+              "rev" => generate_rev()
+            }
 
-        case pub_result do
-          {:ok, published} ->
-            # Delete the draft
-            Repo.delete(draft)
-            tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
+            {pub_result, prev_pub_rev} =
+              case get_document(pid, type, dataset) do
+                {:ok, existing} ->
+                  {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
-          error ->
-            error
+                _ ->
+                  {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
+              end
+
+            result =
+              case pub_result do
+                {:ok, published} ->
+                  # Delete the draft
+                  Repo.delete(draft)
+                  tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
+
+                error ->
+                  error
+              end
+
+            fire_after(result, :after_publish, payload)
         end
 
       {:error, :not_found} ->
@@ -538,40 +595,64 @@ defmodule Barkpark.Content do
     end
   end
 
-  @doc "Unpublish: move published doc back to draft, delete published version."
-  def unpublish_document(published_doc_id, type, dataset) do
+  @doc """
+  Unpublish: move published doc back to draft, delete published version.
+
+  `opts` accepts `:source` and `:user_id`. Fires `:before_unpublish`
+  (halt-capable) and `:after_unpublish` (async).
+  """
+  def unpublish_document(published_doc_id, type, dataset, opts \\ []) do
     pid = published_id(published_doc_id)
     did = draft_id(published_doc_id)
 
     case get_document(pid, type, dataset) do
       {:ok, pub} ->
-        # Create draft with published content
-        draft_attrs = %{
-          "doc_id" => did,
-          "type" => type,
-          "dataset" => dataset,
-          "title" => pub.title,
-          "status" => "draft",
-          "content" => pub.content,
-          "rev" => generate_rev()
+        ctx = build_ctx(opts)
+
+        payload = %{
+          event: :before_unpublish,
+          doc: pub,
+          dataset: dataset,
+          prev_doc: pub,
+          ctx: ctx
         }
 
-        {draft_result, prev_draft_rev} =
-          case get_document(did, type, dataset) do
-            {:ok, existing} ->
-              {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
+        case Barkpark.Plugins.Hooks.fire(:before_unpublish, payload) do
+          {:halt, reason} ->
+            {:error, {:halted, reason}}
 
-            _ ->
-              {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
-          end
+          :ok ->
+            # Create draft with published content
+            draft_attrs = %{
+              "doc_id" => did,
+              "type" => type,
+              "dataset" => dataset,
+              "title" => pub.title,
+              "status" => "draft",
+              "content" => pub.content,
+              "rev" => generate_rev()
+            }
 
-        case draft_result do
-          {:ok, draft} ->
-            Repo.delete(pub)
-            tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
+            {draft_result, prev_draft_rev} =
+              case get_document(did, type, dataset) do
+                {:ok, existing} ->
+                  {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
 
-          error ->
-            error
+                _ ->
+                  {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
+              end
+
+            result =
+              case draft_result do
+                {:ok, draft} ->
+                  Repo.delete(pub)
+                  tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
+
+                error ->
+                  error
+              end
+
+            fire_after(result, :after_unpublish, payload)
         end
 
       error ->
@@ -595,23 +676,50 @@ defmodule Barkpark.Content do
     end
   end
 
-  def delete_document(doc_id, type, dataset) do
+  @doc """
+  Delete both the published and draft variants of a document.
+
+  `opts` accepts `:source` and `:user_id`. Fires `:before_delete`
+  (halt-capable) and `:after_delete` (async). The payload's `:doc` and
+  `:prev_doc` carry the about-to-be-deleted document (the published row
+  if present, otherwise the draft).
+  """
+  def delete_document(doc_id, type, dataset, opts \\ []) do
     pid = published_id(doc_id)
     did = draft_id(doc_id)
 
-    # Delete both draft and published
-    results =
+    existing =
       [pid, did]
       |> Enum.map(fn id -> get_document(id, type, dataset) end)
       |> Enum.filter(&match?({:ok, _}, &1))
-      |> Enum.map(fn {:ok, doc} -> {Repo.delete(doc), doc.rev} end)
+      |> Enum.map(fn {:ok, doc} -> doc end)
 
-    case results do
+    case existing do
       [] ->
         {:error, :not_found}
 
-      [{first_result, prev_rev} | _] ->
-        tap_broadcast(first_result, dataset, type, "delete", prev_rev)
+      [target | _] = docs ->
+        ctx = build_ctx(opts)
+
+        payload = %{
+          event: :before_delete,
+          doc: target,
+          dataset: dataset,
+          prev_doc: target,
+          ctx: ctx
+        }
+
+        case Barkpark.Plugins.Hooks.fire(:before_delete, payload) do
+          {:halt, reason} ->
+            {:error, {:halted, reason}}
+
+          :ok ->
+            [{first_result, prev_rev} | _] =
+              Enum.map(docs, fn doc -> {Repo.delete(doc), doc.rev} end)
+
+            result = tap_broadcast(first_result, dataset, type, "delete", prev_rev)
+            fire_after(result, :after_delete, payload)
+        end
     end
   end
 
@@ -872,7 +980,13 @@ defmodule Barkpark.Content do
 
   # ── Legacy upsert (for backward compat) ───────────────────────────────────
 
-  def upsert_document(type, attrs, dataset) do
+  @doc """
+  Upsert a document — used by autosave and patch paths.
+
+  `opts` accepts `:source` and `:user_id`. Fires `:before_save` and
+  `:after_save` around the DB write, same contract as `create_document/4`.
+  """
+  def upsert_document(type, attrs, dataset, opts \\ []) do
     attrs = from_envelope(attrs)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
     doc_id = raw_id && draft_id(raw_id)
@@ -885,20 +999,68 @@ defmodule Barkpark.Content do
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
 
-    case doc_id && get_document(doc_id, type, dataset) do
-      {:ok, existing} ->
-        existing
-        |> Document.changeset(attrs)
-        |> Repo.update()
-        |> tap_broadcast(dataset, type, "update", existing.rev)
+    ctx = build_ctx(opts)
 
-      _ ->
-        %Document{}
-        |> Document.changeset(attrs)
-        |> Repo.insert()
-        |> tap_broadcast(dataset, type, "create", nil)
+    prev_doc =
+      case doc_id && get_document(doc_id, type, dataset) do
+        {:ok, d} -> d
+        _ -> nil
+      end
+
+    payload = %{
+      event: :before_save,
+      doc: attrs,
+      dataset: dataset,
+      prev_doc: prev_doc,
+      ctx: ctx
+    }
+
+    case Barkpark.Plugins.Hooks.fire(:before_save, payload) do
+      {:halt, reason} ->
+        {:error, {:halted, reason}}
+
+      :ok ->
+        result =
+          case prev_doc do
+            %Document{} = existing ->
+              existing
+              |> Document.changeset(attrs)
+              |> Repo.update()
+              |> tap_broadcast(dataset, type, "update", existing.rev)
+
+            _ ->
+              %Document{}
+              |> Document.changeset(attrs)
+              |> Repo.insert()
+              |> tap_broadcast(dataset, type, "create", nil)
+          end
+
+        fire_after(result, :after_save, payload)
     end
   end
+
+  # ── Lifecycle-hook helpers ────────────────────────────────────────────────
+  #
+  # `build_ctx/1` constructs the `ctx` map every hook payload carries. The
+  # `:source` field is the recursion guard — plugins inspect it (e.g.
+  # `ctx.source == :worker`) to short-circuit hooks they themselves fired.
+  # `fire_after/3` only fires after_* on a successful write; errors flow
+  # through untouched so existing `{:error, changeset}` paths keep working.
+
+  defp build_ctx(opts) do
+    %{
+      source: Keyword.get(opts, :source, :api),
+      user_id: Keyword.get(opts, :user_id)
+    }
+  end
+
+  defp fire_after({:ok, doc}, event, payload) do
+    after_payload = %{payload | event: event, doc: doc}
+    _ = Barkpark.Plugins.Hooks.fire(event, after_payload)
+    {:ok, doc}
+  end
+
+  defp fire_after(other, _event, _payload), do: other
 
   # ── Schema Definitions ────────────────────────────────────────────────────
 
