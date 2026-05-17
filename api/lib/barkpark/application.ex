@@ -60,18 +60,15 @@ defmodule Barkpark.Application do
           # registered above and namespace them as
           # `plugin:<name>:<checker>` in the value-checker registry.
           Barkpark.Validation.Registry.reload_plugin_checkers()
-          # Task barkpark-2nw: seed the codelist registry from the bundled
-          # EDItEUR XML snapshot at `priv/codelists/onix-issue-73.xml`.
-          # Runs after `register_all_schemas/0` so the alias resolver in
-          # `Codelists.get/2` has the OnixEdit `book` schema (and its
-          # `onix.codelistId: N` metadata) available the moment the first
-          # render hits the registry. Never raises; logs + soldiers on.
-          Barkpark.Codelists.EDItEUR.seed_bundled()
-          # Task barkpark-ufw: seed the Thema subject classification
-          # (EDItEUR Thema v1.6, ~9k hierarchical codes) — published
-          # separately from the ONIX codelist bundle. Idempotent on
-          # `(onixedit, onixedit:thema, "1.6")`. Never raises.
-          Barkpark.Codelists.EDItEUR.seed_thema()
+          # Task barkpark-auo: every plugin contributes its codelist
+          # seeders via the `Barkpark.Plugin.codelist_seeders/0` callback.
+          # `Plugins.Registry.run_all_codelist_seeders/0` walks the
+          # registered plugins and invokes each seeder in a per-seeder
+          # try/rescue so one bad plugin never breaks the others. Runs
+          # after `register_all_schemas/0` so the alias resolver in
+          # `Codelists.get/2` already has the schemas (and their
+          # `onix.codelistId: N` metadata) when the first render hits.
+          Barkpark.Plugins.Registry.run_all_codelist_seeders()
         end)
 
         ok

@@ -67,6 +67,42 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @impl Barkpark.Plugin
+  def action_handlers do
+    %{
+      "publish_to_bokbasen" => &Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3
+    }
+  end
+
+  @impl Barkpark.Plugin
+  def external_sync_entries do
+    %{
+      "bokbasen" => %{
+        label: "Bokbasen",
+        states: %{
+          "pending" => %{color: "gray", label: "Pending"},
+          "staging" => %{color: "gray", label: "Staging"},
+          "staged" => %{color: "blue", label: "Staged"},
+          "polling" => %{color: "blue", label: "Polling"},
+          "accepted" => %{color: "green", label: "Accepted"},
+          "rejected" => %{color: "red", label: "Rejected"},
+          "failed" => %{color: "orange", label: "Failed"},
+          "cancelled" => %{color: "orange", label: "Cancelled"},
+          "cannot_cancel" => %{color: "orange", label: "Cannot cancel"},
+          nil => %{color: "gray", label: "Not synced"}
+        }
+      }
+    }
+  end
+
+  @impl Barkpark.Plugin
+  def codelist_seeders do
+    [
+      &Barkpark.Codelists.EDItEUR.seed_bundled/0,
+      &Barkpark.Codelists.EDItEUR.seed_thema/0
+    ]
+  end
+
+  @impl Barkpark.Plugin
   def register_schemas(_opts) do
     raw = book_raw_with_subschemas()
 
