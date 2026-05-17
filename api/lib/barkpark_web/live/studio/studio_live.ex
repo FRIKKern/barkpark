@@ -275,7 +275,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     case Content.create_document(
            type,
            %{"doc_id" => id, "title" => "Untitled"},
-           socket.assigns.dataset
+           socket.assigns.dataset,
+           hook_opts(socket)
          ) do
       {:ok, doc} ->
         # The + button lives on the doc-list pane (a :document_type_list
@@ -287,6 +288,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
         pub_id = Content.published_id(doc.doc_id)
         new_path = socket.assigns.nav_path ++ [pub_id]
         {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
+
+      {:error, {:halted, reason}} ->
+        {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
@@ -510,13 +514,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
         Content.disconnect_references(doc.doc_id, socket.assigns.dataset)
       end
 
-      Content.delete_document(doc.doc_id, type, socket.assigns.dataset)
-      new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+      case Content.delete_document(doc.doc_id, type, socket.assigns.dataset, hook_opts(socket)) do
+        {:error, {:halted, reason}} ->
+          {:noreply,
+           socket
+           |> assign(show_delete: false, delete_refs: [])
+           |> put_flash(:error, "Delete cancelled: #{reason}")}
 
-      {:noreply,
-       socket
-       |> assign(show_delete: false, delete_refs: [])
-       |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+        _ ->
+          new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+
+          {:noreply,
+           socket
+           |> assign(show_delete: false, delete_refs: [])
+           |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+      end
     else
       {:noreply, socket}
     end
@@ -554,13 +566,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("restore-revision", %{"id" => rev_id}, socket) do
     type = socket.assigns[:editor_type]
 
-    case Content.restore_revision(rev_id, type, socket.assigns.dataset) do
+    case Content.restore_revision(rev_id, type, socket.assigns.dataset, hook_opts(socket)) do
       {:ok, _doc} ->
         {:noreply,
          socket
          |> assign(show_history: false, revisions: [])
          |> put_flash(:info, "Restored from history")
          |> rebuild_panes()}
+
+      {:error, {:halted, reason}} ->
+        {:noreply, put_flash(socket, :error, "Restore cancelled: #{reason}")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to restore")}
@@ -590,10 +605,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
            |> put_flash(:error, "Fix validation errors before publishing")}
 
         _ ->
+          opts = hook_opts(socket)
+
           do_action(
             socket,
             fn d, t ->
-              Content.publish_document(Content.published_id(d.doc_id), t, socket.assigns.dataset)
+              Content.publish_document(
+                Content.published_id(d.doc_id),
+                t,
+                socket.assigns.dataset,
+                opts
+              )
             end,
             "Published"
           )
@@ -604,10 +626,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   def handle_event("unpublish", _, socket) do
+    opts = hook_opts(socket)
+
     do_action(
       socket,
       fn doc, type ->
-        Content.unpublish_document(Content.published_id(doc.doc_id), type, socket.assigns.dataset)
+        Content.unpublish_document(
+          Content.published_id(doc.doc_id),
+          type,
+          socket.assigns.dataset,
+          opts
+        )
       end,
       "Unpublished"
     )
@@ -622,7 +651,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      case Content.clone_document(doc, type, socket.assigns.dataset) do
+      case Content.clone_document(doc, type, socket.assigns.dataset, hook_opts(socket)) do
         {:ok, new_doc} ->
           pub_id = Content.published_id(new_doc.doc_id)
           base = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
@@ -632,6 +661,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
            socket
            |> put_flash(:info, "Duplicated as #{pub_id}")
            |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+
+        {:error, {:halted, reason}} ->
+          {:noreply, put_flash(socket, :error, "Duplicate cancelled: #{reason}")}
 
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Failed to duplicate")}
@@ -839,7 +871,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      case Content.upsert_draft(doc, type, schema, params, socket.assigns.dataset) do
+      case Content.upsert_draft(
+             doc,
+             type,
+             schema,
+             params,
+             socket.assigns.dataset,
+             hook_opts(socket)
+           ) do
         {:ok, saved_doc, errs} ->
           new_title = Map.get(params, "title", doc.title)
 
@@ -861,12 +900,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
           )
           |> maybe_refresh_onix_preview()
 
+        {:error, {:halted, reason}} ->
+          # `before_save` hook vetoed the autosave (per plan §0 Q4). The
+          # editor's form state is untouched; surface the reason in the
+          # save_status indicator AND a flash so it can't be missed.
+          socket
+          |> assign(save_status: "Save cancelled")
+          |> put_flash(:error, "Save cancelled: #{reason}")
+
         {:error, _} ->
           assign(socket, save_status: "Save failed")
       end
     else
       socket
     end
+  end
+
+  # Build the keyword list of lifecycle-hook context (`:source`,
+  # `:user_id`) that every Content write call site in StudioLive passes
+  # through. Centralised so the recursion guard (plan §0 Q5) is set
+  # consistently — every Studio-originated write tags itself
+  # `source: :studio` and threads the socket's user_id when present.
+  defp hook_opts(socket) do
+    [source: :studio, user_id: socket.assigns[:user_id]]
   end
 
   # ── ONIX preview side-pane (Task #16) ────────────────────────────────
@@ -916,8 +972,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     if doc && type do
       case action.(doc, type) do
-        {:ok, _} -> {:noreply, socket |> put_flash(:info, msg) |> rebuild_panes()}
-        {:error, _} -> {:noreply, put_flash(socket, :error, "Action failed")}
+        {:ok, _} ->
+          {:noreply, socket |> put_flash(:info, msg) |> rebuild_panes()}
+
+        {:error, {:halted, reason}} ->
+          # Lifecycle-hook veto (per plan §0 Q4). Surface as a red flash
+          # banner so the editor sees why the action was cancelled.
+          {:noreply, put_flash(socket, :error, "#{msg} cancelled: #{reason}")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Action failed")}
       end
     else
       {:noreply, socket}
@@ -936,30 +1000,47 @@ defmodule BarkparkWeb.Studio.StudioLive do
     ids = MapSet.to_list(socket.assigns.selected_doc_ids)
     type = list_pane_type(socket)
     dataset = socket.assigns.dataset
+    opts = hook_opts(socket)
 
     if type == nil or ids == [] do
       assign(socket, selected_doc_ids: MapSet.new())
     else
-      {ok, err} =
-        Enum.reduce(ids, {0, 0}, fn id, {ok, err} ->
+      # Aggregate three buckets: successful writes, halts (lifecycle-hook
+      # vetoes — per plan §0 Q4 these are NOT errors, they're plugin
+      # policy enforcement) and other failures. Surfacing the halt count
+      # separately in the flash makes it obvious to the editor that the
+      # cancelled rows weren't broken — a plugin chose to refuse them.
+      {ok, halted, err} =
+        Enum.reduce(ids, {0, 0, 0}, fn id, {ok, halted, err} ->
           result =
             case kind do
-              :publish -> Content.publish_document(id, type, dataset)
-              :unpublish -> Content.unpublish_document(id, type, dataset)
+              :publish -> Content.publish_document(id, type, dataset, opts)
+              :unpublish -> Content.unpublish_document(id, type, dataset, opts)
             end
 
           case result do
-            {:ok, _} -> {ok + 1, err}
-            _ -> {ok, err + 1}
+            {:ok, _} -> {ok + 1, halted, err}
+            {:error, {:halted, _}} -> {ok, halted + 1, err}
+            _ -> {ok, halted, err + 1}
           end
         end)
 
       verb = if kind == :publish, do: "Published", else: "Unpublished"
 
       flash =
-        if err == 0,
-          do: "#{verb} #{ok} of #{length(ids)}",
-          else: "#{verb} #{ok} of #{length(ids)} (#{err} failed)"
+        cond do
+          halted > 0 and err == 0 ->
+            "#{verb} #{ok} of #{length(ids)}. #{halted} cancelled by plugin rules."
+
+          halted > 0 and err > 0 ->
+            "#{verb} #{ok} of #{length(ids)}. #{halted} cancelled by plugin rules (#{err} failed)."
+
+          err == 0 ->
+            "#{verb} #{ok} of #{length(ids)}"
+
+          true ->
+            "#{verb} #{ok} of #{length(ids)} (#{err} failed)"
+        end
 
       socket
       |> assign(selected_doc_ids: MapSet.new())

@@ -57,11 +57,15 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
     case Content.create_document(
            type,
            %{"doc_id" => id, "title" => "Untitled"},
-           socket.assigns.dataset
+           socket.assigns.dataset,
+           source: :studio
          ) do
       {:ok, doc} ->
         {:noreply,
          push_navigate(socket, to: "/studio/#{type}/#{Content.published_id(doc.doc_id)}")}
+
+      {:error, {:halted, reason}} ->
+        {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create document")}
@@ -69,8 +73,16 @@ defmodule BarkparkWeb.Studio.DocumentListLive do
   end
 
   def handle_event("delete-doc", %{"id" => doc_id, "type" => type}, socket) do
-    Content.delete_document(doc_id, type, socket.assigns.dataset)
-    {:noreply, load_documents(socket)}
+    case Content.delete_document(doc_id, type, socket.assigns.dataset, source: :studio) do
+      {:error, {:halted, reason}} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Delete cancelled: #{reason}")
+         |> load_documents()}
+
+      _ ->
+        {:noreply, load_documents(socket)}
+    end
   end
 
   defp load_documents(socket) do

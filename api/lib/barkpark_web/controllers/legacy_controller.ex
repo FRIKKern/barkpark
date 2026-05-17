@@ -39,11 +39,16 @@ defmodule BarkparkWeb.LegacyController do
       "content" => Map.drop(attrs, ["id", "doc_id", "title", "status", "updatedAt"])
     }
 
-    case Content.upsert_document(type, internal_attrs, @dataset) do
+    case Content.upsert_document(type, internal_attrs, @dataset, source: :api) do
       {:ok, doc} ->
         conn
         |> put_status(:created)
         |> json(render_legacy_doc(doc))
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "halted", reason: reason})
 
       {:error, changeset} ->
         {:error, changeset}
@@ -51,8 +56,17 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def delete(conn, %{"type" => type, "id" => doc_id}) do
-    with {:ok, _} <- Content.delete_document(doc_id, type, @dataset) do
-      json(conn, %{deleted: doc_id})
+    case Content.delete_document(doc_id, type, @dataset, source: :api) do
+      {:ok, _} ->
+        json(conn, %{deleted: doc_id})
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "halted", reason: reason})
+
+      {:error, _} = err ->
+        err
     end
   end
 

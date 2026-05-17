@@ -10,9 +10,16 @@ defmodule BarkparkWeb.MutateController do
   def mutate(conn, %{"dataset" => dataset, "mutations" => mutations}) when is_list(mutations) do
     mutations = apply_if_match_header(conn, mutations)
 
-    case Content.apply_mutations(mutations, dataset) do
+    case Content.apply_mutations(mutations, dataset, source: :api) do
       {:ok, {tx_id, results}} ->
         json(conn, %{transactionId: tx_id, results: results})
+
+      {:error, {:halted, reason}} ->
+        # Lifecycle-hook veto (per plan §0 Q4). HTTP 409 Conflict with a
+        # stable error shape so plugin authors can rely on it.
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "halted", reason: reason})
 
       {:error, reason} ->
         respond_with_error(conn, reason)

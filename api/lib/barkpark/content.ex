@@ -332,15 +332,19 @@ defmodule Barkpark.Content do
   `upsert_document/3`, and returns the saved doc together with the
   validation errors map (drafts save with warnings; only publish blocks).
 
+  `opts` is forwarded to `upsert_document/4` so callers can supply
+  lifecycle-hook context (`:source`, `:user_id`).
+
   Returns `{:ok, saved_doc, validation_errors_map}` on success or
-  `{:error, term}` on a DB upsert failure. Consolidated in Task #11
-  WI3 from prior duplicate bodies in StudioLive
-  (`handle_event "autosave"`, `handle_info :autosave_form`,
+  `{:error, term}` on a DB upsert failure. The `{:error, {:halted,
+  reason}}` shape from a halting `before_save` hook is passed through
+  unchanged. Consolidated in Task #11 WI3 from prior duplicate bodies
+  in StudioLive (`handle_event "autosave"`, `handle_info :autosave_form`,
   `save_doc/3`).
   """
-  @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t()) ::
+  @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
-  def upsert_draft(base_doc, type, schema, params, dataset) do
+  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
     content = build_content(params, schema)
     new_title = Map.get(params, "title", base_doc.title)
 
@@ -357,7 +361,7 @@ defmodule Barkpark.Content do
         _ -> %{}
       end
 
-    case upsert_document(type, attrs, dataset) do
+    case upsert_document(type, attrs, dataset, opts) do
       {:ok, doc} -> {:ok, doc, validation_errors}
       {:error, _} = err -> err
     end
@@ -446,8 +450,9 @@ defmodule Barkpark.Content do
   Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
   insert failure. Used by the Studio's "Duplicate" header action.
   """
-  @spec clone_document(map(), String.t(), String.t()) :: {:ok, Document.t()} | {:error, term()}
-  def clone_document(doc, type, dataset)
+  @spec clone_document(map(), String.t(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def clone_document(doc, type, dataset, opts \\ [])
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
     new_id = generate_id(type)
     src_title = Map.get(doc, :title) || "Untitled"
@@ -461,7 +466,8 @@ defmodule Barkpark.Content do
         "status" => "draft",
         "content" => src_content
       },
-      dataset
+      dataset,
+      opts
     )
   end
 
@@ -727,11 +733,15 @@ defmodule Barkpark.Content do
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
   or `{:error, reason}` with rollback on any failure.
 
+  `opts` accepts `:source` and `:user_id` and is threaded into every
+  per-mutation Content call so lifecycle-hook context (`ctx.source`,
+  `ctx.user_id`) is set correctly for each fired hook.
+
   PubSub broadcasts queued inside the transaction are flushed AFTER a
   successful commit, and discarded on rollback — no ghost events on
   the SSE stream when a batch fails partway through.
   """
-  def apply_mutations(mutations, dataset) when is_list(mutations) do
+  def apply_mutations(mutations, dataset, opts \\ []) when is_list(mutations) do
     # Initialise the deferred-broadcast queue for this process so
     # tap_broadcast/5 knows to queue instead of broadcast immediately.
     Process.put(:barkpark_deferred_broadcasts, [])
@@ -743,7 +753,7 @@ defmodule Barkpark.Content do
 
           results =
             Enum.map(mutations, fn m ->
-              case apply_one(m, dataset) do
+              case apply_one(m, dataset, opts) do
                 {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
                 {:error, reason} -> Repo.rollback(reason)
               end
@@ -768,7 +778,7 @@ defmodule Barkpark.Content do
     end
   end
 
-  defp apply_one(%{"create" => attrs}, dataset) do
+  defp apply_one(%{"create" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
@@ -791,11 +801,11 @@ defmodule Barkpark.Content do
         end
 
       _ ->
-        with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
+        with {:ok, doc} <- create_document(type, attrs, dataset, opts), do: {:ok, doc, "create"}
     end
   end
 
-  defp apply_one(%{"createOrReplace" => attrs}, dataset) do
+  defp apply_one(%{"createOrReplace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
     expected = if_rev(attrs)
@@ -807,12 +817,12 @@ defmodule Barkpark.Content do
       end
 
     with :ok <- ensure_rev(existing, expected),
-         {:ok, doc} <- create_document(type, attrs, dataset) do
+         {:ok, doc} <- create_document(type, attrs, dataset, opts) do
       {:ok, doc, "createOrReplace"}
     end
   end
 
-  defp apply_one(%{"createIfNotExists" => attrs}, dataset) do
+  defp apply_one(%{"createIfNotExists" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
@@ -824,48 +834,52 @@ defmodule Barkpark.Content do
         end
 
       _ ->
-        with {:ok, doc} <- create_document(type, attrs, dataset), do: {:ok, doc, "create"}
+        with {:ok, doc} <- create_document(type, attrs, dataset, opts), do: {:ok, doc, "create"}
     end
   end
 
-  defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset) do
-    with {:ok, doc} <- publish_document(id, type, dataset), do: {:ok, doc, "publish"}
+  defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
+    with {:ok, doc} <- publish_document(id, type, dataset, opts), do: {:ok, doc, "publish"}
   end
 
-  defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset) do
-    with {:ok, doc} <- unpublish_document(id, type, dataset), do: {:ok, doc, "unpublish"}
+  defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset, opts) do
+    with {:ok, doc} <- unpublish_document(id, type, dataset, opts), do: {:ok, doc, "unpublish"}
   end
 
-  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset) do
+  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset, _opts) do
     with {:ok, doc} <- discard_draft(id, type, dataset), do: {:ok, doc, "discardDraft"}
   end
 
-  defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset) do
+  defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
     case if_rev(op) do
       nil ->
-        with {:ok, doc} <- delete_document(id, type, dataset), do: {:ok, doc, "delete"}
+        with {:ok, doc} <- delete_document(id, type, dataset, opts), do: {:ok, doc, "delete"}
 
       expected ->
         with {:ok, existing} <- get_document(id, type, dataset),
              :ok <- ensure_rev(existing, expected),
-             {:ok, doc} <- delete_document(id, type, dataset) do
+             {:ok, doc} <- delete_document(id, type, dataset, opts) do
           {:ok, doc, "delete"}
         end
     end
   end
 
-  defp apply_one(%{"replace" => attrs}, dataset) do
+  defp apply_one(%{"replace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
     with {:ok, existing} <- get_document(id && draft_id(id), type, dataset),
          :ok <- ensure_rev(existing, if_rev(attrs)),
-         {:ok, doc} <- create_document(type, attrs, dataset) do
+         {:ok, doc} <- create_document(type, attrs, dataset, opts) do
       {:ok, doc, "replace"}
     end
   end
 
-  defp apply_one(%{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch}, dataset) do
+  defp apply_one(
+         %{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch},
+         dataset,
+         opts
+       ) do
     with {:ok, existing} <- get_document(id, type, dataset),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       merged =
@@ -880,11 +894,11 @@ defmodule Barkpark.Content do
         "content" => merged
       }
 
-      with {:ok, doc} <- upsert_document(type, attrs, dataset), do: {:ok, doc, "update"}
+      with {:ok, doc} <- upsert_document(type, attrs, dataset, opts), do: {:ok, doc, "update"}
     end
   end
 
-  defp apply_one(_, _), do: {:error, :malformed}
+  defp apply_one(_, _, _), do: {:error, :malformed}
 
   defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
   defp if_rev(_), do: nil
@@ -1552,8 +1566,13 @@ defmodule Barkpark.Content do
     end
   end
 
-  @doc "Restore a document to a specific revision."
-  def restore_revision(revision_id, type, dataset) do
+  @doc """
+  Restore a document to a specific revision.
+
+  `opts` is forwarded to `upsert_document/4` so callers can supply
+  lifecycle-hook context (`:source`, `:user_id`).
+  """
+  def restore_revision(revision_id, type, dataset, opts \\ []) do
     with {:ok, rev} <- get_revision(revision_id) do
       attrs = %{
         "doc_id" => draft_id(rev.doc_id),
@@ -1562,7 +1581,7 @@ defmodule Barkpark.Content do
         "content" => rev.content
       }
 
-      upsert_document(type, attrs, dataset)
+      upsert_document(type, attrs, dataset, opts)
     end
   end
 end
