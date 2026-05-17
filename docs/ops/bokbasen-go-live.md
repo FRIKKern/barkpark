@@ -6,14 +6,44 @@ How to wire Bokbasen credentials into a Barkpark instance and verify the publish
 
 - Bokbasen has issued you a `client_id` + `client_secret` (sandbox or prod)
 - `client_role` is known (typically `publisher`)
-- SSH access to the Barkpark server
+- An admin-token Studio session (for Option A — recommended). SSH access is only needed for Option B (fallback).
 - A draft `book` document with at least one valid `ProductIdentifier` (ISBN-13 minimum) — Bokbasen rejects books without identifiers
 
 ## Step 1 — set credentials
 
 Two equivalent paths. Pick one.
 
-### Option A: `.env` (simpler, all-or-nothing)
+### Option A: admin Studio form (recommended)
+
+No SSH, no `mix run`. Browse to:
+
+```
+http://89.167.28.206/studio/production/_plugins/onixedit/settings
+```
+
+Fill in the five Bokbasen fields:
+
+| Field | Value |
+|---|---|
+| Bokbasen API base URL | `https://api.bokbasen.io` (sandbox: `https://api-sandbox.bokbasen.io`) |
+| OAuth token URL       | `https://login.bokbasen.io/oauth2/token` |
+| Client ID             | issued by Bokbasen |
+| Client secret         | issued by Bokbasen (stored encrypted at rest via `BARKPARK_CLOAK_KEY`) |
+| Client role           | `publisher` (default) or `distributor` |
+
+Click **Save**. Then click **Test connection** — a green flash confirms
+Bokbasen accepted the credentials. The secret never appears in the DOM
+again unless you explicitly click "Reveal" (which records a `"reveal"`
+audit row in `plugin_settings_audits`). "Clear" wipes a single field.
+
+No restart needed — `Bokbasen.Settings.get_credentials/0` reads the
+encrypted row on every token fetch, so the next publish picks up the
+new values immediately.
+
+### Option B: SSH + `.env` (fallback)
+
+If you can't reach Studio (e.g. first-boot before any admin token
+exists), set the five `BOKBASEN_*` env vars:
 
 ```bash
 ssh root@89.167.28.206
@@ -34,33 +64,9 @@ EOF
 systemctl restart barkpark
 ```
 
-`runtime.exs` reads `BOKBASEN_*` at boot and configures `Barkpark.Plugins.OnixEdit.Bokbasen`.
-
-### Option B: encrypted plugin_settings row (per-environment override)
-
-Use this if you want credentials in the DB instead of the OS env (e.g. for per-dataset segregation):
-
-```bash
-ssh root@89.167.28.206
-cd /opt/barkpark
-export PATH="/root/.asdf/bin:/root/.asdf/shims:$PATH" && . /root/.asdf/asdf.sh
-set -a; source .env; set +a
-
-cd api
-mix run -e '
-  Barkpark.Plugins.Settings.put("onixedit", %{
-    "bokbasen" => %{
-      "api_base" => "https://api.bokbasen.io",
-      "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
-      "client_id" => "<your client_id>",
-      "client_secret" => "<your client_secret>",
-      "client_role" => "publisher"
-    }
-  })
-'
-```
-
-`Settings.get_credentials/0` falls back to plugin_settings when env vars are missing. Encrypted at rest via `BARKPARK_CLOAK_KEY`.
+`runtime.exs` reads `BOKBASEN_*` at boot. Env wins over the
+plugin_settings row, so this is also useful for one-off overrides
+(e.g. swapping prod ↔ sandbox without touching the DB).
 
 ## Step 2 — verify the client can fetch a token
 

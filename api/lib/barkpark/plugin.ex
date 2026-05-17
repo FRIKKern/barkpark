@@ -31,6 +31,25 @@ defmodule Barkpark.Plugin do
           (doc_id :: String.t(), dataset :: String.t(), mode :: :dryrun | :real ->
              {:ok, term()} | {:error, term()})
 
+  @typedoc """
+  A declarative field shown in the admin Plugin Settings LiveView. The
+  `:name` is dot-namespaced (`"<settings-row>.<key>"`); the leading
+  segment selects which `plugin_settings` row the value lands in, and
+  the remainder is the flat key inside that row. Example:
+  `"bokbasen.api_base"` writes `%{"api_base" => …}` to the `"bokbasen"`
+  row — the exact shape `Bokbasen.Client` reads back.
+  """
+  @type setting_field :: %{
+          required(:name) => String.t(),
+          required(:type) => :string | :password | :url | :select | :boolean,
+          required(:label) => String.t(),
+          optional(:required) => boolean(),
+          optional(:options) => [String.t()],
+          optional(:default) => term(),
+          optional(:hint) => String.t(),
+          optional(:group) => String.t()
+        }
+
   @callback manifest() :: map()
   @callback register_routes(any()) :: any()
   @callback register_workers(any()) :: [Supervisor.child_spec()]
@@ -40,6 +59,7 @@ defmodule Barkpark.Plugin do
   @callback action_handlers() :: %{optional(String.t()) => action_handler()}
   @callback external_sync_entries() :: %{optional(String.t()) => map()}
   @callback codelist_seeders() :: [(-> any())]
+  @callback settings_schema() :: [setting_field()]
 
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
@@ -48,7 +68,8 @@ defmodule Barkpark.Plugin do
                       checkers: 0,
                       action_handlers: 0,
                       external_sync_entries: 0,
-                      codelist_seeders: 0
+                      codelist_seeders: 0,
+                      settings_schema: 0
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -98,6 +119,9 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def codelist_seeders, do: []
 
+      @impl Barkpark.Plugin
+      def settings_schema, do: []
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -106,7 +130,8 @@ defmodule Barkpark.Plugin do
                      checkers: 0,
                      action_handlers: 0,
                      external_sync_entries: 0,
-                     codelist_seeders: 0
+                     codelist_seeders: 0,
+                     settings_schema: 0
     end
   end
 end

@@ -1230,6 +1230,63 @@
     .bp-plugin-run-row { display: flex; gap: 8px; align-items: baseline; }
     .bp-plugin-run-label { color: var(--fg-muted); min-width: 140px; }
     .bp-plugin-run-value { color: var(--fg); font-family: var(--font-mono); font-size: 11px; }
+    .bp-plugin-card-header-actions { display: flex; gap: 6px; align-items: center; }
+
+    /* ── Plugin settings admin LV (Task barkpark-dbg) ──────────────────
+       The browser-side form that replaces SSH + mix run for editing a
+       plugin's encrypted settings row. Secrets render as `••••••` with
+       Reveal / Clear actions; nothing decrypts into the DOM unless an
+       admin explicitly clicks Reveal. */
+    .bp-settings-form { max-width: 720px; padding: 20px 24px; }
+    .bp-settings-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px; margin-bottom: 16px;
+    }
+    .bp-settings-meta { font-size: 12px; margin: 4px 0 0 0; }
+    .bp-settings-meta code {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--fg-muted); background: var(--bg-card);
+      padding: 1px 5px; border-radius: 3px;
+    }
+    .bp-settings-group {
+      border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
+      padding: 16px; margin-bottom: 16px; background: var(--bg-card);
+    }
+    .bp-settings-group-title {
+      font-size: 13px; font-weight: 600; color: var(--fg);
+      margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .bp-settings-field { display: flex; flex-direction: column; margin-bottom: 12px; }
+    .bp-settings-field label {
+      font-size: 12px; font-weight: 500; color: var(--fg-muted);
+      margin-bottom: 4px;
+    }
+    .bp-settings-field-required::after { content: " *"; color: var(--destructive); }
+    .bp-settings-field input[type="text"],
+    .bp-settings-field input[type="url"],
+    .bp-settings-field input[type="password"],
+    .bp-settings-field select {
+      padding: 6px 8px; font-size: 13px;
+      background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
+    }
+    .bp-settings-field-hint {
+      font-size: 11px; color: var(--fg-dim); margin-top: 4px;
+    }
+    .bp-settings-field-error {
+      font-size: 11px; color: var(--destructive); margin-top: 4px;
+    }
+    .bp-settings-secret-actions { display: flex; gap: 6px; margin-top: 4px; }
+    .bp-settings-secret-reveal {
+      font-family: var(--font-mono); font-size: 11px; padding: 8px;
+      margin-top: 6px;
+      background: var(--bg-muted, var(--bg-card)); border-radius: 4px;
+      word-break: break-all;
+    }
+    .bp-settings-actions {
+      display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;
+      padding-top: 16px; border-top: 1px solid var(--border-muted);
+    }
 
     /* ── Scrollbar ─────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }

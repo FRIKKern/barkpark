@@ -155,15 +155,26 @@ defmodule BarkparkWeb.Admin.PluginsLive do
                   <strong>{row.name}</strong>
                   <span class="bp-plugin-card-version">{row.version}</span>
                 </div>
-                <button
-                  type="button"
-                  class="btn btn-sm"
-                  phx-click="reload-plugin"
-                  phx-value-name={row.name}
-                  data-test-action="reload-plugin"
-                >
-                  Reload this plugin
-                </button>
+                <div class="bp-plugin-card-header-actions">
+                  <%= if row.has_settings do %>
+                    <.link
+                      navigate={~p"/studio/#{@dataset}/_plugins/#{row.name}/settings"}
+                      class="btn btn-sm"
+                      data-test-action="open-settings"
+                    >
+                      Settings
+                    </.link>
+                  <% end %>
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    phx-click="reload-plugin"
+                    phx-value-name={row.name}
+                    data-test-action="reload-plugin"
+                  >
+                    Reload this plugin
+                  </button>
+                </div>
               </header>
 
               <dl class="bp-plugin-rows">
@@ -238,8 +249,28 @@ defmodule BarkparkWeb.Admin.PluginsLive do
       manifest_description: Map.get(manifest, "description"),
       callbacks: Enum.map(@callbacks, &callback_row(module, &1)),
       last_bootstrap: format_entry(Map.get(status_map, :bootstrap), :bootstrap),
-      last_seed: format_entry(Map.get(status_map, :seed), :seed)
+      last_seed: format_entry(Map.get(status_map, :seed), :seed),
+      has_settings: plugin_has_settings?(module)
     }
+  end
+
+  # True iff the plugin's optional `settings_schema/0` callback returns a
+  # non-empty list. Raises are treated as "no settings" so a broken
+  # callback can't crash the admin LV.
+  defp plugin_has_settings?(module) do
+    cond do
+      not Code.ensure_loaded?(module) -> false
+      not function_exported?(module, :settings_schema, 0) -> false
+      true ->
+        try do
+          case module.settings_schema() do
+            [_ | _] -> true
+            _ -> false
+          end
+        rescue
+          _ -> false
+        end
+    end
   end
 
   # Plugin-module callback introspection.

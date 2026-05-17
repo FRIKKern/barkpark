@@ -218,7 +218,7 @@ These attach to individual entries inside `fields`:
 `use Barkpark.Plugin` injects default no-op implementations of every
 optional callback so a freshly-generated plugin compiles without
 declaring anything. Override the callbacks your plugin actually needs.
-All nine callbacks (one required + eight optional) are listed here as a
+All ten callbacks (one required + nine optional) are listed here as a
 single reference — the host walks `Plugins.Registry.all/0` and asks each
 plugin module for its contribution at the relevant lifecycle point.
 
@@ -233,6 +233,53 @@ plugin module for its contribution at the relevant lifecycle point.
 | `action_handlers/0` | optional | `%{name => fun/3}` | `Plugins.Registry.collect_action_handlers/0` → `StudioLive.dispatch_action/4` |
 | `external_sync_entries/0` | optional | `%{system_name => %{label, states}}` | `Plugins.Registry.collect_external_sync_entries/0` → `ExternalSync.all/0` |
 | `codelist_seeders/0` | optional | list of zero-arg functions | `Plugins.Registry.run_all_codelist_seeders/0` in the boot Task |
+| `settings_schema/0` | optional | list of `%{name, type, label, …}` field declarations | `BarkparkWeb.Admin.PluginSettingsLive` at `/studio/:dataset/_plugins/:plugin/settings` |
+
+### `settings_schema/0` — browser-managed plugin credentials
+
+The tenth callback turns a plugin's encrypted `plugin_settings` row into
+an admin form, replacing the SSH + `mix run` ceremony for setting
+secrets. Each entry declares one form field:
+
+```elixir
+@impl Barkpark.Plugin
+def settings_schema do
+  [
+    %{name: "bokbasen.api_base", type: :url, label: "Bokbasen API base URL",
+      required: true, default: "https://api.bokbasen.io", group: "Bokbasen"},
+    %{name: "bokbasen.client_secret", type: :password, label: "Client secret",
+      required: true, group: "Bokbasen",
+      hint: "Stored encrypted at rest via BARKPARK_CLOAK_KEY"}
+  ]
+end
+```
+
+Field names are **dot-namespaced**. The leading segment selects which
+`plugin_settings` row the value lands in; the trailing remainder is the
+flat key inside that row. So `"bokbasen.api_base"` writes
+`%{"api_base" => …}` to the `"bokbasen"` row — the exact shape
+`Bokbasen.Client` already reads back via
+`Bokbasen.Settings.get_credentials/0`. The LV does not invent a new
+storage layout; it mirrors what each runtime client expects.
+
+Supported `:type` values:
+
+| Type | Renders as | Notes |
+|---|---|---|
+| `:string` | `<input type="text">` | |
+| `:url`    | `<input type="url">`  | Validated `http://` / `https://` prefix on submit. |
+| `:password` | `<input type="password">` | NEVER pre-filled. Stored values are echoed as `••••••` placeholder; Reveal / Clear buttons appear when something is on file. Saving an empty password preserves the existing value. |
+| `:select` | `<select>` with `options` | Server-side check against the option list. |
+| `:boolean` | checkbox + hidden default | Hidden `false` paired with checked `true` so unchecked posts as `false`. |
+
+When `validate_settings/1` is also defined, the LV invokes it with the
+nested map shape the plugin already uses (`%{"<row>" => %{<key> => …}}`)
+so existing validators keep working. Any returned
+`{:error, [{field, msg}, …]}` is folded into inline per-field errors.
+
+The "Bokbasen" group also ships a "Test connection" button that calls
+`Bokbasen.Auth.token/0` and flashes the result — purely additive, no
+host knowledge required.
 
 ### Example — OnixEdit's three runtime contributions
 
