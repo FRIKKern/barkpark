@@ -637,11 +637,14 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
-  Studio top-level tab navigation. Reads tab data from
-  `BarkparkWeb.Studio.Nav.tabs/1` (single source of truth) and renders
-  the canonical `<div class="studio-bar-tabs">` wrapper with one anchor
-  per tab. The active tab gets the `active` modifier when its `id`
-  matches `nav_section`.
+  Studio top-level tab navigation. Reads built-in tab data from
+  `BarkparkWeb.Studio.Nav.tabs/1` (single source of truth) and appends
+  plugin-contributed tabs from
+  `Barkpark.Plugins.Registry.collect_top_menu_entries/0`. Renders the
+  canonical `<div class="studio-bar-tabs">` wrapper with one anchor per
+  tab. The active tab gets the `active` modifier when its `id` matches
+  `nav_section` (built-ins) or when its `active_when` rule matches
+  `current_path` (plugins).
 
   Caller wraps with `:if={assigns[:dataset]}` — the component itself
   does NOT guard, so an empty `<div class="studio-bar-tabs">` does not
@@ -649,19 +652,70 @@ defmodule BarkparkWeb.StudioComponents do
   """
   attr :dataset, :string, required: true
   attr :nav_section, :atom, default: nil
+  attr :current_path, :string, default: nil
 
   def studio_tabs(assigns) do
+    plugin_tabs =
+      try do
+        Barkpark.Plugins.Registry.collect_top_menu_entries()
+      rescue
+        _ -> []
+      catch
+        _, _ -> []
+      end
+
+    assigns = assign(assigns, :plugin_tabs, plugin_tabs)
+
     ~H"""
     <div class="studio-bar-tabs">
       <%= for tab <- BarkparkWeb.Studio.Nav.tabs(@dataset) do %>
         <a
           href={tab.path}
           class={"studio-tab #{if @nav_section == tab.id, do: "active"}"}
+          aria-current={if @nav_section == tab.id, do: "page"}
+          data-test-id="top-menu-tab"
+        ><%= tab.label %></a>
+      <% end %>
+      <%= for tab <- @plugin_tabs do %>
+        <% active = plugin_tab_active?(tab, @current_path) %>
+        <a
+          href={tab.path}
+          class={"studio-tab #{if active, do: "active"}"}
+          aria-current={if active, do: "page"}
+          data-test-id="top-menu-tab"
+          data-plugin-tab
         ><%= tab.label %></a>
       <% end %>
     </div>
     """
   end
+
+  @doc false
+  # Decide whether a plugin tab is active. Rule:
+  #
+  #   * explicit `:active_when` always wins
+  #     - string  → `String.starts_with?(current_path, active_when)`
+  #     - regex   → `Regex.match?(active_when, current_path)`
+  #   * absent → exact match on `tab.path`
+  #
+  # `current_path` may be nil in contexts that don't track it (back-compat;
+  # the assign isn't required on every LV). In that case nothing is active.
+  def plugin_tab_active?(_tab, nil), do: false
+  def plugin_tab_active?(_tab, ""), do: false
+
+  def plugin_tab_active?(%{active_when: %Regex{} = re}, current_path)
+      when is_binary(current_path),
+      do: Regex.match?(re, current_path)
+
+  def plugin_tab_active?(%{active_when: prefix}, current_path)
+      when is_binary(prefix) and is_binary(current_path),
+      do: String.starts_with?(current_path, prefix)
+
+  def plugin_tab_active?(%{path: path}, current_path)
+      when is_binary(path) and is_binary(current_path),
+      do: current_path == path
+
+  def plugin_tab_active?(_tab, _current_path), do: false
 
   @doc """
   Studio topbar wrapper. Emits the canonical `<div class="studio-bar">`

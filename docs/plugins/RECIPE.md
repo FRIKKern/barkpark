@@ -146,6 +146,37 @@ defmodule Barkpark.Plugins.Vlie do
   # Vlie has no codelist data of its own, so we skip the
   # `codelist_seeders/0` callback entirely — the default impl injected
   # by `use Barkpark.Plugin` returns `[]`.
+
+  # ─── Host-side UI contributions ───────────────────────────────────────
+  #
+  # Two more declarative callbacks pull Vlie into the Studio chrome
+  # without touching any host file:
+  #
+  #   * `top_menu_entries/0` adds a tab to the Studio topbar (after the
+  #     built-in Structure · Media · API tabs).
+  #   * `desk_items/1` adds a divider + link to the root Structure pane.
+
+  @impl Barkpark.Plugin
+  def top_menu_entries do
+    [
+      %{label: "Vlie",
+        path: "/admin/vlie/dashboard",
+        icon: "send",
+        order: 60,
+        active_when: "/admin/vlie/"}
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def desk_items(_dataset) do
+    [
+      %{type: :divider, label: "Vlie"},
+      %{type: :link,
+        label: "Recent submissions",
+        path: "/admin/vlie/dashboard",
+        icon: "clock"}
+    ]
+  end
 end
 ```
 

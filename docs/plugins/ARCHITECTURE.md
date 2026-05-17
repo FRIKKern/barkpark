@@ -218,9 +218,10 @@ These attach to individual entries inside `fields`:
 `use Barkpark.Plugin` injects default no-op implementations of every
 optional callback so a freshly-generated plugin compiles without
 declaring anything. Override the callbacks your plugin actually needs.
-All ten callbacks (one required + nine optional) are listed here as a
-single reference — the host walks `Plugins.Registry.all/0` and asks each
-plugin module for its contribution at the relevant lifecycle point.
+All twelve callbacks (one required + eleven optional) are listed here
+as a single reference — the host walks `Plugins.Registry.all/0` and
+asks each plugin module for its contribution at the relevant lifecycle
+point.
 
 | Callback | Required? | Returns | Called by |
 |---|---|---|---|
@@ -234,6 +235,60 @@ plugin module for its contribution at the relevant lifecycle point.
 | `external_sync_entries/0` | optional | `%{system_name => %{label, states}}` | `Plugins.Registry.collect_external_sync_entries/0` → `ExternalSync.all/0` |
 | `codelist_seeders/0` | optional | list of zero-arg functions | `Plugins.Registry.run_all_codelist_seeders/0` in the boot Task |
 | `settings_schema/0` | optional | list of `%{name, type, label, …}` field declarations | `BarkparkWeb.Admin.PluginSettingsLive` at `/studio/:dataset/_plugins/:plugin/settings` |
+| `top_menu_entries/0` | optional | list of `%{label, path, …}` tabs | `Plugins.Registry.collect_top_menu_entries/0` → `BarkparkWeb.StudioComponents.studio_tabs/1` |
+| `desk_items/1` | optional | list of `%{type, …}` desk items (per-dataset) | `Plugins.Registry.collect_desk_items/1` → `Barkpark.Structure.build/1` |
+
+### `top_menu_entries/0` — host-side top-bar tabs
+
+Each entry is a map with `:label` and `:path` plus optional `:icon`,
+`:order`, and `:active_when`. Built-in host tabs use orders 10/20/30;
+plugins default to 100 (configurable per-tab). Active-state matching
+uses `:active_when` as a string prefix or `Regex` against the current
+request path; when absent the tab is active only on an exact `:path`
+match.
+
+```elixir
+@impl Barkpark.Plugin
+def top_menu_entries do
+  [
+    %{label: "Bokbasen",
+      path: "/admin/onixedit/staleness",
+      icon: "send",
+      order: 50,
+      active_when: "/admin/onixedit/"}
+  ]
+end
+```
+
+### `desk_items/1` — host-side Structure-pane items
+
+Plugin desk items are appended after the host's auto-generated schema
+items in the root Structure pane. The callback takes the current
+dataset (desk items often differ per-dataset: filter results, doc
+counts, dataset-scoped paths). Supported item types:
+
+| Type | Renders as | Required fields | Optional fields |
+|---|---|---|---|
+| `:link` | Outbound nav row (`<a href>`) | `:label`, `:path` | `:icon` |
+| `:divider` | Section break in the pane | — | `:label` |
+| `:document_list` | Filtered doc-list pane for `:doc_type` | `:label`, `:doc_type` | `:filter` (map shaped like `Content.list_documents/3`'s `:filter_map`), `:icon` |
+| `:nested` | Collapsible folder | `:label`, `:items` | `:icon` |
+
+```elixir
+@impl Barkpark.Plugin
+def desk_items(_dataset) do
+  [
+    %{type: :divider, label: "Bokbasen"},
+    %{type: :link, label: "Pending submissions",
+      path: "/admin/onixedit/staleness", icon: "clock"}
+  ]
+end
+```
+
+In v1 OnixEdit ships only `:link` + `:divider`; the host PaneBuilder
+also accepts `:document_list` and `:nested` for plugins that need
+richer structure. Items the host doesn't recognise are silently
+dropped (a malformed plugin should not break the Structure pane).
 
 ### `settings_schema/0` — browser-managed plugin credentials
 

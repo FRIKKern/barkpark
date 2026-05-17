@@ -18,13 +18,14 @@ defmodule Barkpark.Plugins.Registry do
 
   ## Caching
 
-  Reads (`all/0`, `collect_action_handlers/0`, `collect_external_sync_entries/0`)
-  short-circuit through a `:persistent_term` snapshot. The snapshot is
-  refreshed on every state mutation (currently: `register/2`). Because
-  `:persistent_term.put/2` triggers a global GC scan of all live data,
-  we only write on mutation — never on read. `lookup/1` and
-  `run_all_codelist_seeders/0` still go through the GenServer (lookups
-  are O(1) on the GenServer state, seeders run once at boot/admin).
+  Reads (`all/0`, `collect_action_handlers/0`, `collect_external_sync_entries/0`,
+  `collect_top_menu_entries/0`) short-circuit through a `:persistent_term`
+  snapshot. The snapshot is refreshed on every state mutation (currently:
+  `register/2`). Because `:persistent_term.put/2` triggers a global GC scan
+  of all live data, we only write on mutation — never on read. `lookup/1`,
+  `collect_desk_items/1` (dataset-dependent), and `run_all_codelist_seeders/0`
+  still go through the GenServer (lookups are O(1) on the GenServer state,
+  desk_items varies per request, seeders run once at boot/admin).
   """
 
   use GenServer
@@ -113,6 +114,54 @@ defmodule Barkpark.Plugins.Registry do
       nil ->
         compute_external_sync_entries(GenServer.call(@name, :all))
     end
+  end
+
+  @doc """
+  Walks every registered plugin, calls `top_menu_entries/0`, flattens
+  the results, and returns one list sorted ascending by `:order` (with
+  `:label` as the tiebreaker so the output is deterministic across
+  registrations).
+
+  Built-in host tabs use orders 10/20/30; plugins default to 100. The
+  topbar renders this list after the built-ins so plugin tabs always
+  appear at the right end of the bar unless a plugin sets a lower order.
+
+  Plugins that don't implement the optional callback (or whose callback
+  raises) contribute nothing. Cached via `:persistent_term` — see
+  module doc.
+  """
+  @spec collect_top_menu_entries() :: [Barkpark.Plugin.top_menu_entry()]
+  def collect_top_menu_entries do
+    case :persistent_term.get(@snapshot_key, nil) do
+      %{top_menu_entries: entries} ->
+        entries
+
+      nil ->
+        compute_top_menu_entries(GenServer.call(@name, :all))
+    end
+  end
+
+  @doc """
+  Walks every registered plugin, calls `desk_items(dataset)`, and
+  returns the flat concatenated list in registration order
+  (alphabetical by plugin name).
+
+  Unlike the other collectors this is NOT cached — desk items vary per
+  dataset and are called on every Structure-pane render. The cost is a
+  handful of map lookups + list concatenation per plugin; measure with
+  `:timer.tc/1` before adding cache complexity.
+
+  Plugins that don't implement the optional callback (or whose callback
+  raises) contribute nothing.
+  """
+  @spec collect_desk_items(String.t()) :: [Barkpark.Plugin.desk_item()]
+  def collect_desk_items(dataset) when is_binary(dataset) do
+    all()
+    |> Enum.sort_by(& &1.name)
+    |> Enum.flat_map(fn entry ->
+      items = safe_call(entry.module, :desk_items, [dataset], [])
+      if is_list(items), do: items, else: []
+    end)
   end
 
   @doc """
@@ -251,6 +300,30 @@ defmodule Barkpark.Plugins.Registry do
     end)
   end
 
+  # Collect top-menu entries from all plugins, normalise them to a stable
+  # map shape with `:order` defaulted to 100, and sort by `{order, label}`
+  # so output is deterministic regardless of registration order.
+  defp compute_top_menu_entries(entries) do
+    entries
+    |> Enum.sort_by(& &1.name)
+    |> Enum.flat_map(fn entry ->
+      tabs = safe_call(entry.module, :top_menu_entries, [], [])
+      if is_list(tabs), do: tabs, else: []
+    end)
+    |> Enum.map(&normalize_top_menu_entry/1)
+    |> Enum.sort_by(fn e -> {e.order, e.label} end)
+  end
+
+  defp normalize_top_menu_entry(entry) when is_map(entry) do
+    %{
+      label: to_string(entry[:label] || entry["label"] || ""),
+      path: to_string(entry[:path] || entry["path"] || "/"),
+      icon: entry[:icon] || entry["icon"],
+      order: entry[:order] || entry["order"] || 100,
+      active_when: entry[:active_when] || entry["active_when"]
+    }
+  end
+
   # Re-snapshot the cache from the GenServer state. Called from every
   # mutation handler. Single `:persistent_term.put/2` ⇒ one global GC.
   defp refresh_snapshot(state) do
@@ -259,7 +332,8 @@ defmodule Barkpark.Plugins.Registry do
     :persistent_term.put(@snapshot_key, %{
       plugins: plugins,
       action_handlers: compute_action_handlers(plugins),
-      external_sync_entries: compute_external_sync_entries(plugins)
+      external_sync_entries: compute_external_sync_entries(plugins),
+      top_menu_entries: compute_top_menu_entries(plugins)
     })
 
     state

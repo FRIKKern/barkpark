@@ -83,6 +83,71 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         walk_path(rest, depth + 1, node, panes ++ [list_pane], nil, dataset, opts)
 
+      # Plugin-contributed pre-filtered document list. Same rendering as
+      # `:document_type_list` but the filter map is carried verbatim on
+      # `node.filter` (a map, not a "field=value" string) so PaneBuilder
+      # bypasses `Structure.parse_filter/1`.
+      %{type: :plugin_document_list, type_name: type_name} = node ->
+        schema =
+          case Content.get_schema(type_name, dataset) do
+            {:ok, s} -> s
+            _ -> nil
+          end
+
+        plugin_filter = if is_map(node.filter), do: node.filter, else: %{}
+        list_opts = [perspective: :drafts, filter_map: plugin_filter]
+        docs = Content.list_documents(type_name, dataset, list_opts)
+
+        doc_pane = %{
+          title: node.title || (schema && schema.title) || type_name,
+          icon: node.icon || (schema && schema.icon),
+          type_name: type_name,
+          desk_groups: [],
+          active_desk: nil,
+          items:
+            Enum.map(docs, fn doc ->
+              pub_id = Content.published_id(doc.doc_id)
+
+              %{
+                type: :doc,
+                id: pub_id,
+                title: doc.title || "Untitled",
+                is_draft: Content.draft?(doc.doc_id),
+                status: doc.status
+              }
+            end),
+          selected: Enum.at(rest, 0)
+        }
+
+        editor =
+          case rest do
+            [doc_id | _] ->
+              {doc, is_draft, has_pub} = Content.fetch_doc_with_draft(type_name, doc_id, dataset)
+
+              if doc && schema do
+                %{
+                  doc: doc,
+                  schema: schema,
+                  type: type_name,
+                  is_draft: is_draft,
+                  has_published: has_pub,
+                  form: Content.doc_to_form(doc, schema)
+                }
+              end
+
+            _ ->
+              nil
+          end
+
+        {panes ++ [doc_pane], editor}
+
+      # Plugin-contributed link row — terminal node, no pane to add. The
+      # LV inspects `nav_path` and turns this into outbound navigation
+      # via `push_navigate`. Returning the unchanged pane stack keeps the
+      # parent list pane visible while the navigation flushes.
+      %{type: :plugin_link} ->
+        {panes, nil}
+
       %{type: :document_type_list, type_name: type_name} = node ->
         schema =
           case Content.get_schema(type_name, dataset) do
@@ -243,17 +308,35 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   @doc """
   Convert a Structure node's children into pane items. Dividers stay as
-  `:divider`; everything else becomes `:item` with a `drillable` flag.
+  `:divider`; plugin-contributed `:plugin_link` items render as
+  `:plugin_link` rows the LV turns into outbound navigation (NOT
+  `push_patch` — these point at arbitrary paths outside the StudioLive
+  catch-all); everything else becomes `:item` with a `drillable` flag.
   """
   @spec list_items(map()) :: [map()]
   def list_items(node) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
         :divider ->
-          [%{type: :divider, id: child.id}]
+          # Carry the optional label through so the renderer can show it as a
+          # section break. Legacy host-side dividers omit it (label nil).
+          [%{type: :divider, id: child.id, label: Map.get(child, :title)}]
+
+        :plugin_link ->
+          [
+            %{
+              type: :plugin_link,
+              id: child.id,
+              title: child.title,
+              icon: child.icon,
+              # PaneBuilder stashes the destination in `:filter` on the Node;
+              # surface it here under the more descriptive `:href` key.
+              href: child.filter
+            }
+          ]
 
         _ ->
-          drillable = child.type in [:list, :document_type_list]
+          drillable = child.type in [:list, :document_type_list, :plugin_document_list]
 
           [
             %{
