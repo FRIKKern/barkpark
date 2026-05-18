@@ -486,7 +486,10 @@ defmodule Barkpark.Plugins.OnixEdit do
             "We'll run a dry-run first, then ask again before sending for real.",
           "steps" => ["dryrun", "real"]
         },
-        "icon" => "send"
+        # Editor-header glyph (task barkpark-jl4x). `cloud-upload` so the
+        # button reads as "ship this off-platform" — distinct from the
+        # in-system Publish action (which uses `send`).
+        "icon" => "cloud-upload"
       }
     ]
   end

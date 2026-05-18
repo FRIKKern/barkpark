@@ -1177,7 +1177,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
         "label" => "History",
         "kind" => "event",
         "scope" => "editor_header",
-        "opts" => %{"event" => "show-history", "class" => "btn btn-ghost btn-sm"}
+        "opts" => %{
+          "event" => "show-history",
+          "class" => "btn btn-ghost btn-sm",
+          "icon" => "history"
+        }
       },
       %{
         "name" => "delete-doc",
@@ -1187,7 +1191,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
         "opts" => %{
           "event" => "delete-doc",
           "class" => "btn btn-ghost btn-sm",
-          "style" => "color: var(--destructive);"
+          "style" => "color: var(--destructive);",
+          "icon" => "trash-2"
         }
       },
       if is_draft do
@@ -1196,7 +1201,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
           "label" => "Publish",
           "kind" => "event",
           "scope" => "editor_header",
-          "opts" => %{"event" => "publish", "class" => "btn btn-primary btn-sm"}
+          "opts" => %{
+            "event" => "publish",
+            "class" => "btn btn-primary btn-sm",
+            "icon" => "send"
+          }
         }
       else
         %{
@@ -1204,7 +1213,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
           "label" => "Unpublish",
           "kind" => "event",
           "scope" => "editor_header",
-          "opts" => %{"event" => "unpublish", "class" => "btn btn-sm"}
+          "opts" => %{
+            "event" => "unpublish",
+            "class" => "btn btn-sm",
+            "icon" => "archive"
+          }
         }
       end,
       if is_book do
@@ -1216,7 +1229,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
           "opts" => %{
             "event" => "toggle-onix-preview",
             "class" => "btn btn-ghost btn-sm",
-            "data_test_id" => "onix-preview-toggle"
+            "data_test_id" => "onix-preview-toggle",
+            "icon" => "code"
           }
         }
       end,
@@ -1229,7 +1243,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
           "opts" => %{
             "event" => "toggle-diff",
             "class" => "btn btn-ghost btn-sm",
-            "data_test_id" => "draft-diff-toggle"
+            "data_test_id" => "draft-diff-toggle",
+            "icon" => "git-compare"
           }
         }
       end,
@@ -1242,7 +1257,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
           "opts" => %{
             "event" => "duplicate-doc",
             "class" => "btn btn-ghost btn-sm",
-            "data_test_id" => "duplicate-doc"
+            "data_test_id" => "duplicate-doc",
+            "icon" => "copy"
           }
         }
       end,
@@ -1255,7 +1271,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
           "opts" => %{
             "event" => "open-secondary-picker",
             "class" => "btn btn-ghost btn-sm",
-            "data_test_id" => "open-secondary-picker"
+            "data_test_id" => "open-secondary-picker",
+            "icon" => "panel-right-open"
           }
         }
       end

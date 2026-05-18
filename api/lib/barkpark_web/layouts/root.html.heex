@@ -139,6 +139,16 @@
     .btn-ghost:hover { background: var(--bg-accent); color: var(--fg); }
     .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
     .btn-icon { width: 32px; padding: 0; }
+    /* Editor-header doc-action buttons render as icons + title tooltip
+       (task barkpark-jl4x). Force the .btn-sm box square so each glyph
+       sits centered. `.bp-action-icon` wraps the inline SVG so we can
+       hide it from screen readers — the parent button's aria-label is
+       the announced text. */
+    .btn.btn-sm:has(> .bp-action-icon),
+    .btn.btn-sm > .bp-action-icon ~ * { /* fallback for older browsers */ }
+    .bp-action-icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0; color: currentColor; }
+    .bp-action-icon svg { width: 16px; height: 16px; }
+    .btn-sm:has(> .bp-action-icon:only-child) { width: 32px; padding: 0; }
 
     /* ── Schema-driven field-group tabs (editor pane) ─────────────────── */
     .bp-tab-bar {
