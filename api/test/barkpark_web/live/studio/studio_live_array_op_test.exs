@@ -44,8 +44,18 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
       assert StudioLive.parse_path("doc[a].b") == ["a", "b"]
     end
 
-    test "numeric row index is dropped" do
-      assert StudioLive.parse_path("doc[a][0].b") == ["a", "b"]
+    test "numeric row index is preserved as an integer (data-axis marker)" do
+      # Integer indices stay in the path so put_value_at / do_get_in can
+      # descend into list rows. See barkpark-i2d4 — the previous
+      # behaviour dropped indices, which caused put_value_at to overwrite
+      # the parent list with a map.
+      assert StudioLive.parse_path("doc[a][0].b") == ["a", 0, "b"]
+    end
+
+    test "deep nested arrayOf path preserves the index" do
+      assert StudioLive.parse_path(
+               "doc[productSupplies][0].market.territory.countries"
+             ) == ["productSupplies", 0, "market", "territory", "countries"]
     end
 
     test "deeper dot chain → [a, b, c]" do
@@ -56,8 +66,13 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
       assert StudioLive.parse_path("") == []
     end
 
-    test "non-doc-prefixed garbage → []" do
-      assert StudioLive.parse_path("garbage") == []
+    test "non-doc-prefixed path is accepted as a dotted/bracketed path" do
+      # The doc[ envelope is optional in v2 — nested field components emit
+      # paths relative to the row context, e.g.
+      # `productSupplies[0].market.territory.countries`. The handler routes
+      # through `find_field_by_path/2` which resolves against the schema,
+      # so a meaningless name like "garbage" still returns no field.
+      assert StudioLive.parse_path("garbage") == ["garbage"]
     end
 
     test "malformed `doc[]` (empty key) → []" do
@@ -467,6 +482,253 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
         )
 
       assert after2.assigns.editor_form["publisher"]["imprints"] == [nil, nil]
+    end
+  end
+
+  # ── Pure unit tests: deep-nested put_value_at / list_value_at ────────────
+  #
+  # These pin the integer-index handling that barkpark-i2d4 introduced.
+  # The shape mirrors the OnixEdit `productSupplies[0].market.territory.countries`
+  # path: arrayOf > composite > composite > composite > arrayOf.
+
+  describe "put_value_at/3 with integer indices (data-axis descent)" do
+    test "appending to a deep-nested arrayOf preserves the parent list" do
+      form = %{
+        "productSupplies" => [
+          %{"market" => %{"territory" => %{"countries" => ["NO"]}}},
+          %{"market" => %{"territory" => %{"countries" => ["SE"]}}}
+        ]
+      }
+
+      path = ["productSupplies", 0, "market", "territory", "countries"]
+
+      result = StudioLive.put_value_at(form, path, ["NO", nil])
+
+      # First row got the new countries list.
+      assert StudioLive.list_value_at(result, path) == ["NO", nil]
+
+      # Second row is untouched — the previous bug replaced the entire
+      # productSupplies list with %{"market" => ...}, dropping row 2.
+      assert get_in(result, ["productSupplies", Access.at(1), "market", "territory", "countries"]) ==
+               ["SE"]
+
+      # The parent is still a list.
+      assert is_list(result["productSupplies"])
+      assert length(result["productSupplies"]) == 2
+    end
+
+    test "writing into a list at an out-of-bounds index leaves the list alone" do
+      form = %{"productSupplies" => [%{"market" => %{}}]}
+      path = ["productSupplies", 5, "market", "territory", "countries"]
+
+      result = StudioLive.put_value_at(form, path, ["NO"])
+
+      assert result == form
+    end
+
+    test "list_value_at descends through integer indices" do
+      form = %{
+        "productSupplies" => [
+          %{"market" => %{"territory" => %{"countries" => ["NO", "SE"]}}}
+        ]
+      }
+
+      path = ["productSupplies", 0, "market", "territory", "countries"]
+      assert StudioLive.list_value_at(form, path) == ["NO", "SE"]
+    end
+
+    test "string-keyed descent into a list (without an index) is a no-op (no data loss)" do
+      # Pre-fix this corrupted the list into a map. Now it returns the form
+      # unchanged because the path is malformed for the data shape.
+      form = %{"productSupplies" => [%{"market" => %{}}]}
+      result = StudioLive.put_value_at(form, ["productSupplies", "market"], "wat")
+
+      assert result == form
+    end
+  end
+
+  # ── Integration: deep-nested arrayOf > composite > composite > arrayOf ──
+  #
+  # This is the OnixEdit shape — the exact bug barkpark-i2d4 fixed. The
+  # path productSupplies[0].market.territory.countries goes 4 levels deep
+  # through an arrayOf row. Without the integer-preservation fix, +Add
+  # silently no-opped (or corrupted productSupplies into a map).
+
+  describe "handle_event(\"array_op\", ...) — deep-nested arrayOf inside arrayOf row" do
+    setup do
+      schema = %{
+        "name" => "page",
+        "title" => "Page",
+        "icon" => "file",
+        "visibility" => "public",
+        "fields" => [
+          %{"name" => "title", "title" => "Title", "type" => "string"},
+          %{
+            "name" => "productSupplies",
+            "title" => "Product Supplies",
+            "type" => "arrayOf",
+            "ordered" => true,
+            "of" => %{
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "market",
+                  "type" => "composite",
+                  "fields" => [
+                    %{
+                      "name" => "territory",
+                      "type" => "composite",
+                      "fields" => [
+                        %{
+                          "name" => "countries",
+                          "type" => "arrayOf",
+                          "of" => %{"type" => "string"},
+                          "ordered" => true
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+
+      {:ok, _} = Content.upsert_schema(schema, @dataset)
+      {:ok, schema_def} = Content.get_schema("page", @dataset)
+
+      {:ok, doc} =
+        Content.create_document(
+          "page",
+          %{
+            "doc_id" => "ps1",
+            "title" => "PS",
+            "content" => %{
+              "productSupplies" => [
+                %{"market" => %{"territory" => %{"countries" => ["NO"]}}},
+                %{"market" => %{"territory" => %{"countries" => ["SE"]}}}
+              ]
+            }
+          },
+          @dataset
+        )
+
+      form = %{
+        "title" => "PS",
+        "productSupplies" => [
+          %{"market" => %{"territory" => %{"countries" => ["NO"]}}},
+          %{"market" => %{"territory" => %{"countries" => ["SE"]}}}
+        ]
+      }
+
+      socket =
+        %Phoenix.LiveView.Socket{
+          assigns: %{
+            __changed__: %{},
+            editor_doc: doc,
+            editor_schema: schema_def,
+            editor_type: "page",
+            editor_form: form,
+            editor_is_draft: true,
+            dataset: @dataset,
+            panes: [],
+            save_status: ""
+          }
+        }
+
+      {:ok, socket: socket}
+    end
+
+    test "add_row at productSupplies[0].market.territory.countries appends nil", %{socket: socket} do
+      {:noreply, new_socket} =
+        StudioLive.handle_event(
+          "array_op",
+          %{
+            "action" => "add_row",
+            "path" => "doc[productSupplies][0].market.territory.countries"
+          },
+          socket
+        )
+
+      ps = new_socket.assigns.editor_form["productSupplies"]
+
+      # Row 0's countries grew. Row 1 is untouched. Parent list intact.
+      assert is_list(ps)
+      assert length(ps) == 2
+      assert get_in(ps, [Access.at(0), "market", "territory", "countries"]) == ["NO", nil]
+      assert get_in(ps, [Access.at(1), "market", "territory", "countries"]) == ["SE"]
+    end
+
+    test "remove_row at productSupplies[0].market.territory.countries[0] drops the row", %{
+      socket: socket
+    } do
+      {:noreply, new_socket} =
+        StudioLive.handle_event(
+          "array_op",
+          %{
+            "action" => "remove_row",
+            "path" => "doc[productSupplies][0].market.territory.countries",
+            "index" => "0"
+          },
+          socket
+        )
+
+      ps = new_socket.assigns.editor_form["productSupplies"]
+
+      assert get_in(ps, [Access.at(0), "market", "territory", "countries"]) == []
+      assert get_in(ps, [Access.at(1), "market", "territory", "countries"]) == ["SE"]
+    end
+
+    test "find_field_by_path resolves to the countries field despite the integer index" do
+      schema = %{
+        fields: [
+          %{
+            "name" => "productSupplies",
+            "type" => "arrayOf",
+            "of" => %{
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "market",
+                  "type" => "composite",
+                  "fields" => [
+                    %{
+                      "name" => "territory",
+                      "type" => "composite",
+                      "fields" => [
+                        %{
+                          "name" => "countries",
+                          "type" => "arrayOf",
+                          "of" => %{"type" => "string"}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{editor_schema: schema, __changed__: %{}}
+      }
+
+      # With the integer 0 in the path:
+      assert %{"name" => "countries", "type" => "arrayOf"} =
+               StudioLive.find_field_by_path(
+                 socket,
+                 ["productSupplies", 0, "market", "territory", "countries"]
+               )
+
+      # And without (legacy flat shape — backward compat):
+      assert %{"name" => "countries", "type" => "arrayOf"} =
+               StudioLive.find_field_by_path(
+                 socket,
+                 ["productSupplies", "market", "territory", "countries"]
+               )
     end
   end
 end
