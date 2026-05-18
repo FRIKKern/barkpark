@@ -416,6 +416,22 @@ defmodule Barkpark.Plugin do
               }
             ) :: [doc_action()]
 
+  @doc """
+  Resolve the list of API test specs the runner can fire on demand.
+
+  `ctx` shape: `%{}` — no per-callback context today; the runner fires
+  every spec with the same base_url/auth resolution rules regardless of
+  the calling plugin.
+
+  Default implementation lifts `api_tests/0` via `prev ++ result`.
+  Plugins wanting to reorder, remove, or amend sibling-plugin specs
+  override `resolve_api_tests/2` directly.
+  """
+  @callback resolve_api_tests(
+              prev :: [api_test_spec()],
+              ctx :: map()
+            ) :: [api_test_spec()]
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -476,7 +492,8 @@ defmodule Barkpark.Plugin do
                       resolve_desk_items: 2,
                       resolve_doc_actions: 2,
                       lifecycle_hooks: 0,
-                      api_tests: 0
+                      api_tests: 0,
+                      resolve_api_tests: 2
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -622,6 +639,16 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def api_tests, do: []
 
+      @impl Barkpark.Plugin
+      def resolve_api_tests(prev, _ctx) do
+        if function_exported?(__MODULE__, :api_tests, 0) do
+          result = __MODULE__.api_tests()
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -643,7 +670,8 @@ defmodule Barkpark.Plugin do
                      resolve_desk_items: 2,
                      resolve_doc_actions: 2,
                      lifecycle_hooks: 0,
-                     api_tests: 0
+                     api_tests: 0,
+                     resolve_api_tests: 2
     end
   end
 end
