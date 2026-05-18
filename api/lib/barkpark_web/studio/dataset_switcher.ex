@@ -33,6 +33,6 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
 
   defp section_suffix(:structure), do: "''"
   defp section_suffix(:media), do: "'/media'"
-  defp section_suffix(:api_tester), do: "'/_api'"
+  defp section_suffix(:api_tester), do: "'/api-tester'"
   defp section_suffix(_), do: "''"
 end

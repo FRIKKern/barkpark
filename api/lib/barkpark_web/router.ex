@@ -114,7 +114,6 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live "/_plugins", PluginsLive
       live "/_plugins/:plugin/settings", PluginSettingsLive
-      live "/_api", ApiTestRunnerLive
     end
   end
 
@@ -127,11 +126,11 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live "/", StudioLive
       live "/media", MediaLive
-      # Task barkpark-0s6r — legacy `/api-tester` route removed; the
-      # "API" top-menu tab now points at the admin LV at `/_api`
-      # (see `BarkparkWeb.Admin.ApiTestRunnerLive`). The legacy module
-      # `BarkparkWeb.Studio.ApiTesterLive` remains on disk but is
-      # unrouted; old links 404.
+      # Task barkpark-7xne — restored after the misjudged route-removal
+      # in commit f1e5a21. The legacy ApiTesterLive is the rich endpoint
+      # docs + form-driven playground; plugin-contributed api_tests/0
+      # specs ride this same UI via Endpoints.all/1's "Plugins" category.
+      live "/api-tester", ApiTesterLive
 
       live "/*path", StudioLive
     end

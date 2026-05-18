@@ -40,10 +40,10 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       # Nav tabs (Structure active for StudioLive)
       assert html =~ ~s|<a href="/studio/production"| and html =~ "Structure"
       assert html =~ ~s|href="/studio/production/media"|
-      # Task barkpark-rsek carry-over: the "API" tab now points at the
-      # admin `/_api` LV (`BarkparkWeb.Admin.ApiTestRunnerLive`); the
-      # legacy `/api-tester` route was removed in task barkpark-0s6r.
-      assert html =~ ~s|href="/studio/production/_api"|
+      # Task barkpark-7xne: the rich `/api-tester` LV was restored after
+      # the misjudged route-removal in commit f1e5a21; the "API" tab
+      # points back at `/api-tester`.
+      assert html =~ ~s|href="/studio/production/api-tester"|
 
       # Sign-out form (rendered when @api_token is assigned)
       assert html =~ ~s|action="/logout"|

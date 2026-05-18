@@ -648,13 +648,13 @@ defmodule BarkparkWeb.StudioComponents do
   The active tab is determined uniformly by `plugin_tab_active?/2` —
   built-ins carry an explicit `:active_when` rule so the existing
   highlight behaviour for `/studio/:ds`, `/studio/:ds/media`, and
-  `/studio/:ds/_api` is preserved.
+  `/studio/:ds/api-tester` is preserved.
 
-  The "API" tab points at the admin `ApiTestRunnerLive`
-  (`/studio/:ds/_api`). The LiveView itself is gated by
-  `BarkparkWeb.LiveAuth, :admin` — non-admin clicks land in a 302
-  redirect back to `/studio`. The tab is shown unconditionally; the
-  per-tab admin filter is the LV mount gate, not the component.
+  The "API" tab points at the legacy `BarkparkWeb.Studio.ApiTesterLive`
+  (`/studio/:ds/api-tester`) — restored in task barkpark-7xne after
+  the misjudged route-removal in commit f1e5a21. Plugin api_tests/0
+  specs ride this same UI under a "Plugins" sidebar category seeded by
+  `Barkpark.ApiTester.Endpoints.all/1`.
 
   The `:nav_section` assign is preserved for backwards compatibility
   but no longer drives active-state — `default_top_menu_entries/1`'s
@@ -707,7 +707,7 @@ defmodule BarkparkWeb.StudioComponents do
   # `plugin_tab_active?/2`:
   #
   #   * Structure: regex matching `/studio/<ds>` and any sub-route
-  #     *except* `/media` and `/_api` (those are owned by the
+  #     *except* `/media` and `/api-tester` (those are owned by the
   #     other two built-ins).
   #   * Media / API: exact path prefix.
   #
@@ -718,10 +718,10 @@ defmodule BarkparkWeb.StudioComponents do
     ds_re = Regex.escape(ds)
 
     structure_active =
-      Regex.compile!("^/studio/#{ds_re}(?:$|/(?!media(?:/|$)|_api(?:/|$)).*)")
+      Regex.compile!("^/studio/#{ds_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
 
     media_path = "/studio/#{ds}/media"
-    api_path = "/studio/#{ds}/_api"
+    api_path = "/studio/#{ds}/api-tester"
 
     [
       %{
