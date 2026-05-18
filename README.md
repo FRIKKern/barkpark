@@ -12,7 +12,7 @@ A headless CMS with a Sanity-style desk structure, a draft/published model, and 
 | Core model | Sanity-style draft/published, perspectives (`published` / `drafts` / `raw`) |
 | Plugin system | `Barkpark.Plugin` behaviour — 14 callbacks, resolver chain, lifecycle hooks |
 | Reference plugin | OnixEdit — ONIX 3.0 book metadata + Bokbasen integration |
-| Tests | 1310 mix tests, 47 HTTP integration tests, full ONIX export round-trip |
+| Tests | 1324 mix tests, 47 HTTP integration tests, full ONIX export round-trip |
 | Stack | Elixir 1.19 / Phoenix LiveView 1.1 / PostgreSQL / Oban / Go 1.21+ |
 
 ## Interfaces
@@ -35,6 +35,8 @@ Multi-pane desk at `/studio/:dataset` — drill into content types, filter by st
 ```
 
 Bare `/studio` redirects to the default dataset.
+
+Buttons in the editor header (History / Delete / Publish / Hide XML / …) and the group-tab bar (Core / Descriptive / Contributors / …) render as inline SVG icons with `title` hover tooltips, served from `BarkparkWeb.Icons` — no Lucide CDN.
 
 ### Terminal TUI (Go + Bubble Tea)
 
@@ -90,6 +92,15 @@ curl -N -H "Authorization: Bearer barkpark-dev-token" \
 
 API quick reference: see the table above plus the `## API Quick Reference` section in [`CLAUDE.md`](CLAUDE.md).
 
+#### Auth
+
+The same `barkpark-dev-token` works in two places:
+
+- **Bearer header** — `Authorization: Bearer barkpark-dev-token` on any `curl` / SDK call.
+- **Browser session** — visit `/login`, paste the token, get a session cookie. `POST /logout` to clear it. Studio admin gates (e.g. `/studio/:dataset/_plugins`) ride this session cookie.
+
+Tokens hash to SHA256 in the `api_tokens` table; the paste form never echoes the secret back.
+
 ## Plugin system
 
 Barkpark's plugins are **first-party Elixir modules** that contribute data and behaviour. The host stays in charge of UI — plugins ship no LiveViews, no HEEx, no plugin-specific routes. UI is driven entirely by schema metadata plus the callback surface below.
@@ -104,7 +115,7 @@ flowchart LR
   Host -->|mutation| Life[Lifecycle dispatcher]
   Life -->|before_*: sync, may halt| Cont[Content op]
   Life -->|after_*: async Task.async_stream| Hook[Plugin hooks]
-  Host -->|/_api click| Runner[ApiTestRunner]
+  Host -->|/api-tester click on a Plugins entry| Runner[ApiTestRunner + Asserts]
   Runner -->|Req| HTTP[Real HTTP endpoints]
 ```
 
@@ -124,7 +135,7 @@ flowchart LR
 | `desk_items/1` | `resolve_desk_items/2` | Items in the root Structure pane |
 | — | `resolve_doc_actions/2` | Per-doc action buttons (resolver-only; host seeds from schema) |
 | `lifecycle_hooks/0` | — | Map of `before_*` / `after_*` doc hooks |
-| `api_tests/0` | `resolve_api_tests/2` | Specs the live API runner fires on demand |
+| `api_tests/0` | `resolve_api_tests/2` | Declarative HTTP specs surfaced in `/api-tester` (see below) |
 
 ### Resolver chain
 
@@ -143,7 +154,7 @@ The hook payload carries `ctx.source` (`:studio` / `:api` / `:cli` / `:worker`) 
 
 ### API tests — a small worked example
 
-`api_tests/0` returns declarative HTTP specs. The admin runner at `/studio/:dataset/_api` fires them against the live server via `Req`, evaluates asserts, then always runs `:cleanup` regardless of pass/fail. OnixEdit's four specs (abridged):
+`api_tests/0` returns declarative HTTP specs. The host injects these into the `/studio/:dataset/api-tester` page as a "Plugins" sidebar category — there is **no separate runner LiveView**. Clicking Run on a plugin entry fires the request via `Req`, evaluates the spec's `:asserts` chain via `Barkpark.ApiTestRunner.Asserts.evaluate/2` (status / duration / pass/fail badges in the response panel), then always runs the `:cleanup` steps regardless of pass/fail. OnixEdit's four specs (abridged):
 
 ```elixir
 def api_tests do
@@ -172,7 +183,7 @@ end
 
 - `/studio/:dataset/_plugins` — installed plugins, manifests, hot-reload
 - `/studio/:dataset/_plugins/:plugin/settings` — settings form (Cloak-encrypted at rest)
-- `/studio/:dataset/_api` — live API test runner
+- `/studio/:dataset/api-tester` — rich endpoint browser with a left sidebar of endpoint categories (including a **Plugins** category seeded from every plugin's `api_tests/0`), centre docs + form playground, right response panel with status / duration / headers / pretty-JSON body and per-assert pass/fail badges
 
 ### Where to read more
 
@@ -253,14 +264,14 @@ Schemas drive both clients and the desk structure. POST a schema and it appears 
 
 ```bash
 cd api
-mix test                                           # 1310 tests, ~9 known parallel-sandbox flakes
+mix test                                           # 1324 tests, 2 pre-existing parallel-sandbox flakes (`mix test --failed` re-run: 2/2 pass)
 mix test test/barkpark_web/integration             # 47 HTTP integration tests
 mix test test/barkpark/plugins/onixedit/export_proof_test.exs  # ONIX export round-trip
 ```
 
 Integration tests cover the full documented HTTP contract: `halt_path`, `resolver_outputs`, `media`, `mutations`, `schema_admin`, `preview_routes`, `legacy_crud`. The ONIX round-trip is byte-stable (export → import → re-export, modulo `SentDateTime`).
 
-The live API runner at `/studio/:dataset/_api` fires every plugin's `api_tests/0` against the real running server.
+The Studio's `/studio/:dataset/api-tester` page also fires every plugin's `api_tests/0` against the running server — one click per spec, with assert badges and cleanup-on-fail.
 
 ## Architecture
 
@@ -310,13 +321,14 @@ barkpark/
       content.ex                                Document + schema CRUD, publish, perspectives
       plugin.ex                                 The 14-callback behaviour + __using__/1
       plugins/                                  Registry, resolver chain, bootstrap, onixedit/
-      api_test_runner.ex                        Live runner backing /studio/:dataset/_api
+      api_test_runner.ex                        Req-backed runner used by the Studio api-tester
+      api_test_runner/asserts.ex                Pure assert evaluator (status / body / duration / …)
     lib/barkpark_web/
       router.ex                                 Routes
-      live/admin/                               PluginsLive, PluginSettingsLive,
-                                                  ApiTestRunnerLive, BokbasenLive,
-                                                  OnixeditStalenessLive
-      live/studio/                              StudioLive, MediaLive
+      components/icons.ex                       BarkparkWeb.Icons — inline SVGs with title tooltips
+      live/admin                                PluginsLive, PluginSettingsLive,
+                                                  BokbasenLive, OnixeditStalenessLive
+      live/studio                               StudioLive, MediaLive, ApiTesterLive
       controllers/                              Query, Mutate, Schema, Listen, Media,
                                                   Preview, Legacy, OnixeditExport
     priv/plugins/                               Plugin manifests + assets
