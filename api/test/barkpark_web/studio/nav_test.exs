@@ -7,11 +7,11 @@ defmodule BarkparkWeb.Studio.NavTest do
     assert structure.id == :structure
     assert structure.path == "/studio/staging"
     assert media.path == "/studio/staging/media"
-    # Task barkpark-rsek carry-over: legacy `/api-tester` was replaced by
-    # the admin `/_api` LV (`BarkparkWeb.Admin.ApiTestRunnerLive`). The
-    # Nav module mirrors the canonical tab list rendered by
-    # `studio_components.ex` which points the "API" tab at `/_api`.
-    assert api.path == "/studio/staging/_api"
+    # Task barkpark-7xne: the legacy rich `/api-tester` LV was restored
+    # (the bsp-era `/_api` replacement was much thinner). The Nav module
+    # mirrors the canonical tab list rendered by `studio_components.ex`
+    # which points the "API" tab at `/api-tester`.
+    assert api.path == "/studio/staging/api-tester"
   end
 
   test "tabs/1 URL-encodes dataset with special chars" do
