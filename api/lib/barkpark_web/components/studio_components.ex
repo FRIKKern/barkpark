@@ -1440,8 +1440,10 @@ defmodule BarkparkWeb.StudioComponents do
                     phx-value-group={grp["name"]}
                     role="tab"
                     aria-selected={@nav_group == grp["name"]}
+                    title={grp["title"]}
+                    aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
-                  ><%= grp["title"] %></button>
+                  ><span class="bp-tab-icon" aria-hidden="true"><.icon name={tab_icon(grp)} /></span></button>
                 <% end %>
               </div>
             <% end %>
@@ -1729,6 +1731,11 @@ defmodule BarkparkWeb.StudioComponents do
       _ -> []
     end
   end
+
+  # Per-group icon (task barkpark-sfzn). Plugins that omit "icon" still
+  # render — falls back to a neutral "circle" so the tab bar never blanks.
+  defp tab_icon(%{"icon" => icon}) when is_binary(icon) and icon != "", do: icon
+  defp tab_icon(_), do: "circle"
 
   @doc """
   Filter top-level fields to those visible on the currently selected tab.
