@@ -173,6 +173,10 @@ defmodule Barkpark.ApiTestRunner do
         b -> [{:body, to_string(b)} | req_opts]
       end
 
+    # Tests may thread extra Req options (e.g. `plug: {Req.Test, MyStub}`)
+    # via `:req_options` — appended last so caller opts win on overlap.
+    req_opts = req_opts ++ Keyword.get(opts, :req_options, [])
+
     case Req.request(req_opts) do
       {:ok, %Req.Response{status: status, body: body_bin, headers: response_headers}} ->
         {:ok,

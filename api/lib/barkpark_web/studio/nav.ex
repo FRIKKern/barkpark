@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.Nav do
     [
       %{id: :structure, label: "Structure", path: "/studio/#{ds}"},
       %{id: :media, label: "Media", path: "/studio/#{ds}/media"},
-      %{id: :api_tester, label: "API", path: "/studio/#{ds}/api-tester"}
+      %{id: :api_tester, label: "API", path: "/studio/#{ds}/_api"}
     ]
   end
 

@@ -39,7 +39,7 @@ Most LV routes layer an `on_mount` auth hook on top: `LiveAuth.:admin`,
 | GET  | /studio/:dataset/_plugins/:plugin/settings  | Admin.PluginSettingsLive                | LiveAuth.:admin      | yes (plugin_settings_live_test.exs, 283 LOC) |
 | GET  | /studio/:dataset                            | Studio.StudioLive                       | LiveAuth.:fetch_api_token | yes (studio_live_editor_test.exs 258 LOC + studio_live_array_op_test.exs 472 LOC + studio_live_doc_actions_test.exs 171 LOC) |
 | GET  | /studio/:dataset/media                      | Studio.MediaLive                        | LiveAuth.:fetch_api_token | no |
-| GET  | /studio/:dataset/api-tester                 | Studio.ApiTesterLive                    | LiveAuth.:fetch_api_token | yes (api_tester_live_schema_browser_test.exs, 96 LOC) |
+| GET  | /studio/:dataset/_api                       | Admin.ApiTestRunnerLive                 | LiveAuth.:admin           | partial (api_test_runner_live_test.exs exercises mount + run_all events) |
 | GET  | /studio/:dataset/*path                      | Studio.StudioLive                       | LiveAuth.:fetch_api_token | yes (rolled into the StudioLive tests above — the catch-all is the same module) |
 
 ## :api pipeline — public reads (JSON, optional token)
@@ -183,7 +183,7 @@ Routes with **no** coverage are concentrated in two surfaces:
     {"method": "GET",    "path": "/studio/:dataset/_plugins/:plugin/settings",     "pipeline": "browser+admin_studio_dataset",       "module": "BarkparkWeb.Admin.PluginSettingsLive",  "action": null,                 "auth": "LiveAuth.:admin",       "test_coverage": "yes"},
     {"method": "GET",    "path": "/studio/:dataset",                               "pipeline": "browser+studio_public",              "module": "BarkparkWeb.Studio.StudioLive",         "action": null,                 "auth": "LiveAuth.:fetch_api_token","test_coverage": "yes"},
     {"method": "GET",    "path": "/studio/:dataset/media",                         "pipeline": "browser+studio_public",              "module": "BarkparkWeb.Studio.MediaLive",          "action": null,                 "auth": "LiveAuth.:fetch_api_token","test_coverage": "no"},
-    {"method": "GET",    "path": "/studio/:dataset/api-tester",                    "pipeline": "browser+studio_public",              "module": "BarkparkWeb.Studio.ApiTesterLive",      "action": null,                 "auth": "LiveAuth.:fetch_api_token","test_coverage": "yes"},
+    {"method": "GET",    "path": "/studio/:dataset/_api",                          "pipeline": "browser+admin_studio_dataset",       "module": "BarkparkWeb.Admin.ApiTestRunnerLive",   "action": null,                 "auth": "LiveAuth.:admin",       "test_coverage": "partial"},
     {"method": "GET",    "path": "/studio/:dataset/*path",                         "pipeline": "browser+studio_public",              "module": "BarkparkWeb.Studio.StudioLive",         "action": null,                 "auth": "LiveAuth.:fetch_api_token","test_coverage": "yes"},
     {"method": "GET",    "path": "/v1/meta",                                       "pipeline": "api_unlimited",                      "module": "BarkparkWeb.MetaController",            "action": "index",              "auth": "none",                  "test_coverage": "partial"},
     {"method": "GET",    "path": "/v1/data/search/:dataset",                       "pipeline": "api",                                "module": "BarkparkWeb.SearchController",          "action": "search",             "auth": "optional",              "test_coverage": "yes"},
