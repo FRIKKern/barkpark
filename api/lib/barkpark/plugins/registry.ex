@@ -18,10 +18,10 @@ defmodule Barkpark.Plugins.Registry do
 
   ## Resolver chain (Goal barkpark-cjs, task s2)
 
-  Seven collectors and one brand-new `collect_doc_actions/1` drive a
-  per-callback resolver chain — `(prev, ctx) -> next` — through every
-  registered plugin in load order. Each `collect_X/1` accepts a keyword
-  list with two optional keys:
+  Seven collectors plus `collect_doc_actions/1` and `collect_api_tests/1`
+  drive a per-callback resolver chain — `(prev, ctx) -> next` — through
+  every registered plugin in load order. Each `collect_X/1` accepts a
+  keyword list with two optional keys:
 
     * `:baseline` — initial `prev` value the host seeds. Defaults to `[]`
       for list-shaped collectors, `%{}` for map-shaped ones. Lets the host
@@ -73,9 +73,10 @@ defmodule Barkpark.Plugins.Registry do
 
   `lookup/1`, `collect_desk_items/1` (dataset-dependent),
   `collect_checkers/1`, `collect_codelist_seeders/1`,
-  `collect_settings_schema/1`, `collect_doc_actions/1`, and
-  `run_all_codelist_seeders/0` always go through the live chain — they
-  either depend on ctx or run side-effects.
+  `collect_settings_schema/1`, `collect_doc_actions/1`,
+  `collect_api_tests/1`, and `run_all_codelist_seeders/0` always go
+  through the live chain — they either depend on ctx or run
+  side-effects.
   """
 
   use GenServer
@@ -98,7 +99,8 @@ defmodule Barkpark.Plugins.Registry do
     resolve_settings_schema: {:settings_schema, 0, [], :list_concat},
     resolve_top_menu_entries: {:top_menu_entries, 0, [], :list_concat},
     resolve_desk_items: {:desk_items, 1, [], :list_concat},
-    resolve_doc_actions: {nil, nil, nil, :none}
+    resolve_doc_actions: {nil, nil, nil, :none},
+    resolve_api_tests: {:api_tests, 0, [], :list_concat}
   }
 
   # ─── Public API ─────────────────────────────────────────────────────────
@@ -317,6 +319,30 @@ defmodule Barkpark.Plugins.Registry do
     baseline = Keyword.get(opts, :baseline, [])
     ctx = Keyword.get(opts, :ctx, %{})
     reduce_resolvers(:resolve_doc_actions, baseline, ctx)
+  end
+
+  @doc """
+  Walks every registered plugin and drives the `resolve_api_tests/2`
+  chain, returning the flat concatenated list of `api_test_spec()` maps
+  the runner can fire on demand.
+
+  Accepts `:baseline` / `:ctx` — see `collect_action_handlers/1`. Not
+  cached: the API test runner is an admin-triggered tool, not a hot
+  path, and the host (task s3 — runner wiring) seeds its own built-in
+  smoke tests via `:baseline` so plugins can drop or reorder them
+  symmetric with how they treat sibling-plugin specs.
+
+  Plugins typically implement the additive `api_tests/0` form; the
+  default `resolve_api_tests/2` supplied by `use Barkpark.Plugin` lifts
+  the additive return via `prev ++ result`. Plugins wanting to filter
+  or reorder sibling-plugin specs override `resolve_api_tests/2`
+  directly.
+  """
+  @spec collect_api_tests(keyword()) :: [Barkpark.Plugin.api_test_spec()]
+  def collect_api_tests(opts \\ []) do
+    baseline = Keyword.get(opts, :baseline, [])
+    ctx = Keyword.get(opts, :ctx, %{})
+    reduce_resolvers(:resolve_api_tests, baseline, ctx)
   end
 
   @doc """
