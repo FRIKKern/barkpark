@@ -1,14 +1,25 @@
 # Barkpark
 
-A headless CMS inspired by Sanity. Three ways to manage content: a web Studio, a terminal TUI, or the API directly.
+A headless CMS with a Sanity-style desk structure, a draft/published model, and a plugin system. Three clients: a Phoenix LiveView Studio, a Go Bubble Tea TUI, and a REST API.
 
 **Live demo:** http://89.167.28.206/studio
+
+## At a glance
+
+| | |
+|---|---|
+| Clients | Web Studio (LiveView), Terminal TUI (Go), REST API |
+| Core model | Sanity-style draft/published, perspectives (`published` / `drafts` / `raw`) |
+| Plugin system | `Barkpark.Plugin` behaviour — 14 callbacks, resolver chain, lifecycle hooks |
+| Reference plugin | OnixEdit — ONIX 3.0 book metadata + Bokbasen integration |
+| Tests | 1310 mix tests, 47 HTTP integration tests, full ONIX export round-trip |
+| Stack | Elixir 1.19 / Phoenix LiveView 1.1 / PostgreSQL / Oban / Go 1.21+ |
 
 ## Interfaces
 
 ### Web Studio (LiveView)
 
-Multi-pane desk structure at `/studio` — drill into content types, filter by status, edit documents with autosave, publish/unpublish. Real-time updates across tabs via PubSub.
+Multi-pane desk at `/studio/:dataset` — drill into content types, filter by status, edit with autosave, publish/unpublish. Real-time updates across tabs via PubSub.
 
 ```
  Structure    | Post         | All Post       | Editor
@@ -23,9 +34,11 @@ Multi-pane desk structure at `/studio` — drill into content types, filter by s
  Settings   > |              |                |
 ```
 
+Bare `/studio` redirects to the default dataset.
+
 ### Terminal TUI (Go + Bubble Tea)
 
-Same desk structure in the terminal. Keyboard-driven: `hjkl` navigation, `Enter` to edit, `Ctrl+S` to save. Connects to the Phoenix API over HTTP + SSE for real-time sync.
+Same desk structure in the terminal. Keyboard-driven, talks to the Phoenix API over HTTP + SSE.
 
 | Key | Action |
 |-----|--------|
@@ -37,498 +50,319 @@ Same desk structure in the terminal. Keyboard-driven: `hjkl` navigation, `Enter`
 | `Esc` | Back |
 | `q` | Quit |
 
-### API
+Point the TUI at a remote server with `BARKPARK_API_URL=http://host:4000 go run .`
 
-RESTful content API with Sanity-compatible mutation format. Public reads, authenticated writes.
+The TUI handles only v1 primitive field types. v2 plugin types (`composite`, `arrayOf`, `codelist`, `localizedText`) open as JSON in the TUI — edit those in the Studio. This is a declared v1 constraint, not a missing feature.
+
+### REST API
+
+Public reads, token-authed writes, Sanity-compatible mutation envelope.
 
 ```bash
-# Read (public)
+# Read (public, no auth)
 curl localhost:4000/v1/data/query/production/post
-curl localhost:4000/v1/data/query/production/post?perspective=drafts
 curl localhost:4000/v1/data/doc/production/post/p1
 
-# Write (requires auth)
-TOKEN="barkpark-dev-token"
-
+# Write (Bearer token)
 curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer barkpark-dev-token" \
   -H "Content-Type: application/json" \
-  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"Hello"}}]}'
-
-# Publish / Unpublish
--d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
--d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
+  -d '{"mutations":[{"create":{"_type":"post","_id":"hello","title":"Hi"}}]}'
 
 # Real-time (SSE)
-curl -N -H "Authorization: Bearer $TOKEN" localhost:4000/v1/data/listen/production
+curl -N -H "Authorization: Bearer barkpark-dev-token" \
+  localhost:4000/v1/data/listen/production
 ```
 
-## Desk Structure
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET /v1/data/query/:dataset/:type` | none | List documents |
+| `GET /v1/data/doc/:dataset/:type/:id` | none | Single document |
+| `POST /v1/data/mutate/:dataset` | token | create / patch / publish / unpublish / delete |
+| `GET /v1/data/listen/:dataset` | token | SSE change stream |
+| `GET /v1/preview/query/:dataset/:type` | preview JWT | Drafts read for previews |
+| `GET /v1/schemas/:dataset` | admin | List schemas |
+| `POST /v1/schemas/:dataset` | admin | Upsert schema |
+| `DELETE /v1/schemas/:dataset/:name` | admin | Delete schema |
+| `POST /media/upload` | token | Upload a file |
+| `GET /media`, `GET /media/files/...` | none | List / serve media |
+| `GET /api/documents/:type` | none | Legacy compat (deprecation headers) |
 
-Content types with a `status` field (Post, Project) get filtered sub-views automatically — just like Sanity Studio's desk tool. Private schemas appear as singletons under Settings.
+API quick reference: see the table above plus the `## API Quick Reference` section in [`CLAUDE.md`](CLAUDE.md).
 
+## Plugin system
+
+Barkpark's plugins are **first-party Elixir modules** that contribute data and behaviour. The host stays in charge of UI — plugins ship no LiveViews, no HEEx, no plugin-specific routes. UI is driven entirely by schema metadata plus the callback surface below.
+
+### The 14 callbacks
+
+```mermaid
+flowchart LR
+  Host[Host: Studio / API / Workers] --> Reg[Plugins.Registry]
+  Reg -->|prev, ctx -> next| Res[Resolver chain]
+  Res -->|baseline + per-plugin transforms| Out[Final value]
+  Host -->|mutation| Life[Lifecycle dispatcher]
+  Life -->|before_*: sync, may halt| Cont[Content op]
+  Life -->|after_*: async Task.async_stream| Hook[Plugin hooks]
+  Host -->|/_api click| Runner[ApiTestRunner]
+  Runner -->|Req| HTTP[Real HTTP endpoints]
 ```
-Structure
-  Post             -> All Post / Draft / Published / Archived
-  Page             -> document list
-  Project          -> All Projects / Active / Planning / Completed
-  --------
-  Author           -> document list
-  Category         -> document list
-  --------
-  Settings         -> Site Settings / Navigation / Brand Colors (singletons)
+
+| Callback | Resolver | Purpose |
+|---|---|---|
+| `manifest/0` | — | Frozen plugin.json (compile-time read) |
+| `register_schemas/1` | — | SchemaDefinition rows installed at boot |
+| `register_routes/1` | — | Reserved; plugins currently never own routes |
+| `register_workers/1` | — | Child specs added to the supervision tree |
+| `validate_settings/1` | — | Validate the plugin's settings row before save |
+| `checkers/0` | `resolve_checkers/2` | Background invariant checkers |
+| `action_handlers/0` | `resolve_action_handlers/2` | Named handlers for schema-declared actions |
+| `external_sync_entries/0` | `resolve_external_sync_entries/2` | External system sync registry |
+| `codelist_seeders/0` | `resolve_codelist_seeders/2` | Zero-arg seed functions for codelists |
+| `settings_schema/0` | `resolve_settings_schema/2` | Fields rendered in the admin settings form |
+| `top_menu_entries/0` | `resolve_top_menu_entries/2` | Tabs in the Studio topbar |
+| `desk_items/1` | `resolve_desk_items/2` | Items in the root Structure pane |
+| — | `resolve_doc_actions/2` | Per-doc action buttons (resolver-only; host seeds from schema) |
+| `lifecycle_hooks/0` | — | Map of `before_*` / `after_*` doc hooks |
+| `api_tests/0` | `resolve_api_tests/2` | Specs the live API runner fires on demand |
+
+### Resolver chain
+
+Each `resolve_X/2` is `(prev, ctx) -> next`. The host seeds `prev` with its built-in baseline; every plugin sees the running accumulator and returns a transformed value. Plugins can mutate, reorder, or remove sibling-plugin entries — not just append. When a plugin only implements the additive form, the `__using__/1` macro supplies a default that lifts `prev ++ result` (or `Map.merge/2` for map-shaped callbacks).
+
+### Lifecycle hooks
+
+Eight events bracket the four mutating Content operations:
+
+| Phase | Events | Semantics |
+|---|---|---|
+| `before_*` | `before_save`, `before_publish`, `before_unpublish`, `before_delete` | Sync. `:ok` lets the op proceed; `{:halt, reason}` cancels it. Host surfaces `{:error, {:halted, reason}}` (HTTP 409). |
+| `after_*` | `after_save`, `after_publish`, `after_unpublish`, `after_delete` | Async via `Task.async_stream` (5s timeout). Return value discarded. |
+
+The hook payload carries `ctx.source` (`:studio` / `:api` / `:cli` / `:worker`) so workers that re-fire writes can bail out of their own hooks.
+
+### API tests — a small worked example
+
+`api_tests/0` returns declarative HTTP specs. The admin runner at `/studio/:dataset/_api` fires them against the live server via `Req`, evaluates asserts, then always runs `:cleanup` regardless of pass/fail. OnixEdit's four specs (abridged):
+
+```elixir
+def api_tests do
+  [
+    %{name: "Book schema exposed via /api/schemas",
+      method: :get, path: "/api/schemas", auth: :none,
+      asserts: [{:status, 200}, {:body_contains, ~s|"name":"book"|},
+                {:duration_under_ms, 1_500}]},
+    %{name: "Book schema exposed via /v1/schemas/production",
+      method: :get, path: "/v1/schemas/production", auth: :admin,
+      asserts: [{:status, 200}, {:body_contains, ~s|"name":"book"|}]},
+    %{name: "Bokbasen top-menu tab renders",
+      method: :get, path: "/studio/production", auth: :none,
+      asserts: [{:status, 200}, {:body_contains, "Bokbasen"}]},
+    %{name: "Mutation round-trip: create + cleanup-delete probe book",
+      method: :post, path: "/v1/data/mutate/production", auth: :admin,
+      body: %{"mutations" => [%{"create" => %{"_type" => "book",
+                                              "_id" => "probe", "title" => "Probe"}}]},
+      asserts: [{:status, 200}],
+      cleanup: [_delete_probe_book]}
+  ]
+end
 ```
 
-The desk structure is auto-generated from schemas. Add a new schema via the API and it appears in both the Web Studio and TUI.
+### Plugin admin (Studio)
 
-## Draft/Published Model
+- `/studio/:dataset/_plugins` — installed plugins, manifests, hot-reload
+- `/studio/:dataset/_plugins/:plugin/settings` — settings form (Cloak-encrypted at rest)
+- `/studio/:dataset/_api` — live API test runner
 
-| State | doc_id | Public API |
-|-------|--------|------------|
-| Draft | `drafts.my-post` | Hidden |
-| Published | `my-post` | Visible |
+### Where to read more
 
-Editing a published document creates a draft overlay. Publishing copies the draft to published and deletes the draft. Three perspectives: `published` (default), `drafts` (studio), `raw` (everything).
+- [`docs/plugins/ARCHITECTURE.md`](docs/plugins/ARCHITECTURE.md) — the contract in full
+- [`docs/plugins/RECIPE.md`](docs/plugins/RECIPE.md) — build a plugin in one sitting
+- [`docs/plugins/SCHEMA_V2.md`](docs/plugins/SCHEMA_V2.md) — `composite` / `arrayOf` / `codelist` / `localizedText`
+- [`docs/plugins/INSTALL.md`](docs/plugins/INSTALL.md) — auto-install on boot, idempotency
+- [`docs/plugins/INTEGRATION_LESSONS.md`](docs/plugins/INTEGRATION_LESSONS.md)
+- [`docs/plugins/codelists-byo.md`](docs/plugins/codelists-byo.md)
 
-## Quick Start
+## Quick start
 
-### Local development
+### Local
 
 ```bash
 git clone https://github.com/FRIKKern/barkpark.git
 cd barkpark
-
-# Setup API
 cd api && mix deps.get && mix ecto.setup && cd ..
-
-# Run both
-make dev
-
-# Or separately
-make api    # Phoenix on :4000
-make tui    # Go TUI
+make dev      # tmux: Phoenix + TUI side by side
 ```
 
-Open http://localhost:4000/studio for the web interface.
+Open `http://localhost:4000/studio`.
 
 ### Deploy to a VPS
 
-One-command setup on any Ubuntu 22.04+ server (ARM64 or x86_64):
+One command on any Ubuntu 22.04+ box (ARM64 or x86_64):
 
 ```bash
 ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
 ```
 
-Installs PostgreSQL, Erlang/Elixir (via ASDF), Go, Caddy, and a systemd service. First run takes 10-15 minutes on ARM (Erlang compiles from source).
+Installs PostgreSQL, Erlang/Elixir (via ASDF — Erlang Solutions has no ARM packages), Go, Caddy, and a systemd unit. First run on ARM is 10–15 min (Erlang compiles from source).
 
-After setup:
-
-```bash
-ssh root@YOUR_VPS_IP
-cd /opt/barkpark
-make deploy    # git pull + rebuild + restart
-make status    # service health
-make logs      # tail logs
-```
-
-After any prod operation that touches `systemctl`, run `./api/scripts/prod-postcheck.sh` (see [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md)).
-
-## Schema & Field Types
-
-Create schemas via API — they drive the Studio UI, TUI, and desk structure automatically.
+Updates afterwards:
 
 ```bash
-curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "event",
-    "title": "Event",
-    "icon": "calendar",
-    "visibility": "public",
-    "fields": [
-      {"name": "title", "title": "Title", "type": "string"},
-      {"name": "date", "title": "Date", "type": "datetime"},
-      {"name": "featured", "title": "Featured", "type": "boolean"}
-    ]
-  }'
+ssh root@YOUR_VPS_IP 'cd /opt/barkpark && git pull'   # post-merge hook rebuilds + restarts
+# or, manually:
+ssh root@YOUR_VPS_IP && cd /opt/barkpark && make deploy
 ```
 
-| Type | Description | Options |
-|------|-------------|---------|
-| `string` | Single-line text | |
-| `slug` | URL-safe identifier | |
-| `text` | Multi-line | `rows` |
-| `richText` | Block editor | |
-| `image` | Image upload | |
-| `select` | Dropdown | `options: ["a", "b"]` |
-| `boolean` | Toggle | |
-| `datetime` | Date + time | |
-| `color` | Color picker | |
-| `reference` | Link to type | `refType: "author"` |
-| `array` | Repeatable list | |
+Run [`./api/scripts/prod-postcheck.sh`](api/scripts/prod-postcheck.sh) after any `systemctl` operation. See [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md).
 
-Schema visibility: `public` (queryable without auth) or `private` (requires token, appears under Settings as singleton).
+## Draft/published model
 
-## Guides
+| State | doc_id | Public API |
+|---|---|---|
+| Draft | `drafts.my-post` | Hidden |
+| Published | `my-post` | Visible |
 
-### Creating a new content type
+Editing a published doc creates a draft overlay. Publishing copies the draft to the published id and deletes the draft. Three perspectives: `published` (default public read), `drafts` (Studio), `raw` (everything).
 
-Create a schema and it appears in both Studio and TUI automatically.
+## Schemas and field types
 
-```bash
-curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "recipe",
-    "title": "Recipe",
-    "icon": "recipe",
-    "visibility": "public",
-    "fields": [
-      {"name": "title", "title": "Title", "type": "string"},
-      {"name": "slug", "title": "Slug", "type": "slug"},
-      {"name": "difficulty", "title": "Difficulty", "type": "select", "options": ["easy", "medium", "hard"]},
-      {"name": "prepTime", "title": "Prep Time", "type": "string"},
-      {"name": "instructions", "title": "Instructions", "type": "richText"},
-      {"name": "image", "title": "Photo", "type": "image"},
-      {"name": "vegetarian", "title": "Vegetarian", "type": "boolean"},
-      {"name": "author", "title": "Author", "type": "reference", "refType": "author"}
-    ]
-  }'
-```
+Schemas drive both clients and the desk structure. POST a schema and it appears in Studio + TUI automatically. Schemas with a `status` field of type `select` get filtered sub-views; `visibility: "private"` schemas appear under Settings as singletons.
 
-Reload the Studio and "Recipe" appears in the structure. Since it has no `status` field, it shows as a simple document list. Add a `status` field with `options` to get automatic filtered sub-views.
+### v1 primitives (handled natively by TUI + Studio)
 
-### Adding filtered sub-views to a type
+| Type | Notes |
+|---|---|
+| `string` | Single-line text |
+| `slug` | URL-safe identifier |
+| `text` | Multi-line, `rows` option |
+| `richText` | Block editor |
+| `image` | Image upload |
+| `select` | `options: [...]` |
+| `boolean` | Toggle |
+| `datetime` | Date + time |
+| `color` | Color picker |
+| `reference` | `refType: "author"` |
+| `array` | Repeatable list |
 
-Any schema with a `status` field of type `select` automatically gets filtered sub-views in the desk structure. For example, adding status to the recipe schema:
+### v2 plugin types (Studio only — TUI renders as JSON)
 
-```json
-{"name": "status", "title": "Status", "type": "select", "options": ["draft", "published", "archived"]}
-```
+`composite`, `arrayOf`, `codelist`, `localizedText`. Reference: [`docs/plugins/SCHEMA_V2.md`](docs/plugins/SCHEMA_V2.md).
 
-This produces:
-
-```
-Recipe
-  All Recipe
-  --------
-  Draft
-  Published
-  Archived
-```
-
-Each sub-view only shows documents matching that status value.
-
-### Creating a singleton (settings-style type)
-
-Set `visibility: "private"` and the type appears under Settings as a singleton — one document, no list, direct editor.
-
-```bash
-curl -X POST localhost:4000/v1/schemas/production \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "footer",
-    "title": "Footer",
-    "icon": "link",
-    "visibility": "private",
-    "fields": [
-      {"name": "copyright", "title": "Copyright Text", "type": "string"},
-      {"name": "showSocials", "title": "Show Social Links", "type": "boolean"},
-      {"name": "backgroundColor", "title": "Background Color", "type": "color"}
-    ]
-  }'
-```
-
-Result in desk structure:
-
-```
-Settings
-  Site Settings
-  Navigation
-  Brand Colors
-  Footer            <-- new singleton
-```
-
-### Customizing the desk structure
-
-The desk structure is defined in two files that should stay in sync:
-
-**Elixir** (Web Studio): `api/lib/barkpark/structure.ex` — the `build_desk_items/1` function.
-
-**Go** (TUI): `structure.go` — the `initRootStructure()` function.
-
-Both use the same pattern: group schemas into content, taxonomy, and settings.
-
-To change the ordering or grouping, edit `build_desk_items/1` (Elixir) and `initRootStructure()` (Go). For example, to add a "Media" section:
-
-```elixir
-# In structure.ex, build_desk_items/1:
-content_items ++
-  [divider()] ++
-  taxonomy_items ++
-  [divider()] ++
-  [%Node{id: "media", title: "Media", icon: "camera", type: :list, items: [
-    doc_type_list_item(schemas["photo"]),
-    doc_type_list_item(schemas["video"])
-  ]}] ++
-  [divider()] ++
-  settings_items
-```
-
-```go
-// In structure.go, initRootStructure():
-items = append(items, Divider())
-items = append(items,
-    ListItem().Title("Media").Icon("camera").Child(
-        List().ID("media").Title("Media").Items(
-            DocumentTypeListItem("photo"),
-            DocumentTypeListItem("video"),
-        ).Build(),
-    ).Build(),
-)
-```
-
-### Managing documents via the API
-
-```bash
-TOKEN="barkpark-dev-token"
-
-# Create a document (always starts as draft)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"create":{"_type":"post","_id":"my-post","title":"Hello World"}}]}'
-
-# Edit fields
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"patch":{"id":"drafts.my-post","type":"post","set":{"title":"Updated Title","body":"New content"}}}]}'
-
-# Publish (copies draft to published, deletes draft)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"publish":{"id":"my-post","type":"post"}}]}'
-
-# Unpublish (moves published back to draft)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"unpublish":{"id":"my-post","type":"post"}}]}'
-
-# Delete
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mutations":[{"delete":{"id":"my-post","type":"post"}}]}'
-```
-
-### Querying content from a frontend
-
-```bash
-# All published posts (public, no auth needed)
-curl localhost:4000/v1/data/query/production/post
-
-# Filter by status
-curl "localhost:4000/v1/data/query/production/post?filter=status=published"
-
-# Single document
-curl localhost:4000/v1/data/doc/production/post/p1
-
-# Drafts perspective (for preview/studio)
-curl "localhost:4000/v1/data/query/production/post?perspective=drafts"
-```
-
-Response format:
-
-```json
-{
-  "count": 3,
-  "type": "post",
-  "documents": [
-    {
-      "_id": "p1",
-      "_type": "post",
-      "title": "Getting Started",
-      "status": "published",
-      "content": {"slug": "getting-started", "body": "..."},
-      "_createdAt": "2026-04-12T09:11:20Z",
-      "_updatedAt": "2026-04-12T09:11:20Z"
-    }
-  ]
-}
-```
-
-### Uploading media
-
-```bash
-# Upload a file
-curl -X POST localhost:4000/media/upload \
-  -H "Authorization: Bearer barkpark-dev-token" \
-  -F "file=@photo.jpg"
-
-# List all media
-curl localhost:4000/media
-
-# Serve a file
-curl localhost:4000/media/files/2026/04/photo-abc123.jpg
-
-# Delete
-curl -X DELETE localhost:4000/media/FILE_ID \
-  -H "Authorization: Bearer barkpark-dev-token"
-```
-
-### Connecting the TUI to a remote server
-
-```bash
-BARKPARK_API_URL=http://YOUR_VPS_IP:4000 go run .
-```
-
-Or with a custom token:
-
-```bash
-BARKPARK_API_URL=http://YOUR_VPS_IP:4000 BARKPARK_API_TOKEN=your-token go run .
-```
-
-## OnixEdit Reference Plugin
-
-End-to-end reference plugin: book editor → ONIX 3.0 export → Bokbasen publish + ack-loop with sign-off gate. Demonstrates the full Barkpark plugin contract — Schema Definition v2 (composite / arrayOf / codelist / localizedText), Studio LiveView surfaces, encrypted credentials, Oban-backed background workers, and structured ack-loop state.
-
-See [`docs/spec/onixedit-masterplan-summary.md`](docs/spec/onixedit-masterplan-summary.md) for the full masterplan close-out (phases, decisions, deferred items).
-
-### Plugin schema install
-
-Plugin-declared schemas (e.g. OnixEdit's `book`) auto-install on every server start. A post-boot Task in `Barkpark.Application` walks `Barkpark.Plugins.Registry.all/0` and persists each plugin's `register_schemas/1` output via `Barkpark.Content.upsert_schema/2`. Fresh databases pick up the same schemas through `priv/repo/seeds.exs`, which calls the shared helper `Barkpark.Plugins.Bootstrap.register_all_schemas/0` after the v1 seed loop. Both paths are idempotent against the `(name, dataset)` composite unique index — re-running a deploy or `mix ecto.reset` produces zero duplicate rows. Full reference: [`docs/plugins/INSTALL.md`](docs/plugins/INSTALL.md).
-
-## ONIX 3.0 Export Proof
-
-`proof/onix-sample.xml` is the validated ONIX 3.0 reference output produced by
-the OnixEdit export pipeline (`Barkpark.Plugins.OnixEdit.Export.to_string/1`)
-from the source fixture `api/test/fixtures/onix/full-book.json`. It validates
-clean against the vendored EDItEUR XSD at
-`api/priv/onix/onix-3.0/ONIX_BookProduct_3.0_reference.xsd` and serves as the
-end-to-end demonstration artifact for Phase 6 (Bokbasen pre-flight).
-
-- Regenerate: `cd api && mix onix.export_proof`
-- Drift guard: `api/test/barkpark/plugins/onixedit/export_proof_test.exs`
-
-## Phase 7: Bokbasen integration
-
-Phase 7 closes the OnixEdit publishing loop: a `book` document → ONIX
-3.0 export → Bokbasen's metadata-import API (single-phase async-poll) →
-status accepted, all driven by an Oban worker with a 9-state machine
-(`pending → staging → staged → polling → accepted | rejected | failed |
-cancelled | cannot_cancel`). Status transitions are broadcast over
-`Phoenix.PubSub` so the BookEditor LiveView's status pill updates in
-real time without polling. Three mix tasks plus an admin LiveView at
-`/admin/bokbasen` cover ops surface (status, retry, cancel).
-
-### How to test
-
-A redacted end-to-end integration test exercises the full pipeline
-against a [Bypass](https://hex.pm/packages/bypass) HTTP mock. The
-suite is tagged `@moduletag :bokbasen_integration` and excluded by
-default so the standard `mix test` invocation stays clean.
+## Testing
 
 ```bash
 cd api
-mix test --include bokbasen_integration \
-  test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs
+mix test                                           # 1310 tests, ~9 known parallel-sandbox flakes
+mix test test/barkpark_web/integration             # 47 HTTP integration tests
+mix test test/barkpark/plugins/onixedit/export_proof_test.exs  # ONIX export round-trip
 ```
 
-The test loads its responses from sanitized fixtures under
-`api/test/fixtures/bokbasen/` (synthetic `test_*` IDs and
-`api.example.com` URLs, never real Bokbasen creds).
+Integration tests cover the full documented HTTP contract: `halt_path`, `resolver_outputs`, `media`, `mutations`, `schema_admin`, `preview_routes`, `legacy_crud`. The ONIX round-trip is byte-stable (export → import → re-export, modulo `SentDateTime`).
 
-### Enable the real Bokbasen sandbox
-
-Set the five env vars below, or persist them via the encrypted
-`plugin_settings` row keyed `"bokbasen"` (see
-`Barkpark.Plugins.OnixEdit.Bokbasen.Settings`):
-
-| Env var | Purpose |
-|---------|---------|
-| `BOKBASEN_API_BASE` | Base URL of the Bokbasen metadata-import API (see contract spec for the published value) |
-| `BOKBASEN_OAUTH_TOKEN_URL` | OAuth2 token endpoint URL (see contract spec) |
-| `BOKBASEN_CLIENT_ID` | OAuth2 client id (encrypted at rest in DB) |
-| `BOKBASEN_CLIENT_SECRET` | OAuth2 client secret (encrypted at rest in DB) |
-| `BOKBASEN_CLIENT_ROLE` | `publisher` (default) or `distributor` |
-
-Tunables (optional):
-
-| Env var | Default | Purpose |
-|---------|---------|---------|
-| `BOKBASEN_HTTP_TIMEOUT_MS` | 30000 | Per-request receive timeout |
-| `BOKBASEN_RATE_LIMIT_MS` | 0 | Per-request floor sleep (1 req/sec ⇒ 1000) |
-
-### Cross-references
-
-- Wire contract: [`docs/spec/bokbasen-api-contract.md`](docs/spec/bokbasen-api-contract.md)
-- ONIX pre-flight: [`docs/spec/bokbasen-onix-pre-flight.md`](docs/spec/bokbasen-onix-pre-flight.md)
-- Worker: `api/lib/barkpark/plugins/onixedit/bokbasen/publish_worker.ex`
-- HTTP client: `api/lib/barkpark/plugins/onixedit/bokbasen/client.ex`
-- Admin LiveView: `/admin/bokbasen`
+The live API runner at `/studio/:dataset/_api` fires every plugin's `api_tests/0` against the real running server.
 
 ## Architecture
 
+```mermaid
+flowchart TB
+  subgraph Clients
+    Studio[Web Studio<br/>Phoenix LiveView]
+    TUI[Terminal TUI<br/>Go + Bubble Tea]
+    HTTP[HTTP clients<br/>SDKs / frontends]
+  end
+
+  subgraph Phoenix[Phoenix :4000]
+    Router[Router]
+    Content[Content context<br/>draft/published, perspectives]
+    Registry[Plugins.Registry<br/>resolver chain + lifecycle dispatch]
+    Workers[Oban workers]
+  end
+
+  subgraph Plugins
+    OnixEdit[OnixEdit<br/>14 callbacks]
+  end
+
+  PG[(PostgreSQL<br/>JSONB)]
+  Caddy[Caddy :80/:443]
+
+  Studio -->|WebSocket| Router
+  TUI -->|HTTP + SSE| Router
+  HTTP -->|HTTP| Caddy
+  Caddy --> Router
+  Router --> Content
+  Router --> Registry
+  Registry -.->|prev, ctx -> next| OnixEdit
+  Content -->|before_* halt? after_* async| Registry
+  Content --> PG
+  Workers --> Content
 ```
-Clients                        Server
-                               Phoenix :4000
-Web Studio  ---WebSocket--->     LiveView Studio
-Go TUI      ---HTTP/SSE---->     REST API (CRUD + SSE)
-Frontend    ---HTTP GET----->    Public query API
-                                 Media uploads
-                                 Schema management
 
-                               PostgreSQL
-                                 documents, schemas, tokens, media
-
-                               Caddy :80 -> localhost:4000
-```
-
-## Project Structure
+## Project structure
 
 ```
 barkpark/
-  main.go                    TUI entry point
-  tui.go                     Bubble Tea multi-pane UI + editor
-  store.go                   HTTP + SSE API client
-  schema.go                  Schema types, loaded from API
-  structure.go               Desk structure builder (mirrors Sanity)
-  styles.go                  Lip Gloss terminal styles
-  api/                       Phoenix backend
+  main.go tui.go store.go schema.go             Go TUI (Bubble Tea + HTTP/SSE)
+  structure.go styles.go
+  deploy.sh Makefile                            VPS bootstrap, ops
+  api/
     lib/barkpark/
-      content.ex             Document + schema CRUD, publish
-      structure.ex           Desk structure (mirrors Go)
-      media.ex               File uploads
-      auth.ex                Token auth (SHA256)
+      content.ex                                Document + schema CRUD, publish, perspectives
+      plugin.ex                                 The 14-callback behaviour + __using__/1
+      plugins/                                  Registry, resolver chain, bootstrap, onixedit/
+      api_test_runner.ex                        Live runner backing /studio/:dataset/_api
     lib/barkpark_web/
-      router.ex              Routes (API + Studio + Media)
-      live/studio/
-        studio_live.ex       Multi-pane desk (LiveView)
-      controllers/           Query, Mutate, Schema, Listen, Media
-    priv/repo/seeds.exs      8 schemas, sample docs, dev token
-    start.sh                 Systemd wrapper
-  deploy.sh                  VPS setup script
-  Makefile                   All operations
-  CLAUDE.md                  Agent guide
+      router.ex                                 Routes
+      live/admin/                               PluginsLive, PluginSettingsLive,
+                                                  ApiTestRunnerLive, BokbasenLive,
+                                                  OnixeditStalenessLive
+      live/studio/                              StudioLive, MediaLive
+      controllers/                              Query, Mutate, Schema, Listen, Media,
+                                                  Preview, Legacy, OnixeditExport
+    priv/plugins/                               Plugin manifests + assets
+    priv/repo/seeds.exs                         Seed: 8 schemas, sample docs, dev token
+    test/barkpark/plugins/                      Plugin registry, resolver, lifecycle, api_tests
+    test/barkpark_web/integration/              47 HTTP integration tests
+  docs/plugins/                                 ARCHITECTURE, RECIPE, SCHEMA_V2, INSTALL, ...
+  docs/ops/                                     PROD_OPS, bokbasen-go-live, rollback playbook
+  web/                                          Next.js Vercel demo (optional, `make web`)
 ```
 
-## Tech Stack
+## OnixEdit reference plugin
 
-| Component | Technology |
-|-----------|-----------|
-| Web Studio | Phoenix LiveView |
-| TUI | Go, Bubble Tea, Lip Gloss |
-| API | Elixir, Phoenix |
-| Database | PostgreSQL (JSONB) |
-| Real-time | PubSub (LiveView), SSE (TUI/API) |
-| Auth | Bearer tokens (SHA256) |
-| Proxy | Caddy |
+End-to-end reference plugin: book editor → ONIX 3.0 export → Bokbasen `publisher` / `distributor` metadata-import API with a 9-state machine (`pending → staging → staged → polling → accepted | rejected | failed | cancelled | cannot_cancel`). Demonstrates the full plugin contract: Schema v2 types, codelist seeders, action handlers, settings (Cloak-encrypted), Oban workers, lifecycle hooks, top-menu and desk-item resolvers, and `api_tests/0`.
+
+The validated ONIX 3.0 reference output lives at `proof/onix-sample.xml` and validates clean against the vendored EDItEUR XSD at `api/priv/onix/onix-3.0/ONIX_BookProduct_3.0_reference.xsd`. Regenerate with `cd api && mix onix.export_proof`; the drift guard is `api/test/barkpark/plugins/onixedit/export_proof_test.exs`.
+
+Operations runbook (Bypass-mocked e2e suite, sandbox creds, retry/cancel, status dashboard): [`docs/ops/bokbasen-go-live.md`](docs/ops/bokbasen-go-live.md).
+
+## Make targets
+
+| Target | Purpose |
+|---|---|
+| `make dev` / `make api` / `make tui` / `make run` | Local dev |
+| `make build` / `make web` / `make web-build` | Build TUI binary / Next.js demo |
+| `make rebuild` / `make restart` / `make stop` / `make status` / `make logs` | Service lifecycle (server) |
+| `make seed` / `make migrate` / `make reset-db` | Database |
+| `make deploy` | git pull + clean + compile + restart |
+| `make precheck` | Pre-merge gate (mirrors CI prod-compile + warnings-as-errors) |
+| `make format` / `make format-check` / `make hooks` | Format gate |
+| `make domain-cutover DOMAIN=…` | Update `PHX_HOST`/`PHX_SCHEME` on prod, restart, verify |
+| `make docker-build` / `make docker-up` / `make docker-down` / `make docker-logs` | Docker alternative |
+
+## Tech stack
+
+| Layer | Tech |
+|---|---|
+| API | Elixir 1.19, Phoenix LiveView 1.1 |
+| Persistence | PostgreSQL (JSONB), Ecto |
+| Background jobs | Oban |
+| HTTP client | Req |
+| Encryption | Cloak (plugin settings at rest) |
+| Real-time | Phoenix.PubSub, Phoenix LiveView, SSE |
+| Auth | Bearer tokens (SHA256 hashed) |
+| TUI | Go 1.21+, Bubble Tea, Lip Gloss |
+| Reverse proxy | Caddy |
 
 ## License
 
