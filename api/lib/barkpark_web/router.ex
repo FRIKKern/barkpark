@@ -114,6 +114,7 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live "/_plugins", PluginsLive
       live "/_plugins/:plugin/settings", PluginSettingsLive
+      live "/_api", ApiTestRunnerLive
     end
   end
 
