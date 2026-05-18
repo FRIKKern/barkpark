@@ -127,7 +127,11 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live "/", StudioLive
       live "/media", MediaLive
-      live "/api-tester", ApiTesterLive
+      # Task barkpark-0s6r — legacy `/api-tester` route removed; the
+      # "API" top-menu tab now points at the admin LV at `/_api`
+      # (see `BarkparkWeb.Admin.ApiTestRunnerLive`). The legacy module
+      # `BarkparkWeb.Studio.ApiTesterLive` remains on disk but is
+      # unrouted; old links 404.
 
       live "/*path", StudioLive
     end
