@@ -132,6 +132,17 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         }
 
         result = Runner.run(legacy)
+
+        result =
+          if plugin_spec = endpoint[:plugin_spec] do
+            enrich_with_plugin_asserts(result, plugin_spec,
+              token: socket.assigns.token,
+              base: "http://localhost:4000"
+            )
+          else
+            result
+          end
+
         Map.put(socket.assigns.last_result_by_id, endpoint.id, result)
       end
 
@@ -242,6 +253,120 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       {:ok, decoded} -> decoded
       _ -> nil
     end
+  end
+
+  @doc false
+  # Plugin entries carry a :plugin_spec map (see Endpoints.plugin_spec_to_endpoint/2).
+  # After Runner.run fires the bare HTTP, evaluate each assert in the spec's
+  # :asserts list against the response, then fire any :cleanup steps. Cleanup
+  # always runs regardless of pass/fail (matches ApiTestRunner's plan §0 Q1).
+  #
+  # Runner.run/2 returns body in :body_text; Asserts.evaluate/2 expects :body.
+  # We re-map field names here rather than touching the Runner.
+  #
+  # Public for test-coverage of the enrichment logic without booting a live
+  # HTTP endpoint. Pass `opts: [skip_cleanup: true]` to short-circuit the
+  # cleanup fan-out — useful in tests that don't want Req making real calls.
+  def enrich_with_plugin_asserts(result, plugin_spec, opts) do
+    response = %{
+      status: result.status,
+      body: Map.get(result, :body_text),
+      headers: Map.get(result, :headers, []),
+      duration_ms: Map.get(result, :duration_ms, 0)
+    }
+
+    asserts_results =
+      Enum.map(Map.get(plugin_spec, :asserts, []) || [], fn assertion ->
+        case Barkpark.ApiTestRunner.Asserts.evaluate(assertion, response) do
+          {kind, msg} when kind in [:pass, :fail] ->
+            %{assertion: assertion, status: kind, message: msg}
+        end
+      end)
+
+    cleanup_results =
+      if Keyword.get(opts, :skip_cleanup, false) do
+        []
+      else
+        run_plugin_cleanup(Map.get(plugin_spec, :cleanup, []) || [], opts)
+      end
+
+    result
+    |> Map.put(:plugin_asserts, asserts_results)
+    |> Map.put(:plugin_cleanup, cleanup_results)
+    |> Map.put(:plugin_status, compute_plugin_status(asserts_results))
+  end
+
+  # No asserts = informational spec — treat as pass so the badge doesn't
+  # scream FAIL on a runner-only test case.
+  defp compute_plugin_status([]), do: :pass
+
+  defp compute_plugin_status(asserts_results) do
+    if Enum.all?(asserts_results, &(&1.status == :pass)), do: :pass, else: :fail
+  end
+
+  defp run_plugin_cleanup([], _opts), do: []
+
+  defp run_plugin_cleanup(steps, opts) when is_list(steps) do
+    base = Keyword.get(opts, :base, "http://localhost:4000")
+    token = Keyword.get(opts, :token, "")
+
+    Enum.map(steps, fn step ->
+      method = Map.get(step, :method)
+      path = Map.get(step, :path)
+
+      base_headers = Map.get(step, :headers, %{}) || %{}
+
+      headers =
+        case Map.get(step, :auth, :admin) do
+          :none ->
+            base_headers
+
+          _ ->
+            if token != "" do
+              Map.put_new(base_headers, "authorization", "Bearer #{token}")
+            else
+              base_headers
+            end
+        end
+
+      body =
+        case Map.get(step, :body) do
+          nil -> nil
+          m when is_map(m) -> Jason.encode!(m)
+          s when is_binary(s) -> s
+          other -> to_string(other)
+        end
+
+      started_at = System.monotonic_time(:millisecond)
+
+      req_opts = [
+        method: method,
+        url: base <> path,
+        headers: Enum.into(headers, []),
+        receive_timeout: 10_000,
+        retry: false,
+        decode_body: false
+      ]
+
+      req_opts = if body, do: [{:body, body} | req_opts], else: req_opts
+
+      try do
+        case Req.request(req_opts) do
+          {:ok, %Req.Response{status: status}} ->
+            %{
+              method: method,
+              path: path,
+              status: status,
+              duration_ms: System.monotonic_time(:millisecond) - started_at
+            }
+
+          {:error, e} ->
+            %{method: method, path: path, error: Exception.message(e)}
+        end
+      rescue
+        e -> %{method: method, path: path, error: "cleanup raised: " <> Exception.message(e)}
+      end
+    end)
   end
 
   defp build_curl(%{kind: :reference}, _form_state, _token), do: ""
@@ -505,6 +630,41 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         font-family: var(--font-mono); font-size: 11px;
         background: var(--bg); padding: 1px 5px; border-radius: 3px;
       }
+
+      /* Plugin asserts panel — appears between verdict-reason and headers
+         when the selected endpoint carries a :plugin_spec. */
+      .api-tester-plugin-asserts { margin: 0 0 12px; }
+      .api-tester-plugin-asserts .status-pass { color: var(--success); }
+      .api-tester-plugin-asserts .status-fail { color: var(--destructive); }
+      .api-tester-plugin-asserts ul { list-style: none; padding: 0; margin: 0; }
+      .api-tester-plugin-asserts .assert-row {
+        display: flex; gap: 8px; padding: 4px 0;
+        font-family: var(--font-mono); font-size: 12px; align-items: baseline;
+      }
+      .api-tester-plugin-asserts .assert-row::before {
+        flex-shrink: 0; width: 12px; text-align: center;
+      }
+      .api-tester-plugin-asserts .assert-row.assert-pass::before {
+        content: "✓"; color: var(--success);
+      }
+      .api-tester-plugin-asserts .assert-row.assert-fail::before {
+        content: "✗"; color: var(--destructive);
+      }
+      .api-tester-plugin-asserts .assert-tag { color: var(--fg); font-weight: 500; }
+      .api-tester-plugin-asserts .assert-message { color: var(--fg-muted); }
+
+      .api-tester-plugin-cleanup {
+        margin: 0 0 16px; font-size: 12px; color: var(--fg-muted);
+      }
+      .api-tester-plugin-cleanup summary {
+        cursor: pointer; padding: 4px 0; user-select: none;
+      }
+      .api-tester-plugin-cleanup ul {
+        list-style: none; padding: 6px 0 0; margin: 0;
+      }
+      .api-tester-plugin-cleanup li {
+        padding: 2px 0; font-family: var(--font-mono); font-size: 11px;
+      }
     </style>
     """
   end
@@ -666,6 +826,42 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     ~H"""
     <div class="api-verdict-reason"><%= @result.verdict_reason %></div>
 
+    <%= if asserts = Map.get(@result, :plugin_asserts) do %>
+      <% pass_count = Enum.count(asserts, &(&1.status == :pass)) %>
+      <% total = length(asserts) %>
+      <div class="api-tester-plugin-asserts">
+        <div class="api-section" style="margin-top: 0;">
+          Asserts —
+          <span class={"status-#{Map.get(@result, :plugin_status, :pass)}"}>
+            <%= pass_count %>/<%= total %> pass
+          </span>
+        </div>
+        <ul>
+          <%= for a <- asserts do %>
+            <li class={"assert-row assert-#{a.status}"}>
+              <span class="assert-tag"><%= format_assertion(a.assertion) %></span>
+              <span class="assert-message"><%= a.message %></span>
+            </li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+
+    <%= if (cleanup = Map.get(@result, :plugin_cleanup)) && cleanup != [] do %>
+      <details class="api-tester-plugin-cleanup">
+        <summary>Cleanup ran <%= length(cleanup) %> step<%= if length(cleanup) == 1, do: "", else: "s" %></summary>
+        <ul>
+          <%= for step <- cleanup do %>
+            <li>
+              <%= step.method %> <%= step.path %>
+              → <%= step[:status] || "ERROR: #{step[:error]}" %>
+              <%= if step[:duration_ms] do %>(<%= step.duration_ms %>ms)<% end %>
+            </li>
+          <% end %>
+        </ul>
+      </details>
+    <% end %>
+
     <div class="api-section">Response headers</div>
     <pre class="api-code-block"><%= Enum.map_join(@result.headers, "\n", fn {k, v} -> "#{k}: #{v}" end) %></pre>
 
@@ -673,6 +869,20 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     <pre class="api-code-block"><%= format_body(@result) %></pre>
     """
   end
+
+  # Pretty-print assert tagged tuples for the response panel — turns
+  # `{:status, 200}` into `status == 200`, `{:body_contains, "x"}` into
+  # `body contains "x"`, etc. Falls back to `inspect/1` for unknown tags
+  # so a new assert kind shows up readably instead of crashing the render.
+  defp format_assertion({:status, n}), do: "status == #{n}"
+  defp format_assertion({:body_contains, s}), do: ~s|body contains "#{s}"|
+  defp format_assertion({:body_regex, re}), do: "body matches #{inspect(re)}"
+  defp format_assertion({:json_path, path, _fun}), do: "json[#{Enum.join(path, ".")}] predicate"
+  defp format_assertion({:json_keys_include, keys}), do: "json keys ⊇ #{inspect(keys)}"
+  defp format_assertion({:header, name, _v}), do: ~s|header "#{name}"|
+  defp format_assertion(:not_empty), do: "body not empty"
+  defp format_assertion({:duration_under_ms, n}), do: "duration < #{n}ms"
+  defp format_assertion(other), do: inspect(other)
 
   defp format_body(%{body_json: json}) when is_map(json) or is_list(json),
     do: Jason.encode!(json, pretty: true)
