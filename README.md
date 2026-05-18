@@ -264,7 +264,7 @@ Schemas drive both clients and the desk structure. POST a schema and it appears 
 
 ```bash
 cd api
-mix test                                           # 1324 tests, 2 pre-existing parallel-sandbox flakes (`mix test --failed` re-run: 2/2 pass)
+mix test                                           # ~1324 tests; a handful of pre-existing parallel-sandbox flakes vary per run (`mix test --failed` re-run: all pass)
 mix test test/barkpark_web/integration             # 47 HTTP integration tests
 mix test test/barkpark/plugins/onixedit/export_proof_test.exs  # ONIX export round-trip
 ```
