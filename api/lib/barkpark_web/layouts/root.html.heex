@@ -544,6 +544,15 @@
     .editor-field.has-error .form-input { border-color: var(--destructive); }
     .editor-field.has-error .form-input:focus { box-shadow: 0 0 0 2px hsl(0 62.8% 50.6% / 0.15); }
 
+    /* ── Self-titled structural fields (barkpark-jwcb) ─────────────
+       v2 arrayOf / composite / localizedText render their title in
+       <fieldset><legend>; the outer .editor-field-label is skipped to
+       avoid duplicate titles. Match the regular .editor-field spacing
+       and stack errors + onix hint below the fieldset. */
+    .editor-field-self-titled { margin-bottom: 20px; }
+    .editor-field-self-titled > .field-errors { margin-top: 0.5rem; }
+    .editor-field-self-titled > .bp-onix-hint { display: block; margin-top: 0.25rem; }
+
     /* ── Cross-field validations banner (Task barkpark-cgn) ───────
        Sits between `.editor-meta` and the form, full editor width.
        Empty violations list → no element rendered at all (the

@@ -859,27 +859,61 @@ defmodule BarkparkWeb.StudioComponents do
   def studio_field_renderer(assigns) do
     ~H"""
     <% field_name = @field["name"] %>
+    <% type = @field["type"] %>
     <% rules = @field["validation"] || %{} %>
-    <.editor_field
-      label={@field["title"] || field_name}
-      type={@field["type"]}
-      required={rules["required"] == true}
-      errors={Map.get(@validation_errors, field_name, [])}
-      onix_element={onix_element(@field)}
-    >
-      <%= if PluginAdapter.v2?(@field) do %>
-        <%= PluginAdapter.render(@parent_assigns, @field) %>
-      <% else %>
-        <FieldInputs.input
-          field={@field}
-          editor_form={@editor_form}
-          dataset={@dataset}
-          api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
-        />
-      <% end %>
-    </.editor_field>
+    <% required? = rules["required"] == true %>
+    <% errors = Map.get(@validation_errors, field_name, []) %>
+    <%= if self_titled?(type) do %>
+      <%!-- v2 structural types render their own <legend>; skip outer label,
+           but keep error display + onix hint as inline rows below the field. --%>
+      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"}"}>
+        <%= if PluginAdapter.v2?(@field) do %>
+          <%= PluginAdapter.render(@parent_assigns, @field) %>
+        <% else %>
+          <FieldInputs.input
+            field={@field}
+            editor_form={@editor_form}
+            dataset={@dataset}
+            api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+          />
+        <% end %>
+        <%= if onix = onix_element(@field) do %>
+          <span class="bp-onix-hint" data-onix-element>
+            ONIX: <code><%= onix %></code>
+          </span>
+        <% end %>
+        <%= if errors != [] do %>
+          <div class="field-errors"><%= Enum.join(errors, ", ") %></div>
+        <% end %>
+      </div>
+    <% else %>
+      <.editor_field
+        label={@field["title"] || field_name}
+        type={type}
+        required={required?}
+        errors={errors}
+        onix_element={onix_element(@field)}
+      >
+        <%= if PluginAdapter.v2?(@field) do %>
+          <%= PluginAdapter.render(@parent_assigns, @field) %>
+        <% else %>
+          <FieldInputs.input
+            field={@field}
+            editor_form={@editor_form}
+            dataset={@dataset}
+            api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+          />
+        <% end %>
+      </.editor_field>
+    <% end %>
     """
   end
+
+  # v2 structural field types own their own title via <fieldset><legend>.
+  # Routing them through `editor_field` would render the same title twice
+  # — once in `<label class="editor-field-label">`, once in the legend.
+  # See `barkpark-jwcb`.
+  defp self_titled?(type), do: type in ~w(arrayOf composite localizedText)
 
   @doc """
   Image-picker modal extracted from the legacy inline block at
