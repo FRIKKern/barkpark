@@ -1527,28 +1527,67 @@ defmodule BarkparkWeb.StudioComponents do
         <a
           href={interpolate_doc_action_href(@action, @editor_doc, @dataset)}
           class={action_button_class(@action)}
+          title={@action["label"]}
+          aria-label={@action["label"]}
           data-test-id={doc_action_test_id(@action)}
-        ><%= @action["label"] %></a>
+        ><.doc_action_glyph action={@action} /></a>
       <% "modal" -> %>
         <button
           type="button"
           class={action_button_class(@action)}
           style={action_button_style(@action)}
+          title={@action["label"]}
+          aria-label={@action["label"]}
           data-test-id={doc_action_test_id(@action)}
           phx-click="schema_action"
           phx-value-name={@action["name"]}
-        ><%= @action["label"] %></button>
+        ><.doc_action_glyph action={@action} /></button>
       <% _ -> %>
         <%!-- default: "event" — dispatch the named phx-click event --%>
         <button
           type="button"
           class={action_button_class(@action)}
           style={action_button_style(@action)}
+          title={@action["label"]}
+          aria-label={@action["label"]}
           data-test-id={doc_action_test_id(@action)}
           phx-click={doc_action_event(@action)}
-        ><%= @action["label"] %></button>
+        ><.doc_action_glyph action={@action} /></button>
     <% end %>
     """
+  end
+
+  # Renders the action's icon if one is declared, falling back to the
+  # text label so plugin-contributed actions that pre-date the icon
+  # convention still render a clickable button. The icon SVG is
+  # aria-hidden so screen readers announce the parent button's
+  # aria-label exactly once. See task barkpark-jl4x.
+  attr :action, :map, required: true
+
+  defp doc_action_glyph(assigns) do
+    icon_name = doc_action_icon(assigns.action)
+    assigns = assign(assigns, :icon_name, icon_name)
+
+    ~H"""
+    <%= if @icon_name do %>
+      <span class="bp-action-icon" aria-hidden="true"><.icon name={@icon_name} size={16} /></span>
+    <% else %>
+      <%= @action["label"] %>
+    <% end %>
+    """
+  end
+
+  # Read the icon name from either `opts.icon` (task barkpark-jl4x
+  # convention for built-ins) or the top-level `"icon"` key (existing
+  # schema-action spec — see `Barkpark.Plugin.doc_action` typespec and
+  # `OnixEdit.document_actions/0`). Returns nil when neither is set;
+  # callers fall back to the text label so the button stays usable.
+  defp doc_action_icon(action) do
+    case action do
+      %{"opts" => %{"icon" => icon}} when is_binary(icon) -> icon
+      %{"icon" => icon} when is_binary(icon) -> icon
+      _ -> nil
+    end
   end
 
   defp doc_action_event(action) do
