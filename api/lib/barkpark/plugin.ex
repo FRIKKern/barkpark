@@ -217,6 +217,69 @@ defmodule Barkpark.Plugin do
   """
   @type lifecycle_hooks :: %{optional(lifecycle_event()) => [hook_fn()]}
 
+  # ── API test runner types (Goal barkpark-bsp) ────────────────────────
+
+  @typedoc """
+  A single assertion the API test runner evaluates against a response.
+
+  Tagged-tuple shape so the runner can dispatch via pattern match. The
+  fixed set is locked by plan §0 Q2 (`2026-05-18-api-test-runner.html`):
+
+  - `{:status, 200}` — HTTP status must equal the given integer
+  - `{:body_contains, "needle"}` — raw response body includes the substring
+  - `{:body_regex, ~r/.../}` — raw response body matches the regex
+  - `{:json_path, [...keys...], fn val -> bool end}` — decoded JSON at
+    the given key path satisfies the predicate
+  - `{:json_keys_include, ["a", "b"]}` — top-level JSON map has these keys
+  - `{:header, "x-foo", "bar"}` — response header equals the string, or
+    satisfies the predicate when the third element is a 1-arity function
+  - `:not_empty` — response body is non-empty
+  - `{:duration_under_ms, 500}` — request duration under N milliseconds
+  """
+  @type api_test_assert ::
+          {:status, integer()}
+          | {:body_contains, String.t()}
+          | {:body_regex, Regex.t()}
+          | {:json_path, list(), (any() -> boolean())}
+          | {:json_keys_include, [String.t()]}
+          | {:header, String.t(), String.t() | (String.t() -> boolean())}
+          | :not_empty
+          | {:duration_under_ms, non_neg_integer()}
+
+  @typedoc """
+  Declarative auth mode for an API test spec (plan §0 Q3).
+
+  - `:none` — no Authorization header
+  - `:admin` — runner injects the configured admin/dev token
+  - `{:token, "raw-token"}` — literal bearer token
+  - `{:plugin_setting, "key"}` — runner reads the value from the
+    plugin's stored settings row and uses it as a bearer token
+  """
+  @type api_test_auth ::
+          :none
+          | :admin
+          | {:token, String.t()}
+          | {:plugin_setting, String.t()}
+
+  @typedoc """
+  A single API test spec (plan §0 Q5 — single-request only). The
+  runner fires `:method` + `:path` against the configured base_url,
+  evaluates `:asserts`, then ALWAYS fires every `:cleanup` step in
+  order, regardless of pass/fail (Q1).
+  """
+  @type api_test_spec :: %{
+          required(:name) => String.t(),
+          required(:method) => :get | :post | :put | :patch | :delete,
+          required(:path) => String.t(),
+          optional(:headers) => %{String.t() => String.t()},
+          optional(:body) => map() | nil,
+          optional(:auth) => api_test_auth(),
+          optional(:asserts) => [api_test_assert()],
+          optional(:cleanup) => [
+            %{method: atom(), path: String.t(), headers: map() | nil, body: map() | nil}
+          ]
+        }
+
   @callback manifest() :: map()
   @callback register_routes(any()) :: any()
   @callback register_workers(any()) :: [Supervisor.child_spec()]
@@ -376,6 +439,23 @@ defmodule Barkpark.Plugin do
   """
   @callback lifecycle_hooks() :: lifecycle_hooks()
 
+  # ── API test runner callback (Goal barkpark-bsp) ─────────────────────
+
+  @doc """
+  Declare API test specs the runner can fire on demand.
+
+  Returns a list of `api_test_spec()` maps. Each spec is fired by
+  `Barkpark.ApiTestRunner` via `Req` against the configured base_url
+  (Application env `:api_test_runner_base_url`, default `http://localhost:4000`).
+
+  Asserts are evaluated per-spec; the runner returns structured results
+  (pass/fail/error) per the locked decisions in plan §0 (barkpark-bsp).
+
+  Mutating tests should declare `:cleanup` steps — the runner ALWAYS
+  fires cleanup after asserts, regardless of pass/fail.
+  """
+  @callback api_tests() :: [api_test_spec()]
+
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       register_schemas: 1,
@@ -395,7 +475,8 @@ defmodule Barkpark.Plugin do
                       resolve_top_menu_entries: 2,
                       resolve_desk_items: 2,
                       resolve_doc_actions: 2,
-                      lifecycle_hooks: 0
+                      lifecycle_hooks: 0,
+                      api_tests: 0
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -538,6 +619,9 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def lifecycle_hooks, do: %{}
 
+      @impl Barkpark.Plugin
+      def api_tests, do: []
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -558,7 +642,8 @@ defmodule Barkpark.Plugin do
                      resolve_top_menu_entries: 2,
                      resolve_desk_items: 2,
                      resolve_doc_actions: 2,
-                     lifecycle_hooks: 0
+                     lifecycle_hooks: 0,
+                     api_tests: 0
     end
   end
 end
