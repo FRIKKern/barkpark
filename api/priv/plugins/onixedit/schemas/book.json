@@ -4,14 +4,14 @@
   "icon": "book",
   "visibility": "private",
   "groups": [
-    { "name": "core",         "title": "Core" },
-    { "name": "descriptive",  "title": "Descriptive" },
-    { "name": "contributors", "title": "Contributors" },
-    { "name": "subjects",     "title": "Subjects" },
-    { "name": "marketing",    "title": "Marketing" },
-    { "name": "publishing",   "title": "Publishing" },
-    { "name": "supply",       "title": "Supply & Pricing" },
-    { "name": "status",       "title": "Status" }
+    { "name": "core",         "title": "Core",             "icon": "home" },
+    { "name": "descriptive",  "title": "Descriptive",      "icon": "align-left" },
+    { "name": "contributors", "title": "Contributors",     "icon": "users" },
+    { "name": "subjects",     "title": "Subjects",         "icon": "tag" },
+    { "name": "marketing",    "title": "Marketing",        "icon": "megaphone" },
+    { "name": "publishing",   "title": "Publishing",       "icon": "building" },
+    { "name": "supply",       "title": "Supply & Pricing", "icon": "package" },
+    { "name": "status",       "title": "Status",           "icon": "activity" }
   ],
   "deskGroups": [
     { "name": "drafts",  "title": "Drafts",  "filter": { "doc_id": { "starts_with": "drafts." } } },

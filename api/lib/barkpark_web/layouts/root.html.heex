@@ -175,6 +175,22 @@
       border-bottom-color: var(--primary);
       font-weight: 500;
     }
+    /* Icon-only tabs (task barkpark-sfzn) — label moves to title= */
+    .bp-tab .bp-tab-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.125rem;
+      height: 1.125rem;
+    }
+    .bp-tab .bp-tab-icon svg {
+      width: 100%;
+      height: 100%;
+      stroke-width: 1.75;
+    }
+    .bp-tab:has(.bp-tab-icon) {
+      padding-inline: 0.85rem;
+    }
 
     /* ── Cards ─────────────────────────────────────────────────────────── */
     .card {
