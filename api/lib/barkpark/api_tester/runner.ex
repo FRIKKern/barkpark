@@ -191,30 +191,44 @@ defmodule Barkpark.ApiTester.Runner do
 
   defp run_predicate(:ok, _, _), do: :ok
 
-  defp run_predicate(:envelope_has_reserved_keys, %{"documents" => [first | _]}, _) do
-    required = ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
-    missing = Enum.reject(required, &Map.has_key?(first, &1))
-    if missing == [], do: :ok, else: {:fail, "missing keys: #{inspect(missing)}"}
+  defp run_predicate(:envelope_has_reserved_keys, body, _) do
+    case unwrap_result(body) do
+      %{"documents" => [first | _]} ->
+        required = ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
+        missing = Enum.reject(required, &Map.has_key?(first, &1))
+        if missing == [], do: :ok, else: {:fail, "missing keys: #{inspect(missing)}"}
+
+      _ ->
+        {:fail, "no documents in response"}
+    end
   end
 
-  defp run_predicate(:envelope_has_reserved_keys, _, _), do: {:fail, "no documents in response"}
-
   # Single-doc response (GET /v1/data/doc/:ds/:type/:id) returns the envelope
-  # at the top level, not wrapped in a `documents` array.
+  # under the `result` wrapper.
   defp run_predicate(:envelope_top_level, body, _) when is_map(body) do
-    required = ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
-    missing = Enum.reject(required, &Map.has_key?(body, &1))
-    if missing == [], do: :ok, else: {:fail, "missing keys: #{inspect(missing)}"}
+    case unwrap_result(body) do
+      envelope when is_map(envelope) ->
+        required = ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
+        missing = Enum.reject(required, &Map.has_key?(envelope, &1))
+        if missing == [], do: :ok, else: {:fail, "missing keys: #{inspect(missing)}"}
+
+      _ ->
+        {:fail, "expected a flat envelope object"}
+    end
   end
 
   defp run_predicate(:envelope_top_level, _, _), do: {:fail, "expected a flat envelope object"}
 
-  defp run_predicate(:order_ascending, %{"documents" => docs}, _) when length(docs) >= 2 do
-    dates = Enum.map(docs, & &1["_createdAt"])
-    if dates == Enum.sort(dates), do: :ok, else: {:fail, "not ascending: #{inspect(dates)}"}
-  end
+  defp run_predicate(:order_ascending, body, _) do
+    case unwrap_result(body) do
+      %{"documents" => docs} when length(docs) >= 2 ->
+        dates = Enum.map(docs, & &1["_createdAt"])
+        if dates == Enum.sort(dates), do: :ok, else: {:fail, "not ascending: #{inspect(dates)}"}
 
-  defp run_predicate(:order_ascending, _, _), do: {:fail, "need at least 2 docs to verify order"}
+      _ ->
+        {:fail, "need at least 2 docs to verify order"}
+    end
+  end
 
   defp run_predicate(:error_code_not_found, %{"error" => %{"code" => "not_found"}}, _), do: :ok
 
@@ -317,6 +331,13 @@ defmodule Barkpark.ApiTester.Runner do
   defp run_predicate(other, _, _), do: {:fail, "unknown predicate: #{inspect(other)}"}
 
   # ── Helpers ───────────────────────────────────────────────────────────
+
+  # Query endpoints wrap their payload in {"result": {...}, "schemaHash", "etag", ...}.
+  # Predicates that inspect the document envelope must unwrap this layer first.
+  # Endpoints that return a flat top-level shape (search, analytics, history,
+  # webhooks, schemas) pass through unchanged.
+  defp unwrap_result(%{"result" => %{} = inner}), do: inner
+  defp unwrap_result(other), do: other
 
   defp method_atom("GET"), do: :get
   defp method_atom("POST"), do: :post

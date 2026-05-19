@@ -831,7 +831,9 @@ defmodule Barkpark.ApiTester.Endpoints do
         %{
           label: "search with results",
           path_overrides: %{},
-          query_overrides: %{"q" => "post"},
+          # Title substring that matches at least one seeded post.
+          # Generic terms like "post" don't appear in titles.
+          query_overrides: %{"q" => "GROQ"},
           body: nil,
           expect: {200, :search_has_results}
         },
