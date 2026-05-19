@@ -28,5 +28,15 @@
 #
 # See api/test/barkpark/repo/migrations/codelist_issue_version_test.exs.
 #
-ExUnit.start(exclude: [:bokbasen_integration, :phase8_demo, :requires_wi3, :requires_wi4, :flaky])
+# Goal barkpark-G1 — the fresh-install invariant regression bar
+# (`plugin_free_boot_test.exs`) stops and restarts the whole :barkpark app
+# inside `setup_all` with `:plugins` forced to `[]`. Tagged `:boot_test` so
+# the default `mix test` invocation stays clean of the app restart. Run
+# explicitly:
+#
+#     mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
+#
+ExUnit.start(
+  exclude: [:bokbasen_integration, :phase8_demo, :requires_wi3, :requires_wi4, :flaky, :boot_test]
+)
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)
