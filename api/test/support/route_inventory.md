@@ -108,7 +108,7 @@ Plug stack: `:api` ∪ `RequireToken` ∪ `RequireAdmin`.
 | GET    | /v1/plugins/settings/:plugin_name        | PluginSettingsController:show     | admin | yes (plugin_settings_controller_test.exs, 99 LOC) |
 | PUT    | /v1/plugins/settings/:plugin_name        | PluginSettingsController:update   | admin | yes (plugin_settings_controller_test.exs covers PUT roundtrip) |
 | DELETE | /v1/plugins/settings/:plugin_name        | PluginSettingsController:delete   | admin | yes (plugin_settings_controller_test.exs covers DELETE) |
-| GET    | /v1/plugins/onixedit/export/:dataset/:id | OnixeditExportController:show     | admin | yes (onixedit_export_controller_test.exs, 145 LOC) |
+| GET    | /v1/plugins/onixedit/export/:dataset/:id | Barkpark.Plugins.OnixEdit.Web.ExportController:show | admin | yes (test/barkpark/plugins/onixedit/web/export_controller_test.exs, 145 LOC) |
 | GET    | /v1/webhooks/:dataset                    | WebhookController:index           | admin | yes (webhooks_test.exs, 73 LOC — full CRUD lifecycle) |
 | GET    | /v1/webhooks/:dataset/:id                | WebhookController:show            | admin | yes (webhooks_test.exs) |
 | POST   | /v1/webhooks/:dataset                    | WebhookController:create          | admin | yes (webhooks_test.exs) |
@@ -205,7 +205,7 @@ Routes with **no** coverage are concentrated in two surfaces:
     {"method": "GET",    "path": "/v1/plugins/settings/:plugin_name",              "pipeline": "api+require_admin",                  "module": "BarkparkWeb.PluginSettingsController",  "action": "show",               "auth": "admin",                 "test_coverage": "yes"},
     {"method": "PUT",    "path": "/v1/plugins/settings/:plugin_name",              "pipeline": "api+require_admin",                  "module": "BarkparkWeb.PluginSettingsController",  "action": "update",             "auth": "admin",                 "test_coverage": "yes"},
     {"method": "DELETE", "path": "/v1/plugins/settings/:plugin_name",              "pipeline": "api+require_admin",                  "module": "BarkparkWeb.PluginSettingsController",  "action": "delete",             "auth": "admin",                 "test_coverage": "yes"},
-    {"method": "GET",    "path": "/v1/plugins/onixedit/export/:dataset/:id",      "pipeline": "api+require_admin",                  "module": "BarkparkWeb.OnixeditExportController",  "action": "show",               "auth": "admin",                 "test_coverage": "yes"},
+    {"method": "GET",    "path": "/v1/plugins/onixedit/export/:dataset/:id",      "pipeline": "api+require_admin",                  "module": "Barkpark.Plugins.OnixEdit.Web.ExportController",  "action": "show",               "auth": "admin",                 "test_coverage": "yes"},
     {"method": "GET",    "path": "/v1/webhooks/:dataset",                          "pipeline": "api+require_admin",                  "module": "BarkparkWeb.WebhookController",         "action": "index",              "auth": "admin",                 "test_coverage": "yes"},
     {"method": "GET",    "path": "/v1/webhooks/:dataset/:id",                      "pipeline": "api+require_admin",                  "module": "BarkparkWeb.WebhookController",         "action": "show",               "auth": "admin",                 "test_coverage": "yes"},
     {"method": "POST",   "path": "/v1/webhooks/:dataset",                          "pipeline": "api+require_admin",                  "module": "BarkparkWeb.WebhookController",         "action": "create",             "auth": "admin",                 "test_coverage": "yes"},

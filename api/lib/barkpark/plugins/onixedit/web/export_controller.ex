@@ -1,16 +1,24 @@
-defmodule BarkparkWeb.OnixeditExportController do
+defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   @moduledoc """
   WI6 — HTTP endpoint that streams a single book document as ONIX 3.0 XML.
 
       GET /v1/plugins/onixedit/export/:dataset/:id.onix
 
-  Mounted under the same `:require_admin` pipeline as `/v1/schemas/*`. Loads
-  the document by id from the given dataset (preferring the latest draft
-  over the published variant — same selection precedence used by
-  `Plugins.OnixEdit.Actions.publish_to_bokbasen/3` and, historically, by
+  Mounted under the host's `:require_admin` pipeline via OnixEdit's
+  `register_routes/1` callback — picked up by the host router's
+  `plugin_routes(scope: :api)` callsite inside the `scope "/v1/plugins"`
+  block. Loads the document by id from the given dataset (preferring the
+  latest draft over the published variant — same selection precedence used
+  by `Plugins.OnixEdit.Actions.publish_to_bokbasen/3` and, historically, by
   the removed BookEditor LV), enforces `_type == "book"`, then delegates
   to `Barkpark.Plugins.OnixEdit.Export.to_iodata/1` for the XSD-gated
   render.
+
+  Goal `barkpark-G3` s5 — relocated from the host's
+  `lib/barkpark_web/controllers/onixedit_export_controller.ex`
+  (module `BarkparkWeb.OnixeditExportController`) into the plugin
+  namespace. The URL pattern is preserved exactly — the inlined host
+  scope at `/v1/plugins/onixedit` was deleted in the same change.
   """
 
   use BarkparkWeb, :controller
