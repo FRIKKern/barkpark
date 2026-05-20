@@ -50,6 +50,33 @@ defmodule Barkpark.PluginFreeBootTest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
 
+    # `Application.put_env(:plugins, [])` flips the config but does not
+    # purge plugin-contributed rows that earlier test runs (or a prior
+    # `mix ecto.reset`) persisted in `schema_definitions` — most commonly
+    # OnixEdit's `book` schema. Without this purge, assertion #3 ("exactly
+    # the 8 seed names") sees `book` and fails. Q6 of the G1 grill locks
+    # the 8-name list — adding a 9th host seed must trigger an explicit
+    # assertion update, not silent drift.
+    #
+    # Two races to dodge before we delete + reseed:
+    #
+    #   1. The post-boot Task in `Barkpark.Application.start/2` calls
+    #      `Plugins.Registry.discover_and_register/0`, which walks
+    #      `priv/plugins/` from disk and re-registers OnixEdit regardless
+    #      of the `:plugins` env override. It then calls
+    #      `Bootstrap.register_all_schemas/0`, which re-inserts `book`
+    #      via the SHARED sandbox connection we just installed.
+    #
+    #   2. If we delete_all + reseed BEFORE that Task finishes, the
+    #      Task's later `upsert_schema("book", …)` lands AFTER our
+    #      reseed and assertion #3 sees 9 names.
+    #
+    # Wait for the Task.Supervisor to drain, THEN purge + reseed.
+    wait_for_post_boot_task_to_finish()
+
+    Barkpark.Repo.delete_all(Barkpark.Content.SchemaDefinition)
+    reseed_host_schemas()
+
     on_exit(fn ->
       Application.stop(:barkpark)
 
@@ -63,6 +90,193 @@ defmodule Barkpark.PluginFreeBootTest do
     end)
 
     :ok
+  end
+
+  # Polls Barkpark.TaskSupervisor until it reports zero active children,
+  # i.e. the post-boot one-shot Task has run to completion (or crashed).
+  # Bounded at 5s — well above the disk-walk + per-plugin Bootstrap loop
+  # under :shared sandbox mode in practice. On timeout we proceed anyway
+  # rather than block the suite: the worst case is a race where `book`
+  # leaks into assertion #3, which the regression bar will then catch.
+  defp wait_for_post_boot_task_to_finish(deadline_ms \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + deadline_ms
+    do_wait_for_task_supervisor(deadline)
+  end
+
+  defp do_wait_for_task_supervisor(deadline) do
+    cond do
+      System.monotonic_time(:millisecond) > deadline ->
+        :timeout
+
+      Task.Supervisor.children(Barkpark.TaskSupervisor) == [] ->
+        :ok
+
+      true ->
+        Process.sleep(25)
+        do_wait_for_task_supervisor(deadline)
+    end
+  rescue
+    # The supervisor process may not exist yet if ensure_all_started/1
+    # is still wiring children. Yield and try again until the deadline.
+    _ ->
+      Process.sleep(25)
+      do_wait_for_task_supervisor(deadline)
+  end
+
+  # The 8 host seed schemas, inlined verbatim from `priv/repo/seeds.exs`
+  # (the schema half — documents, dev token, codelist seeding skipped).
+  #
+  # Option B (inline) over option A (Code.eval_file seeds.exs) because
+  # seeds.exs is monolithic: schema seeding is followed by 27 document
+  # inserts, dev-token creation, plugin-Bootstrap, ONIX codelist seeding,
+  # and Thema codelist seeding. The test only queries `/api/schemas` — the
+  # extra inserts (especially ~28k codelist rows) are noise. Coupling the
+  # test to the canonical 8-schema list IS the regression bar (Q6 locked).
+  defp reseed_host_schemas do
+    dataset = "production"
+
+    host_specs = [
+      %{
+        name: "post",
+        title: "Post",
+        icon: "📄",
+        visibility: "public",
+        dataset: dataset,
+        fields: [
+          %{name: "title", title: "Title", type: "string"},
+          %{name: "slug", title: "Slug", type: "slug"},
+          %{
+            name: "status",
+            title: "Status",
+            type: "select",
+            options: ["draft", "published", "archived"]
+          },
+          %{name: "publishedAt", title: "Published At", type: "datetime"},
+          %{name: "excerpt", title: "Excerpt", type: "text", rows: 3},
+          %{name: "body", title: "Body", type: "richText"},
+          %{name: "featuredImage", title: "Featured Image", type: "image"},
+          %{name: "author", title: "Author", type: "reference", refType: "author"},
+          %{name: "featured", title: "Featured Post", type: "boolean"}
+        ]
+      },
+      %{
+        name: "page",
+        title: "Page",
+        icon: "📑",
+        visibility: "public",
+        dataset: dataset,
+        fields: [
+          %{name: "title", title: "Title", type: "string"},
+          %{name: "slug", title: "Slug", type: "slug"},
+          %{name: "body", title: "Page Content", type: "richText"},
+          %{name: "seoTitle", title: "SEO Title", type: "string"},
+          %{name: "seoDescription", title: "SEO Description", type: "text", rows: 2},
+          %{name: "heroImage", title: "Hero Image", type: "image"}
+        ]
+      },
+      %{
+        name: "author",
+        title: "Author",
+        icon: "👤",
+        visibility: "public",
+        dataset: dataset,
+        fields: [
+          %{name: "name", title: "Name", type: "string"},
+          %{name: "slug", title: "Slug", type: "slug"},
+          %{name: "bio", title: "Bio", type: "text", rows: 4},
+          %{name: "avatar", title: "Avatar", type: "image"},
+          %{name: "email", title: "Email", type: "string"},
+          %{
+            name: "role",
+            title: "Role",
+            type: "select",
+            options: ["editor", "writer", "contributor", "admin"]
+          }
+        ]
+      },
+      %{
+        name: "category",
+        title: "Category",
+        icon: "🏷",
+        visibility: "public",
+        dataset: dataset,
+        fields: [
+          %{name: "title", title: "Title", type: "string"},
+          %{name: "slug", title: "Slug", type: "slug"},
+          %{name: "description", title: "Description", type: "text", rows: 2},
+          %{name: "color", title: "Color", type: "color"}
+        ]
+      },
+      %{
+        name: "project",
+        title: "Project",
+        icon: "💼",
+        visibility: "public",
+        dataset: dataset,
+        fields: [
+          %{name: "title", title: "Title", type: "string"},
+          %{name: "slug", title: "Slug", type: "slug"},
+          %{name: "client", title: "Client", type: "string"},
+          %{
+            name: "status",
+            title: "Status",
+            type: "select",
+            options: ["planning", "active", "completed", "archived"]
+          },
+          %{name: "description", title: "Description", type: "richText"},
+          %{name: "coverImage", title: "Cover Image", type: "image"},
+          %{name: "startDate", title: "Start Date", type: "datetime"},
+          %{name: "featured", title: "Featured", type: "boolean"}
+        ]
+      },
+      %{
+        name: "siteSettings",
+        title: "Site Settings",
+        icon: "⚙",
+        visibility: "private",
+        dataset: dataset,
+        fields: [
+          %{name: "title", title: "Site Title", type: "string"},
+          %{name: "description", title: "Site Description", type: "text", rows: 2},
+          %{name: "logo", title: "Logo", type: "image"},
+          %{name: "analyticsId", title: "Analytics ID", type: "string"}
+        ]
+      },
+      %{
+        name: "navigation",
+        title: "Navigation",
+        icon: "🧭",
+        visibility: "private",
+        dataset: dataset,
+        fields: [
+          %{name: "title", title: "Menu Title", type: "string"}
+        ]
+      },
+      %{
+        name: "colors",
+        title: "Brand Colors",
+        icon: "🎨",
+        visibility: "private",
+        dataset: dataset,
+        fields: [
+          %{name: "primary", title: "Primary", type: "color"},
+          %{name: "secondary", title: "Secondary", type: "color"},
+          %{name: "accent", title: "Accent", type: "color"}
+        ]
+      }
+    ]
+
+    # Insert via SchemaDefinition.changeset directly — same path as
+    # `priv/repo/seeds.exs`. We deliberately do NOT route through
+    # `Content.upsert_schema/2`: that function injects a string
+    # `"dataset"` key into the (atom-keyed) attrs, which produces a
+    # mixed-key map and Ecto.CastError. The on_conflict: :nothing keeps
+    # this idempotent even if a row already exists from a prior reseed.
+    Enum.each(host_specs, fn attrs ->
+      %Barkpark.Content.SchemaDefinition{}
+      |> Barkpark.Content.SchemaDefinition.changeset(attrs)
+      |> Barkpark.Repo.insert!(on_conflict: :nothing)
+    end)
   end
 
   describe "fresh-install invariant" do
