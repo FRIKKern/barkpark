@@ -1,6 +1,9 @@
-defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
+defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
   @moduledoc """
-  Phase 8 WI4 — admin LV tests for `/admin/onixedit/staleness`.
+  Phase 8 WI4 — admin LV tests for `/admin/onixedit/staleness`. Moved
+  alongside the LV when the console relocated into the OnixEdit plugin
+  namespace in Goal `barkpark-G3` s4. URL is preserved by the plugin
+  mount.
 
   Covers:
 
@@ -23,6 +26,8 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
 
   @admin_token "onixedit-staleness-admin-test-token"
   @junior_token "onixedit-staleness-junior-test-token"
+
+  @url "/admin/onixedit/staleness"
 
   setup %{conn: conn} do
     {:ok, _} =
@@ -53,19 +58,19 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
   describe "admin gate" do
     test "redirects to /studio without an admin token", %{conn: conn} do
       conn = init_test_session(conn, %{})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/staleness")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @url)
     end
 
     test "redirects to /studio for non-admin tokens", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @junior_token})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/staleness")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @url)
     end
   end
 
   describe "empty state" do
     test "shows the friendly empty-state message when no books exist", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, html} = live(conn, @url)
 
       assert html =~ "OnixEdit Codelist Staleness"
       assert has_element?(view, ~s|[data-test-id="onixedit-staleness-empty"]|)
@@ -90,7 +95,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, html} = live(conn, @url)
 
       assert html =~ "stale-row"
       assert html =~ "ack-row"
@@ -107,7 +112,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       seed_book("plain-row", %{"title" => "no codelists here"})
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, _html} = live(conn, @url)
 
       assert has_element?(
                view,
@@ -129,7 +134,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       seed_book("reval-1", original_content)
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, _html} = live(conn, @url)
 
       view
       |> element(~s|tr[data-test-doc-id="reval-1"] button[data-test-action="revalidate"]|)
@@ -156,7 +161,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, _html} = live(conn, @url)
 
       view
       |> element(~s|tr[data-test-doc-id="ack-flip"] button[data-test-action="acknowledge"]|)
@@ -185,7 +190,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, _html} = live(conn, @url)
 
       assert has_element?(
                view,
@@ -220,7 +225,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, _view, html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, _view, html} = live(conn, @url)
 
       assert html =~ "bg-yellow-100"
       assert html =~ "bg-green-100"
@@ -233,7 +238,7 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLiveTest do
       seed_book("with-issue", %{"title" => "anything"})
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/onixedit/staleness")
+      {:ok, view, _html} = live(conn, @url)
 
       assert has_element?(view, ~s|[data-test-id="current-issue"]|)
     end

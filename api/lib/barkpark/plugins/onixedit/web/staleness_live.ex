@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.Admin.OnixeditStalenessLive do
+defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   @moduledoc """
   Phase 8 WI4 — admin console for ONIX codelist drift in `book` documents.
 
@@ -15,12 +15,14 @@ defmodule BarkparkWeb.Admin.OnixeditStalenessLive do
 
   ## Auth
 
-  Mounted inside the existing `:admin_ops` `live_session` in
-  `BarkparkWeb.Router`. The session uses the
-  `BarkparkWeb.LiveAuth.:admin` `on_mount` hook — same gate as
-  `/admin/bokbasen`. Tokens without `admin` permission redirect to
-  `/studio` with a flash. Phase 8 may grow a dedicated `ops` role; for
-  now WI4 inherits the WI6 admin gate.
+  Mounted via OnixEdit's `register_routes/1` callback (Goal `barkpark-G3`
+  task s4) with `auth: :ops`. The host router's `:plugin_ops`
+  live_session uses `BarkparkWeb.LiveAuth.:ops` as its on_mount hook —
+  same gate as the sibling Bokbasen console. Tokens without `admin` (or
+  the dedicated `ops` permission) redirect to `/studio` with a flash.
+  Final mount lives at `/admin/onixedit/staleness` — same URL as before
+  the move, the plugin-side path happens to coincide with the host
+  scope's path.
 
   ## Pill colours
 
