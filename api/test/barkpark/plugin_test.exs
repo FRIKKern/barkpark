@@ -13,7 +13,7 @@ defmodule Barkpark.PluginTest do
     end
 
     test "default optional callbacks no-op safely" do
-      assert Barkpark.Plugins.Hello.register_routes(:any_router) == :ok
+      assert Barkpark.Plugins.Hello.register_routes(%{}) == []
       assert Barkpark.Plugins.Hello.register_workers(:any_supervisor) == []
       assert Barkpark.Plugins.Hello.register_schemas([]) == []
       assert Barkpark.Plugins.Hello.validate_settings(%{}) == :ok

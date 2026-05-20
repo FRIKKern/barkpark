@@ -146,7 +146,7 @@ defmodule Barkpark.Plugins.OnixEditTest do
     end
 
     test "default behaviour callbacks return their no-op shapes" do
-      assert OnixEdit.register_routes(:noop) == :ok
+      assert OnixEdit.register_routes(%{}) == []
       assert OnixEdit.validate_settings(%{}) == :ok
       assert OnixEdit.checkers() == []
     end
