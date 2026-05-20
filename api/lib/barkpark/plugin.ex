@@ -71,7 +71,9 @@ defmodule Barkpark.Plugin do
           optional(:options) => [String.t()],
           optional(:default) => term(),
           optional(:hint) => String.t(),
-          optional(:group) => String.t()
+          optional(:group) => String.t(),
+          optional(:masked) => boolean(),
+          optional(:placeholder) => String.t()
         }
 
   @typedoc """

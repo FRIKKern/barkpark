@@ -110,7 +110,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
   end
 
-  describe "bokbasen typed preset" do
+  describe "typed renderer driven by settings_schema/0 (bokbasen example)" do
     setup %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       prev = Application.get_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
@@ -143,7 +143,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute html =~ ~s(id="settings_json")
     end
 
-    test "submitting the typed form persists via Bokbasen.Settings", %{conn: conn} do
+    test "submitting the typed form persists via Settings.put", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/studio/settings")
 
       view
