@@ -111,7 +111,14 @@ defmodule BarkparkWeb.Router do
   # `scope "/studio"` here contributes the `/studio` prefix → final
   # `/studio/onixedit/ping`. MUST come before the `/studio/:dataset`
   # catch-all scope below.
-  scope "/studio", BarkparkWeb do
+  #
+  # NOTE: this scope intentionally omits the second `BarkparkWeb` alias
+  # arg that other scopes carry. Plugin modules are fully qualified
+  # (e.g. `Barkpark.Plugins.OnixEdit.PingLive`) — passing a host alias
+  # here would cause Phoenix's `scope` macro to prepend `BarkparkWeb.`
+  # to those names, breaking module resolution (Goal `barkpark-G2`
+  # task s4 pilot proof).
+  scope "/studio" do
     pipe_through :browser
 
     live_session :plugin_admin,
@@ -125,7 +132,8 @@ defmodule BarkparkWeb.Router do
   # For plugin-supplied routes that opt out of the admin gate via
   # `auth: :none` in the route spec opts (e.g. OAuth callbacks). No
   # `on_mount` admin hook; plugins handle their own auth inside the LV.
-  scope "/studio", BarkparkWeb do
+  # Same no-alias rationale as the `:plugin_admin` scope above.
+  scope "/studio" do
     pipe_through :browser
 
     live_session :plugin_public,
