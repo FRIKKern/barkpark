@@ -19,8 +19,7 @@ defmodule BarkparkWeb.Router.Plugins do
       {:live, "/onixedit/ping", PingLive, :index}                 # default :admin
       {:live, "/onixedit/callback", CallbackLive, :index, auth: :public}
       {:live, "/admin/onixedit/staleness", StalenessLive, :index, auth: :ops}
-      {:get, "/v1/plugins/onixedit/export/:dataset/:id",
-       BarkparkWeb.OnixeditExportController, :show, auth: :api}
+      {:get, "/onixedit/export/:dataset/:id", ExportController, :show, auth: :api}
 
   The macro accepts a `scope:` option that selects which subset of routes
   to emit at this callsite:

@@ -23,7 +23,7 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
   ## Public surface
 
     * `export_onix_path/2` — pure URL helper for the `kind:link` export
-      action (mounted route in `OnixeditExportController`).
+      action (mounted route in `Barkpark.Plugins.OnixEdit.Web.ExportController`).
     * `publish_to_bokbasen/3` — handles both `:dryrun` (in-memory XML
       render + summary) and `:real` (Oban enqueue + pending marker)
       modes. Returns `{:ok, result}` or `{:error, reason}` so the caller
@@ -41,7 +41,8 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
 
   @doc """
   Returns the canonical export URL for the `book` document at `doc_id`
-  in `dataset`. Mirrors the path mounted by `OnixeditExportController`.
+  in `dataset`. Mirrors the path mounted by
+  `Barkpark.Plugins.OnixEdit.Web.ExportController`.
 
   Used by the schema registry's `kind:link` export action — StudioLive
   interpolates this into the rendered `<a href>` so a click downloads
@@ -96,9 +97,10 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
 
   # ── doc resolution ────────────────────────────────────────────────────────
 
-  # Prefer draft over published, matching the OnixeditExportController
-  # selection precedence (the historical BookEditor LV used the same
-  # precedence before its removal). Both branches return `_type == "book"`
+  # Prefer draft over published, matching the
+  # Barkpark.Plugins.OnixEdit.Web.ExportController selection precedence
+  # (the historical BookEditor LV used the same precedence before its
+  # removal). Both branches return `_type == "book"`
   # by virtue of the document carrying its own type; callers may still
   # surface a non-book error if they want stricter contracts.
   defp load_book(doc_id, dataset) do

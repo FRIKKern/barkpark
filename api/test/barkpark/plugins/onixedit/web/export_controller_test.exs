@@ -1,9 +1,15 @@
-defmodule BarkparkWeb.OnixeditExportControllerTest do
+defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
   @moduledoc """
   WI6 — contract tests for `GET /v1/plugins/onixedit/export/:dataset/:id.onix`.
 
   Covers: 200 happy-path with ONIX XML body, 401 (no token), 403 (non-admin),
   404 (missing doc), 400 (wrong _type).
+
+  Goal `barkpark-G3` s5 relocated this file from
+  `test/barkpark_web/controllers/onixedit_export_controller_test.exs`
+  alongside the controller's move into the plugin namespace. The URL
+  pattern is unchanged — the controller now mounts via the plugin
+  highway's `:api` scope rather than the deleted inlined host scope.
   """
 
   use BarkparkWeb.ConnCase, async: false

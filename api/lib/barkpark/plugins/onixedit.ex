@@ -167,7 +167,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   @doc """
   Plugin-contributed routes.
 
-  Three routes today, mounted at compile time by the host router's
+  Four routes today, mounted at compile time by the host router's
   `plugin_routes/1` macro:
 
     * `/studio/onixedit/ping` — pilot route from G2 s4 (admin-only,
@@ -181,12 +181,21 @@ defmodule Barkpark.Plugins.OnixEdit do
       codelist drift (Goal `barkpark-G3` s4, was
       `BarkparkWeb.Admin.OnixeditStalenessLive` — same URL kept;
       lived in host namespace before this move).
+    * `/v1/plugins/onixedit/export/:dataset/:id` — admin-only HTTP
+      controller that streams a `book` document as ONIX 3.0 XML
+      (Goal `barkpark-G3` s5, was
+      `BarkparkWeb.OnixeditExportController`). `auth: :api` mounts it
+      under the host's `[:api, :require_admin]` pipeline via the
+      `plugin_routes(scope: :api)` callsite inside
+      `scope "/v1/plugins"`. URL preserved.
 
   Path mounting: each plugin path is relative to the host scope that
   wraps the matching `plugin_routes/1` callsite. The pilot lives under
   `scope "/studio"` (admin scope, default `:admin` auth) → `/studio` +
   `/onixedit/ping`. The two consoles live under `scope "/admin"` (ops
-  scope) → `/admin` + `/onixedit/<console>`.
+  scope) → `/admin` + `/onixedit/<console>`. The export controller
+  lives under `scope "/v1/plugins"` (api scope) → `/v1/plugins` +
+  `/onixedit/export/:dataset/:id`.
 
   The old `/admin/bokbasen` URL is kept alive by a 301 redirect in
   `BarkparkWeb.Router` (back-compat per Goal `barkpark-G3` Q3 grill
@@ -199,7 +208,9 @@ defmodule Barkpark.Plugins.OnixEdit do
       {:live, "/onixedit/bokbasen", Barkpark.Plugins.OnixEdit.Web.BokbasenLive, :index,
        auth: :ops},
       {:live, "/onixedit/staleness", Barkpark.Plugins.OnixEdit.Web.StalenessLive, :index,
-       auth: :ops}
+       auth: :ops},
+      {:get, "/onixedit/export/:dataset/:id", Barkpark.Plugins.OnixEdit.Web.ExportController,
+       :show, auth: :api}
     ]
   end
 
