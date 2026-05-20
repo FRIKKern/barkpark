@@ -1,6 +1,10 @@
 defmodule BarkparkWeb.Router do
   use BarkparkWeb, :router
 
+  # Compile-time macro that folds plugin-contributed routes into the host
+  # router. See `BarkparkWeb.Router.Plugins` and Goal barkpark-G2.
+  import BarkparkWeb.Router.Plugins
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -96,6 +100,38 @@ defmodule BarkparkWeb.Router do
 
     get "/onixedit/book/:doc_id", OnixeditRedirectController, :show
     get "/onixedit/book/:doc_id/view", OnixeditRedirectController, :show
+  end
+
+  # ── Plugin-contributed routes — admin-gated (Goal barkpark-G2 s3) ─────
+  # `plugin_routes(scope: :admin)` expands at compile time to one
+  # Phoenix.Router AST node per `{:live, …}` / `{:get, …}` / etc. tuple
+  # returned by each plugin's `register_routes/1` callback whose `:auth`
+  # opt resolves to `:admin` (the default when omitted). Plugin paths
+  # include the slug — the plugin returns `"/onixedit/ping"` and the
+  # `scope "/studio"` here contributes the `/studio` prefix → final
+  # `/studio/onixedit/ping`. MUST come before the `/studio/:dataset`
+  # catch-all scope below.
+  scope "/studio", BarkparkWeb do
+    pipe_through :browser
+
+    live_session :plugin_admin,
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      plugin_routes(scope: :admin)
+    end
+  end
+
+  # ── Plugin-contributed routes — public (`auth: :none`) ────────────────
+  # For plugin-supplied routes that opt out of the admin gate via
+  # `auth: :none` in the route spec opts (e.g. OAuth callbacks). No
+  # `on_mount` admin hook; plugins handle their own auth inside the LV.
+  scope "/studio", BarkparkWeb do
+    pipe_through :browser
+
+    live_session :plugin_public,
+      layout: {BarkparkWeb.Layouts, :studio} do
+      plugin_routes(scope: :public)
+    end
   end
 
   # ── Studio admin LV — dataset-scoped, admin-gated ─────────────────────
