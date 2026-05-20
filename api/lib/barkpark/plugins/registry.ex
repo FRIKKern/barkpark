@@ -944,6 +944,71 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  Walks registered plugin modules and returns the union of their
+  `register_routes/1` callback results.
+
+  Pure function — does NOT require the Registry GenServer to be alive,
+  because it is called from the `plugin_routes/1` router macro at
+  COMPILE TIME (Goal barkpark-G2 task s3). Discovery reuses the same
+  synchronous `plugin_modules_sync/0` helper that powers
+  `collect_workers/1`, so the unset-vs-empty `:plugins` distinction
+  documented there applies here too: an explicit `[]` returns `[]`
+  (matching the fresh-install invariant the G1 boot test locks), while
+  `:unset` walks `default_paths/0` to fold bundled plugins in.
+
+  Per-plugin error isolation: a plugin that fails to load, fails to
+  export `register_routes/1`, returns a non-list, or whose callback
+  raises contributes nothing — the failure is logged at warning level
+  and the host router still compiles. Mirrors `safe_register_workers/2`.
+
+  Returns a flat list of `Barkpark.Plugin.route_spec()` tagged tuples.
+  """
+  @spec collect_routes(map()) :: [Barkpark.Plugin.route_spec()]
+  def collect_routes(ctx \\ %{}) do
+    ctx = Map.put_new(ctx, :phase, :compile)
+
+    plugin_modules_sync()
+    |> Enum.flat_map(fn module -> safe_register_routes(module, ctx) end)
+  end
+
+  defp safe_register_routes(module, ctx) do
+    try do
+      if Code.ensure_loaded?(module) and function_exported?(module, :register_routes, 1) do
+        case module.register_routes(ctx) do
+          list when is_list(list) ->
+            list
+
+          other ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry.collect_routes/1: #{inspect(module)}." <>
+                "register_routes/1 returned non-list #{inspect(other)} — skipping"
+            )
+
+            []
+        end
+      else
+        []
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_routes/1: #{inspect(module)}." <>
+            "register_routes/1 raised — #{Exception.message(e)}"
+        )
+
+        []
+    catch
+      kind, reason ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_routes/1: #{inspect(module)}." <>
+            "register_routes/1 threw #{kind} #{inspect(reason)}"
+        )
+
+        []
+    end
+  end
+
+  @doc """
   Walks the default discovery roots and registers every plugin found.
 
   Safe to call once during boot; logs warnings (never raises) on per-plugin
