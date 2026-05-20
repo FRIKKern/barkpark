@@ -330,7 +330,12 @@ defmodule BarkparkWeb.Admin.PluginsLive do
     {:implemented, summary("schema", length(schemas), names)}
   end
 
-  defp classify(:register_routes, 1, :ok), do: {:default, "default (no routes)"}
+  defp classify(:register_routes, 1, []), do: {:default, "default (no routes)"}
+
+  defp classify(:register_routes, 1, routes) when is_list(routes) do
+    {:implemented, summary("route", length(routes), [])}
+  end
+
   defp classify(:register_routes, 1, _), do: {:implemented, "registers routes"}
 
   defp classify(:register_workers, 1, []), do: {:default, "default (no workers)"}

@@ -153,6 +153,40 @@ defmodule Barkpark.Plugin do
   """
   @type checker :: {String.t() | atom(), module()}
 
+  @typedoc """
+  HTTP verb tag used in the leading position of a controller-style
+  `route_spec()` tuple.
+  """
+  @type http_verb :: :get | :post | :put | :delete | :patch
+
+  @typedoc """
+  A single Phoenix route a plugin contributes via `register_routes/1`.
+  Tagged-tuple DSL — the first element selects LiveView vs. controller
+  dispatch (Goal barkpark-G2 Q1 locked):
+
+    * `{:live, path, module, action}` — LiveView, named action atom
+    * `{:live, path, module, action, opts}` — LiveView with options
+    * `{verb, path, controller, action}` — controller action for the
+      given HTTP verb
+    * `{verb, path, controller, action, opts}` — controller with options
+
+  `opts` is a keyword list. Recognised keys (Goal barkpark-G2 Q3):
+
+    * `auth: :admin | :none` — auth gate. Defaults to `:admin`; pass
+      `:none` to opt out (e.g. public OAuth callback).
+    * `as: atom()` — Phoenix route name (`Routes.<as>_path/2`).
+
+  Paths join under the host's `/studio/<plugin-slug>/` scope; specs
+  should declare relative paths.
+  """
+  @type route_spec ::
+          {:live, path :: String.t(), module :: module(), action :: atom()}
+          | {:live, path :: String.t(), module :: module(), action :: atom(),
+             opts :: keyword()}
+          | {http_verb(), path :: String.t(), controller :: module(), action :: atom()}
+          | {http_verb(), path :: String.t(), controller :: module(), action :: atom(),
+             opts :: keyword()}
+
   # ── Lifecycle hook types (Goal barkpark-9lq) ─────────────────────────
 
   @typedoc """
@@ -283,7 +317,34 @@ defmodule Barkpark.Plugin do
         }
 
   @callback manifest() :: map()
-  @callback register_routes(any()) :: any()
+
+  @doc """
+  Plugin contributes Phoenix routes that mount under the host's `/studio` scope.
+
+  Each spec is a tagged tuple:
+
+      {:live, path, module, action}             # LiveView, default action :index
+      {:live, path, module, action, opts}       # LiveView with options
+      {:get, path, controller, action}          # controller action
+      {:get, path, controller, action, opts}    # controller with options
+
+  `opts` is a keyword list. Recognised keys:
+
+    * `auth: :admin | :none` — auth gate. Defaults to `:admin` (admin-only).
+      `:none` opts out (e.g. public OAuth callbacks).
+    * `as: atom()` — Phoenix route name (`Routes.<as>_path/2`).
+
+  Paths are joined under `/studio/<plugin-slug>/`. Plugins should write paths
+  as relative (`"/onixedit/ping"`, not `"/studio/onixedit/ping"`); the host
+  macro prepends the scope.
+
+  `ctx` is the call-time context — `%{scope: :admin}` from the host router
+  macro today, may grow later. Pattern-match defensively or ignore it.
+
+  The default no-op returns `[]`; plugins opt in by overriding.
+  """
+  @callback register_routes(ctx :: map()) :: [route_spec()]
+
   @callback register_workers(any()) :: [Supervisor.child_spec()]
   @callback register_schemas(keyword()) :: [Barkpark.Content.SchemaDefinition.t()]
   @callback validate_settings(map()) :: :ok | {:error, [{atom(), String.t()}]}
@@ -553,7 +614,7 @@ defmodule Barkpark.Plugin do
       def manifest, do: @barkpark_plugin_manifest
 
       @impl Barkpark.Plugin
-      def register_routes(_router), do: :ok
+      def register_routes(_ctx), do: []
 
       @impl Barkpark.Plugin
       def register_workers(_supervisor), do: []
