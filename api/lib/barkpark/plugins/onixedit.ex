@@ -74,6 +74,42 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @doc """
+  Test the live Bokbasen OAuth connection (Goal `barkpark-G3`, task s1).
+
+  Called by `Plugins.Registry.collect_test_connection/2` from the admin
+  Plugin Settings LiveView's "Test connection" button. Pulls a token
+  via `Bokbasen.Auth.token/0` (which uses the encrypted credentials
+  already persisted via the settings form) and shapes the result into
+  the host's first-wins contract.
+
+  This relocates the body that used to live as a host-side
+  `defp test_connection("Bokbasen")` clause in
+  `plugin_settings_live.ex`. The user-visible flash strings are
+  preserved verbatim so the admin sees no behaviour change. The host
+  no longer branches by plugin name — every plugin opts in via this
+  callback or inherits the `{:error, :not_implemented}` default.
+  """
+  @impl Barkpark.Plugin
+  def test_connection(_settings) do
+    auth_module = Barkpark.Plugins.OnixEdit.Bokbasen.Auth
+
+    cond do
+      not Code.ensure_loaded?(auth_module) ->
+        {:error, "Bokbasen auth client not loaded."}
+
+      not function_exported?(auth_module, :token, 0) ->
+        {:error, "Bokbasen auth client not loaded."}
+
+      true ->
+        case auth_module.token() do
+          {:ok, _bearer} -> {:ok, %{message: "Bokbasen reachable: token OK."}}
+          {:error, %{message: msg}} -> {:error, "Bokbasen unreachable: #{msg}"}
+          {:error, reason} -> {:error, "Bokbasen unreachable: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  @doc """
   Contribute the side-pane preview for `"book"` documents (Goal
   `barkpark-G1`, task s3). Wraps the existing ONIX 3.0 XML exporter
   in the host's first-wins renderer contract — `{:ok, iodata}` lands

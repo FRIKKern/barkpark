@@ -548,6 +548,29 @@ defmodule Barkpark.Plugin do
   @callback content_renderer(doc_type :: String.t(), content :: map(), ctx :: map()) ::
               content_renderer_result()
 
+  # ── Connection-test callback (Goal barkpark-G3, task s1) ─────────────
+
+  @typedoc """
+  Return value of a `test_connection/1` callback. `{:ok, payload}` is
+  surfaced as a success flash by `Plugins.Registry.collect_test_connection/2`
+  (the admin Plugin Settings LiveView reads `payload[:message]`); `{:error,
+  reason}` is surfaced as the failure flash.
+  """
+  @type test_connection_result :: {:ok, payload :: map()} | {:error, reason :: term()}
+
+  @doc """
+  Plugin tests an external connection (API auth, ingestion endpoint, etc.)
+  using the settings the user has configured. Returns `{:ok, payload}`
+  with details for the UI banner or `{:error, reason}` for the failure
+  flash.
+
+  Called from `Plugins.Registry.collect_test_connection/2` — first-wins
+  by plugin name. The default returns `{:error, :not_implemented}` so
+  plugins without a real connection (e.g. format-only plugins) opt out
+  cleanly.
+  """
+  @callback test_connection(settings :: map()) :: test_connection_result()
+
   # ── API test runner callback (Goal barkpark-bsp) ─────────────────────
 
   @doc """
@@ -587,7 +610,8 @@ defmodule Barkpark.Plugin do
                       lifecycle_hooks: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
-                      content_renderer: 3
+                      content_renderer: 3,
+                      test_connection: 1
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -750,6 +774,12 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def content_renderer(_doc_type, _content, _ctx), do: :skip
 
+      # Default test_connection: opt out. Plugins that wrap an external
+      # service override this with their own auth / ping logic and return
+      # `{:ok, payload}` on success.
+      @impl Barkpark.Plugin
+      def test_connection(_settings), do: {:error, :not_implemented}
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -773,7 +803,8 @@ defmodule Barkpark.Plugin do
                      lifecycle_hooks: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
-                     content_renderer: 3
+                     content_renderer: 3,
+                     test_connection: 1
     end
   end
 end

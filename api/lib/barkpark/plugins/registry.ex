@@ -418,6 +418,68 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  First-wins resolver for `Barkpark.Plugin.test_connection/1` (Goal
+  barkpark-G3, task s1). Looks up the plugin by name and calls its
+  `test_connection/1` callback. Returns the plugin's result verbatim,
+  `{:error, :plugin_not_found}` when no plugin matches the name, and
+  `{:error, :not_implemented}` when the matched plugin did not override
+  the default callback.
+
+  Unlike `collect_content_renderer/3` this is NOT a chain walk — there
+  is one plugin per settings page, identified by the `plugin_name`
+  URL segment the admin LiveView already routes on. The host (the
+  admin Plugin Settings LiveView) calls this with the live form's
+  current `settings` map; the plugin sees the same shape its own
+  settings reader (`Bokbasen.Settings.get_credentials/0` etc.) would
+  produce.
+
+  Defensive: a plugin whose `test_connection/1` raises is collapsed to
+  `{:error, {:raised, message}}` so the host never crashes because a
+  connection test exploded mid-form-submit.
+  """
+  @spec collect_test_connection(plugin_name :: String.t() | atom(), settings :: map()) ::
+          Barkpark.Plugin.test_connection_result() | {:error, :plugin_not_found}
+  def collect_test_connection(plugin_name, settings) when is_map(settings) do
+    name = to_string(plugin_name)
+
+    case lookup(name) do
+      {:ok, %{module: module}} -> safe_test_connection(module, settings)
+      :error -> {:error, :plugin_not_found}
+    end
+  end
+
+  defp safe_test_connection(module, settings) do
+    cond do
+      not Code.ensure_loaded?(module) ->
+        {:error, :not_implemented}
+
+      function_exported?(module, :test_connection, 1) ->
+        try do
+          module.test_connection(settings)
+        rescue
+          e ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry: #{inspect(module)}.test_connection/1 raised — " <>
+                Exception.message(e)
+            )
+
+            {:error, {:raised, Exception.message(e)}}
+        catch
+          kind, reason ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry: #{inspect(module)}.test_connection/1 threw " <>
+                "#{kind} #{inspect(reason)}"
+            )
+
+            {:error, {kind, inspect(reason)}}
+        end
+
+      true ->
+        {:error, :not_implemented}
+    end
+  end
+
+  @doc """
   Walks every registered plugin, calls `codelist_seeders/0` to get a
   list of zero-arg functions, and invokes each one in registration
   order (alphabetical by plugin name).
