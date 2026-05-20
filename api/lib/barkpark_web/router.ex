@@ -75,19 +75,18 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # ── Operations admin (LiveView) — `ops` or `admin` permission ───────────
-  # Phase 8 WI5: dedicated `ops` role lets operators reach the publish-ops
-  # console without inheriting full admin (settings-reveal / schema CRUD).
-  # Existing admin tokens still pass — see `BarkparkWeb.LiveAuth.:ops`.
-  scope "/admin", BarkparkWeb.Admin do
+  # ── Back-compat redirect: legacy /admin/bokbasen URL ──────────────────
+  # Goal `barkpark-G3` s4 moved the Bokbasen console from
+  # `BarkparkWeb.Admin.BokbasenLive` at `/admin/bokbasen` into the
+  # OnixEdit plugin's namespace at `/admin/onixedit/bokbasen` (mounted
+  # via `plugin_routes(scope: :ops)` below). Old deep links keep
+  # working via a 301 from the legacy path. The staleness console
+  # already lived at `/admin/onixedit/staleness` and that URL is
+  # preserved exactly by the plugin mount — no redirect needed there.
+  scope "/admin", BarkparkWeb do
     pipe_through :browser
 
-    live_session :admin_ops,
-      on_mount: [{BarkparkWeb.LiveAuth, :ops}],
-      layout: {BarkparkWeb.Layouts, :studio} do
-      live "/bokbasen", BokbasenLive
-      live "/onixedit/staleness", OnixeditStalenessLive, :index
-    end
+    get "/bokbasen", AdminLegacyRedirectController, :bokbasen
   end
 
   # ── Back-compat redirects (must come BEFORE the StudioLive catch-all) ───

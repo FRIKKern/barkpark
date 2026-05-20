@@ -165,27 +165,41 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @doc """
-  Plugin-contributed routes (Goal `barkpark-G2`, task s4 — end-to-end
-  highway proof).
+  Plugin-contributed routes.
 
-  Returns a single pilot route — `/onixedit/ping` mounting `PingLive` —
-  that the host router's `plugin_routes(scope: :admin)` macro folds in
-  at compile time. The plugin embeds its slug in the path; the host's
-  `scope "/studio"` contributes the `/studio` prefix, yielding a final
-  mount of `/studio/onixedit/ping`.
+  Three routes today, mounted at compile time by the host router's
+  `plugin_routes/1` macro:
 
-  Default `auth: :admin` (the macro applies that when the opts keyword
-  list is absent), so the pilot inherits the `:plugin_admin` live-session
-  with its `BarkparkWeb.LiveAuth.:admin` on_mount gate.
+    * `/studio/onixedit/ping` — pilot route from G2 s4 (admin-only,
+      default `auth: :admin`). Confirms the highway is wired up.
+    * `/admin/onixedit/bokbasen` — operations console for Bokbasen
+      publish submissions (Goal `barkpark-G3` s4, was
+      `BarkparkWeb.Admin.BokbasenLive` at `/admin/bokbasen`). `auth: :ops`
+      so the dedicated `ops` role can reach it without inheriting full
+      admin.
+    * `/admin/onixedit/staleness` — operations console for ONIX
+      codelist drift (Goal `barkpark-G3` s4, was
+      `BarkparkWeb.Admin.OnixeditStalenessLive` — same URL kept;
+      lived in host namespace before this move).
 
-  This is a smoke proof — `bokbasen_live`, `onixedit_staleness_live`,
-  and friends move from the host's `/admin` scope into this plugin
-  highway in G3.
+  Path mounting: each plugin path is relative to the host scope that
+  wraps the matching `plugin_routes/1` callsite. The pilot lives under
+  `scope "/studio"` (admin scope, default `:admin` auth) → `/studio` +
+  `/onixedit/ping`. The two consoles live under `scope "/admin"` (ops
+  scope) → `/admin` + `/onixedit/<console>`.
+
+  The old `/admin/bokbasen` URL is kept alive by a 301 redirect in
+  `BarkparkWeb.Router` (back-compat per Goal `barkpark-G3` Q3 grill
+  decision).
   """
   @impl Barkpark.Plugin
   def register_routes(_ctx) do
     [
-      {:live, "/onixedit/ping", Barkpark.Plugins.OnixEdit.PingLive, :index}
+      {:live, "/onixedit/ping", Barkpark.Plugins.OnixEdit.PingLive, :index},
+      {:live, "/onixedit/bokbasen", Barkpark.Plugins.OnixEdit.Web.BokbasenLive, :index,
+       auth: :ops},
+      {:live, "/onixedit/staleness", Barkpark.Plugins.OnixEdit.Web.StalenessLive, :index,
+       auth: :ops}
     ]
   end
 

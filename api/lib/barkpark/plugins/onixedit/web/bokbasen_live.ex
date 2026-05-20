@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.Admin.BokbasenLive do
+defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   @moduledoc """
   Admin operations console for Bokbasen publish submissions.
 
@@ -9,11 +9,13 @@ defmodule BarkparkWeb.Admin.BokbasenLive do
 
   ## Auth
 
-  Mounted via the existing `BarkparkWeb.LiveAuth.:admin` `on_mount` hook —
-  the same gate that protects `/studio/settings`. Tokens without the
-  `"admin"` permission are redirected to `/studio` with a flash. There is
-  no separate "operator" role today; the brief flags admin-role refinement
-  as a Phase 8 follow-up.
+  Mounted via OnixEdit's `register_routes/1` callback (Goal `barkpark-G3`
+  task s4) with `auth: :ops`. The host router's `:plugin_ops`
+  live_session uses `BarkparkWeb.LiveAuth.:ops` as its on_mount hook —
+  tokens with `"admin"` OR a dedicated `"ops"` permission pass; everything
+  else is redirected to `/studio` with a flash. Final mount lives at
+  `/admin/onixedit/bokbasen`; the legacy `/admin/bokbasen` URL is kept
+  alive by a 301 redirect in `BarkparkWeb.Router`.
 
   ## State machine (mirrors WI4 `PublishWorker`)
 

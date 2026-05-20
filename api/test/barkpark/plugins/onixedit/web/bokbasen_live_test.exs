@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.Admin.BokbasenLiveTest do
+defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLiveTest do
   use BarkparkWeb.ConnCase, async: false
   use Oban.Testing, repo: Barkpark.Repo
 
@@ -11,6 +11,8 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
 
   @admin_token "bokbasen-admin-test-token"
   @junior_token "bokbasen-junior-test-token"
+
+  @url "/admin/onixedit/bokbasen"
 
   setup %{conn: conn} do
     {:ok, _} =
@@ -47,19 +49,19 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
   describe "admin gate" do
     test "redirects to /studio without an admin token", %{conn: conn} do
       conn = init_test_session(conn, %{})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/bokbasen")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @url)
     end
 
     test "redirects to /studio for non-admin tokens", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @junior_token})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/bokbasen")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @url)
     end
   end
 
   describe "empty state" do
     test "shows the friendly empty-state message when no submissions exist", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/admin/bokbasen")
+      {:ok, view, html} = live(conn, @url)
 
       assert html =~ "Bokbasen Submissions"
       assert has_element?(view, ~s|[data-test-id="bokbasen-empty"]|)
@@ -81,7 +83,7 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/admin/bokbasen")
+      {:ok, view, html} = live(conn, @url)
 
       assert html =~ "row-accept"
       assert html =~ "row-failed"
@@ -100,7 +102,7 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/bokbasen")
+      {:ok, view, _html} = live(conn, @url)
 
       view
       |> element(~s|tr[data-test-doc-id="retry-me"] button[data-test-action="retry"]|)
@@ -119,7 +121,7 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/bokbasen")
+      {:ok, view, _html} = live(conn, @url)
 
       assert has_element?(
                view,
@@ -142,7 +144,7 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
       })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/admin/bokbasen")
+      {:ok, view, _html} = live(conn, @url)
 
       assert has_element?(view, ~s|tr[data-test-doc-id="live-row"] [data-test-pill="polling"]|)
 
@@ -170,7 +172,7 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
       seed_book("f-fail", %{"state" => "failed", "updated_at" => "2026-04-30T10:00:00.000000Z"})
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/admin/bokbasen")
+      {:ok, view, html} = live(conn, @url)
 
       assert html =~ "f-acc"
       assert html =~ "f-fail"
@@ -182,6 +184,14 @@ defmodule BarkparkWeb.Admin.BokbasenLiveTest do
       html2 = render(view)
       refute html2 =~ ~r/data-test-doc-id="f-acc"/
       assert html2 =~ "f-fail"
+    end
+  end
+
+  describe "back-compat redirect" do
+    test "GET /admin/bokbasen 301-redirects to the new plugin path", %{conn: conn} do
+      conn = get(conn, "/admin/bokbasen")
+      assert conn.status == 301
+      assert Plug.Conn.get_resp_header(conn, "location") == ["/admin/onixedit/bokbasen"]
     end
   end
 end
