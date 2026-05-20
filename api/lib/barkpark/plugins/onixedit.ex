@@ -74,6 +74,41 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @doc """
+  Contribute the side-pane preview for `"book"` documents (Goal
+  `barkpark-G1`, task s3). Wraps the existing ONIX 3.0 XML exporter
+  in the host's first-wins renderer contract — `{:ok, iodata}` lands
+  in the preview pane's `<pre>`, `:skip` hides the pane.
+
+  Three behaviours folded into one callback:
+
+    * **Other doc types** → `:skip` so the host falls through to the
+      next plugin (and ultimately hides the pane).
+    * **`Export.to_string/1` returns `{:error, _}`** (in-progress edits
+      routinely fail the XSD gate) → `:skip` rather than surface a
+      half-rendered preview. The pane disappears until the next
+      autosave succeeds — the soft-error badge that lived in the
+      old hardcoded path is intentionally dropped here because the
+      generic renderer contract has no envelope for it. We can layer
+      a `{:ok, iodata, meta}` shape on later if a publisher actually
+      wants the "export failed" badge back.
+    * **`Export.to_string/1` raises** → caught by the `rescue :skip`
+      below so the host never crashes because a renderer exploded
+      mid-edit. The Registry's own rescue layer would also catch
+      this, but defending here keeps the host trace clean.
+  """
+  @impl Barkpark.Plugin
+  def content_renderer("book", content, _ctx) when is_map(content) do
+    case Barkpark.Plugins.OnixEdit.Export.to_string(content) do
+      {:ok, xml} when is_binary(xml) -> {:ok, xml}
+      _other -> :skip
+    end
+  rescue
+    _ -> :skip
+  end
+
+  def content_renderer(_doc_type, _content, _ctx), do: :skip
+
+  @doc """
   Plugin-contributed supervision children (Goal `barkpark-G1`, task s2).
 
   Returns the OAuth2 token cache used by the Bokbasen client. Folded into

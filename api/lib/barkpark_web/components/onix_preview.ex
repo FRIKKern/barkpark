@@ -1,31 +1,72 @@
 defmodule BarkparkWeb.Components.OnixPreview do
   @moduledoc """
-  Side-pane ONIX 3.0 XML preview for the currently-edited book. Renders
-  the result of `Barkpark.Plugins.OnixEdit.Export.to_string/2` on every
-  autosave (debounced upstream by the parent LiveView via the existing
-  `phx-debounce` on the editor form inputs).
+  Side-pane content preview component. Doc-type-agnostic (Goal
+  `barkpark-G1`, task s3) — receives pre-rendered iodata from the
+  parent LiveView and dumps it into a `<pre>`. The parent obtains
+  the iodata via `Barkpark.Plugins.Registry.collect_content_renderer/3`
+  which walks registered plugins first-wins; with plugins=[] the
+  parent returns `:none` and the component is never mounted.
 
-  Pure server-render — no JS, no syntax highlighting. The pane is only
-  mounted when the editor's `editor_type` is `"book"`; other schemas
-  keep the existing single-pane editor for back-compat (Task #16 scope,
-  matches the v1 ONIX-only constraint declared in the project CLAUDE.md).
+  The legacy file name `onix_preview.ex` is preserved to keep the diff
+  small (the on-disk path is referenced in screenshots, docs, and
+  external bookmarks). The exported function is `content_preview/1`
+  — that's the doc-type-agnostic entrypoint used by
+  `studio_editor_shell/1`. The thin `onix_preview/1` shim still exists
+  for the test file in `test/barkpark_web/components/onix_preview_test.exs`,
+  which pins the visual contract (root class, test id, error badge,
+  empty state) for the original Book / ONIX-specific shape; it
+  delegates to `content_preview/1` with a hard-coded `"ONIX 3.0
+  preview"` header so the legacy class names + copy survive.
 
-  Render contract:
-    * `:doc`   — current document content map (raw, unsaved values OK).
-                 Currently unused inside the component (the parent
-                 recomputes XML upstream) but kept on the attr list so
-                 the call sites stay self-documenting.
-    * `:type`  — schema type name; component is mounted only when this
-                 is `"book"` but the attr is kept for symmetry / debug.
-    * `:xml`   — pre-rendered XML binary (or `nil` before the first
-                 autosave). Component owns the `<pre>` wrapper.
-    * `:error` — any export/validation error term (any-typed by design —
-                 the upstream `Export.to_string/2` may return
-                 `{:xsd_invalid, reasons}` today and could surface other
-                 envelopes later; the component renders a soft badge).
+  Pure server-render — no JS, no syntax highlighting.
+
+  Render contract (`content_preview/1`):
+
+    * `:rendered` — pre-rendered iodata from the winning plugin
+                     renderer. The component renders the `<pre>`
+                     wrapper. Required.
+    * `:type`     — doc-type discriminator (passed through to the
+                     `data-bp-type` attr for test selectors). Required.
+    * `:title`    — header text shown in the preview pane. Defaults
+                     to `"Preview"`; pass an OnixEdit / publisher-
+                     specific string when the renderer wants
+                     prominent branding.
   """
 
   use Phoenix.Component
+
+  attr :rendered, :any,
+    required: true,
+    doc: "pre-rendered iodata from Plugins.Registry.collect_content_renderer/3"
+
+  attr :type, :string, required: true, doc: "doc type discriminator (data-bp-type attr)"
+  attr :title, :string, default: "Preview"
+
+  def content_preview(assigns) do
+    binary = if assigns.rendered, do: IO.iodata_to_binary(assigns.rendered), else: nil
+    assigns = assign(assigns, :binary, binary)
+
+    ~H"""
+    <aside class="bp-onix-preview" data-test-id="onix-preview" data-bp-type={@type}>
+      <header class="bp-onix-preview-header">
+        <span class="bp-onix-preview-title"><%= @title %></span>
+        <span :if={@binary} class="bp-onix-preview-meta">
+          <%= byte_size(@binary) %> bytes
+        </span>
+      </header>
+      <pre :if={@binary} class="bp-onix-preview-body"><code><%= @binary %></code></pre>
+      <div :if={!@binary} class="bp-onix-preview-empty">
+        Start editing to see preview
+      </div>
+    </aside>
+    """
+  end
+
+  # ── Legacy shim ────────────────────────────────────────────────────
+  # Pre-s3 contract: `xml` / `error` assigns + the literal "ONIX 3.0
+  # preview" header + "Start editing to see ONIX" empty-state copy.
+  # Kept alive for the existing component test; new call sites go
+  # through `content_preview/1`.
 
   attr :doc, :map, required: true, doc: "the current document content (raw map)"
   attr :type, :string, required: true

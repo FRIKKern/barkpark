@@ -346,6 +346,78 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  First-wins resolver for the Studio preview pane (Goal barkpark-G1
+  task s3). Walks every registered plugin in load order (Application
+  config when set, otherwise alphabetical-by-name — same source of
+  truth as the additive resolver chain), calls `content_renderer/3` on
+  each, and returns the FIRST `{:ok, iodata}` it gets back. When every
+  plugin returns `:skip` (or no plugin implements the callback) the
+  function returns `:none` and the StudioLive caller hides the preview
+  pane entirely.
+
+  Three reasons this is a simple first-wins instead of an additive
+  `reduce_resolvers/3` fold:
+
+    1. Only one preview can render per doc-type at a time — the pane
+       holds a single `<pre>`. Two plugins claiming `"book"` would
+       fight over the surface.
+    2. The host has no built-in baseline to seed (unlike top-menu /
+       desk-items / doc-actions). With plugins=[] there is no preview.
+    3. The returned iodata flows straight into the rendered pane — no
+       merge / sort / dedup step would be meaningful.
+
+  Defensive: a plugin whose `content_renderer/3` raises is treated as
+  `:skip` and the chain continues. The host never crashes because a
+  preview renderer exploded mid-edit.
+  """
+  @spec collect_content_renderer(String.t(), map(), map()) :: {:ok, iodata()} | :none
+  def collect_content_renderer(doc_type, content, ctx \\ %{})
+      when is_binary(doc_type) and is_map(content) and is_map(ctx) do
+    load_ordered_plugins()
+    |> Enum.find_value(:none, fn entry ->
+      safe_content_renderer_call(entry.module, doc_type, content, ctx)
+    end)
+  end
+
+  # Returns `{:ok, iodata}` when the plugin contributes one (Enum.find_value
+  # treats any non-nil/non-false return as the hit), or `nil` to keep the
+  # chain walking. All non-ok returns + every raise / throw collapse to nil.
+  defp safe_content_renderer_call(module, doc_type, content, ctx) do
+    cond do
+      not Code.ensure_loaded?(module) ->
+        nil
+
+      function_exported?(module, :content_renderer, 3) ->
+        try do
+          case module.content_renderer(doc_type, content, ctx) do
+            {:ok, iodata} -> {:ok, iodata}
+            :skip -> nil
+            _ -> nil
+          end
+        rescue
+          e ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry: #{inspect(module)}.content_renderer/3 raised — " <>
+                Exception.message(e)
+            )
+
+            nil
+        catch
+          kind, reason ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry: #{inspect(module)}.content_renderer/3 threw " <>
+                "#{kind} #{inspect(reason)}"
+            )
+
+            nil
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  @doc """
   Walks every registered plugin, calls `codelist_seeders/0` to get a
   list of zero-arg functions, and invokes each one in registration
   order (alphabetical by plugin name).
