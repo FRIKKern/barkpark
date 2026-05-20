@@ -62,13 +62,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
        cross_violations: [],
        confirm_modal: nil,
        nav_group: nil,
-       # ── ONIX preview side-pane (Task #16) ────────────────────────────
-       # Pane is rendered only when editor_type == "book"; assigns are
-       # mounted unconditionally so toggle / first-autosave paths never
-       # hit a missing-key surprise on non-book schemas.
-       onix_preview_xml: nil,
-       onix_preview_error: nil,
-       onix_preview_visible: true,
+       # ── Content preview side-pane (Goal barkpark-G1, task s3) ─────────
+       # Doc-type-agnostic. Pane is rendered iff a plugin's
+       # `content_renderer/3` callback contributes iodata via
+       # `Plugins.Registry.collect_content_renderer/3` AND the user has
+       # not toggled the pane off. With plugins=[] this assign stays
+       # nil → pane is absent from the layout (fresh-install
+       # invariant, Goal `barkpark-G1`).
+       content_preview_rendered: nil,
+       content_preview_visible: true,
        # ── Document actions (Task barkpark-3yq) ─────────────────────────
        # E2 split-view: read-only secondary editor pane.
        secondary_doc: nil,
@@ -310,12 +312,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, do_autosave(socket, params)}
   end
 
-  # Toggle the ONIX preview side-pane (Task #16). Book editor only —
-  # the button itself is gated on `editor_type == "book"` so a stray
-  # event on a non-book schema just flips a hidden assign.
-  def handle_event("toggle-onix-preview", _, socket) do
+  # Toggle the content preview side-pane (Goal barkpark-G1, task s3).
+  # Doc-type-agnostic — the button itself only renders when a plugin
+  # contributed iodata for the open doc, so a stray event just flips a
+  # hidden assign.
+  def handle_event("toggle-content-preview", _, socket) do
     {:noreply,
-     assign(socket, onix_preview_visible: !socket.assigns.onix_preview_visible)}
+     assign(socket, content_preview_visible: !socket.assigns.content_preview_visible)}
   end
 
   # Toggle the draft-vs-published diff view (Task barkpark-uix). The
@@ -779,8 +782,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # a `kind: "modal"` action lands here. The generic ConfirmModal opens with
   # the action's metadata; dry-run and real confirmations route through
   # `confirm-modal-dryrun` / `confirm-modal-real` below, each of which
-  # dispatches into the plugin-owned action handler (e.g.
-  # `Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3`). `kind: "link"`
+  # dispatches into the plugin-owned action handler resolved via
+  # `Plugins.Registry.collect_action_handlers/1`. `kind: "link"`
   # actions never hit this handler — they're rendered as anchor tags by
   # `StudioComponents.doc_action_button/1`, so a click is a plain HTTP
   # navigation.
@@ -898,7 +901,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             validation_errors: errs,
             cross_violations: compute_cross_violations(schema, params)
           )
-          |> maybe_refresh_onix_preview()
+          |> maybe_refresh_content_preview()
 
         {:error, {:halted, reason}} ->
           # `before_save` hook vetoed the autosave (per plan §0 Q4). The
@@ -925,44 +928,44 @@ defmodule BarkparkWeb.Studio.StudioLive do
     [source: :studio, user_id: socket.assigns[:user_id]]
   end
 
-  # ── ONIX preview side-pane (Task #16) ────────────────────────────────
-  # Recompute the ONIX 3.0 XML preview for the open book document.
-  # Runs at the end of `do_autosave/2`'s success branch, and again from
-  # `rebuild_panes/1` so the preview lands on first-mount (before any
-  # input event has fired). Non-book schemas short-circuit unchanged —
-  # the side pane is book-only by declared scope (project CLAUDE.md
-  # v1 ONIX-only constraint). `Export.to_string/2` runs in <100ms for
-  # a typical book; if it ever grows we'll dispatch to a Task, but for
-  # v1 the inline call keeps the autosave round-trip predictable.
-  defp maybe_refresh_onix_preview(socket) do
-    case socket.assigns[:editor_type] do
-      "book" ->
+  # ── Content preview side-pane (Goal barkpark-G1, task s3) ──────────
+  # Doc-type-agnostic recompute. Runs at the end of `do_autosave/2`'s
+  # success branch, and again from `rebuild_panes/1` so the preview
+  # lands on first-mount (before any input event has fired).
+  #
+  # First-wins resolver: walks registered plugins via
+  # `Plugins.Registry.collect_content_renderer/3` and uses the first
+  # `{:ok, iodata}` it gets. When every plugin returns `:skip` (or
+  # plugins=[]), `:none` ⇒ assign nil ⇒ pane is absent from the layout.
+  # This is the host-side of the s3 refactor — Barkpark itself knows
+  # nothing about `"book"` documents or ONIX XML; OnixEdit's plugin
+  # module contributes the renderer.
+  defp maybe_refresh_content_preview(socket) do
+    doc_type = socket.assigns[:editor_type]
+
+    case doc_type do
+      type when is_binary(type) and type != "" ->
         content = socket.assigns[:editor_form] || %{}
 
-        # Wrap in try/rescue: in-progress edits routinely fail the XSD
-        # gate AND can blow up before validation if a string slipped
-        # into a slot the exporter expects to enumerate (e.g. a list-
-        # backed field that's still a stringly-typed scratch value).
-        # Either way the right behaviour is identical: surface a soft
-        # "export failed" badge and leave the previous XML in place so
-        # a transient miss never blanks the pane.
-        try do
-          case Barkpark.Plugins.OnixEdit.Export.to_string(content) do
-            {:ok, xml} ->
-              assign(socket, onix_preview_xml: xml, onix_preview_error: nil)
+        ctx = %{
+          current_user: socket.assigns[:current_user],
+          user_id: socket.assigns[:user_id],
+          dataset: socket.assigns[:dataset],
+          perspective: socket.assigns[:perspective]
+        }
 
-            {:error, reason} ->
-              assign(socket, onix_preview_error: reason)
-          end
-        rescue
-          e -> assign(socket, onix_preview_error: {:export_raised, e.__struct__})
+        case Barkpark.Plugins.Registry.collect_content_renderer(type, content, ctx) do
+          {:ok, rendered} ->
+            assign(socket, content_preview_rendered: rendered)
+
+          :none ->
+            assign(socket, content_preview_rendered: nil)
         end
 
       _ ->
-        # Non-book schemas: keep assigns at their default `nil` so the
-        # pane is never rendered for them (back-compat for post/page/
-        # author/etc.). Also clear any stale state from a previous book.
-        assign(socket, onix_preview_xml: nil, onix_preview_error: nil)
+        # No doc / no doc_type → clear any stale preview from a
+        # previously-open doc so the pane closes cleanly.
+        assign(socket, content_preview_rendered: nil)
     end
   end
 
@@ -1162,14 +1165,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     assigns = socket_to_assigns(assigns)
     editor_doc = assigns[:editor_doc]
     editor_schema = assigns[:editor_schema]
-    editor_type = assigns[:editor_type]
     is_draft = assigns[:editor_is_draft] == true
     published_doc = assigns[:published_doc]
-    onix_preview_visible = assigns[:onix_preview_visible] == true
+    content_preview_visible = assigns[:content_preview_visible] == true
+    content_preview_rendered = assigns[:content_preview_rendered]
     diff_visible = assigns[:diff_visible] == true
 
     has_published_twin = is_draft and not is_nil(published_doc)
-    is_book = editor_type == "book"
+    has_content_preview = not is_nil(content_preview_rendered)
 
     base = [
       %{
@@ -1220,14 +1223,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
           }
         }
       end,
-      if is_book do
+      if has_content_preview do
         %{
-          "name" => "toggle-onix-preview",
-          "label" => if(onix_preview_visible, do: "Hide XML", else: "Show XML"),
+          "name" => "toggle-content-preview",
+          "label" => if(content_preview_visible, do: "Hide preview", else: "Show preview"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
-            "event" => "toggle-onix-preview",
+            "event" => "toggle-content-preview",
             "class" => "btn btn-ghost btn-sm",
             "data_test_id" => "onix-preview-toggle",
             "icon" => "code"
@@ -1674,7 +1677,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         socket.assigns[:diff_visible] &&
           editor_doc != nil && is_draft && has_published
     )
-    |> maybe_refresh_onix_preview()
+    |> maybe_refresh_content_preview()
   end
 
   # Fetch the published twin of the currently-open draft, if any. Returns
@@ -1882,9 +1885,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
         presences={@presences}
         parent_assigns={assigns}
         nav_group={@nav_group}
-        onix_preview_xml={@onix_preview_xml}
-        onix_preview_error={@onix_preview_error}
-        onix_preview_visible={@onix_preview_visible}
+        content_preview_rendered={@content_preview_rendered}
+        content_preview_visible={@content_preview_visible}
         diff_visible={@diff_visible}
         published_doc={@published_doc}
         doc_actions={resolved_doc_actions(assigns)}

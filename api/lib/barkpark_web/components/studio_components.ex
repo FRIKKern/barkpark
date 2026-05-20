@@ -1369,10 +1369,12 @@ defmodule BarkparkWeb.StudioComponents do
   # fields). Empty list → banner not rendered, no visual cost on
   # schemas that declare no rules.
   attr :cross_violations, :list, default: []
-  # ── ONIX preview side-pane (Task #16) — book-only ──────────────────
-  attr :onix_preview_xml, :string, default: nil
-  attr :onix_preview_error, :any, default: nil
-  attr :onix_preview_visible, :boolean, default: true
+  # ── Content preview side-pane (Goal barkpark-G1, task s3) ──────────
+  # Doc-type-agnostic. Parent passes pre-rendered iodata + a soft
+  # toggle. The pane is rendered iff `content_preview_rendered != nil`
+  # AND the toggle is on — there is NO hardcoded doc-type gate.
+  attr :content_preview_rendered, :any, default: nil
+  attr :content_preview_visible, :boolean, default: true
   # ── Draft-vs-Published diff view (Task barkpark-uix) ───────────────
   # `diff_visible` flips the editor body between the form and the
   # field-level diff. `published_doc` is the published twin of the open
@@ -1406,8 +1408,8 @@ defmodule BarkparkWeb.StudioComponents do
     assigns =
       assigns
       |> assign(
-        :show_onix_preview,
-        assigns.editor_type == "book" and assigns.onix_preview_visible and
+        :show_content_preview,
+        assigns.content_preview_rendered != nil and assigns.content_preview_visible and
           not (assigns.diff_visible and show_diff_toggle)
       )
       |> assign(:show_diff_toggle, show_diff_toggle)
@@ -1448,7 +1450,7 @@ defmodule BarkparkWeb.StudioComponents do
           </:actions>
         </.document_header>
 
-        <div class={"editor-with-preview " <> if(@show_onix_preview, do: "has-onix-preview", else: "")}>
+        <div class={"editor-with-preview " <> if(@show_content_preview, do: "has-onix-preview", else: "")}>
         <div class="editor-body editor-panel-main">
           <%= if @editor_schema do %>
             <div class="editor-meta">
@@ -1508,12 +1510,10 @@ defmodule BarkparkWeb.StudioComponents do
             </form>
           <% end %>
         </div>
-        <BarkparkWeb.Components.OnixPreview.onix_preview
-          :if={@show_onix_preview}
-          doc={@editor_form || %{}}
-          type={@editor_type}
-          xml={@onix_preview_xml}
-          error={@onix_preview_error}
+        <BarkparkWeb.Components.OnixPreview.content_preview
+          :if={@show_content_preview}
+          rendered={@content_preview_rendered}
+          type={@editor_type || ""}
         />
         </div>
       </div>

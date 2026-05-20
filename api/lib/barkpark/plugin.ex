@@ -455,6 +455,36 @@ defmodule Barkpark.Plugin do
   """
   @callback lifecycle_hooks() :: lifecycle_hooks()
 
+  # ── Content renderer callback (Goal barkpark-G1, task s3) ────────────
+
+  @typedoc """
+  Return value of a `content_renderer/3` callback. `{:ok, iodata}` wins
+  the first-wins resolver chain in `Plugins.Registry.collect_content_renderer/3`
+  (StudioLive pipes the iodata straight into the preview pane's `<pre>`);
+  `:skip` falls through to the next plugin.
+  """
+  @type content_renderer_result :: {:ok, iodata()} | :skip
+
+  @doc """
+  Plugin contributes a content-preview renderer for a doc_type.
+
+  Called by StudioLive's preview pane via
+  `Plugins.Registry.collect_content_renderer/3`. First plugin to return
+  `{:ok, iodata}` wins (priority via the same load-order chain other
+  resolvers use); subsequent plugins are skipped. When every plugin
+  returns `:skip` the host returns `:none` and the preview pane is
+  hidden — no special-case wiring per plugin.
+
+  `ctx` carries `:current_user`, `:dataset`, `:perspective`, and
+  whatever else the StudioLive context provides. Plugins should
+  pattern-match on `doc_type` and return `:skip` for types they don't
+  handle. Failures inside the callback should be caught by the plugin
+  (`rescue :skip`) so the host never crashes because a renderer
+  exploded mid-edit.
+  """
+  @callback content_renderer(doc_type :: String.t(), content :: map(), ctx :: map()) ::
+              content_renderer_result()
+
   # ── API test runner callback (Goal barkpark-bsp) ─────────────────────
 
   @doc """
@@ -493,7 +523,8 @@ defmodule Barkpark.Plugin do
                       resolve_doc_actions: 2,
                       lifecycle_hooks: 0,
                       api_tests: 0,
-                      resolve_api_tests: 2
+                      resolve_api_tests: 2,
+                      content_renderer: 3
 
   defmacro __using__(opts) do
     caller_dir = Path.dirname(__CALLER__.file)
@@ -649,6 +680,13 @@ defmodule Barkpark.Plugin do
         end
       end
 
+      # Default content_renderer: opt out. Plugins that contribute a
+      # preview override this clause with a pattern-matched
+      # `content_renderer/3` and return `{:ok, iodata}` for the types
+      # they handle.
+      @impl Barkpark.Plugin
+      def content_renderer(_doc_type, _content, _ctx), do: :skip
+
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
@@ -671,7 +709,8 @@ defmodule Barkpark.Plugin do
                      resolve_doc_actions: 2,
                      lifecycle_hooks: 0,
                      api_tests: 0,
-                     resolve_api_tests: 2
+                     resolve_api_tests: 2,
+                     content_renderer: 3
     end
   end
 end

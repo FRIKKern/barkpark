@@ -395,7 +395,7 @@
     .pane-body { flex: 1; overflow-y: auto; }
 
     /* ── Desk-group filter chips (schema-declared list filters on a
-       :document_type_list pane — e.g. book Drafts/Pending/Synced/Failed/All).
+       :document_type_list pane — e.g. Drafts/Pending/Synced/Failed/All).
        Lives between the pane header and the doc list. ──────────────── */
     .bp-desk-filter {
       display: flex; flex-wrap: wrap; gap: 4px;
@@ -580,12 +580,14 @@
     .bp-violation-item.bp-violations-warning { color: var(--warning); }
     .bp-violation-fields { color: var(--fg-dim); font-family: var(--font-mono); font-size: 11px; }
 
-    /* ── ONIX preview side-pane (Task #16 — book schema only).
-       The shell wraps the editor-body and an optional <aside> in a
-       flex row when `.has-onix-preview` is present; non-book editors
-       keep the legacy single-column body (no `.has-onix-preview`)
-       and `.editor-with-preview` collapses to a plain block via the
-       lone child taking 100% width. ────────────────────────────── */
+    /* ── Content preview side-pane (Goal barkpark-G1, task s3).
+       Doc-type-agnostic. The shell wraps the editor-body and an
+       optional <aside> in a flex row when `.has-onix-preview` is
+       present; when no plugin contributed a renderer the wrapper
+       collapses to a plain block via the lone child taking 100%
+       width. Class name kept as `.has-onix-preview` for CSS
+       continuity — selector identifies the LAYOUT mode, not the
+       plugin. ─────────────────────────────────────────────────── */
     .editor-with-preview { display: flex; gap: 0; flex: 1; min-height: 0; }
     .editor-with-preview .editor-panel-main { flex: 1 1 100%; min-width: 0; }
     .editor-with-preview.has-onix-preview .editor-panel-main { flex: 1 1 60%; max-width: none; }
@@ -1401,11 +1403,11 @@
       }
     };
 
-    // OnixEdit WI6 — server-pushed download trigger. The LiveView pushes a
+    // Server-pushed file-download trigger. A LiveView pushes a
     // `download` event with `{url, filename}`; we synthesize a hidden anchor
     // click to trigger a normal browser download flow against the
-    // admin-gated controller.
-    Hooks.OnixDownload = {
+    // backing controller.
+    Hooks.PluginDownload = {
       mounted() {
         this.handleEvent("download", ({url, filename}) => {
           const a = document.createElement("a");
