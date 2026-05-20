@@ -147,9 +147,17 @@ defmodule Barkpark.Plugins.OnixEditTest do
 
     test "default behaviour callbacks return their no-op shapes" do
       assert OnixEdit.register_routes(:noop) == :ok
-      assert OnixEdit.register_workers(:noop) == []
       assert OnixEdit.validate_settings(%{}) == :ok
       assert OnixEdit.checkers() == []
+    end
+
+    test "register_workers/1 contributes the Bokbasen.Auth token cache" do
+      # Goal barkpark-G1, task s2: OnixEdit overrides the no-op default and
+      # asks the host to start its OAuth2 token cache as part of the boot
+      # supervision tree. The previous hardcode in Barkpark.Application is
+      # gone; this callback is the only way Auth gets started.
+      assert OnixEdit.register_workers(%{phase: :boot}) ==
+               [Barkpark.Plugins.OnixEdit.Bokbasen.Auth]
     end
   end
 

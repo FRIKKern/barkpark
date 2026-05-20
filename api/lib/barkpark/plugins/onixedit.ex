@@ -74,6 +74,26 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @doc """
+  Plugin-contributed supervision children (Goal `barkpark-G1`, task s2).
+
+  Returns the OAuth2 token cache used by the Bokbasen client. Folded into
+  the host supervision tree by `Barkpark.Plugins.Registry.collect_workers/1`
+  during `Barkpark.Application.start/2` — see that callsite for the
+  ordering rationale (Vault must be up so `Auth` can decrypt the stored
+  client_secret; endpoint must be down so traffic does not race the token
+  cache coming up).
+
+  Lazy GenServer — does NOT fetch a token at boot; the first `Auth.token/0`
+  call triggers the first fetch.
+  """
+  @impl Barkpark.Plugin
+  def register_workers(_ctx) do
+    [
+      Barkpark.Plugins.OnixEdit.Bokbasen.Auth
+    ]
+  end
+
+  @doc """
   Resolve the editor-header doc-action list — drops the
   `publish_to_bokbasen` entry while the book's Bokbasen submission is
   in-flight.

@@ -738,6 +738,140 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  Walks registered plugin modules and returns the union of their
+  `register_workers/1` callback results.
+
+  Pure function — does NOT require the Registry GenServer to be alive,
+  because it is called from `Barkpark.Application.start/2` while the
+  supervision tree is being constructed (the Registry process is itself
+  a child of that tree, not yet started). Discovery happens via the
+  same source-of-truth chain documented in the module doc, with one
+  twist: when `:plugins` is unset the function performs a synchronous
+  disk walk of `default_paths/0` so production boots fold OnixEdit's
+  Bokbasen.Auth in even when no explicit config declares the plugin.
+
+  Source-of-truth precedence (matches `load_ordered_plugins/0` at
+  runtime, with the unset-vs-empty distinction added):
+
+    * `Application.fetch_env(:barkpark, :plugins)` returns `{:ok, list}` —
+      honour the list verbatim, mapping each entry to its module atom.
+      An EXPLICIT empty list returns `[]` (this is the
+      `plugin_free_boot_test.exs` contract).
+    * `:error` (unset) — walk `default_paths/0` synchronously, the same
+      filesystem chain that powers `discover_and_register/0`.
+
+  Per-plugin error isolation: a plugin that fails to load, fails to
+  export `register_workers/1`, or whose callback raises contributes
+  nothing — the failure is logged at warning level and the boot
+  continues. This mirrors how the post-boot `discover_and_register/0`
+  isolates per-plugin failures.
+
+  Returns a flat list of `Supervisor.child_spec()`-compatible terms.
+  """
+  @spec collect_workers(map()) :: [Supervisor.child_spec() | {module(), term()} | module()]
+  def collect_workers(ctx \\ %{}) do
+    ctx = Map.put_new(ctx, :phase, :boot)
+
+    plugin_modules_sync()
+    |> Enum.flat_map(fn module -> safe_register_workers(module, ctx) end)
+  end
+
+  defp plugin_modules_sync do
+    case Application.fetch_env(:barkpark, :plugins) do
+      {:ok, configured} when is_list(configured) ->
+        configured
+        |> Enum.map(&module_of_configured_entry/1)
+        |> Enum.reject(&is_nil/1)
+
+      _ ->
+        # Unset → walk disk synchronously. Matches `discover_and_register/0`
+        # but returns modules instead of registering them; the post-boot
+        # discovery Task still runs and populates the live Registry for
+        # runtime resolver-chain queries.
+        default_paths()
+        |> Enum.flat_map(&plugin_dirs_in/1)
+        |> Enum.flat_map(&module_from_plugin_dir/1)
+    end
+  end
+
+  defp module_of_configured_entry(module) when is_atom(module), do: module
+
+  defp module_of_configured_entry({_name, module}) when is_atom(module), do: module
+
+  defp module_of_configured_entry(name) when is_binary(name) do
+    # Resolve a string plugin_name by reading the manifest off disk.
+    default_paths()
+    |> Enum.flat_map(&plugin_dirs_in/1)
+    |> Enum.find_value(fn dir ->
+      with {:ok, raw} <- File.read(Path.join(dir, "plugin.json")),
+           {:ok, manifest} <- Jason.decode(raw),
+           true <- manifest["plugin_name"] == name,
+           {:ok, module} <- resolve_module(manifest) do
+        module
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  defp module_of_configured_entry(_), do: nil
+
+  defp module_from_plugin_dir(dir) do
+    manifest_path = Path.join(dir, "plugin.json")
+
+    with {:ok, raw} <- File.read(manifest_path),
+         {:ok, manifest} <- Jason.decode(raw),
+         {:ok, module} <- resolve_module(manifest) do
+      [module]
+    else
+      reason ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_workers/1: skipping #{inspect(dir)} — " <>
+            inspect(reason)
+        )
+
+        []
+    end
+  end
+
+  defp safe_register_workers(module, ctx) do
+    try do
+      if Code.ensure_loaded?(module) and function_exported?(module, :register_workers, 1) do
+        case module.register_workers(ctx) do
+          list when is_list(list) ->
+            list
+
+          other ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry.collect_workers/1: #{inspect(module)}." <>
+                "register_workers/1 returned non-list #{inspect(other)} — skipping"
+            )
+
+            []
+        end
+      else
+        []
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_workers/1: #{inspect(module)}." <>
+            "register_workers/1 raised — #{Exception.message(e)}"
+        )
+
+        []
+    catch
+      kind, reason ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_workers/1: #{inspect(module)}." <>
+            "register_workers/1 threw #{kind} #{inspect(reason)}"
+        )
+
+        []
+    end
+  end
+
+  @doc """
   Walks the default discovery roots and registers every plugin found.
 
   Safe to call once during boot; logs warnings (never raises) on per-plugin
