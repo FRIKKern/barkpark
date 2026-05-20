@@ -17,18 +17,42 @@ defmodule BarkparkWeb.Router.Plugins do
   keyword list:
 
       {:live, "/onixedit/ping", PingLive, :index}                 # default :admin
-      {:live, "/onixedit/callback", CallbackLive, :index, auth: :none}
+      {:live, "/onixedit/callback", CallbackLive, :index, auth: :public}
+      {:live, "/admin/onixedit/staleness", StalenessLive, :index, auth: :ops}
+      {:get, "/v1/plugins/onixedit/export/:dataset/:id",
+       BarkparkWeb.OnixeditExportController, :show, auth: :api}
 
   The macro accepts a `scope:` option that selects which subset of routes
   to emit at this callsite:
 
       plugin_routes(scope: :admin)    # emit routes with auth: :admin (default)
+      plugin_routes(scope: :ops)      # emit routes with auth: :ops
       plugin_routes(scope: :public)   # emit routes with auth: :none
+      plugin_routes(scope: :api)      # emit routes with auth: :api
 
   The host router wraps each `plugin_routes/1` call in its own
-  `scope` + `live_session` block with the appropriate `on_mount` and
-  pipeline — the macro itself does not start scopes or sessions, so the
-  caller controls auth gating, root layout, and live-session boundaries.
+  `scope` + `live_session` (or `scope` + `pipe_through`) block with the
+  appropriate `on_mount` and pipeline — the macro itself does not start
+  scopes or sessions, so the caller controls auth gating, root layout,
+  and live-session boundaries.
+
+  ## Scope tags (Goal barkpark-G3 s3)
+
+  | tag        | route_spec `auth:` value  | typical host wrapper                                           |
+  |------------|---------------------------|----------------------------------------------------------------|
+  | `:admin`   | `:admin` (default)        | `pipe_through :browser` + `live_session on_mount: …:admin`     |
+  | `:ops`     | `:ops`                    | `pipe_through :browser` + `live_session on_mount: …:ops`       |
+  | `:public`  | `:public` (or `:none`)    | `pipe_through :browser` + `live_session` (no on_mount)         |
+  | `:api`     | `:api`                    | `pipe_through [:api, :require_admin]` (controller routes only) |
+
+  The `:ops` bucket gates routes via the loosened admin role used by the
+  publish-ops console (see `BarkparkWeb.LiveAuth.on_mount(:ops, …)`).
+  The `:api` bucket is for controller routes mounted under `/v1` with
+  the `require_admin` token check — no `live_session`.
+
+  Each bucket emits the routes the caller asks for and nothing else;
+  with no plugin contributing routes to a given bucket the call expands
+  to an empty list and the caller's wrapping scope is a harmless no-op.
 
   ## Path mounting
 
@@ -52,13 +76,27 @@ defmodule BarkparkWeb.Router.Plugins do
   @doc """
   Emits Phoenix.Router AST for plugin-contributed routes.
 
-  Accepts a `scope:` option (`:admin` by default, `:public` to emit
-  routes whose `auth: :none` was set). Reads
-  `Barkpark.Plugins.Registry.collect_routes/1` at compile time and
-  filters by the requested scope.
+  Accepts a `scope:` option that selects which subset of routes to
+  emit at this callsite:
+
+    * `:admin` (default) — routes whose `auth:` resolves to `:admin`
+    * `:ops`             — routes that opted in to `auth: :ops`
+    * `:public`          — routes that opted in to `auth: :none`
+    * `:api`             — routes that opted in to `auth: :api`
+
+  Reads `Barkpark.Plugins.Registry.collect_routes/1` at compile time
+  and filters by the requested scope. The caller is responsible for
+  wrapping the call in the right `scope` + `live_session` /
+  `pipe_through` host-router block — see the moduledoc table.
   """
   defmacro plugin_routes(opts \\ []) do
     scope = Keyword.get(opts, :scope, :admin)
+
+    unless scope in [:admin, :ops, :public, :api] do
+      raise ArgumentError,
+            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api, got #{inspect(scope)}"
+    end
+
     ctx = %{scope: scope, phase: :compile}
 
     routes =
@@ -74,13 +112,23 @@ defmodule BarkparkWeb.Router.Plugins do
   # A 4-tuple has no opts, so it gets the default `auth: :admin` and
   # appears only at the `:admin` callsite. A 5-tuple reads `:auth` from
   # the opts keyword list — `:admin` by default when the key is absent.
+  #
+  # The `:public` scope tag matches routes whose `auth:` opt is `:none`
+  # — `:public` is the callsite-facing name, `:none` is the spec-side
+  # opt value (chosen for ergonomic readability at the plugin author's
+  # callsite: `auth: :none` reads as "no auth required"). `:ops` and
+  # `:api` use the same atom on both sides.
   defp route_in_scope?({_kind, _path, _mod, _action}, scope), do: scope == :admin
 
   defp route_in_scope?({_kind, _path, _mod, _action, opts}, scope) when is_list(opts) do
-    Keyword.get(opts, :auth, :admin) == scope
+    auth = Keyword.get(opts, :auth, :admin)
+    auth_matches_scope?(auth, scope)
   end
 
   defp route_in_scope?(_, _), do: false
+
+  defp auth_matches_scope?(:none, :public), do: true
+  defp auth_matches_scope?(auth, scope), do: auth == scope
 
   # ── AST emission ────────────────────────────────────────────────────
 
