@@ -75,14 +75,13 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # ── Back-compat redirect: legacy /admin/bokbasen URL ──────────────────
-  # Goal `barkpark-G3` s4 moved the Bokbasen console from
-  # `BarkparkWeb.Admin.BokbasenLive` at `/admin/bokbasen` into the
-  # OnixEdit plugin's namespace at `/admin/onixedit/bokbasen` (mounted
-  # via `plugin_routes(scope: :ops)` below). Old deep links keep
-  # working via a 301 from the legacy path. The staleness console
-  # already lived at `/admin/onixedit/staleness` and that URL is
-  # preserved exactly by the plugin mount — no redirect needed there.
+  # ── Back-compat redirects: legacy host-namespaced admin URLs ──────────
+  # When a plugin admin LV migrates from host namespace into a plugin's
+  # own namespace via `plugin_routes(scope: :ops)`, its URL prefix
+  # changes from `/admin/<lv>` to `/admin/<plugin>/<lv>`. The redirect
+  # controller below preserves old deep links via 301. New legacy paths
+  # only get an entry when the URL prefix genuinely changes — when the
+  # original URL already includes the plugin slug, no redirect is needed.
   scope "/admin", BarkparkWeb do
     pipe_through :browser
 
@@ -112,11 +111,11 @@ defmodule BarkparkWeb.Router do
   # catch-all scope below.
   #
   # NOTE: this scope intentionally omits the second `BarkparkWeb` alias
-  # arg that other scopes carry. Plugin modules are fully qualified
-  # (e.g. `Barkpark.Plugins.OnixEdit.PingLive`) — passing a host alias
-  # here would cause Phoenix's `scope` macro to prepend `BarkparkWeb.`
-  # to those names, breaking module resolution (Goal `barkpark-G2`
-  # task s4 pilot proof).
+  # arg that other scopes carry. Plugin modules are fully qualified by
+  # the route specs returned from each plugin's `register_routes/1`
+  # callback — passing a host alias here would cause Phoenix's `scope`
+  # macro to prepend `BarkparkWeb.` to those names, breaking module
+  # resolution.
   scope "/studio" do
     pipe_through :browser
 
