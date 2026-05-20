@@ -170,14 +170,20 @@ defmodule Barkpark.Plugin do
       given HTTP verb
     * `{verb, path, controller, action, opts}` — controller with options
 
-  `opts` is a keyword list. Recognised keys (Goal barkpark-G2 Q3):
+  `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :none` — auth gate. Defaults to `:admin`; pass
-      `:none` to opt out (e.g. public OAuth callback).
+    * `auth: :admin | :ops | :public | :api | :none` — auth gate. Defaults
+      to `:admin`. Buckets routes into the matching scope when the host
+      router's `plugin_routes/1` macro expands:
+        - `:admin` — admin scope (LiveAuth.:admin, mounts under `/studio`)
+        - `:ops`   — ops scope (LiveAuth.:ops, mounts under `/admin`)
+        - `:public` / `:none` — no auth gate (mounts under `/studio`)
+        - `:api`   — API pipeline + admin required (mounts under `/v1/plugins`)
     * `as: atom()` — Phoenix route name (`Routes.<as>_path/2`).
 
-  Paths join under the host's `/studio/<plugin-slug>/` scope; specs
-  should declare relative paths.
+  Paths join under the macro's wrapping scope; specs should declare
+  relative paths that include the plugin slug (e.g. `"/onixedit/ping"`
+  yields `/studio/onixedit/ping` under `:admin`).
   """
   @type route_spec ::
           {:live, path :: String.t(), module :: module(), action :: atom()}
@@ -330,13 +336,16 @@ defmodule Barkpark.Plugin do
 
   `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :none` — auth gate. Defaults to `:admin` (admin-only).
-      `:none` opts out (e.g. public OAuth callbacks).
+    * `auth: :admin | :ops | :public | :api | :none` — auth gate (defaults
+      to `:admin`). Buckets the route into the matching `plugin_routes/1`
+      scope: `:admin` under `/studio`, `:ops` under `/admin`, `:public`/
+      `:none` under `/studio` with no gate, `:api` under `/v1/plugins`
+      with the API pipeline + admin required.
     * `as: atom()` — Phoenix route name (`Routes.<as>_path/2`).
 
-  Paths are joined under `/studio/<plugin-slug>/`. Plugins should write paths
-  as relative (`"/onixedit/ping"`, not `"/studio/onixedit/ping"`); the host
-  macro prepends the scope.
+  Paths join under the macro's wrapping scope; plugins declare relative
+  paths that include the plugin slug (e.g. `"/onixedit/ping"` resolves
+  to `/studio/onixedit/ping` under the `:admin` scope).
 
   `ctx` is the call-time context — `%{scope: :admin}` from the host router
   macro today, may grow later. Pattern-match defensively or ignore it.
