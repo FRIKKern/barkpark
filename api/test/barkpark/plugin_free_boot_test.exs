@@ -36,11 +36,32 @@ defmodule Barkpark.PluginFreeBootTest do
 
   @expected_seed_schemas ~w(post page author category project siteSettings navigation colors)
 
+  # `:persistent_term` keys that the plugin layer writes during a normal
+  # boot. They survive `Application.stop` because persistent_term is
+  # process-independent — when this case runs AFTER a prior test that
+  # populated them with OnixEdit's contributions, a stale snapshot can
+  # leak `book` / `Bokbasen` tokens into the "fresh" boot below.
+  #
+  # Erase before `ensure_all_started/1` so the fresh app starts with empty
+  # caches. Defence-in-depth: G5.s2's discovery kill-switch (Registry now
+  # respects `:plugins=[]` and short-circuits the disk walk) is the
+  # primary fix; this purge guarantees no pre-existing snapshot can
+  # contaminate the boot path even if the kill-switch had a regression.
+  @plugin_snapshot_keys [
+    {Barkpark.Plugins.Registry, :snapshot}
+  ]
+
   setup_all do
     prev_plugins = Application.get_env(:barkpark, :plugins, :unset)
 
     Application.put_env(:barkpark, :plugins, [])
     Application.stop(:barkpark)
+
+    # Erase plugin-derived `:persistent_term` snapshots that survive
+    # `Application.stop`. See @plugin_snapshot_keys for the list and
+    # rationale.
+    Enum.each(@plugin_snapshot_keys, &:persistent_term.erase/1)
+
     {:ok, _} = Application.ensure_all_started(:barkpark)
 
     # The Repo restart wipes the previous sandbox-mode setting. Restore the
