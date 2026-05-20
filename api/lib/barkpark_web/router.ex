@@ -128,11 +128,12 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # ── Plugin-contributed routes — public (`auth: :none`) ────────────────
+  # ── Plugin-contributed routes — public (`auth: :public`) ──────────────
   # For plugin-supplied routes that opt out of the admin gate via
-  # `auth: :none` in the route spec opts (e.g. OAuth callbacks). No
-  # `on_mount` admin hook; plugins handle their own auth inside the LV.
-  # Same no-alias rationale as the `:plugin_admin` scope above.
+  # `auth: :public` (or the legacy `auth: :none`) in the route spec opts
+  # (e.g. OAuth callbacks). No `on_mount` admin hook; plugins handle
+  # their own auth inside the LV. Same no-alias rationale as the
+  # `:plugin_admin` scope above.
   scope "/studio" do
     pipe_through :browser
 
@@ -140,6 +141,43 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :public)
     end
+  end
+
+  # ── Plugin-contributed routes — ops-gated (`auth: :ops`) ──────────────
+  # Goal barkpark-G3 s3. Mirrors the host's `:admin_ops` scope at
+  # `/admin` — same `:browser` pipeline, same `BarkparkWeb.LiveAuth.:ops`
+  # on_mount hook. Plugins that contribute an ops route write paths
+  # relative to `/admin/<plugin-slug>/` (e.g.
+  # `"/onixedit/staleness"` → `/admin/onixedit/staleness`).
+  # No-op until a plugin contributes a spec with `auth: :ops` (G3 s4
+  # migrates Bokbasen + onixedit staleness; until then this expands to
+  # an empty live_session, which Phoenix accepts cleanly).
+  # Same no-alias rationale as the `:plugin_admin` scope above —
+  # plugin LV modules are fully qualified.
+  scope "/admin" do
+    pipe_through :browser
+
+    live_session :plugin_ops,
+      on_mount: [{BarkparkWeb.LiveAuth, :ops}],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      plugin_routes(scope: :ops)
+    end
+  end
+
+  # ── Plugin-contributed routes — API (`auth: :api`) ────────────────────
+  # Goal barkpark-G3 s3. Mirrors the host's `/v1/plugins/onixedit`
+  # scope — `[:api, :require_admin]` pipeline, controller routes only
+  # (no live_session). Plugins that contribute an API route write paths
+  # relative to `/v1/plugins/<plugin-slug>/` (e.g.
+  # `"/onixedit/export/:dataset/:id"` → `/v1/plugins/onixedit/export/...`).
+  # No-op until a plugin contributes a spec with `auth: :api` (G3 s5
+  # migrates the OnixEdit export controller).
+  # Same no-alias rationale as the `:plugin_admin` scope — plugin
+  # controller modules are fully qualified.
+  scope "/v1/plugins" do
+    pipe_through [:api, :require_admin]
+
+    plugin_routes(scope: :api)
   end
 
   # ── Studio admin LV — dataset-scoped, admin-gated ─────────────────────
