@@ -336,6 +336,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         label: "Bokbasen API base URL",
         required: true,
         default: "https://api.bokbasen.io",
+        placeholder: "https://api.bokbasen.io",
         group: "Bokbasen",
         hint:
           "Production: https://api.bokbasen.io  ·  Sandbox: https://api-sandbox.bokbasen.io"
@@ -346,6 +347,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         label: "OAuth token URL",
         required: true,
         default: "https://login.bokbasen.io/oauth2/token",
+        placeholder: "https://login.bokbasen.io/oauth2/token",
         group: "Bokbasen"
       },
       %{
@@ -353,6 +355,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         type: :string,
         label: "Client ID",
         required: true,
+        masked: true,
         group: "Bokbasen"
       },
       %{
@@ -360,6 +363,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         type: :password,
         label: "Client secret",
         required: true,
+        masked: true,
         group: "Bokbasen",
         hint: "Stored encrypted at rest via BARKPARK_CLOAK_KEY"
       },

@@ -2,25 +2,29 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   @moduledoc """
   Generic encrypted-JSON editor for plugin settings.
 
-  Phase 1 has no plugin enumeration — admin types a `plugin_name`,
-  loads the (masked) JSON, edits it, saves it back. A reveal-on-click
-  control re-fetches the unmasked value and records a `reveal` audit row.
+  Admin types a `plugin_name`, loads the (masked) values, edits them, saves
+  them back. A reveal-on-click control re-fetches the unmasked value and
+  records a `reveal` audit row.
 
-  Phase 7 / WI2: when `plugin_name == "bokbasen"`, the form switches to a
-  typed view with 5 named inputs and password-typed secret fields backed
-  by `Barkpark.Plugins.OnixEdit.Bokbasen.Settings`. The generic
-  raw-JSON path is kept for every other plugin.
+  ## Typed-form vs raw-JSON path
+
+  When the named plugin contributes a `settings_schema/0` (via the resolver
+  chain in `Barkpark.Plugins.Registry`), the form switches to a typed view
+  rendered generically by spec — labels, input types, `:masked` flags for
+  per-field reveal buttons, `:options` for `:select`, `:placeholder`,
+  `:hint`, and host-side `:required` enforcement on save. When no spec is
+  available, the legacy raw-JSON textarea is used.
+
+  The host knows NOTHING about specific plugins. The bokbasen Settings
+  panel is rendered exactly like any other plugin's panel — by reading
+  the spec OnixEdit returns from `Plugins.Registry.collect_settings_schema/1`.
   """
 
   use BarkparkWeb, :live_view
 
+  alias Barkpark.Plugins.Registry, as: PluginsRegistry
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
-  alias Barkpark.Plugins.OnixEdit.Bokbasen.Settings, as: BokbasenSettings
-
-  @bokbasen "bokbasen"
-  @bokbasen_secret_keys ~w(client_id client_secret)
-  @bokbasen_keys ~w(api_base oauth_token_url client_id client_secret client_role)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -30,8 +34,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
        page_title: "Plugin Settings",
        plugin_name: "",
        settings_json: "",
-       bokbasen_form: empty_bokbasen_form(),
-       bokbasen_revealed: %{"client_id" => false, "client_secret" => false},
+       settings_fields: [],
+       typed_form: %{},
+       revealed: %{},
        masked: true,
        loaded?: false,
        error: nil
@@ -44,110 +49,88 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   end
 
   def handle_event("load", %{"plugin_name" => name}, socket) do
-    if name == @bokbasen do
-      load_bokbasen(socket, name)
-    else
+    fields = fields_for(name)
+
+    if fields == [] do
       load_generic(socket, name)
+    else
+      load_typed(socket, name, fields)
     end
   end
 
   def handle_event("reveal", %{"plugin_name" => name}, socket) do
     case Settings.reveal(name, user_id: user_id(socket)) do
       {:ok, map} ->
-        {:noreply,
-         socket
-         |> assign(
-           settings_json: pretty(map),
-           masked: false,
-           loaded?: true,
-           error: nil
-         )
-         |> put_flash(:info, "Revealed (audited).")}
+        fields = socket.assigns.settings_fields
+
+        socket =
+          if fields == [] do
+            assign(socket,
+              settings_json: pretty(map),
+              masked: false,
+              loaded?: true,
+              error: nil
+            )
+          else
+            typed_form =
+              Enum.reduce(fields, socket.assigns.typed_form, fn field, acc ->
+                key = flat_key(field)
+                Map.put(acc, key, to_string(Map.get(map, key, "")))
+              end)
+
+            revealed = Enum.into(masked_keys(fields), %{}, fn k -> {k, true} end)
+
+            assign(socket,
+              typed_form: typed_form,
+              revealed: revealed,
+              masked: false,
+              loaded?: true,
+              error: nil
+            )
+          end
+
+        {:noreply, put_flash(socket, :info, "Revealed (audited).")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "No settings to reveal.")}
     end
   end
 
-  def handle_event("reveal_field", %{"field" => field}, socket)
-      when field in @bokbasen_secret_keys do
-    case Settings.reveal(@bokbasen, user_id: user_id(socket)) do
-      {:ok, map} ->
-        form =
-          socket.assigns.bokbasen_form
-          |> Map.put(field, Map.get(map, field, ""))
+  def handle_event("reveal_field", %{"field" => field}, socket) do
+    fields = socket.assigns.settings_fields
+    plugin_name = socket.assigns.plugin_name
 
-        revealed = Map.put(socket.assigns.bokbasen_revealed, field, true)
+    if field in masked_keys(fields) do
+      case Settings.reveal(plugin_name, user_id: user_id(socket)) do
+        {:ok, map} ->
+          typed_form = Map.put(socket.assigns.typed_form, field, to_string(Map.get(map, field, "")))
+          revealed = Map.put(socket.assigns.revealed, field, true)
 
-        {:noreply,
-         socket
-         |> assign(
-           bokbasen_form: form,
-           bokbasen_revealed: revealed,
-           masked: not all_revealed?(revealed),
-           error: nil
-         )
-         |> put_flash(:info, "Revealed #{field} (audited).")}
+          {:noreply,
+           socket
+           |> assign(
+             typed_form: typed_form,
+             revealed: revealed,
+             masked: not all_masked_revealed?(fields, revealed),
+             error: nil
+           )
+           |> put_flash(:info, "Revealed #{field} (audited).")}
 
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "No settings to reveal.")}
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "No settings to reveal.")}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
-  def handle_event("save", %{"plugin_name" => @bokbasen} = params, socket) do
-    form = bokbasen_params_to_form(params)
+  def handle_event("save", %{"plugin_name" => name} = params, socket) do
+    fields = fields_for(name)
 
-    case BokbasenSettings.put_credentials(form, user_id: user_id(socket)) do
-      {:ok, _record} ->
-        masked = mask_bokbasen(form)
-
-        {:noreply,
-         socket
-         |> assign(
-           plugin_name: @bokbasen,
-           bokbasen_form: masked,
-           bokbasen_revealed: %{"client_id" => false, "client_secret" => false},
-           masked: true,
-           loaded?: true,
-           error: nil
-         )
-         |> put_flash(:info, "Saved Bokbasen credentials.")}
-
-      {:error, {:invalid, missing}} ->
-        {:noreply,
-         socket
-         |> assign(bokbasen_form: form, error: format_invalid(missing))}
-
-      {:error, %Ecto.Changeset{} = cs} ->
-        {:noreply, assign(socket, bokbasen_form: form, error: format_changeset(cs))}
-    end
-  end
-
-  def handle_event("save", %{"plugin_name" => name, "settings_json" => json}, socket) do
-    case Jason.decode(json) do
-      {:ok, map} when is_map(map) ->
-        case Settings.put(name, map, user_id: user_id(socket)) do
-          {:ok, _record} ->
-            {:noreply,
-             socket
-             |> assign(
-               plugin_name: name,
-               settings_json: pretty(Masking.mask(map)),
-               masked: true,
-               loaded?: true,
-               error: nil
-             )
-             |> put_flash(:info, "Saved #{name}.")}
-
-          {:error, %Ecto.Changeset{} = cs} ->
-            {:noreply, assign(socket, error: format_changeset(cs))}
-        end
-
-      {:ok, _other} ->
-        {:noreply, assign(socket, error: "JSON must be an object at the top level.")}
-
-      {:error, %Jason.DecodeError{} = err} ->
-        {:noreply, assign(socket, error: "Invalid JSON: #{Exception.message(err)}")}
+    if fields == [] do
+      save_generic(socket, name, params)
+    else
+      save_typed(socket, name, fields, params)
     end
   end
 
@@ -159,8 +142,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          |> assign(
            plugin_name: name,
            settings_json: "",
-           bokbasen_form: empty_bokbasen_form(),
-           bokbasen_revealed: %{"client_id" => false, "client_secret" => false},
+           settings_fields: [],
+           typed_form: %{},
+           revealed: %{},
            masked: true,
            loaded?: false,
            error: nil
@@ -205,10 +189,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <button type="submit">Load</button>
       </form>
 
-      <%= if @plugin_name == "bokbasen" do %>
-        {render_bokbasen_form(assigns)}
-      <% else %>
+      <%= if @settings_fields == [] do %>
         {render_generic_form(assigns)}
+      <% else %>
+        {render_typed_form(assigns)}
       <% end %>
 
       <%= if @error do %>
@@ -257,105 +241,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     """
   end
 
-  defp render_bokbasen_form(assigns) do
+  defp render_typed_form(assigns) do
     ~H"""
-    <form phx-submit="save" data-preset="bokbasen">
-      <input type="hidden" name="plugin_name" value="bokbasen" />
+    <form phx-submit="save" data-preset={@plugin_name}>
+      <input type="hidden" name="plugin_name" value={@plugin_name} />
 
       <fieldset style="border:1px solid #ddd; padding:.75rem; margin-bottom:.5rem;">
-        <legend>Bokbasen credentials</legend>
+        <legend>{@plugin_name} settings</legend>
 
-        <p>
-          <label>
-            API base URL
-            <input
-              type="url"
-              name="api_base"
-              value={Map.get(@bokbasen_form, "api_base", "")}
-              placeholder="https://api.bokbasen.io"
-              style="width:100%;"
-              required
-            />
-          </label>
-        </p>
-
-        <p>
-          <label>
-            OAuth2 token URL
-            <input
-              type="url"
-              name="oauth_token_url"
-              value={Map.get(@bokbasen_form, "oauth_token_url", "")}
-              placeholder="https://login.bokbasen.io/oauth2/token"
-              style="width:100%;"
-              required
-            />
-          </label>
-        </p>
-
-        <p>
-          <label>
-            Client ID
-            <input
-              type={input_type_for("client_id", @bokbasen_revealed)}
-              name="client_id"
-              value={Map.get(@bokbasen_form, "client_id", "")}
-              autocomplete="off"
-              style="width:100%;"
-              required
-            />
-          </label>
-          <button
-            type="button"
-            phx-click="reveal_field"
-            phx-value-field="client_id"
-            disabled={not @loaded?}
-          >
-            Reveal
-          </button>
-        </p>
-
-        <p>
-          <label>
-            Client secret
-            <input
-              type={input_type_for("client_secret", @bokbasen_revealed)}
-              name="client_secret"
-              value={Map.get(@bokbasen_form, "client_secret", "")}
-              autocomplete="off"
-              style="width:100%;"
-              required
-            />
-          </label>
-          <button
-            type="button"
-            phx-click="reveal_field"
-            phx-value-field="client_secret"
-            disabled={not @loaded?}
-          >
-            Reveal
-          </button>
-        </p>
-
-        <p>
-          <label>
-            Client role
-            <select name="client_role" style="width:100%;">
-              <option
-                value="publisher"
-                selected={Map.get(@bokbasen_form, "client_role", "publisher") == "publisher"}
-              >
-                publisher (default)
-              </option>
-              <option
-                value="distributor"
-                selected={Map.get(@bokbasen_form, "client_role", "publisher") == "distributor"}
-              >
-                distributor
-              </option>
-            </select>
-          </label>
-        </p>
+        <%= for field <- @settings_fields do %>
+          {render_field(Map.merge(assigns, %{field: field, key: flat_key(field)}))}
+        <% end %>
       </fieldset>
 
       <div style="display:flex; gap:.5rem; margin-top:.5rem;">
@@ -363,8 +259,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <button
           type="button"
           phx-click="delete"
-          phx-value-plugin_name="bokbasen"
-          data-confirm="Delete Bokbasen credentials?"
+          phx-value-plugin_name={@plugin_name}
+          data-confirm={"Delete settings for #{@plugin_name}?"}
           disabled={not @loaded?}
         >
           Delete
@@ -374,32 +270,135 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     """
   end
 
-  defp load_bokbasen(socket, name) do
+  defp render_field(assigns) do
+    ~H"""
+    <p>
+      <label>
+        {@field.label}<%= if @field[:required] do %> <span style="color:#a00;">*</span><% end %>
+        {render_input(Map.merge(assigns, %{value: Map.get(@typed_form, @key, default_for(@field))}))}
+      </label>
+      <%= if @field[:masked] do %>
+        <button
+          type="button"
+          phx-click="reveal_field"
+          phx-value-field={@key}
+          disabled={not @loaded?}
+        >
+          Reveal
+        </button>
+      <% end %>
+      <%= if hint = @field[:hint] do %>
+        <br /><small style="color:#666;">{hint}</small>
+      <% end %>
+    </p>
+    """
+  end
+
+  defp render_input(assigns) do
+    case assigns.field.type do
+      :select -> render_select(assigns)
+      :boolean -> render_boolean(assigns)
+      :password -> render_secret(assigns)
+      :url -> render_text(assigns, "url")
+      :string -> render_string(assigns)
+      _ -> render_text(assigns, "text")
+    end
+  end
+
+  defp render_select(assigns) do
+    ~H"""
+    <select name={@key} style="width:100%;">
+      <%= for opt <- (@field[:options] || []) do %>
+        <option value={opt} selected={to_string(@value) == to_string(opt)}>{opt}</option>
+      <% end %>
+    </select>
+    """
+  end
+
+  defp render_boolean(assigns) do
+    ~H"""
+    <input type="checkbox" name={@key} value="true" checked={truthy?(@value)} />
+    """
+  end
+
+  defp render_secret(assigns) do
+    ~H"""
+    <input
+      type={if Map.get(@revealed, @key, false), do: "text", else: "password"}
+      name={@key}
+      value={@value}
+      placeholder={@field[:placeholder]}
+      autocomplete="off"
+      style="width:100%;"
+      required={!!@field[:required]}
+    />
+    """
+  end
+
+  defp render_string(assigns) do
+    ~H"""
+    <input
+      type={if @field[:masked] == true and not Map.get(@revealed, @key, false), do: "password", else: "text"}
+      name={@key}
+      value={@value}
+      placeholder={@field[:placeholder]}
+      autocomplete="off"
+      style="width:100%;"
+      required={!!@field[:required]}
+    />
+    """
+  end
+
+  defp render_text(assigns, html_type) do
+    assigns = Map.put(assigns, :html_type, html_type)
+
+    ~H"""
+    <input
+      type={@html_type}
+      name={@key}
+      value={@value}
+      placeholder={@field[:placeholder]}
+      autocomplete="off"
+      style="width:100%;"
+      required={!!@field[:required]}
+    />
+    """
+  end
+
+  # ── Load paths ─────────────────────────────────────────────────────────
+
+  defp load_typed(socket, name, fields) do
     case Settings.get(name, user_id: user_id(socket)) do
       {:ok, map} ->
+        typed = typed_form_from(fields, map, mask_secrets: true)
+
         {:noreply,
          socket
          |> assign(
            plugin_name: name,
-           bokbasen_form: mask_bokbasen(map),
-           bokbasen_revealed: %{"client_id" => false, "client_secret" => false},
+           settings_fields: fields,
+           typed_form: typed,
+           revealed: empty_revealed(fields),
            masked: true,
            loaded?: true,
            error: nil
          )}
 
       {:error, :not_found} ->
+        defaults = typed_form_defaults(fields)
+
         {:noreply,
          socket
          |> assign(
            plugin_name: name,
-           bokbasen_form: empty_bokbasen_form(),
-           bokbasen_revealed: %{"client_id" => false, "client_secret" => false},
+           settings_fields: fields,
+           typed_form: defaults,
+           revealed: empty_revealed(fields),
            masked: false,
            loaded?: false,
            error: nil
          )
-         |> put_flash(:info, "No Bokbasen credentials yet — fill in and Save.")}
+         |> put_flash(:info, "No settings yet for #{name} — fill in and Save.")}
     end
   end
 
@@ -412,6 +411,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          socket
          |> assign(
            plugin_name: name,
+           settings_fields: [],
            settings_json: pretty(masked),
            masked: true,
            loaded?: true,
@@ -423,6 +423,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          socket
          |> assign(
            plugin_name: name,
+           settings_fields: [],
            settings_json: "{}",
            masked: false,
            loaded?: false,
@@ -432,47 +433,174 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
-  defp bokbasen_params_to_form(params) do
-    Map.new(@bokbasen_keys, fn key -> {key, Map.get(params, key, "") |> to_string()} end)
+  # ── Save paths ─────────────────────────────────────────────────────────
+
+  defp save_typed(socket, name, fields, params) do
+    form = params_to_form(fields, params)
+
+    case validate_required(fields, form) do
+      :ok ->
+        case Settings.put(name, form, user_id: user_id(socket)) do
+          {:ok, _record} ->
+            masked = typed_form_from(fields, form, mask_secrets: true)
+
+            {:noreply,
+             socket
+             |> assign(
+               plugin_name: name,
+               settings_fields: fields,
+               typed_form: masked,
+               revealed: empty_revealed(fields),
+               masked: true,
+               loaded?: true,
+               error: nil
+             )
+             |> put_flash(:info, "Saved #{name}.")}
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            {:noreply, assign(socket, typed_form: form, error: format_changeset(cs))}
+        end
+
+      {:error, missing} ->
+        {:noreply,
+         socket
+         |> assign(typed_form: form, error: format_missing(missing))}
+    end
   end
 
-  defp mask_bokbasen(map) do
-    role = Map.get(map, "client_role") || Map.get(map, :client_role) || "publisher"
+  defp save_generic(socket, name, %{"settings_json" => json}) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) ->
+        case Settings.put(name, map, user_id: user_id(socket)) do
+          {:ok, _record} ->
+            {:noreply,
+             socket
+             |> assign(
+               plugin_name: name,
+               settings_json: pretty(Masking.mask(map)),
+               masked: true,
+               loaded?: true,
+               error: nil
+             )
+             |> put_flash(:info, "Saved #{name}.")}
 
-    %{
-      "api_base" => to_string(Map.get(map, "api_base") || Map.get(map, :api_base) || ""),
-      "oauth_token_url" =>
-        to_string(Map.get(map, "oauth_token_url") || Map.get(map, :oauth_token_url) || ""),
-      "client_id" =>
-        Masking.mask(to_string(Map.get(map, "client_id") || Map.get(map, :client_id) || "")),
-      "client_secret" =>
-        Masking.mask(
-          to_string(Map.get(map, "client_secret") || Map.get(map, :client_secret) || "")
-        ),
-      "client_role" => to_string(role)
-    }
+          {:error, %Ecto.Changeset{} = cs} ->
+            {:noreply, assign(socket, error: format_changeset(cs))}
+        end
+
+      {:ok, _other} ->
+        {:noreply, assign(socket, error: "JSON must be an object at the top level.")}
+
+      {:error, %Jason.DecodeError{} = err} ->
+        {:noreply, assign(socket, error: "Invalid JSON: #{Exception.message(err)}")}
+    end
   end
 
-  defp empty_bokbasen_form do
-    %{
-      "api_base" => "",
-      "oauth_token_url" => "",
-      "client_id" => "",
-      "client_secret" => "",
-      "client_role" => "publisher"
-    }
+  defp save_generic(socket, _name, _params) do
+    {:noreply, assign(socket, error: "Missing settings_json.")}
   end
 
-  defp input_type_for(field, revealed) do
-    if Map.get(revealed, field, false), do: "text", else: "password"
+  # ── Spec helpers ───────────────────────────────────────────────────────
+
+  # Pulls the settings spec via the resolver chain and filters to fields
+  # whose dot-namespaced `:name` leads with the requested plugin_name.
+  # This matches the convention plugin_settings_live.ex uses and what
+  # OnixEdit's spec actually declares (e.g. "bokbasen.api_base").
+  defp fields_for(""), do: []
+
+  defp fields_for(plugin_name) when is_binary(plugin_name) do
+    PluginsRegistry.collect_settings_schema(ctx: %{plugin_name: plugin_name})
+    |> Enum.filter(&field_belongs_to?(&1, plugin_name))
   end
 
-  defp all_revealed?(revealed) do
-    Enum.all?(@bokbasen_secret_keys, &Map.get(revealed, &1, false))
+  defp field_belongs_to?(%{name: name}, plugin_name) when is_binary(name) do
+    case String.split(name, ".", parts: 2) do
+      [^plugin_name, _rest] -> true
+      _ -> false
+    end
   end
 
-  defp format_invalid(missing) do
-    "Missing or invalid: " <> Enum.map_join(missing, ", ", &Atom.to_string/1)
+  defp field_belongs_to?(_, _), do: false
+
+  defp flat_key(%{name: name}) do
+    case String.split(name, ".", parts: 2) do
+      [_prefix, key] -> key
+      [key] -> key
+    end
+  end
+
+  defp masked_keys(fields) do
+    fields
+    |> Enum.filter(fn f -> f[:masked] == true or f.type == :password end)
+    |> Enum.map(&flat_key/1)
+  end
+
+  defp empty_revealed(fields) do
+    Enum.into(masked_keys(fields), %{}, fn k -> {k, false} end)
+  end
+
+  defp all_masked_revealed?(fields, revealed) do
+    keys = masked_keys(fields)
+    keys != [] and Enum.all?(keys, &Map.get(revealed, &1, false))
+  end
+
+  # Build the form map from a stored settings row. Masked fields are
+  # masked through `Masking.mask/1`; unmasked fields keep their raw value.
+  defp typed_form_from(fields, map, opts) do
+    mask_secrets = Keyword.get(opts, :mask_secrets, true)
+    masked_set = MapSet.new(masked_keys(fields))
+
+    Enum.into(fields, %{}, fn field ->
+      key = flat_key(field)
+      raw = to_string(Map.get(map, key, default_for(field)))
+
+      value =
+        if mask_secrets and MapSet.member?(masked_set, key) do
+          Masking.mask(raw)
+        else
+          raw
+        end
+
+      {key, value}
+    end)
+  end
+
+  defp typed_form_defaults(fields) do
+    Enum.into(fields, %{}, fn field -> {flat_key(field), default_for(field)} end)
+  end
+
+  defp default_for(%{default: default}) when not is_nil(default), do: to_string(default)
+  defp default_for(_), do: ""
+
+  defp params_to_form(fields, params) do
+    Enum.into(fields, %{}, fn field ->
+      key = flat_key(field)
+      raw = Map.get(params, key, "")
+      {key, to_string(raw)}
+    end)
+  end
+
+  defp validate_required(fields, form) do
+    missing =
+      fields
+      |> Enum.filter(fn f ->
+        f[:required] and blank?(Map.get(form, flat_key(f), ""))
+      end)
+      |> Enum.map(& &1.label)
+
+    if missing == [], do: :ok, else: {:error, missing}
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank?(_), do: false
+
+  defp truthy?(value) when value in [true, "true", "on", "1", 1], do: true
+  defp truthy?(_), do: false
+
+  defp format_missing(missing) do
+    "Missing or invalid: " <> Enum.join(missing, ", ")
   end
 
   defp pretty(map), do: Jason.encode!(map, pretty: true)
