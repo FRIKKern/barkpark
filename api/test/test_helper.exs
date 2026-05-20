@@ -36,7 +36,23 @@
 #
 #     mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
 #
+# Goal barkpark-G2 task s5 — the plugin-route highway lock
+# (`plugin_routes_test.exs`) mutates the `:barkpark, :plugins` env around
+# its second describe to assert `Plugins.Registry.collect_routes/1`
+# collapses to `[]`. Tagged `:plugin_routes` so the default run leaves the
+# env untouched. Run explicitly:
+#
+#     mix test --only plugin_routes test/barkpark_web/plugin_routes_test.exs
+#
 ExUnit.start(
-  exclude: [:bokbasen_integration, :phase8_demo, :requires_wi3, :requires_wi4, :flaky, :boot_test]
+  exclude: [
+    :bokbasen_integration,
+    :phase8_demo,
+    :requires_wi3,
+    :requires_wi4,
+    :flaky,
+    :boot_test,
+    :plugin_routes
+  ]
 )
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)
