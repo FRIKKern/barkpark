@@ -618,7 +618,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         "name" => "export_onix",
         "label" => "Export ONIX",
         "kind" => "link",
-        "href" => "/v1/plugins/onixedit/export/:dataset/:id.onix",
+        "href" => "/v1/plugins/onixedit/export/:dataset/:id",
         "icon" => "download"
       },
       %{

@@ -146,9 +146,21 @@ defmodule Barkpark.Plugins.OnixEditTest do
     end
 
     test "default behaviour callbacks return their no-op shapes" do
-      assert OnixEdit.register_routes(%{}) == []
+      # register_routes/1 was a no-op until G2.s4 — OnixEdit now overrides it
+      # with 4 routes (ping pilot, bokbasen + staleness LVs, export controller).
+      # See the dedicated "register_routes/1 contributes …" assertion below.
       assert OnixEdit.validate_settings(%{}) == :ok
       assert OnixEdit.checkers() == []
+    end
+
+    test "register_routes/1 contributes ping + bokbasen + staleness + export" do
+      routes = OnixEdit.register_routes(%{})
+      assert length(routes) == 4
+      paths = Enum.map(routes, fn route -> elem(route, 1) end)
+      assert "/onixedit/ping" in paths
+      assert "/onixedit/bokbasen" in paths
+      assert "/onixedit/staleness" in paths
+      assert "/onixedit/export/:dataset/:id" in paths
     end
 
     test "register_workers/1 contributes the Bokbasen.Auth token cache" do
