@@ -129,6 +129,31 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @doc """
+  Plugin-contributed routes (Goal `barkpark-G2`, task s4 — end-to-end
+  highway proof).
+
+  Returns a single pilot route — `/onixedit/ping` mounting `PingLive` —
+  that the host router's `plugin_routes(scope: :admin)` macro folds in
+  at compile time. The plugin embeds its slug in the path; the host's
+  `scope "/studio"` contributes the `/studio` prefix, yielding a final
+  mount of `/studio/onixedit/ping`.
+
+  Default `auth: :admin` (the macro applies that when the opts keyword
+  list is absent), so the pilot inherits the `:plugin_admin` live-session
+  with its `BarkparkWeb.LiveAuth.:admin` on_mount gate.
+
+  This is a smoke proof — `bokbasen_live`, `onixedit_staleness_live`,
+  and friends move from the host's `/admin` scope into this plugin
+  highway in G3.
+  """
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    [
+      {:live, "/onixedit/ping", Barkpark.Plugins.OnixEdit.PingLive, :index}
+    ]
+  end
+
+  @doc """
   Resolve the editor-header doc-action list — drops the
   `publish_to_bokbasen` entry while the book's Bokbasen submission is
   in-flight.
