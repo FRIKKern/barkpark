@@ -2,15 +2,16 @@ defmodule Barkpark.ExternalSync do
   @moduledoc """
   Plugin-agnostic registry of external-system sync integrations.
 
-  Each entry describes how a system's raw state strings map to a UI pill
-  (color + human-readable label) and what to show as the system label
-  ("Bokbasen", "Onyx", "Stripe", whatever). The registry is the single
-  source of truth `BarkparkWeb.Components.ExternalSyncPill` reads from.
+  Each entry describes how an external system's raw state strings map to
+  a UI pill (color + human-readable label) and what to show as the
+  system label. The registry is the single source of truth
+  `BarkparkWeb.Components.ExternalSyncPill` reads from.
 
-  Plugins do NOT register at runtime — entries live here as a compile-time
-  map so the BEAM-resident `@entries` constant is purged at code load and
-  unknown systems are fast to detect (`get/1 → nil`). When a new external
-  system needs UI sync semantics, add an entry here.
+  Host-owned entries live here as a compile-time `@entries` map; plugins
+  contribute their own slice at runtime via the `external_sync_entries/0`
+  callback (see `Barkpark.Plugin` for the contract). When a new external
+  system needs UI sync semantics, either add a host entry below or have
+  a plugin contribute it.
 
   ## Topic convention
 
@@ -26,15 +27,11 @@ defmodule Barkpark.ExternalSync do
   The compile-time `@entries` map below is the **host-owned** slice — UI
   pill contracts that ship with Barkpark itself, independent of any
   plugin. Plugins contribute their own slice via the
-  `Barkpark.Plugin.external_sync_entries/0` callback, which the
-  `Barkpark.Plugins.Registry` exposes as
-  `collect_external_sync_entries/0`. `all/0` merges both on every call —
+  `external_sync_entries/0` callback on `Barkpark.Plugin`, which
+  `Barkpark.Plugins.Registry.collect_external_sync_entries/1` walks at
+  call time. `all/0` merges host + plugin entries on every invocation —
   no cache, no boot-time snapshot — so a plugin coming online late still
   shows up. Plugin entries take precedence on key collision.
-
-  Bokbasen (the original sole entry) now lives in
-  `Barkpark.Plugins.OnixEdit.external_sync_entries/0` since it is
-  plugin-owned territory.
   """
 
   @entries %{}
@@ -93,7 +90,8 @@ defmodule Barkpark.ExternalSync do
   end
 
   @doc """
-  Resolve the system-level label ("Bokbasen", "Stripe", …). Falls back to
+  Resolve the system-level label (the human-readable name shown on the
+  external-sync pill — registered via the entry's `:label` key). Falls back to
   the system name unchanged so unregistered systems still render.
   """
   @spec system_label(String.t() | atom() | nil) :: String.t()
