@@ -13,12 +13,12 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   ## Field-name → settings-row mapping
 
   `Barkpark.Plugin.settings_schema/0` returns field names like
-  `"bokbasen.api_base"`. The leading dot-segment is the
-  `plugin_settings` row name; the trailing remainder is the flat key
-  inside that row. This is the exact shape the runtime client reads
-  (`Bokbasen.Client` → `Bokbasen.Settings.get_credentials/0`). Fields
-  with no dot in their name fall back to the URL plugin name as the
-  row, with the field name as the flat key.
+  `"<row>.<key>"`. The leading dot-segment is the `plugin_settings` row
+  name; the trailing remainder is the flat key inside that row. This is
+  the exact shape the runtime client reads back via
+  `Plugins.Settings.get/1`. Fields with no dot in their name fall back
+  to the URL plugin name as the row, with the field name as the flat
+  key.
 
   Storing means grouping by row, building one map per row, and calling
   `Plugins.Settings.put/3` once per row — that keeps the audit log
@@ -37,6 +37,17 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
   Empty `:password` form values are dropped before the merge, so saving
   with the secret box blank preserves the existing encrypted value.
+
+  ## Test connection
+
+  When the plugin module exports `test_connection/1` (every plugin built
+  with `use Barkpark.Plugin` does — the default returns `{:error,
+  :not_implemented}`), the form renders a single "Test connection"
+  button. Clicking it calls `Plugins.Registry.collect_test_connection/2`
+  which first-wins-resolves the plugin by name and invokes its callback
+  with the live form's settings. The result is surfaced as an `:info` or
+  `:error` flash. The host stays plugin-agnostic — there is no
+  per-plugin branching in this module.
   """
 
   use BarkparkWeb, :live_view
@@ -188,9 +199,14 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     end
   end
 
-  def handle_event("test-connection", %{"group" => group}, socket) do
-    flash = test_connection(group)
-    {kind, msg} = flash
+  def handle_event("test-connection", _params, socket) do
+    result =
+      Registry.collect_test_connection(
+        socket.assigns.plugin_name,
+        current_settings(socket)
+      )
+
+    {kind, msg} = flash_for_test_connection(result)
     {:noreply, put_flash(socket, kind, msg)}
   end
 
@@ -243,18 +259,20 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
               </div>
             <% end %>
 
-            <%= if group == "Bokbasen" and has_test_connection?(group) do %>
-              <button
-                type="button"
-                class="btn btn-sm"
-                phx-click="test-connection"
-                phx-value-group={group}
-                data-test-action={"test-connection-#{group}"}
-              >
-                Test connection
-              </button>
-            <% end %>
           </section>
+        <% end %>
+
+        <%= if test_connection_available?(@plugin_module) do %>
+          <div class="bp-settings-test-connection">
+            <button
+              type="button"
+              class="btn btn-sm"
+              phx-click="test-connection"
+              data-test-action="test-connection"
+            >
+              Test connection
+            </button>
+          </div>
         <% end %>
 
         <div class="bp-settings-actions">
@@ -605,30 +623,75 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     end
   end
 
-  defp test_connection("Bokbasen") do
-    auth_module = Barkpark.Plugins.OnixEdit.Bokbasen.Auth
-
-    if Code.ensure_loaded?(auth_module) and function_exported?(auth_module, :token, 0) do
-      try do
-        case auth_module.token() do
-          {:ok, _bearer} -> {:info, "Bokbasen reachable: token OK."}
-          {:error, %{message: msg}} -> {:error, "Bokbasen unreachable: #{msg}"}
-          {:error, reason} -> {:error, "Bokbasen unreachable: #{inspect(reason)}"}
-        end
-      rescue
-        e -> {:error, "Bokbasen unreachable: #{Exception.message(e)}"}
-      catch
-        kind, reason -> {:error, "Bokbasen unreachable: #{kind} #{inspect(reason)}"}
-      end
-    else
-      {:error, "Bokbasen auth client not loaded."}
-    end
+  # The "Test connection" button renders when the plugin module exports
+  # `test_connection/1`. Every `use Barkpark.Plugin` module exports it
+  # because of the `defoverridable` default — plugins that have nothing
+  # to test inherit the default which returns `{:error, :not_implemented}`,
+  # and the host surfaces that as a flash. No per-plugin branching here.
+  defp test_connection_available?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :test_connection, 1)
   end
 
-  defp test_connection(_), do: {:info, "No test handler registered for this group."}
+  defp test_connection_available?(_), do: false
 
-  defp has_test_connection?("Bokbasen"), do: true
-  defp has_test_connection?(_), do: false
+  # Build the settings map the plugin's `test_connection/1` callback
+  # expects from the row-grouped form values. Mirrors `persist_rows/2`'s
+  # row-grouping but reads from the latest stored values plus any
+  # non-blank in-flight form input — so the admin can click "Test
+  # connection" before pressing Save and see the new credentials
+  # validated against the live endpoint.
+  defp current_settings(socket) do
+    fields = socket.assigns.fields
+    stored = socket.assigns.stored
+    form_values = socket.assigns.form_values
+
+    Enum.reduce(fields, %{}, fn field, acc ->
+      {row, key} = split_field_name(field.name)
+      submitted = Map.get(form_values, field.name)
+
+      value =
+        cond do
+          not blank?(submitted) ->
+            submitted
+
+          true ->
+            case Map.fetch(stored, field.name) do
+              {:ok, v} when not is_nil(v) -> v
+              _ -> nil
+            end
+        end
+
+      sub = Map.get(acc, row, %{})
+      sub = if is_nil(value), do: sub, else: Map.put(sub, key, to_string(value))
+      Map.put(acc, row, sub)
+    end)
+  end
+
+  # Map the plugin's `{:ok, payload} | {:error, reason}` test_connection
+  # contract onto the LV's `{flash_kind, flash_message}` shape.
+  defp flash_for_test_connection({:ok, %{message: msg}}) when is_binary(msg),
+    do: {:info, msg}
+
+  defp flash_for_test_connection({:ok, _payload}),
+    do: {:info, "Connection OK."}
+
+  defp flash_for_test_connection({:error, :not_implemented}),
+    do: {:error, "This plugin does not implement a connection test."}
+
+  defp flash_for_test_connection({:error, :plugin_not_found}),
+    do: {:error, "Plugin is not registered."}
+
+  defp flash_for_test_connection({:error, %{message: msg}}) when is_binary(msg),
+    do: {:error, msg}
+
+  defp flash_for_test_connection({:error, msg}) when is_binary(msg),
+    do: {:error, msg}
+
+  defp flash_for_test_connection({:error, reason}),
+    do: {:error, inspect(reason)}
+
+  defp flash_for_test_connection(_other),
+    do: {:error, "Connection test returned an unexpected result."}
 
   defp current_user_id(socket) do
     case socket.assigns[:api_token] do
