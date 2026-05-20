@@ -85,7 +85,7 @@ defmodule BarkparkWeb.Router do
   scope "/admin", BarkparkWeb do
     pipe_through :browser
 
-    get "/bokbasen", AdminLegacyRedirectController, :bokbasen
+    get "/bokbasen", LegacyRedirectController, :bokbasen
   end
 
   # ── Back-compat redirects (must come BEFORE the StudioLive catch-all) ───
@@ -96,8 +96,8 @@ defmodule BarkparkWeb.Router do
   scope "/studio/:dataset", BarkparkWeb do
     pipe_through :browser
 
-    get "/onixedit/book/:doc_id", OnixeditRedirectController, :show
-    get "/onixedit/book/:doc_id/view", OnixeditRedirectController, :show
+    get "/onixedit/book/:doc_id", LegacyRedirectController, :onixedit_book
+    get "/onixedit/book/:doc_id/view", LegacyRedirectController, :onixedit_book
   end
 
   # ── Plugin-contributed routes — admin-gated (Goal barkpark-G2 s3) ─────
