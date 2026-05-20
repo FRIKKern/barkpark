@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Bokbasen.ReplayTest do
+defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenReplayTest do
   use Barkpark.DataCase, async: false
   use Oban.Testing, repo: Barkpark.Repo
 
@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Bokbasen.ReplayTest do
   alias Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker
   alias Mix.Tasks.Bokbasen.Replay
 
-  @full_book_path Path.expand("../../fixtures/onix/full-book.json", __DIR__)
+  @full_book_path Path.expand("../../../../fixtures/onix/full-book.json", __DIR__)
 
   setup do
     prev_shell = Mix.shell()

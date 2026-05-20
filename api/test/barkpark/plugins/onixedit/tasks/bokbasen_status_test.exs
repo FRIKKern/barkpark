@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Bokbasen.StatusTest do
+defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
   use Barkpark.DataCase, async: false
 
   import ExUnit.CaptureIO
