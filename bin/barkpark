@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+#
+# barkpark — one-command entrypoint for a personal-local install (Wave 5).
+#
+#   barkpark up        ensure secrets → start managed Postgres → migrate →
+#                      boot the server → print the URL. Safe to re-run.
+#   barkpark reload    restart the server so config changes take effect.
+#                      (See "CONFIG-RELOAD FOOTGUN" below.)
+#   barkpark stop      stop the server and the managed Postgres.
+#   barkpark status    report Postgres + server state.
+#   barkpark psql ...  open a psql shell on the managed Postgres.
+#
+# ── CONFIG-RELOAD FOOTGUN ─────────────────────────────────────────────────────
+# Barkpark reads its secrets and tokens from ~/.barkpark/.env at BOOT only.
+# Neither the dev server (`mix phx.server`) nor a `mix release` hot-reloads
+# config/*.exs or re-reads the env file while running. So if you change a value
+# in ~/.barkpark/.env — most commonly PAPERFLOW_INGEST_TOKEN — the running
+# server keeps the OLD value until it is restarted.
+#
+#   THIS IS WHY `barkpark reload` EXISTS. It is a full stop + start of the
+#   server process (Postgres keeps running), which re-sources ~/.barkpark/.env
+#   and re-runs config/runtime.exs. Use it after editing the env file:
+#
+#       $EDITOR ~/.barkpark/.env      # change PAPERFLOW_INGEST_TOKEN
+#       barkpark reload               # new token now in effect
+#
+# POSIX-friendly bash.
+set -euo pipefail
+
+# ── Paths ────────────────────────────────────────────────────────────────────
+
+BIN_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(cd -P -- "$BIN_DIR/.." && pwd)"
+API_DIR="$REPO_ROOT/api"
+PG="$BIN_DIR/barkpark-pg"
+
+# Export BARKPARK_HOME (and the PG port, if set) so the child barkpark-pg always
+# resolves the SAME data dir / port as this script — otherwise a user who set
+# BARKPARK_HOME via the script's own default (not an exported env var) could end
+# up with the parent and the PG helper disagreeing on locations.
+export BARKPARK_HOME="${BARKPARK_HOME:-$HOME/.barkpark}"
+if [ -n "${BARKPARK_PG_PORT:-}" ]; then export BARKPARK_PG_PORT; fi
+ENV_FILE="$BARKPARK_HOME/.env"
+SERVER_PID_FILE="$BARKPARK_HOME/server.pid"
+SERVER_LOG="$BARKPARK_HOME/server.log"
+
+PORT="${PORT:-4000}"
+PHX_HOST="${PHX_HOST:-localhost}"
+
+# `barkpark up` boots in :prod so config/runtime.exs's prod branch runs — that
+# branch is the ONLY one that reads DATABASE_URL (→ managed Postgres on :5433),
+# SECRET_KEY_BASE, PREVIEW_JWT_SECRET, PHX_HOST, and BARKPARK_CLOAK_KEY from the
+# env file. Booting in :dev would silently use the hardcoded barkpark_dev DB on
+# :5432 from config/dev.exs and ignore the managed instance entirely. Keeping
+# MIX_ENV=prod here is what makes the managed-Postgres + first-run-secrets path
+# actually load-bearing, and it leaves the dev database completely untouched.
+export MIX_ENV="${BARKPARK_MIX_ENV:-prod}"
+# runtime.exs reads PHX_SCHEME (default "http"); localhost over http is fine and
+# avoids the https+IP check_origin trap documented in runtime.exs.
+export PHX_SCHEME="${PHX_SCHEME:-http}"
+
+log() { printf 'barkpark: %s\n' "$*"; }
+die() { printf 'barkpark: %s\n' "$*" >&2; exit 1; }
+
+# ── T5.4 secrets — first-run generation, idempotent reuse ────────────────────
+#
+# Delegates to Barkpark.Release.Secrets.write_env/1, which generates the three
+# crypto secrets + placeholders into ~/.barkpark/.env on first run and only
+# appends MISSING keys on later runs (existing values are never overwritten and
+# never printed). Runs with --no-start so booting the supervision tree is not
+# triggered just to write a file.
+ensure_secrets() {
+  if [ -f "$ENV_FILE" ]; then
+    log "reusing secrets at $ENV_FILE"
+  else
+    log "generating first-run secrets at $ENV_FILE"
+  fi
+  # write_env/1 is idempotent either way; call it on every `up` so a partially
+  # filled .env (e.g. user added DATABASE_URL but no secrets) is topped up.
+  #
+  # Run this step under MIX_ENV=dev, NOT prod: config/runtime.exs's prod branch
+  # RAISES when SECRET_KEY_BASE/DATABASE_URL/… are missing, which is exactly the
+  # state we are in on a first run. The dev branch has no such raise, and
+  # Barkpark.Release.Secrets has zero compile-time coupling to the repo, so the
+  # file write is unaffected by the env. (--no-start avoids booting the tree.)
+  # Pass the explicit ENV_FILE path so the shell and Elixir can never disagree
+  # on the location (write_env/1 also honors BARKPARK_HOME, but being explicit
+  # is belt-and-suspenders and survives a future default-path change).
+  ( cd "$API_DIR" && MIX_ENV=dev mix run --no-start -e \
+      "Barkpark.Release.Secrets.write_env(\"$ENV_FILE\") |> elem(1) |> IO.puts()" \
+      >/dev/null )
+}
+
+# Load ~/.barkpark/.env into the environment, then override DATABASE_URL to the
+# managed Postgres so the .env placeholder (default :5432) never wins. PORT and
+# PHX_HOST come from the env file if set there, else the defaults above.
+load_env() {
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+  fi
+  # Managed Postgres URL is authoritative — it knows the real (non-default) port.
+  DATABASE_URL="$("$PG" url)"
+  export DATABASE_URL
+  export PORT
+  export PHX_HOST
+}
+
+# ── server lifecycle ─────────────────────────────────────────────────────────
+#
+# The pidfile records the PID of the ACTUAL beam.smp listening on $PORT — not
+# the `mix phx.server` launcher. `mix phx.server` exec-replaces itself with (or
+# detaches) the BEAM, so the launcher PID dies after boot and is useless for
+# stop/reload. We resolve the listener PID via lsof after the port comes up and
+# store that, so stop/reload always target the right process.
+
+# PID of whatever is listening on our HTTP port, or empty.
+listener_pid() {
+  lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1
+}
+
+server_running() {
+  [ -f "$SERVER_PID_FILE" ] && kill -0 "$(cat "$SERVER_PID_FILE")" 2>/dev/null
+}
+
+start_server() {
+  if server_running; then
+    log "server already running (pid $(cat "$SERVER_PID_FILE"))"
+    return 0
+  fi
+  if [ -n "$(listener_pid)" ]; then
+    die "something is already listening on port $PORT — stop it or set PORT=<other>"
+  fi
+  log "booting server on http://$PHX_HOST:$PORT (MIX_ENV=$MIX_ENV)"
+  mkdir -p "$BARKPARK_HOME"
+  # Boot via mix phx.server in MIX_ENV=prod (exported at top): runtime.exs reads
+  # the managed DATABASE_URL + the generated secrets from the now-loaded env.
+  # PHX_SERVER=true flips the endpoint's server flag so it actually listens.
+  # nohup so `up` returns to the shell; the real PID is captured below.
+  ( cd "$API_DIR" && nohup env PHX_SERVER=true mix phx.server >>"$SERVER_LOG" 2>&1 & )
+  wait_server
+  # Record the actual listening beam PID (not the launcher) for stop/reload.
+  local pid
+  pid="$(listener_pid)"
+  if [ -z "$pid" ]; then
+    die "server answered but no listener PID found on port $PORT — see $SERVER_LOG"
+  fi
+  echo "$pid" >"$SERVER_PID_FILE"
+  log "server up (pid $pid) — http://$PHX_HOST:$PORT/studio"
+}
+
+wait_server() {
+  local i
+  for i in $(seq 1 60); do
+    if curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "server did not answer on http://$PHX_HOST:$PORT within 60s — see $SERVER_LOG"
+}
+
+stop_server() {
+  local pid
+  pid="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
+  # Fall back to the live listener if the pidfile is stale/missing.
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    pid="$(listener_pid)"
+  fi
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    log "stopping server (pid $pid)"
+    kill "$pid" 2>/dev/null || true
+    # Wait for it to actually release the port (graceful BEAM shutdown).
+    local i
+    for i in $(seq 1 15); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+    kill -9 "$pid" 2>/dev/null || true
+  else
+    log "server not running"
+  fi
+  rm -f "$SERVER_PID_FILE"
+}
+
+# ── migrations ───────────────────────────────────────────────────────────────
+
+migrate() {
+  log "running migrations"
+  ( cd "$API_DIR" && mix ecto.migrate )
+}
+
+# ── subcommands ──────────────────────────────────────────────────────────────
+
+cmd_up() {
+  command -v mix >/dev/null 2>&1 || die "mix not found on PATH — install Elixir"
+  ensure_secrets        # T5.4
+  "$PG" start           # T5.2 — managed Postgres on :5433
+  load_env              # pulls DATABASE_URL from the managed instance
+  migrate               # apply schema to the managed DB
+  start_server          # T5.3 — boot + wait + print URL
+}
+
+# T5.6 — restart the server so a changed ~/.barkpark/.env takes effect.
+# Postgres is normally left running; only the BEAM is recycled. We still call
+# `barkpark-pg start` (idempotent — a no-op if already up) so a reload after a
+# machine reboot, where the managed Postgres is down, brings it back before the
+# server boots in :prod and tries to connect to the managed DB.
+cmd_reload() {
+  log "reload: restarting server so config changes take effect"
+  stop_server
+  "$PG" start >/dev/null
+  load_env
+  start_server
+}
+
+cmd_stop() {
+  stop_server
+  "$PG" stop
+}
+
+cmd_status() {
+  "$PG" status || true
+  if server_running; then
+    log "server running (pid $(cat "$SERVER_PID_FILE")) — http://$PHX_HOST:$PORT"
+  else
+    log "server stopped"
+  fi
+}
+
+case "${1:-up}" in
+  up)     cmd_up ;;
+  reload) cmd_reload ;;
+  stop)   cmd_stop ;;
+  status) cmd_status ;;
+  psql)   shift || true; exec "$PG" psql "$@" ;;
+  *)
+    echo "usage: barkpark {up|reload|stop|status|psql}" >&2
+    exit 2
+    ;;
+esac

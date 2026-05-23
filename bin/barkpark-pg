@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# barkpark-pg — managed embedded Postgres launcher (T5.2, Wave 5).
+#
+# Runs a Barkpark-private Postgres under $BARKPARK_HOME (default ~/.barkpark),
+# on a NON-default port (5433) bound to localhost only, so it never collides
+# with or touches a system/dev Postgres on 5432. First run does `initdb`;
+# subsequent runs detect and reuse the existing data dir (idempotent).
+#
+# Subcommands:
+#   start    initdb (if needed), start Postgres, create the role+db (if needed),
+#            wait until it accepts connections. Prints the DATABASE_URL.
+#   stop     stop Postgres (fast shutdown).
+#   status   report whether the managed instance is up.
+#   url      print the DATABASE_URL for the managed instance (no side effects).
+#   psql     open a psql shell against the managed instance (args passed through).
+#
+# Locating the Postgres tools (initdb/pg_ctl/psql), in priority order:
+#   1. $BARKPARK_PG_BIN if set (explicit override),
+#   2. Postgres.app bundled versions (newest),
+#   3. Homebrew postgresql@NN keg bins (newest),
+#   4. whatever is on PATH.
+#
+# POSIX-friendly bash; no arrays-of-arrays, no bashisms beyond `local`.
+set -euo pipefail
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+BARKPARK_HOME="${BARKPARK_HOME:-$HOME/.barkpark}"
+PG_PORT="${BARKPARK_PG_PORT:-5433}"
+PG_HOST="127.0.0.1"
+PG_DATA="$BARKPARK_HOME/pgdata"
+PG_LOG="$BARKPARK_HOME/postgres.log"
+PG_DB="${BARKPARK_PG_DB:-barkpark}"
+PG_USER="${BARKPARK_PG_USER:-barkpark}"
+# Version-pin marker — written on first initdb, compared on later starts.
+PG_VERSION_FILE="$BARKPARK_HOME/PG_VERSION_PINNED"
+
+# ── Tool location ────────────────────────────────────────────────────────────
+
+# Echo the directory containing a usable initdb, or empty if none found.
+find_pg_bin() {
+  # 1. explicit override
+  if [ -n "${BARKPARK_PG_BIN:-}" ] && [ -x "$BARKPARK_PG_BIN/initdb" ]; then
+    printf '%s\n' "$BARKPARK_PG_BIN"
+    return 0
+  fi
+
+  # 2. Postgres.app — newest version dir that has initdb.
+  local candidate
+  for candidate in $(ls -d /Applications/Postgres.app/Contents/Versions/*/bin 2>/dev/null | sort -rV); do
+    if [ -x "$candidate/initdb" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  # 3. Homebrew postgresql@NN kegs — newest first. Cover both arm and intel.
+  for candidate in \
+    $(ls -d /opt/homebrew/opt/postgresql@*/bin 2>/dev/null | sort -rV) \
+    $(ls -d /usr/local/opt/postgresql@*/bin 2>/dev/null | sort -rV) \
+    /opt/homebrew/opt/postgresql/bin \
+    /usr/local/opt/postgresql/bin; do
+    if [ -x "$candidate/initdb" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  # 4. PATH fallback.
+  if command -v initdb >/dev/null 2>&1; then
+    dirname "$(command -v initdb)"
+    return 0
+  fi
+
+  return 1
+}
+
+PG_BIN="$(find_pg_bin || true)"
+if [ -z "$PG_BIN" ]; then
+  echo "barkpark-pg: could not find a Postgres install (initdb)." >&2
+  echo "  Install one of:" >&2
+  echo "    brew install postgresql@17    (Homebrew)" >&2
+  echo "    https://postgresapp.com       (Postgres.app)" >&2
+  echo "  or set BARKPARK_PG_BIN=/path/to/postgres/bin" >&2
+  exit 1
+fi
+
+INITDB="$PG_BIN/initdb"
+PG_CTL="$PG_BIN/pg_ctl"
+PSQL="$PG_BIN/psql"
+POSTGRES_BIN="$PG_BIN/postgres"
+
+# Server-side version (e.g. "17.9") of the located install. Parse the first
+# dotted-numeric token so suffixes like "(Homebrew)" don't end up as the
+# version — `postgres --version` prints e.g. "postgres (PostgreSQL) 17.9 (Homebrew)".
+pg_server_version() {
+  "$POSTGRES_BIN" --version 2>/dev/null \
+    | grep -oE '[0-9]+(\.[0-9]+)+' \
+    | head -1
+}
+
+# ── DATABASE_URL ─────────────────────────────────────────────────────────────
+# Ecto URL form (ecto://user:pass@host:port/db). We run trust-auth on
+# localhost, so the password segment is a placeholder — never a real secret.
+
+database_url() {
+  printf 'ecto://%s:barkpark@%s:%s/%s\n' "$PG_USER" "$PG_HOST" "$PG_PORT" "$PG_DB"
+}
+
+# ── initdb (idempotent) ──────────────────────────────────────────────────────
+
+is_initialized() {
+  # A real Postgres data dir always carries PG_VERSION at its root.
+  [ -f "$PG_DATA/PG_VERSION" ]
+}
+
+do_initdb() {
+  if is_initialized; then
+    return 0
+  fi
+
+  echo "barkpark-pg: initializing fresh data dir at $PG_DATA"
+  mkdir -p "$BARKPARK_HOME"
+  # --auth-local=trust + --auth-host=trust: this instance only ever listens on
+  # localhost (see -h below), so trust auth is acceptable and keeps `barkpark
+  # up` password-free. -U sets the bootstrap superuser to our app role so the
+  # role already exists with the database we create next.
+  "$INITDB" \
+    --pgdata="$PG_DATA" \
+    --username="$PG_USER" \
+    --auth-local=trust \
+    --auth-host=trust \
+    --encoding=UTF8 \
+    >/dev/null
+
+  # Pin the PG major.minor that created this data dir. Postgres refuses to
+  # start a data dir created by a different MAJOR version, so record it for a
+  # clear error message instead of a cryptic pg_ctl failure later.
+  pg_server_version > "$PG_VERSION_FILE"
+  echo "barkpark-pg: pinned Postgres $(cat "$PG_VERSION_FILE")"
+}
+
+# Guard: refuse to start if the located Postgres major differs from the one
+# that created the data dir.
+check_version_pin() {
+  if [ ! -f "$PG_VERSION_FILE" ]; then
+    return 0
+  fi
+  local pinned current pinned_major current_major
+  pinned="$(cat "$PG_VERSION_FILE")"
+  current="$(pg_server_version)"
+  # If we could not parse a version from the located Postgres, skip the guard
+  # rather than false-trigger a mismatch against an empty string.
+  if [ -z "$current" ]; then
+    return 0
+  fi
+  pinned_major="${pinned%%.*}"
+  current_major="${current%%.*}"
+  if [ "$pinned_major" != "$current_major" ]; then
+    echo "barkpark-pg: data dir was created by Postgres $pinned (major $pinned_major)" >&2
+    echo "  but the located Postgres is $current (major $current_major)." >&2
+    echo "  Postgres cannot open a data dir across major versions." >&2
+    echo "  Point BARKPARK_PG_BIN at a Postgres $pinned_major install, or migrate the data." >&2
+    exit 1
+  fi
+}
+
+# ── lifecycle ────────────────────────────────────────────────────────────────
+
+is_running() {
+  "$PG_CTL" --pgdata="$PG_DATA" status >/dev/null 2>&1
+}
+
+start_pg() {
+  do_initdb
+  check_version_pin
+
+  if is_running; then
+    echo "barkpark-pg: already running on $PG_HOST:$PG_PORT"
+  else
+    echo "barkpark-pg: starting Postgres on $PG_HOST:$PG_PORT"
+    # -p sets the port; -h binds the listen address to localhost ONLY;
+    # -k sets the unix-socket dir inside BARKPARK_HOME so it never reuses the
+    #    default /tmp socket of a system Postgres.
+    "$PG_CTL" \
+      --pgdata="$PG_DATA" \
+      --log="$PG_LOG" \
+      --wait \
+      --options="-p $PG_PORT -h $PG_HOST -k $BARKPARK_HOME" \
+      start
+  fi
+
+  wait_ready
+  ensure_database
+  echo "barkpark-pg: ready — $(database_url)"
+}
+
+wait_ready() {
+  local i
+  for i in $(seq 1 30); do
+    if "$PG_BIN/pg_isready" --host="$PG_HOST" --port="$PG_PORT" --quiet 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "barkpark-pg: Postgres did not become ready within 30s — see $PG_LOG" >&2
+  exit 1
+}
+
+# Create the application database if it does not exist yet. The bootstrap
+# superuser role (PG_USER) is created by initdb, so we only need the DB.
+ensure_database() {
+  if "$PSQL" --host="$PG_HOST" --port="$PG_PORT" --username="$PG_USER" \
+      --dbname=postgres --tuples-only --no-align \
+      --command="SELECT 1 FROM pg_database WHERE datname='$PG_DB'" 2>/dev/null \
+      | grep -q 1; then
+    return 0
+  fi
+  echo "barkpark-pg: creating database '$PG_DB'"
+  "$PSQL" --host="$PG_HOST" --port="$PG_PORT" --username="$PG_USER" \
+    --dbname=postgres --command="CREATE DATABASE \"$PG_DB\"" >/dev/null
+}
+
+stop_pg() {
+  if is_running; then
+    echo "barkpark-pg: stopping Postgres"
+    "$PG_CTL" --pgdata="$PG_DATA" --mode=fast --wait stop
+  else
+    echo "barkpark-pg: not running"
+  fi
+}
+
+status_pg() {
+  if is_running; then
+    echo "barkpark-pg: running on $PG_HOST:$PG_PORT (data: $PG_DATA)"
+    return 0
+  fi
+  echo "barkpark-pg: stopped (data: $PG_DATA)"
+  return 1
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+
+cmd="${1:-start}"
+case "$cmd" in
+  start)  start_pg ;;
+  stop)   stop_pg ;;
+  status) status_pg ;;
+  url)    database_url ;;
+  psql)
+    shift || true
+    exec "$PSQL" --host="$PG_HOST" --port="$PG_PORT" \
+      --username="$PG_USER" --dbname="$PG_DB" "$@"
+    ;;
+  *)
+    echo "usage: barkpark-pg {start|stop|status|url|psql}" >&2
+    exit 2
+    ;;
+esac

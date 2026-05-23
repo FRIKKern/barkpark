@@ -114,6 +114,39 @@ defmodule Barkpark.Release.SecretsTest do
     end
   end
 
+  describe "default_path/0" do
+    # NOTE: not async — these mutate the BARKPARK_HOME env var, which is
+    # process-global. Kept in its own describe so the async tests above stay
+    # isolated.
+    setup do
+      prev = System.get_env("BARKPARK_HOME")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_HOME")
+          val -> System.put_env("BARKPARK_HOME", val)
+        end
+      end)
+
+      :ok
+    end
+
+    test "honors BARKPARK_HOME so the shell launcher and Elixir agree" do
+      System.put_env("BARKPARK_HOME", "/tmp/barkpark-home-xyz")
+      assert Secrets.default_path() == "/tmp/barkpark-home-xyz/.env"
+    end
+
+    test "falls back to ~/.barkpark/.env when BARKPARK_HOME is unset" do
+      System.delete_env("BARKPARK_HOME")
+      assert Secrets.default_path() == Path.expand("~/.barkpark/.env")
+    end
+
+    test "falls back to ~/.barkpark/.env when BARKPARK_HOME is empty" do
+      System.put_env("BARKPARK_HOME", "")
+      assert Secrets.default_path() == Path.expand("~/.barkpark/.env")
+    end
+  end
+
   # Minimal .env reader for assertions — splits on the first `=` per line.
   defp parse_env(path) do
     path

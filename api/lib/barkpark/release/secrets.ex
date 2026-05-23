@@ -100,9 +100,24 @@ defmodule Barkpark.Release.Secrets do
     {:ok, path}
   end
 
-  @doc "Default `.env` location for a personal-local install."
+  @doc """
+  Default `.env` location for a personal-local install.
+
+  Honors `BARKPARK_HOME` (the same root `bin/barkpark` and `bin/barkpark-pg`
+  use) so the shell launcher and this module never disagree on where the env
+  file lives. Falls back to `~/.barkpark/.env` when `BARKPARK_HOME` is unset.
+  """
   @spec default_path() :: String.t()
-  def default_path, do: Path.expand("~/.barkpark/.env")
+  def default_path do
+    home =
+      case System.get_env("BARKPARK_HOME") do
+        nil -> "~/.barkpark"
+        "" -> "~/.barkpark"
+        value -> value
+      end
+
+    home |> Path.join(".env") |> Path.expand()
+  end
 
   # The full set of var=value entries the template should contain. Crypto
   # secrets are freshly generated; the two non-secret vars are placeholders

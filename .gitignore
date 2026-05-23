@@ -1,10 +1,20 @@
 # Binaries
 /barkpark
-bin/
+# bin/ holds the committed launcher scripts (Wave 5 personal-local packaging),
+# so we do NOT ignore the directory wholesale. Git can't re-include a file once
+# its parent dir is excluded, so instead we ignore everything inside bin/ and
+# then negate the two scripts we track. Compiled binaries dropped into bin/
+# (e.g. by `air`) stay ignored by the wildcard.
+bin/*
+!bin/barkpark
+!bin/barkpark-pg
 *.exe
 *.dll
 *.so
 *.dylib
+
+# Erlang crash dumps (left by a failed BEAM boot)
+erl_crash.dump
 
 # Go
 go.sum

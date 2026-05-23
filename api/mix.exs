@@ -11,7 +11,7 @@ defmodule Barkpark.MixProject do
       aliases: aliases(),
       deps: deps(),
       listeners: [Phoenix.CodeReloader],
-      releases: [barkpark: [include_executables_for: [:unix], steps: [:assemble]]]
+      releases: releases()
     ]
   end
 
@@ -64,6 +64,25 @@ defmodule Barkpark.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       # Phase 7 WI3: in-process HTTP mock for Bokbasen client tests
       {:bypass, "~> 2.1", only: :test}
+    ]
+  end
+
+  # Release configuration (T5.1 — Wave 5 personal-local packaging).
+  #
+  # `rel/overlays/` is copied verbatim into the assembled release root, so
+  # `rel/overlays/bin/migrate` ships alongside the generated `bin/barkpark`
+  # launcher. `rel/env.sh.eex` is evaluated by the boot scripts and is where
+  # we default PHX_SERVER=true so `bin/barkpark start` actually serves HTTP
+  # without the caller having to remember the env var.
+  defp releases do
+    [
+      barkpark: [
+        include_executables_for: [:unix],
+        # The release ships its own ERTS so a packaged install does not depend
+        # on the host having a matching Erlang/Elixir on PATH.
+        include_erts: true,
+        steps: [:assemble]
+      ]
     ]
   end
 
