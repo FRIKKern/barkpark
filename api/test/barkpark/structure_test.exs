@@ -158,6 +158,75 @@ defmodule Barkpark.StructureTest do
     end
   end
 
+  describe "papers in the desk (convergence: papers are documents)" do
+    alias Barkpark.Content
+    alias BarkparkWeb.Studio.PaneBuilder
+
+    defp seed_paper_schema!(dataset) do
+      insert_schema!(%{
+        name: "paper",
+        title: "Papers",
+        icon: "📰",
+        visibility: "public",
+        dataset: dataset,
+        fields: [%{"name" => "title", "title" => "Title", "type" => "string"}]
+      })
+    end
+
+    test "the paper schema yields a :document_type_list node in build/2" do
+      dataset = "structure_test_papers"
+      seed_legacy(dataset)
+      seed_paper_schema!(dataset)
+
+      tree = Structure.build(dataset)
+
+      paper_node =
+        Enum.find(tree.items, fn n ->
+          n.type == :document_type_list and n.id == "paper"
+        end)
+
+      assert %Node{} = paper_node, "expected a paper doc-type-list node in top-level items"
+      assert paper_node.type_name == "paper"
+      assert paper_node.title == "Papers"
+      assert paper_node.visibility == :public
+    end
+
+    test "a seeded paper is listed in the desk pane and opens via PaperLive" do
+      dataset = "structure_test_papers_listed"
+      seed_paper_schema!(dataset)
+
+      slug = "2026-05-24-desk-listing"
+
+      {:ok, _doc} =
+        Content.upsert_paper(%{
+          slug: slug,
+          dataset: dataset,
+          blocks: [
+            %{"id" => "h", "type" => "heading", "text" => "Desk Listing Paper"},
+            %{"id" => "p", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "body"}]}
+          ]
+        })
+
+      # Drill into the "paper" doc-type-list pane.
+      {panes, editor} = PaneBuilder.build(dataset, ["paper"])
+
+      # No Studio form editor opens for a paper — PaperLive owns it.
+      assert editor == nil
+
+      paper_pane = List.last(panes)
+      assert paper_pane.type_name == "paper"
+
+      item = Enum.find(paper_pane.items, fn i -> i.id == slug end)
+      assert item, "expected the seeded paper to be listed in the desk pane"
+      # Listed rows are external links into PaperLive, not :doc form rows.
+      assert item.type == :paper_doc
+      assert item.href == "/papers/#{slug}"
+      # Title derived from the first heading block.
+      assert item.title == "Desk Listing Paper"
+    end
+  end
+
   describe "parse_filter/1" do
     test "returns empty map for nil" do
       assert Structure.parse_filter(nil) == %{}

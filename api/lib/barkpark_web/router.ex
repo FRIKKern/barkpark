@@ -96,7 +96,7 @@ defmodule BarkparkWeb.Router do
 
     post "/papers", PaperIngestController, :ingest
     # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
-    # auth; applies via Papers.apply_block_op, broadcasts a delta frame.
+    # auth; applies via Content.apply_paper_block_op, broadcasts a delta frame.
     post "/papers/:slug/ops", PaperIngestController, :apply_op
   end
 

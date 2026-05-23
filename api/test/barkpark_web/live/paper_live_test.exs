@@ -20,13 +20,13 @@ defmodule BarkparkWeb.PaperLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias Barkpark.Papers
+  alias Barkpark.Content
 
   @slug "2026-05-23-convergence-demo"
 
   defp seed_paper(html) do
     {:ok, paper} =
-      Papers.upsert_paper(%{slug: @slug, body_html: html, event_type: "plan-written"})
+      Content.upsert_paper(%{slug: @slug, body_html: html, event_type: "plan-written"})
 
     paper
   end
@@ -61,7 +61,7 @@ defmodule BarkparkWeb.PaperLiveTest do
       # the real Content/PubSub spine: upsert_paper persists + broadcasts on
       # the per-doc topic the LiveView subscribed to at mount.
       {:ok, _} =
-        Papers.upsert_paper(%{
+        Content.upsert_paper(%{
           slug: @slug,
           body_html:
             ~s(<section id="block-1"><h1>First</h1></section>) <>
@@ -106,7 +106,7 @@ defmodule BarkparkWeb.PaperLiveTest do
       ]
 
       {:ok, paper} =
-        Papers.upsert_paper(%{slug: @block_slug, blocks: blocks, event_type: "plan-written"})
+        Content.upsert_paper(%{slug: @block_slug, blocks: blocks, event_type: "plan-written"})
 
       paper
     end
@@ -147,9 +147,9 @@ defmodule BarkparkWeb.PaperLiveTest do
       # Append three blocks in sequence through the real context + PubSub spine.
       # Each apply_block_op renders the fragment, bumps rev, broadcasts a
       # {:paper_block, …} delta the LiveView (subscribed at mount) consumes.
-      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-2", "Second block."))
-      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-3", "Third block."))
-      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-4", "Fourth block."))
+      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Second block."))
+      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-3", "Third block."))
+      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-4", "Fourth block."))
 
       rendered = render(view)
 
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.PaperLiveTest do
     test "a patch-block delta patches one block in place; the rest are untouched",
          %{conn: conn} do
       seed_block_paper()
-      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-2", "Second block."))
+      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Second block."))
 
       {:ok, view, _html} = live(conn, "/papers/#{@block_slug}")
       pid_before = view.pid
@@ -189,7 +189,7 @@ defmodule BarkparkWeb.PaperLiveTest do
         "patch" => %{"content" => [%{"type" => "text", "value" => "First block EDITED."}]}
       }
 
-      {:ok, _} = Papers.apply_block_op(@block_slug, patch)
+      {:ok, _} = Content.apply_paper_block_op(@block_slug, patch)
       rendered = render(view)
 
       assert rendered =~ "First block EDITED."
@@ -209,8 +209,8 @@ defmodule BarkparkWeb.PaperLiveTest do
       # Persist two blocks straight into the context (bumps rev), but hand the
       # LiveView a SINGLE delta whose rev is ahead of what it last saw — a
       # simulated dropped frame. The view must refetch the full doc.
-      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-2", "Recovered B2."))
-      {:ok, last} = Papers.apply_block_op(@block_slug, append_block_op("b-3", "Recovered B3."))
+      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Recovered B2."))
+      {:ok, last} = Content.apply_paper_block_op(@block_slug, append_block_op("b-3", "Recovered B3."))
 
       # Frame with a rev far ahead of the mount rev → gap → refetch path.
       send(
@@ -241,14 +241,14 @@ defmodule BarkparkWeb.PaperLiveTest do
          %{conn: conn} do
       # An HTML-only paper (no blocks) keeps the Wave-3 re-assign path.
       slug = "wave4-html-fallback"
-      {:ok, _} = Papers.upsert_paper(%{slug: slug, body_html: "<p id=\"v1\">v1</p>"})
+      {:ok, _} = Content.upsert_paper(%{slug: slug, body_html: "<p id=\"v1\">v1</p>"})
 
       {:ok, view, html} = live(conn, "/papers/#{slug}")
       assert html =~ ~s(id="v1")
       refute html =~ ~s(id="v2")
       pid_before = view.pid
 
-      {:ok, _} = Papers.upsert_paper(%{slug: slug, body_html: "<p id=\"v2\">v2 re-assigned</p>"})
+      {:ok, _} = Content.upsert_paper(%{slug: slug, body_html: "<p id=\"v2\">v2 re-assigned</p>"})
 
       rendered = render(view)
       assert rendered =~ ~s(id="v2")

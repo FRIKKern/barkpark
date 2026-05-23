@@ -10,7 +10,12 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.Papers
+  alias Barkpark.Content
+  import Ecto.Query, only: [from: 2]
+
+  # Convenience accessors — papers are type-"paper" documents now; the block
+  # list / HTML cache / provenance live in the document's `content` map.
+  defp pc(doc, key), do: get_in(doc.content || %{}, [key])
 
   # Set in config/test.exs.
   @token "paperflow-test-ingest-token"
@@ -34,7 +39,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
         |> post(@path, body("no-token-paper"))
 
       assert json_response(conn, 401)["error"]["code"] == "unauthorized"
-      refute Papers.get_paper("no-token-paper")
+      refute Content.get_paper("no-token-paper")
     end
 
     test "rejects with a wrong token", %{conn: conn} do
@@ -45,7 +50,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
         |> post(@path, body("bad-token-paper"))
 
       assert json_response(conn, 401)["error"]["code"] == "unauthorized"
-      refute Papers.get_paper("bad-token-paper")
+      refute Content.get_paper("bad-token-paper")
     end
   end
 
@@ -53,7 +58,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
     test "upserts the paper and broadcasts on the per-doc topic", %{conn: conn} do
       slug = "ingest-ok-paper"
       # Subscribe BEFORE the request so we observe the broadcast.
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Papers.topic(slug))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
 
       conn =
         conn
@@ -68,11 +73,11 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       assert is_binary(resp["rev"])
 
       # Persisted so a fresh LiveView mount renders the latest HTML.
-      paper = Papers.get_paper(slug)
-      assert paper.body_html =~ slug
-      assert paper.source_doc == "plans/#{slug}.html"
-      assert paper.goal_id == "bd-test1"
-      assert paper.event_type == "plan-written"
+      paper = Content.get_paper(slug)
+      assert pc(paper, "body_html") =~ slug
+      assert pc(paper, "source_doc") == "plans/#{slug}.html"
+      assert pc(paper, "goal_id") == "bd-test1"
+      assert pc(paper, "event_type") == "plan-written"
 
       # Broadcast landed on the topic PaperLive subscribes to.
       assert_receive {:paper_updated, %{slug: ^slug, html: html}}
@@ -94,10 +99,17 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       _ =
         auth.(Phoenix.ConnTest.build_conn(), %{"slug" => slug, "body_html" => "<p>v2 updated</p>"})
 
-      paper = Papers.get_paper(slug)
-      assert paper.body_html == "<p>v2 updated</p>"
+      paper = Content.get_paper(slug)
+      assert pc(paper, "body_html") == "<p>v2 updated</p>"
       # Exactly one row for the slug — updated, not duplicated.
-      assert length(Barkpark.Repo.all(Barkpark.Papers.Paper)) >= 1
+      count =
+        Barkpark.Repo.one(
+          from d in Barkpark.Content.Document,
+            where: d.type == "paper" and d.doc_id == ^slug,
+            select: count(d.id)
+        )
+
+      assert count == 1
     end
 
     test "rejects a payload missing slug/body_html with 400", %{conn: conn} do
@@ -136,7 +148,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       slug = "ops-target-#{System.unique_integer([:positive])}"
       # A block-backed paper to apply ops against.
       {:ok, paper} =
-        Papers.upsert_paper(%{
+        Content.upsert_paper(%{
           slug: slug,
           blocks: [
             %{"id" => "intro", "type" => "paragraph",
@@ -144,12 +156,12 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
           ]
         })
 
-      {:ok, slug: slug, rev0: paper.rev}
+      {:ok, slug: slug, rev0: pc(paper, "rev")}
     end
 
     test "valid op + bearer applies, bumps rev, broadcasts a delta, returns the fragment",
          %{conn: conn, slug: slug, rev0: rev0} do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Papers.topic(slug))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
 
       conn = auth_post(conn, slug, append_op("b-new", "Streamed in."))
 
@@ -162,9 +174,9 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       assert resp["fragment_html"] =~ "Streamed in."
 
       # Persisted: block list grew, HTML cache refreshed.
-      paper = Papers.get_paper(slug)
-      assert length(paper.blocks) == 2
-      assert paper.body_html =~ "Streamed in."
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 2
+      assert pc(paper, "body_html") =~ "Streamed in."
 
       # Delta frame landed on the per-doc topic PaperLive subscribes to.
       assert_receive {:paper_block, %{op_kind: "append-block", block_id: "b-new", rev: rev}}
@@ -180,7 +192,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
 
       assert json_response(conn, 401)["error"]["code"] == "unauthorized"
       # Untouched — still just the seeded block.
-      assert length(Papers.get_paper(slug).blocks) == 1
+      assert length(pc(Content.get_paper(slug), "blocks")) == 1
     end
 
     test "unknown slug → 404", %{conn: conn} do
