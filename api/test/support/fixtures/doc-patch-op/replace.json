@@ -1,0 +1,81 @@
+{
+  "before": {
+    "version": 1,
+    "title": "Guide",
+    "preview": "How to deploy.",
+    "blocks": [
+      {
+        "id": "g-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Guide"
+      },
+      {
+        "id": "g-old",
+        "type": "paragraph",
+        "content": [{ "type": "text", "value": "Run the deploy steps below." }]
+      },
+      {
+        "id": "g-detail",
+        "type": "section",
+        "title": "Details",
+        "blocks": [
+          {
+            "id": "g-detail-p",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Each step is idempotent." }]
+          }
+        ]
+      }
+    ]
+  },
+  "op": {
+    "op": "replace-block",
+    "id": "g-old",
+    "block": {
+      "id": "g-steps",
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [{ "type": "text", "value": "Build the artifact" }],
+        [{ "type": "text", "value": "Push to staging" }],
+        [{ "type": "text", "value": "Promote to production" }]
+      ]
+    }
+  },
+  "after": {
+    "version": 1,
+    "title": "Guide",
+    "preview": "How to deploy.",
+    "blocks": [
+      {
+        "id": "g-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Guide"
+      },
+      {
+        "id": "g-steps",
+        "type": "list",
+        "ordered": true,
+        "items": [
+          [{ "type": "text", "value": "Build the artifact" }],
+          [{ "type": "text", "value": "Push to staging" }],
+          [{ "type": "text", "value": "Promote to production" }]
+        ]
+      },
+      {
+        "id": "g-detail",
+        "type": "section",
+        "title": "Details",
+        "blocks": [
+          {
+            "id": "g-detail-p",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Each step is idempotent." }]
+          }
+        ]
+      }
+    ]
+  }
+}

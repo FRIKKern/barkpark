@@ -1,0 +1,88 @@
+{
+  "before": {
+    "version": 1,
+    "title": "Onboarding",
+    "preview": "Get set up in three steps.",
+    "blocks": [
+      {
+        "id": "ob-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Onboarding"
+      },
+      {
+        "id": "ob-steps",
+        "type": "section",
+        "title": "Steps",
+        "blocks": [
+          {
+            "id": "ob-intro",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Follow these to begin." }]
+          },
+          {
+            "id": "ob-list",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              [{ "type": "text", "value": "Create an account" }],
+              [{ "type": "text", "value": "Invite your team" }]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "op": {
+    "op": "insert-after",
+    "afterId": "ob-intro",
+    "block": {
+      "id": "ob-note",
+      "type": "callout",
+      "tone": "info",
+      "title": "Heads up",
+      "content": [{ "type": "text", "value": "This takes about five minutes." }]
+    }
+  },
+  "after": {
+    "version": 1,
+    "title": "Onboarding",
+    "preview": "Get set up in three steps.",
+    "blocks": [
+      {
+        "id": "ob-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Onboarding"
+      },
+      {
+        "id": "ob-steps",
+        "type": "section",
+        "title": "Steps",
+        "blocks": [
+          {
+            "id": "ob-intro",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Follow these to begin." }]
+          },
+          {
+            "id": "ob-note",
+            "type": "callout",
+            "tone": "info",
+            "title": "Heads up",
+            "content": [{ "type": "text", "value": "This takes about five minutes." }]
+          },
+          {
+            "id": "ob-list",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              [{ "type": "text", "value": "Create an account" }],
+              [{ "type": "text", "value": "Invite your team" }]
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
