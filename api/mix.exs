@@ -10,7 +10,8 @@ defmodule Barkpark.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      listeners: [Phoenix.CodeReloader]
+      listeners: [Phoenix.CodeReloader],
+      releases: [barkpark: [include_executables_for: [:unix], steps: [:assemble]]]
     ]
   end
 
