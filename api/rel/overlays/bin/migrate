@@ -1,0 +1,13 @@
+#!/bin/sh
+# Release migrate overlay (T5.1 — Wave 5).
+#
+# Runs Ecto migrations against the release WITHOUT a Mix install present, by
+# evaluating Barkpark.Release.migrate/0 inside the packaged BEAM. `barkpark up`
+# calls this after the managed Postgres is reachable and DATABASE_URL is set.
+#
+# This script lives in rel/overlays/bin and is copied verbatim into the release
+# root, so it sits next to the generated `barkpark` launcher at runtime.
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+exec ./barkpark eval "Barkpark.Release.migrate()"
