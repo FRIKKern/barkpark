@@ -210,6 +210,13 @@ if config_env() == :prod do
     config :barkpark, :default_cors_origins, parsed
   end
 
+  # Paper-ingest shared secret (convergence MVP). When unset, the ingest
+  # endpoint rejects every request (RequireIngestToken treats nil as "no
+  # token configured" → 401), so the seam is closed by default in prod.
+  if ingest_token = System.get_env("PAPERFLOW_INGEST_TOKEN") do
+    config :barkpark, :paperflow_ingest_token, ingest_token
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

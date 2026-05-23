@@ -46,6 +46,12 @@ config :barkpark, :preview,
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
 config :barkpark, :default_cors_origins, []
 
+# Shared secret for the paperflow → Barkpark paper-ingest endpoint
+# (convergence MVP, masterplan Figure 6). Matches BARKPARK_INGEST_TOKEN
+# from ~/.paperflow/barkpark.env. Overridden per-env: runtime.exs reads
+# PAPERFLOW_INGEST_TOKEN in prod; dev.exs/test.exs set a local default.
+config :barkpark, :paperflow_ingest_token, nil
+
 config :barkpark, Oban,
   repo: Barkpark.Repo,
   queues: [default: 10, bokbasen: 4, plugins: 6],

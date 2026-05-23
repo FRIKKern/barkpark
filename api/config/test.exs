@@ -32,3 +32,6 @@ config :phoenix,
 
 # Drive Oban manually in tests so we can drain queues from assertions.
 config :barkpark, Oban, testing: :manual
+
+# Fixed paper-ingest secret for tests (convergence MVP).
+config :barkpark, :paperflow_ingest_token, "paperflow-test-ingest-token"
