@@ -8,13 +8,25 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
 
   ## Options
 
-    * `--out PATH`           — output directory (default `priv/plugins/<name>`)
-    * `--module ModuleName`  — module name (default derived from `<name>`)
+    * `--root PATH`          — base directory the layout is rooted at
+      (default `.`, the `api/` cwd). The manifest, entry module, and test
+      destinations are all derived from this.
+    * `--out PATH`           — override for the manifest (priv) directory only
+      (default `<root>/priv/plugins/<name>`)
+    * `--module ModuleName`  — module name (default `Barkpark.Plugins.<Pascal>`)
     * `--description "..."`  — manifest description (default boilerplate)
     * `--capabilities r,w,s` — CSV list of capability names (default empty).
       Single-letter shortcuts: `r`→`routes`, `w`→`workers`, `s`→`schemas`,
       `n`→`node`, `c`→`codelists`, `t`→`settings`. Full names also accepted.
-    * `--force`              — overwrite an existing output directory
+    * `--force`              — overwrite existing output files
+
+  The generated skeleton mirrors the working OnixEdit layout so the plugin
+  actually registers: the entry module lands in the COMPILED tree at
+  `<root>/lib/barkpark/plugins/<name>.ex` (where `elixirc_paths` can see it),
+  the manifest at `<root>/priv/plugins/<name>/plugin.json` carries an explicit
+  `"module"` key so `Barkpark.Plugins.Registry.resolve_module/1` agrees with
+  what the module defines, and the test lands on the `mix test` path at
+  `<root>/test/barkpark/plugins/<name>_test.exs`.
 
   The generated skeleton uses the `Barkpark.Plugin` behaviour at compile
   time (D7 — no runtime eval) and produces a `plugin.json` that validates
@@ -25,6 +37,7 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
   use Mix.Task
 
   @switches [
+    root: :string,
     out: :string,
     module: :string,
     description: :string,
@@ -34,10 +47,14 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
 
   @slug_regex ~r/^[a-z][a-z0-9_-]*$/
 
+  # Each template renders to a destination resolved against the assigns.
+  # The manifest + README + schemas live under the priv dir; the entry
+  # module and test live in the compiled `lib/` and `test/` trees so the
+  # plugin actually registers and is exercised by `mix test`.
   @templates [
-    {"plugin.json.eex", "plugin.json"},
+    {"plugin.json.eex", :manifest},
     {"lib/plugin.ex.eex", :lib_module},
-    {"README.md.eex", "README.md"},
+    {"README.md.eex", :readme},
     {"test/plugin_test.exs.eex", :test_module}
   ]
 
@@ -58,18 +75,35 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
           """)
       end
 
+    root = Keyword.get(opts, :root, ".")
+    priv_dir = Keyword.get(opts, :out, default_priv_dir(root, name))
+    paths = build_paths(root, name, priv_dir)
+
     assigns = build_assigns(name, opts)
-    out_dir = Keyword.get(opts, :out, default_out(name))
     force? = Keyword.get(opts, :force, false)
 
-    ensure_writable!(out_dir, force?)
-    generate(out_dir, assigns)
-    print_next_steps(out_dir, assigns)
+    ensure_writable!(paths, force?)
+    generate(paths, assigns)
+    print_next_steps(paths, assigns)
 
     :ok
   end
 
-  defp default_out(name), do: Path.join(["priv", "plugins", name])
+  defp default_priv_dir(root, name), do: Path.join([root, "priv", "plugins", name])
+
+  # Resolves the three destinations. The manifest, README and schemas/
+  # dir live under `priv_dir`; the entry module and test live in the
+  # compiled trees rooted at `root`.
+  defp build_paths(root, name, priv_dir) do
+    %{
+      priv_dir: priv_dir,
+      manifest: Path.join(priv_dir, "plugin.json"),
+      readme: Path.join(priv_dir, "README.md"),
+      schemas_keep: Path.join([priv_dir, "schemas", ".gitkeep"]),
+      lib_module: Path.join([root, "lib", "barkpark", "plugins", name <> ".ex"]),
+      test_module: Path.join([root, "test", "barkpark", "plugins", name <> "_test.exs"])
+    }
+  end
 
   defp build_assigns(name, opts) do
     unless Regex.match?(@slug_regex, name) do
@@ -89,9 +123,17 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
     %{
       plugin_name: name,
       module: module,
+      manifest_rel: manifest_rel(name),
       description: description,
       capabilities: capabilities
     }
+  end
+
+  # Relative path from the entry module's dir (`lib/barkpark/plugins/`)
+  # to its manifest under `priv/plugins/<name>/`. Three `..` climbs reach
+  # the app root, same as the OnixEdit reference module.
+  defp manifest_rel(name) do
+    Path.join(["../../../priv/plugins", name, "plugin.json"])
   end
 
   defp parse_capabilities(nil), do: []
@@ -113,60 +155,57 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
   defp expand_capability("t"), do: "settings"
   defp expand_capability(other), do: other
 
+  # Namespaced default so it matches what `Registry.resolve_module/1`
+  # derives from `plugin_name` (same `Macro.camelize` per-segment, same
+  # `Barkpark.Plugins.` prefix). An explicit `--module` overrides this.
   defp default_module(name) do
-    name
-    |> String.split(["-", "_"], trim: true)
-    |> Enum.map_join("", &String.capitalize/1)
+    pascal =
+      name
+      |> String.split(~r/[_\-\s]+/, trim: true)
+      |> Enum.map_join("", &Macro.camelize/1)
+
+    "Barkpark.Plugins." <> pascal
   end
 
-  defp ensure_writable!(out_dir, force?) do
-    if File.exists?(out_dir) and not force? do
+  # Files are scattered across the priv dir and the shared lib/+test/
+  # trees, so we guard each generated file individually rather than
+  # wiping a single output directory (which would destroy unrelated code
+  # under `lib/barkpark/plugins/`). The priv dir is treated as the plugin's
+  # own — `--force` clears it wholesale.
+  defp ensure_writable!(paths, force?) do
+    targets = [paths.manifest, paths.readme, paths.lib_module, paths.test_module]
+    existing = Enum.filter(targets, &File.exists?/1)
+
+    if existing != [] and not force? do
       Mix.raise("""
-      Output directory already exists: #{out_dir}
+      Refusing to overwrite existing files:
+
+      #{Enum.map_join(existing, "\n", &("  - " <> &1))}
 
       Pass `--force` to overwrite.
       """)
     end
 
-    if force? and File.exists?(out_dir) do
-      File.rm_rf!(out_dir)
+    if force? and File.exists?(paths.priv_dir) do
+      File.rm_rf!(paths.priv_dir)
     end
-
-    File.mkdir_p!(out_dir)
   end
 
-  defp generate(out_dir, assigns) do
+  defp generate(paths, assigns) do
     template_root = template_root()
 
-    for {src, dest} <- @templates do
-      target = resolve_target(dest, assigns, out_dir)
+    for {src, key} <- @templates do
+      target = Map.fetch!(paths, key)
       File.mkdir_p!(Path.dirname(target))
-
-      content =
-        if String.ends_with?(src, ".eex") do
-          render_eex(Path.join(template_root, src), assigns)
-        else
-          File.read!(Path.join(template_root, src))
-        end
-
+      content = render_eex(Path.join(template_root, src), assigns)
       File.write!(target, content)
       Mix.shell().info("* creating #{Path.relative_to_cwd(target)}")
     end
 
-    schemas_keep = Path.join([out_dir, "schemas", ".gitkeep"])
-    File.mkdir_p!(Path.dirname(schemas_keep))
-    File.write!(schemas_keep, "")
-    Mix.shell().info("* creating #{Path.relative_to_cwd(schemas_keep)}")
+    File.mkdir_p!(Path.dirname(paths.schemas_keep))
+    File.write!(paths.schemas_keep, "")
+    Mix.shell().info("* creating #{Path.relative_to_cwd(paths.schemas_keep)}")
   end
-
-  defp resolve_target(:lib_module, %{plugin_name: name}, out_dir),
-    do: Path.join([out_dir, "lib", name <> ".ex"])
-
-  defp resolve_target(:test_module, %{plugin_name: name}, out_dir),
-    do: Path.join([out_dir, "test", name <> "_test.exs"])
-
-  defp resolve_target(rel, _assigns, out_dir) when is_binary(rel),
-    do: Path.join(out_dir, rel)
 
   defp render_eex(path, assigns) do
     EEx.eval_file(path, assigns: Map.to_list(assigns))
@@ -180,18 +219,26 @@ defmodule Mix.Tasks.Barkpark.Plugin.New do
     ])
   end
 
-  defp print_next_steps(out_dir, %{plugin_name: name}) do
+  defp print_next_steps(paths, %{module: module}) do
+    schemas_dir = Path.join(paths.priv_dir, "schemas")
+
     Mix.shell().info("""
 
-    Plugin scaffold created at #{Path.relative_to_cwd(out_dir)}.
+    Plugin scaffold created.
+
+      module:   #{Path.relative_to_cwd(paths.lib_module)}  (#{module})
+      manifest: #{Path.relative_to_cwd(paths.manifest)}
+      test:     #{Path.relative_to_cwd(paths.test_module)}
 
     Next steps:
 
-      1. Run `mix compile` to verify the skeleton compiles.
-      2. Add the module to your plugin registry (see
-         `Barkpark.Plugins.Registry.discover_and_register/0`).
-      3. Drop schemas into `#{Path.join(out_dir, "schemas")}`.
-      4. Run `mix test test/#{name}_test.exs` once tests are wired up.
+      1. Run `mix compile` to compile the entry module.
+      2. Restart the server. `Barkpark.Plugins.Registry` auto-discovers
+         the plugin from its manifest in `priv/plugins/` — no manual
+         registry edit. (When the `:plugins` config is unset, discovery is
+         automatic; when set, it acts as a whitelist of `plugin_name`s.)
+      3. Drop schemas into `#{schemas_dir}`.
+      4. Run `mix test #{Path.relative_to_cwd(paths.test_module)}`.
     """)
   end
 end

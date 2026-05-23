@@ -8,33 +8,36 @@
 
 ## Layout
 
+The entry module lives in the compiled tree so it actually registers; the
+manifest, schemas, and this README live under `priv/plugins/<%= @plugin_name %>/`.
+
 ```
+lib/barkpark/plugins/<%= @plugin_name %>.ex     # plugin module (use Barkpark.Plugin)
+test/barkpark/plugins/<%= @plugin_name %>_test.exs  # on the mix test path
 priv/plugins/<%= @plugin_name %>/
-├── lib/
-│   └── <%= @plugin_name %>.ex     # plugin module (use Barkpark.Plugin)
-├── schemas/                       # plugin schema definitions
-├── plugin.json                    # manifest (validated at boot)
-├── README.md                      # this file
-└── test/
-    └── <%= @plugin_name %>_test.exs
+├── plugin.json                   # manifest (validated at compile time)
+├── README.md                     # this file
+└── schemas/                      # plugin schema definitions
 ```
 
 ## Adding code
 
-- Schemas: drop JSON or Elixir schema files into `schemas/`.
-- Logic: extend the module in `lib/<%= @plugin_name %>.ex`.
-- Tests: add cases to `test/<%= @plugin_name %>_test.exs` and run `mix test`.
+- Schemas: drop JSON or Elixir schema files into
+  `priv/plugins/<%= @plugin_name %>/schemas/`.
+- Logic: extend the module in `lib/barkpark/plugins/<%= @plugin_name %>.ex`.
+- Tests: add cases to `test/barkpark/plugins/<%= @plugin_name %>_test.exs`
+  and run `mix test`.
 
 ## Verifying
 
 ```bash
 cd api
-MIX_ENV=prod mix compile --warnings-as-errors
-mix test test/<%= @plugin_name %>_test.exs
+mix compile
+mix test test/barkpark/plugins/<%= @plugin_name %>_test.exs
 ```
 
 ## Further reading
 
 - `docs/plugins/SCHEMA_V2.md` — composite, arrayOf, codelist, localizedText
-- `Barkpark.Plugin` behaviour — `lib/barkpark/plugins/plugin.ex`
+- `Barkpark.Plugin` behaviour — `lib/barkpark/plugin.ex`
 - `Barkpark.Plugins.Registry` — discovery & registration entrypoint

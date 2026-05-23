@@ -70,6 +70,25 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
     def external_sync_entries, do: raise("boom from FakeRaisingHandlersPlugin")
   end
 
+  # Two ordering probes: each appends its own name to a shared
+  # :persistent_term list so the test can read back the invocation order.
+  defmodule FakeOrderPluginA do
+    def codelist_seeders do
+      [fn -> append_order(:a) end]
+    end
+
+    def append_order(tag) do
+      key = {Barkpark.Plugins.RegistryCollectTest, :seed_order}
+      :persistent_term.put(key, :persistent_term.get(key, []) ++ [tag])
+    end
+  end
+
+  defmodule FakeOrderPluginB do
+    def codelist_seeders do
+      [fn -> FakeOrderPluginA.append_order(:b) end]
+    end
+  end
+
   # ─── collect_action_handlers/0 ──────────────────────────────────────────
 
   describe "collect_action_handlers/0" do
@@ -149,6 +168,36 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
                {FakeRaisingCodelistPlugin, :seeded_after_boom},
                false
              ) == true
+    end
+
+    test "seeds in the configured :plugins order, not alphabetical" do
+      order_key = {__MODULE__, :seed_order}
+      :persistent_term.erase(order_key)
+
+      salt = System.unique_integer([:positive])
+      # Names chosen so alphabetical order (a-… before b-…) is the REVERSE
+      # of the configured order, proving config wins over Enum.sort_by/2.
+      name_a = "zz-order-a-#{salt}"
+      name_b = "aa-order-b-#{salt}"
+
+      :ok = Registry.register(FakeOrderPluginA, %{"plugin_name" => name_a})
+      :ok = Registry.register(FakeOrderPluginB, %{"plugin_name" => name_b})
+
+      prior = Application.get_env(:barkpark, :plugins, [])
+      # Configured order: A (zz-…) THEN B (aa-…) — opposite of alphabetical.
+      Application.put_env(:barkpark, :plugins, [name_a, name_b])
+      on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+
+      assert :ok = Registry.run_all_codelist_seeders()
+
+      observed = :persistent_term.get(order_key, [])
+      a_idx = Enum.find_index(observed, &(&1 == :a))
+      b_idx = Enum.find_index(observed, &(&1 == :b))
+
+      assert is_integer(a_idx) and is_integer(b_idx)
+
+      assert a_idx < b_idx,
+             "expected configured order (A before B); got: #{inspect(observed)}"
     end
   end
 end
