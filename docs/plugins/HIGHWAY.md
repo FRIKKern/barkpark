@@ -176,9 +176,21 @@ rather than just append to it.
 ### `validate_settings/1`
 
 * **Signature.** `@callback validate_settings(map()) :: :ok | {:error, [{atom(), String.t()}]}`.
-* **When fires.** Called by `Barkpark.Plugins.Settings.put/3` before
-  persisting the form-submitted map. A non-`:ok` return blocks the save and
-  the admin LV surfaces the field-level errors.
+* **When fires.** Called by the admin Plugin Settings LiveView
+  (`BarkparkWeb.Admin.PluginSettingsLive.run_plugin_validation/2`) on form
+  submit. The LV resolves the plugin module by name, shapes the typed form
+  values into the nested `%{"<row>" => %{<key> => …}}` map the plugin
+  expects, and calls `module.validate_settings/1` **before** persisting. A
+  non-`:ok` return blocks the save and the LV surfaces the field-level
+  errors.
+  **Note — `Barkpark.Plugins.Settings.put/3` does NOT call this.**
+  `put/3` is keyed by settings-**row** name and performs no validation; it
+  only persists the changeset. `validate_settings/1` is per-**plugin**.
+  Because the admin LV is the only caller, **other write paths that reach
+  `Settings.put/3` directly — the Studio settings LiveView and the plugin
+  settings API controller — currently bypass `validate_settings/1`.** This
+  is a known limitation: validation today is gated at the admin form, not at
+  the storage layer.
 * **Returns.** `:ok` or `{:error, [{field_atom, message_string}, …]}`.
 * **Default.** `:ok` — plugins that don't need extra validation rely on the
   declarative `settings_schema/0` typing.
@@ -721,7 +733,7 @@ callback path. Walk through `api/lib/barkpark/plugins/onixedit.ex`:
 | `content_renderer/3` | Pattern-matched on `"book"` — calls `OnixEdit.Export.to_string/1`, returns `{:ok, xml}` on success, `:skip` on `{:error, _}` or raise. |
 | `test_connection/1` | Calls `Bokbasen.Auth.token/0`, returns `{:ok, %{message: "Bokbasen reachable: token OK."}}` or `{:error, "Bokbasen unreachable: …"}`. |
 | `resolve_doc_actions/2` | Drops `"publish_to_bokbasen"` from `prev` while the book's `bp_export_status.state` is in `["queued", "staging", "staged", "polling"]`. The companion `action_handlers/0` entry stays registered — the handler still runs whenever the action isn't hidden. Proof of the Goal `barkpark-cjs` resolver refactor. |
-| `codelist_requirements/0` | Plugin-internal helper (not a Plugin behaviour callback) — declares the ~70 EDItEUR list IDs the schema references. Consumed by `mix barkpark.codelists.import`. |
+| `codelist_requirements/0` | Plugin-internal helper (not a Plugin behaviour callback) — declares the ~70 EDItEUR list IDs the schema references. Consumed by `mix barkpark.codelists.seed`. |
 
 The plugin's whole public-API contract with the host is the table above.
 Every other Elixir module under `Barkpark.Plugins.OnixEdit.*` is internal

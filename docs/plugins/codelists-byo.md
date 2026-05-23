@@ -41,7 +41,8 @@ The seeder resolves the path in this fixed precedence:
 1. **`--source PATH` argument** to `mix barkpark.codelists.seed`
 2. **`BARKPARK_ONIX_CODELIST_PATH` environment variable**
 3. **Plugin settings**, key `"codelist_path"` for plugin `"onixedit"`
-   (configured via Studio at `/studio/plugins/onixedit/settings`)
+   (configured via Studio at `/studio/production/_plugins/onixedit/settings`
+   — the admin plugin-settings route is `/studio/:dataset/_plugins/:plugin/settings`)
 
 If none are configured, the Mix task prints a guided message pointing
 publishers at the Studio first-boot wizard and exits 1 — there is no
