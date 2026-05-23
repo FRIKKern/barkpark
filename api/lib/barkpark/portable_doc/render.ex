@@ -51,6 +51,210 @@ defmodule Barkpark.PortableDoc.Render do
     end
   end
 
+  # ── block → HTML (Wave 4 entry point) ──────────────────────────────────────
+  #
+  # The functions above render a *Pd-tree* (`%{"kind" => "PdText", …}`). The
+  # functions below render a portable-doc *block list* — the AST shape that
+  # `Barkpark.PortableDoc.Patch` operates on (`%{"id" => …, "type" => …}`) and
+  # that the Papers context stores. They first `compose_block/1` each block into
+  # a Pd-tree (the in-process twin of `composeBlock` in
+  # `portable-doc/packages/primitives/src/kernel.ts`), then `walk/2` it — the
+  # exact pairing of `renderBlockHtml` in the TS `backend-web` static renderer.
+
+  @doc """
+  Render a single portable-doc block to a bare HTML fragment — no `<!doctype>`,
+  no `<html>`, no container `<div>`.
+
+  The composed Pd-tree is walked with `doctype: false`, so the output is the
+  same fragment that block would produce inside a full-document render. A
+  `section` block carries its own leading/trailing `PdHr` rules (they live in
+  the block's composed sub-tree), so they survive here by design.
+  """
+  def render_block(block, opts \\ %{}) when is_map(block) do
+    block
+    |> compose_block()
+    |> render_html(Map.put(opts, :doctype, false))
+  end
+
+  @doc """
+  Render a full portable-doc block list to one concatenated HTML fragment, in
+  order. Used to refresh the `body_html` cache from the block source of truth.
+  """
+  def render_blocks(blocks, opts \\ %{}) when is_list(blocks) do
+    blocks
+    |> Enum.map(&render_block(&1, opts))
+    |> Enum.join("")
+  end
+
+  # ── compose_block: portable-doc block → Pd-tree ────────────────────────────
+  # Faithful Elixir port of kernel.ts `composeBlock`. One clause per block type.
+  # Trusts the AST has already been validated (the validator is the only gate);
+  # it does not re-validate URLs or tone palette membership.
+
+  @doc false
+  def compose_block(%{"type" => "heading"} = b) do
+    %{"kind" => "PdText", "weight" => "bold", "children" => [Map.get(b, "text", "")]}
+  end
+
+  def compose_block(%{"type" => "paragraph"} = b) do
+    %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
+  end
+
+  def compose_block(%{"type" => "list"} = b) do
+    ordered = Map.get(b, "ordered") == true
+
+    item_rows =
+      Map.get(b, "items", [])
+      |> Enum.with_index()
+      |> Enum.map(fn {item, idx} ->
+        prefix = if ordered, do: "#{idx + 1}. ", else: "• "
+
+        %{
+          "kind" => "PdBox",
+          "style" => %{"flexDirection" => "row"},
+          "children" => [
+            %{"kind" => "PdText", "children" => [prefix]},
+            %{"kind" => "PdText", "children" => compose_inline_children(item)}
+          ]
+        }
+      end)
+
+    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => item_rows}
+  end
+
+  def compose_block(%{"type" => "callout"} = b) do
+    body = %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
+
+    base = %{"kind" => "PdCallout", "tone" => Map.get(b, "tone"), "children" => [body]}
+    maybe_put(base, "title", Map.get(b, "title"))
+  end
+
+  def compose_block(%{"type" => "action"} = b) do
+    %{
+      "kind" => "PdButton",
+      "href" => Map.get(b, "href", ""),
+      "label" => Map.get(b, "label", ""),
+      "priority" => Map.get(b, "priority")
+    }
+  end
+
+  def compose_block(%{"type" => "section"} = b) do
+    leading = [%{"kind" => "PdHr"}]
+
+    title =
+      case Map.get(b, "title") do
+        nil -> []
+        t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
+      end
+
+    inner = Enum.map(Map.get(b, "blocks", []), &compose_block/1)
+
+    children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+  end
+
+  def compose_block(%{"type" => "divider"}), do: %{"kind" => "PdHr"}
+
+  def compose_block(%{"type" => "code"} = b) do
+    children =
+      Map.get(b, "value", "")
+      |> String.split("\n")
+      |> Enum.map(fn line ->
+        %{"kind" => "PdText", "children" => [%{"kind" => "PdInlineCode", "value" => line}]}
+      end)
+
+    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+  end
+
+  def compose_block(%{"type" => "image"} = b) do
+    %{"kind" => "PdImage", "src" => Map.get(b, "src", ""), "alt" => Map.get(b, "alt", "")}
+    |> maybe_put("width", Map.get(b, "width"))
+    |> maybe_put("height", Map.get(b, "height"))
+  end
+
+  def compose_block(%{"type" => "table"} = b) do
+    rows =
+      Map.get(b, "rows", [])
+      |> Enum.map(fn row ->
+        Enum.map(row, fn cell ->
+          cell |> compose_inline_children() |> Enum.map(&to_pd_node_from_inline_child/1)
+        end)
+      end)
+
+    %{"kind" => "PdTable", "rows" => rows}
+  end
+
+  def compose_block(%{"type" => type}) do
+    raise ArgumentError, "compose_block: unhandled block type #{type}"
+  end
+
+  # ── inline walker (kernel.ts composeInline) ────────────────────────────────
+
+  defp compose_inline_children(nodes) when is_list(nodes) do
+    Enum.map(nodes, &compose_inline(&1, false))
+  end
+
+  defp compose_inline_children(_), do: []
+
+  defp compose_inline(%{"type" => "text"} = n, _inside_link), do: Map.get(n, "value", "")
+
+  defp compose_inline(%{"type" => "strong"} = n, inside_link) do
+    %{
+      "kind" => "PdText",
+      "weight" => "bold",
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
+  defp compose_inline(%{"type" => "em"} = n, inside_link) do
+    %{
+      "kind" => "PdText",
+      "italic" => true,
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
+  defp compose_inline(%{"type" => "code"} = n, _inside_link) do
+    %{"kind" => "PdInlineCode", "value" => Map.get(n, "value", "")}
+  end
+
+  defp compose_inline(%{"type" => "link"} = n, inside_link) do
+    children = Enum.map(Map.get(n, "children", []), &compose_inline_for_link_children(&1, true))
+
+    if inside_link do
+      # Nested link — flatten to a plain text wrapper to keep links non-recursive.
+      %{"kind" => "PdText", "children" => children}
+    else
+      %{"kind" => "PdLink", "href" => Map.get(n, "href", ""), "children" => children}
+    end
+  end
+
+  defp compose_inline(%{"type" => type}, _inside_link) do
+    raise ArgumentError, "compose_inline: unhandled inline type #{type}"
+  end
+
+  # Link children are PdText | string only.
+  defp compose_inline_for_link_children(node, inside_link) do
+    case compose_inline(node, inside_link) do
+      s when is_binary(s) -> s
+      %{"kind" => "PdText"} = t -> t
+      # `code` or a flattened nested link → wrap in a PdText so the type holds.
+      other -> %{"kind" => "PdText", "children" => [other]}
+    end
+  end
+
+  # Coerce an inline child into a Pd-node for table cells.
+  defp to_pd_node_from_inline_child(child) when is_binary(child) do
+    %{"kind" => "PdText", "children" => [child]}
+  end
+
+  defp to_pd_node_from_inline_child(child), do: child
+
+  # Put `key => value` only when value is not nil (mirrors the conditional
+  # spreads in kernel.ts, e.g. `...(title !== undefined ? {title} : {})`).
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
   # ── walk: one clause per PdNode kind ───────────────────────────────────────
 
   defp walk(%{"kind" => "PdContainer"} = n, width), do: container(n, width)

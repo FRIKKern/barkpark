@@ -95,6 +95,9 @@ defmodule BarkparkWeb.Router do
     pipe_through :paperflow_ingest
 
     post "/papers", PaperIngestController, :ingest
+    # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
+    # auth; applies via Papers.apply_block_op, broadcasts a delta frame.
+    post "/papers/:slug/ops", PaperIngestController, :apply_op
   end
 
   # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────

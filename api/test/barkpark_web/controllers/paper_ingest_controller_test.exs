@@ -110,4 +110,101 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       assert json_response(conn, 400)["error"]["code"] == "malformed"
     end
   end
+
+  describe "block-ingest endpoint (POST /:slug/ops)" do
+    defp ops_path(slug), do: "#{@path}/#{slug}/ops"
+
+    defp auth_post(conn, slug, op) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> @token)
+      |> put_req_header("content-type", "application/json")
+      |> post(ops_path(slug), op)
+    end
+
+    defp append_op(id, text) do
+      %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => id,
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+    end
+
+    setup do
+      slug = "ops-target-#{System.unique_integer([:positive])}"
+      # A block-backed paper to apply ops against.
+      {:ok, paper} =
+        Papers.upsert_paper(%{
+          slug: slug,
+          blocks: [
+            %{"id" => "intro", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Intro."}]}
+          ]
+        })
+
+      {:ok, slug: slug, rev0: paper.rev}
+    end
+
+    test "valid op + bearer applies, bumps rev, broadcasts a delta, returns the fragment",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Papers.topic(slug))
+
+      conn = auth_post(conn, slug, append_op("b-new", "Streamed in."))
+
+      resp = json_response(conn, 200)
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      assert resp["op"] == "append-block"
+      assert resp["block_id"] == "b-new"
+      assert resp["rev"] == rev0 + 1
+      assert resp["fragment_html"] =~ "Streamed in."
+
+      # Persisted: block list grew, HTML cache refreshed.
+      paper = Papers.get_paper(slug)
+      assert length(paper.blocks) == 2
+      assert paper.body_html =~ "Streamed in."
+
+      # Delta frame landed on the per-doc topic PaperLive subscribes to.
+      assert_receive {:paper_block, %{op_kind: "append-block", block_id: "b-new", rev: rev}}
+      assert rev == rev0 + 1
+    end
+
+    test "bad token → 401, no mutation", %{conn: conn, slug: slug} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer not-the-real-token")
+        |> put_req_header("content-type", "application/json")
+        |> post(ops_path(slug), append_op("b-x", "nope"))
+
+      assert json_response(conn, 401)["error"]["code"] == "unauthorized"
+      # Untouched — still just the seeded block.
+      assert length(Papers.get_paper(slug).blocks) == 1
+    end
+
+    test "unknown slug → 404", %{conn: conn} do
+      conn = auth_post(conn, "no-such-paper", append_op("b-x", "nope"))
+      assert json_response(conn, 404)["error"]["code"] == "not_found"
+    end
+
+    test "malformed op (unknown discriminator) → 422", %{conn: conn, slug: slug} do
+      conn = auth_post(conn, slug, %{"op" => "frobnicate", "block" => %{"id" => "z"}})
+      assert json_response(conn, 422)["error"]["code"] == "malformed_op"
+    end
+
+    test "well-shaped op that fails to apply (block not found) → 422", %{conn: conn, slug: slug} do
+      bad =
+        %{
+          "op" => "patch-block",
+          "id" => "does-not-exist",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "x"}]}
+        }
+
+      conn = auth_post(conn, slug, bad)
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "block_not_found"
+      assert resp["error"]["op"] == "patch-block"
+    end
+  end
 end

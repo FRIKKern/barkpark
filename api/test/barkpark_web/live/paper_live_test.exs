@@ -95,4 +95,167 @@ defmodule BarkparkWeb.PaperLiveTest do
       assert html =~ "No paper saved yet"
     end
   end
+
+  describe "Gate-B: multi-block streaming (no reload across a sequence)" do
+    @block_slug "2026-05-23-wave4-stream"
+
+    defp seed_block_paper do
+      blocks = [
+        %{"id" => "b-intro", "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "First block streamed."}]}
+      ]
+
+      {:ok, paper} =
+        Papers.upsert_paper(%{slug: @block_slug, blocks: blocks, event_type: "plan-written"})
+
+      paper
+    end
+
+    defp append_block_op(id, text) do
+      %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => id,
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+    end
+
+    test "mount streams the initial block keyed by its id", %{conn: conn} do
+      seed_block_paper()
+
+      {:ok, _view, html} = live(conn, "/papers/#{@block_slug}")
+
+      # Stream container is present and renders the seeded block.
+      assert html =~ ~s(phx-update="stream")
+      assert html =~ ~s(data-block-id="b-intro")
+      assert html =~ "First block streamed."
+      assert html =~ ~s(id="paper-sentinel")
+    end
+
+    test "a SEQUENCE of appends each appear via the stream; sentinel + prior blocks + pid survive",
+         %{conn: conn} do
+      seed_block_paper()
+
+      {:ok, view, html} = live(conn, "/papers/#{@block_slug}")
+      assert html =~ "First block streamed."
+      refute html =~ "data-block-id=\"b-2\""
+
+      pid_before = view.pid
+
+      # Append three blocks in sequence through the real context + PubSub spine.
+      # Each apply_block_op renders the fragment, bumps rev, broadcasts a
+      # {:paper_block, …} delta the LiveView (subscribed at mount) consumes.
+      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-2", "Second block."))
+      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-3", "Third block."))
+      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-4", "Fourth block."))
+
+      rendered = render(view)
+
+      # Every new block appears in the DOM, keyed by id, via the stream...
+      assert rendered =~ ~s(data-block-id="b-2")
+      assert rendered =~ "Second block."
+      assert rendered =~ ~s(data-block-id="b-3")
+      assert rendered =~ "Third block."
+      assert rendered =~ ~s(data-block-id="b-4")
+      assert rendered =~ "Fourth block."
+
+      # ...the original block survived (it was never re-rendered)...
+      assert rendered =~ ~s(data-block-id="b-intro")
+      assert rendered =~ "First block streamed."
+
+      # SENTINEL 1 — same process across the WHOLE sequence: no remount,
+      # no push_navigate/redirect at any step = no reload.
+      assert view.pid == pid_before
+      assert Process.alive?(view.pid)
+
+      # SENTINEL 2 — the mount-time marker survived every delta.
+      assert rendered =~ ~s(id="paper-sentinel")
+      assert rendered =~ ~s(data-slug="#{@block_slug}")
+    end
+
+    test "a patch-block delta patches one block in place; the rest are untouched",
+         %{conn: conn} do
+      seed_block_paper()
+      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-2", "Second block."))
+
+      {:ok, view, _html} = live(conn, "/papers/#{@block_slug}")
+      pid_before = view.pid
+
+      patch = %{
+        "op" => "patch-block",
+        "id" => "b-intro",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "First block EDITED."}]}
+      }
+
+      {:ok, _} = Papers.apply_block_op(@block_slug, patch)
+      rendered = render(view)
+
+      assert rendered =~ "First block EDITED."
+      refute rendered =~ "First block streamed."
+      # Sibling block untouched.
+      assert rendered =~ "Second block."
+      # No remount.
+      assert view.pid == pid_before
+    end
+
+    test "rev-gap recovery: a delta whose rev skips ahead triggers a full refetch",
+         %{conn: conn} do
+      seed_block_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@block_slug}")
+      pid_before = view.pid
+
+      # Persist two blocks straight into the context (bumps rev), but hand the
+      # LiveView a SINGLE delta whose rev is ahead of what it last saw — a
+      # simulated dropped frame. The view must refetch the full doc.
+      {:ok, _} = Papers.apply_block_op(@block_slug, append_block_op("b-2", "Recovered B2."))
+      {:ok, last} = Papers.apply_block_op(@block_slug, append_block_op("b-3", "Recovered B3."))
+
+      # Frame with a rev far ahead of the mount rev → gap → refetch path.
+      send(
+        view.pid,
+        {:paper_block,
+         %{
+           op_kind: "append-block",
+           block_id: "b-3",
+           fragment_html: "<p>stale fragment ignored</p>",
+           position: 2,
+           rev: last.rev
+         }}
+      )
+
+      rendered = render(view)
+
+      # The refetch pulled the true current doc — both persisted blocks present,
+      # the stale inline fragment was NOT used.
+      assert rendered =~ "Recovered B2."
+      assert rendered =~ "Recovered B3."
+      refute rendered =~ "stale fragment ignored"
+      # Still no remount.
+      assert view.pid == pid_before
+      assert rendered =~ ~s(id="paper-sentinel")
+    end
+
+    test "whole-HTML fallback still works: a :paper_updated broadcast re-assigns",
+         %{conn: conn} do
+      # An HTML-only paper (no blocks) keeps the Wave-3 re-assign path.
+      slug = "wave4-html-fallback"
+      {:ok, _} = Papers.upsert_paper(%{slug: slug, body_html: "<p id=\"v1\">v1</p>"})
+
+      {:ok, view, html} = live(conn, "/papers/#{slug}")
+      assert html =~ ~s(id="v1")
+      refute html =~ ~s(id="v2")
+      pid_before = view.pid
+
+      {:ok, _} = Papers.upsert_paper(%{slug: slug, body_html: "<p id=\"v2\">v2 re-assigned</p>"})
+
+      rendered = render(view)
+      assert rendered =~ ~s(id="v2")
+      assert rendered =~ "v2 re-assigned"
+      # No remount on the fallback path either.
+      assert view.pid == pid_before
+      assert rendered =~ ~s(id="paper-sentinel")
+    end
+  end
 end

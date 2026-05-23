@@ -22,6 +22,8 @@
       params: { _csrf_token: csrfToken }
     });
     liveSocket.connect();
+    // Expose for hooks / debugging (Wave 4 block-streaming).
+    window.liveSocket = liveSocket;
   </script>
 </body>
 </html>
