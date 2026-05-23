@@ -32,7 +32,26 @@ defmodule Barkpark.Content do
     Validation
   }
 
+  alias Barkpark.PortableDoc.{Patch, Render}
+
   @drafts_prefix "drafts."
+
+  # ── Papers (convergence: papers are first-class documents) ────────────────
+  #
+  # A paper is a `documents` row of type "paper" (doc_id = the slug). Its
+  # portable-doc block list is the source of truth, stored under
+  # `content["blocks"]`; `content["body_html"]` is the derived HTML cache
+  # rendered by `Barkpark.PortableDoc.Render`. The monotonic integer streaming
+  # rev — distinct from the document's opaque string `rev` used by the mutation
+  # spine — lives at `content["rev"]`. `content["source_doc"]`, `["goal_id"]`,
+  # and `["event_type"]` carry paperflow provenance.
+  #
+  # Papers ride the SAME per-doc PubSub topic shape used in Wave 4 —
+  # `doc:<dataset>:paper:<slug>` — and broadcast the SAME two frames
+  # (`{:paper_updated, …}` whole-HTML, `{:paper_block, …}` delta) so
+  # `BarkparkWeb.PaperLive` keeps working with minimal change.
+  @paper_type "paper"
+  @paper_default_dataset "paperflow"
 
   # ── Draft/Published helpers ────────────────────────────────────────────────
 
@@ -1584,4 +1603,311 @@ defmodule Barkpark.Content do
       upsert_document(type, attrs, dataset, opts)
     end
   end
+
+  # ── Papers — context functions ─────────────────────────────────────────────
+  #
+  # These operate on `documents` rows of type "paper". They preserve the Wave 4
+  # streaming protocol exactly — only the storage moved from the dedicated
+  # `papers` table into the unified `documents` table. The logic below is the
+  # port of the former `Barkpark.Papers` context.
+
+  @doc "The default dataset papers live under (mirrors the paperflow side)."
+  def paper_default_dataset, do: @paper_default_dataset
+
+  @doc "The document type discriminator for papers."
+  def paper_type, do: @paper_type
+
+  @doc """
+  Per-doc PubSub topic for a paper. Same shape as the documents spine:
+  `doc:<dataset>:paper:<slug>`. PaperLive subscribes to this; writes broadcast
+  to it.
+  """
+  def paper_topic(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
+    "doc:#{dataset}:#{@paper_type}:#{slug}"
+  end
+
+  @doc """
+  Fetch a paper (a type-"paper" document) by slug (and dataset). Returns the
+  `%Document{}` or `nil`. Papers are always published (no draft prefix).
+  """
+  def get_paper(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
+    case get_document(slug, @paper_type, dataset) do
+      {:ok, doc} -> doc
+      {:error, :not_found} -> nil
+    end
+  end
+
+  @doc """
+  The paper's block list, or `nil` for an HTML-only (legacy) paper.
+  """
+  def paper_blocks(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
+    case get_paper(slug, dataset) do
+      nil -> nil
+      doc -> get_in(doc.content || %{}, ["blocks"])
+    end
+  end
+
+  @doc """
+  Upsert a paper keyed by `{dataset, slug}` (as a type-"paper" document) and
+  broadcast a **whole-HTML** frame on the per-doc topic.
+
+  `attrs` accepts string or atom keys: `slug` (required), and either
+  `body_html` OR `blocks`. When `blocks` is given, `body_html` is (re)rendered
+  from it as the derived cache. Optionally `dataset`, `source_doc`, `goal_id`,
+  `event_type`. The monotonic integer streaming rev (`content["rev"]`) is
+  bumped on every write.
+
+  On success, broadcasts `{:paper_updated, %{slug, dataset, html, rev, …}}` to
+  `paper_topic(slug, dataset)` and returns `{:ok, %Document{}}`. Returns
+  `{:error, changeset}` on validation/constraint failure.
+  """
+  def upsert_paper(attrs) when is_map(attrs) do
+    attrs = normalize_paper_attrs(attrs)
+    slug = attrs["slug"]
+    dataset = attrs["dataset"] || @paper_default_dataset
+
+    existing = slug && get_paper(slug, dataset)
+
+    blocks = attrs["blocks"]
+
+    body_html =
+      cond do
+        is_list(blocks) -> Render.render_blocks(blocks)
+        is_binary(attrs["body_html"]) -> attrs["body_html"]
+        true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
+      end
+
+    next_rev = paper_next_rev(existing)
+
+    content =
+      (existing && existing.content || %{})
+      |> Map.put("body_html", body_html)
+      |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
+      |> maybe_put_paper("source_doc", attrs["source_doc"])
+      |> maybe_put_paper("goal_id", attrs["goal_id"])
+      |> maybe_put_paper("event_type", attrs["event_type"])
+      |> Map.put("rev", next_rev)
+
+    title = paper_title(content, slug)
+
+    doc_attrs = %{
+      "doc_id" => slug,
+      "type" => @paper_type,
+      "dataset" => dataset,
+      "title" => title,
+      "status" => "published",
+      "content" => content,
+      "rev" => generate_rev()
+    }
+
+    changeset =
+      Document.changeset(existing || %Document{}, doc_attrs)
+
+    result =
+      if existing do
+        Repo.update(changeset)
+      else
+        Repo.insert(changeset)
+      end
+
+    case result do
+      {:ok, doc} ->
+        broadcast_paper_update(doc)
+        {:ok, doc}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Apply a single portable-doc `op` (a DocPatchOp map) to a paper's block list,
+  persist the new block list + a refreshed `body_html` cache + a bumped
+  streaming rev, then broadcast a **delta** frame.
+
+  Flow mirrors the former `Barkpark.Papers.apply_block_op/3`:
+
+    1. Load the paper. Unknown slug ⇒ `{:error, :not_found}`. An HTML-only
+       paper seeds an empty block list so the first op can append into it.
+    2. Apply via `Barkpark.PortableDoc.Patch.apply_patch/2`.
+    3. Render the affected block + refresh the whole `content["body_html"]`.
+    4. Persist `content["blocks"]` + `content["body_html"]` + bumped
+       `content["rev"]`.
+    5. Broadcast `{:paper_block, %{op_kind, block_id, fragment_html, position,
+       rev}}` on the per-doc topic.
+
+  Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
+  rev:}}` on success.
+  """
+  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset)
+      when is_binary(slug) and is_map(op) do
+    with %Document{} = doc <- get_paper(slug, dataset),
+         blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
+         {:ok, affected} <- locate_paper_affected(op, new_blocks) do
+      op_kind = Map.get(op, "op")
+      rev = paper_next_rev(doc)
+      body_html = Render.render_blocks(new_blocks)
+
+      fragment_html =
+        case affected.block do
+          nil -> nil
+          block -> Render.render_block(block)
+        end
+
+      content =
+        (doc.content || %{})
+        |> Map.put("blocks", new_blocks)
+        |> Map.put("body_html", body_html)
+        |> Map.put("rev", rev)
+
+      title = paper_title(content, slug)
+
+      changeset =
+        Document.changeset(doc, %{
+          "content" => content,
+          "title" => title,
+          "rev" => generate_rev()
+        })
+
+      case Repo.update(changeset) do
+        {:ok, _saved} ->
+          frame = %{
+            op_kind: op_kind,
+            block_id: affected.block_id,
+            fragment_html: fragment_html,
+            position: affected.position,
+            rev: rev
+          }
+
+          broadcast_paper_block(slug, dataset, frame)
+
+          {:ok,
+           %{
+             block: affected.block,
+             fragment_html: fragment_html,
+             op_kind: op_kind,
+             block_id: affected.block_id,
+             position: affected.position,
+             rev: rev
+           }}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    else
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  # ── Papers — internal ──────────────────────────────────────────────────────
+
+  # Resolve which block an op affected (post-apply) plus its top-level position.
+  # Identical to the former Barkpark.Papers.locate_affected/2.
+  defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
+    {:ok,
+     %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
+  end
+
+  defp locate_paper_affected(%{"op" => "insert-after", "block" => block}, new_blocks) do
+    id = Map.get(block, "id")
+    {:ok, %{block: block, block_id: id, position: paper_top_level_index(new_blocks, id)}}
+  end
+
+  defp locate_paper_affected(%{"op" => kind, "id" => id}, new_blocks)
+       when kind in ["patch-block", "replace-block"] do
+    block = paper_find_block(new_blocks, id)
+    {:ok, %{block: block, block_id: id, position: paper_top_level_index(new_blocks, id)}}
+  end
+
+  defp locate_paper_affected(%{"op" => "remove-block", "id" => id}, _new_blocks) do
+    {:ok, %{block: nil, block_id: id, position: nil}}
+  end
+
+  defp locate_paper_affected(op, _new_blocks), do: {:error, {:invalid_op, op}}
+
+  defp paper_top_level_index(blocks, id) do
+    Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
+  end
+
+  defp paper_find_block(blocks, id) do
+    Enum.find_value(blocks, fn block ->
+      cond do
+        Map.get(block, "id") == id -> block
+        Map.get(block, "type") == "section" -> paper_find_block(Map.get(block, "blocks", []), id)
+        true -> nil
+      end
+    end)
+  end
+
+  # `documents.title` is derived from the first heading block's text, falling
+  # back to the slug — the desk list needs a title.
+  defp paper_title(content, slug) when is_map(content) do
+    blocks = Map.get(content, "blocks")
+
+    heading_text =
+      if is_list(blocks) do
+        Enum.find_value(blocks, fn b ->
+          if Map.get(b, "type") == "heading", do: blank_to_nil(Map.get(b, "text"))
+        end)
+      end
+
+    heading_text || slug
+  end
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(s) when is_binary(s), do: s
+  defp blank_to_nil(_), do: nil
+
+  defp broadcast_paper_update(%Document{} = doc) do
+    content = doc.content || %{}
+
+    msg =
+      {:paper_updated,
+       %{
+         slug: doc.doc_id,
+         dataset: doc.dataset,
+         html: Map.get(content, "body_html"),
+         rev: Map.get(content, "rev"),
+         source_doc: Map.get(content, "source_doc"),
+         goal_id: Map.get(content, "goal_id"),
+         event_type: Map.get(content, "event_type")
+       }}
+
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, paper_topic(doc.doc_id, doc.dataset), msg)
+  end
+
+  defp broadcast_paper_block(slug, dataset, frame) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      paper_topic(slug, dataset),
+      {:paper_block, frame}
+    )
+  end
+
+  # Allow callers to pass atom OR string keys (controller params are strings,
+  # internal callers/tests may use atoms). Stringify, dropping nils.
+  defp normalize_paper_attrs(attrs) do
+    Enum.reduce(attrs, %{}, fn {k, v}, acc ->
+      key = if is_atom(k), do: Atom.to_string(k), else: k
+      if is_nil(v), do: acc, else: Map.put(acc, key, v)
+    end)
+  end
+
+  defp maybe_put_paper(map, _key, nil), do: map
+  defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
+  # increments the stored integer otherwise.
+  defp paper_next_rev(nil), do: 1
+
+  defp paper_next_rev(%Document{content: content}) when is_map(content) do
+    case Map.get(content, "rev") do
+      n when is_integer(n) -> n + 1
+      _ -> 1
+    end
+  end
+
+  defp paper_next_rev(_), do: 1
 end

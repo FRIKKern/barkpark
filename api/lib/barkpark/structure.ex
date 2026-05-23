@@ -49,6 +49,7 @@ defmodule Barkpark.Structure do
     host_items =
       [
         build_content_group(schemas),
+        build_papers_group(schemas),
         build_books_group(schemas),
         build_taxonomy_group(schemas),
         build_settings_group(schemas)
@@ -198,6 +199,18 @@ defmodule Barkpark.Structure do
       end
 
     items
+  end
+
+  # Papers (convergence: papers are first-class type-"paper" documents).
+  # Surfaced as its own desk group. The list opens each paper in PaperLive at
+  # `/papers/:slug` — NOT the Studio form editor — see PaneBuilder's special
+  # casing of the "paper" type.
+  defp build_papers_group(schemas) do
+    if Map.has_key?(schemas, "paper") do
+      [doc_type_list_item(schemas["paper"])]
+    else
+      []
+    end
   end
 
   # Plugin-owned book schema (OnixEdit). Private visibility, but surfaced

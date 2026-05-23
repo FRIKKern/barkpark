@@ -1824,6 +1824,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     <span class="pane-item-label"><%= item.title %></span>
                   </a>
 
+                <% :paper_doc -> %>
+                  <%!-- A paper lists in the desk but opens in PaperLive
+                        (`/papers/:slug`), NOT the Studio form editor. It is an
+                        external link out of the StudioLive catch-all. --%>
+                  <a
+                    id={"paper-doc-#{item.id}"}
+                    href={item.href}
+                    class="pane-doc-item nav-paper-entry"
+                    data-test-id="nav-paper-entry"
+                  >
+                    <div class="bp-doc-row-body">
+                      <div class="pane-doc-title">
+                        <span class={"pane-doc-dot #{item.status || ""}"}></span>
+                        <%= item.title %>
+                      </div>
+                      <div class="pane-doc-id"><%= item.id %></div>
+                    </div>
+                  </a>
+
                 <% :doc -> %>
                   <% item_presences = PresenceState.on_doc(@presences, item.id) %>
                   <.pane_doc_item

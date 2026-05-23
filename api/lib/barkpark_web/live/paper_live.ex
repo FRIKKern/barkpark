@@ -41,31 +41,42 @@ defmodule BarkparkWeb.PaperLive do
   # Phoenix.HTML.Form but not the parent module, so import it here.
   import Phoenix.HTML, only: [raw: 1]
 
-  alias Barkpark.Papers
+  alias Barkpark.Content
   alias Barkpark.PortableDoc.Render
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
-    paper = Papers.get_paper(slug)
+    paper = Content.get_paper(slug)
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Papers.topic(slug))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
     end
 
     socket =
       socket
       |> assign(:slug, slug)
       |> assign(:found, not is_nil(paper))
-      |> assign(:rev, (paper && paper.rev) || 0)
-      |> assign(:html, (paper && paper.body_html) || "")
+      |> assign(:rev, paper_rev(paper))
+      |> assign(:html, paper_html(paper))
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
   end
 
+  # Pull the streaming rev / cached HTML / blocks out of the paper document's
+  # `content` map (papers are type-"paper" documents now).
+  defp paper_rev(nil), do: 0
+  defp paper_rev(%{content: content}), do: Map.get(content || %{}, "rev") || 0
+
+  defp paper_html(nil), do: ""
+  defp paper_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
+
+  defp paper_blocks(%{content: content}), do: Map.get(content || %{}, "blocks")
+  defp paper_blocks(_), do: nil
+
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, %{blocks: blocks}) when is_list(blocks) do
+  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}}) when is_list(blocks) do
     socket
     |> assign(:block_mode, true)
     |> stream(:blocks, to_stream_items(blocks))
@@ -164,24 +175,27 @@ defmodule BarkparkWeb.PaperLive do
   end
 
   defp refetch(socket) do
-    case Papers.get_paper(socket.assigns.slug) do
+    case Content.get_paper(socket.assigns.slug) do
       nil ->
         socket
 
-      %{blocks: blocks} = paper when is_list(blocks) ->
-        socket
-        |> stream(:blocks, to_stream_items(blocks), reset: true)
-        |> assign(:rev, paper.rev)
-        |> assign(:block_mode, true)
-        |> assign(:found, true)
-
       paper ->
-        # Refetched a paper that has reverted to HTML-only — fall back.
-        socket
-        |> assign(:html, paper.body_html)
-        |> assign(:rev, paper.rev)
-        |> assign(:block_mode, false)
-        |> assign(:found, true)
+        case paper_blocks(paper) do
+          blocks when is_list(blocks) ->
+            socket
+            |> stream(:blocks, to_stream_items(blocks), reset: true)
+            |> assign(:rev, paper_rev(paper))
+            |> assign(:block_mode, true)
+            |> assign(:found, true)
+
+          _ ->
+            # Refetched a paper that has reverted to HTML-only — fall back.
+            socket
+            |> assign(:html, paper_html(paper))
+            |> assign(:rev, paper_rev(paper))
+            |> assign(:block_mode, false)
+            |> assign(:found, true)
+        end
     end
   end
 

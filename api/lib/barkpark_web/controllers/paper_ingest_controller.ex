@@ -28,12 +28,14 @@ defmodule BarkparkWeb.PaperIngestController do
       { "op": "append-block", "block": { "id": "b1", "type": "paragraph", … } }
 
   It applies a single DocPatchOp to the paper's block list via
-  `Papers.apply_block_op/2`, which renders the changed fragment, refreshes the
-  HTML cache, bumps the rev, and broadcasts a `{:paper_block, …}` delta frame.
+  `Content.apply_paper_block_op/2`, which renders the changed fragment,
+  refreshes the HTML cache, bumps the rev, and broadcasts a `{:paper_block, …}`
+  delta frame. Papers are stored as `documents` rows of type "paper" — the
+  streaming protocol (topic, frames) is unchanged.
   """
   use BarkparkWeb, :controller
 
-  alias Barkpark.Papers
+  alias Barkpark.Content
 
   # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   @op_kinds ~w(append-block insert-after patch-block replace-block remove-block)
@@ -48,17 +50,18 @@ defmodule BarkparkWeb.PaperIngestController do
       "goal_id" => params["goal_id"]
     }
 
-    case Papers.upsert_paper(attrs) do
+    case Content.upsert_paper(attrs) do
       {:ok, paper} ->
         conn
         |> put_status(:ok)
         |> json(%{
           ok: true,
-          slug: paper.slug,
-          # `rev` is a monotonic integer (Wave 4); stringify in the wire
-          # response so existing clients that read it as a string keep working.
-          rev: to_string(paper.rev),
-          liveview_path: "/papers/#{paper.slug}"
+          slug: paper.doc_id,
+          # The monotonic streaming rev lives in content["rev"] (an integer);
+          # stringify in the wire response so existing clients that read it as a
+          # string keep working.
+          rev: to_string(get_in(paper.content, ["rev"])),
+          liveview_path: "/papers/#{paper.doc_id}"
         })
 
       {:error, _changeset} ->
@@ -91,7 +94,7 @@ defmodule BarkparkWeb.PaperIngestController do
         |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
 
       true ->
-        case Papers.apply_block_op(slug, op) do
+        case Content.apply_paper_block_op(slug, op) do
           {:ok, result} ->
             conn
             |> put_status(:ok)

@@ -179,6 +179,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         docs = Content.list_documents(type_name, dataset, list_opts)
 
+        # Papers are listed in the desk but OPEN in PaperLive (the live block
+        # view at `/papers/:slug`), NOT the Studio form editor. Their list
+        # rows render as external links; no inline editor opens for them.
+        paper? = type_name == Content.paper_type()
+
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
@@ -189,35 +194,49 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             Enum.map(docs, fn doc ->
               pub_id = Content.published_id(doc.doc_id)
 
-              %{
+              base = %{
                 type: :doc,
                 id: pub_id,
                 title: doc.title || "Untitled",
                 is_draft: Content.draft?(doc.doc_id),
                 status: doc.status
               }
+
+              if paper? do
+                Map.merge(base, %{type: :paper_doc, href: "/papers/#{pub_id}"})
+              else
+                base
+              end
             end),
           selected: Enum.at(rest, 0)
         }
 
         editor =
-          case rest do
-            [doc_id | _] ->
-              {doc, is_draft, has_pub} = Content.fetch_doc_with_draft(type_name, doc_id, dataset)
-
-              if doc && schema do
-                %{
-                  doc: doc,
-                  schema: schema,
-                  type: type_name,
-                  is_draft: is_draft,
-                  has_published: has_pub,
-                  form: Content.doc_to_form(doc, schema)
-                }
-              end
-
-            _ ->
+          cond do
+            # Never open the Studio form editor for a paper — PaperLive owns it.
+            paper? ->
               nil
+
+            true ->
+              case rest do
+                [doc_id | _] ->
+                  {doc, is_draft, has_pub} =
+                    Content.fetch_doc_with_draft(type_name, doc_id, dataset)
+
+                  if doc && schema do
+                    %{
+                      doc: doc,
+                      schema: schema,
+                      type: type_name,
+                      is_draft: is_draft,
+                      has_published: has_pub,
+                      form: Content.doc_to_form(doc, schema)
+                    }
+                  end
+
+                _ ->
+                  nil
+              end
           end
 
         {panes ++ [doc_pane], editor}
