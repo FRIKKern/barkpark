@@ -44,6 +44,12 @@ defmodule Barkpark.Application do
       ] ++
         plugin_children ++
         [
+          # Boot-order fix: SchemaBootstrap runs SYNCHRONOUSLY here, after the
+          # Repo + Plugins.Registry GenServer (above) and BEFORE Oban. The
+          # supervisor blocks on its init/1 (which registers every plugin's
+          # schemas) before starting Oban, so Oban can never dequeue a job
+          # against an unregistered schema. No paused queues, no resume loop.
+          Barkpark.SchemaBootstrap,
           {Oban, Application.fetch_env!(:barkpark, Oban)},
           {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
           {Phoenix.PubSub, name: Barkpark.PubSub},
@@ -63,33 +69,10 @@ defmodule Barkpark.Application do
       {:ok, _pid} = ok ->
         Barkpark.Telemetry.Handlers.attach()
 
-        # WI1: plugin registry — boot-time discovery runs in a supervised
-        # one-shot Task so a slow filesystem walk never blocks startup.
-        # Phase 3 WI3: after discovery completes, walk the registered
-        # plugins and load their declared checkers into the validation
-        # registry. Sequential inside one task — order matters (checkers
-        # need plugins to be present first), but neither blocks endpoint.
-        Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-          Barkpark.Plugins.Registry.discover_and_register()
-          # Task 5: persist each plugin's `register_schemas/1` output via
-          # `Content.upsert_schema/2`. Idempotent on `(name, dataset)`. Per-
-          # plugin try/rescue inside Bootstrap keeps a bad plugin from
-          # tanking the whole sweep — never crashes app start.
-          Barkpark.Plugins.Bootstrap.register_all_schemas()
-          # Phase 3 WI1: pull `checkers/0` slots out of every plugin
-          # registered above and namespace them as
-          # `plugin:<name>:<checker>` in the value-checker registry.
-          Barkpark.Validation.Registry.reload_plugin_checkers()
-          # Task barkpark-auo: every plugin contributes its codelist
-          # seeders via the `Barkpark.Plugin.codelist_seeders/0` callback.
-          # `Plugins.Registry.run_all_codelist_seeders/0` walks the
-          # registered plugins and invokes each seeder in a per-seeder
-          # try/rescue so one bad plugin never breaks the others. Runs
-          # after `register_all_schemas/0` so the alias resolver in
-          # `Codelists.get/2` already has the schemas (and their
-          # `onix.codelistId: N` metadata) when the first render hits.
-          Barkpark.Plugins.Registry.run_all_codelist_seeders()
-        end)
+        # Plugin discovery + schema/checker/seeder registration now runs
+        # synchronously in Barkpark.SchemaBootstrap (a child positioned
+        # before the Oban child above), so it has completed by the time the
+        # supervisor returns {:ok, _pid} here. Nothing left to do post-boot.
 
         ok
 
