@@ -1,0 +1,72 @@
+{
+  "before": {
+    "version": 1,
+    "title": "Changelog",
+    "preview": "Recent changes.",
+    "blocks": [
+      {
+        "id": "cl-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Changelog"
+      },
+      {
+        "id": "cl-section",
+        "type": "section",
+        "title": "v0.4",
+        "blocks": [
+          {
+            "id": "cl-kept",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Opened heading levels to h1–h6." }]
+          },
+          {
+            "id": "cl-doomed",
+            "type": "callout",
+            "tone": "danger",
+            "title": "Deprecated",
+            "content": [{ "type": "text", "value": "The legacy export path is gone." }]
+          }
+        ]
+      },
+      {
+        "id": "cl-divider",
+        "type": "divider"
+      }
+    ]
+  },
+  "op": {
+    "op": "remove-block",
+    "id": "cl-doomed",
+    "expectedVersion": "12"
+  },
+  "after": {
+    "version": 1,
+    "title": "Changelog",
+    "preview": "Recent changes.",
+    "blocks": [
+      {
+        "id": "cl-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Changelog"
+      },
+      {
+        "id": "cl-section",
+        "type": "section",
+        "title": "v0.4",
+        "blocks": [
+          {
+            "id": "cl-kept",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Opened heading levels to h1–h6." }]
+          }
+        ]
+      },
+      {
+        "id": "cl-divider",
+        "type": "divider"
+      }
+    ]
+  }
+}

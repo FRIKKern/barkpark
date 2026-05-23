@@ -1,0 +1,77 @@
+{
+  "before": {
+    "version": 1,
+    "title": "Release notes",
+    "preview": "What shipped this week.",
+    "blocks": [
+      {
+        "id": "rn-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Release notes"
+      },
+      {
+        "id": "rn-body",
+        "type": "section",
+        "title": "Highlights",
+        "blocks": [
+          {
+            "id": "rn-intro",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Two changes landed." }]
+          },
+          {
+            "id": "rn-cta",
+            "type": "action",
+            "label": "Read more",
+            "href": "https://example.com/notes",
+            "priority": "primary"
+          }
+        ]
+      }
+    ]
+  },
+  "op": {
+    "op": "append-block",
+    "block": {
+      "id": "rn-divider",
+      "type": "divider"
+    }
+  },
+  "after": {
+    "version": 1,
+    "title": "Release notes",
+    "preview": "What shipped this week.",
+    "blocks": [
+      {
+        "id": "rn-heading",
+        "type": "heading",
+        "level": 1,
+        "text": "Release notes"
+      },
+      {
+        "id": "rn-body",
+        "type": "section",
+        "title": "Highlights",
+        "blocks": [
+          {
+            "id": "rn-intro",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Two changes landed." }]
+          },
+          {
+            "id": "rn-cta",
+            "type": "action",
+            "label": "Read more",
+            "href": "https://example.com/notes",
+            "priority": "primary"
+          }
+        ]
+      },
+      {
+        "id": "rn-divider",
+        "type": "divider"
+      }
+    ]
+  }
+}
