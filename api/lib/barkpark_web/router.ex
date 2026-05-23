@@ -39,6 +39,13 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.RequireToken
   end
 
+  # Paperflow paper-ingest: JSON in, shared-secret bearer auth (NOT the
+  # api_tokens table). Convergence MVP — masterplan Figure 6.
+  pipeline :paperflow_ingest do
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.RequireIngestToken
+  end
+
   pipeline :require_admin do
     plug BarkparkWeb.Plugs.RequireToken
     plug BarkparkWeb.Plugs.RequireAdmin
@@ -62,6 +69,32 @@ defmodule BarkparkWeb.Router do
     get "/login", SessionController, :new
     post "/login", SessionController, :create
     post "/logout", SessionController, :delete
+  end
+
+  # ── Paperflow papers (LiveView) — convergence MVP, masterplan Figure 6 ──
+  # A saved paperflow paper renders LIVE here with no page reload. The route
+  # template MUST match `BARKPARK_LIVEVIEW_PATH_TEMPLATE` (= "/papers/{slug}")
+  # in paperflow/hooks/event-on-save.sh. No admin gate — this is a personal-
+  # local read surface; the paper HTML is our own.
+  #
+  # `paper.html.heex` is a FULL document, so it is the ROOT layout here (set
+  # via live_session :root_layout); the inner/app layout is disabled in
+  # PaperLive.mount (`layout: false`) to avoid the studio chrome wrapper.
+  scope "/papers", BarkparkWeb do
+    pipe_through :browser
+
+    live_session :papers, root_layout: {BarkparkWeb.Layouts, :paper} do
+      live "/:slug", PaperLive
+    end
+  end
+
+  # ── Paperflow paper ingest (JSON POST) ──────────────────────────────────
+  # Receives the extracted paper body from event-on-save.sh, upserts by slug,
+  # and broadcasts on the per-doc PubSub topic PaperLive subscribes to.
+  scope "/v1/paperflow", BarkparkWeb do
+    pipe_through :paperflow_ingest
+
+    post "/papers", PaperIngestController, :ingest
   end
 
   # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────

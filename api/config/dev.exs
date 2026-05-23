@@ -63,3 +63,9 @@ config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
 
 config :barkpark, :default_cors_origins, ["http://localhost:3000", "http://localhost:5173"]
+
+# Local paper-ingest secret (convergence MVP). Must match BARKPARK_INGEST_TOKEN
+# in ~/.paperflow/barkpark.env for the event-on-save.sh mirror to authenticate.
+config :barkpark,
+       :paperflow_ingest_token,
+       System.get_env("PAPERFLOW_INGEST_TOKEN", "paperflow-dev-ingest-token")
