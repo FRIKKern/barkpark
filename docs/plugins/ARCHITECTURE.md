@@ -218,25 +218,25 @@ These attach to individual entries inside `fields`:
 `use Barkpark.Plugin` injects default no-op implementations of every
 optional callback so a freshly-generated plugin compiles without
 declaring anything. Override the callbacks your plugin actually needs.
-All twelve callbacks (one required + eleven optional) are listed here
-as a single reference — the host walks `Plugins.Registry.all/0` and
-asks each plugin module for its contribution at the relevant lifecycle
-point.
 
-| Callback | Required? | Returns | Called by |
-|---|---|---|---|
-| `manifest/0` | yes (injected by `__using__`) | the parsed `plugin.json` map | `Plugins.Registry` on register |
-| `register_routes/1` | optional | `:ok` (router hook) | reserved — not invoked today |
-| `register_workers/1` | optional | list of child specs | reserved — not invoked today |
-| `register_schemas/1` | optional | list of `%SchemaDefinition{}` | `Plugins.Bootstrap.register_all_schemas/0` |
-| `validate_settings/1` | optional | `:ok` or `{:error, [{atom, String.t()}]}` | `Plugins.Settings` writes |
-| `checkers/0` | optional | list of `{name, module}` for value-checkers | `Validation.Registry.reload_plugin_checkers/0` |
-| `action_handlers/0` | optional | `%{name => fun/3}` | `Plugins.Registry.collect_action_handlers/0` → `StudioLive.dispatch_action/4` |
-| `external_sync_entries/0` | optional | `%{system_name => %{label, states}}` | `Plugins.Registry.collect_external_sync_entries/0` → `ExternalSync.all/0` |
-| `codelist_seeders/0` | optional | list of zero-arg functions | `Plugins.Registry.run_all_codelist_seeders/0` in the boot Task |
-| `settings_schema/0` | optional | list of `%{name, type, label, …}` field declarations | `BarkparkWeb.Admin.PluginSettingsLive` at `/studio/:dataset/_plugins/:plugin/settings` |
-| `top_menu_entries/0` | optional | list of `%{label, path, …}` tabs | `Plugins.Registry.collect_top_menu_entries/0` → `BarkparkWeb.StudioComponents.studio_tabs/1` |
-| `desk_items/1` | optional | list of `%{type, …}` desk items (per-dataset) | `Plugins.Registry.collect_desk_items/1` → `Barkpark.Structure.build/1` |
+The contract shape: exactly one **required** callback (`manifest/0`,
+injected by `__using__`) plus a couplet of **optional** callbacks
+(roughly two dozen — direct registration + host hooks, the additive
+contribution collectors, and their `resolve_*/2` resolver companions).
+The host reads them three ways: at register time, at compile time
+(routes), and at runtime (the resolver chain that folds plugin
+contributions into host UI). `register_routes/1` and `register_workers/1`
+are **both live**, not reserved — see "Plugin lifecycle" and "URL paths"
+below.
+
+**[HIGHWAY.md](HIGHWAY.md) is the canonical, exhaustive callback
+reference.** It carries every callback's signature, default, when-fires,
+failure mode, and resolver pairing. ARCHITECTURE documents principles and
+the contract; do not maintain a competing catalogue here. The handful of
+callbacks the rest of this doc walks in narrative form (`top_menu_entries/0`,
+`desk_items/1`, `settings_schema/0`, `action_handlers/0`,
+`external_sync_entries/0`, `codelist_seeders/0`) are illustrative, not
+the full set.
 
 ### `top_menu_entries/0` — host-side top-bar tabs
 
@@ -292,9 +292,9 @@ dropped (a malformed plugin should not break the Structure pane).
 
 ### `settings_schema/0` — browser-managed plugin credentials
 
-The tenth callback turns a plugin's encrypted `plugin_settings` row into
-an admin form, replacing the SSH + `mix run` ceremony for setting
-secrets. Each entry declares one form field:
+The `settings_schema/0` callback turns a plugin's encrypted
+`plugin_settings` row into an admin form, replacing the SSH + `mix run`
+ceremony for setting secrets. Each entry declares one form field:
 
 ```elixir
 @impl Barkpark.Plugin
