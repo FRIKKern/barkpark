@@ -481,8 +481,10 @@ defmodule Barkpark.Plugins.Registry do
 
   @doc """
   Walks every registered plugin, calls `codelist_seeders/0` to get a
-  list of zero-arg functions, and invokes each one in registration
-  order (alphabetical by plugin name).
+  list of zero-arg functions, and invokes each one in the configured
+  `:plugins` load order (the same order `reduce_resolvers/3` and
+  `collect_content_renderer/3` use). Falls back to alphabetical-by-name
+  when no `:plugins` order is configured.
 
   Each seeder is wrapped in `try/rescue` so one failing plugin's seeder
   doesn't abort the rest. Failures log a warning. Returns `:ok` always.
@@ -492,8 +494,7 @@ defmodule Barkpark.Plugins.Registry do
   """
   @spec run_all_codelist_seeders() :: :ok
   def run_all_codelist_seeders do
-    all()
-    |> Enum.sort_by(& &1.name)
+    load_ordered_plugins()
     |> Enum.each(&run_codelist_seeders_for_entry/1)
 
     :ok
@@ -758,12 +759,22 @@ defmodule Barkpark.Plugins.Registry do
   # malformed plugin can't corrupt the accumulator.
   defp lift(prev, _result, _lift_kind), do: prev
 
-  # Check whether the plugin's `resolve_X/2` is the default lift supplied by
-  # `Barkpark.Plugin.__using__/1`. We can't inspect AST at runtime, but we
-  # can fingerprint behaviour: call the default with a known prev and ctx
-  # and see whether the result equals `prev ++ additive_result` (for lists)
-  # or `Map.merge(prev, additive_result)` (for maps). If yes, the plugin
-  # hasn't overridden — no warning. If no, it overrode — warn.
+  # Check whether the plugin's `resolve_X/2` is the macro-injected default
+  # lift supplied by `Barkpark.Plugin.__using__/1`. This is deliberately a
+  # BEHAVIORAL fingerprint, not a static check: `__using__/1` injects a
+  # default `resolve_X/2` for EVERY plugin, so `function_exported?` cannot
+  # distinguish an author override from the injected default — they're both
+  # exported functions. There is no AST at runtime to inspect either. The
+  # only signal left is to RUN the callbacks and compare results: call the
+  # additive form and the resolver with a known empty `prev` + ctx, then test
+  # whether the resolver returned exactly `prev ++ additive_result` (lists) or
+  # `Map.merge(prev, additive_result)` (maps). Equal → it's the default lift,
+  # no warning. Different → the author overrode it, warn.
+  #
+  # This runs ONCE per plugin at registration (from `warn_duplicate_forms/0`),
+  # not on any hot path. It relies on the additive callbacks being
+  # side-effect-free pure data returns — which the plugin contract requires —
+  # since invoking them here for the fingerprint must be safe to repeat.
   #
   # Avoids false positives on the wide ecosystem of plugins that legitimately
   # use only the additive form.
@@ -1258,11 +1269,23 @@ defmodule Barkpark.Plugins.Registry do
     end
   end
 
-  defp resolve_module(%{"module" => mod}) when is_binary(mod) and mod != "" do
+  @doc """
+  Resolves the Elixir module a manifest maps to.
+
+  Prefers an explicit `"module"` key; otherwise derives
+  `Barkpark.Plugins.<Pascal>` from `"plugin_name"` (per-segment
+  `Macro.camelize`). Returns `{:ok, module}` or `{:error, :no_plugin_name}`.
+
+  Public so the plugin generator's test can assert that the manifest it
+  emits resolves to the module its generated `lib/` file defines — the
+  exact discovery match that was previously broken.
+  """
+  @spec resolve_module(map()) :: {:ok, module()} | {:error, :no_plugin_name}
+  def resolve_module(%{"module" => mod}) when is_binary(mod) and mod != "" do
     {:ok, Module.concat([mod])}
   end
 
-  defp resolve_module(%{"plugin_name" => name}) when is_binary(name) and name != "" do
+  def resolve_module(%{"plugin_name" => name}) when is_binary(name) and name != "" do
     pascal =
       name
       |> String.split(~r/[_\-\s]+/, trim: true)
@@ -1271,7 +1294,7 @@ defmodule Barkpark.Plugins.Registry do
     {:ok, Module.concat([Barkpark, Plugins, pascal])}
   end
 
-  defp resolve_module(_), do: {:error, :no_plugin_name}
+  def resolve_module(_), do: {:error, :no_plugin_name}
 
   # ─── GenServer ──────────────────────────────────────────────────────────
 

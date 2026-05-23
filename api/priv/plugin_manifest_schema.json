@@ -90,7 +90,7 @@
     },
     "settings_schema": {
       "type": "object",
-      "description": "Embedded JSON Schema for runtime user-supplied plugin settings. Validated by Barkpark.Plugins.Settings on put/3."
+      "description": "Embedded JSON Schema for runtime user-supplied plugin settings. Advisory — runtime validation is performed by the plugin's validate_settings/1 callback (invoked by the admin Plugin Settings LiveView), not by Settings.put/3."
     },
     "codelists": {
       "type": "array",

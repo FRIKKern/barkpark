@@ -43,16 +43,28 @@ defmodule Barkpark.Plugins.Settings do
 
     record = Repo.get(SettingsRecord, plugin_name) || %SettingsRecord{plugin_name: plugin_name}
 
-    record
-    |> SettingsRecord.changeset(attrs)
-    |> Repo.insert_or_update(
-      on_conflict: {:replace_all_except, [:plugin_name]},
-      conflict_target: :plugin_name
-    )
-    |> case do
-      {:ok, rec} ->
-        log_audit(plugin_name, "write", user_id)
+    # Transaction keeps the settings mutation and its audit row atomic — if the
+    # audit insert raises, the persisted secret rolls back instead of stranding
+    # an un-audited write.
+    txn =
+      Repo.transaction(fn ->
+        case record
+             |> SettingsRecord.changeset(attrs)
+             |> Repo.insert_or_update(
+               on_conflict: {:replace_all_except, [:plugin_name]},
+               conflict_target: :plugin_name
+             ) do
+          {:ok, rec} ->
+            log_audit(plugin_name, "write", user_id)
+            rec
 
+          {:error, changeset} ->
+            Repo.rollback(changeset)
+        end
+      end)
+
+    case txn do
+      {:ok, rec} ->
         :telemetry.execute(
           [:barkpark, :plugin_settings, :write],
           %{count: 1},
@@ -61,8 +73,8 @@ defmodule Barkpark.Plugins.Settings do
 
         {:ok, rec}
 
-      {:error, _} = err ->
-        err
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, changeset}
     end
   end
 
@@ -75,8 +87,13 @@ defmodule Barkpark.Plugins.Settings do
         {:error, :not_found}
 
       rec ->
-        Repo.delete!(rec)
-        log_audit(plugin_name, "delete", user_id)
+        # Atomic delete + audit: an audit failure rolls back the row deletion.
+        {:ok, :deleted} =
+          Repo.transaction(fn ->
+            Repo.delete!(rec)
+            log_audit(plugin_name, "delete", user_id)
+            :deleted
+          end)
 
         :telemetry.execute(
           [:barkpark, :plugin_settings, :write],
@@ -101,7 +118,15 @@ defmodule Barkpark.Plugins.Settings do
         {:error, :not_found}
 
       %SettingsRecord{settings: map} ->
-        log_audit(plugin_name, "reveal", user_id)
+        # Atomic reveal: the secret is only returned once the audit row commits.
+        # If the audit insert raises, the transaction rolls back and no secret
+        # leaves the function without a recorded reveal.
+        {:ok, ^map} =
+          Repo.transaction(fn ->
+            log_audit(plugin_name, "reveal", user_id)
+            map
+          end)
+
         {:ok, map}
     end
   end

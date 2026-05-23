@@ -63,6 +63,37 @@ defmodule Barkpark.Plugins.SettingsTest do
     end
   end
 
+  describe "transactional audit (mutation + audit row atomic)" do
+    test "put returns {:ok, record} and records a write audit row" do
+      assert {:ok, %{plugin_name: @plugin}} =
+               Settings.put(@plugin, %{"k" => "v"}, user_id: "carol")
+
+      actions = audit_actions(@plugin)
+      assert "write" in actions
+    end
+
+    test "delete returns :ok and records a delete audit row" do
+      assert {:ok, _} = Settings.put(@plugin, %{"k" => "v"}, user_id: "carol")
+      assert :ok = Settings.delete(@plugin, user_id: "carol")
+
+      assert "delete" in audit_actions(@plugin)
+    end
+
+    test "reveal returns the unmasked map and records a reveal audit row" do
+      settings = %{"client_secret" => "topsecret"}
+      assert {:ok, _} = Settings.put(@plugin, settings, user_id: "carol")
+
+      assert {:ok, ^settings} = Settings.reveal(@plugin, user_id: "carol")
+
+      assert "reveal" in audit_actions(@plugin)
+    end
+
+    test "reveal on missing plugin returns :not_found and writes no audit row" do
+      assert {:error, :not_found} = Settings.reveal("never_existed")
+      assert audit_actions("never_existed") == []
+    end
+  end
+
   describe "encryption at rest" do
     test "raw column does not contain the plaintext value" do
       secret_marker = "PLAINTEXT_MARKER_DO_NOT_LEAK_3f8a"
@@ -84,5 +115,13 @@ defmodule Barkpark.Plugins.SettingsTest do
 
       refute String.contains?(raw_str, secret_marker)
     end
+  end
+
+  defp audit_actions(plugin_name) do
+    from(a in SettingsAudit,
+      where: a.plugin_name == ^plugin_name,
+      select: a.action
+    )
+    |> Repo.all()
   end
 end

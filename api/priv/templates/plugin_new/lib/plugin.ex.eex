@@ -6,11 +6,17 @@ defmodule <%= @module %> do
 
   Capabilities: <%= if @capabilities == [], do: "(none)", else: Enum.join(@capabilities, ", ") %>
 
-  Add schemas to `priv/plugins/<%= @plugin_name %>/schemas/` and any
-  custom logic below. The plugin manifest lives in
-  `priv/plugins/<%= @plugin_name %>/plugin.json` and is read + validated
-  at compile time by `Barkpark.Plugin.__using__/1`.
+  This module lives in the compiled tree at
+  `lib/barkpark/plugins/<%= @plugin_name %>.ex` so it is reachable by
+  `elixirc_paths` and registers via `Barkpark.Plugins.Registry`. The
+  manifest at `priv/plugins/<%= @plugin_name %>/plugin.json` is read +
+  validated at compile time by `Barkpark.Plugin.__using__/1` (D7 — no
+  runtime eval), and its `"module"` key points back at this module so
+  discovery matches.
+
+  Drop schemas into `priv/plugins/<%= @plugin_name %>/schemas/` and add any
+  custom logic below.
   """
 
-  use Barkpark.Plugin
+  use Barkpark.Plugin, manifest_path: "<%= @manifest_rel %>"
 end
