@@ -171,6 +171,84 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  describe "render_block/1 — portable-doc block → fragment (Wave 4)" do
+    test "heading composes to a bold span" do
+      block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
+      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+    end
+
+    test "paragraph with plain text composes to a span" do
+      block = %{
+        "id" => "p1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Hello"}]
+      }
+
+      assert Render.render_block(block) == "<span>Hello</span>"
+    end
+
+    test "divider composes to an hr" do
+      assert Render.render_block(%{"id" => "d", "type" => "divider"}) ==
+               ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+    end
+
+    test "callout uses tone palette and title (matches fixture block shape)" do
+      block = %{
+        "id" => "c",
+        "type" => "callout",
+        "tone" => "warning",
+        "title" => "Degraded",
+        "content" => [%{"type" => "text", "value" => "API latency is elevated."}]
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<div style="border-left:4px solid #92400e;background:#fffbeb;padding:16px;color:#92400e">) <>
+                 ~s(<strong>Degraded</strong> <span>API latency is elevated.</span></div>)
+    end
+
+    test "action composes to a primary button" do
+      block = %{
+        "id" => "a",
+        "type" => "action",
+        "label" => "Read more",
+        "href" => "https://example.com/notes",
+        "priority" => "primary"
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<a href="https://example.com/notes" style="display:inline-block;padding:10px 20px;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read more</a>)
+    end
+
+    test "section wraps children between leading/trailing hr rules" do
+      block = %{
+        "id" => "s",
+        "type" => "section",
+        "title" => "Highlights",
+        "blocks" => [
+          %{"id" => "p", "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Body."}]}
+        ]
+      }
+
+      html = Render.render_block(block)
+      # Leading + trailing hr from the composed section sub-tree.
+      assert html =~ ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+      assert html =~ ~s(<span style="font-weight:bold">Highlights</span>)
+      assert html =~ "<span>Body.</span>"
+    end
+
+    test "render_blocks concatenates a list in order" do
+      blocks = [
+        %{"id" => "h", "type" => "heading", "text" => "A"},
+        %{"id" => "p", "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "B"}]}
+      ]
+
+      assert Render.render_blocks(blocks) ==
+               ~s(<span style="font-weight:bold">A</span><span>B</span>)
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"

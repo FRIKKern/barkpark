@@ -1,23 +1,50 @@
 defmodule Barkpark.Papers do
   @moduledoc """
-  Context for paperflow papers (convergence MVP, masterplan Figure 6).
+  Context for paperflow papers (convergence masterplan Figure 6;
+  block-streaming in Wave 4).
 
-  A paper is a slug-keyed row holding opaque pre-rendered article HTML.
-  `upsert_paper/1` writes the latest HTML and broadcasts on the **same**
-  per-doc PubSub topic shape Barkpark already uses for documents —
-  `doc:<dataset>:<type>:<id>` (see `Barkpark.Content.tap_broadcast/5`) — so
-  `BarkparkWeb.PaperLive` rides the existing `tap_broadcast → Phoenix.PubSub
-  → LiveView` spine. No new broadcast engine, no GenServer-per-document.
+  A paper is a slug-keyed row. Two storage modes coexist:
 
-  The "no reload" win comes purely from LiveView re-assigning `@html` on
-  each broadcast and letting morphdom diff the DOM — there are no delta
-  frames here, by design.
+    * **block-backed (Wave 4):** `blocks` (a portable-doc block list) is the
+      source of truth; `body_html` is a derived cache rendered by
+      `Barkpark.PortableDoc.Render` on every write.
+    * **HTML-only (Wave 3, legacy):** `blocks` is `nil`; the opaque
+      `body_html` is stored and rendered verbatim. No backfill.
+
+  Broadcasts ride the **same** per-doc PubSub topic shape Barkpark already uses
+  for documents — `doc:<dataset>:<type>:<id>` — so `BarkparkWeb.PaperLive`
+  rides the existing `Phoenix.PubSub → LiveView` spine. No new broadcast
+  engine, no GenServer-per-document.
+
+  ## Two broadcast frames
+
+    * `{:paper_updated, %{slug, dataset, html, rev, …}}` — the **whole-HTML**
+      frame (Wave 3). Used on initial create / HTML-only upsert / fallback.
+      PaperLive re-assigns the full container.
+    * `{:paper_block, %{op_kind, block_id, fragment_html, position, rev}}` — the
+      **delta** frame (Wave 4). Emitted on a successful block op. PaperLive
+      appends/patches the single affected stream item — no whole re-assign.
+
+  Every write bumps a **monotonic per-paper integer** `rev` and stamps the
+  broadcast with it, so PaperLive can spot a missed delta (received rev !=
+  expected rev) and refetch the full doc.
+
+  ## Coalescing (T4.7) — deferred, by design
+
+  Each block op flushes exactly one delta frame (flush-per-op). A debounce
+  buffer was deliberately NOT added: it would need a GenServer-per-paper and
+  would break the per-op `rev` contract that rev-gap recovery depends on (each
+  op must carry its own consecutive rev). The consumer cost per frame is a
+  single `stream_insert`, which morphdom patches in place — cheap. Coalescing
+  becomes worthwhile only under sustained high-frequency bursts; until a real
+  workload demands it, flush-per-op is the simpler correct behaviour.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Repo
   alias Barkpark.Papers.Paper
+  alias Barkpark.PortableDoc.{Patch, Render}
 
   @default_dataset "paperflow"
   # Matches the `type` segment used in the documents per-doc topic; papers
@@ -29,8 +56,8 @@ defmodule Barkpark.Papers do
 
   @doc """
   Per-doc PubSub topic for a paper. Same shape as the documents spine:
-  `doc:<dataset>:<type>:<id>`. PaperLive subscribes to this; `upsert_paper/1`
-  broadcasts to it.
+  `doc:<dataset>:<type>:<id>`. PaperLive subscribes to this; writes broadcast
+  to it.
   """
   def topic(slug, dataset \\ @default_dataset) when is_binary(slug) do
     "doc:#{dataset}:#{@paper_type}:#{slug}"
@@ -42,16 +69,28 @@ defmodule Barkpark.Papers do
   end
 
   @doc """
-  Upsert a paper keyed by `{dataset, slug}` and broadcast the new HTML on the
-  per-doc topic.
+  The paper's block list, or `nil` for an HTML-only (legacy) paper.
+  """
+  def get_blocks(slug, dataset \\ @default_dataset) when is_binary(slug) do
+    case get_paper(slug, dataset) do
+      nil -> nil
+      %Paper{blocks: blocks} -> blocks
+    end
+  end
 
-  `attrs` accepts string or atom keys: `slug` (required), `body_html`
-  (required), and optionally `dataset`, `source_doc`, `goal_id`,
-  `event_type`. A fresh `rev` is minted on every write.
+  @doc """
+  Upsert a paper keyed by `{dataset, slug}` and broadcast a **whole-HTML**
+  frame on the per-doc topic.
 
-  On success, broadcasts `{:paper_updated, %{slug:, dataset:, html:, rev:,
-  ...}}` to `topic(slug, dataset)` and returns `{:ok, paper}`. Returns
-  `{:error, changeset}` on validation/constraint failure.
+  `attrs` accepts string or atom keys: `slug` (required), and either
+  `body_html` OR `blocks`. When `blocks` is given, `body_html` is (re)rendered
+  from it as the derived cache; when only `body_html` is given, the paper stays
+  HTML-only (`blocks` left as-is / nil). Optionally `dataset`, `source_doc`,
+  `goal_id`, `event_type`. `rev` is bumped to the next integer on every write.
+
+  On success, broadcasts `{:paper_updated, %{slug, dataset, html, rev, …}}` to
+  `topic(slug, dataset)` and returns `{:ok, paper}`. Returns `{:error,
+  changeset}` on validation/constraint failure.
   """
   def upsert_paper(attrs) when is_map(attrs) do
     attrs = normalize(attrs)
@@ -61,9 +100,20 @@ defmodule Barkpark.Papers do
 
     existing = slug && get_paper(slug, dataset)
 
-    changeset =
-      (existing || %Paper{})
-      |> Paper.changeset(Map.put(attrs, "rev", generate_rev()))
+    # When blocks are supplied, render the HTML cache from them so the two stay
+    # in lockstep. When only HTML is supplied, store it opaquely (legacy path).
+    attrs =
+      case attrs["blocks"] do
+        blocks when is_list(blocks) ->
+          Map.put(attrs, "body_html", Render.render_blocks(blocks))
+
+        _ ->
+          attrs
+      end
+
+    attrs = Map.put(attrs, "rev", next_rev(existing))
+
+    changeset = Paper.changeset(existing || %Paper{}, attrs)
 
     result =
       if existing do
@@ -82,7 +132,128 @@ defmodule Barkpark.Papers do
     end
   end
 
+  @doc """
+  Apply a single portable-doc `op` (a DocPatchOp map) to a paper's block list,
+  persist the new block list + a refreshed `body_html` cache + a bumped `rev`,
+  then broadcast a **delta** frame.
+
+  Flow:
+
+    1. Load the paper. Unknown slug ⇒ `{:error, :not_found}`. A paper that has
+       never carried blocks (HTML-only) seeds an empty block list, so the first
+       op can `append-block` into it.
+    2. Apply via `Barkpark.PortableDoc.Patch.apply_patch/2`. A patch failure
+       surfaces structurally as `{:error, {code, target, op_kind}}` (e.g.
+       `{:error, {:block_not_found, "x", "patch-block"}}`).
+    3. Render just the affected block via `Barkpark.PortableDoc.Render` and
+       refresh the whole `body_html` cache from the new block list.
+    4. Persist `blocks` + `body_html` + bumped `rev`.
+    5. Broadcast `{:paper_block, %{op_kind, block_id, fragment_html, position,
+       rev}}` on the per-doc topic.
+
+  Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
+  rev:}}` on success.
+  """
+  def apply_block_op(slug, op, dataset \\ @default_dataset)
+      when is_binary(slug) and is_map(op) do
+    with %Paper{} = paper <- get_paper(slug, dataset),
+         blocks = paper.blocks || [],
+         {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
+         {:ok, affected} <- locate_affected(op, new_blocks) do
+      op_kind = Map.get(op, "op")
+      rev = next_rev(paper)
+      body_html = Render.render_blocks(new_blocks)
+
+      fragment_html =
+        case affected.block do
+          nil -> nil
+          block -> Render.render_block(block)
+        end
+
+      changeset =
+        Paper.changeset(paper, %{
+          "blocks" => new_blocks,
+          "body_html" => body_html,
+          "rev" => rev
+        })
+
+      case Repo.update(changeset) do
+        {:ok, _saved} ->
+          frame = %{
+            op_kind: op_kind,
+            block_id: affected.block_id,
+            fragment_html: fragment_html,
+            position: affected.position,
+            rev: rev
+          }
+
+          broadcast_block(slug, dataset, frame)
+
+          {:ok,
+           %{
+             block: affected.block,
+             fragment_html: fragment_html,
+             op_kind: op_kind,
+             block_id: affected.block_id,
+             position: affected.position,
+             rev: rev
+           }}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    else
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
   # ── Internal ────────────────────────────────────────────────────────────
+
+  # Resolve which block an op affected (post-apply) plus its position, so the
+  # delta frame can tell PaperLive whether to append, insert-after, patch, or
+  # remove the stream item. `position` is the 0-based index in the TOP-LEVEL
+  # block list (the common flat-list case the streaming consumer keys on);
+  # `nil` for ops on a nested-section block or a remove.
+  defp locate_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
+    {:ok,
+     %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
+  end
+
+  defp locate_affected(%{"op" => "insert-after", "block" => block}, new_blocks) do
+    id = Map.get(block, "id")
+    {:ok, %{block: block, block_id: id, position: top_level_index(new_blocks, id)}}
+  end
+
+  defp locate_affected(%{"op" => kind, "id" => id}, new_blocks)
+       when kind in ["patch-block", "replace-block"] do
+    block = find_block(new_blocks, id)
+    {:ok, %{block: block, block_id: id, position: top_level_index(new_blocks, id)}}
+  end
+
+  defp locate_affected(%{"op" => "remove-block", "id" => id}, _new_blocks) do
+    # The block is gone; the frame carries only its id so the consumer can
+    # delete the stream item. No fragment to render.
+    {:ok, %{block: nil, block_id: id, position: nil}}
+  end
+
+  defp locate_affected(op, _new_blocks), do: {:error, {:invalid_op, op}}
+
+  # 0-based index of `id` in the top-level list, or nil if it lives in a section.
+  defp top_level_index(blocks, id) do
+    Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
+  end
+
+  # Find a block by id anywhere in the tree (recurses sections).
+  defp find_block(blocks, id) do
+    Enum.find_value(blocks, fn block ->
+      cond do
+        Map.get(block, "id") == id -> block
+        Map.get(block, "type") == "section" -> find_block(Map.get(block, "blocks", []), id)
+        true -> nil
+      end
+    end)
+  end
 
   defp broadcast_update(%Paper{} = paper) do
     msg =
@@ -100,6 +271,10 @@ defmodule Barkpark.Papers do
     Phoenix.PubSub.broadcast(Barkpark.PubSub, topic(paper.slug, paper.dataset), msg)
   end
 
+  defp broadcast_block(slug, dataset, frame) do
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, topic(slug, dataset), {:paper_block, frame})
+  end
+
   # Allow callers to pass atom OR string keys (controller params are strings,
   # internal callers/tests may use atoms). Stringify, dropping nils.
   defp normalize(attrs) do
@@ -109,7 +284,9 @@ defmodule Barkpark.Papers do
     end)
   end
 
-  defp generate_rev do
-    16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
-  end
+  # Next monotonic rev for a paper. Starts at 1 for a fresh paper; increments
+  # the stored integer otherwise.
+  defp next_rev(nil), do: 1
+  defp next_rev(%Paper{rev: rev}) when is_integer(rev), do: rev + 1
+  defp next_rev(%Paper{}), do: 1
 end
