@@ -365,6 +365,7 @@ defmodule BarkparkWeb.Router do
   scope "/v1/media", BarkparkWeb do
     pipe_through :api
 
+    get "/:dataset/search/suggestions", V1.MediaController, :search_suggestions
     get "/:dataset/search", V1.MediaController, :search
     get "/:dataset/share/:token", V1.MediaCollectionsController, :share_view
     get "/:dataset/collections", V1.MediaCollectionsController, :index

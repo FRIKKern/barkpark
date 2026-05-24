@@ -11,7 +11,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations}
+  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchAnalytics}
   alias BarkparkWeb.V1.MediaSearchParams
 
   action_fallback BarkparkWeb.FallbackController
@@ -33,6 +33,10 @@ defmodule BarkparkWeb.V1.MediaController do
 
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+    SearchAnalytics.record(dataset, params, total, ms,
+      actor_key: search_actor_key(conn)
+    )
+
     json(conn, %{
       result: %{
         hits: hits,
@@ -43,6 +47,24 @@ defmodule BarkparkWeb.V1.MediaController do
       },
       syncTags: ["bp:ds:#{dataset}:media"],
       ms: ms
+    })
+  end
+
+  def search_suggestions(conn, %{"dataset" => dataset} = params) do
+    prefix = params["q"] || params["prefix"]
+    limit = parse_int(params["limit"], 8) |> min(20)
+
+    result =
+      SearchAnalytics.suggestions(
+        dataset,
+        search_actor_key(conn),
+        prefix,
+        limit: limit
+      )
+
+    json(conn, %{
+      result: result,
+      syncTags: ["bp:ds:#{dataset}:media:search"]
     })
   end
 
@@ -282,6 +304,23 @@ defmodule BarkparkWeb.V1.MediaController do
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(value), do: value
+
+  defp search_actor_key(conn) do
+    case conn.assigns[:api_token] do
+      %{id: id} -> "token:" <> id
+      _ -> search_client_key(conn)
+    end
+  end
+
+  defp search_client_key(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
+      [client | _] when is_binary(client) and client != "" ->
+        "client:" <> String.slice(client, 0, 64)
+
+      _ ->
+        "anon"
+    end
+  end
 
   defp metadata_params(%{"metadata" => metadata}) when is_map(metadata), do: metadata
 
