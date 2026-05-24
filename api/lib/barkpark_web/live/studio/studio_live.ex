@@ -956,11 +956,38 @@ defmodule BarkparkWeb.Studio.StudioLive do
   #
   # patch.ex / render.ex are untouched; only the op maps we build vary.
 
-  # View ⇄ Edit toggle. View is the read-only live stream (unchanged); Edit
-  # renders the per-block controls. Pure assign flip — no remount.
+  # View ⇄ Edit toggle. View is the read-only live stream; Edit renders the
+  # per-block controls. Pure assign flip — no remount.
+  #
+  # Entering Edit tears the streamed `<article phx-update="stream">` container
+  # out of the DOM (the editor branch renders instead). A LiveView stream is a
+  # write-only changelog with no server-side snapshot, so once that container
+  # is destroyed there is nothing to re-emit when it returns. Flipping the
+  # assign back alone would re-render an EMPTY stream container — the View pane
+  # would show zero blocks. So on the View transition we re-populate
+  # `:paper_blocks` from the current `paper_doc` blocks (the source of truth,
+  # kept fresh by `sync_paper_edit_doc/1` after every edit), reusing the same
+  # `paper_stream_items/1` path the initial mount uses. `reset: true` discards
+  # any stale client state so the View shows exactly the current blocks,
+  # including edits made while in Edit mode. Still a pure stream/assign update
+  # — no remount, no rebuild_panes.
   def handle_event("paper-toggle-edit", _params, socket) do
     if socket.assigns[:editor_view] == :paper do
-      {:noreply, assign(socket, paper_edit_mode: !socket.assigns[:paper_edit_mode])}
+      next_edit_mode = !socket.assigns[:paper_edit_mode]
+
+      socket = assign(socket, paper_edit_mode: next_edit_mode)
+
+      socket =
+        if next_edit_mode or not socket.assigns[:paper_block_mode] do
+          socket
+        else
+          # Switching back to View on a block-backed paper: rehydrate the stream.
+          stream(socket, :paper_blocks, paper_stream_items(paper_top_level_blocks(socket)),
+            reset: true
+          )
+        end
+
+      {:noreply, socket}
     else
       {:noreply, socket}
     end

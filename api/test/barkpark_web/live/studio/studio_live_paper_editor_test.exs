@@ -178,6 +178,66 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
              ["p-second", "h-1", "p-intro"]
   end
 
+  test "View → Edit → View round-trip re-populates the read-only stream (no remount)",
+       %{conn: conn} do
+    {:ok, view, html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    pid_before = view.pid
+
+    # View mode: the read-only stream shows the blocks' text, no edit controls.
+    assert html =~ "Editor Paper"
+    assert html =~ "Original intro text."
+    refute html =~ ~s(data-test-id="studio-paper-block-editor")
+
+    # → Edit: editor controls render, the streamed View article is gone.
+    edit_html = open_editor(view)
+    refute edit_html =~ ~s(<article id="paper-body-#{@slug}")
+
+    # → View: toggle back. Before the fix the stream container returns EMPTY
+    # (a LiveView stream has no server-side snapshot to re-emit), so the pane
+    # shows zero blocks. After the fix the stream is rehydrated from the
+    # current paper_doc blocks.
+    view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
+    # Back in read-only View — edit controls gone, streamed article present.
+    refute view_html =~ ~s(data-test-id="studio-paper-block-editor")
+    assert view_html =~ ~s(<article id="paper-body-#{@slug}")
+
+    # THE REGRESSION ASSERTION: the blocks are rendered again in View.
+    assert view_html =~ "Editor Paper"
+    assert view_html =~ "Original intro text."
+    assert view_html =~ "Second paragraph."
+
+    # Same process throughout — no remount, the sentinel survived.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+    assert view_html =~ ~s(id="paper-sentinel")
+  end
+
+  test "edit made in Edit mode is visible in View after toggling back (re-streams CURRENT blocks)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    pid_before = view.pid
+
+    # → Edit, patch the intro paragraph, then → View.
+    open_editor(view)
+
+    view
+    |> form(~s([data-edit-block-id="p-intro"] form), %{"text" => "Edited while in edit mode."})
+    |> render_submit()
+
+    view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
+    # View shows the EDITED text (re-streamed from the current blocks), and the
+    # superseded original text is gone.
+    refute view_html =~ ~s(data-test-id="studio-paper-block-editor")
+    assert view_html =~ "Edited while in edit mode."
+    refute view_html =~ "Original intro text."
+
+    # No remount.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+  end
+
   test "a {:paper_block} broadcast from another source streams into the editor (edits are ops)",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
