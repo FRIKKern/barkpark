@@ -178,6 +178,152 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
     end
   end
 
+  describe "Beta block-op on a post — apply_document_block_op/5 (3.2)" do
+    test "editing the bound title block persists + projects content[\"title\"] and the row title" do
+      id = "beta-title-#{System.unique_integer([:positive])}"
+
+      {:ok, doc} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => id, "title" => "Before"},
+          @dataset
+        )
+
+      title_block = Enum.find(doc.content["blocks"], &(&1["fieldName"] == "title"))
+
+      op = %{
+        "op" => "patch-block",
+        "id" => title_block["id"],
+        "patch" => %{"value" => "After (Beta)"}
+      }
+
+      {:ok, %{op_kind: "patch-block", block_id: bid}} =
+        Content.apply_document_block_op(doc.doc_id, "post", op, @dataset)
+
+      assert bid == title_block["id"]
+
+      {:ok, saved} = Content.get_document(doc.doc_id, "post", @dataset)
+
+      # Bound title block value + projected content["title"] + row title all moved.
+      saved_title = Enum.find(saved.content["blocks"], &(&1["fieldName"] == "title"))
+      assert saved_title["value"] == "After (Beta)"
+      assert saved.content["title"] == "After (Beta)"
+      assert saved.title == "After (Beta)"
+    end
+
+    test "editing the free body paragraph updates content[\"body\"] (doc.body)" do
+      id = "beta-body-#{System.unique_integer([:positive])}"
+
+      {:ok, doc} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => id, "title" => "Body Test"},
+          @dataset
+        )
+
+      free_para = Enum.find(doc.content["blocks"], &(not Projection.bound?(&1)))
+      assert free_para["type"] == "paragraph"
+
+      op = %{
+        "op" => "patch-block",
+        "id" => free_para["id"],
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Beta body text."}]}
+      }
+
+      {:ok, _} = Content.apply_document_block_op(doc.doc_id, "post", op, @dataset)
+
+      {:ok, saved} = Content.get_document(doc.doc_id, "post", @dataset)
+
+      saved_free = Enum.find(saved.content["blocks"], &(not Projection.bound?(&1)))
+      assert saved_free["content"] == [%{"type" => "text", "value" => "Beta body text."}]
+
+      # Projected body region reflects the edited free block + its rendered HTML.
+      assert saved.content["body"]["blocks"] == [saved_free]
+      assert saved.content["body"]["html"] =~ "Beta body text."
+    end
+
+    test "a Beta op on a legacy doc with NO blocks synthesizes-then-persists them" do
+      id = "beta-synth-#{System.unique_integer([:positive])}"
+
+      {:ok, base_doc} =
+        Content.upsert_document(
+          "post",
+          %{"doc_id" => id, "title" => "Legacy Beta", "content" => %{"slug" => "legacy-beta"}},
+          @dataset
+        )
+
+      refute Map.has_key?(base_doc.content, "blocks")
+
+      # Resolve the in-memory synthesis to find the bound slug block id.
+      {synth_blocks, true} = Content.resolve_blocks_for_edit(base_doc, "post", @dataset)
+      slug_block = Enum.find(synth_blocks, &(&1["fieldName"] == "slug"))
+
+      op = %{
+        "op" => "patch-block",
+        "id" => slug_block["id"],
+        "patch" => %{"value" => "new-slug"}
+      }
+
+      {:ok, _} = Content.apply_document_block_op(base_doc.doc_id, "post", op, @dataset)
+
+      {:ok, saved} = Content.get_document(base_doc.doc_id, "post", @dataset)
+
+      # The first Beta edit MATERIALIZES content["blocks"] on disk + re-projects.
+      assert is_list(saved.content["blocks"])
+      assert saved.content["slug"] == "new-slug"
+    end
+  end
+
+  describe "toggle losslessness (3 — Classic save after a Beta edit, 1 — flip is lossless)" do
+    test "resolve_blocks_for_edit returns stored blocks verbatim (toggle does not mutate)" do
+      id = "toggle-noop-#{System.unique_integer([:positive])}"
+
+      {:ok, doc} =
+        Content.create_document("post", %{"doc_id" => id, "title" => "Toggle"}, @dataset)
+
+      stored = doc.content["blocks"]
+
+      # Resolving for a Beta open (the toggle's read) returns the SAME list,
+      # synth? = false, no mutation — Classic and Beta read one block list.
+      assert {^stored, false} = Content.resolve_blocks_for_edit(doc, "post", @dataset)
+    end
+
+    test "a Classic save after a Beta edit keeps the free body block intact" do
+      id = "beta-then-classic-#{System.unique_integer([:positive])}"
+
+      {:ok, doc} =
+        Content.create_document("post", %{"doc_id" => id, "title" => "Round Trip"}, @dataset)
+
+      # Beta edit: write distinctive text into the free body paragraph.
+      free_para = Enum.find(doc.content["blocks"], &(not Projection.bound?(&1)))
+
+      beta_op = %{
+        "op" => "patch-block",
+        "id" => free_para["id"],
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Survives the Classic save."}]}
+      }
+
+      {:ok, _} = Content.apply_document_block_op(doc.doc_id, "post", beta_op, @dataset)
+      {:ok, after_beta} = Content.get_document(doc.doc_id, "post", @dataset)
+
+      after_beta_free = Enum.reject(after_beta.content["blocks"], &Projection.bound?/1)
+
+      # Now a Classic save that only touches the title — the Exp-P3.1 guard,
+      # exercised through the real Beta-then-Classic round trip.
+      form = %{"title" => "Classic Edit", "slug" => "", "featuredImage" => "", "status" => "draft"}
+      {:ok, saved, _errs} = Content.upsert_draft(after_beta, "post", schema_for(), form, @dataset)
+
+      saved_free = Enum.reject(saved.content["blocks"], &Projection.bound?/1)
+
+      # Free body block (the Beta-authored text) is byte-identical after Classic save.
+      assert saved_free == after_beta_free
+      assert saved.content["body"]["html"] =~ "Survives the Classic save."
+
+      # And the Classic-edited title landed.
+      assert saved.content["title"] == "Classic Edit"
+    end
+  end
+
   defp schema_for do
     {:ok, schema} = Content.get_schema("post", @dataset)
     schema
