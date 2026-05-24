@@ -52,6 +52,34 @@ export const SLASH_ITEMS = [
 // then never renders and the menu behaves exactly as before.
 const EXPECTED_GROUP = "EXPECTED";
 
+// Count the BOUND field blocks currently rendered in the editor for `name`.
+// Bound blocks render as `.bp-paper-edit-field[data-field-name="<name>"]`; the
+// hidden `[data-expected-fields]` config element carries no `data-field-name`,
+// so it is never miscounted. This is the LIVE source of truth for hide-at-cap —
+// the server-rendered `data-expected-fields` list can lag the editor (lazy
+// block synthesis + client-side inserts), which is why the cap is enforced here
+// against what is actually on screen, not against the server's count hint.
+function countBoundFieldBlocks(name) {
+  if (!name) return 0;
+  const esc = name.replace(/["\\]/g, "\\$&");
+  try {
+    return document.querySelectorAll(
+      `.bp-paper-edit-field[data-field-name="${esc}"]`,
+    ).length;
+  } catch (_e) {
+    return 0;
+  }
+}
+
+// True when this expected field has an integer `max` and its LIVE bound-block
+// count has reached it — so the slash menu must hide it (1/1 used). A nil/absent
+// or non-integer max is unlimited and never at cap.
+function fieldAtCapLive(f) {
+  const max = typeof f.max === "number" ? f.max : parseInt(f.max, 10);
+  if (!Number.isInteger(max)) return false;
+  return countBoundFieldBlocks(f.name) >= max;
+}
+
 export function readExpectedItems(doc = document) {
   const el = doc.querySelector("[data-expected-fields]");
   if (!el) return [];
@@ -65,6 +93,8 @@ export function readExpectedItems(doc = document) {
 
   return parsed
     .filter((f) => f && typeof f.name === "string" && f.name !== "")
+    // EX2 hide-at-cap, computed against the LIVE editor (see fieldAtCapLive).
+    .filter((f) => !fieldAtCapLive(f))
     .map((f) => ({
       group: EXPECTED_GROUP,
       type: f.type || "field-string",
@@ -82,11 +112,15 @@ export class SlashMenu {
     // Structured. The EXPECTED group is read fresh on every open() and
     // prepended, so it always reflects current usage.
     this._baseItems = items || SLASH_ITEMS;
+    // _allItems = EXPECTED group + base groups (recomputed each open). _items =
+    // the filtered view shown for the current query. _query = live filter text.
+    this._allItems = this._baseItems;
     this._items = this._baseItems;
+    this._query = "";
     this._onChoose = onChoose || (() => {});
     this._onDismiss = onDismiss || (() => {});
     this._open = false;
-    this._active = 0; // index into the FLAT selectable item list
+    this._active = 0; // index into the FLAT selectable (filtered) item list
     this._el = null; // popup root
     this._rowEls = []; // parallel to selectable items, for active styling
 
@@ -99,16 +133,18 @@ export class SlashMenu {
     return this._open;
   }
 
-  // Show the popup anchored to a caret rect { left, top, bottom }.
-  open(rect) {
+  // Show the popup anchored to a caret rect { left, top, bottom }, filtered by
+  // `query` (the text after "/"). Called on first open AND on every keystroke
+  // while the menu stays open, so the rows narrow live as the user types.
+  open(rect, query = "") {
     if (!this._el) this._build();
-    // Recompute the item list on every open: EXPECTED group (read fresh from
-    // the DOM so it reflects current usage / hide-at-cap) on top, then the base
-    // generic groups below.
-    this._items = [...readExpectedItems(), ...this._baseItems];
+    // Recompute the candidate list on every open: EXPECTED group (read fresh
+    // from the DOM so it reflects current usage / hide-at-cap) on top, then the
+    // base generic groups below.
+    this._allItems = [...readExpectedItems(), ...this._baseItems];
+    this._query = query || "";
+    this._applyFilter(); // → this._items (filtered view)
     if (!this._open) {
-      this._active = 0;
-      this._render();
       this._open = true;
       document.addEventListener("mousedown", this._onDocPointer, true);
       // Capture-phase Escape so the menu reliably closes even when the
@@ -118,8 +154,30 @@ export class SlashMenu {
       // prevents the same Escape from leaking to other handlers.
       document.addEventListener("keydown", this._onDocKeydown, true);
     }
+    // Re-render every call so the filtered rows update and the active row
+    // resets to the first match as the query changes.
+    this._active = 0;
+    this._render();
     this._position(rect);
     this._syncActive();
+  }
+
+  // Narrow _allItems by the live query — case-insensitive substring over the
+  // label / type / description / group. An empty query passes everything
+  // through. Group headers are emitted by _render only when an item of that
+  // group survives, so groups with no matches disappear automatically.
+  _applyFilter() {
+    const q = (this._query || "").trim().toLowerCase();
+    if (!q) {
+      this._items = this._allItems;
+      return;
+    }
+    this._items = this._allItems.filter((it) => {
+      const hay = `${it.label || ""} ${it.type || ""} ${it.desc || ""} ${
+        it.group || ""
+      }`.toLowerCase();
+      return hay.includes(q);
+    });
   }
 
   close() {
@@ -178,6 +236,14 @@ export class SlashMenu {
     const list = document.createElement("div");
     list.className = "bp-slash-list";
     this._el.appendChild(list);
+
+    // Empty state — a non-selectable row when the query matches no block.
+    if (this._items.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "bp-slash-empty";
+      empty.textContent = "No blocks match";
+      list.appendChild(empty);
+    }
 
     let lastGroup = null;
     this._items.forEach((item, idx) => {
