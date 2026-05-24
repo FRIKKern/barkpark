@@ -129,13 +129,13 @@ defmodule Barkpark.PortableDoc.Patch do
         # `null` is treated as "absent" — it can never re-key the type.
         case Map.get(patch, "type") do
           nil ->
-            {[merge_block(target, patch)], false}
+            {[merge_block(target, coerce_field_patch(target, patch))], false}
 
           patch_type ->
             if patch_type != Map.get(target, "type") do
               {[target], true}
             else
-              {[merge_block(target, patch)], false}
+              {[merge_block(target, coerce_field_patch(target, patch))], false}
             end
         end
       end)
@@ -262,4 +262,21 @@ defmodule Barkpark.PortableDoc.Patch do
   defp section?(block), do: Map.get(block, "type") == "section"
 
   defp block_id(block), do: Map.get(block, "id")
+
+  # Minimal per-type coercion for field-* LEAF blocks (P2.1). Only the
+  # `"value"` key is touched, and only for field-boolean (string "true"/"false"
+  # → real bool) so a stringy checkbox value can never land in the store as a
+  # binary. All other field types (string/slug/text/select/datetime/color) keep
+  # their value as-is — string values are already the right shape. Non-field
+  # blocks (rich text, callout, …) are returned untouched, so the P1 path is
+  # byte-identical. Full per-type schema validation is a later slice.
+  defp coerce_field_patch(%{"type" => "field-boolean"}, patch) do
+    case Map.fetch(patch, "value") do
+      {:ok, "true"} -> Map.put(patch, "value", true)
+      {:ok, "false"} -> Map.put(patch, "value", false)
+      _ -> patch
+    end
+  end
+
+  defp coerce_field_patch(_target, patch), do: patch
 end

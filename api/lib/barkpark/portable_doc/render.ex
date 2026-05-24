@@ -184,9 +184,104 @@ defmodule Barkpark.PortableDoc.Render do
     %{"kind" => "PdTable", "rows" => rows}
   end
 
+  # ── field-* LEAF blocks (P2.1) ─────────────────────────────────────────────
+  # Structured field blocks carry their own `value` (the editable datum) plus a
+  # human `label`. View-mode renders a labelled row: a bold label followed by the
+  # rendered value. Each clause composes to a PdBox(column) so the fragment is
+  # self-contained and walks through the existing renderer with no new PdNode
+  # kinds. All values flow through PdText, so they inherit `escape_html` at walk
+  # time — no field-* clause emits raw HTML.
+
+  def compose_block(%{"type" => "field-string"} = b), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-slug"} = b), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-text"} = b), do: field_row(b, field_value_text(b))
+
+  def compose_block(%{"type" => "field-boolean"} = b) do
+    field_row(b, if(Map.get(b, "value") == true, do: "Yes", else: "No"))
+  end
+
+  def compose_block(%{"type" => "field-select"} = b) do
+    value = Map.get(b, "value")
+
+    label =
+      Map.get(b, "options", [])
+      |> Enum.find(fn opt -> Map.get(opt, "value") == value end)
+      |> case do
+        nil -> field_value_text(b)
+        opt -> to_string(Map.get(opt, "label", Map.get(opt, "value", "")))
+      end
+
+    field_row(b, label)
+  end
+
+  def compose_block(%{"type" => "field-datetime"} = b) do
+    field_row(b, format_datetime(Map.get(b, "value", "")))
+  end
+
+  def compose_block(%{"type" => "field-color"} = b) do
+    hex = field_value_text(b)
+    # A swatch (PdBox with a backgroundColor + border) beside the hex string.
+    # The swatch background only takes the value when it's a strict #rrggbb /
+    # #rgb hex — never an arbitrary string — so it can't break out of the inline
+    # style attribute (the hex text itself is still escaped at PdText walk time).
+    swatch = %{
+      "kind" => "PdBox",
+      "style" => %{
+        "width" => 16,
+        "height" => 16,
+        "backgroundColor" => safe_hex(hex),
+        "borderWidth" => 1,
+        "borderColor" => @rule,
+        "borderStyle" => "single"
+      },
+      "children" => []
+    }
+
+    value_row = %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "row"},
+      "children" => [swatch, %{"kind" => "PdText", "children" => [hex]}]
+    }
+
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b), value_row]
+    }
+  end
+
   def compose_block(%{"type" => type}) do
     raise ArgumentError, "compose_block: unhandled block type #{type}"
   end
+
+  # A labelled value row: bold label on its own line, then the value as PdText.
+  defp field_row(b, value_text) when is_binary(value_text) do
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b), %{"kind" => "PdText", "children" => [value_text]}]
+    }
+  end
+
+  defp field_label_node(b) do
+    %{"kind" => "PdText", "weight" => "bold", "children" => [to_string(Map.get(b, "label", ""))]}
+  end
+
+  defp field_value_text(b), do: to_string(Map.get(b, "value", ""))
+
+  @hex_re ~r/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+  # Only a strict hex literal may reach the inline style attribute; otherwise
+  # fall back to a transparent swatch so a hostile `value` can't inject CSS.
+  defp safe_hex(v) when is_binary(v) do
+    if Regex.match?(@hex_re, v), do: v, else: "transparent"
+  end
+
+  defp safe_hex(_), do: "transparent"
+
+  # datetime-local strings ("2026-05-24T10:00") render with the 'T' replaced by
+  # a space for readability; anything else passes through escaped as-is.
+  defp format_datetime(v) when is_binary(v), do: String.replace(v, "T", " ")
+  defp format_datetime(v), do: to_string(v)
 
   # ── inline walker (kernel.ts composeInline) ────────────────────────────────
 
@@ -301,6 +396,7 @@ defmodule Barkpark.PortableDoc.Render do
     []
     |> maybe_flex(s)
     |> maybe_push(s, "width", fn v -> "width:#{v}px" end)
+    |> maybe_push(s, "height", fn v -> "height:#{v}px" end)
     |> maybe_push(s, "padding", fn v -> "padding:#{v}px" end)
     |> maybe_push(s, "margin", fn v -> "margin:#{v}px" end)
     |> maybe_border(s)

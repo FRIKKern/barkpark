@@ -269,6 +269,112 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert Process.alive?(view.pid)
   end
 
+  # ── field-* LEAF blocks (P2.1) ─────────────────────────────────────────────
+
+  @field_slug "2026-05-24-fields-paper"
+
+  defp seed_field_paper! do
+    blocks = [
+      %{"id" => "f-str", "type" => "field-string", "label" => "Name", "value" => "Knut"},
+      %{"id" => "f-slug", "type" => "field-slug", "label" => "Slug", "value" => "knut"},
+      %{"id" => "f-text", "type" => "field-text", "label" => "Bio", "value" => "Hi", "rows" => 4},
+      %{"id" => "f-bool", "type" => "field-boolean", "label" => "Featured", "value" => false},
+      %{
+        "id" => "f-sel",
+        "type" => "field-select",
+        "label" => "Tone",
+        "value" => "info",
+        "options" => [
+          %{"value" => "info", "label" => "Info"},
+          %{"value" => "warning", "label" => "Warning"}
+        ]
+      },
+      %{"id" => "f-dt", "type" => "field-datetime", "label" => "When", "value" => "2026-05-24T10:00"},
+      %{"id" => "f-color", "type" => "field-color", "label" => "Accent", "value" => "#4f46e5"}
+    ]
+
+    {:ok, paper} = Content.upsert_paper(%{slug: @field_slug, dataset: @dataset, blocks: blocks})
+    paper
+  end
+
+  test "Edit mode renders a native control + BarkparkFieldBlockBridge for each field-* block",
+       %{conn: conn} do
+    seed_field_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    edit_html = open_editor(view)
+
+    # Each field block gets a stable wrapper mounted with the bridge hook,
+    # carrying its block id + field type for client-side coercion.
+    for {id, type} <- [
+          {"f-str", "field-string"},
+          {"f-slug", "field-slug"},
+          {"f-text", "field-text"},
+          {"f-bool", "field-boolean"},
+          {"f-sel", "field-select"},
+          {"f-dt", "field-datetime"},
+          {"f-color", "field-color"}
+        ] do
+      assert edit_html =~ ~s(id="paper-fld-#{id}")
+      assert edit_html =~ ~s(data-block-id="#{id}")
+      assert edit_html =~ ~s(data-field-type="#{type}")
+    end
+
+    assert edit_html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+    # Native controls present with their seeded values.
+    assert edit_html =~ ~s(data-test-id="paper-field-field-string")
+    assert edit_html =~ ~s(<textarea)
+    assert edit_html =~ ~s(type="checkbox")
+    assert edit_html =~ ~s(type="datetime-local")
+    assert edit_html =~ ~s(type="color")
+    # The select renders the seeded option labels.
+    assert edit_html =~ "Warning"
+  end
+
+  test "a paper-op patch-block on a field-string block persists the new value", %{conn: conn} do
+    seed_field_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    open_editor(view)
+
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "f-str",
+      "patch" => %{"value" => "Solveig"}
+    })
+
+    block = Content.paper_blocks(@field_slug, @dataset) |> Enum.find(&(&1["id"] == "f-str"))
+    assert block["type"] == "field-string"
+    assert block["value"] == "Solveig"
+    # label is untouched (shallow merge).
+    assert block["label"] == "Name"
+  end
+
+  test "a paper-op patch-block on a field-boolean coerces + persists a real boolean",
+       %{conn: conn} do
+    seed_field_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    open_editor(view)
+
+    # The bridge sends a real JS boolean; assert the bool path. Also assert the
+    # patch.ex coercion guard turns a stringy "true" into a real boolean.
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "f-bool",
+      "patch" => %{"value" => true}
+    })
+
+    block = Content.paper_blocks(@field_slug, @dataset) |> Enum.find(&(&1["id"] == "f-bool"))
+    assert block["value"] === true
+
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "f-bool",
+      "patch" => %{"value" => "false"}
+    })
+
+    block = Content.paper_blocks(@field_slug, @dataset) |> Enum.find(&(&1["id"] == "f-bool"))
+    assert block["value"] === false
+  end
+
   test "a {:paper_block} broadcast from another source streams into the editor (edits are ops)",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")

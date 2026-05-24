@@ -2614,6 +2614,68 @@ defmodule BarkparkWeb.Studio.StudioLive do
         </form>
       <% "divider" -> %>
         <p class="bp-paper-edit-readonly">— divider —</p>
+
+      <%!-- field-* LEAF blocks (P2.1). Each renders a labelled native control
+            inside a stable phx-update="ignore" wrapper mounted with the
+            BarkparkFieldBlockBridge hook. The hook reads data-field-type to
+            coerce the value, builds a patch-block op carrying {value:…}, and
+            pushes it through the same `paper-op` pipeline the rich-text WC uses.
+            phx-update="ignore" keeps LiveView from re-stamping the control's
+            value mid-edit (server owns the model; no echo). --%>
+      <% t when t in ["field-string", "field-slug"] -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <input type="text" class="bp-paper-edit-text" value={Map.get(@block, "value", "")}
+                 data-test-id={"paper-field-" <> @type} />
+        </div>
+
+      <% "field-text" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <textarea class="bp-paper-edit-textarea" rows={Map.get(@block, "rows") || 3}
+                    data-test-id="paper-field-field-text"><%= Map.get(@block, "value", "") %></textarea>
+        </div>
+
+      <% "field-boolean" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <input type="checkbox" checked={Map.get(@block, "value") == true}
+                 data-test-id="paper-field-field-boolean" />
+        </div>
+
+      <% "field-select" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <select class="form-input" data-test-id="paper-field-field-select">
+            <option :for={o <- Map.get(@block, "options", [])}
+                    value={Map.get(o, "value")}
+                    selected={Map.get(o, "value") == Map.get(@block, "value")}>
+              <%= Map.get(o, "label", Map.get(o, "value", "")) %>
+            </option>
+          </select>
+        </div>
+
+      <% "field-datetime" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <input type="datetime-local" class="form-input" value={Map.get(@block, "value", "")}
+                 data-test-id="paper-field-field-datetime" />
+        </div>
+
+      <% "field-color" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <input type="color" value={Map.get(@block, "value", "#000000")}
+                 data-test-id="paper-field-field-color"
+                 style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
+        </div>
+
       <% _ -> %>
         <%!-- image / table and any other type are read-only in the MVP. --%>
         <p class="bp-paper-edit-readonly">

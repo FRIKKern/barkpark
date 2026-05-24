@@ -1484,6 +1484,58 @@
       }
     };
 
+    // BarkparkFieldBlockBridge — LV↔native-control bridge for the paper
+    // editor's field-* LEAF blocks (P2.1). Mounted on the phx-update="ignore"
+    // wrapper that holds one native control (checkbox / select / text /
+    // textarea / datetime-local / color) per field block. On input/change it
+    // coerces the control's value by data-field-type, builds a portable-doc
+    // {op:"patch-block", id, patch:{value:…}} op, and pushes it through the
+    // SAME `paper-op` handler the rich-text WC uses — the server owns the
+    // model, no client state, no echo back into the control.
+    Hooks.BarkparkFieldBlockBridge = {
+      mounted() {
+        const blockId = this.el.dataset.blockId;
+        const fieldType = this.el.dataset.fieldType;
+        const control = this.el.querySelector("input, select, textarea");
+        if (!control) return;
+        this._control = control;
+
+        const send = () => {
+          let value;
+          if (fieldType === "field-boolean") {
+            value = control.checked;
+          } else {
+            value = control.value;
+          }
+          this.pushEvent("paper-op", {
+            op: "patch-block",
+            id: blockId,
+            patch: { value: value }
+          });
+        };
+
+        // datetime / color / select / boolean commit on `change`; free-text
+        // (string / slug / text) debounce on `input` so we don't flood the
+        // server per keystroke.
+        const debounced = ["field-string", "field-slug", "field-text"].includes(fieldType);
+        if (debounced) {
+          this._onInput = () => {
+            clearTimeout(this._t);
+            this._t = setTimeout(send, 300);
+          };
+          control.addEventListener("input", this._onInput);
+        } else {
+          this._onChange = send;
+          control.addEventListener("change", this._onChange);
+        }
+      },
+      destroyed() {
+        clearTimeout(this._t);
+        if (this._control && this._onInput) this._control.removeEventListener("input", this._onInput);
+        if (this._control && this._onChange) this._control.removeEventListener("change", this._onChange);
+      }
+    };
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: {
         _csrf_token: csrfToken,
