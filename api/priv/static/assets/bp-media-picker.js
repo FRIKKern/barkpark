@@ -33,6 +33,8 @@ class BpMediaPicker extends HTMLElement {
     this._files = [];
     this._value = "";
     this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
+    this._searchClientId = null;
+    this._lastSearchEventId = null;
   }
 
   connectedCallback() {
@@ -113,6 +115,35 @@ class BpMediaPicker extends HTMLElement {
 
   _token() {
     return this.getAttribute("data-token") || "";
+  }
+
+  _ensureSearchClientId() {
+    const key = "bp-search-client:media:" + this._dataset();
+    try {
+      let id = sessionStorage.getItem(key);
+      if (!id) {
+        id =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : "c" + Date.now().toString(36);
+        sessionStorage.setItem(key, id);
+      }
+      return id;
+    } catch (_e) {
+      return "anon-" + Date.now().toString(36);
+    }
+  }
+
+  _searchHeaders(json) {
+    const h = { Accept: "application/json" };
+    if (json) h["Content-Type"] = "application/json";
+    const tok = this._token();
+    if (tok) h["Authorization"] = "Bearer " + tok;
+    if (!this._searchClientId) this._searchClientId = this._ensureSearchClientId();
+    if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
+    if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
+    h["X-BP-Search-Source"] = "media-picker";
+    return h;
   }
 
   _isReferenceMode() {
@@ -292,10 +323,6 @@ class BpMediaPicker extends HTMLElement {
 
   async _loadFiles() {
     const dataset = this._dataset();
-    const headers = { Accept: "application/json" };
-    const tok = this._token();
-    if (tok) headers["Authorization"] = "Bearer " + tok;
-
     const params = new URLSearchParams({
       limit: "50",
       offset: "0",
@@ -308,11 +335,12 @@ class BpMediaPicker extends HTMLElement {
         "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString(),
         {
           credentials: "same-origin",
-          headers: headers
+          headers: this._searchHeaders()
         }
       );
       if (!r.ok) return;
       const data = await r.json();
+      if (data && data.searchEventId) this._lastSearchEventId = data.searchEventId;
       const hits = (data && data.result && data.result.hits) || [];
       this._files = hits
         .map((hit) => ({

@@ -2,14 +2,8 @@
 //
 // Typeahead reference picker. Reads `value` (doc id) and `ref-type`
 // (target schema) attributes; optional `dataset` (default "production").
-// On user search, fetches /v1/data/query/<dataset>/<refType> once and
-// filters client-side by the document's `title` (case-insensitive
-// substring). The MVP intentionally avoids a server-side q= param —
-// the existing query endpoint accepts only structured `filter[..][op]`
-// and the publisher fanout for v1 schemas (author, category, post,
-// page) is small enough that an unbounded fetch + client-side filter
-// is acceptable. v2 may add a search controller and switch the
-// fetch URL accordingly without changing this component's contract.
+// Search uses `/v1/data/search/:dataset` with optional `type=` filter and
+// feeds Barkpark core search intelligence via X-BP-Search-* headers.
 //
 // Selected state renders a Sanity-style pill (.ref-selected) with the
 // referenced doc's title and a Remove button. The hidden input value
@@ -20,9 +14,13 @@
 // caught by BarkparkFieldBridge on the wrapper div.
 //
 // Contract: docs/studio/web-components.md
-// Replaces server-side phx-click="open-ref-picker"/"clear-ref" modal flow
-// for the reference renderer; the StudioLive modal handlers remain
-// orphaned-but-harmless until v2 cleanup.
+
+function bpRefEsc(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
+}
 
 class BpReferencePicker extends HTMLElement {
   constructor() {
@@ -30,19 +28,25 @@ class BpReferencePicker extends HTMLElement {
     this._value = "";
     this._refType = "";
     this._dataset = "production";
-    this._candidates = null; // lazy-loaded list of {id, title}
     this._loading = false;
     this._debounceMs = 200;
     this._debounceTimer = null;
     this._mounted = false;
+    this._suggestions = { recent: [], popular: [], nohits: [] };
+    this._suggestRecent = [];
+    this._suggestPopular = [];
+    this._suggestNohits = [];
+    this._searchClientId = null;
+    this._lastSearchEventId = null;
   }
 
   connectedCallback() {
-    if (this._mounted) return; // double-mount guard
+    if (this._mounted) return;
     this._mounted = true;
     this._value = this.getAttribute("value") || "";
     this._refType = this.getAttribute("ref-type") || "";
     this._dataset = this.getAttribute("dataset") || "production";
+    this._searchClientId = this._ensureSearchClientId();
     this._render();
     if (this._value) this._loadSelectedTitle();
   }
@@ -52,7 +56,6 @@ class BpReferencePicker extends HTMLElement {
     this._debounceTimer = null;
   }
 
-  // ── Rendering ────────────────────────────────────────────────────────
   _render() {
     this.replaceChildren();
     if (this._value) {
@@ -114,16 +117,22 @@ class BpReferencePicker extends HTMLElement {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "form-input bp-ref-search-input";
-    input.placeholder = `Search ${this._refType}…`;
+    input.placeholder = `Search ${this._refType || "documents"}…`;
     input.autocomplete = "off";
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-controls", "bp-ref-suggest-list");
     input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
     input.addEventListener("focus", () => this._onSearchInput(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") this._hideDropdown();
+    });
     wrap.appendChild(input);
 
-    const dropdown = document.createElement("ul");
+    const dropdown = document.createElement("div");
     dropdown.className = "bp-ref-dropdown";
-    dropdown.style.cssText =
-      "list-style:none;margin:0;padding:0;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--bg-popover);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:240px;overflow-y:auto;display:none;";
+    dropdown.id = "bp-ref-suggest-list";
+    dropdown.hidden = true;
+    dropdown.setAttribute("role", "listbox");
     wrap.appendChild(dropdown);
 
     this.appendChild(wrap);
@@ -131,7 +140,6 @@ class BpReferencePicker extends HTMLElement {
     this._dropdown = dropdown;
   }
 
-  // ── Behaviour ────────────────────────────────────────────────────────
   _switchToSearch() {
     this._value = "";
     this._selectedTitle = "";
@@ -149,6 +157,7 @@ class BpReferencePicker extends HTMLElement {
   _select(doc) {
     this._value = doc.id;
     this._selectedTitle = doc.title || doc.id;
+    this._hideDropdown();
     this._render();
     this._emit(this._value);
   }
@@ -158,131 +167,248 @@ class BpReferencePicker extends HTMLElement {
     this._debounceTimer = setTimeout(() => this._search(term), this._debounceMs);
   }
 
+  _ensureSearchClientId() {
+    const key = "bp-search-client:documents:" + this._dataset;
+    try {
+      let id = sessionStorage.getItem(key);
+      if (!id) {
+        id =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : "c" + Date.now().toString(36);
+        sessionStorage.setItem(key, id);
+      }
+      return id;
+    } catch (_e) {
+      return "anon-" + Date.now().toString(36);
+    }
+  }
+
+  _searchHeaders() {
+    const h = { Accept: "application/json" };
+    if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
+    if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
+    h["X-BP-Search-Source"] = "studio-picker";
+    return h;
+  }
+
+  _captureSearchEventId(body) {
+    if (body && body.searchEventId) {
+      this._lastSearchEventId = body.searchEventId;
+    }
+  }
+
   async _search(term) {
-    // No ref-type (e.g. a paper field-reference block created with an empty
-    // refType): the typeahead can't fetch /v1/data/query/<dataset>/<type> —
-    // that route needs a concrete :type and 404s on an empty segment, so the
-    // dropdown would never populate and a reference could never be chosen.
-    // Fall back to the all-types title search endpoint (server-side q=), which
-    // requires a non-empty term. With a ref-type, keep the fast unbounded
-    // fetch + client-side filter (unchanged; byte-identical for the classic
-    // editor where refType is always set).
-    if (!this._refType) {
-      await this._searchAllTypes(term);
-      return;
-    }
-    await this._ensureCandidates();
-    const t = (term || "").trim().toLowerCase();
-    const matches = (this._candidates || [])
-      .filter((c) => {
-        if (!t) return true;
-        const haystack = (c.title || c.id).toLowerCase();
-        return haystack.includes(t);
-      })
-      .slice(0, 50);
-    this._renderDropdown(matches);
-  }
-
-  // All-types search via /v1/data/search/<dataset>?q=… — used only when no
-  // ref-type is set. The endpoint mandates a non-empty q, so an empty term
-  // closes the dropdown rather than fetching everything.
-  async _searchAllTypes(term) {
     const t = (term || "").trim();
+
     if (!t) {
-      this._renderDropdown([]);
+      await this._fetchSuggestions("");
+      this._renderSuggestDropdown();
       return;
     }
+
     try {
-      const url = `/v1/data/search/${encodeURIComponent(this._dataset)}?q=${encodeURIComponent(t)}&perspective=published&limit=50`;
-      const res = await fetch(url, { credentials: "same-origin" });
-      if (!res.ok) {
-        this._renderDropdown([]);
-        return;
-      }
-      const body = await res.json();
-      const docs =
-        (body && body.result && body.result.documents) ||
-        (body && body.documents) ||
-        [];
-      const matches = docs
-        .map((d) => ({ id: d._id || d.id || "", title: d.title || d._id || "" }))
-        .slice(0, 50);
-      this._renderDropdown(matches);
+      const matches = await this._fetchSearchResults(t);
+      this._renderResultDropdown(matches);
     } catch (_e) {
-      this._renderDropdown([]);
+      this._hideDropdown();
     }
   }
 
-  async _ensureCandidates() {
-    if (this._candidates !== null || this._loading) return;
-    this._loading = true;
+  _searchUrl(query) {
+    const params = new URLSearchParams({
+      q: query,
+      perspective: "published",
+      limit: "50"
+    });
+    if (this._refType) params.set("type", this._refType);
+    return (
+      "/v1/data/search/" +
+      encodeURIComponent(this._dataset) +
+      "?" +
+      params.toString()
+    );
+  }
+
+  async _fetchSearchResults(query) {
+    const res = await fetch(this._searchUrl(query), {
+      credentials: "same-origin",
+      headers: this._searchHeaders()
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+    this._captureSearchEventId(body);
+    const docs = body.documents || [];
+    return docs
+      .map((d) => ({ id: d._id || d.id || "", title: d.title || d._id || "" }))
+      .filter((d) => d.id);
+  }
+
+  async _fetchSuggestions(prefix) {
+    const params = new URLSearchParams({ limit: "8" });
+    if (prefix) params.set("q", prefix);
+    const url =
+      "/v1/data/search/" +
+      encodeURIComponent(this._dataset) +
+      "/suggestions?" +
+      params.toString();
+
     try {
-      const url = `/v1/data/query/${encodeURIComponent(this._dataset)}/${encodeURIComponent(this._refType)}?perspective=published&limit=200`;
-      const res = await fetch(url, { credentials: "same-origin" });
-      if (!res.ok) {
-        this._candidates = [];
-        return;
-      }
-      const body = await res.json();
-      const docs =
-        (body && body.result && body.result.documents) ||
-        (body && body.documents) ||
-        [];
-      this._candidates = docs.map((d) => ({
-        id: d._id || d.id || "",
-        title: d.title || d._id || ""
-      }));
+      const res = await fetch(url, {
+        credentials: "same-origin",
+        headers: this._searchHeaders()
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      this._suggestions = (data && data.result) || {
+        recent: [],
+        popular: [],
+        nohits: []
+      };
     } catch (_e) {
-      this._candidates = [];
-    } finally {
-      this._loading = false;
+      /* optional */
     }
   }
 
-  _renderDropdown(matches) {
+  _renderSuggestDropdown() {
+    if (!this._dropdown) return;
+
+    const recent = this._suggestions.recent || [];
+    const popular = this._suggestions.popular || [];
+    const nohits = this._suggestions.nohits || [];
+
+    this._suggestRecent = recent;
+    this._suggestPopular = popular;
+    this._suggestNohits = nohits;
+
+    if (!recent.length && !popular.length && !nohits.length) {
+      this._hideDropdown();
+      return;
+    }
+
+    let html = "";
+
+    if (recent.length) {
+      html +=
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">Recent</div>' +
+        recent.map((item, i) => this._suggestRow(item, "recent", i)).join("") +
+        "</div>";
+    }
+
+    if (popular.length) {
+      html +=
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">Popular</div>' +
+        popular.map((item, i) => this._suggestRow(item, "popular", i, item.count)).join("") +
+        "</div>";
+    }
+
+    if (nohits.length) {
+      html +=
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">No matches before</div>' +
+        nohits
+          .map((item, i) =>
+            this._suggestRow({ query: item.query, filters: {} }, "nohits", i, item.count)
+          )
+          .join("") +
+        "</div>";
+    }
+
+    this._dropdown.innerHTML = html;
+    this._dropdown.hidden = false;
+    if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
+
+    this._dropdown.querySelectorAll(".bp-ref-suggest-item").forEach((btn) => {
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const section = btn.dataset.section;
+        const idx = parseInt(btn.dataset.index, 10);
+        let payload = null;
+        if (section === "popular") payload = this._suggestPopular[idx];
+        else if (section === "recent") payload = this._suggestRecent[idx];
+        else if (section === "nohits") {
+          const row = this._suggestNohits[idx];
+          if (row) payload = { query: row.query, filters: {} };
+        }
+        if (payload && payload.query) {
+          if (this._searchInput) this._searchInput.value = payload.query;
+          this._search(payload.query);
+        }
+      });
+    });
+  }
+
+  _suggestRow(item, section, index, count) {
+    const label = bpRefEsc(item.query || "");
+    const meta =
+      typeof count === "number"
+        ? '<span class="bp-ref-suggest-meta">' + count + " searches</span>"
+        : item.resultCount != null
+          ? '<span class="bp-ref-suggest-meta">' + item.resultCount + " docs</span>"
+          : "";
+    return (
+      '<button type="button" class="bp-ref-suggest-item" role="option" data-section="' +
+      section +
+      '" data-index="' +
+      index +
+      '"><span class="bp-ref-suggest-label">' +
+      label +
+      "</span>" +
+      meta +
+      "</button>"
+    );
+  }
+
+  _renderResultDropdown(matches) {
     if (!this._dropdown) return;
     this._dropdown.replaceChildren();
+
     if (!matches.length) {
-      this._dropdown.style.display = "none";
+      const empty = document.createElement("div");
+      empty.className = "bp-ref-dropdown-empty";
+      empty.textContent = "No matches";
+      this._dropdown.appendChild(empty);
+      this._dropdown.hidden = false;
+      if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
       return;
     }
+
     for (const doc of matches) {
-      const li = document.createElement("li");
-      li.className = "bp-ref-dropdown-item";
-      li.style.cssText =
-        "padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-muted);";
-      li.textContent = doc.title || doc.id;
-      // mousedown fires before input blur — keeps click reliable.
-      li.addEventListener("mousedown", (e) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bp-ref-dropdown-item";
+      btn.setAttribute("role", "option");
+      btn.textContent = doc.title || doc.id;
+      btn.addEventListener("mousedown", (e) => {
         e.preventDefault();
         this._select(doc);
       });
-      li.addEventListener("mouseenter", () => {
-        li.style.background = "var(--bg-accent)";
-      });
-      li.addEventListener("mouseleave", () => {
-        li.style.background = "";
-      });
-      this._dropdown.appendChild(li);
+      this._dropdown.appendChild(btn);
     }
-    this._dropdown.style.display = "block";
+
+    this._dropdown.hidden = false;
+    if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
+  }
+
+  _hideDropdown() {
+    if (!this._dropdown) return;
+    this._dropdown.hidden = true;
+    this._dropdown.replaceChildren();
+    if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "false");
   }
 
   async _loadSelectedTitle() {
-    // No ref-type (a paper field-reference block created with an empty
-    // refType): the single-doc endpoint /v1/data/doc/<dataset>/<type>/<id>
-    // needs a concrete :type — with an empty refType the URL collapses to
-    // `…/doc/<dataset>//<id>` (double slash) and 404s, so the pill could
-    // never resolve its title. Fall back to the all-types title search
-    // endpoint (the same /v1/data/search route the picker uses with no
-    // ref-type), looking the value up by id. The TYPED path below stays
-    // byte-identical for the classic editor where refType is always set.
     if (!this._refType) {
-      await this._loadSelectedTitleAllTypes();
+      await this._loadSelectedTitleViaSearch();
       return;
     }
     try {
-      const url = `/v1/data/doc/${encodeURIComponent(this._dataset)}/${encodeURIComponent(this._refType)}/${encodeURIComponent(this._value)}`;
+      const url =
+        "/v1/data/doc/" +
+        encodeURIComponent(this._dataset) +
+        "/" +
+        encodeURIComponent(this._refType) +
+        "/" +
+        encodeURIComponent(this._value);
       const res = await fetch(url, { credentials: "same-origin" });
       if (!res.ok) return;
       const body = await res.json();
@@ -293,36 +419,29 @@ class BpReferencePicker extends HTMLElement {
         if (this._mounted && this._value) this._render();
       }
     } catch (_e) {
-      // Silent: pill keeps showing the id as fallback.
+      /* pill keeps id */
     }
   }
 
-  // Resolve the current value's title when no ref-type is set, via the
-  // type-less /v1/data/search/<dataset>?q=<value> endpoint (real + reachable;
-  // GET, ILIKE on title). We match the returned doc whose _id equals the
-  // stored value and adopt its title. On any miss the pill keeps showing the
-  // raw id (the existing graceful fallback).
-  async _loadSelectedTitleAllTypes() {
+  async _loadSelectedTitleViaSearch() {
     const id = (this._value || "").trim();
     if (!id) return;
     try {
-      const url = `/v1/data/search/${encodeURIComponent(this._dataset)}?q=${encodeURIComponent(id)}&perspective=published&limit=50`;
-      const res = await fetch(url, { credentials: "same-origin" });
+      const res = await fetch(this._searchUrl(id), {
+        credentials: "same-origin",
+        headers: this._searchHeaders()
+      });
       if (!res.ok) return;
       const body = await res.json();
-      const docs =
-        (body && body.result && body.result.documents) ||
-        (body && body.documents) ||
-        [];
-      const match =
-        docs.find((d) => (d._id || d.id) === id) || docs[0] || null;
+      const docs = body.documents || [];
+      const match = docs.find((d) => (d._id || d.id) === id) || docs[0] || null;
       const title = match && (match.title || match._id || match.id);
       if (title && this._value) {
         this._selectedTitle = title;
         if (this._mounted && this._value) this._render();
       }
     } catch (_e) {
-      // Silent: pill keeps showing the id as fallback.
+      /* pill keeps id */
     }
   }
 
@@ -336,7 +455,6 @@ class BpReferencePicker extends HTMLElement {
     );
   }
 
-  // Programmatic API for tests + future server-pushed updates.
   get value() {
     return this._value;
   }
