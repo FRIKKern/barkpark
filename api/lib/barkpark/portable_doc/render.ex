@@ -210,15 +210,15 @@ defmodule Barkpark.PortableDoc.Render do
     text = Map.get(b, "text", "")
     level = heading_level(Map.get(b, "level"))
 
-    base = %{"kind" => "PdText", "weight" => "bold", "children" => [text]}
-
-    # Article mode stamps a transient size hint the heading walk reads to size
-    # by level (h1 > h2 > h3). Email mode leaves the node as the original single
-    # bold span — byte-identical to the pre-article behaviour.
+    # Article mode emits a real semantic heading node (`PdHeading` → `<h1>` /
+    # `<h2>` / `<h3>`) so screen readers, the outline tree, and CSS `hN`
+    # selectors all see a genuine heading — the styled `<span>` it used to be
+    # registered as 0 real headings in the DOM. Email mode keeps the original
+    # single bold span, byte-identical to the pre-article behaviour.
     if style == :article do
-      Map.put(base, "_heading_level", level)
+      %{"kind" => "PdHeading", "level" => level, "children" => [text]}
     else
-      base
+      %{"kind" => "PdText", "weight" => "bold", "children" => [text]}
     end
   end
 
@@ -255,6 +255,19 @@ defmodule Barkpark.PortableDoc.Render do
 
   def compose_block(%{"type" => "paragraph"} = b, _style) do
     %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
+  end
+
+  # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
+  # (mirrors doc.css `.pullquote`) in article mode. Email/default mode degrades
+  # to a plain italic span (no border / sizing cues) via the same `_role` hook
+  # the other typographic roles use, so it stays a single styled `<span>`.
+  def compose_block(%{"type" => "pullquote"} = b, _style) do
+    %{
+      "kind" => "PdText",
+      "_role" => "pullquote",
+      "italic" => true,
+      "children" => compose_inline_children(Map.get(b, "content", []))
+    }
   end
 
   def compose_block(%{"type" => "list"} = b, _style) do
@@ -310,6 +323,13 @@ defmodule Barkpark.PortableDoc.Render do
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
   end
 
+  # Article mode: the doc.css `hr.section` look — a centered "§" glyph
+  # straddling a hairline rule (the glyph sits on the warm parchment, masking
+  # the rule behind it). Email/default mode: a plain `PdHr`, unchanged.
+  def compose_block(%{"type" => "divider"}, :article) do
+    %{"kind" => "_raw", "html" => section_divider_html()}
+  end
+
   def compose_block(%{"type" => "divider"}, _style), do: %{"kind" => "PdHr"}
 
   # ── diagram / figure blocks (P1 slice 2) ───────────────────────────────────
@@ -343,6 +363,16 @@ defmodule Barkpark.PortableDoc.Render do
       "kind" => "_raw",
       "html" => figure_html(child, caption, style)
     }
+  end
+
+  # Article mode emits ONE styled `<pre>` code block — monospace, parchment
+  # `#f1ede2` background, a 3px terracotta left-border, padding, horizontal
+  # scroll — via the `_raw` escape hatch (the value is escaped first). Email /
+  # default mode keeps the original per-line inline `<code>` chip stack,
+  # byte-identical to before.
+  def compose_block(%{"type" => "code"} = b, :article) do
+    value = to_string(Map.get(b, "value", ""))
+    %{"kind" => "_raw", "html" => code_block_html(value)}
   end
 
   def compose_block(%{"type" => "code"} = b, _style) do
@@ -680,6 +710,27 @@ defmodule Barkpark.PortableDoc.Render do
   defp format_datetime(v) when is_binary(v), do: String.replace(v, "T", " ")
   defp format_datetime(v), do: to_string(v)
 
+  # ── article block HTML emission (code / section divider) ───────────────────
+
+  # A single styled `<pre>` code block for article mode: monospace, parchment
+  # `#f1ede2` background, a 3px terracotta `#a23925` left-border, padding, and
+  # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
+  # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
+  defp code_block_html(value) do
+    ~s(<pre style="background:#f1ede2;border-left:3px solid #a23925;padding:0.9rem 1.1rem;) <>
+      ~s(margin:1.2rem 0;font-family:#{@font_mono};font-size:0.9rem;line-height:1.5;) <>
+      ~s(overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>)
+  end
+
+  # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
+  # rule. The glyph sits in an inline-block box with the parchment page colour
+  # as its background, masking the rule that runs behind it across the column.
+  defp section_divider_html do
+    ~s(<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid #e6e2d8">) <>
+      ~s(<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;) <>
+      ~s(background:#fbfaf6;color:#6a6a6a;font-size:1.1rem">§</span></div>)
+  end
+
   # ── diagram / figure HTML emission ─────────────────────────────────────────
 
   # Entity-encode ONLY the three structural chars Mermaid source can carry
@@ -855,6 +906,7 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp walk(%{"kind" => "PdContainer"} = n, width, pal), do: container(n, width, pal)
   defp walk(%{"kind" => "PdBox"} = n, width, pal), do: box(n, width, pal)
+  defp walk(%{"kind" => "PdHeading"} = n, width, pal), do: heading(n, width, pal)
   defp walk(%{"kind" => "PdText"} = n, width, pal), do: text(n, width, pal)
   defp walk(%{"kind" => "PdLink"} = n, width, pal), do: link(n, width, pal)
 
@@ -987,6 +1039,25 @@ defmodule Barkpark.PortableDoc.Render do
     end
   end
 
+  # Real semantic heading (article mode only — the compose clause emits this
+  # kind exclusively under `:article`). Renders `<h1>` / `<h2>` / `<h3>` by
+  # clamped level with the level-sized article rule inline. Children mix raw
+  # strings (escaped) and child nodes (recursed), same contract as PdText.
+  defp heading(n, width, pal) do
+    level = heading_level(Map.get(n, "level"))
+
+    inner =
+      Map.get(n, "children", [])
+      |> Enum.map(fn
+        k when is_binary(k) -> escape_html(k)
+        k -> walk(k, width, pal)
+      end)
+      |> Enum.join("")
+
+    style = heading_style(level, pal) |> Enum.join(";")
+    ~s(<h#{level} style="#{style}">#{inner}</h#{level}>)
+  end
+
   # ── article typographic roles ──────────────────────────────────────────────
   # Applied only when the compose clause stamped a hint AND the palette is the
   # article palette. The accumulator `out` is in REVERSE-build order (it gets
@@ -995,12 +1066,6 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp apply_text_role(out, inner, n, %{style: :article} = pal) do
     cond do
-      level = Map.get(n, "_heading_level") ->
-        # Drop the plain bold flag; the heading rule carries its own weight.
-        out = List.delete(out, "font-weight:bold")
-        out = heading_style(level, pal) ++ out
-        {out, inner}
-
       Map.get(n, "_role") == "eyebrow" ->
         {[
            "font-family:#{pal.font_heading}",
@@ -1029,6 +1094,21 @@ defmodule Barkpark.PortableDoc.Render do
            "line-height:1.5",
            "font-weight:500",
            "font-size:1.28rem"
+           | out
+         ], inner}
+
+      Map.get(n, "_role") == "pullquote" ->
+        # `display:block` so the left-border + margins read as a block quote
+        # even though the node walks out as a `<span>`. `italic` is already on
+        # the node (set by compose), so `font-style:italic` is in `out` here.
+        {[
+           "margin:1.6rem 0",
+           "padding:0.2rem 0 0.2rem 1.2rem",
+           "border-left:3px solid #{pal.accent}",
+           "color:#{pal.muted}",
+           "line-height:1.5",
+           "font-size:1.2rem",
+           "display:block"
            | out
          ], inner}
 
@@ -1116,6 +1196,55 @@ defmodule Barkpark.PortableDoc.Render do
          end)
 
     ~s(<img src="#{safe_url(Map.get(n, "src", ""))}" alt="#{escape_attr(Map.get(n, "alt", ""))}" style="max-width:100%;height:auto"#{dims}>)
+  end
+
+  # Article mode styles the header row distinctly: the first row becomes a
+  # `<thead>`/`<th>` band — uppercase, muted, with a 2px bottom rule under the
+  # header — and the warm rule colour (`pal.rule` = #e6e2d8) replaces gray on
+  # the body cells. Email/default mode keeps the flat `<td>`-only table,
+  # byte-identical to before.
+  defp table(n, width, %{style: :article} = pal) do
+    [head | body] =
+      case Map.get(n, "rows", []) do
+        [] -> [[]]
+        rows -> rows
+      end
+
+    thead =
+      if head == [] do
+        ""
+      else
+        cells =
+          head
+          |> Enum.map(fn cell ->
+            inner = render_children(cell, width, pal)
+
+            ~s(<th style="border-bottom:2px solid #{pal.rule};padding:8px 12px;text-align:left;) <>
+              ~s(text-transform:uppercase;letter-spacing:0.04em;font-size:0.78rem;color:#{pal.muted};) <>
+              ~s(font-family:#{pal.font_heading}">#{inner}</th>)
+          end)
+          |> Enum.join("")
+
+        "<thead><tr>#{cells}</tr></thead>"
+      end
+
+    tbody =
+      body
+      |> Enum.map(fn row ->
+        cells =
+          row
+          |> Enum.map(fn cell ->
+            inner = render_children(cell, width, pal)
+            ~s(<td style="border-bottom:1px solid #{pal.rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
+          end)
+          |> Enum.join("")
+
+        "<tr>#{cells}</tr>"
+      end)
+      |> Enum.join("")
+
+    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
+      thead <> "<tbody>#{tbody}</tbody></table>"
   end
 
   defp table(n, width, pal) do
