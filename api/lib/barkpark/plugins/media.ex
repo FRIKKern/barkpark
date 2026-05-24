@@ -39,6 +39,11 @@ defmodule Barkpark.Plugins.Media do
     [&Codelists.seed_all/0]
   end
 
+  @impl Barkpark.Plugin
+  def api_tests do
+    Barkpark.Plugins.Media.ApiTests.specs()
+  end
+
   @doc """
   Called by `Barkpark.Plugins.Registry.run_after_media_upload/1` after a
   blob lands in `media_files`. Creates the companion metadata document.
