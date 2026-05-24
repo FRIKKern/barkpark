@@ -529,9 +529,9 @@
           "</div>";
       }
 
-      if (nohits.length && !popular.length) {
+      if (nohits.length) {
         html +=
-          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">No results before</div>' +
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">No matches before</div>' +
           nohits
             .map((item, i) =>
               this._suggestRow({ query: item.query, filters: {} }, "nohits", i, item.count)

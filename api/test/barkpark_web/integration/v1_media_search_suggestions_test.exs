@@ -112,4 +112,32 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
 
     assert Enum.any?(suggest["result"]["nohits"], &(&1["query"] == "zzznohitsquery"))
   end
+
+  test "recent is scoped to x-bp-search-client header", %{conn: conn} do
+    upload_named(conn, "client-scope-demo.png")
+    search(conn |> put_req_header("x-bp-search-client", "client-a"), "client-scope")
+    search(conn |> put_req_header("x-bp-search-client", "client-b"), "other-query")
+
+    suggest_a =
+      conn
+      |> put_req_header("x-bp-search-client", "client-a")
+      |> authed()
+      |> get(~p"/v1/media/production/search/suggestions")
+      |> json_response(200)
+
+    recent_a = suggest_a["result"]["recent"]
+    assert Enum.any?(recent_a, &(&1["query"] == "client-scope"))
+    refute Enum.any?(recent_a, &(&1["query"] == "other-query"))
+
+    suggest_b =
+      conn
+      |> put_req_header("x-bp-search-client", "client-b")
+      |> authed()
+      |> get(~p"/v1/media/production/search/suggestions")
+      |> json_response(200)
+
+    recent_b = suggest_b["result"]["recent"]
+    assert Enum.any?(recent_b, &(&1["query"] == "other-query"))
+    refute Enum.any?(recent_b, &(&1["query"] == "client-scope"))
+  end
 end
