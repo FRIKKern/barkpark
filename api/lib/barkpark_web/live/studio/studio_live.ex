@@ -2354,6 +2354,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :paper_block_mode, :boolean, default: false
   attr :paper_edit_mode, :boolean, default: false
   attr :dataset, :string, required: true
+  attr :api_token_raw, :string, default: ""
   attr :streams, :map, required: true
 
   defp studio_paper_view(assigns) do
@@ -2414,7 +2415,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   <p id="paper-empty">No paper selected.</p>
                 </article>
               <% @paper_edit_mode && @paper_block_mode -> %>
-                <.paper_block_editor slug={@slug} blocks={@edit_blocks} paper_rev={@paper_rev} />
+                <.paper_block_editor
+                  slug={@slug}
+                  blocks={@edit_blocks}
+                  paper_rev={@paper_rev}
+                  dataset={@dataset}
+                  api_token_raw={@api_token_raw}
+                />
               <% @paper_block_mode -> %>
                 <%!-- Block-backed: each top-level block is its own keyed stream
                       item. A delta patches/appends/deletes ONE of these.
@@ -2461,6 +2468,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :slug, :string, required: true
   attr :blocks, :list, required: true
   attr :paper_rev, :integer, default: 0
+  attr :dataset, :string, default: "production"
+  attr :api_token_raw, :string, default: ""
 
   defp paper_block_editor(assigns) do
     ~H"""
@@ -2499,7 +2508,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             >×</button>
           </span>
         </div>
-        <.paper_block_fields block={block} />
+        <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
       </div>
 
       <%!-- Add-block dropdown. The `+ Add` <select> fires append-block (no
@@ -2532,6 +2541,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # the params to a patch-block op. Paragraph/callout bodies are PLAIN TEXT in
   # the MVP (inline marks dropped on save).
   attr :block, :map, required: true
+  attr :dataset, :string, default: "production"
+  attr :api_token_raw, :string, default: ""
 
   defp paper_block_fields(assigns) do
     assigns =
@@ -2674,6 +2685,41 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <input type="color" value={Map.get(@block, "value", "#000000")}
                  data-test-id="paper-field-field-color"
                  style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
+        </div>
+
+      <%!-- field-reference / field-image PICKER blocks (P2.2). The Edit control
+            is an existing picker Web Component (bp-reference-picker /
+            bp-media-picker) rather than a native control. Each WC owns its own
+            search / select / clear UX and emits a bubbling `bp-change`
+            CustomEvent({detail:{value}}) on selection — the SAME event the
+            classic field_inputs.ex renderer relies on. BarkparkFieldBlockBridge
+            (root.html.heex) listens for that `bp-change` (in addition to native
+            input/change) and pushes a {op:"patch-block",id,patch:{value}} op
+            through the same `paper-op` pipeline. The reference WC reads its
+            refType + dataset from inline block attrs; the media WC reads the
+            raw bearer token from data-token (empty disables upload, browse +
+            select still work). value is a plain string in both cases. --%>
+      <% "field-reference" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <bp-reference-picker
+            value={Map.get(@block, "value", "")}
+            ref-type={Map.get(@block, "refType", "")}
+            dataset={Map.get(@block, "dataset", @dataset)}
+            data-test-id="paper-field-field-reference"
+          ></bp-reference-picker>
+        </div>
+
+      <% "field-image" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
+          <bp-media-picker
+            value={Map.get(@block, "value", "")}
+            data-token={@api_token_raw}
+            data-test-id="paper-field-field-image"
+          ></bp-media-picker>
         </div>
 
       <% _ -> %>
