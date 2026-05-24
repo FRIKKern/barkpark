@@ -33,9 +33,19 @@ defmodule BarkparkWeb.V1.MediaController do
 
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
-    SearchAnalytics.record(dataset, params, total, ms,
-      actor_key: search_actor_key(conn)
-    )
+    record_result =
+      SearchAnalytics.record(dataset, params, total, ms,
+        actor_key: search_actor_key(conn),
+        parent_event_id: search_parent_event_id(conn),
+        session_key: search_session_key(conn),
+        source: search_source(conn)
+      )
+
+    search_event_id =
+      case record_result do
+        {:ok, id} -> id
+        _ -> nil
+      end
 
     json(conn, %{
       result: %{
@@ -45,9 +55,22 @@ defmodule BarkparkWeb.V1.MediaController do
         offset: opts[:offset],
         facets: facets
       },
+      searchEventId: search_event_id,
       syncTags: ["bp:ds:#{dataset}:media"],
       ms: ms
     })
+  end
+
+  def search_insights(conn, %{"dataset" => dataset} = params) do
+    period = params["period"] || "week"
+
+    result =
+      SearchAnalytics.insights(dataset,
+        period: period,
+        period_start: parse_period_start(params["periodStart"])
+      )
+
+    json(conn, %{result: result, syncTags: ["bp:ds:#{dataset}:media:search:insights"]})
   end
 
   def search_suggestions(conn, %{"dataset" => dataset} = params) do
@@ -315,6 +338,48 @@ defmodule BarkparkWeb.V1.MediaController do
           %{id: id} -> "token:" <> id
           _ -> "anon"
         end
+    end
+  end
+
+  defp search_session_key(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
+      [client | _] when is_binary(client) and client != "" ->
+        String.slice(client, 0, 64)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp search_parent_event_id(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-parent") do
+      [id | _] when is_binary(id) and id != "" ->
+        case Ecto.UUID.cast(String.trim(id)) do
+          {:ok, uuid} -> uuid
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp search_source(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-source") do
+      [source | _] when is_binary(source) and source != "" ->
+        String.slice(source, 0, 32)
+
+      _ ->
+        "api"
+    end
+  end
+
+  defp parse_period_start(nil), do: nil
+
+  defp parse_period_start(value) when is_binary(value) do
+    case Date.from_iso8601(value) do
+      {:ok, date} -> date
+      _ -> nil
     end
   end
 

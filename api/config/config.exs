@@ -70,6 +70,7 @@ config :barkpark, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
+       {"30 3 * * *", Barkpark.Workers.SearchAnalyticsCrystallize},
        {"0 4 * * *", Barkpark.Workers.SearchAnalyticsPrune}
      ]}
   ]
