@@ -274,6 +274,7 @@ defmodule BarkparkWeb.Router do
   scope "/v1/data", BarkparkWeb do
     pipe_through :api
 
+    get "/search/:dataset/suggestions", SearchController, :search_suggestions
     get "/search/:dataset", SearchController, :search
     get "/query/:dataset/:type", QueryController, :index
     get "/doc/:dataset/:type/:doc_id", QueryController, :show
@@ -306,6 +307,12 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_token, :idempotent]
 
     post "/mutate/:dataset", MutateController, :mutate
+  end
+
+  scope "/v1/data", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/search/:dataset/insights", SearchController, :search_insights
   end
 
   # ── Schema management — requires admin token ────────────────────────────

@@ -12,7 +12,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Content.Errors
   alias Barkpark.Media
   alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchIntelligence}
-  alias BarkparkWeb.V1.MediaSearchParams
+  alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -35,10 +35,10 @@ defmodule BarkparkWeb.V1.MediaController do
 
     record_result =
       SearchIntelligence.record(dataset, params, total, ms,
-        actor_key: search_actor_key(conn),
-        parent_event_id: search_parent_event_id(conn),
-        session_key: search_session_key(conn),
-        source: search_source(conn)
+        actor_key: SearchIntel.actor_key(conn),
+        parent_event_id: SearchIntel.parent_event_id(conn),
+        session_key: SearchIntel.session_key(conn),
+        source: SearchIntel.source(conn, "explorer")
       )
 
     search_event_id =
@@ -67,7 +67,7 @@ defmodule BarkparkWeb.V1.MediaController do
     opts = [period: period]
 
     opts =
-      case parse_period_start(params["periodStart"]) do
+      case SearchIntel.parse_period_start(params["periodStart"]) do
         %Date{} = date -> Keyword.put(opts, :period_start, date)
         _ -> opts
       end
@@ -84,7 +84,7 @@ defmodule BarkparkWeb.V1.MediaController do
     result =
       SearchIntelligence.suggestions(
         dataset,
-        search_actor_key(conn),
+        SearchIntel.actor_key(conn),
         prefix,
         limit: limit
       )
@@ -331,61 +331,6 @@ defmodule BarkparkWeb.V1.MediaController do
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(value), do: value
-
-  defp search_actor_key(conn) do
-    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
-      [client | _] when is_binary(client) and client != "" ->
-        "client:" <> String.slice(client, 0, 64)
-
-      _ ->
-        case conn.assigns[:api_token] do
-          %{id: id} -> "token:" <> id
-          _ -> "anon"
-        end
-    end
-  end
-
-  defp search_session_key(conn) do
-    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
-      [client | _] when is_binary(client) and client != "" ->
-        String.slice(client, 0, 64)
-
-      _ ->
-        nil
-    end
-  end
-
-  defp search_parent_event_id(conn) do
-    case Plug.Conn.get_req_header(conn, "x-bp-search-parent") do
-      [id | _] when is_binary(id) and id != "" ->
-        case Ecto.UUID.cast(String.trim(id)) do
-          {:ok, uuid} -> uuid
-          _ -> nil
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  defp search_source(conn) do
-    case Plug.Conn.get_req_header(conn, "x-bp-search-source") do
-      [source | _] when is_binary(source) and source != "" ->
-        String.slice(source, 0, 32)
-
-      _ ->
-        "api"
-    end
-  end
-
-  defp parse_period_start(nil), do: nil
-
-  defp parse_period_start(value) when is_binary(value) do
-    case Date.from_iso8601(value) do
-      {:ok, date} -> date
-      _ -> nil
-    end
-  end
 
   defp metadata_params(%{"metadata" => metadata}) when is_map(metadata), do: metadata
 

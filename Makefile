@@ -29,13 +29,13 @@ logs: ## Tail Phoenix service logs
 	@journalctl -u barkpark -f --no-pager
 
 seed: ## Re-seed the database
-	cd api && MIX_ENV=prod mix run priv/repo/seeds.exs
+	cd api && bash start.sh mix run priv/repo/seeds.exs
 
 migrate: ## Run database migrations
-	cd api && MIX_ENV=prod mix ecto.migrate
+	cd api && bash start.sh mix ecto.migrate
 
 reset-db: ## Drop, recreate, migrate, and seed the database
-	cd api && MIX_ENV=prod mix ecto.reset
+	cd api && bash start.sh mix ecto.reset
 
 # ── Local development ────────────────────────────────────────────────────────
 
