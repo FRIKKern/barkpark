@@ -3168,6 +3168,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
       dataset={@dataset}
     />
 
+    <%!-- Beta focus mode mirror (Task barkpark-270j). This 0×0 element carries
+          the live `@editor_mode` and the EditorFocus JS hook mirrors it onto
+          `<html data-editor-focus="beta">` whenever the value is "beta". CSS
+          gated on that attribute hides the doc-list pane, slims the topbar, and
+          centers the paper column — a clean standalone-document surface. The
+          element ALWAYS renders so the hook persists across Classic⇄Beta flips;
+          flipping changes the data-editor-mode value, which fires the hook's
+          updated() with no reload. The topbar lives in studio.html.heex (outside
+          this LiveView's scope), so this attr on <html> is how the slim-topbar
+          CSS reaches it. --%>
+    <div id="editor-focus-mirror" phx-hook="EditorFocus" data-editor-mode={@editor_mode}
+         style="display:none;"></div>
+
     <.pane_layout id="studio-panes">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
@@ -3177,6 +3190,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
           title={pane.title}
           collapsed={collapsed}
+          marker_class={if pane[:type_name], do: "bp-doc-list", else: nil}
           phx_click={if collapsed, do: "expand-pane", else: nil}
           phx_value_idx={if collapsed, do: "#{idx}", else: nil}
         >
