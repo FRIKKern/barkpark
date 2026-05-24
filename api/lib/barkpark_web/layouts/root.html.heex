@@ -1496,6 +1496,30 @@
       mounted() {
         const blockId = this.el.dataset.blockId;
         const fieldType = this.el.dataset.fieldType;
+
+        const push = (value) => {
+          this.pushEvent("paper-op", {
+            op: "patch-block",
+            id: blockId,
+            patch: { value: value }
+          });
+        };
+
+        // PICKER field blocks (field-reference / field-image, P2.2) are driven
+        // by a bp-* Web Component (bp-reference-picker / bp-media-picker) that
+        // owns its own DOM and emits a bubbling `bp-change` CustomEvent with
+        // {detail:{value}} (a string: a referenced doc id, or an image URL) on
+        // selection/clear. No native control to read — the value rides on the
+        // event. Forward it straight through as a patch-block op.
+        if (fieldType === "field-reference" || fieldType === "field-image") {
+          this._onChange = (e) => {
+            push(e.detail && e.detail.value);
+          };
+          this.el.addEventListener("bp-change", this._onChange);
+          return;
+        }
+
+        // LEAF field blocks (P2.1) wrap a native control.
         const control = this.el.querySelector("input, select, textarea");
         if (!control) return;
         this._control = control;
@@ -1507,11 +1531,7 @@
           } else {
             value = control.value;
           }
-          this.pushEvent("paper-op", {
-            op: "patch-block",
-            id: blockId,
-            patch: { value: value }
-          });
+          push(value);
         };
 
         // datetime / color / select / boolean commit on `change`; free-text
@@ -1531,6 +1551,13 @@
       },
       destroyed() {
         clearTimeout(this._t);
+        const fieldType = this.el.dataset.fieldType;
+        // Picker blocks bind `bp-change` on the wrapper (this.el); leaf blocks
+        // bind input/change on the inner native control.
+        if (fieldType === "field-reference" || fieldType === "field-image") {
+          if (this._onChange) this.el.removeEventListener("bp-change", this._onChange);
+          return;
+        }
         if (this._control && this._onInput) this._control.removeEventListener("input", this._onInput);
         if (this._control && this._onChange) this._control.removeEventListener("change", this._onChange);
       }

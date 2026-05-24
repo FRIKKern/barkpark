@@ -250,6 +250,43 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
+  # ── field-reference / field-image PICKER blocks (P2.2) ─────────────────────
+  # Two field blocks whose Edit-mode control is an existing picker Web Component
+  # (bp-reference-picker / bp-media-picker) rather than a native control. The
+  # `value` is a plain string in both cases (a referenced doc id for reference;
+  # an image URL for image), matching the v1 classic-field persistence model.
+  #
+  # field-reference View: a labelled row whose value is the referenced doc id
+  # rendered as PdText (escaped at walk time). The doc *title* is resolved
+  # client-side by the WC in Edit mode; the server has only the id here, so View
+  # shows the id — a no-fetch, pure rendering of the stored datum. Empty value
+  # renders an em-dash placeholder.
+  def compose_block(%{"type" => "field-reference"} = b) do
+    value = field_value_text(b)
+    field_row(b, if(value == "", do: "—", else: value))
+  end
+
+  # field-image View: a labelled row with an <img> preview when a URL is set,
+  # else a "No image" placeholder. The src is funnelled through PdImage so it
+  # inherits the renderer's `safe_url` scheme allowlist; the label stays bold
+  # PdText. Empty value → a plain placeholder PdText line.
+  def compose_block(%{"type" => "field-image"} = b) do
+    src = field_value_text(b)
+
+    value_node =
+      if src == "" do
+        %{"kind" => "PdText", "children" => ["No image"]}
+      else
+        %{"kind" => "PdImage", "src" => src, "alt" => to_string(Map.get(b, "label", ""))}
+      end
+
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b), value_node]
+    }
+  end
+
   def compose_block(%{"type" => type}) do
     raise ArgumentError, "compose_block: unhandled block type #{type}"
   end

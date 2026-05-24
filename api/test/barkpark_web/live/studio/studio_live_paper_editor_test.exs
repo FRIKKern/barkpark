@@ -290,7 +290,20 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
         ]
       },
       %{"id" => "f-dt", "type" => "field-datetime", "label" => "When", "value" => "2026-05-24T10:00"},
-      %{"id" => "f-color", "type" => "field-color", "label" => "Accent", "value" => "#4f46e5"}
+      %{"id" => "f-color", "type" => "field-color", "label" => "Accent", "value" => "#4f46e5"},
+      %{
+        "id" => "f-ref",
+        "type" => "field-reference",
+        "label" => "Author",
+        "refType" => "author",
+        "value" => "a1"
+      },
+      %{
+        "id" => "f-img",
+        "type" => "field-image",
+        "label" => "Cover",
+        "value" => ""
+      }
     ]
 
     {:ok, paper} = Content.upsert_paper(%{slug: @field_slug, dataset: @dataset, blocks: blocks})
@@ -404,5 +417,77 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     # Same process throughout — no remount.
     assert view.pid == pid_before
     assert Process.alive?(view.pid)
+  end
+
+  # ── field-reference / field-image PICKER blocks (P2.2) ─────────────────────
+
+  test "Edit mode renders the bp-reference-picker + bp-media-picker picker WCs",
+       %{conn: conn} do
+    seed_field_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    edit_html = open_editor(view)
+
+    # field-reference mounts a bp-reference-picker inside the standard bridge
+    # wrapper, carrying its block id, field type, refType + dataset inline.
+    assert edit_html =~ ~s(id="paper-fld-f-ref")
+    assert edit_html =~ ~s(data-block-id="f-ref")
+    assert edit_html =~ ~s(data-field-type="field-reference")
+    assert edit_html =~ ~s(<bp-reference-picker)
+    assert edit_html =~ ~s(ref-type="author")
+    assert edit_html =~ ~s(data-test-id="paper-field-field-reference")
+
+    # field-image mounts a bp-media-picker inside the same bridge wrapper.
+    assert edit_html =~ ~s(id="paper-fld-f-img")
+    assert edit_html =~ ~s(data-block-id="f-img")
+    assert edit_html =~ ~s(data-field-type="field-image")
+    assert edit_html =~ ~s(<bp-media-picker)
+    assert edit_html =~ ~s(data-test-id="paper-field-field-image")
+
+    # Both ride the SAME bridge hook the leaf fields use.
+    assert edit_html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+  end
+
+  test "a paper-op patch-block on a field-reference persists the new ref doc id",
+       %{conn: conn} do
+    seed_field_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    open_editor(view)
+
+    # The bp-reference-picker emits a bubbling `bp-change` CustomEvent with
+    # {detail:{value: <docId>}}; BarkparkFieldBlockBridge forwards detail.value
+    # into a patch-block op pushed as `paper-op`. Simulate that wire — the op
+    # arrives JSON-decoded with string keys, exactly as the handler accepts it.
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "f-ref",
+      "patch" => %{"value" => "a2"}
+    })
+
+    block = Content.paper_blocks(@field_slug, @dataset) |> Enum.find(&(&1["id"] == "f-ref"))
+    assert block["type"] == "field-reference"
+    assert block["value"] == "a2"
+    # refType + label untouched (shallow merge).
+    assert block["refType"] == "author"
+    assert block["label"] == "Author"
+  end
+
+  test "a paper-op patch-block on a field-image persists the new image URL",
+       %{conn: conn} do
+    seed_field_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    open_editor(view)
+
+    # The bp-media-picker emits the same `bp-change` event carrying the image
+    # URL string; the bridge forwards it as a patch-block op.
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "f-img",
+      "patch" => %{"value" => "/media/cover.png"}
+    })
+
+    block = Content.paper_blocks(@field_slug, @dataset) |> Enum.find(&(&1["id"] == "f-img"))
+    assert block["type"] == "field-image"
+    assert block["value"] == "/media/cover.png"
+    assert block["label"] == "Cover"
   end
 end
