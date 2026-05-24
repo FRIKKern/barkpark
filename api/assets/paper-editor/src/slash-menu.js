@@ -14,31 +14,32 @@
 export const SLASH_ITEMS = [
   // group: the optgroup label shown as a section header in the popup.
   // type:  the block type passed to default_block/2 on the server.
-  // label: the human label shown in the row.
-  // hint:  a tiny glyph for premium feel (purely decorative).
-  { group: "Text", type: "paragraph", label: "Paragraph", hint: "¶" },
-  { group: "Text", type: "heading", label: "Heading", hint: "H" },
-  { group: "Text", type: "list", label: "List", hint: "•" },
-  { group: "Text", type: "callout", label: "Callout", hint: "!" },
-  { group: "Text", type: "code", label: "Code", hint: "</>" },
-  { group: "Text", type: "divider", label: "Divider", hint: "—" },
-  { group: "Text", type: "section", label: "Section", hint: "§" },
+  // label: the human label shown (bold) in the row.
+  // hint:  a 16px icon glyph at the row's left (recolors to accent when active).
+  // desc:  a short right-aligned muted description (Portable-Doc slash style).
+  { group: "Text", type: "paragraph", label: "Paragraph", hint: "¶", desc: "plain body text" },
+  { group: "Text", type: "heading", label: "Heading", hint: "H", desc: "h1 — section title" },
+  { group: "Text", type: "list", label: "List", hint: "•", desc: "bulleted or ordered" },
+  { group: "Text", type: "callout", label: "Callout", hint: "!", desc: "warn or info card" },
+  { group: "Text", type: "code", label: "Code", hint: "</>", desc: "monospace block" },
+  { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
+  { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
 
-  { group: "Basic fields", type: "field-string", label: "String", hint: "T" },
-  { group: "Basic fields", type: "field-slug", label: "Slug", hint: "/" },
-  { group: "Basic fields", type: "field-text", label: "Long text", hint: "¶" },
-  { group: "Basic fields", type: "field-boolean", label: "Boolean", hint: "✓" },
-  { group: "Basic fields", type: "field-select", label: "Select", hint: "▾" },
-  { group: "Basic fields", type: "field-datetime", label: "Date & time", hint: "◷" },
-  { group: "Basic fields", type: "field-color", label: "Color", hint: "●" },
+  { group: "Basic fields", type: "field-string", label: "String", hint: "T", desc: "single-line value" },
+  { group: "Basic fields", type: "field-slug", label: "Slug", hint: "/", desc: "url-safe key" },
+  { group: "Basic fields", type: "field-text", label: "Long text", hint: "¶", desc: "multi-line value" },
+  { group: "Basic fields", type: "field-boolean", label: "Boolean", hint: "✓", desc: "true / false toggle" },
+  { group: "Basic fields", type: "field-select", label: "Select", hint: "▾", desc: "pick one option" },
+  { group: "Basic fields", type: "field-datetime", label: "Date & time", hint: "◷", desc: "timestamp value" },
+  { group: "Basic fields", type: "field-color", label: "Color", hint: "●", desc: "hex swatch value" },
 
-  { group: "Media & reference", type: "field-image", label: "Image", hint: "▣" },
-  { group: "Media & reference", type: "field-reference", label: "Reference", hint: "↗" },
+  { group: "Media & reference", type: "field-image", label: "Image", hint: "▣", desc: "upload or url" },
+  { group: "Media & reference", type: "field-reference", label: "Reference", hint: "↗", desc: "link another document" },
 
-  { group: "Structured", type: "composite", label: "Composite", hint: "{}" },
-  { group: "Structured", type: "arrayOf", label: "Array of", hint: "[]" },
-  { group: "Structured", type: "codelist", label: "Code list", hint: "#" },
-  { group: "Structured", type: "localizedText", label: "Localized text", hint: "🌐" },
+  { group: "Structured", type: "composite", label: "Composite", hint: "{}", desc: "object of subfields" },
+  { group: "Structured", type: "arrayOf", label: "Array of", hint: "[]", desc: "repeating list" },
+  { group: "Structured", type: "codelist", label: "Code list", hint: "#", desc: "registry-backed enum" },
+  { group: "Structured", type: "localizedText", label: "Localized text", hint: "🌐", desc: "multi-language string" },
 ];
 
 export class SlashMenu {
@@ -123,6 +124,18 @@ export class SlashMenu {
     this._el.innerHTML = "";
     this._rowEls = [];
 
+    // Eyebrow — uppercase, letter-spaced "Insert block" header (Portable-Doc
+    // `.paper-slash-popover__head`). Sits above the scrollable row list.
+    const eyebrow = document.createElement("div");
+    eyebrow.className = "bp-slash-eyebrow";
+    eyebrow.textContent = "Insert block";
+    this._el.appendChild(eyebrow);
+
+    // Scrollable list region so the eyebrow + footer stay pinned.
+    const list = document.createElement("div");
+    list.className = "bp-slash-list";
+    this._el.appendChild(list);
+
     let lastGroup = null;
     this._items.forEach((item, idx) => {
       if (item.group !== lastGroup) {
@@ -130,7 +143,7 @@ export class SlashMenu {
         const header = document.createElement("div");
         header.className = "bp-slash-group";
         header.textContent = item.group;
-        this._el.appendChild(header);
+        list.appendChild(header);
       }
 
       const row = document.createElement("button");
@@ -139,6 +152,7 @@ export class SlashMenu {
       row.setAttribute("role", "option");
       row.dataset.type = item.type;
 
+      // 16px icon glyph — recolors to --paper-accent on the active/selected row.
       const hint = document.createElement("span");
       hint.className = "bp-slash-hint";
       hint.textContent = item.hint || "";
@@ -147,8 +161,14 @@ export class SlashMenu {
       label.className = "bp-slash-label";
       label.textContent = item.label;
 
+      // Right-aligned muted description.
+      const desc = document.createElement("span");
+      desc.className = "bp-slash-desc";
+      desc.textContent = item.desc || "";
+
       row.appendChild(hint);
       row.appendChild(label);
+      row.appendChild(desc);
 
       // mousedown (not click) so we fire before the editor's blur closes us.
       row.addEventListener("mousedown", (e) => {
@@ -161,9 +181,18 @@ export class SlashMenu {
         this._syncActive();
       });
 
-      this._el.appendChild(row);
+      list.appendChild(row);
       this._rowEls.push(row);
     });
+
+    // Footer hint bar — <kbd> chips for the keyboard contract.
+    const foot = document.createElement("div");
+    foot.className = "bp-slash-foot";
+    foot.innerHTML =
+      "<kbd>↵</kbd> insert <span class=\"bp-slash-foot-sep\">·</span> " +
+      "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
+      "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
+    this._el.appendChild(foot);
   }
 
   _syncActive() {
