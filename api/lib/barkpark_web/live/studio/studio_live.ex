@@ -111,7 +111,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
        paper_rev: 0,
        paper_html: "",
        paper_block_mode: false,
-       paper_topic: nil
+       paper_topic: nil,
+       # ── In-Studio paper block editor (convergence/studio-paper-editor) ───
+       # `paper_edit_mode` flips the paper pane between the read-only live
+       # stream (View — the default, unchanged) and the block edit form (Edit).
+       # In Edit mode each per-block control fires a `paper-*` event that maps
+       # to ONE DocPatchOp and calls `Content.apply_paper_block_op/3`; the
+       # resulting `{:paper_block,…}` delta flows through the SAME stream
+       # handler that a remote viewer sees, so the View stays in sync and the
+       # pane never remounts. `paper_edit_block` builds the edit form straight
+       # from `paper_doc.content["blocks"]` (the source of truth, refetched
+       # after every op) — it never bypasses the op pipeline.
+       paper_edit_mode: false
      )
      |> stream(:paper_blocks, [])
      |> allow_upload(:image,
@@ -201,7 +212,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, refetch_paper(socket)}
 
       true ->
-        {:noreply, apply_paper_delta(socket, frame)}
+        socket = apply_paper_delta(socket, frame)
+        # In Edit mode the per-block form reads from `paper_doc.content`, so it
+        # must track the new block list too — refresh just the in-memory doc
+        # (the stream already advanced via apply_paper_delta). This keeps the
+        # editor form correct whether the delta came from THIS pane's own op or
+        # from another source (a remote viewer / the ingest endpoint), proving
+        # edits-are-ops both ways.
+        socket =
+          if socket.assigns[:paper_edit_mode], do: sync_paper_edit_doc(socket), else: socket
+
+        {:noreply, socket}
     end
   end
 
@@ -380,8 +401,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # contributed iodata for the open doc, so a stray event just flips a
   # hidden assign.
   def handle_event("toggle-content-preview", _, socket) do
-    {:noreply,
-     assign(socket, content_preview_visible: !socket.assigns.content_preview_visible)}
+    {:noreply, assign(socket, content_preview_visible: !socket.assigns.content_preview_visible)}
   end
 
   # Toggle the draft-vs-published diff view (Task barkpark-uix). The
@@ -806,8 +826,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   def handle_event("close-secondary", _, socket) do
-    {:noreply,
-     assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)}
+    {:noreply, assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)}
   end
 
   # ── E3. Bulk publish (list pane multi-select) ──────────────────────────────
@@ -925,6 +944,325 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, socket}
     end
   end
+
+  # ── In-Studio paper block editor events (convergence/studio-paper-editor) ───
+  #
+  # Every editing event below maps a form/button action to exactly ONE
+  # DocPatchOp and routes it through `Content.apply_paper_block_op/3`. The op
+  # pipeline renders the fragment, persists blocks + body_html, bumps the
+  # streaming rev, and broadcasts a `{:paper_block,…}` delta — which the
+  # existing stream handler applies with no remount. We NEVER write the DB
+  # directly here and NEVER rebuild_panes (that would remount the view).
+  #
+  # patch.ex / render.ex are untouched; only the op maps we build vary.
+
+  # View ⇄ Edit toggle. View is the read-only live stream (unchanged); Edit
+  # renders the per-block controls. Pure assign flip — no remount.
+  def handle_event("paper-toggle-edit", _params, socket) do
+    if socket.assigns[:editor_view] == :paper do
+      {:noreply, assign(socket, paper_edit_mode: !socket.assigns[:paper_edit_mode])}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Edit a block's textual field(s) → patch-block with only the changed
+  # field(s). Inline content (paragraph/callout) is plain text in the MVP:
+  # the textarea value is wrapped as a single text inline node, which DROPS
+  # any pre-existing inline marks (bold/italic/link) on that block — an
+  # accepted MVP tradeoff (marks/slash-menu/drag-drop are deferred).
+  def handle_event("paper-edit-block", %{"block_id" => id} = params, socket) do
+    block = paper_block_by_id(socket, id)
+    patch = build_block_patch(block, params)
+    {:noreply, paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})}
+  end
+
+  # Add a block. Default `insert-after` the focused block; `append-block` when
+  # no anchor (empty doc or top-level add). A fresh immutable id is generated.
+  def handle_event("paper-add-block", %{"block-type" => type} = params, socket) do
+    new = default_block(type, new_block_id())
+
+    op =
+      case params["after-id"] do
+        after_id when is_binary(after_id) and after_id != "" ->
+          %{"op" => "insert-after", "afterId" => after_id, "block" => new}
+
+        _ ->
+          %{"op" => "append-block", "block" => new}
+      end
+
+    {:noreply, paper_op(socket, op)}
+  end
+
+  # Delete a block → remove-block by id.
+  def handle_event("paper-delete-block", %{"id" => id}, socket) do
+    {:noreply, paper_op(socket, %{"op" => "remove-block", "id" => id})}
+  end
+
+  # Reorder a top-level block one slot up/down. Implemented as two ops
+  # (remove-block then insert-after the new neighbour) — the simplest correct
+  # path that stays entirely on the op pipeline. Both ops broadcast their own
+  # delta; the second arrives with the next rev so the stream applies in order.
+  def handle_event("paper-move-block", %{"id" => id, "dir" => dir}, socket) do
+    blocks = paper_top_level_blocks(socket)
+    idx = Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
+
+    {:noreply, paper_reorder(socket, blocks, idx, dir)}
+  end
+
+  # ── paper editor helpers ────────────────────────────────────────────────────
+
+  # Apply one op via the canonical pipeline, then refresh the in-memory
+  # `paper_doc` so the edit form reflects the new block list. The op's own
+  # `{:paper_block}` broadcast already advanced the read-only stream (and any
+  # remote viewer); this just keeps THIS pane's edit controls in sync.
+  defp paper_op(socket, op) do
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+    dataset = socket.assigns.dataset
+
+    cond do
+      is_nil(slug) ->
+        socket
+
+      true ->
+        case Content.apply_paper_block_op(slug, op, dataset) do
+          {:ok, _result} ->
+            sync_paper_edit_doc(socket)
+
+          {:error, _reason} ->
+            put_flash(socket, :error, "Edit failed")
+        end
+    end
+  end
+
+  # Reorder by removing then re-inserting after the neighbour in the target
+  # direction. No-ops at the boundaries. Two sequential ops keep us on the
+  # pipeline rather than mutating blocks directly.
+  defp paper_reorder(socket, _blocks, nil, _dir), do: socket
+
+  # Up: swap `moved` with its predecessor. Remove the predecessor, then
+  # re-insert it directly after `moved`. After the remove, `moved` shifts up
+  # one slot; the insert puts the old predecessor right below it — a clean
+  # one-slot-up move that also works when the destination is the head slot.
+  # `insert-after` is the only insertion op, so a swap is the simplest correct
+  # path (no "insert-before" exists).
+  defp paper_reorder(socket, blocks, idx, "up") when idx > 0 do
+    moved = Enum.at(blocks, idx)
+    pred = Enum.at(blocks, idx - 1)
+    remove = %{"op" => "remove-block", "id" => Map.get(pred, "id")}
+    insert = %{"op" => "insert-after", "afterId" => Map.get(moved, "id"), "block" => pred}
+    socket |> paper_op(remove) |> paper_op(insert)
+  end
+
+  # Down: remove `moved`, re-insert it after the block that was below it. After
+  # the remove the successor shifts up to `idx`; inserting `moved` after it
+  # lands `moved` one slot lower.
+  defp paper_reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
+    moved = Enum.at(blocks, idx)
+    anchor = Enum.at(blocks, idx + 1)
+    anchor_id = Map.get(anchor, "id")
+    remove = %{"op" => "remove-block", "id" => Map.get(moved, "id")}
+    insert = %{"op" => "insert-after", "afterId" => anchor_id, "block" => moved}
+    socket |> paper_op(remove) |> paper_op(insert)
+  end
+
+  defp paper_reorder(socket, _blocks, _idx, _dir), do: socket
+
+  # Re-read the paper from the DB into `paper_doc` (block list = source of
+  # truth). Used after a local op and on any delta while in edit mode.
+  defp sync_paper_edit_doc(socket) do
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+
+    case slug && Content.get_paper(slug, socket.assigns.dataset) do
+      %{} = fresh -> assign(socket, paper_doc: fresh)
+      _ -> socket
+    end
+  end
+
+  # Top-level blocks of the currently-open paper (source of truth).
+  defp paper_top_level_blocks(socket) do
+    case socket.assigns[:paper_doc] do
+      %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
+      _ -> []
+    end
+  end
+
+  # Find a block by id anywhere in the tree (recurses sections), so a control
+  # nested inside a section still resolves its block.
+  defp paper_block_by_id(socket, id) do
+    find_paper_block(paper_top_level_blocks(socket), id)
+  end
+
+  defp find_paper_block(blocks, id) when is_list(blocks) do
+    Enum.find_value(blocks, fn b ->
+      cond do
+        Map.get(b, "id") == id -> b
+        Map.get(b, "type") == "section" -> find_paper_block(Map.get(b, "blocks", []), id)
+        true -> nil
+      end
+    end)
+  end
+
+  defp find_paper_block(_blocks, _id), do: nil
+
+  # Build the patch map for a block from the submitted form params. Only the
+  # editable field(s) for that block type are included; `id`/`type` are locked
+  # by patch.ex regardless. Mirrors the EXACT block shapes in
+  # Barkpark.PortableDoc.Render.compose_block/1.
+  defp build_block_patch(%{"type" => "heading"}, params) do
+    %{}
+    |> put_if_present("text", params["text"])
+    |> put_if_present("level", parse_level(params["level"]))
+  end
+
+  defp build_block_patch(%{"type" => "paragraph"}, params) do
+    %{"content" => text_to_inline(params["text"] || "")}
+  end
+
+  defp build_block_patch(%{"type" => "callout"}, params) do
+    %{}
+    |> put_if_present("tone", params["tone"])
+    |> Map.put("content", text_to_inline(params["text"] || ""))
+    |> put_callout_title(params["title"])
+  end
+
+  defp build_block_patch(%{"type" => "code"}, params) do
+    %{}
+    |> put_if_present("lang", params["lang"])
+    |> Map.put("value", params["value"] || "")
+  end
+
+  defp build_block_patch(%{"type" => "list"}, params) do
+    # Each `item-N` param is one list item's plain text. Items keep their
+    # 0-based order. An ordered/unordered toggle rides in `ordered`.
+    items =
+      params
+      |> Enum.filter(fn {k, _v} -> String.starts_with?(k, "item-") end)
+      |> Enum.sort_by(fn {k, _v} -> k |> String.replace_prefix("item-", "") |> to_int(0) end)
+      |> Enum.map(fn {_k, v} -> text_to_inline(v || "") end)
+
+    %{}
+    |> Map.put("items", items)
+    |> put_if_present("ordered", parse_bool(params["ordered"]))
+  end
+
+  defp build_block_patch(%{"type" => "section"}, params) do
+    put_if_present(%{}, "title", params["title"])
+  end
+
+  # Unknown / non-editable block type (image, table, divider) → no-op patch.
+  defp build_block_patch(_block, _params), do: %{}
+
+  # A callout title is optional; an empty string drops it back to untitled.
+  defp put_callout_title(patch, title) when is_binary(title) do
+    case String.trim(title) do
+      "" -> Map.put(patch, "title", nil)
+      t -> Map.put(patch, "title", t)
+    end
+  end
+
+  defp put_callout_title(patch, _), do: patch
+
+  defp put_if_present(map, _key, nil), do: map
+  defp put_if_present(map, _key, ""), do: map
+  defp put_if_present(map, key, value), do: Map.put(map, key, value)
+
+  defp parse_level(nil), do: nil
+
+  defp parse_level(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, _} when n in 1..6 -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_level(_), do: nil
+
+  defp parse_bool("true"), do: true
+  defp parse_bool("on"), do: true
+  defp parse_bool(true), do: true
+  defp parse_bool(_), do: false
+
+  defp to_int(s, default) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, _} -> n
+      _ -> default
+    end
+  end
+
+  defp to_int(_, default), do: default
+
+  # MVP inline handling: wrap plain text as a single text inline node. This
+  # DROPS pre-existing marks (bold/italic/link) on the block when re-saved —
+  # accepted for the MVP block editor (rich inline marks are deferred).
+  defp text_to_inline(text) when is_binary(text) do
+    [%{"type" => "text", "value" => text}]
+  end
+
+  # Render an InlineNode array back to plain text for a textarea/input: keep
+  # only text-node values (and nested children of strong/em/link), concatenated.
+  # Lossy by design — the inverse of text_to_inline/1 for the MVP.
+  defp inline_to_text(nodes) when is_list(nodes) do
+    nodes
+    |> Enum.map(&inline_node_text/1)
+    |> Enum.join("")
+  end
+
+  defp inline_to_text(_), do: ""
+
+  defp inline_node_text(%{"type" => "text", "value" => v}) when is_binary(v), do: v
+  defp inline_node_text(%{"value" => v}) when is_binary(v), do: v
+
+  defp inline_node_text(%{"children" => children}) when is_list(children),
+    do: inline_to_text(children)
+
+  defp inline_node_text(s) when is_binary(s), do: s
+  defp inline_node_text(_), do: ""
+
+  # Generate a short unique, immutable block id. Block ids are never reused or
+  # mutated once assigned (patch.ex locks `id`).
+  defp new_block_id do
+    "b-" <> (:crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false))
+  end
+
+  # A fresh block of `type` with sensible empty defaults, in the EXACT shape
+  # Render.compose_block/1 expects. `image`/`table`/`action` are not offered in
+  # the Add menu (deferred), so they are not built here.
+  defp default_block("heading", id),
+    do: %{"id" => id, "type" => "heading", "text" => "New heading", "level" => 2}
+
+  defp default_block("paragraph", id),
+    do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => ""}]}
+
+  defp default_block("list", id),
+    do: %{
+      "id" => id,
+      "type" => "list",
+      "ordered" => false,
+      "items" => [[%{"type" => "text", "value" => ""}]]
+    }
+
+  defp default_block("callout", id),
+    do: %{
+      "id" => id,
+      "type" => "callout",
+      "tone" => "info",
+      "content" => [%{"type" => "text", "value" => ""}]
+    }
+
+  defp default_block("code", id),
+    do: %{"id" => id, "type" => "code", "lang" => "", "value" => ""}
+
+  defp default_block("divider", id),
+    do: %{"id" => id, "type" => "divider"}
+
+  defp default_block("section", id),
+    do: %{"id" => id, "type" => "section", "title" => "New section", "blocks" => []}
+
+  defp default_block(_unknown, id),
+    do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => ""}]}
 
   # Single autosave path consumed by handle_event "autosave",
   # handle_event "save", and handle_info :autosave_form. Delegates to
@@ -1713,6 +2051,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path,
         desk: socket.assigns[:nav_desk]
       )
+
     new_schema = editor && editor[:schema]
     old_schema = socket.assigns[:editor_schema]
     nav_group = resolve_nav_group(socket.assigns[:nav_group], old_schema, new_schema)
@@ -1781,7 +2120,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
         paper_doc: paper,
         paper_rev: rev,
         paper_html: html,
-        paper_block_mode: true
+        paper_block_mode: true,
+        # Opening (or jumping to) a paper always lands in read-only View mode.
+        paper_edit_mode: false
       )
       |> stream(:paper_blocks, paper_stream_items(blocks), reset: true)
     else
@@ -1791,7 +2132,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
         paper_doc: paper,
         paper_rev: rev,
         paper_html: html,
-        paper_block_mode: false
+        paper_block_mode: false,
+        paper_edit_mode: false
       )
       |> stream(:paper_blocks, [], reset: true)
     end
@@ -1806,7 +2148,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
         paper_doc: nil,
         paper_rev: 0,
         paper_html: "",
-        paper_block_mode: false
+        paper_block_mode: false,
+        paper_edit_mode: false
       )
     else
       assign(socket, editor_view: :form)
@@ -1971,13 +2314,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :paper_rev, :integer, default: 0
   attr :paper_html, :string, default: ""
   attr :paper_block_mode, :boolean, default: false
+  attr :paper_edit_mode, :boolean, default: false
   attr :dataset, :string, required: true
   attr :streams, :map, required: true
 
   defp studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
     title = (assigns.paper_doc && assigns.paper_doc.title) || slug || "Paper"
-    assigns = assign(assigns, slug: slug, title: title)
+
+    edit_blocks =
+      case assigns.paper_doc do
+        %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
+        _ -> []
+      end
+
+    assigns = assign(assigns, slug: slug, title: title, edit_blocks: edit_blocks)
 
     ~H"""
     <div class="editor-panel" data-test-id="studio-paper-editor">
@@ -1986,6 +2337,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <span class="badge badge-published">paper</span>
         </:status_pill>
         <:actions>
+          <%!-- View ⇄ Edit toggle. View is the read-only live stream; Edit
+                renders the per-block controls. Block-backed papers only. --%>
+          <button
+            :if={@slug && @paper_block_mode}
+            type="button"
+            class={"btn btn-sm " <> if(@paper_edit_mode, do: "btn-primary", else: "btn-ghost")}
+            phx-click="paper-toggle-edit"
+            data-test-id="paper-edit-toggle"
+          >
+            <.icon name={if @paper_edit_mode, do: "eye", else: "pencil"} size={14} />
+            <%= if @paper_edit_mode, do: "View", else: "Edit" %>
+          </button>
           <a
             :if={@slug}
             href={"/papers/#{@slug}"}
@@ -2012,6 +2375,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
                 <article id="paper-body" data-rev={@paper_rev}>
                   <p id="paper-empty">No paper selected.</p>
                 </article>
+              <% @paper_edit_mode && @paper_block_mode -> %>
+                <.paper_block_editor slug={@slug} blocks={@edit_blocks} paper_rev={@paper_rev} />
               <% @paper_block_mode -> %>
                 <%!-- Block-backed: each top-level block is its own keyed stream
                       item. A delta patches/appends/deletes ONE of these.
@@ -2045,6 +2410,203 @@ defmodule BarkparkWeb.Studio.StudioLive do
         </div>
       </div>
     </div>
+    """
+  end
+
+  # ── Paper block editor (function component) ─────────────────────────────────
+  #
+  # Edit mode for a block-backed paper. Renders per-block edit controls; each
+  # control fires a `paper-*` event that maps to ONE DocPatchOp. The container
+  # is keyed on the slug + rev so a jump or an op refreshes it cleanly. This is
+  # plain assign-driven HTML (no stream) — the read-only View pane is the
+  # streamed surface; this editor reads from `paper_doc.content["blocks"]`.
+  attr :slug, :string, required: true
+  attr :blocks, :list, required: true
+  attr :paper_rev, :integer, default: 0
+
+  defp paper_block_editor(assigns) do
+    ~H"""
+    <div id={"paper-editor-#{@slug}"} class="bp-paper-editor" data-test-id="studio-paper-block-editor">
+      <p :if={@blocks == []} class="bp-paper-editor-empty">
+        This paper has no blocks yet. Add one below.
+      </p>
+
+      <div :for={block <- @blocks} class="bp-paper-edit-block" data-edit-block-id={Map.get(block, "id")}>
+        <div class="bp-paper-edit-toolbar">
+          <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
+          <span class="bp-paper-edit-actions">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              title="Move up"
+              phx-click="paper-move-block"
+              phx-value-id={Map.get(block, "id")}
+              phx-value-dir="up"
+            >▲</button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              title="Move down"
+              phx-click="paper-move-block"
+              phx-value-id={Map.get(block, "id")}
+              phx-value-dir="down"
+            >▼</button>
+            <button
+              type="button"
+              class="btn btn-destructive btn-sm"
+              title="Delete block"
+              phx-click="paper-delete-block"
+              phx-value-id={Map.get(block, "id")}
+              data-test-id="paper-delete-block"
+            >×</button>
+          </span>
+        </div>
+        <.paper_block_fields block={block} />
+      </div>
+
+      <%!-- Add-block dropdown. The `+ Add` <select> fires append-block (no
+            anchor) of the chosen type via paper-add-block. --%>
+      <form
+        class="bp-paper-add-block"
+        phx-submit="paper-add-block"
+        data-test-id="paper-add-block"
+      >
+        <label>
+          + Add block
+          <select name="block-type">
+            <option value="paragraph">Paragraph</option>
+            <option value="heading">Heading</option>
+            <option value="list">List</option>
+            <option value="callout">Callout</option>
+            <option value="code">Code</option>
+            <option value="divider">Divider</option>
+            <option value="section">Section</option>
+          </select>
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+      </form>
+    </div>
+    """
+  end
+
+  # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
+  # carries a hidden `id` and submits its changed field(s); the handler maps
+  # the params to a patch-block op. Paragraph/callout bodies are PLAIN TEXT in
+  # the MVP (inline marks dropped on save).
+  attr :block, :map, required: true
+
+  defp paper_block_fields(assigns) do
+    assigns =
+      assign(assigns, id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
+
+    ~H"""
+    <%= case @type do %>
+      <% "heading" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <select name="level" class="bp-paper-edit-level">
+            <option :for={lvl <- 1..6} value={lvl} selected={Map.get(@block, "level", 2) == lvl}>
+              H<%= lvl %>
+            </option>
+          </select>
+          <input
+            type="text"
+            name="text"
+            class="bp-paper-edit-text"
+            value={Map.get(@block, "text", "")}
+            data-test-id="paper-field-text"
+          />
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "paragraph" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <textarea
+            name="text"
+            class="bp-paper-edit-textarea"
+            rows="3"
+            data-test-id="paper-field-text"
+          ><%= inline_to_text(Map.get(@block, "content", [])) %></textarea>
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "callout" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <select name="tone" class="bp-paper-edit-tone">
+            <option :for={t <- ~w(info success warning danger neutral)} value={t} selected={Map.get(@block, "tone") == t}>
+              <%= t %>
+            </option>
+          </select>
+          <input
+            type="text"
+            name="title"
+            class="bp-paper-edit-text"
+            placeholder="Title (optional)"
+            value={Map.get(@block, "title", "")}
+          />
+          <textarea
+            name="text"
+            class="bp-paper-edit-textarea"
+            rows="3"
+            data-test-id="paper-field-text"
+          ><%= inline_to_text(Map.get(@block, "content", [])) %></textarea>
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "code" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <input
+            type="text"
+            name="lang"
+            class="bp-paper-edit-text"
+            placeholder="lang"
+            value={Map.get(@block, "lang", "")}
+          />
+          <textarea
+            name="value"
+            class="bp-paper-edit-textarea bp-paper-edit-code"
+            rows="5"
+            data-test-id="paper-field-value"
+          ><%= Map.get(@block, "value", "") %></textarea>
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "list" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-ordered">
+            <input type="checkbox" name="ordered" checked={Map.get(@block, "ordered") == true} /> Ordered
+          </label>
+          <input
+            :for={{item, idx} <- Enum.with_index(Map.get(@block, "items", []))}
+            type="text"
+            name={"item-#{idx}"}
+            class="bp-paper-edit-text"
+            value={inline_to_text(item)}
+            data-test-id={"paper-field-item-#{idx}"}
+          />
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "section" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <input
+            type="text"
+            name="title"
+            class="bp-paper-edit-text"
+            placeholder="Section title"
+            value={Map.get(@block, "title", "")}
+            data-test-id="paper-field-title"
+          />
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "divider" -> %>
+        <p class="bp-paper-edit-readonly">— divider —</p>
+      <% _ -> %>
+        <%!-- image / table and any other type are read-only in the MVP. --%>
+        <p class="bp-paper-edit-readonly">
+          <%= @type %> blocks are not editable yet (view/delete/reorder only).
+        </p>
+    <% end %>
     """
   end
 
@@ -2189,6 +2751,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           paper_rev={@paper_rev}
           paper_html={@paper_html}
           paper_block_mode={@paper_block_mode}
+          paper_edit_mode={@paper_edit_mode}
           dataset={@dataset}
           streams={@streams}
         />
