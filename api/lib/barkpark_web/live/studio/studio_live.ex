@@ -2014,8 +2014,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
                 </article>
               <% @paper_block_mode -> %>
                 <%!-- Block-backed: each top-level block is its own keyed stream
-                      item. A delta patches/appends/deletes ONE of these. --%>
-                <article id="paper-body" data-rev={@paper_rev} phx-update="stream">
+                      item. A delta patches/appends/deletes ONE of these.
+
+                      The container id is keyed on the slug so jumping to a
+                      DIFFERENT paper hands LiveView a NEW stream container —
+                      it tears down the prior paper's block DOM instead of
+                      reusing nodes whose block ids happen to collide across
+                      papers (the "stale content after a jump" bug). Within
+                      the SAME paper the id is stable, so `{:paper_block}`
+                      deltas still diff in place with no remount. --%>
+                <article
+                  id={"paper-body-#{@slug}"}
+                  data-rev={@paper_rev}
+                  phx-update="stream"
+                >
                   <div
                     :for={{dom_id, block} <- @streams.paper_blocks}
                     id={dom_id}
@@ -2025,8 +2037,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   </div>
                 </article>
               <% true -> %>
-                <%!-- HTML-only (legacy): whole opaque body, re-assigned on update. --%>
-                <article id="paper-body" data-rev={@paper_rev}>{raw(@paper_html)}</article>
+                <%!-- HTML-only (legacy): whole opaque body, re-assigned on
+                      update. Keyed on the slug too so a jump swaps the node. --%>
+                <article id={"paper-body-#{@slug}"} data-rev={@paper_rev}>{raw(@paper_html)}</article>
             <% end %>
           </main>
         </div>
