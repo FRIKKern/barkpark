@@ -615,6 +615,49 @@
     }
     .pane-column--collapsed:hover .pane-column-collapsed-label { color: var(--fg); }
 
+    /* ── Beta focus mode (Task barkpark-270j) ──────────────────────────
+       When the Studio editor is in Beta, the EditorFocus JS hook sets
+       html[data-editor-focus="beta"]. Everything below is scoped to that
+       attribute, so Classic mode (no attr) is visually UNCHANGED — these
+       rules simply don't match. Goal: a clean standalone-document surface
+       — the original Portable Doc editor reads as a centered paper column
+       on a plain page, not a panel inside the CMS shell.
+
+       Reversibility / navigation are preserved deliberately:
+         • The brand (logo + dataset switcher) stays in the slim topbar, so
+           the user can navigate back to the structure/dataset.
+         • The theme toggle stays (dark mode must keep working in focus mode).
+         • The Classic⇄Beta toggle lives in the editor header (rendered by
+           the LiveView, NOT the topbar) and is never hidden — flipping back
+           to Classic clears the attr and restores full chrome live. */
+
+    /* Hide the left document-list pane(s). */
+    html[data-editor-focus="beta"] .pane-column.bp-doc-list { display: none; }
+
+    /* Slim the topbar: drop the CMS tabs (Structure/Media/API) and the
+       sign-out button so it stops feeling like an app shell. Brand +
+       theme toggle remain. The bar keeps its height so the layout below
+       it doesn't jump. */
+    html[data-editor-focus="beta"] .studio-bar-tabs { display: none; }
+    html[data-editor-focus="beta"] .studio-bar form[action="/logout"],
+    html[data-editor-focus="beta"] .studio-bar .studio-bar-actions:has(form[action="/logout"]) {
+      display: none;
+    }
+    html[data-editor-focus="beta"] .studio-bar {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border-muted);
+    }
+
+    /* Center the paper column in the available width. The editor panel is a
+       flex child of .pane-layout; once the doc-list pane is gone it already
+       spans the full width. .bp-paper-surface is max-width:680px; margin auto,
+       so it self-centers — but we widen the breathing room and ensure the
+       editor-body wrapper lets it center symmetrically rather than hugging
+       the (now-absent) left pane. */
+    html[data-editor-focus="beta"] .editor-panel { background: var(--paper-bg); }
+    html[data-editor-focus="beta"] .editor-with-preview { justify-content: center; }
+    html[data-editor-focus="beta"] .bp-paper-surface { margin: 0 auto; }
+
     /* ── Editor pane (used by StudioLive via document_header /
        editor_field / empty_editor in BarkparkWeb.StudioComponents).
        Originally hoisted from StudioLive's inline <style> so the now-
@@ -2085,6 +2128,31 @@
       destroyed() {
         this.el.removeEventListener("click", this._onClick);
       }
+    };
+
+    // EditorFocus — mirrors the Studio editor mode onto the <html> element so
+    // CSS can switch the whole page into a frameless "focus" surface when the
+    // Beta editor is open (Task barkpark-270j). Mirrors the ThemeToggle
+    // pattern: the LiveView renders a hidden #editor-focus-mirror element with
+    // data-editor-mode={@editor_mode}; this hook reads it and sets/clears
+    // document.documentElement.dataset.editorFocus on mount AND on every
+    // LiveView update (which fires when the Classic⇄Beta toggle flips the
+    // assign — no reload). On destroy it clears the attribute so navigating
+    // away from Studio never leaves the page stuck in focus mode. The topbar
+    // lives in a layout outside this LiveView; the <html> attr is how the
+    // slim-topbar CSS reaches it.
+    Hooks.EditorFocus = {
+      _apply() {
+        var mode = this.el.dataset.editorMode || "classic";
+        if (mode === "beta") {
+          document.documentElement.dataset.editorFocus = "beta";
+        } else {
+          delete document.documentElement.dataset.editorFocus;
+        }
+      },
+      mounted() { this._apply(); },
+      updated() { this._apply(); },
+      destroyed() { delete document.documentElement.dataset.editorFocus; }
     };
 
     // Server-pushed file-download trigger. A LiveView pushes a

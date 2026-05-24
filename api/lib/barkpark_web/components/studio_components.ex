@@ -61,6 +61,11 @@ defmodule BarkparkWeb.StudioComponents do
   attr :phx_click, :string, default: nil
   attr :phx_value_idx, :string, default: nil
   attr :id, :string, default: nil
+  # Optional extra class appended to the (non-collapsed) column wrapper —
+  # used by callers to mark structurally-significant panes (e.g.
+  # `bp-doc-list` on the document-list pane so Beta focus mode can hide it
+  # via CSS). nil leaves the legacy class string byte-identical.
+  attr :marker_class, :string, default: nil
 
   slot :header_actions
   slot :inner_block, required: true
@@ -69,7 +74,8 @@ defmodule BarkparkWeb.StudioComponents do
     extra_classes =
       [
         assigns[:last] && "pane-column--last",
-        assigns[:flex] && "pane-column--flex"
+        assigns[:flex] && "pane-column--flex",
+        assigns[:marker_class]
       ]
       |> Enum.filter(& &1)
       |> Enum.join(" ")
