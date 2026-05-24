@@ -1484,7 +1484,9 @@
 
     html[data-theme="light"] .bp-paper-surface,
     html[data-theme="light"] .bp-paper-body {
-      --paper-bg:         #fbfaf6;
+      /* A3: warm paper chrome tone — matches the original editor canvas
+         (warmer/greyer than pure white), never #fff. */
+      --paper-bg:         #fefdf9;
       --paper-bg-deep:    #f5f2e9;
       --paper-ink:        #1f1a14;
       --paper-ink-soft:   #5b524a;
@@ -1494,6 +1496,7 @@
       --paper-accent:     #a23925;
       --paper-accent-soft: rgba(162, 57, 37, 0.10);
       --paper-chrome-bg:  #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
     }
     html[data-theme="dark"] .bp-paper-surface,
     html[data-theme="dark"] .bp-paper-body {
@@ -1507,10 +1510,11 @@
       --paper-accent:     #d97a5f;
       --paper-accent-soft: rgba(217, 122, 95, 0.14);
       --paper-chrome-bg:  #221e1a;
+      --paper-chrome-border: rgba(236, 230, 220, 0.14);
     }
     /* Fallback so a pre-paint load with no data-theme still gets warm paper. */
     .bp-paper-surface, .bp-paper-body {
-      --paper-bg:         #fbfaf6;
+      --paper-bg:         #fefdf9;
       --paper-bg-deep:    #f5f2e9;
       --paper-ink:        #1f1a14;
       --paper-ink-soft:   #5b524a;
@@ -1520,8 +1524,14 @@
       --paper-accent:     #a23925;
       --paper-accent-soft: rgba(162, 57, 37, 0.10);
       --paper-chrome-bg:  #fefdf9;
-      --paper-font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+      /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
+         actually renders in the macOS system serif (Iowan Old Style). We mirror
+         that rendered face here; self-hosted Source Serif 4 stays in the stack as
+         a cross-platform fallback (still @font-face'd above). */
+      --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
       --paper-font-mono:  var(--font-mono);
+      /* Warm paper chrome tone for the editor canvas (A3) — never pure white. */
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
     }
 
     /* The page — a single centered serif column on warm paper. The
@@ -1533,7 +1543,8 @@
       color: var(--paper-ink);
       font-family: var(--paper-font-serif);
       font-size: 18px;
-      line-height: 1.55;
+      /* A2: airier rhythm (~30.6px at 18px) to match the original editor. */
+      line-height: 1.70;
       letter-spacing: 0.005em;
       font-feature-settings: "kern", "liga", "onum";
       text-rendering: optimizeLegibility;
@@ -1664,9 +1675,17 @@
     .bp-paper-edit-toolbar {
       position: absolute; top: 4px; left: -10px;
       transform: translateX(-100%);
-      display: flex; align-items: center; gap: 2px;
+      display: flex; align-items: center; gap: 4px;
       margin: 0; opacity: 0; pointer-events: none;
       transition: opacity 0.30s ease-out;
+      /* A4: the original's floating-chrome PILL (warm chrome surface, hairline
+         border, soft shadow) — replaces the bare transparent strip. Themed via
+         the `--paper-chrome-*` tokens so it reads warm in light AND dark. */
+      background: var(--paper-chrome-bg);
+      border: 0.75px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      padding: 3px 6px;
     }
     .bp-paper-edit-block:hover .bp-paper-edit-toolbar,
     .bp-paper-edit-block:focus-within .bp-paper-edit-toolbar {
@@ -1692,7 +1711,7 @@
     .bp-paper-edit-toolbar .btn:hover { background: transparent; color: var(--paper-ink-soft); }
     .bp-paper-edit-toolbar .btn-destructive:hover { color: var(--paper-accent); background: var(--paper-accent-soft); }
     .bp-paper-edit-toolbar .btn:disabled { opacity: 0.35; }
-    /* The ⠿ drag handle — grab affordance, warms on hover like the others. */
+    /* The ⋮⋮ drag handle — grab affordance, warms on hover like the others. */
     .bp-paper-drag-grip {
       display: inline-flex; align-items: center; justify-content: center;
       cursor: grab; user-select: none; letter-spacing: -1px;
@@ -1746,6 +1765,90 @@
       letter-spacing: 0.02em; font-family: var(--font);
     }
 
+    /* ── Priority B: bound fields read as a DOCUMENT, not a form ────────────
+       A block carries `data-field-name` only when it is BOUND to a schema
+       field (synthesis emits `fieldName`; free body blocks have none). For
+       those we hide the muted "Title/Slug/Featured Image" label entirely and
+       drop the boxy form chrome so title/slug/image read as prose. The bound
+       editors (BarkparkFieldBlockBridge / pickers) keep working — only the
+       presentation changes. */
+    .bp-paper-edit-field[data-field-name] .bp-paper-edit-fieldlabel {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    /* Drop the inter-field hairline rules between adjacent bound blocks — the
+       underline on the text inputs + the per-edit-block margin already separate
+       them; stacked rules read as a CMS form. */
+    .bp-paper-edit-field[data-field-name] input[type="text"],
+    .bp-paper-edit-field[data-field-name] textarea {
+      border-bottom: 0;
+    }
+
+    /* Title → a large borderless serif H1 (32px/600), no label, no box. */
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"] {
+      font-family: var(--paper-font-serif);
+      font-size: 32px; font-weight: 600; line-height: 1.3;
+      letter-spacing: -0.01em; color: var(--paper-ink);
+      padding: 0; margin: 0; border: 0; background: transparent;
+    }
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"]::placeholder {
+      color: var(--paper-ink-faint);
+    }
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"]:focus {
+      outline: none; border: 0;
+    }
+
+    /* Slug → muted inline text, small, faint — sits quietly under the title. */
+    .bp-paper-edit-field[data-field-name="slug"] input[type="text"] {
+      font-family: var(--paper-font-mono);
+      font-size: 13px; color: var(--paper-ink-faint);
+      padding: 0; margin: 0; border: 0; background: transparent;
+    }
+    .bp-paper-edit-field[data-field-name="slug"] input[type="text"]:focus {
+      outline: none; border: 0; color: var(--paper-ink-soft);
+    }
+
+    /* Featured image (any bound image field) → inline figure. The media WC
+       shows the picked image when set, or a slim unobtrusive affordance at
+       rest; no big dropzone card, no "Featured Image" label. The WC styling
+       lives in its own component CSS — here we just strip the field chrome and
+       let it sit inline as a figure on the page. */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] {
+      gap: 0; margin: 6pt 0 0;
+    }
+    /* Scope the bp-media-picker internals (light-DOM WC) for the BOUND image
+       on the paper surface: a picked image becomes a flush inline figure; at
+       rest the empty box collapses to a slim "Add image" affordance instead of
+       the big bordered dropzone card. Upload/browse stay fully functional. */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] bp-media-picker {
+      display: block;
+    }
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-preview-img {
+      display: block; max-width: 100%; height: auto; margin: 0;
+      border-radius: 3px; border: 1px solid var(--paper-rule);
+      background: var(--paper-bg-deep);
+    }
+    /* Empty state: collapse the WC's "No image selected" text to a slim
+       affordance. font-size:0 hides the WC's own text node; the ::before
+       carries the visible "+ Add image" label at readable size. */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty {
+      font-size: 0; padding: 0;
+    }
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty::before {
+      content: "+ Add image";
+      font-family: var(--font); font-size: 13px;
+      color: var(--paper-ink-faint);
+    }
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-actions {
+      display: flex; gap: 6px; margin-top: 4px;
+    }
+    /* Hide the big "Drop image here" dropzone card + the browse grid at rest —
+       they reappear only via the WC's own interactions, not as resting chrome. */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-dropzone,
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-grid:empty {
+      display: none;
+    }
+
     /* Add-block row — quiet hairline divider, muted control. */
     .bp-paper-add-block {
       display: flex; align-items: center; gap: 8px;
@@ -1768,6 +1871,13 @@
        very first block in the editor zeroes its leading margin so the document
        doesn't open with a gap. */
     .bp-paper-editor-body { outline: none; }
+    /* A1: kill the browser-default blue focus ring on the editable surface.
+       The contenteditable/ProseMirror otherwise paints `outline: rgb(0,95,204)
+       auto` on focus — a blue box that screams "input". Mirrors the original
+       Portable Doc editor, which has no focus ring on the paper. */
+    .bp-paper-surface [contenteditable]:focus,
+    .bp-paper-surface .ProseMirror:focus,
+    .bp-paper-surface .ProseMirror-focused { outline: none; }
     .bp-paper-editor > .bp-paper-edit-block:first-child .bp-paper-editor-body > :first-child { margin-top: 0; }
     .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; margin: 24pt 0 6pt; }
     .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 18pt 0 4pt; }
