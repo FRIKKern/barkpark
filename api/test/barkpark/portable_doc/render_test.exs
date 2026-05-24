@@ -649,6 +649,212 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # form block (P4) — native portable-doc render of a paperflow grill /
+  # questionnaire. Render-only: clean semantic <fieldset>/<legend>/<input>/
+  # <textarea> markup, NO <script>, NO action/method, NO submit wiring (the
+  # interactive layer is a later phase). Mirrors grill.js input types
+  # (yesno/single/multi/scale/text). The whole-block container carries a
+  # bp-form class; the kind discriminator picks bp-form-grill vs
+  # bp-form-questionnaire. All user text flows through escape_html.
+  describe "form block — grill / questionnaire render (P4)" do
+    @grill %{
+      "id" => "fm1",
+      "type" => "form",
+      "kind" => "grill",
+      "questions" => [
+        %{
+          "id" => "q1",
+          "prompt" => "Ship it?",
+          "type" => "yesno",
+          "rationale" => "Gauges confidence.",
+          "recommendation" => "Ship."
+        },
+        %{
+          "id" => "q2",
+          "prompt" => "Pick a colour",
+          "type" => "single",
+          "options" => ["Red", "Green", "Blue"]
+        },
+        %{
+          "id" => "q3",
+          "prompt" => "Pick toppings",
+          "type" => "multi",
+          "options" => ["Cheese", "Ham"]
+        },
+        %{"id" => "q4", "prompt" => "Rate it", "type" => "scale"},
+        %{"id" => "q5", "prompt" => "Anything else?", "type" => "text"}
+      ]
+    }
+
+    test "wraps the block in a bp-form / bp-form-grill container section" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ "<section"
+      assert html =~ "bp-form"
+      assert html =~ "bp-form-grill"
+    end
+
+    test "a questionnaire kind carries the bp-form-questionnaire hook" do
+      block = Map.put(@grill, "kind", "questionnaire")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "bp-form-questionnaire"
+      refute html =~ "bp-form-grill"
+    end
+
+    test "kind defaults to grill when absent" do
+      block = Map.delete(@grill, "kind")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "bp-form-grill"
+    end
+
+    test "each question is a <fieldset> with an escaped <legend> prompt" do
+      block = %{
+        "type" => "form",
+        "questions" => [%{"id" => "q", "prompt" => "A < B & C?", "type" => "text"}]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "<fieldset"
+      assert html =~ "<legend"
+      # The prompt is HTML-escaped, never raw.
+      assert html =~ "A &lt; B &amp; C?"
+      refute html =~ "A < B & C?"
+    end
+
+    test "rationale and recommendation render as muted lines when present" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ "Gauges confidence."
+      assert html =~ "Recommendation:"
+      assert html =~ "Ship."
+    end
+
+    test "rationale / recommendation are omitted when absent" do
+      block = %{
+        "type" => "form",
+        "questions" => [%{"id" => "q", "prompt" => "Bare?", "type" => "text"}]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+      refute html =~ "Recommendation:"
+    end
+
+    test "yesno emits two radios (Yes / No) sharing name = the question id" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ ~s(type="radio")
+      assert html =~ ~s(name="q1")
+      assert html =~ "Yes"
+      assert html =~ "No"
+    end
+
+    test "single emits one radio per option, sharing name = id, with labels" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ ~s(name="q2")
+      assert html =~ "Red"
+      assert html =~ "Green"
+      assert html =~ "Blue"
+      # Three radios for q2 share the same name.
+      assert length(Regex.scan(~r/name="q2"/, html)) == 3
+    end
+
+    test "multi emits one checkbox per option, name = id" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ ~s(type="checkbox")
+      assert html =~ ~s(name="q3")
+      assert html =~ "Cheese"
+      assert html =~ "Ham"
+      assert length(Regex.scan(~r/name="q3"/, html)) == 2
+    end
+
+    test "scale defaults to radios 1..5 sharing name = id" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ ~s(name="q4")
+      # Five integer radios 1..5.
+      assert length(Regex.scan(~r/name="q4"/, html)) == 5
+      assert html =~ ">1<"
+      assert html =~ ">5<"
+    end
+
+    test "scale honours an explicit min/max range" do
+      block = %{
+        "type" => "form",
+        "questions" => [
+          %{"id" => "s", "prompt" => "Rate", "type" => "scale", "scale" => %{"min" => 0, "max" => 2}}
+        ]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+      # 0, 1, 2 → three radios.
+      assert length(Regex.scan(~r/name="s"/, html)) == 3
+      assert html =~ ">0<"
+      assert html =~ ">2<"
+    end
+
+    test "text emits a <textarea> named for the question id" do
+      html = Render.render_block(@grill, %{style: :article})
+      assert html =~ "<textarea"
+      assert html =~ ~s(name="q5")
+    end
+
+    test "render-only: NO script / action / method / submit wiring" do
+      html = Render.render_block(@grill, %{style: :article})
+      refute html =~ "<script"
+      refute html =~ "action="
+      refute html =~ "method="
+      refute html =~ "type=\"submit\""
+      refute html =~ "<button"
+    end
+
+    test "an empty / absent questions list renders a bare bp-form section (no crash)" do
+      empty = %{"type" => "form", "questions" => []}
+      absent = %{"type" => "form"}
+
+      html_empty = Render.render_block(empty, %{style: :article})
+      html_absent = Render.render_block(absent, %{style: :article})
+
+      assert html_empty =~ "bp-form"
+      refute html_empty =~ "<fieldset"
+      assert html_absent =~ "bp-form"
+      refute html_absent =~ "<fieldset"
+    end
+
+    test "questionnaire is a true alias of form (same fieldset machinery)" do
+      block = %{
+        "type" => "questionnaire",
+        "questions" => [%{"id" => "q", "prompt" => "Scope?", "type" => "text"}]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "bp-form-questionnaire"
+      assert html =~ "<fieldset"
+      assert html =~ ~s(name="q")
+      assert html =~ "<textarea"
+    end
+
+    test "email mode is deterministic and still semantic (plainer)" do
+      html = Render.render_block(@grill, %{style: :email})
+      assert html =~ "<section"
+      assert html =~ "bp-form"
+      assert html =~ "<fieldset"
+      assert html =~ ~s(name="q1")
+      assert html =~ "<textarea"
+      refute html =~ "<script"
+    end
+  end
+
+  # Regression discipline (P4): adding the form clause must not perturb the
+  # email-default output of any existing block. Pin one simple block
+  # byte-for-byte — the divider in email mode — exactly as it was before.
+  describe "regression — existing block email output byte-unchanged (P4)" do
+    test "divider email output is byte-identical" do
+      assert Render.render_block(%{"id" => "d", "type" => "divider"}) ==
+               ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+    end
+
+    test "bold heading email output is byte-identical" do
+      block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
+      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"
