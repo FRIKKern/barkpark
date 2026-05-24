@@ -42,9 +42,47 @@ export const SLASH_ITEMS = [
   { group: "Structured", type: "localizedText", label: "Localized text", hint: "🌐", desc: "multi-language string" },
 ];
 
+// EX2 — expectation-aware top group. The Beta document editor renders the doc's
+// STILL-recommendable expected fields as JSON on `[data-expected-fields]` (a
+// stable LiveView-driven element, re-rendered on every block-list change —
+// capped fields are dropped server-side, so a field hides once full). On open,
+// the menu reads that JSON and prepends an "EXPECTED" group whose items insert
+// a BOUND field block (they carry a `fieldName`). Returns [] when the element
+// is absent or empty (the paper pane, or a doc with no Expectation) — the group
+// then never renders and the menu behaves exactly as before.
+const EXPECTED_GROUP = "EXPECTED";
+
+export function readExpectedItems(doc = document) {
+  const el = doc.querySelector("[data-expected-fields]");
+  if (!el) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(el.getAttribute("data-expected-fields") || "[]");
+  } catch (_e) {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .filter((f) => f && typeof f.name === "string" && f.name !== "")
+    .map((f) => ({
+      group: EXPECTED_GROUP,
+      type: f.type || "field-string",
+      // carry the field name so the WC can dispatch a BOUND insert.
+      fieldName: f.name,
+      label: f.label || f.name,
+      hint: "✦",
+      desc: "expected",
+    }));
+}
+
 export class SlashMenu {
   constructor({ items, onChoose, onDismiss }) {
-    this._items = items || SLASH_ITEMS;
+    // The base (generic) groups — Text / Basic fields / Media & reference /
+    // Structured. The EXPECTED group is read fresh on every open() and
+    // prepended, so it always reflects current usage.
+    this._baseItems = items || SLASH_ITEMS;
+    this._items = this._baseItems;
     this._onChoose = onChoose || (() => {});
     this._onDismiss = onDismiss || (() => {});
     this._open = false;
@@ -64,6 +102,10 @@ export class SlashMenu {
   // Show the popup anchored to a caret rect { left, top, bottom }.
   open(rect) {
     if (!this._el) this._build();
+    // Recompute the item list on every open: EXPECTED group (read fresh from
+    // the DOM so it reflects current usage / hide-at-cap) on top, then the base
+    // generic groups below.
+    this._items = [...readExpectedItems(), ...this._baseItems];
     if (!this._open) {
       this._active = 0;
       this._render();
@@ -103,10 +145,11 @@ export class SlashMenu {
     this._syncActive();
   }
 
-  // Commit the currently-active item.
+  // Commit the currently-active item. Passes the WHOLE item so the caller can
+  // read both `type` and (for an EXPECTED pick) `fieldName`.
   choose() {
     const item = this._items[this._active];
-    if (item) this._onChoose(item.type);
+    if (item) this._onChoose(item);
   }
 
   // ── internals ────────────────────────────────────────────────────────────
@@ -138,11 +181,14 @@ export class SlashMenu {
 
     let lastGroup = null;
     this._items.forEach((item, idx) => {
+      const isExpected = item.group === EXPECTED_GROUP;
       if (item.group !== lastGroup) {
         lastGroup = item.group;
         const header = document.createElement("div");
         header.className = "bp-slash-group";
         header.textContent = item.group;
+        // Stamp the EXPECTED group header so its CSS picks up the accent.
+        if (isExpected) header.dataset.expected = "";
         list.appendChild(header);
       }
 
@@ -151,6 +197,12 @@ export class SlashMenu {
       row.className = "bp-slash-item";
       row.setAttribute("role", "option");
       row.dataset.type = item.type;
+      // EXPECTED-group rows carry the field name (for the bound insert) and a
+      // data-expected marker so the ✦ hint + "expected" tag recolor to accent.
+      if (isExpected) {
+        row.dataset.expected = "";
+        if (item.fieldName) row.dataset.fieldName = item.fieldName;
+      }
 
       // 16px icon glyph — recolors to --paper-accent on the active/selected row.
       const hint = document.createElement("span");

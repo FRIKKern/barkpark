@@ -2083,6 +2083,21 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-width: 130px;
     }
+    /* ── EX2 — EXPECTED group. The top group of fields the doc's Expectation
+       recommends. Its eyebrow + ✦ hint + "expected" tag pick up the rust
+       accent so the recommended fields read distinctly from the generic
+       groups below. Reuses the existing .bp-slash-* tokens (themed both
+       modes via --paper-* variables); the group header text is "EXPECTED",
+       matched here on the data attribute the renderer stamps. */
+    .bp-slash-group[data-expected],
+    .bp-slash-item[data-expected] .bp-slash-hint {
+      color: var(--paper-accent);
+    }
+    .bp-slash-item[data-expected] .bp-slash-desc {
+      color: var(--paper-accent);
+      text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px;
+      opacity: 0.85;
+    }
     /* Footer hint bar with <kbd> chips for the keyboard contract. */
     .bp-slash-foot {
       border-top: 1px solid var(--paper-rule-soft);
