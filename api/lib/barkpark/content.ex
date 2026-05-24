@@ -355,6 +355,31 @@ defmodule Barkpark.Content do
     }
   end
 
+  # The same resolvers as `render_opts/1`, plus the per-doc render `:style`
+  # when the paper is marked `"article"`. Threaded into `Render.render_blocks/2`
+  # so an article paper's body_html cache (and delta fragments) come out in the
+  # article palette. A nil / non-"article" style adds nothing → email default,
+  # byte-unchanged from `render_opts/1`.
+  defp paper_render_opts(dataset, "article"), do: Map.put(render_opts(dataset), :style, :article)
+  defp paper_render_opts(dataset, _style), do: render_opts(dataset)
+
+  # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs
+  # wins (so an ingest/POST can set it), else the existing doc's stored style is
+  # preserved (a partial update never silently demotes an article paper), else
+  # nil (the email default). Only "article" is meaningful; anything else is
+  # normalized away so we never persist a stray marker.
+  defp paper_style(attrs, existing) do
+    explicit = attrs["style"]
+    existing_style = existing && get_in(existing.content || %{}, ["style"])
+
+    cond do
+      explicit == "article" -> "article"
+      is_binary(explicit) -> nil
+      existing_style == "article" -> "article"
+      true -> nil
+    end
+  end
+
   @doc """
   Fetch a document with draft-first preference. Returns the draft if it
   exists, otherwise falls back to the published row, plus flags for
@@ -2148,9 +2173,16 @@ defmodule Barkpark.Content do
 
     blocks = attrs["blocks"]
 
+    # Per-doc article marker. An ingest/POST may set `style: "article"` in
+    # attrs; otherwise it sticks at whatever the existing doc already carries
+    # (so a partial update never silently demotes an article paper). Threaded
+    # into render_opts so the body_html cache is rendered in the article palette.
+    style = paper_style(attrs, existing)
+    render_opts = paper_render_opts(dataset, style)
+
     body_html =
       cond do
-        is_list(blocks) -> Render.render_blocks(blocks, render_opts(dataset))
+        is_list(blocks) -> Render.render_blocks(blocks, render_opts)
         is_binary(attrs["body_html"]) -> attrs["body_html"]
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
@@ -2161,6 +2193,7 @@ defmodule Barkpark.Content do
       (existing && existing.content || %{})
       |> Map.put("body_html", body_html)
       |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
+      |> maybe_put_paper("style", style)
       |> maybe_put_paper("source_doc", attrs["source_doc"])
       |> maybe_put_paper("goal_id", attrs["goal_id"])
       |> maybe_put_paper("event_type", attrs["event_type"])
@@ -2230,7 +2263,10 @@ defmodule Barkpark.Content do
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
-      render_opts = render_opts(dataset)
+      # Carry the doc's stored article marker into the render so both the
+      # body_html cache and the delta fragment match the article palette.
+      style = get_in(doc.content || %{}, ["style"])
+      render_opts = paper_render_opts(dataset, style)
       body_html = Render.render_blocks(new_blocks, render_opts)
 
       fragment_html =
