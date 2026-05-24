@@ -856,6 +856,142 @@
     .image-picker-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
     .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* bp-asset-browser — native mediaAsset modal */
+    .bp-ab-overlay {
+      position: fixed; inset: 0; z-index: 60;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .bp-ab-overlay[hidden] { display: none !important; }
+    .bp-ab-dialog {
+      width: min(960px, 100%); max-height: min(85vh, 900px);
+      background: var(--bg-elevated); border: 1px solid var(--border-muted);
+      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .bp-ab-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border-muted);
+    }
+    .bp-ab-title { font-size: 15px; font-weight: 600; margin: 0; flex: 0 0 auto; }
+    .bp-ab-search { flex: 1; min-width: 0; }
+    .bp-ab-body { position: relative; flex: 1; overflow-y: auto; padding: 16px; }
+    .bp-ab-loading { position: absolute; inset: 16px; display: flex; align-items: center; justify-content: center; }
+    .bp-ab-grid { min-height: 120px; }
+    .bp-ab-card {
+      display: flex; flex-direction: column; align-items: stretch;
+      padding: 0; border: 2px solid transparent; background: var(--bg-subtle);
+      cursor: pointer; text-align: left;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .bp-ab-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+    .bp-ab-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+    .bp-ab-file-icon {
+      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; text-transform: uppercase; color: var(--fg-muted);
+      background: var(--bg-muted);
+    }
+    .bp-ab-card-title {
+      font-size: 11px; color: var(--fg-muted); padding: 6px 8px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bp-mp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+    /* bp-asset-explorer — full-page Media tab workspace */
+    .media-explorer-panel {
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .media-explorer-panel bp-asset-explorer {
+      flex: 1; display: flex; min-height: 0; width: 100%;
+    }
+    .bp-ae-root {
+      display: flex; flex: 1; min-height: 0; width: 100%;
+      background: var(--bg); overflow: hidden;
+    }
+    .bp-ae-sidebar {
+      width: 200px; flex-shrink: 0; border-right: 1px solid var(--border-muted);
+      padding: 16px 12px; overflow-y: auto;
+    }
+    .bp-ae-sidebar-title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--fg-dim); margin-bottom: 12px;
+    }
+    .bp-ae-filters { display: flex; flex-direction: column; gap: 4px; }
+    .bp-ae-filter {
+      text-align: left; padding: 8px 10px; border-radius: var(--radius-sm);
+      border: none; background: transparent; color: var(--fg-muted);
+      font-size: 13px; cursor: pointer;
+    }
+    .bp-ae-filter:hover { background: var(--bg-subtle); color: var(--fg); }
+    .bp-ae-filter.is-active {
+      background: var(--primary-muted, rgba(59, 130, 246, 0.12));
+      color: var(--primary); font-weight: 600;
+    }
+    .bp-ae-main {
+      flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+    }
+    .bp-ae-toolbar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border-muted);
+    }
+    .bp-ae-search { flex: 1; min-width: 180px; }
+    .bp-ae-count { margin-left: auto; }
+    .bp-ae-count.bp-ae-status-error { color: var(--danger, #c0392b); font-weight: 500; }
+    .bp-ae-density-label { display: flex; align-items: center; gap: 8px; }
+    .bp-ae-density { width: 100px; }
+    .bp-ae-grid-wrap {
+      flex: 1; overflow-y: auto; padding: 16px; position: relative; min-height: 0;
+    }
+    .bp-ae-grid {
+      grid-template-columns: repeat(auto-fill, minmax(var(--ae-cell, 160px), 1fr));
+    }
+    .bp-ae-card {
+      padding: 0; cursor: pointer; text-align: left;
+      border: 2px solid transparent; transition: border-color 0.15s, transform 0.15s;
+    }
+    .bp-ae-card:hover { border-color: var(--border); transform: translateY(-2px); }
+    .bp-ae-card.is-selected { border-color: var(--primary); }
+    .bp-ae-file-icon {
+      width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; text-transform: uppercase; color: var(--fg-muted);
+    }
+    .bp-ae-filmstrip {
+      border-top: 1px solid var(--border-muted); padding: 8px 12px;
+      overflow-x: auto; flex-shrink: 0;
+    }
+    .bp-ae-filmstrip-track { display: flex; gap: 8px; min-height: 56px; }
+    .bp-ae-strip-item {
+      width: 56px; height: 56px; flex-shrink: 0; padding: 0; overflow: hidden;
+      border: 2px solid transparent; border-radius: var(--radius-sm);
+      background: var(--bg-subtle); cursor: pointer;
+    }
+    .bp-ae-strip-item.is-selected { border-color: var(--primary); }
+    .bp-ae-strip-item img { width: 100%; height: 100%; object-fit: cover; }
+    .bp-ae-strip-item span {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%; font-size: 9px; text-transform: uppercase;
+    }
+    .bp-ae-inspector {
+      width: 300px; flex-shrink: 0; border-left: 1px solid var(--border-muted);
+      padding: 16px; overflow-y: auto; display: flex; flex-direction: column;
+    }
+    .bp-ae-inspector-img {
+      width: 100%; max-height: 200px; object-fit: contain; border-radius: var(--radius-sm);
+      background: var(--bg-subtle); margin-bottom: 12px;
+    }
+    .bp-ae-inspector-icon {
+      height: 120px; display: flex; align-items: center; justify-content: center;
+      background: var(--bg-subtle); border-radius: var(--radius-sm);
+      text-transform: uppercase; color: var(--fg-muted); margin-bottom: 12px;
+    }
+    .bp-ae-inspector-title { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+    .bp-ae-meta { font-size: 12px; margin: 0 0 16px; }
+    .bp-ae-meta dt { color: var(--fg-dim); margin-top: 8px; }
+    .bp-ae-meta dd { margin: 2px 0 0; word-break: break-all; }
+    .bp-ae-meta code { font-size: 11px; }
+    .bp-ae-inspector-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+
     /* Reference field */
     .ref-field { position: relative; }
     .ref-selected {
@@ -1938,6 +2074,19 @@
        very first block in the editor zeroes its leading margin so the document
        doesn't open with a gap. */
     .bp-paper-editor-body { outline: none; }
+    /* Empty-block ghost text — @tiptap/extension-placeholder stamps `is-empty`
+       (current empty node) / `is-editor-empty` (whole-empty editor) + a
+       `data-placeholder` attr on the node. Render it as a muted, non-shifting
+       prefix (float + height:0 so it never nudges the caret). The faint ink
+       token (#8a8278) is the original Portable Doc editor's exact hint colour. */
+    .bp-paper-editor-body .ProseMirror .is-empty::before,
+    .bp-paper-editor-body .ProseMirror .is-editor-empty::before {
+      content: attr(data-placeholder);
+      color: var(--paper-ink-faint);
+      float: left;
+      height: 0;
+      pointer-events: none;
+    }
     /* A1: kill the browser-default blue focus ring on the editable surface.
        The contenteditable/ProseMirror otherwise paints `outline: rgb(0,95,204)
        auto` on focus — a blue box that screams "input". Mirrors the original
@@ -2231,6 +2380,8 @@
 <body>
   {@inner_content}
   <script src="/assets/bp-rich-text-editor.js" defer></script>
+  <script src="/assets/bp-asset-explorer.js" defer></script>
+  <script src="/assets/bp-asset-browser.js" defer></script>
   <script src="/assets/bp-media-picker.js" defer></script>
   <script src="/assets/bp-reference-picker.js" defer></script>
   <script src="/assets/bp-document-preview.js" defer></script>

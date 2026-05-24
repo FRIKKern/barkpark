@@ -17,6 +17,8 @@
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
+import Placeholder from "@tiptap/extension-placeholder";
+import Typography from "@tiptap/extension-typography";
 
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
@@ -62,6 +64,27 @@ class BpPaperEditor extends HTMLElement {
         // render + edit. openOnClick:false keeps clicks editing, not
         // navigating; autolink off so typing a URL is not silently linkified.
         Link.configure({ openOnClick: false, autolink: false }),
+        // Empty-block ghost text — parity with the PortableDoc editor's
+        // @tiptap/extension-placeholder. Each WC owns ONE block, so the hint
+        // reflects this block's role; the focused empty block shows it. Paragraph
+        // surfaces the "/" affordance; headings name their level.
+        // includeChildren:false so a single placeholder shows on the top-level
+        // textblock only (never doubled across a list-item's inner paragraph).
+        Placeholder.configure({
+          includeChildren: false,
+          showOnlyWhenEditable: true,
+          placeholder: ({ node }) => {
+            if (node.type.name === "heading") {
+              return `Heading ${(node.attrs && node.attrs.level) || 1}`;
+            }
+            return "Start typing, or press / for blocks…";
+          },
+        }),
+        // Smart typography (— for --, “ ” for quotes, … for ...) — parity with
+        // the PortableDoc editor's @tiptap/extension-typography. This WC only
+        // ever hosts prose blocks (paragraph/heading/list — see convert.js), so
+        // there is no code block to exclude.
+        Typography,
       ],
       content: blockToTiptap(block),
       editorProps: {
@@ -153,11 +176,13 @@ class BpPaperEditor extends HTMLElement {
   // ── slash menu ─────────────────────────────────────────────────────────
   //
   // Trigger rule (deliberately conservative so a "/" inside prose never opens
-  // the menu): the menu opens ONLY when the editor holds a single empty block
-  // whose ENTIRE text is exactly "/" and the caret sits right after it — i.e.
-  // the user typed "/" at the start of an otherwise-empty line. Any other
-  // content (text before the slash, a second paragraph, a non-collapsed
-  // selection) keeps the menu closed.
+  // the menu): the menu opens when the editor holds a single block whose text
+  // STARTS with "/" and the caret sits at the end of that text — i.e. the user
+  // typed "/" at the start of an otherwise-empty line and may keep typing a
+  // query ("/head"). The substring after "/" is the live filter query, passed
+  // to the menu so it narrows as you type — PortableDoc-editor parity. Text
+  // that does NOT start with "/" (a slash mid-prose), a multi-line block, or a
+  // non-collapsed selection all keep the menu closed.
   _maybeSlash() {
     if (!this._editor) return;
 
@@ -171,17 +196,19 @@ class BpPaperEditor extends HTMLElement {
     }
 
     const text = this._editor.getText(); // plain text across the single block
+    const startsSlash = text.length > 0 && text[0] === "/";
+    const atEnd = selection.$from.parentOffset === text.length;
     const triggered =
-      text === "/" && selection.$from.parentOffset === 1 && doc.childCount <= 2;
+      startsSlash && atEnd && !text.includes("\n") && doc.childCount <= 2;
 
     if (triggered) {
-      this._openSlash();
+      this._openSlash(text.slice(1)); // query = everything after the leading "/"
     } else {
       this._closeSlash();
     }
   }
 
-  _openSlash() {
+  _openSlash(query = "") {
     if (!this._slash) {
       this._slash = new SlashMenu({
         items: SLASH_ITEMS,
@@ -189,9 +216,10 @@ class BpPaperEditor extends HTMLElement {
         onDismiss: () => this._dismissSlash(),
       });
     }
-    // Anchor the popup to the live caret rectangle.
+    // Anchor the popup to the live caret rectangle. open() handles both the
+    // first open and a re-open with a new filter query (as the user types).
     const rect = this._caretRect();
-    this._slash.open(rect);
+    this._slash.open(rect, query);
   }
 
   _closeSlash() {
@@ -247,8 +275,9 @@ class BpPaperEditor extends HTMLElement {
   // fieldName, so the detail omits it and the server takes the unchanged path.
   _chooseSlash(item) {
     this._closeSlash();
-    // Remove the leading "/" so the trigger char never persists.
-    this._editor.chain().focus().setTextSelection({ from: 1, to: 2 }).deleteSelection().run();
+    // Remove the ENTIRE "/query" the user typed (not just the "/") so the
+    // trigger text never persists in the now-empty origin block.
+    this._editor.chain().focus().selectAll().deleteSelection().run();
 
     const detail = { type: item.type, afterId: this._blockId };
     if (item.fieldName) detail.fieldName = item.fieldName;
