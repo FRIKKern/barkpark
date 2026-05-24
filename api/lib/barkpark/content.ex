@@ -408,7 +408,7 @@ defmodule Barkpark.Content do
         val =
           if key in ["title", "status"],
             do: Map.get(acc, key),
-            else: get_in(doc.content || %{}, [key]) || ""
+            else: classic_form_value(get_in(doc.content || %{}, [key]))
 
         Map.put(acc, key, val)
       end)
@@ -416,6 +416,18 @@ defmodule Barkpark.Content do
       base
     end
   end
+
+  # A field's projected content value, flattened to the SCALAR the Classic form
+  # input expects. A `body` REGION projects to a body map (`%{"blocks" => …,
+  # "html" => …}` — Projection.project_body/2); the Classic richText/text input
+  # is a string editor, so surface the rendered HTML string. This is the Classic
+  # read side of the lossless Beta↔Classic toggle (Exp-P3.2): both views read
+  # the ONE projected content, each presenting it in its own shape — no
+  # conversion of the underlying block list. Non-map (scalar) values pass through
+  # unchanged; nil becomes "".
+  defp classic_form_value(%{"html" => html}) when is_binary(html), do: html
+  defp classic_form_value(nil), do: ""
+  defp classic_form_value(value), do: value
 
   @doc """
   Build a `content` map from a form params map by reducing schema
@@ -2105,6 +2117,77 @@ defmodule Barkpark.Content do
       end
     else
       nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  @doc """
+  Apply a single portable-doc `op` to ANY Expectation-bearing document's block
+  list (Exp-P3.2 — the generalization of `apply_paper_block_op/3` off the
+  hardcoded `"paper"` type onto an arbitrary `{doc_id, type}`).
+
+  This is the Beta block editor's write path for a non-paper document (a post):
+  the same DocPatchOps the paper pane emits (`patch-block`, `insert-after`,
+  `append-block`, `remove-block`, `move-block`, `replace-block`) apply to the
+  document's `content["blocks"]`, then the content is re-projected
+  (`Projection.project/3` — bound blocks → `content[fieldName]`, free blocks →
+  `content["body"]`) and persisted through the canonical `upsert_document/4`
+  path, which broadcasts `{:doc_updated,…}` + fires lifecycle hooks exactly
+  like a Classic save.
+
+  Synthesis-on-first-edit (Exp-P2/P3.1): a document with no stored
+  `content["blocks"]` synthesizes its block list in memory via
+  `resolve_blocks_for_edit/3`, applies the op to that, and the write persists
+  the result — the first Beta edit is what materializes the blocks on disk.
+
+  The block list is the SAME one Classic reads through projection — never a
+  separate copy. Returns `{:ok, %{block, block_id, op_kind, position}}` on
+  success, mirroring `apply_paper_block_op/3`'s result shape (minus the
+  paper-only streaming `rev`/`fragment_html`, which the document editor does
+  not stream). `opts` is forwarded to `upsert_document/4` for hook context.
+  """
+  @spec apply_document_block_op(String.t(), String.t(), map(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def apply_document_block_op(doc_id, type, op, dataset, opts \\ [])
+      when is_binary(doc_id) and is_binary(type) and is_map(op) do
+    with {:ok, %Document{} = doc} <- get_document(doc_id, type, dataset),
+         {blocks, _synth?} = resolve_blocks_for_edit(doc, type, dataset),
+         {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
+         {:ok, affected} <- locate_paper_affected(op, new_blocks) do
+      content =
+        (doc.content || %{})
+        |> Map.put("blocks", new_blocks)
+        # Project-on-write — the SOLE writer of content[fieldName]/content["body"]
+        # for this document, identical to the paper path. Bound title → "title",
+        # free body blocks → content["body"].
+        |> Projection.project(new_blocks, render_opts(dataset))
+
+      # Derive the row title from the bound title field if present (matches the
+      # Classic-save title precedence), else keep the document's current title.
+      new_title = blank_to_nil(Map.get(content, "title")) || doc.title
+
+      attrs = %{
+        "doc_id" => draft_id(published_id(doc_id)),
+        "title" => new_title,
+        "status" => doc.status,
+        "content" => content
+      }
+
+      case upsert_document(type, attrs, dataset, opts) do
+        {:ok, _saved} ->
+          {:ok,
+           %{
+             block: affected.block,
+             block_id: affected.block_id,
+             op_kind: Map.get(op, "op"),
+             position: affected.position
+           }}
+
+        {:error, _} = err ->
+          err
+      end
+    else
+      {:error, :not_found} -> {:error, :not_found}
       {:error, _reason} = err -> err
     end
   end

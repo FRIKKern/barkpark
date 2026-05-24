@@ -122,7 +122,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # pane never remounts. `paper_edit_block` builds the edit form straight
        # from `paper_doc.content["blocks"]` (the source of truth, refetched
        # after every op) — it never bypasses the op pipeline.
-       paper_edit_mode: false
+       paper_edit_mode: false,
+       # Per-document Classic <-> Beta toggle (Exp-P3.2, barkpark-g2ql).
+       # `editor_mode` flips an Expectation-bearing document's editor between
+       # the Classic schema form (`:classic`, default - reads projected
+       # content[fieldName]) and the Beta premium block editor (`:beta` -
+       # reuses `paper_block_editor` over the doc's content["blocks"]). Both
+       # views read the ONE block list; flipping re-projects, never converts,
+       # so it is lossless both ways. `editor_blocks` holds the block list
+       # backing the Beta view (the stored content["blocks"] or, when absent,
+       # an in-memory synthesis via Content.resolve_blocks_for_edit/3 that is
+       # persisted on the first Beta edit). `editor_blocks_synth?` records
+       # whether that list was synthesized (nothing on disk yet).
+       editor_mode: :classic,
+       editor_blocks: [],
+       editor_blocks_synth?: false
      )
      |> stream(:paper_blocks, [])
      |> allow_upload(:image,
@@ -429,6 +443,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # event when nothing is loaded just flips a hidden assign.
   def handle_event("toggle-diff", _, socket) do
     {:noreply, assign(socket, diff_visible: !socket.assigns.diff_visible)}
+  end
+
+  # Per-document Classic <-> Beta toggle (Exp-P3.2). Pure assign flip over the
+  # SAME content["blocks"] both views read — Classic renders the schema form,
+  # Beta renders the premium block editor. Flipping NEVER mutates the block
+  # list (no conversion); it just re-projects through the current view. The
+  # `mode` param ("classic"|"beta") is explicit so the two buttons are idempotent
+  # (clicking Classic while already Classic is a no-op). Gated on a Beta-eligible
+  # document; a stray event when ineligible just keeps Classic.
+  def handle_event("editor-set-mode", %{"mode" => mode}, socket) do
+    next =
+      case mode do
+        "beta" -> if beta_editable?(socket), do: :beta, else: :classic
+        _ -> :classic
+      end
+
+    # Entering Beta reads the freshest block list off the editor doc so an edit
+    # made via the Classic form before the flip is reflected. The blocks already
+    # live on editor_blocks (kept fresh by rebuild_panes); resync defensively in
+    # case the form path mutated content without a rebuild.
+    socket =
+      if next == :beta, do: sync_editor_blocks(socket), else: socket
+
+    {:noreply, assign(socket, editor_mode: next)}
   end
 
   def handle_event("autosave", _params, socket) do
@@ -1111,6 +1149,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # `{:paper_block}` broadcast already advanced the read-only stream (and any
   # remote viewer); this just keeps THIS pane's edit controls in sync.
   defp paper_op(socket, op) do
+    cond do
+      # Beta block editor over a non-paper DOCUMENT (Exp-P3.2). The same
+      # block editor + the same `paper-*` events drive a post's editing in
+      # Beta mode; route the op through the generalized document block-op
+      # path so it applies to content["blocks"], re-projects
+      # content[fieldName]/content["body"], and persists + broadcasts via
+      # upsert_document. No paper_doc / no stream — the form re-reads the
+      # refetched blocks.
+      socket.assigns[:editor_view] == :form and socket.assigns[:editor_mode] == :beta and
+          socket.assigns[:editor_doc] != nil ->
+        document_op(socket, op)
+
+      true ->
+        paper_pane_op(socket, op)
+    end
+  end
+
+  # The paper-pane op path (unchanged): applies to the open paper's blocks,
+  # streams the delta, re-syncs the in-memory paper_doc.
+  defp paper_pane_op(socket, op) do
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
     dataset = socket.assigns.dataset
@@ -1127,6 +1185,48 @@ defmodule BarkparkWeb.Studio.StudioLive do
           {:error, _reason} ->
             put_flash(socket, :error, "Edit failed")
         end
+    end
+  end
+
+  # The document (post) Beta op path: one DocPatchOp → content["blocks"] →
+  # re-project → persist via Content.apply_document_block_op/5, then refetch the
+  # doc so editor_doc/editor_blocks/editor_form reflect the persisted state.
+  defp document_op(socket, op) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    dataset = socket.assigns.dataset
+
+    case Content.apply_document_block_op(doc.doc_id, type, op, dataset, hook_opts(socket)) do
+      {:ok, _result} ->
+        sync_editor_blocks(socket)
+
+      {:error, _reason} ->
+        put_flash(socket, :error, "Edit failed")
+    end
+  end
+
+  # Refetch the open document into editor_doc/editor_blocks/editor_form so all
+  # three reflect the latest persisted state after a Beta op (or before entering
+  # Beta). Reads the draft-first row, re-derives the Classic form via
+  # doc_to_form, and re-resolves the block list — keeping Classic and Beta over
+  # the ONE block list. No rebuild_panes (no remount).
+  defp sync_editor_blocks(socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    dataset = socket.assigns.dataset
+
+    with %{doc_id: doc_id} <- doc,
+         {:ok, fresh} <- Content.get_document(doc_id, type, dataset) do
+      {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
+
+      assign(socket,
+        editor_doc: fresh,
+        editor_blocks: blocks,
+        editor_blocks_synth?: synth?,
+        editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema])
+      )
+    else
+      _ -> socket
     end
   end
 
@@ -1165,11 +1265,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  # Top-level blocks of the currently-open paper (source of truth).
+  # Top-level blocks of the surface the block editor is currently driving — the
+  # open paper's blocks in the paper pane, or the open document's resolved
+  # `editor_blocks` when the block editor is the document Beta view (Exp-P3.2).
+  # The op handlers (paper-edit-block / paper-move-block / …) read through this
+  # so the SAME controls drive either surface against the right block list.
   defp paper_top_level_blocks(socket) do
-    case socket.assigns[:paper_doc] do
-      %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
-      _ -> []
+    cond do
+      socket.assigns[:editor_view] == :form and socket.assigns[:editor_mode] == :beta and
+          is_list(socket.assigns[:editor_blocks]) ->
+        socket.assigns[:editor_blocks]
+
+      true ->
+        case socket.assigns[:paper_doc] do
+          %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
+          _ -> []
+        end
     end
   end
 
@@ -2252,6 +2363,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
     is_draft = (editor && editor[:is_draft]) || false
     has_published = (editor && editor[:has_published]) || false
 
+    # Resolve the block list backing a Beta view of the open document (the
+    # stored content["blocks"] or an in-memory synthesis when absent). Whether
+    # the editor is currently showing Classic or Beta, we keep this fresh so a
+    # toggle into Beta renders the up-to-date blocks without a refetch.
+    # `editor_mode` resets to :classic whenever the open document changes (a
+    # different doc_id) — a Beta session is per-document, not sticky across docs.
+    {editor_blocks, editor_blocks_synth?} =
+      Content.resolve_blocks_for_edit(editor_doc, editor_type, socket.assigns.dataset)
+
+    editor_mode =
+      if same_editor_doc?(socket.assigns[:editor_doc], editor_doc),
+        do: socket.assigns[:editor_mode] || :classic,
+        else: :classic
+
     socket =
       assign(socket,
         panes: panes,
@@ -2261,6 +2386,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
         editor_is_draft: is_draft,
         editor_has_published: has_published,
         editor_form: new_form,
+        editor_mode: editor_mode,
+        editor_blocks: editor_blocks,
+        editor_blocks_synth?: editor_blocks_synth?,
         save_status: socket.assigns[:save_status] || "",
         nav_group: nav_group,
         cross_violations: compute_cross_violations(new_schema, new_form),
@@ -2343,6 +2471,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
     else
       assign(socket, editor_view: :form)
     end
+  end
+
+  # ── Per-document Classic <-> Beta toggle (Exp-P3.2, barkpark-g2ql) ───────────
+
+  # Same open document across a rebuild? Compared by published id so a draft
+  # save (drafts.<id>) that re-resolves the editor doesn't read as a doc switch
+  # and snap the user back to Classic mid-Beta-session.
+  defp same_editor_doc?(%{doc_id: a}, %{doc_id: b}),
+    do: Content.published_id(a) == Content.published_id(b)
+
+  defp same_editor_doc?(_, _), do: false
+
+  # Beta is offered only for an Expectation-bearing document — one that already
+  # has stored blocks OR a non-empty synthesized block list. A doc whose schema
+  # carries no layout synthesizes to []; offering Beta there would show an empty
+  # block editor, so we gate it out and the Classic form is the only view.
+  defp beta_editable?(socket) do
+    socket.assigns[:editor_doc] != nil and socket.assigns[:editor_blocks] != []
   end
 
   # Each stream item carries a stable id (the block id) and its rendered
@@ -2640,6 +2786,36 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # is keyed on the slug + rev so a jump or an op refreshes it cleanly. This is
   # plain assign-driven HTML (no stream) — the read-only View pane is the
   # streamed surface; this editor reads from `paper_doc.content["blocks"]`.
+  # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
+  # Two-button segmented control fired into `editor-set-mode`. The active mode
+  # is `btn-primary`, the other `btn-ghost`. Rendered in the editor header for
+  # a Beta-eligible document only (the caller gates on `@editor_blocks != []`).
+  attr :mode, :atom, default: :classic
+  attr :beta_ok, :boolean, default: false
+
+  defp editor_mode_toggle(assigns) do
+    ~H"""
+    <div class="editor-mode-toggle" role="group" aria-label="Editor mode" data-test-id="editor-mode-toggle">
+      <button
+        type="button"
+        class={"btn btn-sm " <> if(@mode == :classic, do: "btn-primary", else: "btn-ghost")}
+        phx-click="editor-set-mode"
+        phx-value-mode="classic"
+        aria-pressed={@mode == :classic}
+        data-test-id="editor-mode-classic"
+      >Classic</button>
+      <button
+        type="button"
+        class={"btn btn-sm " <> if(@mode == :beta, do: "btn-primary", else: "btn-ghost")}
+        phx-click="editor-set-mode"
+        phx-value-mode="beta"
+        aria-pressed={@mode == :beta}
+        data-test-id="editor-mode-beta"
+      >Beta</button>
+    </div>
+    """
+  end
+
   attr :slug, :string, required: true
   attr :blocks, :list, required: true
   attr :paper_rev, :integer, default: 0
@@ -3124,25 +3300,64 @@ defmodule BarkparkWeb.Studio.StudioLive do
           streams={@streams}
         />
       <% else %>
-        <.studio_editor_shell
-          editor_doc={@editor_doc}
-          editor_schema={@editor_schema}
-          editor_type={@editor_type}
-          editor_form={@editor_form}
-          editor_is_draft={@editor_is_draft}
-          dataset={@dataset}
-          validation_errors={@validation_errors}
-          cross_violations={@cross_violations}
-          save_status={@save_status}
-          presences={@presences}
-          parent_assigns={assigns}
-          nav_group={@nav_group}
-          content_preview_rendered={@content_preview_rendered}
-          content_preview_visible={@content_preview_visible}
-          diff_visible={@diff_visible}
-          published_doc={@published_doc}
-          doc_actions={resolved_doc_actions(assigns)}
-        />
+        <%!-- Per-document Classic <-> Beta editor (Exp-P3.2, barkpark-g2ql).
+              Beta reuses the premium block editor over the SAME
+              content["blocks"] Classic projects from. The toggle (a `.editor-mode-toggle`
+              segmented control) re-projects, never converts. Beta is offered
+              only for an Expectation-bearing document (`@editor_blocks != []`);
+              other docs only ever see Classic. --%>
+        <% beta_ok = @editor_doc != nil and @editor_blocks != [] %>
+        <%= if beta_ok and @editor_mode == :beta do %>
+          <div class="editor-panel" data-test-id="studio-doc-beta-editor">
+            <.document_header dataset={@dataset} title={@editor_doc.title || "Untitled"}>
+              <:status_pill>
+                <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
+                  <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
+                </span>
+              </:status_pill>
+              <:actions>
+                <.editor_mode_toggle mode={@editor_mode} beta_ok={beta_ok} />
+              </:actions>
+            </.document_header>
+            <div class="editor-with-preview">
+              <div class="editor-body editor-panel-main">
+                <main class="bp-paper-shell" data-test-id="studio-doc-beta-shell">
+                  <.paper_block_editor
+                    slug={@editor_doc.doc_id}
+                    blocks={@editor_blocks}
+                    paper_rev={0}
+                    dataset={@dataset}
+                    api_token_raw={Map.get(assigns, :api_token_raw, "")}
+                  />
+                </main>
+              </div>
+            </div>
+          </div>
+        <% else %>
+          <.studio_editor_shell
+            editor_doc={@editor_doc}
+            editor_schema={@editor_schema}
+            editor_type={@editor_type}
+            editor_form={@editor_form}
+            editor_is_draft={@editor_is_draft}
+            dataset={@dataset}
+            validation_errors={@validation_errors}
+            cross_violations={@cross_violations}
+            save_status={@save_status}
+            presences={@presences}
+            parent_assigns={assigns}
+            nav_group={@nav_group}
+            content_preview_rendered={@content_preview_rendered}
+            content_preview_visible={@content_preview_visible}
+            diff_visible={@diff_visible}
+            published_doc={@published_doc}
+            doc_actions={resolved_doc_actions(assigns)}
+          >
+            <:extra_actions>
+              <.editor_mode_toggle :if={beta_ok} mode={@editor_mode} beta_ok={beta_ok} />
+            </:extra_actions>
+          </.studio_editor_shell>
+        <% end %>
       <% end %>
       <!-- doc_actions flows through Registry.collect_doc_actions/1 with
            the host's `default_doc_actions/2` as :baseline. Plugins
