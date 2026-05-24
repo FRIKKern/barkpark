@@ -522,6 +522,56 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  Notifies registered plugins after a blob upload lands in `media_files`.
+
+  Plugins opt in by exporting `after_media_upload/1`. Failures are logged
+  per-plugin; the upload itself is never rolled back.
+  """
+  @spec run_after_media_upload(map()) :: :ok
+  def run_after_media_upload(ctx) when is_map(ctx) do
+    load_ordered_plugins()
+    |> Enum.each(fn %{module: module} ->
+      if function_exported?(module, :after_media_upload, 1) do
+        safe_call(module, :after_media_upload, [ctx], :ok)
+      end
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Notifies registered plugins after a blob row is deleted from `media_files`.
+
+  Plugins opt in by exporting `after_media_delete/1`.
+  """
+  @spec run_after_media_delete(map()) :: :ok
+  def run_after_media_delete(ctx) when is_map(ctx) do
+    load_ordered_plugins()
+    |> Enum.each(fn %{module: module} ->
+      if function_exported?(module, :after_media_delete, 1) do
+        safe_call(module, :after_media_delete, [ctx], :ok)
+      end
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Returns the `mediaAsset` document id linked to a blob, if any plugin
+  exports `asset_doc_id_for_file/2`.
+  """
+  @spec asset_doc_id_for_media_file(String.t(), String.t()) :: String.t() | nil
+  def asset_doc_id_for_media_file(media_file_id, dataset)
+      when is_binary(media_file_id) and is_binary(dataset) do
+    load_ordered_plugins()
+    |> Enum.find_value(fn %{module: module} ->
+      if function_exported?(module, :asset_doc_id_for_file, 2) do
+        module.asset_doc_id_for_file(media_file_id, dataset)
+      end
+    end)
+  end
+
+  @doc """
   Iterate registered plugins; for each (plugin, resolver-callback) pair
   where the plugin exports BOTH the resolver and the additive form, log
   one `Logger.warning` line naming the plugin and callback. The resolver

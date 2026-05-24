@@ -1,0 +1,188 @@
+{
+  "name": "mediaAsset",
+  "title": "Media Asset",
+  "icon": "🖼",
+  "visibility": "private",
+  "groups": [
+    { "name": "file", "title": "File", "icon": "file" },
+    { "name": "metadata", "title": "Metadata", "icon": "tag" },
+    { "name": "rights", "title": "Rights", "icon": "shield" }
+  ],
+  "deskGroups": [
+    { "name": "images", "title": "Images", "filter": { "content.bp_asset_kind": { "eq": "image" } } },
+    { "name": "video", "title": "Video", "filter": { "content.bp_asset_kind": { "eq": "video" } } },
+    { "name": "audio", "title": "Audio", "filter": { "content.bp_asset_kind": { "eq": "audio" } } },
+    { "name": "documents", "title": "Documents", "filter": { "content.bp_asset_kind": { "eq": "document" } } },
+    { "name": "all", "title": "All", "filter": {} }
+  ],
+  "initial_values": {
+    "bp_processing_status": "ready",
+    "bp_visibility": "public",
+    "tags": []
+  },
+  "fields": [
+    {
+      "name": "mediaFileId",
+      "title": "Media file ID",
+      "type": "string",
+      "group": "file"
+    },
+    {
+      "name": "fileInfo",
+      "title": "File info",
+      "type": "composite",
+      "group": "file",
+      "fields": [
+        { "name": "url", "title": "URL", "type": "string" },
+        { "name": "path", "title": "Path", "type": "string" },
+        { "name": "mimeType", "title": "MIME type", "type": "string" },
+        { "name": "size", "title": "Size (bytes)", "type": "string" },
+        { "name": "originalName", "title": "Original filename", "type": "string" },
+        { "name": "width", "title": "Width", "type": "string" },
+        { "name": "height", "title": "Height", "type": "string" }
+      ]
+    },
+    {
+      "name": "bp_asset_kind",
+      "title": "Asset kind",
+      "type": "select",
+      "group": "file",
+      "options": ["image", "video", "audio", "document", "other"]
+    },
+    {
+      "name": "bp_processing_status",
+      "title": "Processing status",
+      "type": "select",
+      "group": "file",
+      "options": ["ready", "processing", "failed"]
+    },
+    {
+      "name": "bp_visibility",
+      "title": "Delivery visibility",
+      "type": "select",
+      "group": "rights",
+      "options": ["public", "token", "private"]
+    },
+    {
+      "name": "checkedOutBy",
+      "title": "Checked out by",
+      "type": "string",
+      "group": "metadata"
+    },
+    {
+      "name": "checkedOutAt",
+      "title": "Checked out at",
+      "type": "string",
+      "group": "metadata"
+    },
+    {
+      "name": "altText",
+      "title": "Alt text",
+      "type": "localizedText",
+      "group": "metadata",
+      "languages": ["nob", "eng"],
+      "format": "plain",
+      "fallbackChain": ["nob", "eng", "first-non-empty"]
+    },
+    {
+      "name": "caption",
+      "title": "Caption",
+      "type": "localizedText",
+      "group": "metadata",
+      "languages": ["nob", "eng"],
+      "format": "rich",
+      "fallbackChain": ["nob", "eng", "first-non-empty"]
+    },
+    {
+      "name": "description",
+      "title": "Description",
+      "type": "text",
+      "group": "metadata",
+      "rows": 3
+    },
+    {
+      "name": "collection",
+      "title": "Primary collection",
+      "type": "reference",
+      "refType": "mediaCollection",
+      "group": "metadata"
+    },
+    {
+      "name": "collections",
+      "title": "Collections",
+      "type": "arrayOf",
+      "ordered": false,
+      "group": "metadata",
+      "of": { "type": "reference", "refType": "mediaCollection" }
+    },
+    {
+      "name": "tags",
+      "title": "Tags",
+      "type": "arrayOf",
+      "ordered": false,
+      "group": "metadata",
+      "of": { "type": "string" }
+    },
+    {
+      "name": "assetRole",
+      "title": "Role",
+      "type": "codelist",
+      "codelistId": "media:asset_role",
+      "version": 1,
+      "group": "metadata"
+    },
+    {
+      "name": "focalPoint",
+      "title": "Focal point",
+      "type": "composite",
+      "group": "metadata",
+      "fields": [
+        { "name": "x", "title": "X", "type": "string" },
+        { "name": "y", "title": "Y", "type": "string" }
+      ]
+    },
+    {
+      "name": "relatedAssets",
+      "title": "Related assets",
+      "type": "arrayOf",
+      "ordered": false,
+      "group": "metadata",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "relation",
+            "title": "Relation",
+            "type": "codelist",
+            "codelistId": "media:relation_type",
+            "version": 1
+          },
+          { "name": "target", "title": "Target asset", "type": "reference", "refType": "mediaAsset" }
+        ]
+      }
+    },
+    {
+      "name": "rights",
+      "title": "Rights",
+      "type": "composite",
+      "group": "rights",
+      "fields": [
+        { "name": "copyrightHolder", "title": "Copyright holder", "type": "string" },
+        {
+          "name": "license",
+          "title": "License",
+          "type": "codelist",
+          "codelistId": "media:license",
+          "version": 1
+        },
+        { "name": "usageNotes", "title": "Usage notes", "type": "text", "rows": 2 },
+        {
+          "name": "watermarkProfile",
+          "title": "Watermark profile",
+          "type": "select",
+          "options": ["none", "draft", "editorial"]
+        }
+      ]
+    }
+  ]
+}

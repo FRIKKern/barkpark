@@ -57,6 +57,7 @@ apt-get update -qq
 apt-get install -y -qq \
   build-essential git curl wget unzip \
   libssl-dev automake autoconf libncurses5-dev \
+  libvips-dev \
   inotify-tools ufw
 
 # ── 2. PostgreSQL ────────────────────────────────────────────────────────────

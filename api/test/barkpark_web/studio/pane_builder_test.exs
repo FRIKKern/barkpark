@@ -129,4 +129,29 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       assert Enum.at(hd(result).items, 0) == %{type: :divider, id: "d"}
     end
   end
+
+  describe "mediaAsset explorer view" do
+    test "browsing mediaAsset list without a doc opens the media explorer editor" do
+      dataset = "pb_media_explorer"
+
+      insert_schema!(%{
+        name: "mediaAsset",
+        title: "Media Asset",
+        icon: "image",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}],
+        desk_groups: [
+          %{"name" => "images", "title" => "Images", "filter" => %{"content.bp_asset_kind" => %{"eq" => "image"}}},
+          %{"name" => "all", "title" => "All", "filter" => %{}}
+        ]
+      })
+
+      {panes, editor} = PaneBuilder.build(dataset, ["mediaAsset"], desk: "images")
+
+      assert length(panes) == 2
+      assert editor[:view] == :media_explorer
+      assert editor[:kind_filter] == "image"
+    end
+  end
 end

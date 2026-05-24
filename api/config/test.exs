@@ -35,3 +35,4 @@ config :barkpark, Oban, testing: :manual
 
 # Fixed paper-ingest secret for tests (convergence MVP).
 config :barkpark, :paperflow_ingest_token, "paperflow-test-ingest-token"
+config :barkpark, :media_signing_secret, "test-media-signing-secret"

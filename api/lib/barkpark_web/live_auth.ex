@@ -43,14 +43,26 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   def on_mount(:fetch_api_token, _params, session, socket) do
-    case session["api_token"] do
-      raw when is_binary(raw) ->
-        case Auth.verify_token(raw) do
+    raw =
+      case session["api_token"] do
+        token when is_binary(token) and token != "" -> token
+        _ -> dev_browser_token_fallback()
+      end
+
+    case raw do
+      nil ->
+        {:cont,
+         socket
+         |> assign(:api_token, nil)
+         |> assign(:api_token_raw, "")}
+
+      token ->
+        case Auth.verify_token(token) do
           {:ok, api_token} ->
             {:cont,
              socket
              |> assign(:api_token, api_token)
-             |> assign(:api_token_raw, raw)}
+             |> assign(:api_token_raw, token)}
 
           _ ->
             {:cont,
@@ -58,12 +70,14 @@ defmodule BarkparkWeb.LiveAuth do
              |> assign(:api_token, nil)
              |> assign(:api_token_raw, "")}
         end
+    end
+  end
 
-      _ ->
-        {:cont,
-         socket
-         |> assign(:api_token, nil)
-         |> assign(:api_token_raw, "")}
+  # In dev, Studio gets the seeded token automatically so media upload works
+  # without a separate /login step. Production always requires POST /login.
+  defp dev_browser_token_fallback do
+    if Mix.env() == :dev do
+      Application.get_env(:barkpark, :dev_browser_token)
     end
   end
 
