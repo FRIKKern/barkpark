@@ -3320,8 +3320,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
               </:actions>
             </.document_header>
             <div class="editor-with-preview">
-              <div class="editor-body editor-panel-main">
-                <main class="bp-paper-shell" data-test-id="studio-doc-beta-shell">
+              <div class="editor-body editor-panel-main bp-paper-body">
+                <main class="bp-paper-shell bp-paper-surface" data-test-id="studio-doc-beta-shell">
                   <.paper_block_editor
                     slug={@editor_doc.doc_id}
                     blocks={@editor_blocks}
