@@ -1274,8 +1274,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   # A fresh block of `type` with sensible empty defaults, in the EXACT shape
-  # Render.compose_block/1 expects. `image`/`table`/`action` are not offered in
-  # the Add menu (deferred), so they are not built here.
+  # Render.compose_block/1 (and, for field/composite blocks, the field-block
+  # editors) expect. Every type the add-block menu offers (P3.1) has a clause
+  # here producing a minimal, VALID, immediately-editable block — the new id is
+  # the only non-default datum. The configurable types (select / composite /
+  # arrayOf / codelist / localizedText) get a minimal usable shape; real schema
+  # config (option lists, subfield trees, the bound codelist, language set)
+  # lands later via the Expectations layer — there is no config editor here.
+  #
+  # ── rich-text (Text group) ──
   defp default_block("heading", id),
     do: %{"id" => id, "type" => "heading", "text" => "New heading", "level" => 2}
 
@@ -1306,6 +1313,87 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp default_block("section", id),
     do: %{"id" => id, "type" => "section", "title" => "New section", "blocks" => []}
+
+  # ── leaf field-* blocks (P2.1) — Basic fields group ──
+  # string / slug / text share the {label, value:""} shape; the field-text
+  # editor also reads an optional "rows" but defaults to 3 when absent.
+  defp default_block("field-string", id),
+    do: %{"id" => id, "type" => "field-string", "label" => "Text", "value" => ""}
+
+  defp default_block("field-slug", id),
+    do: %{"id" => id, "type" => "field-slug", "label" => "Slug", "value" => ""}
+
+  defp default_block("field-text", id),
+    do: %{"id" => id, "type" => "field-text", "label" => "Long text", "value" => ""}
+
+  defp default_block("field-boolean", id),
+    do: %{"id" => id, "type" => "field-boolean", "label" => "Boolean", "value" => false}
+
+  defp default_block("field-datetime", id),
+    do: %{"id" => id, "type" => "field-datetime", "label" => "Date & time", "value" => ""}
+
+  defp default_block("field-color", id),
+    do: %{"id" => id, "type" => "field-color", "label" => "Color", "value" => "#000000"}
+
+  defp default_block("field-select", id),
+    do: %{
+      "id" => id,
+      "type" => "field-select",
+      "label" => "Select",
+      "value" => "",
+      "options" => [
+        %{"value" => "option-1", "label" => "Option 1"},
+        %{"value" => "option-2", "label" => "Option 2"}
+      ]
+    }
+
+  # ── picker field-* blocks (P2.2) — Media & reference group ──
+  # field-reference's refType is empty by default; the picker still browses all
+  # types when ref-type is "". field-image's value is an empty image URL.
+  defp default_block("field-reference", id),
+    do: %{"id" => id, "type" => "field-reference", "label" => "Reference", "refType" => "", "value" => ""}
+
+  defp default_block("field-image", id),
+    do: %{"id" => id, "type" => "field-image", "label" => "Image", "value" => ""}
+
+  # ── v2 composite field-* blocks (P2.3) — Structured group ──
+  # composite carries an inline "fields" config (subfields use name/type/title,
+  # matching PaperFieldBlock.build_subfield/1 + Render.compose_block/1) and a
+  # structured map "value". arrayOf carries an "of" element descriptor + an
+  # "ordered" flag + a list "value". codelist carries a (here empty) codelistId
+  # + a scalar "value". localizedText carries a language set + a "format" + a
+  # %{lang => text} "value".
+  defp default_block("composite", id),
+    do: %{
+      "id" => id,
+      "type" => "composite",
+      "label" => "Composite",
+      "fields" => [%{"name" => "field1", "type" => "string", "title" => "Field 1"}],
+      "value" => %{}
+    }
+
+  defp default_block("arrayOf", id),
+    do: %{
+      "id" => id,
+      "type" => "arrayOf",
+      "label" => "Array",
+      "of" => %{"type" => "string"},
+      "ordered" => false,
+      "value" => []
+    }
+
+  defp default_block("codelist", id),
+    do: %{"id" => id, "type" => "codelist", "label" => "Code list", "codelistId" => "", "value" => ""}
+
+  defp default_block("localizedText", id),
+    do: %{
+      "id" => id,
+      "type" => "localizedText",
+      "label" => "Localized text",
+      "languages" => ["en"],
+      "format" => "plain",
+      "value" => %{}
+    }
 
   defp default_block(_unknown, id),
     do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => ""}]}
@@ -2520,7 +2608,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
       </div>
 
       <%!-- Add-block dropdown. The `+ Add` <select> fires append-block (no
-            anchor) of the chosen type via paper-add-block. --%>
+            anchor) of the chosen type via paper-add-block. Every portable-doc
+            block type is creatable here (P3.1), grouped by optgroup so the
+            list stays scannable: Text (rich-text), Basic fields (leaf field-*),
+            Media & reference (picker field-*), Structured (v2 composite). Each
+            choice resolves to default_block/2 and is applied through the SAME
+            paper-add-block → paper_op pipeline. --%>
       <form
         class="bp-paper-add-block"
         phx-submit="paper-add-block"
@@ -2529,13 +2622,34 @@ defmodule BarkparkWeb.Studio.StudioLive do
         <label>
           + Add block
           <select name="block-type">
-            <option value="paragraph">Paragraph</option>
-            <option value="heading">Heading</option>
-            <option value="list">List</option>
-            <option value="callout">Callout</option>
-            <option value="code">Code</option>
-            <option value="divider">Divider</option>
-            <option value="section">Section</option>
+            <optgroup label="Text">
+              <option value="paragraph">Paragraph</option>
+              <option value="heading">Heading</option>
+              <option value="list">List</option>
+              <option value="callout">Callout</option>
+              <option value="code">Code</option>
+              <option value="divider">Divider</option>
+              <option value="section">Section</option>
+            </optgroup>
+            <optgroup label="Basic fields">
+              <option value="field-string">String</option>
+              <option value="field-slug">Slug</option>
+              <option value="field-text">Long text</option>
+              <option value="field-boolean">Boolean</option>
+              <option value="field-select">Select</option>
+              <option value="field-datetime">Date &amp; time</option>
+              <option value="field-color">Color</option>
+            </optgroup>
+            <optgroup label="Media &amp; reference">
+              <option value="field-image">Image</option>
+              <option value="field-reference">Reference</option>
+            </optgroup>
+            <optgroup label="Structured">
+              <option value="composite">Composite</option>
+              <option value="arrayOf">Array of</option>
+              <option value="codelist">Code list</option>
+              <option value="localizedText">Localized text</option>
+            </optgroup>
           </select>
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Add</button>

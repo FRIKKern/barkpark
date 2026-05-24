@@ -686,4 +686,104 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     block = Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-keywords"))
     assert block["value"] == ["history", "norway", ""]
   end
+
+  # ── P3.1: every block type is creatable from the add-block UI ───────────────
+  # The add-block <select> now offers every portable-doc block type (grouped by
+  # optgroup). Each choice resolves to default_block/2 and is appended through
+  # the canonical paper-add-block → paper_op → Content.apply_paper_block_op
+  # pipeline, which renders the new block (compose_block must accept it) and
+  # persists. These assertions prove the full round-trip for every type.
+
+  # Every type the add-block menu offers (the optgroup list, in order). The
+  # per-type invariant (so a degraded default surfaces as a failure) lives in
+  # `addable_block_valid?/1` below — module attributes cannot hold closures.
+  @addable_block_types ~w(
+    paragraph heading list callout code divider section
+    field-string field-slug field-text field-boolean field-datetime field-color field-select
+    field-reference field-image
+    composite arrayOf codelist localizedText
+  )
+
+  # The per-type invariant the freshly-built default block must satisfy.
+  defp addable_block_valid?(%{"type" => "paragraph"}), do: true
+  defp addable_block_valid?(%{"type" => "heading", "level" => 2}), do: true
+  defp addable_block_valid?(%{"type" => "list", "ordered" => false}), do: true
+  defp addable_block_valid?(%{"type" => "callout", "tone" => "info"}), do: true
+  defp addable_block_valid?(%{"type" => "code"}), do: true
+  defp addable_block_valid?(%{"type" => "divider"}), do: true
+  defp addable_block_valid?(%{"type" => "section", "blocks" => b}) when is_list(b), do: true
+  defp addable_block_valid?(%{"type" => "field-string", "value" => ""}), do: true
+  defp addable_block_valid?(%{"type" => "field-slug", "value" => ""}), do: true
+  defp addable_block_valid?(%{"type" => "field-text", "value" => ""}), do: true
+  defp addable_block_valid?(%{"type" => "field-boolean", "value" => false}), do: true
+  defp addable_block_valid?(%{"type" => "field-datetime", "value" => ""}), do: true
+  defp addable_block_valid?(%{"type" => "field-color", "value" => "#000000"}), do: true
+  defp addable_block_valid?(%{"type" => "field-select", "options" => o}) when length(o) == 2, do: true
+  defp addable_block_valid?(%{"type" => "field-reference", "refType" => _}), do: true
+  defp addable_block_valid?(%{"type" => "field-image", "value" => ""}), do: true
+
+  defp addable_block_valid?(%{"type" => "composite", "fields" => f, "value" => v})
+       when is_list(f) and is_map(v),
+       do: true
+
+  defp addable_block_valid?(%{"type" => "arrayOf", "value" => [], "of" => of}) when is_map(of),
+    do: true
+
+  defp addable_block_valid?(%{"type" => "codelist", "codelistId" => _}), do: true
+
+  defp addable_block_valid?(%{"type" => "localizedText", "languages" => ["en"], "value" => v})
+       when is_map(v),
+       do: true
+
+  defp addable_block_valid?(_), do: false
+
+  for type <- @addable_block_types do
+    test "adding a #{type} block via the add-block UI appends a valid block", %{conn: conn} do
+      type = unquote(type)
+
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+      open_editor(view)
+
+      before_count = Content.paper_blocks(@slug, @dataset) |> length()
+
+      view
+      |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => type})
+      |> render_submit()
+
+      blocks = Content.paper_blocks(@slug, @dataset)
+      assert length(blocks) == before_count + 1
+
+      last = List.last(blocks)
+      # Fresh immutable "b-" id, the per-type default shape, and it renders in
+      # the editor (so compose_block accepted it during render_blocks).
+      assert String.starts_with?(last["id"], "b-")
+
+      assert addable_block_valid?(last),
+             "default #{type} block did not satisfy its invariant: #{inspect(last)}"
+
+      assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
+    end
+  end
+
+  test "a freshly-added field block can be removed via its delete control (remove-block)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+
+    # Add a field-string, then delete it — the per-block × control fires a
+    # remove-block op through the same pipeline, regardless of block type.
+    view
+    |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => "field-string"})
+    |> render_submit()
+
+    new_id = Content.paper_blocks(@slug, @dataset) |> List.last() |> Map.get("id")
+    assert new_id in (Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]))
+
+    view
+    |> element(~s([data-edit-block-id="#{new_id}"] [data-test-id="paper-delete-block"]))
+    |> render_click()
+
+    refute new_id in (Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]))
+    refute render(view) =~ ~s(data-edit-block-id="#{new_id}")
+  end
 end
