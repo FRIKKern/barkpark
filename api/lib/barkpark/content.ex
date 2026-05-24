@@ -1223,6 +1223,23 @@ defmodule Barkpark.Content do
     end
   end
 
+  @doc """
+  Resolve the full Expectation for a schema definition.
+
+  An Expectation is the schema PLUS its SOFT `layout` (ordered field-refs +
+  free-content region markers) and `prefill` (create-time scaffold). Explicit
+  stored `layout`/`prefill` columns win when non-empty; otherwise a field-order
+  default is derived (`SchemaDefinition.default_layout/1` + `default_prefill/1`)
+  so nothing has to migrate. The layout is metadata, never a constraint — a
+  document with missing or reordered fields is always valid.
+
+  Returns `%{layout: [map()], prefill: map()}`.
+  """
+  @spec resolve_expectation(SchemaDefinition.t()) :: %{layout: [map()], prefill: map()}
+  def resolve_expectation(%SchemaDefinition{} = schema) do
+    SchemaDefinition.resolve_expectation(schema)
+  end
+
   def upsert_schema(attrs, dataset) do
     name = Map.get(attrs, "name") || Map.get(attrs, :name)
     attrs = Map.put(attrs, "dataset", dataset)

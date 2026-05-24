@@ -415,4 +415,111 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
       assert SchemaDefinition.plugin_custom_prefix() == "bp_"
     end
   end
+
+  describe "default_layout/1 — field-order derivation (Exp-P1)" do
+    test "each field becomes a field-ref in declared order, plus a trailing body region" do
+      schema = %{
+        "name" => "author",
+        "fields" => [
+          %{"name" => "name", "type" => "string"},
+          %{"name" => "slug", "type" => "slug"},
+          %{"name" => "bio", "type" => "text"}
+        ]
+      }
+
+      assert SchemaDefinition.default_layout(schema) == [
+               %{"kind" => "field", "name" => "name"},
+               %{"kind" => "field", "name" => "slug"},
+               %{"kind" => "field", "name" => "bio"},
+               %{"kind" => "region", "name" => "body"}
+             ]
+    end
+
+    test "works on a %SchemaDefinition{} struct with string-keyed fields" do
+      schema = %SchemaDefinition{
+        name: "page",
+        fields: [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "body", "type" => "richText"}
+        ]
+      }
+
+      assert SchemaDefinition.default_layout(schema) == [
+               %{"kind" => "field", "name" => "title"},
+               %{"kind" => "field", "name" => "body"},
+               %{"kind" => "region", "name" => "body"}
+             ]
+    end
+
+    test "a fieldless schema still gets one trailing body region" do
+      schema = %{"name" => "empty", "fields" => []}
+      assert SchemaDefinition.default_layout(schema) == [%{"kind" => "region", "name" => "body"}]
+    end
+  end
+
+  describe "default_prefill/1 (Exp-P1)" do
+    test "returns initial_values verbatim from a struct, dynamics unresolved" do
+      schema = %SchemaDefinition{
+        name: "x",
+        initial_values: %{"status" => "draft", "year" => "$today.year"}
+      }
+
+      assert SchemaDefinition.default_prefill(schema) == %{
+               "status" => "draft",
+               "year" => "$today.year"
+             }
+    end
+
+    test "returns %{} when no initial_values are declared" do
+      assert SchemaDefinition.default_prefill(%SchemaDefinition{name: "x"}) == %{}
+      assert SchemaDefinition.default_prefill(%{"name" => "x", "fields" => []}) == %{}
+    end
+  end
+
+  describe "resolve_expectation/1 (Exp-P1)" do
+    test "explicit stored layout/prefill win over the derived default" do
+      explicit_layout = [
+        %{"kind" => "field", "name" => "title"},
+        %{"kind" => "field", "name" => "slug"},
+        %{"kind" => "field", "name" => "featuredImage"},
+        %{"kind" => "region", "name" => "body"}
+      ]
+
+      schema = %SchemaDefinition{
+        name: "post",
+        fields: [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "slug", "type" => "slug"},
+          %{"name" => "featuredImage", "type" => "image"}
+        ],
+        layout: explicit_layout,
+        prefill: %{"status" => "draft", "featured" => false}
+      }
+
+      assert SchemaDefinition.resolve_expectation(schema) == %{
+               layout: explicit_layout,
+               prefill: %{"status" => "draft", "featured" => false}
+             }
+    end
+
+    test "derives the default when no layout/prefill is stored" do
+      schema = %SchemaDefinition{
+        name: "author",
+        fields: [
+          %{"name" => "name", "type" => "string"},
+          %{"name" => "role", "type" => "select"}
+        ],
+        initial_values: %{"role" => "writer"}
+      }
+
+      assert SchemaDefinition.resolve_expectation(schema) == %{
+               layout: [
+                 %{"kind" => "field", "name" => "name"},
+                 %{"kind" => "field", "name" => "role"},
+                 %{"kind" => "region", "name" => "body"}
+               ],
+               prefill: %{"role" => "writer"}
+             }
+    end
+  end
 end
