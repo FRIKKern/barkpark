@@ -57,6 +57,11 @@ defmodule BarkparkWeb.PaperLive do
       |> assign(:slug, slug)
       |> assign(:found, not is_nil(paper))
       |> assign(:rev, paper_rev(paper))
+      # `:article?` is the per-doc style marker (`content["style"] == "article"`).
+      # The root `:paper` layout reads it to switch on article page chrome; the
+      # block render path reads it to render each block in `:article` palette.
+      # Non-article papers leave it false → email default, chrome unchanged.
+      |> assign(:article?, paper_article?(paper))
       |> assign(:html, paper_html(paper))
       |> assign_block_mode(paper)
 
@@ -74,12 +79,22 @@ defmodule BarkparkWeb.PaperLive do
   defp paper_blocks(%{content: content}), do: Map.get(content || %{}, "blocks")
   defp paper_blocks(_), do: nil
 
+  # The per-doc style marker. An article paper sets `content["style"] ==
+  # "article"`; everything else (and the empty state) is the email default.
+  defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"
+  defp paper_article?(_), do: false
+
+  # Render opts threaded into every block render. Article papers carry
+  # `style: :article`; the empty map keeps the email default byte-unchanged.
+  defp render_opts(true), do: %{style: :article}
+  defp render_opts(false), do: %{}
+
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}}) when is_list(blocks) do
+  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}} = paper) when is_list(blocks) do
     socket
     |> assign(:block_mode, true)
-    |> stream(:blocks, to_stream_items(blocks))
+    |> stream(:blocks, to_stream_items(blocks, paper_article?(paper)))
   end
 
   defp assign_block_mode(socket, _paper) do
@@ -92,10 +107,14 @@ defmodule BarkparkWeb.PaperLive do
 
   # Each stream item needs a stable `:id` (the block id) and its rendered
   # fragment. Only top-level blocks are streamed individually; a `section`
-  # block renders as one fragment (its children live inside it).
-  defp to_stream_items(blocks) do
+  # block renders as one fragment (its children live inside it). An article
+  # paper renders each block in the `:article` palette so the live per-block
+  # output matches the article body_html cache.
+  defp to_stream_items(blocks, article?) do
+    opts = render_opts(article?)
+
     Enum.map(blocks, fn block ->
-      %{id: Map.get(block, "id"), html: Render.render_block(block)}
+      %{id: Map.get(block, "id"), html: Render.render_block(block, opts)}
     end)
   end
 
@@ -180,11 +199,14 @@ defmodule BarkparkWeb.PaperLive do
         socket
 
       paper ->
+        article? = paper_article?(paper)
+
         case paper_blocks(paper) do
           blocks when is_list(blocks) ->
             socket
-            |> stream(:blocks, to_stream_items(blocks), reset: true)
+            |> stream(:blocks, to_stream_items(blocks, article?), reset: true)
             |> assign(:rev, paper_rev(paper))
+            |> assign(:article?, article?)
             |> assign(:block_mode, true)
             |> assign(:found, true)
 
@@ -193,6 +215,7 @@ defmodule BarkparkWeb.PaperLive do
             socket
             |> assign(:html, paper_html(paper))
             |> assign(:rev, paper_rev(paper))
+            |> assign(:article?, article?)
             |> assign(:block_mode, false)
             |> assign(:found, true)
         end
@@ -206,7 +229,7 @@ defmodule BarkparkWeb.PaperLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="bp-paper-shell">
+    <main class={["bp-paper-shell", @article? && "bp-paper-article"]}>
       <%!-- Sentinel: rendered once at mount, OUTSIDE the streamed/re-assigned
             container. It survives a handle_info DOM diff but would be torn
             down by a remount/navigate — the surviving-sentinel proof of
