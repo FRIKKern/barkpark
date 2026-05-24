@@ -436,6 +436,59 @@ defmodule Barkpark.Content do
     end)
   end
 
+  # ── Exp-P3.2 — Classic-save content (the data-loss guard) ─────────────────
+  #
+  # A document THAT HAS content["blocks"] (it has been opened in the Beta block
+  # editor) must NOT be saved by overwriting content from the flat Classic form
+  # map — that would drop every FREE block and content["blocks"] itself. Instead
+  # the submitted fields are mapped onto the matching BOUND blocks' values, the
+  # block list is re-projected, and FREE blocks + block ORDER survive
+  # byte-identical. A document WITHOUT blocks (legacy, never Beta-edited) keeps
+  # the existing build_content/2 field-map behavior unchanged.
+  defp classic_save_content(base_doc, params, schema, dataset) do
+    base_content = Map.get(base_doc, :content) || %{}
+
+    case Map.get(base_content, "blocks") do
+      blocks when is_list(blocks) ->
+        values = classic_field_values(params, schema)
+        new_blocks = Synthesis.patch_bound_values(blocks, values)
+
+        base_content
+        |> Map.put("blocks", new_blocks)
+        |> Projection.project(new_blocks, render_opts(dataset))
+
+      _ ->
+        build_content(params, schema)
+    end
+  end
+
+  # The field => submitted-value map a Classic save patches onto bound blocks.
+  # Keyed by the SCHEMA's declared field names plus the row-level "title" field
+  # (post's layout binds title), so only fields the schema knows about can
+  # touch a bound block. "status" lives on the row, never in content, so it is
+  # excluded. Values are taken verbatim from the form params; a field absent
+  # from params is omitted (its bound block is left untouched).
+  defp classic_field_values(params, schema) do
+    names =
+      case schema do
+        %{fields: fields} when is_list(fields) ->
+          Enum.map(fields, & &1["name"]) ++ ["title"]
+
+        _ ->
+          ["title"]
+      end
+
+    names
+    |> Enum.uniq()
+    |> Enum.reject(&(&1 in [nil, "status"]))
+    |> Enum.reduce(%{}, fn name, acc ->
+      case Map.fetch(params, name) do
+        {:ok, value} -> Map.put(acc, name, value)
+        :error -> acc
+      end
+    end)
+  end
+
   @doc """
   Upsert a draft for the document being edited. Builds attrs from the
   form params + schema, runs informational validation, calls
@@ -455,7 +508,7 @@ defmodule Barkpark.Content do
   @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
   def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
-    content = build_content(params, schema)
+    content = classic_save_content(base_doc, params, schema, dataset)
     new_title = Map.get(params, "title", base_doc.title)
 
     attrs = %{
@@ -539,7 +592,7 @@ defmodule Barkpark.Content do
               |> tap_broadcast(dataset, type, "update", existing.rev)
 
             _ ->
-              attrs = apply_initial_values(attrs, type, dataset)
+              attrs = scaffold_or_initial_values(attrs, type, dataset)
 
               %Document{}
               |> Document.changeset(attrs)
@@ -617,6 +670,69 @@ defmodule Barkpark.Content do
   end
 
   defp apply_initial_values(attrs, _type, _dataset), do: attrs
+
+  # ── Exp-P3.1 — Create-from-Expectation scaffold ──────────────────────────
+  #
+  # On creating a new document of an EXPECTATION-BEARING type — a type whose
+  # schema carries an EXPLICIT stored `layout` (e.g. `post`; see seeds) — the
+  # Expectation is instantiated into `content["blocks"]`: one BOUND block per
+  # layout field (valued from provided content / row title / prefill / empty)
+  # plus the body region as free blocks (an empty paragraph placeholder when
+  # none provided). Then `Projection.project/3` derives `content[fieldName]` +
+  # `content["body"]` from those blocks — replacing the flat
+  # `apply_initial_values` for these types.
+  #
+  # A type with NO explicit layout (a plain v1 schema relying only on flat
+  # `initial_values`, or no schema at all) keeps the unchanged
+  # `apply_initial_values` path. The explicit-layout gate is what marks a type
+  # as Expectation-bearing here — a derived-default layout alone does not flip
+  # an existing v1 type onto the block path (it would silently drop
+  # initial_values keys that are not declared fields).
+  defp scaffold_or_initial_values(attrs, type, dataset)
+       when is_binary(type) and is_binary(dataset) do
+    case get_schema(type, dataset) do
+      {:ok, %SchemaDefinition{layout: layout} = schema}
+      when is_list(layout) and layout != [] ->
+        scaffold_expectation(attrs, schema, dataset)
+
+      _ ->
+        apply_initial_values(attrs, type, dataset)
+    end
+  end
+
+  defp scaffold_or_initial_values(attrs, type, dataset),
+    do: apply_initial_values(attrs, type, dataset)
+
+  # Build the scaffold block list from the schema's Expectation + provided
+  # values, persist it under content["blocks"], and project. The row title
+  # lives on the document row, not under content — it is folded in under
+  # "title" so a bound title field-block picks it up, and re-derived into
+  # content["title"] by projection (mirroring synthesize_blocks/3).
+  defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset) do
+    %{layout: layout, prefill: prefill} = resolve_expectation(schema)
+    prefill = resolve_dynamics(prefill)
+    provided = Map.get(attrs, "content") || %{}
+
+    values =
+      provided
+      |> Map.put_new("title", Map.get(attrs, "title"))
+      |> drop_nil_values()
+
+    blocks = Synthesis.scaffold(layout, values, prefill, schema.fields || [])
+
+    content =
+      provided
+      |> Map.put("blocks", blocks)
+      |> Projection.project(blocks, render_opts(dataset))
+
+    Map.put(attrs, "content", content)
+  end
+
+  defp drop_nil_values(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn {k, v}, acc ->
+      if is_nil(v), do: acc, else: Map.put(acc, k, v)
+    end)
+  end
 
   @doc false
   def deep_merge(a, b) when is_map(a) and is_map(b) do
@@ -1122,6 +1238,12 @@ defmodule Barkpark.Content do
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
+      # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
+      # carries content["blocks"] re-derives content[fieldName]/content["body"]
+      # from those blocks — the same project-on-write the paper path runs.
+      # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
+      # (legacy field-map save) skips it untouched.
+      |> maybe_project_document_content(dataset)
 
     ctx = build_ctx(opts)
 
@@ -1160,6 +1282,23 @@ defmodule Barkpark.Content do
           end
 
         fire_after(result, :after_save, payload)
+    end
+  end
+
+  # Re-project content[fieldName]/content["body"] from content["blocks"] when a
+  # whole-document write carries a block list (Exp-P3.1 — generalizes the
+  # paper-path project-on-write to the document path). A write whose content has
+  # no "blocks" key is returned untouched, so legacy field-map saves are
+  # unaffected and projection remains the SOLE writer of the projected keys.
+  defp maybe_project_document_content(attrs, dataset) do
+    content = Map.get(attrs, "content")
+
+    case content && Map.get(content, "blocks") do
+      blocks when is_list(blocks) ->
+        Map.put(attrs, "content", Projection.project(content, blocks, render_opts(dataset)))
+
+      _ ->
+        attrs
     end
   end
 
