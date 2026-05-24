@@ -363,6 +363,12 @@ defmodule BarkparkWeb.Router do
 
   # ── v1 Media — unified blob + mediaAsset metadata ───────────────────────
   scope "/v1/media", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/:dataset/search/insights", V1.MediaController, :search_insights
+  end
+
+  scope "/v1/media", BarkparkWeb do
     pipe_through :api
 
     get "/:dataset/search/suggestions", V1.MediaController, :search_suggestions

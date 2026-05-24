@@ -171,6 +171,7 @@
       this._suggestHideTimer = null;
       this._suggestions = { recent: [], popular: [], nohits: [] };
       this._searchClientId = this._ensureSearchClientId();
+      this._lastSearchEventId = null;
     }
 
     connectedCallback() {
@@ -430,6 +431,8 @@
       const tok = this._token();
       if (tok) h["Authorization"] = "Bearer " + tok;
       if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
+      if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
+      h["X-BP-Search-Source"] = "explorer";
       return h;
     }
 
@@ -1059,6 +1062,11 @@
         }
         if (data && data.result && typeof data.result.total === "number") {
           this._total = data.result.total;
+        }
+        if (data && data.searchEventId) {
+          this._lastSearchEventId = data.searchEventId;
+        } else if (!append) {
+          this._lastSearchEventId = null;
         }
         const page = rows
           .map((row) => mergeHit(row))
