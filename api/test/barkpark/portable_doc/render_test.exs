@@ -310,6 +310,112 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # Article render mode (P1 slice 1) — an opt-in `:style => :article` palette
+  # threaded through render_html / render_block. The DEFAULT (:email) output is
+  # byte-unchanged; these cases pin the article divergence and the no-regression
+  # guarantee for the email path.
+  describe "render mode (:style) — article palette vs email default" do
+    test "article mode emits the article palette (accent, serif stack, width 680)" do
+      # A PdContainer carries the palette's body font + width budget; a PdButton
+      # child carries the accent. Render through the full document so the body
+      # background (parchment) is asserted too.
+      tree = %{
+        "kind" => "PdContainer",
+        "children" => [
+          %{"kind" => "PdButton", "href" => "https://x.test", "label" => "Go", "priority" => "primary"}
+        ]
+      }
+
+      html = Render.render_html(tree, %{style: :article})
+
+      # Accent terracotta is unreachable in the email palette.
+      assert html =~ "#a23925"
+      # Serif body stack on the article container.
+      assert html =~ "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
+      # Default article width budget (clamped maxWidth defaults to palette width).
+      assert html =~ "max-width:680px"
+      # Parchment page background on the doctype body.
+      assert html =~ ~s(<body style="background:#fbfaf6;)
+    end
+
+    test "email/default mode output is unchanged for an existing block" do
+      # The Wave 4 expectation for a heading block must still hold byte-for-byte.
+      block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
+      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+      assert Render.render_block(block, %{style: :email}) ==
+               ~s(<span style="font-weight:bold">Title</span>)
+    end
+
+    test "heading level 1/2/3 produce distinct article sizes" do
+      h = fn level ->
+        block = %{"type" => "heading", "level" => level, "text" => "H"}
+        Render.render_block(block, %{style: :article})
+      end
+
+      assert h.(1) =~ "font-size:32px"
+      assert h.(2) =~ "font-size:24px"
+      assert h.(3) =~ "font-size:20px"
+      # Distinct from one another.
+      refute h.(1) =~ "font-size:24px"
+      refute h.(2) =~ "font-size:32px"
+      # h1/h2 weight 700, h3 weight 600.
+      assert h.(1) =~ "font-weight:700"
+      assert h.(3) =~ "font-weight:600"
+    end
+
+    test "eyebrow renders an uppercase accent kicker in article mode" do
+      block = %{"type" => "eyebrow", "text" => "Field notes"}
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "Field notes"
+      assert html =~ "text-transform:uppercase"
+      assert html =~ "letter-spacing:0.08em"
+      assert html =~ "color:#a23925"
+    end
+
+    test "byline joins items with a separator and carries a bottom rule (article)" do
+      block = %{"type" => "byline", "items" => ["Pelle Jarl", "May 2026"]}
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "Pelle Jarl · May 2026"
+      assert html =~ "border-bottom:1px solid #e6e2d8"
+      assert html =~ "color:#6a6a6a"
+    end
+
+    test "byline accepts a plain text fallback" do
+      block = %{"type" => "byline", "text" => "Solo author"}
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "Solo author"
+    end
+
+    test "ingress renders a heavier, larger lead paragraph in article mode" do
+      block = %{
+        "type" => "ingress",
+        "content" => [%{"type" => "text", "value" => "The lead."}]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "The lead."
+      assert html =~ "font-size:1.28rem"
+      assert html =~ "font-weight:500"
+    end
+
+    test "eyebrow/byline/ingress degrade to plain text in email mode (no article cues)" do
+      eyebrow = Render.render_block(%{"type" => "eyebrow", "text" => "Kicker"}, %{style: :email})
+      byline = Render.render_block(%{"type" => "byline", "text" => "Author"}, %{style: :email})
+
+      ingress =
+        Render.render_block(
+          %{"type" => "ingress", "content" => [%{"type" => "text", "value" => "Lead"}]},
+          %{style: :email}
+        )
+
+      assert eyebrow == "<span>Kicker</span>"
+      assert byline == "<span>Author</span>"
+      assert ingress == "<span>Lead</span>"
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"

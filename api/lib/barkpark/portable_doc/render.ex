@@ -28,6 +28,59 @@ defmodule Barkpark.PortableDoc.Render do
 
   @allowed_scheme ~r/^(?:https?|mailto|tel):/i
 
+  # ── render styles (palettes) ───────────────────────────────────────────────
+  #
+  # A `palette` is the per-render context threaded through `walk/3`. The DEFAULT
+  # is `:email` — its values are the module constants above, so existing call
+  # sites that pass no `:style` are byte-identical to before. `:article` mirrors
+  # doc.css `:root` (serif body, parchment bg, terracotta accent) for the
+  # paperflow-native article surface. The palette also carries `:style` so the
+  # compose / walk clauses that diverge by mode (headings, eyebrow, byline,
+  # ingress) can branch on it.
+  #
+  # Font names are single-quoted inside CSS so the surrounding double-quoted
+  # `style` attribute stays valid HTML.
+
+  @doc false
+  def email_palette do
+    %{
+      style: :email,
+      font_body: @font_body,
+      font_heading: @font_body,
+      width: @default_width,
+      bg: @page_bg,
+      paper: "#ffffff",
+      text: "#111827",
+      muted: "#6b7280",
+      rule: @rule,
+      accent: @brand,
+      link_color: "#1d4ed8",
+      code_bg: "#f3f4f6"
+    }
+  end
+
+  @doc false
+  def article_palette do
+    %{
+      style: :article,
+      font_body:
+        "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
+      font_heading: "system-ui,-apple-system,'SF Pro Text',sans-serif",
+      width: 680,
+      bg: "#fbfaf6",
+      paper: "#ffffff",
+      text: "#1a1a1a",
+      muted: "#6a6a6a",
+      rule: "#e6e2d8",
+      accent: "#a23925",
+      link_color: "#a23925",
+      code_bg: "#f1ede2"
+    }
+  end
+
+  defp palette_for(:article), do: article_palette()
+  defp palette_for(_), do: email_palette()
+
   @doc """
   Render a Pd-tree `root` to an HTML string.
 
@@ -36,16 +89,20 @@ defmodule Barkpark.PortableDoc.Render do
     * `:doctype` — wrap the body in a full `<!doctype html>…</html>` document.
       Defaults to `true`; pass `false` to emit only the body fragment.
     * `:container_width` — outer width budget in px. Defaults to `600`.
+    * `:style` — render palette: `:email` (default, the module constants) or
+      `:article` (paperflow-native serif/parchment palette). Opt-in only; the
+      `:email` default keeps existing output byte-unchanged.
   """
   def render_html(root, opts \\ %{}) do
-    width = Map.get(opts, :container_width, @default_width)
-    body = walk(root, width)
+    palette = palette_for(Map.get(opts, :style, :email))
+    width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
+    body = walk(root, width, palette)
 
     if Map.get(opts, :doctype, true) == false do
       body
     else
       ~s(<!doctype html><html><head><meta charset="utf-8"></head>) <>
-        ~s(<body style="background:#{@page_bg};margin:0;padding:0;">) <>
+        ~s(<body style="background:#{palette.bg};margin:0;padding:0;">) <>
         body <>
         "</body></html>"
     end
@@ -71,10 +128,12 @@ defmodule Barkpark.PortableDoc.Render do
   the block's composed sub-tree), so they survive here by design.
   """
   def render_block(block, opts \\ %{}) when is_map(block) do
+    style = Map.get(opts, :style, :email)
+
     block
     |> resolve_ref_title(opts)
     |> resolve_code_label(opts)
-    |> compose_block()
+    |> compose_block(style)
     |> render_html(Map.put(opts, :doctype, false))
   end
 
@@ -140,16 +199,65 @@ defmodule Barkpark.PortableDoc.Render do
   # Trusts the AST has already been validated (the validator is the only gate);
   # it does not re-validate URLs or tone palette membership.
 
+  # `compose_block/1` keeps the email (default) palette so existing call sites
+  # and tests are byte-unchanged. The style-aware `compose_block/2` below carries
+  # the render style so heading / eyebrow / byline / ingress can diverge.
   @doc false
-  def compose_block(%{"type" => "heading"} = b) do
-    %{"kind" => "PdText", "weight" => "bold", "children" => [Map.get(b, "text", "")]}
+  def compose_block(b), do: compose_block(b, :email)
+
+  @doc false
+  def compose_block(%{"type" => "heading"} = b, style) do
+    text = Map.get(b, "text", "")
+    level = heading_level(Map.get(b, "level"))
+
+    base = %{"kind" => "PdText", "weight" => "bold", "children" => [text]}
+
+    # Article mode stamps a transient size hint the heading walk reads to size
+    # by level (h1 > h2 > h3). Email mode leaves the node as the original single
+    # bold span — byte-identical to the pre-article behaviour.
+    if style == :article do
+      Map.put(base, "_heading_level", level)
+    else
+      base
+    end
   end
 
-  def compose_block(%{"type" => "paragraph"} = b) do
+  def compose_block(%{"type" => "eyebrow"} = b, _style) do
+    # Uppercase, letter-spaced, accent kicker (article) / muted line (email).
+    # The walk reads `_role` to pick the styling per palette.
+    %{
+      "kind" => "PdText",
+      "_role" => "eyebrow",
+      "children" => [to_string(Map.get(b, "text", ""))]
+    }
+  end
+
+  def compose_block(%{"type" => "byline"} = b, _style) do
+    # `items` (list) joined by " · ", else a plain `text`. Muted sans line with
+    # a bottom rule in article mode.
+    text =
+      case Map.get(b, "items") do
+        items when is_list(items) -> items |> Enum.map(&to_string/1) |> Enum.join(" · ")
+        _ -> to_string(Map.get(b, "text", ""))
+      end
+
+    %{"kind" => "PdText", "_role" => "byline", "children" => [text]}
+  end
+
+  def compose_block(%{"type" => "ingress"} = b, _style) do
+    # Lead paragraph — heavier weight + larger size in article mode.
+    %{
+      "kind" => "PdText",
+      "_role" => "ingress",
+      "children" => compose_inline_children(Map.get(b, "content", []))
+    }
+  end
+
+  def compose_block(%{"type" => "paragraph"} = b, _style) do
     %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
   end
 
-  def compose_block(%{"type" => "list"} = b) do
+  def compose_block(%{"type" => "list"} = b, _style) do
     ordered = Map.get(b, "ordered") == true
 
     item_rows =
@@ -171,14 +279,14 @@ defmodule Barkpark.PortableDoc.Render do
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => item_rows}
   end
 
-  def compose_block(%{"type" => "callout"} = b) do
+  def compose_block(%{"type" => "callout"} = b, _style) do
     body = %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
 
     base = %{"kind" => "PdCallout", "tone" => Map.get(b, "tone"), "children" => [body]}
     maybe_put(base, "title", Map.get(b, "title"))
   end
 
-  def compose_block(%{"type" => "action"} = b) do
+  def compose_block(%{"type" => "action"} = b, _style) do
     %{
       "kind" => "PdButton",
       "href" => Map.get(b, "href", ""),
@@ -187,7 +295,7 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
-  def compose_block(%{"type" => "section"} = b) do
+  def compose_block(%{"type" => "section"} = b, style) do
     leading = [%{"kind" => "PdHr"}]
 
     title =
@@ -196,15 +304,15 @@ defmodule Barkpark.PortableDoc.Render do
         t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
       end
 
-    inner = Enum.map(Map.get(b, "blocks", []), &compose_block/1)
+    inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
 
     children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
   end
 
-  def compose_block(%{"type" => "divider"}), do: %{"kind" => "PdHr"}
+  def compose_block(%{"type" => "divider"}, _style), do: %{"kind" => "PdHr"}
 
-  def compose_block(%{"type" => "code"} = b) do
+  def compose_block(%{"type" => "code"} = b, _style) do
     children =
       Map.get(b, "value", "")
       |> String.split("\n")
@@ -215,13 +323,13 @@ defmodule Barkpark.PortableDoc.Render do
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
   end
 
-  def compose_block(%{"type" => "image"} = b) do
+  def compose_block(%{"type" => "image"} = b, _style) do
     %{"kind" => "PdImage", "src" => Map.get(b, "src", ""), "alt" => Map.get(b, "alt", "")}
     |> maybe_put("width", Map.get(b, "width"))
     |> maybe_put("height", Map.get(b, "height"))
   end
 
-  def compose_block(%{"type" => "table"} = b) do
+  def compose_block(%{"type" => "table"} = b, _style) do
     rows =
       Map.get(b, "rows", [])
       |> Enum.map(fn row ->
@@ -241,15 +349,15 @@ defmodule Barkpark.PortableDoc.Render do
   # kinds. All values flow through PdText, so they inherit `escape_html` at walk
   # time — no field-* clause emits raw HTML.
 
-  def compose_block(%{"type" => "field-string"} = b), do: field_row(b, field_value_text(b))
-  def compose_block(%{"type" => "field-slug"} = b), do: field_row(b, field_value_text(b))
-  def compose_block(%{"type" => "field-text"} = b), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-string"} = b, _style), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-slug"} = b, _style), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-text"} = b, _style), do: field_row(b, field_value_text(b))
 
-  def compose_block(%{"type" => "field-boolean"} = b) do
+  def compose_block(%{"type" => "field-boolean"} = b, _style) do
     field_row(b, if(Map.get(b, "value") == true, do: "Yes", else: "No"))
   end
 
-  def compose_block(%{"type" => "field-select"} = b) do
+  def compose_block(%{"type" => "field-select"} = b, _style) do
     value = Map.get(b, "value")
 
     label =
@@ -263,11 +371,11 @@ defmodule Barkpark.PortableDoc.Render do
     field_row(b, label)
   end
 
-  def compose_block(%{"type" => "field-datetime"} = b) do
+  def compose_block(%{"type" => "field-datetime"} = b, _style) do
     field_row(b, format_datetime(Map.get(b, "value", "")))
   end
 
-  def compose_block(%{"type" => "field-color"} = b) do
+  def compose_block(%{"type" => "field-color"} = b, _style) do
     hex = field_value_text(b)
     # A swatch (PdBox with a backgroundColor + border) beside the hex string.
     # The swatch background only takes the value when it's a strict #rrggbb /
@@ -311,7 +419,7 @@ defmodule Barkpark.PortableDoc.Render do
   # and stashed on the transient `"_ref_title"` key; when no resolver is wired
   # (pure unit tests, no dataset in scope) the key is absent and View falls
   # back to the stored id — a no-fetch rendering of the raw datum.
-  def compose_block(%{"type" => "field-reference"} = b) do
+  def compose_block(%{"type" => "field-reference"} = b, _style) do
     value = field_value_text(b)
     resolved = b |> Map.get("_ref_title", "") |> to_string()
 
@@ -329,7 +437,7 @@ defmodule Barkpark.PortableDoc.Render do
   # else a "No image" placeholder. The src is funnelled through PdImage so it
   # inherits the renderer's `safe_url` scheme allowlist; the label stays bold
   # PdText. Empty value → a plain placeholder PdText line.
-  def compose_block(%{"type" => "field-image"} = b) do
+  def compose_block(%{"type" => "field-image"} = b, _style) do
     src = media_field_url(Map.get(b, "value", ""))
 
     value_node =
@@ -355,7 +463,7 @@ defmodule Barkpark.PortableDoc.Render do
   # time — no composite clause emits raw HTML.
 
   # composite → labelled box, one sub-row per subfield (name: stringified value).
-  def compose_block(%{"type" => "composite"} = b) do
+  def compose_block(%{"type" => "composite"} = b, _style) do
     value = Map.get(b, "value", %{})
     subfields = Map.get(b, "fields", [])
 
@@ -383,7 +491,7 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   # arrayOf → labelled box, one PdText row per element (stringified).
-  def compose_block(%{"type" => "arrayOf"} = b) do
+  def compose_block(%{"type" => "arrayOf"} = b, _style) do
     elements = Map.get(b, "value", [])
 
     rows =
@@ -415,7 +523,7 @@ defmodule Barkpark.PortableDoc.Render do
   # (the caller wired a `:codelist_resolver`), else falls back to the raw code,
   # else an em-dash for an empty/unresolved value. Mirrors the field-reference
   # id→title resolution exactly.
-  def compose_block(%{"type" => "codelist"} = b) do
+  def compose_block(%{"type" => "codelist"} = b, _style) do
     code = field_value_text(b)
     label = b |> Map.get("_code_label", "") |> to_string()
 
@@ -430,7 +538,7 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   # localizedText → labelled box, one row per language (lang: text).
-  def compose_block(%{"type" => "localizedText"} = b) do
+  def compose_block(%{"type" => "localizedText"} = b, _style) do
     value = Map.get(b, "value", %{})
     languages = Map.get(b, "languages", [])
 
@@ -455,9 +563,16 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
-  def compose_block(%{"type" => type}) do
+  def compose_block(%{"type" => type}, _style) do
     raise ArgumentError, "compose_block: unhandled block type #{type}"
   end
+
+  # Clamp a heading level to 1..3; default to 2 when absent/out of range.
+  defp heading_level(l) when l in [1, 2, 3], do: l
+  defp heading_level("1"), do: 1
+  defp heading_level("2"), do: 2
+  defp heading_level("3"), do: 3
+  defp heading_level(_), do: 2
 
   # A labelled value row: bold label on its own line, then the value as PdText.
   defp field_row(b, value_text) when is_binary(value_text) do
@@ -600,42 +715,47 @@ defmodule Barkpark.PortableDoc.Render do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # ── walk: one clause per PdNode kind ───────────────────────────────────────
+  #
+  # `walk/3` threads the render `palette` (email default) alongside the width.
+  # Email values equal the module constants, so email output is byte-identical
+  # to the pre-palette walker; the article palette only diverges where the
+  # compose clauses stamped a `_role` / `_heading_level` hint.
 
-  defp walk(%{"kind" => "PdContainer"} = n, width), do: container(n, width)
-  defp walk(%{"kind" => "PdBox"} = n, width), do: box(n, width)
-  defp walk(%{"kind" => "PdText"} = n, width), do: text(n, width)
-  defp walk(%{"kind" => "PdLink"} = n, width), do: link(n, width)
+  defp walk(%{"kind" => "PdContainer"} = n, width, pal), do: container(n, width, pal)
+  defp walk(%{"kind" => "PdBox"} = n, width, pal), do: box(n, width, pal)
+  defp walk(%{"kind" => "PdText"} = n, width, pal), do: text(n, width, pal)
+  defp walk(%{"kind" => "PdLink"} = n, width, pal), do: link(n, width, pal)
 
-  defp walk(%{"kind" => "PdInlineCode"} = n, _width) do
-    ~s(<code style="background:#f3f4f6;padding:2px 6px;font-family:#{@font_mono};font-size:0.95em">) <>
+  defp walk(%{"kind" => "PdInlineCode"} = n, _width, pal) do
+    ~s(<code style="background:#{pal.code_bg};padding:2px 6px;font-family:#{@font_mono};font-size:0.95em">) <>
       escape_html(Map.get(n, "value", "")) <> "</code>"
   end
 
-  defp walk(%{"kind" => "PdButton"} = n, _width), do: button(n)
-  defp walk(%{"kind" => "PdHr"} = n, _width), do: hr(n)
-  defp walk(%{"kind" => "PdImage"} = n, _width), do: image(n)
-  defp walk(%{"kind" => "PdTable"} = n, width), do: table(n, width)
-  defp walk(%{"kind" => "PdCallout"} = n, width), do: callout(n, width)
+  defp walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
+  defp walk(%{"kind" => "PdHr"} = n, _width, pal), do: hr(n, pal)
+  defp walk(%{"kind" => "PdImage"} = n, _width, _pal), do: image(n)
+  defp walk(%{"kind" => "PdTable"} = n, width, pal), do: table(n, width, pal)
+  defp walk(%{"kind" => "PdCallout"} = n, width, pal), do: callout(n, width, pal)
 
-  defp walk(%{"kind" => kind}, _width) do
+  defp walk(%{"kind" => kind}, _width, _pal) do
     raise ArgumentError, "render_html: unhandled #{kind}"
   end
 
   # ── per-kind renderers ──────────────────────────────────────────────────────
 
-  defp container(n, width) do
+  defp container(n, width, pal) do
     # Trap: clamp container width with min(maxWidth, width).
     # Match TS `n.maxWidth ?? width` (nullish, not falsy) so a literal `0`
     # maxWidth is honored rather than silently replaced by the budget.
     w = min(Map.get(n, "maxWidth", width), width)
-    inner = render_children(Map.get(n, "children", []), w)
+    inner = render_children(Map.get(n, "children", []), w, pal)
 
-    ~s(<div style="max-width:#{w}px;margin:0 auto;padding:24px;font-family:#{@font_body};color:#111827;background:#ffffff">) <>
+    ~s(<div style="max-width:#{w}px;margin:0 auto;padding:24px;font-family:#{pal.font_body};color:#{pal.text};background:#{pal.paper}">) <>
       inner <> "</div>"
   end
 
-  defp box(n, width) do
-    inner = render_children(Map.get(n, "children", []), width)
+  defp box(n, width, pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
     ~s(<div style="#{box_style(Map.get(n, "style"))}">) <> inner <> "</div>"
   end
 
@@ -686,13 +806,13 @@ defmodule Barkpark.PortableDoc.Render do
   defp css_border_style("double"), do: "double"
   defp css_border_style(_), do: "solid"
 
-  defp text(n, width) do
+  defp text(n, width, pal) do
     # Trap: PdText.children mixes raw strings (escaped) and child nodes (recursed).
     inner =
       Map.get(n, "children", [])
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
-        k -> walk(k, width)
+        k -> walk(k, width, pal)
       end)
       |> Enum.join("")
 
@@ -712,6 +832,12 @@ defmodule Barkpark.PortableDoc.Render do
       end
 
     out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+
+    # Article-only typographic roles. These prepend their own declarations and,
+    # for headings, REPLACE the plain `font-weight:bold` with a level-sized rule.
+    # In email mode (or with no hint) `out` is untouched → byte-identical span.
+    {out, inner} = apply_text_role(out, inner, n, pal)
+
     out = Enum.reverse(out)
 
     # Trap: emit NO style= attr when the style list is empty.
@@ -722,33 +848,121 @@ defmodule Barkpark.PortableDoc.Render do
     end
   end
 
-  defp link(n, width) do
+  # ── article typographic roles ──────────────────────────────────────────────
+  # Applied only when the compose clause stamped a hint AND the palette is the
+  # article palette. The accumulator `out` is in REVERSE-build order (it gets
+  # `Enum.reverse`d before joining), so we APPEND role declarations here — they
+  # land at the FRONT of the final style string, ahead of weight/italic/deco.
+
+  defp apply_text_role(out, inner, n, %{style: :article} = pal) do
+    cond do
+      level = Map.get(n, "_heading_level") ->
+        # Drop the plain bold flag; the heading rule carries its own weight.
+        out = List.delete(out, "font-weight:bold")
+        out = heading_style(level, pal) ++ out
+        {out, inner}
+
+      Map.get(n, "_role") == "eyebrow" ->
+        {[
+           "font-family:#{pal.font_heading}",
+           "color:#{pal.accent}",
+           "letter-spacing:0.08em",
+           "text-transform:uppercase",
+           "font-weight:600",
+           "font-size:0.78rem"
+           | out
+         ], inner}
+
+      Map.get(n, "_role") == "byline" ->
+        {[
+           "border-bottom:1px solid #{pal.rule}",
+           "padding-bottom:0.6rem",
+           "margin:0 0 1.4rem",
+           "color:#{pal.muted}",
+           "font-family:#{pal.font_heading}",
+           "font-size:0.9rem"
+           | out
+         ], inner}
+
+      Map.get(n, "_role") == "ingress" ->
+        {[
+           "color:#{pal.text}",
+           "line-height:1.5",
+           "font-weight:500",
+           "font-size:1.28rem"
+           | out
+         ], inner}
+
+      true ->
+        {out, inner}
+    end
+  end
+
+  defp apply_text_role(out, inner, _n, _pal), do: {out, inner}
+
+  # Heading declarations by clamped level (article palette). Sizes descend
+  # h1 > h2 > h3; h1/h2 use weight 700, h3 weight 600. Sans heading font.
+  defp heading_style(1, pal) do
+    [
+      "font-family:#{pal.font_heading}",
+      "color:#{pal.text}",
+      "letter-spacing:-0.02em",
+      "line-height:1.1",
+      "margin:1.6rem 0 0.8rem",
+      "font-weight:700",
+      "font-size:32px"
+    ]
+  end
+
+  defp heading_style(2, pal) do
+    [
+      "font-family:#{pal.font_heading}",
+      "color:#{pal.text}",
+      "line-height:1.2",
+      "margin:1.4rem 0 0.6rem",
+      "font-weight:700",
+      "font-size:24px"
+    ]
+  end
+
+  defp heading_style(_3, pal) do
+    [
+      "font-family:#{pal.font_heading}",
+      "color:#{pal.text}",
+      "line-height:1.25",
+      "margin:1.2rem 0 0.5rem",
+      "font-weight:600",
+      "font-size:20px"
+    ]
+  end
+
+  defp link(n, width, pal) do
     # Trap: PdLink.children mixes raw strings (escaped) and child nodes (recursed).
     inner =
       Map.get(n, "children", [])
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
-        k -> walk(k, width)
+        k -> walk(k, width, pal)
       end)
       |> Enum.join("")
 
-    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#1d4ed8;text-decoration:underline">#{inner}</a>)
+    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color};text-decoration:underline">#{inner}</a>)
   end
 
-  defp button(n) do
+  defp button(n, pal) do
     label = escape_html(Map.get(n, "label", ""))
     href = safe_url(Map.get(n, "href", ""))
 
     if Map.get(n, "priority") == "primary" do
-      ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;background:#{@brand};color:#{@brand_text};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
+      ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;background:#{pal.accent};color:#{@brand_text};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
     else
-      ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;border:2px solid #{@brand};color:#{@brand};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
+      ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;border:2px solid #{pal.accent};color:#{pal.accent};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
     end
   end
 
-  defp hr(n) do
+  defp hr(n, pal) do
     t = Map.get(n, "thickness") || 1
-    ~s(<hr style="border:none;border-top:#{t}px solid #{@rule};margin:16px 0">)
+    ~s(<hr style="border:none;border-top:#{t}px solid #{pal.rule};margin:16px 0">)
   end
 
   defp image(n) do
@@ -765,15 +979,15 @@ defmodule Barkpark.PortableDoc.Render do
     ~s(<img src="#{safe_url(Map.get(n, "src", ""))}" alt="#{escape_attr(Map.get(n, "alt", ""))}" style="max-width:100%;height:auto"#{dims}>)
   end
 
-  defp table(n, width) do
+  defp table(n, width, pal) do
     rows =
       Map.get(n, "rows", [])
       |> Enum.map(fn row ->
         cells =
           row
           |> Enum.map(fn cell ->
-            inner = render_children(cell, width)
-            ~s(<td style="border:1px solid #{@rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
+            inner = render_children(cell, width, pal)
+            ~s(<td style="border:1px solid #{pal.rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
           end)
           |> Enum.join("")
 
@@ -784,8 +998,8 @@ defmodule Barkpark.PortableDoc.Render do
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{rows}</table>)
   end
 
-  defp callout(n, width) do
-    pal = tone_palette(Map.get(n, "tone"))
+  defp callout(n, width, pal) do
+    tone = tone_palette(Map.get(n, "tone"))
 
     title_html =
       case Map.get(n, "title") do
@@ -794,16 +1008,16 @@ defmodule Barkpark.PortableDoc.Render do
         title -> "<strong>#{escape_html(title)}</strong> "
       end
 
-    inner = render_children(Map.get(n, "children", []), width)
+    inner = render_children(Map.get(n, "children", []), width, pal)
 
-    ~s(<div style="border-left:4px solid #{pal.fg};background:#{pal.bg};padding:16px;color:#{pal.fg}">#{title_html}#{inner}</div>)
+    ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{title_html}#{inner}</div>)
   end
 
   # ── shared helpers ──────────────────────────────────────────────────────────
 
-  defp render_children(children, width) do
+  defp render_children(children, width, pal) do
     children
-    |> Enum.map(&walk(&1, width))
+    |> Enum.map(&walk(&1, width, pal))
     |> Enum.join("")
   end
 
