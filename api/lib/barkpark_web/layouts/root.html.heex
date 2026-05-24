@@ -1596,6 +1596,37 @@
       border-radius: 3px; border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
     }
 
+    /* ── Dark-mode View contrast fix (B2 P2) ──────────────────────────────
+       The read-only View pane renders blocks via `PortableDoc.Render`, which
+       emits CANONICAL inline styles for portability (standalone /papers/<slug>
+       export + email backend, byte-comparable): the PdContainer carries
+       `color:#111827;background:#ffffff`, links `color:#1d4ed8`, inline code
+       `background:#f3f4f6`. On warm-dark paper that paints a light card with
+       near-black ink — unreadable. We DON'T touch render.ex (its output is the
+       canonical export), so we override those inline styles HERE, scoped to the
+       editor View surface only, with `!important` to beat inline. The values
+       map to the paper tokens — in light mode `--paper-ink` ≈ #1f1a14 and the
+       container bg goes transparent over the same cream page, so the light
+       View is visually unchanged; in dark it becomes warm ink on warm paper. */
+    .bp-paper-surface [data-block-id] div[style*="background:#ffffff"],
+    .bp-paper-surface article div[style*="background:#ffffff"] {
+      background: transparent !important;
+      color: var(--paper-ink) !important;
+    }
+    .bp-paper-surface [data-block-id] span[style*="color:#111827"],
+    .bp-paper-surface article span[style*="color:#111827"] {
+      color: var(--paper-ink) !important;
+    }
+    .bp-paper-surface [data-block-id] a[style*="color:#1d4ed8"],
+    .bp-paper-surface article a[style*="color:#1d4ed8"] {
+      color: var(--paper-accent) !important;
+    }
+    .bp-paper-surface [data-block-id] code[style*="background:#f3f4f6"],
+    .bp-paper-surface article code[style*="background:#f3f4f6"] {
+      background: var(--paper-bg-deep) !important;
+      color: var(--paper-ink) !important;
+    }
+
     /* ── In-Studio Beta block editor (Edit mode). Card chrome + uppercase
        type-label strips are GONE (B1) — each block reads as clean prose on
        the page. The block container is transparent with generous rhythm;
@@ -1610,36 +1641,50 @@
     }
     /* Faint hover outline marks the active block without a card frame. */
     .bp-paper-edit-block:hover { outline: 1px solid var(--paper-rule); outline-offset: 8px; border-radius: 2px; }
-    /* The toolbar floats at the block's left margin, hidden until hover/focus. */
+    /* The chrome cluster floats in the block's LEFT MARGIN, hidden until the
+       block is hovered/active, then fades in (Portable-Doc `.paper-floating-
+       chrome` contract: ~150ms in / 300ms out, transparent bg, ink-faint
+       glyphs that warm to ink-soft on hover). The default (resting) transition
+       carries the SLOWER 300ms so a mouse-leave fades out gently; the
+       hover/focus rule swaps in the QUICKER 150ms so the chrome appears
+       promptly when you arrive. */
     .bp-paper-edit-toolbar {
-      position: absolute; top: 4px; left: -6px;
+      position: absolute; top: 4px; left: -10px;
       transform: translateX(-100%);
       display: flex; align-items: center; gap: 2px;
       margin: 0; opacity: 0; pointer-events: none;
-      transition: opacity 0.14s ease-out;
+      transition: opacity 0.30s ease-out;
     }
     .bp-paper-edit-block:hover .bp-paper-edit-toolbar,
-    .bp-paper-edit-block:focus-within .bp-paper-edit-toolbar { opacity: 1; pointer-events: auto; }
+    .bp-paper-edit-block:focus-within .bp-paper-edit-toolbar {
+      opacity: 1; pointer-events: auto;
+      transition: opacity 0.15s ease-out;
+    }
     /* Type label is dropped from view — kept in DOM for tests/a11y only. */
     .bp-paper-edit-kind {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
     .bp-paper-edit-actions { display: flex; gap: 2px; }
-    /* Minimal, unobtrusive control buttons (override the zinc .btn chrome). */
+    /* Minimal, unobtrusive control buttons (override the zinc .btn chrome).
+       Transparent bg, small, ink-faint → ink-soft on hover (per
+       `.paper-block__drag-handle`). Delete stays subtle until hovered. */
     .bp-paper-edit-toolbar .btn,
     .bp-paper-drag-grip {
-      height: 20px; min-width: 20px; padding: 0 4px;
+      height: 20px; min-width: 18px; padding: 0 3px;
       border: 0; background: transparent; color: var(--paper-ink-faint);
       font-size: 13px; line-height: 1; border-radius: 3px;
+      transition: color 0.16s ease-out, background 0.16s ease-out;
     }
-    .bp-paper-edit-toolbar .btn:hover { background: var(--paper-accent-soft); color: var(--paper-ink-soft); }
+    .bp-paper-edit-toolbar .btn:hover { background: transparent; color: var(--paper-ink-soft); }
     .bp-paper-edit-toolbar .btn-destructive:hover { color: var(--paper-accent); background: var(--paper-accent-soft); }
     .bp-paper-edit-toolbar .btn:disabled { opacity: 0.35; }
+    /* The ⠿ drag handle — grab affordance, warms on hover like the others. */
     .bp-paper-drag-grip {
       display: inline-flex; align-items: center; justify-content: center;
-      cursor: grab; user-select: none;
+      cursor: grab; user-select: none; letter-spacing: -1px;
     }
+    .bp-paper-drag-grip:hover { color: var(--paper-ink-soft); }
     .bp-paper-drag-grip:active { cursor: grabbing; }
     .bp-paper-dragging { opacity: 0.5; }
 
@@ -1717,43 +1762,131 @@
       background: var(--paper-bg-deep); padding: 0.08em 0.35em; border-radius: 3px;
     }
 
-    /* ── Slash menu (Notion-style "/" insert popup, P3.3) ─────────────────
+    /* ── Curated slash popover (B2) — "1:1 with Portable-Doc". ─────────────
        Rendered into <body> by SlashMenu (src/slash-menu.js) and positioned
-       fixed at the caret. Grouped headers + selectable rows; the .is-active
-       row mirrors the keyboard cursor. */
+       fixed at the caret. Mirrors Portable-Doc's `.paper-slash-popover`:
+       280px warm chrome surface, "Insert block" eyebrow, icon + bold name +
+       right-aligned muted description rows, accent-soft active row with a
+       rust icon, and a <kbd> footer hint bar.
+
+       The popover lives OUTSIDE `.bp-paper-surface` (appended to <body>), so
+       the `--paper-*` tokens scoped to the surface don't reach it. We re-bind
+       the handful it needs here, keyed on `html[data-theme]`, so it themes
+       warm in BOTH modes — cream popover in light, warm-dark in dark.
+       `--paper-rule-soft` is the footer-divider hairline (lighter than rule). */
+    html[data-theme="light"] .bp-slash-menu {
+      --paper-bg:          #fbfaf6;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-ink-faint:   #8a8278;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-rule-soft:   rgba(31, 26, 20, 0.04);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+    }
+    html[data-theme="dark"] .bp-slash-menu {
+      --paper-bg:          #1b1815;
+      --paper-ink:         #ece6dc;
+      --paper-ink-soft:    #b8ad9e;
+      --paper-ink-faint:   #7f7568;
+      --paper-rule:        rgba(236, 230, 220, 0.10);
+      --paper-rule-soft:   rgba(236, 230, 220, 0.05);
+      --paper-accent:      #d97a5f;
+      --paper-accent-soft: rgba(217, 122, 95, 0.14);
+      --paper-chrome-bg:   #221e1a;
+      --paper-chrome-border: rgba(236, 230, 220, 0.14);
+    }
+    /* Pre-paint / no-theme fallback — warm light defaults + fonts. */
     .bp-slash-menu {
+      --paper-bg:          #fbfaf6;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-ink-faint:   #8a8278;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-rule-soft:   rgba(31, 26, 20, 0.04);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+      --paper-font-serif:  'Source Serif 4', Georgia, 'Times New Roman', serif;
+      --paper-font-sans:   var(--font);
+      --paper-font-mono:   var(--font-mono);
+
       position: fixed; z-index: 200;
-      min-width: 220px; max-width: 280px; max-height: 320px;
-      overflow-y: auto;
-      padding: 6px;
-      background: var(--bg-popover);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+      width: 280px;
+      display: flex; flex-direction: column;
+      padding: 6px 0 4px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      font-family: var(--paper-font-sans);
+      animation: bp-slash-fade 0.12s ease-out;
+    }
+    @keyframes bp-slash-fade {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    /* Eyebrow — uppercase letter-spaced "Insert block" header. */
+    .bp-slash-eyebrow {
+      font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--paper-ink-faint); padding: 6px 14px;
+    }
+    .bp-slash-list {
+      display: block; padding: 2px 6px;
+      max-height: 320px; overflow-y: auto;
     }
     .bp-slash-group {
-      padding: 6px 8px 4px;
+      padding: 6px 8px 2px;
       font-size: 10px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.06em; color: var(--fg-dim);
+      letter-spacing: 0.12em; color: var(--paper-ink-faint);
     }
     .bp-slash-item {
       display: flex; align-items: center; gap: 10px;
-      width: 100%; padding: 7px 8px;
-      background: transparent; border: none; border-radius: var(--radius-sm);
-      color: var(--fg); font-family: inherit; font-size: 13px;
-      text-align: left; cursor: pointer;
-      transition: background 0.08s;
+      width: 100%; padding: 5px 8px;
+      background: transparent; border: none; border-radius: 4px;
+      color: var(--paper-ink); font-family: inherit; font-size: 13px;
+      line-height: 1.2; text-align: left; cursor: pointer;
+      transition: background 0.08s ease-out;
     }
     .bp-slash-item:hover,
-    .bp-slash-item.is-active { background: var(--bg-accent); }
+    .bp-slash-item.is-active { background: var(--paper-accent-soft); }
     .bp-slash-hint {
-      flex: 0 0 22px;
+      flex: 0 0 16px;
       display: inline-flex; align-items: center; justify-content: center;
-      width: 22px; height: 22px; border-radius: 4px;
-      background: var(--bg-muted); color: var(--fg-muted);
-      font-size: 11px; font-family: var(--font-mono);
+      width: 16px; height: 16px;
+      color: var(--paper-ink-faint);
+      font-size: 13px; font-family: var(--paper-font-mono);
+      transition: color 0.08s ease-out;
     }
-    .bp-slash-label { flex: 1; min-width: 0; }
+    /* Active/selected row recolors the icon to the rust accent. */
+    .bp-slash-item:hover .bp-slash-hint,
+    .bp-slash-item.is-active .bp-slash-hint { color: var(--paper-accent); }
+    .bp-slash-label {
+      flex: 1 1 auto; min-width: 0;
+      font-weight: 600; letter-spacing: 0.005em;
+    }
+    .bp-slash-desc {
+      flex: 0 0 auto; margin-left: auto; padding-left: 8px;
+      color: var(--paper-ink-faint); font-size: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 130px;
+    }
+    /* Footer hint bar with <kbd> chips for the keyboard contract. */
+    .bp-slash-foot {
+      border-top: 1px solid var(--paper-rule-soft);
+      margin-top: 4px; padding: 8px 14px 4px;
+      font-size: 10.5px; color: var(--paper-ink-faint); letter-spacing: 0.04em;
+    }
+    .bp-slash-foot-sep { opacity: 0.6; margin: 0 2px; }
+    .bp-slash-foot kbd {
+      font-family: var(--paper-font-mono); font-size: 10px;
+      background: var(--paper-bg); border: 1px solid var(--paper-rule);
+      border-radius: 3px; padding: 0 4px; color: var(--paper-ink-soft);
+      margin: 0 1px;
+    }
   </style>
 </head>
 <body>
