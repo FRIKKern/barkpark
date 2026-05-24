@@ -3,22 +3,34 @@ defmodule BarkparkWeb.PaperIngestController do
   Ingest endpoint for paperflow papers (convergence MVP, masterplan Figure 6).
 
   Matches the request the `paperflow/hooks/event-on-save.sh` mirror block
-  POSTs:
+  POSTs. Two body shapes are accepted, both keyed by `slug`:
+
+  NATIVE BLOCKS (preferred — renders in article mode at /papers/:slug):
 
       POST /v1/paperflow/papers
       Authorization: Bearer <BARKPARK_INGEST_TOKEN>   (RequireIngestToken plug)
       Content-Type: application/json
       {
-        "source_doc": "plans/2026-05-23-foo.html",
         "slug":       "2026-05-23-foo",
-        "event_type": "plan-written",
-        "body_html":  "<article>…</article>",
-        "goal_id":    "bd-a1b2"        // optional
+        "style":      "article",
+        "blocks":     [ {"type":"heading","level":1,…}, … ],
+        "source_doc": "specs/2026-05-23-foo.html",   // optional
+        "event_type": "spec-written",                // optional
+        "goal_id":    "bd-a1b2"                       // optional
       }
+
+  RAW HTML (legacy fallback — stored verbatim, no article projection):
+
+      POST /v1/paperflow/papers
+      …
+      { "slug": "2026-05-23-foo", "body_html": "<article>…</article>", … }
 
   Upserts the paper keyed by slug and broadcasts on its per-doc PubSub topic
   so any mounted `PaperLive` re-renders with no reload. Persists so a fresh
-  mount renders the latest HTML.
+  mount renders the latest HTML. When `blocks` is present `Content.upsert_paper`
+  renders the `body_html` cache from them in the article palette (style
+  defaults to "article" on the blocks path); a `body_html`-only request stores
+  the HTML verbatim as before.
 
   Wave 4 adds a second action, `apply_op/2`, for block-streaming:
 
@@ -40,11 +52,46 @@ defmodule BarkparkWeb.PaperIngestController do
   # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   @op_kinds ~w(append-block insert-after patch-block replace-block remove-block)
 
+  # Native portable-doc blocks path (preferred). Renders in article mode so
+  # the doc shows native typography at /papers/:slug. `style` defaults to
+  # "article" since paperflow only mirrors article-grammar docs through this
+  # endpoint; an explicit `style` in the body overrides it.
+  def ingest(conn, %{"slug" => slug, "blocks" => blocks} = params)
+      when is_binary(slug) and slug != "" and is_list(blocks) do
+    attrs = %{
+      "slug" => slug,
+      "blocks" => blocks,
+      "style" => params["style"] || "article",
+      "source_doc" => params["source_doc"],
+      "event_type" => params["event_type"],
+      "goal_id" => params["goal_id"]
+    }
+
+    case Content.upsert_paper(attrs) do
+      {:ok, paper} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{
+          ok: true,
+          slug: paper.doc_id,
+          rev: to_string(get_in(paper.content, ["rev"])),
+          liveview_path: "/papers/#{paper.doc_id}"
+        })
+
+      {:error, _changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "invalid_paper", message: "could not store paper"}})
+    end
+  end
+
+  # Raw HTML path (legacy fallback). Stored verbatim — no article projection.
   def ingest(conn, %{"slug" => slug, "body_html" => body_html} = params)
       when is_binary(slug) and slug != "" and is_binary(body_html) do
     attrs = %{
       "slug" => slug,
       "body_html" => body_html,
+      "style" => params["style"],
       "source_doc" => params["source_doc"],
       "event_type" => params["event_type"],
       "goal_id" => params["goal_id"]
@@ -74,7 +121,12 @@ defmodule BarkparkWeb.PaperIngestController do
   def ingest(conn, _params) do
     conn
     |> put_status(:bad_request)
-    |> json(%{error: %{code: "malformed", message: "slug and body_html are required"}})
+    |> json(%{
+      error: %{
+        code: "malformed",
+        message: "slug plus either blocks (list) or body_html (string) are required"
+      }
+    })
   end
 
   @doc """
