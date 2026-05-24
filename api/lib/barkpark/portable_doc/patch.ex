@@ -22,7 +22,7 @@ defmodule Barkpark.PortableDoc.Patch do
   and a block is `%{"id" => "…", "type" => "…", …}`. A `section` block nests
   the tree under its own `"blocks"` key.
 
-  ## The five ops
+  ## The six ops
 
   Each op is a map whose `"op"` key is the discriminator:
 
@@ -33,10 +33,20 @@ defmodule Barkpark.PortableDoc.Patch do
   | `patch-block`   | `"id"`, `"patch"`    | Shallow-merge `patch`; `id` + `type` are immutable. |
   | `replace-block` | `"id"`, `"block"`    | Replace the block `id` wholesale.                   |
   | `remove-block`  | `"id"`               | Remove the block `id` from its parent's `blocks`.   |
+  | `move-block`    | `"id"`, `"after"`    | Move the block `id` to just after `after` (or to the front when `after` is `null`). |
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
   `replace-block`, and `remove-block` recurse into `section` children at any
   depth, exactly as patch.ts does. `append-block` is top-level only.
+
+  `move-block` is **top-level only** (the paper editor reorders the top-level
+  block list; nested-within-section reorder is not in scope). It is a pure
+  permutation — the moved block keeps its identity (same id, same content), so
+  it never duplicates content. `"after"` names the block the moved block should
+  land directly after; `null` (or absent) moves it to the head. Moving a block
+  after itself, or after the block it already follows, is an idempotent no-op.
+  Note: `move-block` is a Barkpark-local extension and is **not** part of the
+  shared TS portable-doc contract — the TS `applyDocPatch()` does not know it.
 
   An op MAY also carry an optional `"ifRev"` / `"expectedVersion"` concurrency
   guard. The canonical patch.ts single-op core does not evaluate these (rev
@@ -158,6 +168,44 @@ defmodule Barkpark.PortableDoc.Patch do
     case transform_at_id(blocks, id, fn _target -> [] end) do
       nil -> {:error, {:block_not_found, id, "remove-block"}}
       new_blocks -> {:ok, new_blocks}
+    end
+  end
+
+  # move-block — top-level reorder, pure permutation. Lift the block out by id,
+  # then splice it back in directly after `after_id` (or at the head when
+  # `after_id` is nil). The lifted block keeps its identity + content, so this
+  # never duplicates a block. Both the moved id and the (non-nil) anchor must
+  # exist at top level; "after itself" is an idempotent no-op.
+  defp apply_to_blocks(blocks, %{"op" => "move-block", "id" => id} = op) do
+    after_id = Map.get(op, "after")
+
+    cond do
+      not Enum.any?(blocks, &(block_id(&1) == id)) ->
+        {:error, {:block_not_found, id, "move-block"}}
+
+      after_id == id ->
+        # Moving a block after itself is meaningless but harmless.
+        {:ok, blocks}
+
+      not is_nil(after_id) and not Enum.any?(blocks, &(block_id(&1) == after_id)) ->
+        {:error, {:block_not_found, after_id, "move-block"}}
+
+      true ->
+        moved = Enum.find(blocks, &(block_id(&1) == id))
+        without = Enum.reject(blocks, &(block_id(&1) == id))
+
+        new_blocks =
+          case after_id do
+            nil ->
+              [moved | without]
+
+            anchor ->
+              idx = Enum.find_index(without, &(block_id(&1) == anchor))
+              {head, tail} = Enum.split(without, idx + 1)
+              head ++ [moved] ++ tail
+          end
+
+        {:ok, new_blocks}
     end
   end
 

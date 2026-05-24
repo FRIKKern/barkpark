@@ -1829,6 +1829,13 @@ defmodule Barkpark.Content do
     {:ok, %{block: nil, block_id: id, position: nil}}
   end
 
+  # move-block: the moved block kept its id + content; report it at its NEW
+  # top-level index so the View-pane stream can re-place it correctly.
+  defp locate_paper_affected(%{"op" => "move-block", "id" => id}, new_blocks) do
+    block = paper_find_block(new_blocks, id)
+    {:ok, %{block: block, block_id: id, position: paper_top_level_index(new_blocks, id)}}
+  end
+
   defp locate_paper_affected(op, _new_blocks), do: {:error, {:invalid_op, op}}
 
   defp paper_top_level_index(blocks, id) do

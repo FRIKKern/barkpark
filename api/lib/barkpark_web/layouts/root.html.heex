@@ -1563,6 +1563,91 @@
       }
     };
 
+    // BarkparkPaperSortable — drag-handle reorder for the paper block editor
+    // (P3.2). Mounted on the editor container. Native HTML5 drag, NO external
+    // dependency. CRITICAL: only the per-block GRIP ([data-drag-grip]) is
+    // draggable — the block bodies hold contenteditable editors + form inputs,
+    // so making the whole block draggable would fight text selection/focus.
+    // Each block has draggable="true" on its grip; we resolve the owning
+    // [data-edit-block-id] block on dragstart. On drop we compute which block
+    // the dragged one landed AFTER (by pointer Y vs each block's midpoint) and
+    // push `paper-move-block-to` with {id, after-id} — the server maps it to a
+    // single `move-block` op. The server owns the model: we do NOT reorder the
+    // DOM optimistically; the {:paper_block,…} delta re-streams the View pane
+    // and the assign re-render redraws the Edit list.
+    Hooks.BarkparkPaperSortable = {
+      mounted() {
+        this._dragId = null;
+
+        const blockOf = (node) =>
+          node && node.closest ? node.closest("[data-edit-block-id]") : null;
+
+        this._onDragStart = (e) => {
+          const grip = e.target.closest && e.target.closest("[data-drag-grip]");
+          if (!grip) {
+            // Drag did not start on a grip (e.g. a text selection inside the
+            // block body) — cancel so the block body is never dragged.
+            e.preventDefault();
+            return;
+          }
+          const block = blockOf(grip);
+          if (!block) return;
+          this._dragId = block.dataset.editBlockId;
+          block.classList.add("bp-paper-dragging");
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            // Firefox requires data to be set for a drag to begin.
+            try { e.dataTransfer.setData("text/plain", this._dragId); } catch (_) {}
+          }
+        };
+
+        this._onDragOver = (e) => {
+          if (this._dragId == null) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        };
+
+        this._onDrop = (e) => {
+          if (this._dragId == null) return;
+          e.preventDefault();
+
+          // Find the block the pointer is over (or nearest), then decide
+          // whether the dragged block lands before or after it by midpoint.
+          const blocks = Array.from(this.el.querySelectorAll("[data-edit-block-id]"));
+          let afterId = ""; // empty ⇒ drop at the head
+          for (const b of blocks) {
+            if (b.dataset.editBlockId === this._dragId) continue;
+            const rect = b.getBoundingClientRect();
+            if (e.clientY > rect.top + rect.height / 2) {
+              afterId = b.dataset.editBlockId;
+            }
+          }
+
+          const draggedId = this._dragId;
+          this._clearDrag();
+          this.pushEvent("paper-move-block-to", { id: draggedId, "after-id": afterId });
+        };
+
+        this._clearDrag = () => {
+          const dragging = this.el.querySelector(".bp-paper-dragging");
+          if (dragging) dragging.classList.remove("bp-paper-dragging");
+          this._dragId = null;
+        };
+        this._onDragEnd = this._clearDrag;
+
+        this.el.addEventListener("dragstart", this._onDragStart);
+        this.el.addEventListener("dragover", this._onDragOver);
+        this.el.addEventListener("drop", this._onDrop);
+        this.el.addEventListener("dragend", this._onDragEnd);
+      },
+      destroyed() {
+        this.el.removeEventListener("dragstart", this._onDragStart);
+        this.el.removeEventListener("dragover", this._onDragOver);
+        this.el.removeEventListener("drop", this._onDrop);
+        this.el.removeEventListener("dragend", this._onDragEnd);
+      }
+    };
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: {
         _csrf_token: csrfToken,
