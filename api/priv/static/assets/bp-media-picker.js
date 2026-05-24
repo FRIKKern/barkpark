@@ -1,6 +1,6 @@
 // bp-media-picker — Studio image-field Web Component (Task #12 WI1).
 //
-// Wraps /media + /media/upload and the native mediaAsset library
+// Wraps /v1/media search + /media/upload and the native mediaAsset library
 // (bp-asset-browser). Emits bp-change with either a bare URL (legacy)
 // or JSON {"url","assetId"} when an asset document is known.
 
@@ -292,17 +292,37 @@ class BpMediaPicker extends HTMLElement {
 
   async _loadFiles() {
     const dataset = this._dataset();
+    const headers = { Accept: "application/json" };
+    const tok = this._token();
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+
+    const params = new URLSearchParams({
+      limit: "50",
+      offset: "0",
+      sort: "created-desc"
+    });
+    params.set("facet.kind", "image");
+
     try {
       const r = await fetch(
-        "/media?type=image/&dataset=" + encodeURIComponent(dataset),
+        "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString(),
         {
           credentials: "same-origin",
-          headers: { Accept: "application/json" }
+          headers: headers
         }
       );
       if (!r.ok) return;
       const data = await r.json();
-      this._files = (data && data.files) || [];
+      const hits = (data && data.result && data.result.hits) || [];
+      this._files = hits
+        .map((hit) => ({
+          url: hit.thumbnailUrl || hit.previewUrl || hit.originalUrl || hit.url || "",
+          originalName: hit.originalName || hit.filename,
+          filename: hit.filename,
+          mimeType: hit.mimeType,
+          assetDocId: hit.assetDocId || (hit.asset && hit.asset._id) || ""
+        }))
+        .filter((f) => f.url);
       this._renderGrid();
     } catch (_e) {
       // Best-effort listing — leave grid empty on failure.

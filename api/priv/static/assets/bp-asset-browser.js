@@ -1,6 +1,6 @@
 // bp-asset-browser — native mediaAsset document browser (Media plugin).
 //
-// Modal grid over GET /v1/data/query/:dataset/mediaAsset. Used standalone
+// Modal grid over GET /v1/media/:dataset/search. Used standalone
 // or opened from bp-media-picker ("Browse library"). Emits
 // CustomEvent("bp-asset-select", { detail: { id, url, title, mime, asset } }).
 
@@ -32,6 +32,7 @@
       this._open = false;
       this._assets = [];
       this._filter = "";
+      this._searchTimer = null;
       this._onSelect = null;
       this._accept = "image/*";
     }
@@ -67,7 +68,8 @@
       });
       this._search.addEventListener("input", (e) => {
         this._filter = e.target.value || "";
-        this._renderGrid();
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(() => this._loadAssets(), 250);
       });
       document.addEventListener("keydown", (e) => {
         if (this._open && e.key === "Escape") this.close();
@@ -111,22 +113,23 @@
       return null;
     }
 
-    async _loadAssets() {
+  async _loadAssets() {
       if (this._loading) this._loading.hidden = false;
       if (this._empty) this._empty.hidden = true;
       if (this._grid) this._grid.innerHTML = "";
 
       const dataset = this._dataset();
       const kind = this._acceptKind();
-      let url =
-        "/v1/data/query/" +
-        encodeURIComponent(dataset) +
-        "/mediaAsset?perspective=drafts&limit=200&order=updated_at_desc";
+      const params = new URLSearchParams({
+        limit: "200",
+        offset: "0",
+        sort: this._filter ? "relevance" : "updated-desc"
+      });
+      if (kind) params.set("facet.kind", kind);
+      if (this._filter) params.set("q", this._filter);
 
-      if (kind) {
-        url +=
-          "&filter[bp_asset_kind][eq]=" + encodeURIComponent(kind);
-      }
+      const url =
+        "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString();
 
       const headers = { Accept: "application/json" };
       const tok = this._token();
@@ -136,11 +139,8 @@
         const r = await fetch(url, { credentials: "same-origin", headers: headers });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
-        const docs =
-          (data && data.result && data.result.documents) ||
-          (data && data.documents) ||
-          [];
-        this._assets = docs.filter((d) => assetUrl(d));
+        const hits = (data && data.result && data.result.hits) || [];
+        this._assets = hits.map((hit) => this._hitToDoc(hit)).filter((d) => assetUrl(d));
         this._renderGrid();
       } catch (_e) {
         this._assets = [];
@@ -153,18 +153,26 @@
       }
     }
 
-    _matchesFilter(doc) {
-      if (!this._filter) return true;
-      const q = this._filter.toLowerCase();
-      const title = (doc.title || "").toLowerCase();
-      const orig =
-        (doc.fileInfo && doc.fileInfo.originalName) || "";
-      return title.indexOf(q) >= 0 || orig.toLowerCase().indexOf(q) >= 0;
+    _hitToDoc(hit) {
+      const asset = (hit && hit.asset) || {};
+      const url = hit.originalUrl || hit.url || "";
+      return {
+        _id: hit.assetDocId || asset._id || hit.id,
+        title: asset.title || hit.originalName || hit.filename || hit.id,
+        bp_asset_kind: asset.bp_asset_kind || hit.kind || "other",
+        fileInfo: {
+          url: url,
+          thumbUrl: hit.thumbnailUrl || hit.previewUrl || url,
+          mimeType: hit.mimeType || "",
+          originalName: hit.originalName || hit.filename || ""
+        },
+        _blobId: hit.id
+      };
     }
 
     _renderGrid() {
       if (!this._grid) return;
-      const items = this._assets.filter((d) => this._matchesFilter(d));
+      const items = this._assets;
 
       if (!items.length) {
         this._grid.innerHTML = "";
@@ -177,13 +185,14 @@
       this._grid.innerHTML = items
         .map((doc) => {
           const url = esc(assetUrl(doc));
+          const thumb = esc((doc.fileInfo && doc.fileInfo.thumbUrl) || assetUrl(doc));
           const title = esc(doc.title || doc.fileInfo.originalName || doc._id);
           const id = esc(doc._id || "");
           const mime = esc(assetMime(doc));
           const kind = assetKind(doc);
-          const thumb =
+          const cell =
             kind === "image"
-              ? '<img src="' + url + '" alt="" loading="lazy" />'
+              ? '<img src="' + thumb + '" alt="" loading="lazy" />'
               : '<div class="bp-ab-file-icon">' + esc(kind) + "</div>";
           return (
             '<button type="button" class="bp-ab-card media-card" data-id="' +
