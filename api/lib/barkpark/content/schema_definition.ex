@@ -18,8 +18,18 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :initial_values, :map, default: %{}
     field :cross_validations, {:array, :map}, default: []
 
+    # Expectation layer (additive, SOFT — never blocks a document).
+    #   * `layout`  — ordered list interleaving field-refs with free-content
+    #                 region markers; see `default_layout/1` for the shape.
+    #   * `prefill`  — scaffold used to pre-fill a new document; evolves the
+    #                 flat `initial_values`. See `default_prefill/1`.
+    field :layout, {:array, :map}, default: []
+    field :prefill, :map, default: %{}
+
     timestamps(type: :utc_datetime_usec)
   end
+
+  @type t :: %__MODULE__{}
 
   def changeset(schema_def, attrs) do
     schema_def
@@ -35,7 +45,9 @@ defmodule Barkpark.Content.SchemaDefinition do
       :groups,
       :desk_groups,
       :initial_values,
-      :cross_validations
+      :cross_validations,
+      :layout,
+      :prefill
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
@@ -169,6 +181,129 @@ defmodule Barkpark.Content.SchemaDefinition do
     case parse(schema) do
       {:ok, parsed} -> flat?(parsed)
       {:error, _} -> false
+    end
+  end
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Expectation layer — Exp-P1 (barkpark-u7q5). An Expectation is today's
+  # schema_definition PLUS two additive, SOFT parts: `layout` and `prefill`.
+  # Both are metadata, never constraints — a document with missing or reordered
+  # fields is always valid. These pure functions DERIVE a sensible default
+  # Expectation from an existing schema so nothing has to migrate.
+  #
+  # ## Shapes
+  #
+  #   layout  = [
+  #     %{"kind" => "field",  "name" => "title"},
+  #     %{"kind" => "field",  "name" => "slug"},
+  #     ...one entry per top-level field, in declared order...,
+  #     %{"kind" => "region", "name" => "body"}   # trailing free-content region
+  #   ]
+  #
+  #   prefill = the schema's `initial_values` map verbatim (a flat scaffold),
+  #             or `%{}` when none is declared.
+  #
+  # A `field` entry references a top-level field by `name`. A `region` entry
+  # marks a free-content area (rich blocks live here in a LATER phase). The
+  # derived default always appends exactly one trailing `body` region.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  @default_region_name "body"
+
+  @doc "The trailing free-content region name appended by `default_layout/1`."
+  def default_region_name, do: @default_region_name
+
+  @doc """
+  Synthesize a default `layout` from a schema's field order.
+
+  Accepts a `%SchemaDefinition{}`, a `%Parsed{}`, or a raw schema map. Each
+  top-level field becomes a `%{"kind" => "field", "name" => <name>}` entry in
+  declared order, followed by one trailing
+  `%{"kind" => "region", "name" => "body"}` free-content marker.
+
+  Fields without a usable string `name` are skipped (the region is always
+  appended regardless).
+  """
+  @spec default_layout(t() | Parsed.t() | map()) :: [map()]
+  def default_layout(schema) do
+    field_entries =
+      schema
+      |> field_names()
+      |> Enum.map(fn name -> %{"kind" => "field", "name" => name} end)
+
+    field_entries ++ [%{"kind" => "region", "name" => @default_region_name}]
+  end
+
+  @doc """
+  Synthesize a default `prefill` scaffold from a schema's `initial_values`.
+
+  Returns the `initial_values` map verbatim when present, else `%{}`. Dynamic
+  tokens (`$today`, `$today.year`) are preserved unresolved — resolution
+  happens at document-create time, not here.
+  """
+  @spec default_prefill(t() | Parsed.t() | map()) :: map()
+  def default_prefill(%__MODULE__{initial_values: iv}) when is_map(iv), do: iv
+  def default_prefill(%Parsed{raw: raw}) when is_map(raw), do: prefill_from_raw(raw)
+  def default_prefill(schema) when is_map(schema), do: prefill_from_raw(schema)
+  def default_prefill(_), do: %{}
+
+  @doc """
+  Resolve the full Expectation for a schema: returns `{layout, prefill}`.
+
+  Explicit stored `layout`/`prefill` win when non-empty; otherwise the
+  field-order default is derived. This is the SOFT, never-blocking read used
+  by the schema read API (`Content.resolve_expectation/1`).
+  """
+  @spec resolve_expectation(t() | Parsed.t() | map()) :: %{
+          layout: [map()],
+          prefill: map()
+        }
+  def resolve_expectation(%__MODULE__{} = schema) do
+    layout =
+      case schema.layout do
+        list when is_list(list) and list != [] -> list
+        _ -> default_layout(schema)
+      end
+
+    prefill =
+      case schema.prefill do
+        map when is_map(map) and map_size(map) > 0 -> map
+        _ -> default_prefill(schema)
+      end
+
+    %{layout: layout, prefill: prefill}
+  end
+
+  def resolve_expectation(schema) do
+    %{layout: default_layout(schema), prefill: default_prefill(schema)}
+  end
+
+  # Top-level field names in declared order, from any accepted input shape.
+  defp field_names(%__MODULE__{fields: fields}) when is_list(fields) do
+    fields
+    |> Enum.map(fn f -> f["name"] || f[:name] end)
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp field_names(%Parsed{fields: fields}) when is_list(fields) do
+    fields
+    |> Enum.map(& &1.name)
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp field_names(schema) when is_map(schema) do
+    case parse(schema) do
+      {:ok, parsed} -> field_names(parsed)
+      {:error, _} -> []
+    end
+  end
+
+  defp field_names(_), do: []
+
+  defp prefill_from_raw(raw) do
+    case Map.get(raw, "initial_values") || Map.get(raw, :initial_values) do
+      map when is_map(map) -> map
+      _ -> %{}
     end
   end
 

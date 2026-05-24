@@ -28,7 +28,21 @@ schemas = [
       %{name: "featuredImage", title: "Featured Image", type: "image"},
       %{name: "author", title: "Author", type: "reference", refType: "author"},
       %{name: "featured", title: "Featured Post", type: "boolean"}
-    ]
+    ],
+    # Explicit Expectation (Exp-P1, barkpark-u7q5). SOFT layout: title → slug →
+    # hero → body free-content region. `featuredImage` is the post's hero field
+    # (post has no field literally named "hero"). `prefill` is the create-time
+    # scaffold; `status` defaults to "draft", `featured` to false.
+    layout: [
+      %{kind: "field", name: "title"},
+      %{kind: "field", name: "slug"},
+      %{kind: "field", name: "featuredImage"},
+      %{kind: "region", name: "body"}
+    ],
+    prefill: %{
+      "status" => "draft",
+      "featured" => false
+    }
   },
   %{
     name: "page",
