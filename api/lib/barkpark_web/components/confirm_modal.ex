@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Components.ConfirmModal do
     >
       <div
         class="bp-modal card"
-        style="background: var(--surface, #fff); padding: 24px; min-width: 420px; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; gap: 12px; overflow: auto;"
+        style="background: var(--bg-card); color: var(--fg); padding: 24px; min-width: 420px; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; gap: 12px; overflow: auto;"
       >
         <h2 id={"#{@id}-title"} class="h3" style="margin: 0;"><%= @title %></h2>
         <p :if={@body} class="text-sm text-muted" style="margin: 0;"><%= @body %></p>
@@ -78,7 +78,7 @@ defmodule BarkparkWeb.Components.ConfirmModal do
         <%= if @stage == "dryrun" and @preview != [] do %>
           <div
             data-test-id="confirm-modal-preview"
-            style="border: 1px solid var(--border-muted, #e5e7eb); border-radius: 4px; padding: 12px;"
+            style="border: 1px solid var(--border-muted); border-radius: 4px; padding: 12px;"
           >
             <%= render_slot(@preview) %>
           </div>

@@ -1,20 +1,54 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
+  <%!-- Pre-paint theme: synchronous so data-theme is set before first paint
+        (no FOUC). The ONLY allowed blocking <head> script — it is ~5 lines and
+        sets a single attribute. Default follows the OS until the user toggles;
+        the choice then persists in localStorage. While no explicit pref is
+        stored, OS scheme changes are mirrored live. --%>
+  <script>
+    (function () {
+      var KEY = "barkpark_theme";
+      function osTheme() {
+        return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      var stored = localStorage.getItem(KEY);
+      document.documentElement.dataset.theme = stored || osTheme();
+      // Follow OS live ONLY while the user has made no explicit choice.
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
+        if (localStorage.getItem(KEY)) return;
+        document.documentElement.dataset.theme = e.matches ? "dark" : "light";
+      });
+    })();
+  </script>
   <title>Barkpark Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     /* ── shadcn/radix inspired design tokens ──────────────────────────── */
+    /* Theme-independent tokens (fonts, radii, layout) live on :root once. */
     :root {
       --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
 
-      /* zinc-based dark theme (shadcn) */
+      --radius-sm: 6px;
+      --radius: 8px;
+      --radius-lg: 12px;
+
+      /* Sanity-specific */
+      --sidebar-w: 240px;
+      --header-h: 52px;
+    }
+
+    /* zinc-based DARK theme (shadcn). :root is the attribute-less fallback —
+       a load before the pre-paint script runs still gets the dark palette. */
+    :root,
+    html[data-theme="dark"] {
+      color-scheme: dark;
       --bg:            hsl(240 10% 3.9%);
       --bg-card:       hsl(240 10% 5.5%);
       --bg-muted:      hsl(240 3.7% 10%);
@@ -38,16 +72,45 @@
       --destructive:       hsl(0 62.8% 50.6%);
       --destructive-fg:    hsl(0 0% 100%);
 
+      /* Tinted surfaces for status banners (settings flash). */
       --success:       hsl(142 71% 45%);
+      --success-bg:    hsl(142 50% 12%);
       --warning:       hsl(38 92% 50%);
+      --destructive-bg: hsl(0 50% 14%);
+    }
 
-      --radius-sm: 6px;
-      --radius: 8px;
-      --radius-lg: 12px;
+    /* zinc-based LIGHT theme (shadcn). Every token from the dark set is
+       re-authored — no token falls through to a dark value in light mode. */
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg:            hsl(0 0% 100%);
+      --bg-card:       hsl(0 0% 100%);
+      --bg-muted:      hsl(240 4.8% 95.9%);
+      --bg-accent:     hsl(240 4.8% 92%);
+      --bg-popover:    hsl(0 0% 100%);
 
-      /* Sanity-specific */
-      --sidebar-w: 240px;
-      --header-h: 52px;
+      --border:        hsl(240 5.9% 90%);
+      --border-muted:  hsl(240 5.9% 90%);
+      --input:         hsl(240 5.9% 90%);
+      --ring:          hsl(217.2 91.2% 59.8%);
+
+      --fg:            hsl(240 10% 3.9%);
+      --fg-muted:      hsl(240 3.8% 46.1%);
+      --fg-accent:     hsl(240 5.9% 10%);
+      --fg-dim:        hsl(240 4% 65%);
+
+      --primary:       hsl(240 5.9% 10%);
+      --primary-fg:    hsl(0 0% 98%);
+      --primary-hover: hsl(240 5.9% 22%);
+
+      --destructive:       hsl(0 72.2% 50.6%);
+      --destructive-fg:    hsl(0 0% 98%);
+
+      /* Tinted surfaces for status banners (settings flash). */
+      --success:       hsl(142 71% 35%);
+      --success-bg:    hsl(142 60% 94%);
+      --warning:       hsl(38 92% 42%);
+      --destructive-bg: hsl(0 80% 96%);
     }
 
     /* ── Reset ────────────────────────────────────────────────────────── */
@@ -361,6 +424,14 @@
     }
     .studio-tab:hover { color: var(--fg); background: var(--bg-muted); text-decoration: none; }
     .studio-tab.active { color: var(--fg); background: var(--bg-accent); }
+    /* Theme toggle: show the icon for the action the click will perform.
+       The hook mirrors document.documentElement.dataset.theme onto the
+       button. Default (no mirror yet / dark) shows the sun ("go light"). */
+    .theme-toggle { padding: 0 8px; }
+    .theme-toggle-sun { display: inline-flex; }
+    .theme-toggle-moon { display: none; }
+    .theme-toggle[data-theme="light"] .theme-toggle-sun { display: none; }
+    .theme-toggle[data-theme="light"] .theme-toggle-moon { display: inline-flex; }
     .studio-bar-actions {
       display: flex; align-items: center; gap: 8px; margin-left: auto;
     }
@@ -961,9 +1032,11 @@
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7280' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
       background-repeat: no-repeat; background-position: right 8px center;
     }
-    /* Flip UA picker chrome (datetime spinbuttons, calendar icon) to dark. */
+    /* UA picker chrome (datetime spinbuttons, calendar icon) inherits the
+       html-level color-scheme (set per theme above) so native widgets match
+       the active theme rather than the raw OS preference. */
     .bp-input[type="datetime-local"], .bp-input[type="date"],
-    .bp-input[type="time"], .bp-input[type="color"] { color-scheme: dark; }
+    .bp-input[type="time"], .bp-input[type="color"] { color-scheme: inherit; }
 
     /* Numeric-string fields (ONIX prices, years, counts — ~30 fields typed
        as string). The renderer adds .bp-input-numeric + inputmode="numeric"
@@ -1479,6 +1552,30 @@
           localStorage.setItem("barkpark_user_name", name);
           localStorage.setItem("barkpark_user_color", color);
         });
+      }
+    };
+
+    // ThemeToggle — client-only dark/light flip. On click it flips
+    // document.documentElement.dataset.theme and persists the choice to
+    // localStorage (which freezes OS-follow; the pre-paint listener
+    // short-circuits once a key is present). The button label/icon
+    // reflects the live theme via a data-theme mirror on the element.
+    Hooks.ThemeToggle = {
+      mounted() {
+        this._sync = () => {
+          this.el.dataset.theme = document.documentElement.dataset.theme || "dark";
+        };
+        this._sync();
+        this._onClick = () => {
+          var next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+          document.documentElement.dataset.theme = next;
+          localStorage.setItem("barkpark_theme", next);
+          this._sync();
+        };
+        this.el.addEventListener("click", this._onClick);
+      },
+      destroyed() {
+        this.el.removeEventListener("click", this._onClick);
       }
     };
 

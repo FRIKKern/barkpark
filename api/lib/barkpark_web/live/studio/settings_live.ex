@@ -162,16 +162,16 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     <div class="settings-live" style="max-width: 720px; margin: 2rem auto; font-family: ui-sans-serif, system-ui;">
       <h1>Plugin Settings</h1>
 
-      <p style="color: #555;">
+      <p style="color: var(--fg-muted);">
         Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
         to fetch unmasked (audited).
       </p>
 
       <%= if msg = Phoenix.Flash.get(@flash, :info) do %>
-        <div role="status" style="background:#e7f7ec; padding:.5rem; margin:.5rem 0;">{msg}</div>
+        <div role="status" style="background:var(--success-bg); color:var(--success); padding:.5rem; margin:.5rem 0;">{msg}</div>
       <% end %>
       <%= if msg = Phoenix.Flash.get(@flash, :error) do %>
-        <div role="alert" style="background:#fdecea; padding:.5rem; margin:.5rem 0;">{msg}</div>
+        <div role="alert" style="background:var(--destructive-bg); color:var(--destructive); padding:.5rem; margin:.5rem 0;">{msg}</div>
       <% end %>
 
       <form phx-change="update_name" phx-submit="load" style="margin-bottom:1rem;">
@@ -196,10 +196,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <% end %>
 
       <%= if @error do %>
-        <p role="alert" style="color:#a00;">{@error}</p>
+        <p role="alert" style="color:var(--destructive);">{@error}</p>
       <% end %>
 
-      <p style="margin-top:1rem; color:#888; font-size:.9em;">
+      <p style="margin-top:1rem; color:var(--fg-muted); font-size:.9em;">
         Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
       </p>
     </div>
@@ -246,7 +246,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     <form phx-submit="save" data-preset={@plugin_name}>
       <input type="hidden" name="plugin_name" value={@plugin_name} />
 
-      <fieldset style="border:1px solid #ddd; padding:.75rem; margin-bottom:.5rem;">
+      <fieldset style="border:1px solid var(--border); padding:.75rem; margin-bottom:.5rem;">
         <legend>{@plugin_name} settings</legend>
 
         <%= for field <- @settings_fields do %>
@@ -274,7 +274,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     ~H"""
     <p>
       <label>
-        {@field.label}<%= if @field[:required] do %> <span style="color:#a00;">*</span><% end %>
+        {@field.label}<%= if @field[:required] do %> <span style="color:var(--destructive);">*</span><% end %>
         {render_input(Map.merge(assigns, %{value: Map.get(@typed_form, @key, default_for(@field))}))}
       </label>
       <%= if @field[:masked] do %>
@@ -288,7 +288,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         </button>
       <% end %>
       <%= if hint = @field[:hint] do %>
-        <br /><small style="color:#666;">{hint}</small>
+        <br /><small style="color:var(--fg-muted);">{hint}</small>
       <% end %>
     </p>
     """

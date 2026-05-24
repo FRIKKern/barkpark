@@ -151,16 +151,16 @@ defmodule BarkparkWeb.StudioComponents do
     ~H"""
     <aside
       class="studio-sidebar"
-      style="width:240px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border-color, #e5e7eb);padding:.5rem;"
+      style="width:240px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border);padding:.5rem;"
     >
       <div
         class="studio-sidebar-header"
-        style="font-weight:600;padding:.5rem .75rem;color:var(--muted-color,#6b7280);"
+        style="font-weight:600;padding:.5rem .75rem;color:var(--fg-muted);"
       ><%= @structure.title %></div>
       <%= for item <- @structure.items do %>
         <%= case item.type do %>
           <% :divider -> %>
-            <div class="studio-sidebar-divider" style="height:1px;background:var(--border-color,#e5e7eb);margin:.5rem 0;"></div>
+            <div class="studio-sidebar-divider" style="height:1px;background:var(--border);margin:.5rem 0;"></div>
           <% _ -> %>
             <a
               href={"/studio/#{@dataset}/#{item.id}"}
@@ -632,6 +632,36 @@ defmodule BarkparkWeb.StudioComponents do
           Sign out
         </button>
       </.form>
+    </div>
+    """
+  end
+
+  @doc """
+  Dark/light theme toggle for the Studio topbar. Client-only — the
+  `ThemeToggle` JS hook (root.html.heex) flips
+  `document.documentElement.dataset.theme`, persists the choice to
+  `localStorage`, and mirrors the live theme onto this button's own
+  `data-theme` attribute. Sun vs moon icon visibility is driven purely
+  by CSS off that mirror (`.theme-toggle-sun` / `.theme-toggle-moon`),
+  so no server round-trip is needed to reflect the current theme.
+  `phx-update="ignore"` keeps LiveView patches from clobbering the
+  hook-set attribute.
+  """
+  def studio_theme_toggle(assigns) do
+    ~H"""
+    <div class="studio-bar-actions">
+      <button
+        id="studio-theme-toggle"
+        type="button"
+        class="btn btn-ghost btn-sm theme-toggle"
+        phx-hook="ThemeToggle"
+        phx-update="ignore"
+        aria-label="Toggle dark / light theme"
+        title="Toggle dark / light theme"
+      >
+        <span class="theme-toggle-sun"><.icon name="sun" size={16} /></span>
+        <span class="theme-toggle-moon"><.icon name="moon" size={16} /></span>
+      </button>
     </div>
     """
   end

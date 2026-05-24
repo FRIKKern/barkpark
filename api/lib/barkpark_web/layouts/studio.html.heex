@@ -28,6 +28,9 @@
         <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
       </div>
     </:actions>
+    <:actions>
+      <.studio_theme_toggle />
+    </:actions>
     <:actions :if={assigns[:api_token]}>
       <.studio_signout_button />
     </:actions>
