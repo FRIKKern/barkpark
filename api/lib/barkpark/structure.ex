@@ -202,9 +202,11 @@ defmodule Barkpark.Structure do
   end
 
   # Papers (convergence: papers are first-class type-"paper" documents).
-  # Surfaced as its own desk group. The list opens each paper in PaperLive at
-  # `/papers/:slug` — NOT the Studio form editor — see PaneBuilder's special
-  # casing of the "paper" type.
+  # Surfaced as its own desk group. The list opens each paper LIVE inside the
+  # Studio editor pane at `/studio/:dataset/paper/:slug` — Studio-internal
+  # navigation, NOT a link out to `/papers/:slug`. The structure + list panes
+  # stay visible; the paper's blocks render (and stream) in the editor pane.
+  # See PaneBuilder's special casing of the "paper" type.
   defp build_papers_group(schemas) do
     if Map.has_key?(schemas, "paper") do
       [doc_type_list_item(schemas["paper"])]

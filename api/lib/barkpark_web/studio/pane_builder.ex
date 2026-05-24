@@ -179,9 +179,13 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         docs = Content.list_documents(type_name, dataset, list_opts)
 
-        # Papers are listed in the desk but OPEN in PaperLive (the live block
-        # view at `/papers/:slug`), NOT the Studio form editor. Their list
-        # rows render as external links; no inline editor opens for them.
+        # Papers are listed in the desk and OPEN LIVE inside the Studio editor
+        # pane (a streaming block view), NOT the Studio form editor and NOT an
+        # external link out to `/papers/:slug`. Their list rows are ordinary
+        # selectable `:doc` rows so `phx-click="select"` drives Studio-internal
+        # navigation to `/studio/:dataset/paper/:slug`; the editor map carries
+        # `view: :paper` so StudioLive renders the block stream instead of a
+        # field form.
         paper? = type_name == Content.paper_type()
 
         doc_pane = %{
@@ -194,28 +198,44 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             Enum.map(docs, fn doc ->
               pub_id = Content.published_id(doc.doc_id)
 
-              base = %{
+              %{
                 type: :doc,
                 id: pub_id,
                 title: doc.title || "Untitled",
                 is_draft: Content.draft?(doc.doc_id),
                 status: doc.status
               }
-
-              if paper? do
-                Map.merge(base, %{type: :paper_doc, href: "/papers/#{pub_id}"})
-              else
-                base
-              end
             end),
           selected: Enum.at(rest, 0)
         }
 
         editor =
           cond do
-            # Never open the Studio form editor for a paper — PaperLive owns it.
+            # A paper opens as a LIVE block view in the editor pane. Build a
+            # `view: :paper` editor map carrying the paper document so
+            # StudioLive can render + subscribe to the block stream.
             paper? ->
-              nil
+              case rest do
+                [slug | _] ->
+                  case Content.get_paper(slug, dataset) do
+                    nil ->
+                      nil
+
+                    paper_doc ->
+                      %{
+                        view: :paper,
+                        doc: paper_doc,
+                        schema: schema,
+                        type: type_name,
+                        is_draft: false,
+                        has_published: false,
+                        form: %{}
+                      }
+                  end
+
+                _ ->
+                  nil
+              end
 
             true ->
               case rest do

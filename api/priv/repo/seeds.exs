@@ -147,13 +147,14 @@ IO.puts("Seeded #{length(schemas)} schema definitions")
 
 # ── Paper schema (convergence: papers are type-"paper" documents) ────────────
 #
-# Papers live in the "paperflow" dataset by default and render via PaperLive at
-# `/papers/:slug` (NOT the Studio form editor). Seed the schema so the Studio
-# desk renders a "Papers" node when viewing that dataset. The migration
-# `20260524090000_papers_as_documents` seeds the same row for existing DBs;
-# this keeps a fresh `mix ecto.reset` consistent.
+# Papers live in the "production" dataset by default and open LIVE inside the
+# Studio editor pane at `/studio/:dataset/paper/:slug`. Seed the schema so the
+# Studio desk renders a "Papers" node when viewing that dataset. The migration
+# `20260524090000_papers_as_documents` seeds the same row for existing DBs and
+# moves any legacy paperflow-dataset papers into production; this keeps a fresh
+# `mix ecto.reset` consistent.
 
-paper_dataset = "paperflow"
+paper_dataset = "production"
 
 %SchemaDefinition{}
 |> SchemaDefinition.changeset(%{
