@@ -155,4 +155,54 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     assert rendered =~ "First block streamed."
     assert view.pid == pid_before
   end
+
+  test "jumping between papers swaps the editor content (no stale blocks from the prior paper)",
+       %{conn: conn} do
+    other_slug = "2026-05-24-other-paper"
+
+    # A SECOND paper that deliberately REUSES the same block ids as the first
+    # (`h-1`, `b-intro`) but with different content — the exact shape that, on
+    # a naive shared stream, leaves paper A's DOM nodes reused under paper B's
+    # block ids.
+    {:ok, _} =
+      Content.upsert_paper(%{
+        slug: other_slug,
+        dataset: @dataset,
+        blocks: [
+          %{"id" => "h-1", "type" => "heading", "text" => "Other Paper"},
+          %{
+            "id" => "b-intro",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Totally different body."}]
+          }
+        ]
+      })
+
+    # Open paper A. (Block BODY text — e.g. "First block streamed." — renders
+    # ONLY in the editor pane; titles like "Studio Paper" also appear in the
+    # Papers list pane, so we assert on block body text to scope to the editor.)
+    {:ok, view, html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    assert html =~ "First block streamed."
+    assert html =~ ~s(data-slug="#{@slug}")
+
+    pid_before = view.pid
+
+    # Jump to paper B within the SAME LiveView (Studio-internal navigation).
+    html_b = render_patch(view, "/studio/#{@dataset}/paper/#{other_slug}")
+
+    # The editor now shows paper B...
+    assert html_b =~ ~s(data-slug="#{other_slug}")
+    assert html_b =~ "Totally different body."
+    # ...and NONE of paper A's block body lingers in the editor (the bug).
+    refute html_b =~ "First block streamed."
+
+    # Jump back to paper A — A's content returns cleanly, B's is gone.
+    html_a = render_patch(view, "/studio/#{@dataset}/paper/#{@slug}")
+    assert html_a =~ ~s(data-slug="#{@slug}")
+    assert html_a =~ "First block streamed."
+    refute html_a =~ "Totally different body."
+
+    # Same process throughout — these are push_patch navigations, not remounts.
+    assert view.pid == pid_before
+  end
 end
