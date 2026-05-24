@@ -31,12 +31,61 @@
 </head>
 <body>
   {@inner_content}
+  <%!-- Mermaid engine for `diagram` blocks. Loaded `defer` (NEVER a blocking
+        <script> in <head> — golden rule). startOnLoad:false: the PaperMermaid
+        hook runs it manually so it works with LiveView's streamed DOM, where
+        diagram <pre> elements arrive AFTER the initial parse. --%>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <script>
+    // PaperMermaid: run Mermaid over any unprocessed `pre.mermaid` inside this
+    // hook's element. Registered on the streamed <article>, so its mounted()
+    // fires once and updated() fires on every stream delta — exactly when a new
+    // `diagram` block's <pre class="mermaid"> enters the DOM. Guarded for the
+    // case where mermaid.min.js (deferred) hasn't loaded yet: we retry on the
+    // script's load event.
+    let PaperHooks = {
+      PaperMermaid: {
+        runMermaid() {
+          let nodes = Array.from(
+            this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
+          );
+          if (!nodes.length) return;
+          if (window.mermaid && window.mermaid.run) {
+            window.mermaid.run({ nodes });
+          } else {
+            // mermaid.min.js still deferred-loading — retry once it's ready.
+            window.addEventListener("load", () => {
+              if (window.mermaid && window.mermaid.run) {
+                window.mermaid.run({
+                  nodes: Array.from(
+                    this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
+                  )
+                });
+              }
+            }, { once: true });
+          }
+        },
+        mounted() { this.runMermaid(); },
+        updated() { this.runMermaid(); }
+      }
+    };
+
+    // Initialise the engine in manual mode (startOnLoad:false). Wrapped so it's
+    // a no-op if the deferred script isn't present yet — the hook re-checks.
+    function initMermaid() {
+      if (window.mermaid && window.mermaid.initialize) {
+        window.mermaid.initialize({ startOnLoad: false, theme: "default" });
+      }
+    }
+    if (document.readyState === "complete") initMermaid();
+    else window.addEventListener("load", initMermaid, { once: true });
+
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-      params: { _csrf_token: csrfToken }
+      params: { _csrf_token: csrfToken },
+      hooks: PaperHooks
     });
     liveSocket.connect();
     // Expose for hooks / debugging (Wave 4 block-streaming).

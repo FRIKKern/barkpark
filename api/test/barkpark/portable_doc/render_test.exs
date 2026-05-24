@@ -416,6 +416,79 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # diagram / figure blocks (P1 slice 2) — the canonical paperflow Mermaid
+  # figure. Article mode emits `<pre class="mermaid">` (the engine's selector)
+  # with the source entity-encoded so it round-trips the static extractor and
+  # Mermaid decodes it at runtime; email mode degrades (no engine trigger).
+  describe "diagram block — Mermaid figure (article) and degraded (email)" do
+    @diagram %{
+      "id" => "dg1",
+      "type" => "diagram",
+      "source" => "graph TD\n  A[Start] --> B{x > 0 & y < 1}\n  B --> C",
+      "caption" => "Figure 1. The control flow."
+    }
+
+    test "article mode emits pre.mermaid with entity-encoded source + figcaption" do
+      html = Render.render_block(@diagram, %{style: :article})
+
+      # The engine selects on this exact literal.
+      assert html =~ ~s(<pre class="mermaid">)
+      # & < > are entity-encoded inside the mermaid source.
+      assert html =~ "x &gt; 0 &amp; y &lt; 1"
+      # Raw structural chars must NOT survive in the source.
+      refute html =~ "x > 0 & y < 1"
+      # Bold "Figure N." run-in, remainder plain.
+      assert html =~ "<b>Figure 1.</b>"
+      assert html =~ "The control flow."
+      # Article figure chrome: parchment card.
+      assert html =~ "<figure"
+      assert html =~ "background:#fbfaf6"
+    end
+
+    test "email/default mode degrades — no pre.mermaid, source as a code block" do
+      html = Render.render_block(@diagram, %{style: :email})
+
+      # The Mermaid engine must NOT be triggered in email contexts.
+      refute html =~ ~s(<pre class="mermaid">)
+      # Source still shown (escaped) so the diagram intent survives in email.
+      assert html =~ "graph TD"
+      assert html =~ "x &gt; 0 &amp; y &lt; 1"
+      # Caption still rendered with the bold run-in.
+      assert html =~ "<b>Figure 1.</b>"
+    end
+
+    test "diagram with no caption omits the figcaption (article)" do
+      block = Map.delete(@diagram, "caption")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ ~s(<pre class="mermaid">)
+      refute html =~ "<figcaption"
+    end
+
+    test "a non-Figure caption renders without a bold run-in" do
+      block = Map.put(@diagram, "caption", "Just a label")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "Just a label"
+      refute html =~ "<b>"
+    end
+  end
+
+  describe "figure block — generic child + caption" do
+    test "article mode wraps a composed child block with a captioned figure" do
+      block = %{
+        "id" => "fg1",
+        "type" => "figure",
+        "caption" => "Figure 2. A heading inside.",
+        "child" => %{"id" => "h", "type" => "heading", "level" => 2, "text" => "Inner"}
+      }
+
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "<figure"
+      assert html =~ "Inner"
+      assert html =~ "<b>Figure 2.</b>"
+      assert html =~ "A heading inside."
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"

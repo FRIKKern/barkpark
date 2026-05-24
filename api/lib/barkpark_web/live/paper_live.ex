@@ -243,8 +243,12 @@ defmodule BarkparkWeb.PaperLive do
           </article>
         <% @block_mode -> %>
           <%!-- Block-backed: each top-level block is its own keyed stream item.
-                A delta patches/appends/deletes ONE of these, never the lot. --%>
-          <article id="paper-body" data-rev={@rev} phx-update="stream">
+                A delta patches/appends/deletes ONE of these, never the lot.
+                `phx-hook="PaperMermaid"` runs the Mermaid engine over any fresh
+                `pre.mermaid` on mount AND on every stream delta — so a `diagram`
+                block streamed in after the initial parse still renders. The
+                hook re-renders harmlessly when no diagram blocks are present. --%>
+          <article id="paper-body" data-rev={@rev} phx-update="stream" phx-hook="PaperMermaid">
             <div :for={{dom_id, block} <- @streams.blocks} id={dom_id} data-block-id={block.id}>
               {raw(block.html)}
             </div>
