@@ -2104,6 +2104,22 @@
     .bp-paper-editor-body ol { padding-left: 24px; }
     .bp-paper-editor-body ul li { list-style: disc; }
     .bp-paper-editor-body ol li { list-style: decimal; }
+    /* Doc footer status bar (gap #4) — a muted, sans, end-of-surface row with
+       word + block count and a save affordance, like the original editor. */
+    .bp-paper-footer {
+      margin-top: 32px;
+      padding-top: 12px;
+      border-top: 1px solid var(--paper-rule);
+      font-family: var(--font);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      color: var(--paper-ink-faint);
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .bp-paper-footer-sep { opacity: 0.5; }
+    .bp-paper-footer-save { margin-left: auto; color: var(--paper-ink-soft); }
     /* Restore the surface's old-style hanging figures in the editable text.
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
