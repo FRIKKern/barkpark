@@ -1490,6 +1490,7 @@
       --paper-ink-soft:   #5b524a;
       --paper-ink-faint:  #8a8278;
       --paper-rule:       rgba(31, 26, 20, 0.08);
+      --paper-edit-hover: rgba(31, 26, 20, 0.10);
       --paper-accent:     #a23925;
       --paper-accent-soft: rgba(162, 57, 37, 0.10);
       --paper-chrome-bg:  #fefdf9;
@@ -1502,6 +1503,7 @@
       --paper-ink-soft:   #b8ad9e;
       --paper-ink-faint:  #7f7568;
       --paper-rule:       rgba(236, 230, 220, 0.10);
+      --paper-edit-hover: rgba(236, 230, 220, 0.12);
       --paper-accent:     #d97a5f;
       --paper-accent-soft: rgba(217, 122, 95, 0.14);
       --paper-chrome-bg:  #221e1a;
@@ -1514,6 +1516,7 @@
       --paper-ink-soft:   #5b524a;
       --paper-ink-faint:  #8a8278;
       --paper-rule:       rgba(31, 26, 20, 0.08);
+      --paper-edit-hover: rgba(31, 26, 20, 0.10);
       --paper-accent:     #a23925;
       --paper-accent-soft: rgba(162, 57, 37, 0.10);
       --paper-chrome-bg:  #fefdf9;
@@ -1634,13 +1637,23 @@
        (a floating toolbar replaces them in B2). */
     .bp-paper-editor { display: flex; flex-direction: column; gap: 0; padding: 0; }
     .bp-paper-editor-empty { color: var(--paper-ink-faint); font-style: italic; }
+    /* No uniform inter-block gap — prose rhythm rides on the element margins
+       inside `.bp-paper-editor-body` (type-aware) so we don't double-space.
+       Bound-FIELD blocks have no such element rhythm, so they get a wrapper
+       gap restored below (`:has(.bp-paper-edit-form|.bp-paper-edit-field)`)
+       to keep title/slug/featuredImage from collapsing together. */
     .bp-paper-edit-block {
       position: relative;
       border: 0; border-radius: 0; background: transparent;
-      padding: 6px 0; margin: 6pt 0 0;
+      padding: 6px 0; margin: 0;
     }
-    /* Faint hover outline marks the active block without a card frame. */
-    .bp-paper-edit-block:hover { outline: 1px solid var(--paper-rule); outline-offset: 8px; border-radius: 2px; }
+    .bp-paper-edit-block:has(.bp-paper-edit-form),
+    .bp-paper-edit-block:has(.bp-paper-edit-field) { margin-top: 6pt; }
+    /* Faint hover outline marks the active block without a card frame. The
+       `--paper-edit-hover` token (0.10 in light vs the 0.08 `--paper-rule`)
+       + 10px offset give the active block a touch more presence; the token is
+       theme-scoped to a warm-light alpha in dark so it reads in both modes. */
+    .bp-paper-edit-block:hover { outline: 1px solid var(--paper-edit-hover); outline-offset: 10px; border-radius: 2px; }
     /* The chrome cluster floats in the block's LEFT MARGIN, hidden until the
        block is hovered/active, then fades in (Portable-Doc `.paper-floating-
        chrome` contract: ~150ms in / 300ms out, transparent bg, ink-faint
@@ -1747,16 +1760,35 @@
     .bp-paper-edit-wc {
       border: 0; background: transparent; padding: 0;
     }
+    /* Type-aware vertical rhythm — mirrors `.bp-paper-surface h1/h2/h3/p/li`
+       so the editable text breathes exactly like the read/preview surface.
+       Each prose block is its OWN single-element ProseMirror, so inter-block
+       rhythm rides on the leading element's margin-top (NOT a uniform wrapper
+       gap — that is neutralized below for prose to avoid double-spacing). The
+       very first block in the editor zeroes its leading margin so the document
+       doesn't open with a gap. */
     .bp-paper-editor-body { outline: none; }
-    .bp-paper-editor-body :first-child { margin-top: 0; }
-    .bp-paper-editor-body p { margin: 0; }
-    .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; margin: 2px 0; }
-    .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 2px 0; }
-    .bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.3; margin: 2px 0; }
+    .bp-paper-editor > .bp-paper-edit-block:first-child .bp-paper-editor-body > :first-child { margin-top: 0; }
+    .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; margin: 24pt 0 6pt; }
+    .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 18pt 0 4pt; }
+    .bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.3; margin: 12pt 0 2pt; }
+    .bp-paper-editor-body p  { margin: 12pt 0 0; }
+    .bp-paper-editor-body li { margin: 4pt 0 0; }
     .bp-paper-editor-body ul,
     .bp-paper-editor-body ol { padding-left: 24px; }
     .bp-paper-editor-body ul li { list-style: disc; }
     .bp-paper-editor-body ol li { list-style: decimal; }
+    /* Restore the surface's old-style hanging figures in the editable text.
+       The bundled ProseMirror base CSS kills ligatures + onum with
+       `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
+       this higher-specificity rule (`.bp-paper-surface .ProseMirror`) wins it
+       back so `1234567890` renders as old-style numerals, matching surface. */
+    .bp-paper-surface .ProseMirror {
+      font-variant-ligatures: normal;
+      -webkit-font-variant-ligatures: normal;
+      font-variant-numeric: oldstyle-nums;
+      font-feature-settings: "kern", "liga", "onum";
+    }
     .bp-paper-editor-body code {
       font-family: var(--paper-font-mono); font-size: 0.92em;
       background: var(--paper-bg-deep); padding: 0.08em 0.35em; border-radius: 3px;
