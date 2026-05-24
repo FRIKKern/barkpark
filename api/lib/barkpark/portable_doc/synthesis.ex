@@ -44,6 +44,11 @@ defmodule Barkpark.PortableDoc.Synthesis do
   # Map each top-level field's declared schema type → the field-block type a
   # bound block should carry. Falls back to field-string for unknown/typeless
   # fields (still round-trips: value is copied verbatim).
+  #
+  # v1 leaf types map to a `field-*` block; the four v2 nested types
+  # (composite / arrayOf / codelist / localizedText) use a block type EQUAL to
+  # the field type itself (the identity mapping — see `Render.compose_block/1`,
+  # which has `%{"type" => "composite"}` etc. clauses, no `field-` prefix).
   @field_block_types %{
     "string" => "field-string",
     "slug" => "field-slug",
@@ -54,8 +59,31 @@ defmodule Barkpark.PortableDoc.Synthesis do
     "color" => "field-color",
     "select" => "field-select",
     "reference" => "field-reference",
-    "image" => "field-image"
+    "image" => "field-image",
+    "composite" => "composite",
+    "arrayOf" => "arrayOf",
+    "codelist" => "codelist",
+    "localizedText" => "localizedText"
   }
+
+  @default_field_block_type "field-string"
+
+  @doc """
+  The block type a bound block carries for a given schema field TYPE.
+
+  v1 leaf types map to a `field-*` block (e.g. `"string"` → `"field-string"`,
+  `"image"` → `"field-image"`); the four v2 nested types use the identity
+  mapping (`"composite"` → `"composite"`, matching `Render.compose_block/1`).
+  Unknown / `nil` types fall back to `#{@default_field_block_type}` — the value
+  still round-trips through projection verbatim.
+
+  This is the single source of truth for the schema-type → block-type mapping,
+  shared by `synthesize/3`, `scaffold/4`, and
+  `Content.available_expected_fields/2` (the Expectation-aware slash menu).
+  """
+  @spec field_block_type(String.t() | nil) :: String.t()
+  def field_block_type(field_type),
+    do: Map.get(@field_block_types, field_type, @default_field_block_type)
 
   @doc """
   Synthesize an in-memory block list for a legacy document.
@@ -103,7 +131,7 @@ defmodule Barkpark.PortableDoc.Synthesis do
   defp synth_field_block(name, content, type_by_name, idx) do
     case Map.fetch(content, name) do
       {:ok, value} ->
-        block_type = Map.get(@field_block_types, Map.get(type_by_name, name), "field-string")
+        block_type = field_block_type(Map.get(type_by_name, name))
 
         [
           %{
@@ -205,7 +233,7 @@ defmodule Barkpark.PortableDoc.Synthesis do
   # synthesis, which skips value-less fields). The value is resolved from the
   # provided values, then prefill, then an empty default by block type.
   defp scaffold_field_block(name, values, prefill, type_by_name, idx) do
-    block_type = Map.get(@field_block_types, Map.get(type_by_name, name), "field-string")
+    block_type = field_block_type(Map.get(type_by_name, name))
     value = scaffold_value(name, values, prefill, block_type)
 
     [

@@ -1956,6 +1956,175 @@ defmodule Barkpark.Content do
     Synthesis.synthesize(layout, content_with_title, fields)
   end
 
+  # ── EX1 — Expectation-aware slash menu (barkpark-q39y) ────────────────────
+  #
+  # An Expectation layout's `field` entries carry optional CARDINALITY:
+  # `"max"` (integer cap, nil/absent = unlimited) and `"enforce"` (boolean,
+  # default false — see SchemaDefinition layout doc). These two pure helpers
+  # let the slash menu reason about which expected fields are STILL
+  # recommendable for a given document, and whether a HARD cap blocks a 2nd
+  # insert.
+
+  @doc """
+  The expected fields that are STILL recommendable for a document's block list.
+
+  Given a document's `blocks` list and the resolved Expectation (`%{layout:,
+  prefill:}` from `resolve_expectation/1`) plus the schema (for per-field type
+  and human label), returns the layout `field` entries whose current bound-block
+  count is BELOW their `max` cap — i.e. `count < max`, or always when `max` is
+  nil/absent (unlimited). Fields at or over `max` are EXCLUDED (hide-at-cap),
+  regardless of `enforce`.
+
+  Each returned entry is a map the slash menu can render + insert:
+
+      %{
+        name:    "title",          # the layout field name
+        type:    "field-string",   # the bound block's type (schema-type → block-type)
+        label:   "Title",          # the schema field's human title (falls back to name)
+        count:   0,                # bound blocks in `blocks` with fieldName == name
+        max:     1,                # the layout entry's cap (nil = unlimited)
+        enforce: true              # the layout entry's hard/soft flag
+      }
+
+  Region entries are ignored (they carry no cardinality). A `field` entry whose
+  `name` is missing/blank is skipped. Pure: no Repo access.
+  """
+  @spec available_expected_fields([map()], %{
+          required(:layout) => [map()],
+          optional(:prefill) => map()
+        }) :: [map()]
+  @spec available_expected_fields([map()], %{
+          required(:layout) => [map()],
+          optional(:prefill) => map()
+        }, SchemaDefinition.t() | map() | nil) :: [map()]
+  def available_expected_fields(blocks, expectation, schema \\ nil)
+
+  def available_expected_fields(blocks, %{layout: layout}, schema)
+      when is_list(blocks) and is_list(layout) do
+    type_by_name = expected_field_type_index(schema)
+    label_by_name = expected_field_label_index(schema)
+
+    layout
+    |> Enum.filter(&match?(%{"kind" => "field"}, &1))
+    |> Enum.map(&expected_field_descriptor(&1, blocks, type_by_name, label_by_name))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(&field_at_cap?/1)
+  end
+
+  def available_expected_fields(_blocks, _expectation, _schema), do: []
+
+  @doc """
+  True when a HARD cap blocks inserting another bound block for `field_name`.
+
+  Blocks the insert when the field's current bound-block count is at or over its
+  `max` AND the layout entry is `enforce: true`. A SOFT cap (`enforce: false`)
+  returns `false` even at the cap — the slash menu hides the field there, but a
+  programmatic insert is still allowed. Unlimited (`max` nil/absent) is never
+  blocked. An unknown `field_name` (no matching layout `field` entry) is never
+  blocked. Pure: no Repo access.
+  """
+  @spec expected_field_blocked?([map()], %{required(:layout) => [map()]}, String.t()) ::
+          boolean()
+  def expected_field_blocked?(blocks, %{layout: layout}, field_name)
+      when is_list(blocks) and is_list(layout) and is_binary(field_name) do
+    case Enum.find(layout, &match?(%{"kind" => "field", "name" => ^field_name}, &1)) do
+      nil ->
+        false
+
+      entry ->
+        max = layout_entry_max(entry)
+        enforce = layout_entry_enforce(entry)
+        count = bound_field_count(blocks, field_name)
+
+        enforce and is_integer(max) and count >= max
+    end
+  end
+
+  def expected_field_blocked?(_blocks, _expectation, _field_name), do: false
+
+  # One slash-menu descriptor for a layout `field` entry (or nil when the entry
+  # has no usable string name). Cap filtering happens in the caller.
+  defp expected_field_descriptor(entry, blocks, type_by_name, label_by_name) do
+    case Map.get(entry, "name") do
+      name when is_binary(name) and name != "" ->
+        field_type = Map.get(type_by_name, name)
+
+        %{
+          name: name,
+          type: Synthesis.field_block_type(field_type),
+          label: Map.get(label_by_name, name) || name,
+          count: bound_field_count(blocks, name),
+          max: layout_entry_max(entry),
+          enforce: layout_entry_enforce(entry)
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  # A descriptor is at-cap (excluded from the available list) when it has an
+  # integer max and the current count has reached it. nil max = unlimited =
+  # never at cap. enforce is irrelevant to hide-at-cap — both soft and hard
+  # caps hide the field once full.
+  defp field_at_cap?(%{count: count, max: max}) when is_integer(max), do: count >= max
+  defp field_at_cap?(_), do: false
+
+  # Number of BOUND blocks (fieldName == name) for a field, top-level only —
+  # bound blocks are never nested (Projection bound?/1 reads top-level
+  # fieldName). Matches Projection's bound-field semantics.
+  defp bound_field_count(blocks, name) do
+    Enum.count(blocks, fn b -> is_map(b) and Map.get(b, "fieldName") == name end)
+  end
+
+  # The layout entry's max cap: an integer, or nil for unlimited (absent or any
+  # non-integer value — e.g. an explicit JSON null — is treated as unlimited).
+  defp layout_entry_max(entry) do
+    case Map.get(entry, "max") do
+      n when is_integer(n) -> n
+      _ -> nil
+    end
+  end
+
+  # The layout entry's enforce flag: only an explicit boolean `true` enforces;
+  # absent/any other value is soft (false).
+  defp layout_entry_enforce(%{"enforce" => true}), do: true
+  defp layout_entry_enforce(_), do: false
+
+  # field name → declared schema type, for picking each field's block type.
+  defp expected_field_type_index(%SchemaDefinition{fields: fields}) when is_list(fields),
+    do: expected_field_type_index(fields)
+
+  defp expected_field_type_index(%{fields: fields}) when is_list(fields),
+    do: expected_field_type_index(fields)
+
+  defp expected_field_type_index(fields) when is_list(fields) do
+    Enum.reduce(fields, %{}, fn f, acc ->
+      name = f["name"] || f[:name]
+      type = f["type"] || f[:type]
+      if is_binary(name), do: Map.put(acc, name, type), else: acc
+    end)
+  end
+
+  defp expected_field_type_index(_), do: %{}
+
+  # field name → human title (label), for the slash-menu label.
+  defp expected_field_label_index(%SchemaDefinition{fields: fields}) when is_list(fields),
+    do: expected_field_label_index(fields)
+
+  defp expected_field_label_index(%{fields: fields}) when is_list(fields),
+    do: expected_field_label_index(fields)
+
+  defp expected_field_label_index(fields) when is_list(fields) do
+    Enum.reduce(fields, %{}, fn f, acc ->
+      name = f["name"] || f[:name]
+      title = f["title"] || f[:title]
+      if is_binary(name) and is_binary(title), do: Map.put(acc, name, title), else: acc
+    end)
+  end
+
+  defp expected_field_label_index(_), do: %{}
+
   @doc """
   Upsert a paper keyed by `{dataset, slug}` (as a type-"paper" document) and
   broadcast a **whole-HTML** frame on the per-doc topic.

@@ -194,8 +194,8 @@ defmodule Barkpark.Content.SchemaDefinition do
   # ## Shapes
   #
   #   layout  = [
-  #     %{"kind" => "field",  "name" => "title"},
-  #     %{"kind" => "field",  "name" => "slug"},
+  #     %{"kind" => "field",  "name" => "title", "max" => 1, "enforce" => false},
+  #     %{"kind" => "field",  "name" => "slug",  "max" => 1, "enforce" => false},
   #     ...one entry per top-level field, in declared order...,
   #     %{"kind" => "region", "name" => "body"}   # trailing free-content region
   #   ]
@@ -203,9 +203,19 @@ defmodule Barkpark.Content.SchemaDefinition do
   #   prefill = the schema's `initial_values` map verbatim (a flat scaffold),
   #             or `%{}` when none is declared.
   #
-  # A `field` entry references a top-level field by `name`. A `region` entry
-  # marks a free-content area (rich blocks live here in a LATER phase). The
-  # derived default always appends exactly one trailing `body` region.
+  # A `field` entry references a top-level field by `name`. It MAY carry optional
+  # CARDINALITY keys (EX1, barkpark-q39y):
+  #
+  #   * `"max"`     — integer cap on how many bound blocks of this field a
+  #                   document may hold; `nil`/absent means unlimited.
+  #   * `"enforce"` — boolean (default `false`). When `true`, the cap is HARD:
+  #                   inserting past `max` is rejected. When `false`, the cap is
+  #                   SOFT: the slash menu hides the field at the cap, but a
+  #                   block can still be inserted programmatically.
+  #
+  # A `region` entry marks a free-content area (rich blocks live here) and is
+  # UNCHANGED — it carries no cardinality. The derived default always appends
+  # exactly one trailing `body` region.
   # ─────────────────────────────────────────────────────────────────────────────
 
   @default_region_name "body"
@@ -217,9 +227,11 @@ defmodule Barkpark.Content.SchemaDefinition do
   Synthesize a default `layout` from a schema's field order.
 
   Accepts a `%SchemaDefinition{}`, a `%Parsed{}`, or a raw schema map. Each
-  top-level field becomes a `%{"kind" => "field", "name" => <name>}` entry in
-  declared order, followed by one trailing
-  `%{"kind" => "region", "name" => "body"}` free-content marker.
+  top-level field becomes a
+  `%{"kind" => "field", "name" => <name>, "max" => 1, "enforce" => false}` entry
+  in declared order (EX1: each derived field is expected exactly once, SOFTLY —
+  the slash menu hides it at the cap but never blocks an insert), followed by
+  one trailing `%{"kind" => "region", "name" => "body"}` free-content marker.
 
   Fields without a usable string `name` are skipped (the region is always
   appended regardless).
@@ -229,7 +241,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     field_entries =
       schema
       |> field_names()
-      |> Enum.map(fn name -> %{"kind" => "field", "name" => name} end)
+      |> Enum.map(fn name ->
+        %{"kind" => "field", "name" => name, "max" => 1, "enforce" => false}
+      end)
 
     field_entries ++ [%{"kind" => "region", "name" => @default_region_name}]
   end

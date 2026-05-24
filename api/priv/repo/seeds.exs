@@ -33,10 +33,15 @@ schemas = [
     # hero → body free-content region. `featuredImage` is the post's hero field
     # (post has no field literally named "hero"). `prefill` is the create-time
     # scaffold; `status` defaults to "draft", `featured` to false.
+    #
+    # CARDINALITY (EX1, barkpark-q39y): title / slug / featuredImage are expected
+    # exactly ONCE and HARD-enforced (`max: 1, enforce: true`) — the slash menu
+    # hides them at the cap and a 2nd insert is rejected. The body region is
+    # free-content and carries no cardinality.
     layout: [
-      %{kind: "field", name: "title"},
-      %{kind: "field", name: "slug"},
-      %{kind: "field", name: "featuredImage"},
+      %{kind: "field", name: "title", max: 1, enforce: true},
+      %{kind: "field", name: "slug", max: 1, enforce: true},
+      %{kind: "field", name: "featuredImage", max: 1, enforce: true},
       %{kind: "region", name: "body"}
     ],
     prefill: %{
