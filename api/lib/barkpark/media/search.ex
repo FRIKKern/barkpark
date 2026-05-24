@@ -3,7 +3,7 @@ defmodule Barkpark.Media.Search do
   Faceted search over `media_files` joined with linked `mediaAsset` documents.
 
   WoodWing-style query options:
-    * `:q` — text search (filename, original name, asset title)
+    * `:q` — text search (filename, original name, asset title, tags)
     * `:kind`, `:mime_type`, `:status`, `:processing`, `:collection`, `:tags`
     * `:facet_selections` — map of active facet filters
     * `:facets` — list of facet fields to aggregate
@@ -289,7 +289,7 @@ defmodule Barkpark.Media.Search do
 
           {parts ++
              [
-               "AND (m.original_name ILIKE $#{idx} OR m.filename ILIKE $#{idx} OR d.title ILIKE $#{idx})"
+               "AND (m.original_name ILIKE $#{idx} OR m.filename ILIKE $#{idx} OR d.title ILIKE $#{idx} OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(d.content->'tags', '[]'::jsonb)) elem WHERE elem ILIKE $#{idx}))"
              ], params ++ [pattern], idx + 1}
 
         {:tags, value}, {parts, params, idx} ->
@@ -340,12 +340,14 @@ defmodule Barkpark.Media.Search do
             order_by(query, [m, d],
               desc:
                 fragment(
-                  "CASE WHEN ? ILIKE ? OR ? ILIKE ? OR ? ILIKE ? THEN 1 ELSE 0 END",
+                  "CASE WHEN ? ILIKE ? OR ? ILIKE ? OR ? ILIKE ? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?) THEN 1 ELSE 0 END",
                   d.title,
                   ^pattern,
                   m.original_name,
                   ^pattern,
                   m.filename,
+                  ^pattern,
+                  d.content,
                   ^pattern
                 ),
               desc: m.inserted_at
@@ -371,11 +373,20 @@ defmodule Barkpark.Media.Search do
 
   defp maybe_filter_search(query, q) when is_binary(q) do
     pattern = "%#{escape_like(q)}%"
+    text_search_where(query, pattern)
+  end
 
+  defp text_search_where(query, pattern) do
     where(
       query,
       [m, d],
-      ilike(m.original_name, ^pattern) or ilike(m.filename, ^pattern) or ilike(d.title, ^pattern)
+      ilike(m.original_name, ^pattern) or ilike(m.filename, ^pattern) or
+        ilike(d.title, ^pattern) or
+        fragment(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?)",
+          d.content,
+          ^pattern
+        )
     )
   end
 

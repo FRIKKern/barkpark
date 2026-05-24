@@ -97,7 +97,28 @@ Media Desk layout maps directly to the two modes:
 
 Future Phase 3 additions in this shell: saved searches (sidebar), bulk select on query, list column config.
 
-**Shipped in explorer (Phase 0+):** sort control, Format facet, scroll/load-more paging, list headers, `/` to focus search, inspector tags + document previews, session prefs for view/sort.
+**Shipped in explorer (Phase 0+):** sort control, Format facet, scroll/load-more paging, list headers, `/` to focus search, inspector tags + document previews, session prefs for view/sort, search history dropdown (Recent / Popular / Nohits).
+
+---
+
+## Search analytics (Phase 1 — Postgres)
+
+Inspired by Algolia Query Suggestions and Typesense `popular_queries`:
+
+| Bucket | Scope | Purpose |
+|--------|-------|---------|
+| **recent** | Per browser session (`X-BP-Search-Client`) or API token | Personal autocomplete |
+| **popular** | Dataset-wide, 30 days, non-zero hits | Team trending queries |
+| **nohits** | Zero-result queries | Content-gap / synonym signals |
+
+- Events logged on first-page `/v1/media/:dataset/search` only (`offset=0`).
+- Suggestions: `GET /v1/media/:dataset/search/suggestions?q=prefix`.
+- Postgres `pg_trgm` GIN index on `query` for prefix matching — no separate engine required yet.
+- **Retention:** table grows unbounded today; add TTL job before high-volume prod (e.g. 90-day prune).
+
+Implementation: `Barkpark.Media.SearchAnalytics`, `media_search_events` table, explorer suggest UI in `bp-asset-explorer.js`.
+
+Future: promote repeated **nohits** to admin dashboard; sync **popular** into sidebar shortcuts; optional ParadeDB `pg_search` for asset full-text at scale (Phase 2).
 
 ---
 

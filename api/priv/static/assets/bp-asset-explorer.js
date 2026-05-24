@@ -375,6 +375,15 @@
           if (this._searchEl) this._searchEl.focus();
           return;
         }
+        if (
+          e.key === "Escape" &&
+          this._suggestEl &&
+          !this._suggestEl.hidden &&
+          document.activeElement === this._searchEl
+        ) {
+          this._hideSuggest();
+          return;
+        }
         if (!this._selected) return;
         if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
         if (e.key === "ArrowRight") this._selectRelative(1);
