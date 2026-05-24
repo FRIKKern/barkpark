@@ -2856,7 +2856,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             title="Drag to reorder"
             aria-label="Drag to reorder block"
             data-test-id="paper-drag-grip"
-          >⠿</span>
+          >⋮⋮</span>
           <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
           <span class="bp-paper-edit-actions">
             <button
@@ -3042,7 +3042,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             value mid-edit (server owns the model; no echo). --%>
       <% t when t in ["field-string", "field-slug"] -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <input type="text" class="bp-paper-edit-text" value={Map.get(@block, "value", "")}
                  data-test-id={"paper-field-" <> @type} />
@@ -3050,7 +3050,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       <% "field-text" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <textarea class="bp-paper-edit-textarea" rows={Map.get(@block, "rows") || 3}
                     data-test-id="paper-field-field-text"><%= Map.get(@block, "value", "") %></textarea>
@@ -3058,7 +3058,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       <% "field-boolean" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <input type="checkbox" checked={Map.get(@block, "value") == true}
                  data-test-id="paper-field-field-boolean" />
@@ -3066,7 +3066,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       <% "field-select" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <select class="form-input" data-test-id="paper-field-field-select">
             <option :for={o <- Map.get(@block, "options", [])}
@@ -3079,7 +3079,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       <% "field-datetime" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <input type="datetime-local" class="form-input" value={Map.get(@block, "value", "")}
                  data-test-id="paper-field-field-datetime" />
@@ -3087,7 +3087,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       <% "field-color" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <input type="color" value={Map.get(@block, "value", "#000000")}
                  data-test-id="paper-field-field-color"
@@ -3108,7 +3108,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             select still work). value is a plain string in both cases. --%>
       <% "field-reference" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <bp-reference-picker
             value={Map.get(@block, "value", "")}
@@ -3120,7 +3120,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       <% "field-image" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
-             data-block-id={@id} data-field-type={@type} class="bp-paper-edit-field">
+             data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <bp-media-picker
             value={Map.get(@block, "value", "")}
