@@ -2890,7 +2890,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :expected_fields, :list, default: []
 
   defp paper_block_editor(assigns) do
-    assigns = assign(assigns, :last_index, length(assigns.blocks) - 1)
+    assigns =
+      assigns
+      |> assign(:last_index, length(assigns.blocks) - 1)
+      |> assign(:doc_stats, beta_doc_stats(assigns.blocks))
 
     ~H"""
     <%!-- The whole block list is a drag-sortable surface. The
@@ -3020,9 +3023,47 @@ defmodule BarkparkWeb.Studio.StudioLive do
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Add</button>
       </form>
+
+      <%!-- Doc footer (gap #4): live word + block count and a save affordance,
+            mirroring the original PortableDoc editor's status bar. Counts come
+            from the server-side block list (beta_doc_stats/1), refreshed on each
+            persisted block op. --%>
+      <footer class="bp-paper-footer" data-test-id="bp-paper-footer">
+        <span><%= @doc_stats.words %> words</span>
+        <span class="bp-paper-footer-sep">·</span>
+        <span><%= @doc_stats.blocks %> blocks</span>
+        <span class="bp-paper-footer-save">✓ Auto-saved</span>
+      </footer>
     </div>
     """
   end
+
+  # Live document stats for the Beta editor footer (gap #4): top-level block
+  # count + total word count across all block text. Pure; recomputed on each
+  # render so it tracks the persisted block list.
+  defp beta_doc_stats(blocks) when is_list(blocks) do
+    words =
+      blocks
+      |> Enum.map(&beta_node_text/1)
+      |> Enum.map(fn t -> t |> String.split(~r/\s+/, trim: true) |> length() end)
+      |> Enum.sum()
+
+    %{blocks: length(blocks), words: words}
+  end
+
+  defp beta_doc_stats(_), do: %{blocks: 0, words: 0}
+
+  # Recursively gather plain text from a block / inline node — a string, a list,
+  # or a map carrying text/value/children/content/items/body. Unknown → "".
+  defp beta_node_text(s) when is_binary(s), do: s
+  defp beta_node_text(list) when is_list(list), do: Enum.map_join(list, " ", &beta_node_text/1)
+
+  defp beta_node_text(%{} = m) do
+    ["text", "value", "children", "content", "items", "body"]
+    |> Enum.map_join(" ", fn k -> beta_node_text(Map.get(m, k)) end)
+  end
+
+  defp beta_node_text(_), do: ""
 
   # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
   # carries a hidden `id` and submits its changed field(s); the handler maps
