@@ -185,7 +185,7 @@ class BpPaperEditor extends HTMLElement {
     if (!this._slash) {
       this._slash = new SlashMenu({
         items: SLASH_ITEMS,
-        onChoose: (type) => this._chooseSlash(type),
+        onChoose: (item) => this._chooseSlash(item),
         onDismiss: () => this._dismissSlash(),
       });
     }
@@ -238,17 +238,24 @@ class BpPaperEditor extends HTMLElement {
     }
   }
 
-  // User picked a type: erase the typed "/" from this block, close the menu,
+  // User picked an item: erase the typed "/" from this block, close the menu,
   // and emit the bubbling/composed `bp-slash-insert` event. The server creates
   // the new block (default_block + insert-after) — this WC does NOT build it.
-  _chooseSlash(type) {
+  //
+  // An EXPECTED-group item carries a `fieldName`; we forward it so the server
+  // builds a BOUND block (default_block + fieldName). A generic item has no
+  // fieldName, so the detail omits it and the server takes the unchanged path.
+  _chooseSlash(item) {
     this._closeSlash();
     // Remove the leading "/" so the trigger char never persists.
     this._editor.chain().focus().setTextSelection({ from: 1, to: 2 }).deleteSelection().run();
 
+    const detail = { type: item.type, afterId: this._blockId };
+    if (item.fieldName) detail.fieldName = item.fieldName;
+
     this.dispatchEvent(
       new CustomEvent("bp-slash-insert", {
-        detail: { type, afterId: this._blockId },
+        detail,
         bubbles: true,
         composed: true,
       }),

@@ -1092,25 +1092,37 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, paper_op(socket, op)}
   end
 
-  # Slash-menu insert (P3.3). The <bp-paper-editor> WC emits a `bp-slash-insert`
-  # CustomEvent {type, afterId} when the user picks a type from the "/" popup;
+  # Slash-menu insert (P3.3 + EX2). The <bp-paper-editor> WC emits a
+  # `bp-slash-insert` CustomEvent {type, afterId} — and, for an EXPECTED-group
+  # pick, {type, fieldName, afterId} — when the user chooses from the "/" popup;
   # the BarkparkPaperEditor hook forwards it here. We build the block with the
   # SAME default_block/2 + new_block_id/0 the add-block path uses and apply an
   # `insert-after` op through the SAME paper_op/2 pipeline — no duplicated
   # block-creation logic. A blank/empty afterId falls back to append-block.
+  #
+  # When a `fieldName` is present (an EXPECTED-group pick) the new block is
+  # BOUND: `default_block/2` plus `"fieldName" => fname`. Before inserting, the
+  # hard cap is enforced server-side as a safety net — `expected_field_blocked?/3`
+  # defends against a stale menu / a race where a capped+enforced field gets
+  # offered. A blocked insert is a no-op with a gentle flash. Generic picks
+  # (no fieldName) behave exactly as before.
+  def handle_event(
+        "paper-slash-insert",
+        %{"type" => type, "fieldName" => fname} = params,
+        socket
+      )
+      when is_binary(fname) and fname != "" do
+    if expected_field_blocked?(socket, fname) do
+      {:noreply, put_flash(socket, :error, "That field is already at its limit.")}
+    else
+      new = Map.put(default_block(type, new_block_id()), "fieldName", fname)
+      {:noreply, paper_op(socket, slash_insert_op(params["afterId"], new))}
+    end
+  end
+
   def handle_event("paper-slash-insert", %{"type" => type} = params, socket) do
     new = default_block(type, new_block_id())
-
-    op =
-      case params["afterId"] do
-        after_id when is_binary(after_id) and after_id != "" ->
-          %{"op" => "insert-after", "afterId" => after_id, "block" => new}
-
-        _ ->
-          %{"op" => "append-block", "block" => new}
-      end
-
-    {:noreply, paper_op(socket, op)}
+    {:noreply, paper_op(socket, slash_insert_op(params["afterId"], new))}
   end
 
   # Delete a block → remove-block by id.
@@ -1283,6 +1295,54 @@ defmodule BarkparkWeb.Studio.StudioLive do
         end
     end
   end
+
+  # ── EX2 — expectation-aware slash menu (barkpark-0uq8) ──────────────────────
+
+  # An `insert-after` op anchored to a non-blank id, else `append-block`.
+  defp slash_insert_op(after_id, block) when is_binary(after_id) and after_id != "",
+    do: %{"op" => "insert-after", "afterId" => after_id, "block" => block}
+
+  defp slash_insert_op(_after_id, block),
+    do: %{"op" => "append-block", "block" => block}
+
+  # Hard-cap guard for a bound expected-field insert: resolve the active doc's
+  # current block list + Expectation and ask Content whether `field_name` is at
+  # an ENFORCED cap. Returns false (allow) for any non-Expectation context (no
+  # schema in scope ⇒ no enforced caps ⇒ never blocked).
+  defp expected_field_blocked?(socket, field_name) do
+    case slash_expectation(socket) do
+      %{layout: _} = expectation ->
+        Content.expected_field_blocked?(
+          paper_top_level_blocks(socket),
+          expectation,
+          field_name
+        )
+
+      _ ->
+        false
+    end
+  end
+
+  # The resolved Expectation for the surface the slash menu is driving — the
+  # open document's schema in the Beta document view, else nil (the paper pane
+  # has no Expectation). Mirrors paper_top_level_blocks/1's surface gate so the
+  # block list and the Expectation always describe the SAME document.
+  defp slash_expectation(socket) do
+    case socket.assigns[:editor_schema] do
+      %Barkpark.Content.SchemaDefinition{} = schema -> Content.resolve_expectation(schema)
+      _ -> nil
+    end
+  end
+
+  # The expected fields STILL recommendable for the current Beta block list,
+  # rendered into `data-expected-fields` for the slash menu's EXPECTED group.
+  # Returns [] when there is no schema/Expectation (no group shown).
+  defp beta_expected_fields(%Barkpark.Content.SchemaDefinition{} = schema, blocks)
+       when is_list(blocks) do
+    Content.available_expected_fields(blocks, Content.resolve_expectation(schema), schema)
+  end
+
+  defp beta_expected_fields(_schema, _blocks), do: []
 
   # Find a block by id anywhere in the tree (recurses sections), so a control
   # nested inside a section still resolves its block.
@@ -2821,6 +2881,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :paper_rev, :integer, default: 0
   attr :dataset, :string, default: "production"
   attr :api_token_raw, :string, default: ""
+  # EX2 — the expected fields STILL recommendable for THIS doc's current block
+  # list (Content.available_expected_fields/3). Each entry carries name/type/
+  # label; the slash menu reads it from `data-expected-fields` to render its
+  # top EXPECTED group. Empty list ⇒ no group rendered (e.g. the paper pane,
+  # which has no Expectation). Re-rendered on every block-list change because
+  # the carrier <div> lives OUTSIDE any phx-update="ignore" node.
+  attr :expected_fields, :list, default: []
 
   defp paper_block_editor(assigns) do
     assigns = assign(assigns, :last_index, length(assigns.blocks) - 1)
@@ -2839,6 +2906,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
       data-test-id="studio-paper-block-editor"
       phx-hook="BarkparkPaperSortable"
     >
+      <%!-- EX2 — expectation-aware slash menu carrier. A stable, LiveView-driven
+            element (NOT inside any phx-update="ignore" wrapper) holding the
+            JSON list of expected fields STILL recommendable for the current
+            block list. It re-renders whenever @blocks/@expected_fields change,
+            so the slash menu's EXPECTED group always reflects current usage
+            (a field hides once it hits its cap). The slash menu in
+            slash-menu.js reads `[data-expected-fields]` on open. --%>
+      <div
+        id="bp-expected-fields"
+        data-expected-fields={Jason.encode!(@expected_fields)}
+        data-test-id="bp-expected-fields"
+        hidden
+      ></div>
+
       <p :if={@blocks == []} class="bp-paper-editor-empty">
         This paper has no blocks yet. Add one below.
       </p>
@@ -3339,6 +3420,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   <.paper_block_editor
                     slug={@editor_doc.doc_id}
                     blocks={@editor_blocks}
+                    expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}
                     paper_rev={0}
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
