@@ -45,18 +45,37 @@
     }
   }
 
+  function inferKind(mime, fallback) {
+    if (fallback && fallback !== "other") return fallback;
+    const m = (mime || "").toLowerCase();
+    if (m.indexOf("image/") === 0) return "image";
+    if (m.indexOf("video/") === 0) return "video";
+    if (m.indexOf("audio/") === 0) return "audio";
+    if (m.indexOf("application/") === 0 || m.indexOf("text/") === 0) return "document";
+    return "other";
+  }
+
   function mergeHit(row) {
     const asset = row.asset || assetFromBlob(row);
     const nested = asset && typeof asset === "object" ? asset : {};
+    const mime = nested.fileInfo && nested.fileInfo.mimeType ? nested.fileInfo.mimeType : row.mimeType;
+    const kind = nested.bp_asset_kind || inferKind(mime, row.kind);
     return Object.assign({}, nested, {
       _blobId: row.id,
       _id: nested._id || row.assetDocId || row.id,
       title: nested.title || row.originalName || row.filename,
+      bp_asset_kind: kind,
       visibility: row.visibility || nested.bp_visibility,
       thumbnailUrl: row.thumbnailUrl || nested.thumbnailUrl,
       previewUrl: row.previewUrl || nested.previewUrl,
       originalUrl: row.originalUrl || nested.originalUrl,
-      permissions: row.permissions || []
+      permissions: row.permissions || [],
+      fileInfo: Object.assign({}, nested.fileInfo || {}, {
+        url: (nested.fileInfo && nested.fileInfo.url) || row.originalUrl || row.url,
+        mimeType: mime,
+        size: (nested.fileInfo && nested.fileInfo.size) || String(row.size || ""),
+        originalName: (nested.fileInfo && nested.fileInfo.originalName) || row.originalName || row.filename
+      })
     });
   }
 
@@ -130,6 +149,10 @@
       this._assetDetail = null;
       this._shareInfo = null;
       this._toastTimer = null;
+      this._total = 0;
+      this._offset = 0;
+      this._pageSize = 50;
+      this._viewMode = "grid";
     }
 
     connectedCallback() {
@@ -151,8 +174,12 @@
         "</aside>" +
         '<main class="bp-ae-main">' +
         '<header class="bp-ae-toolbar">' +
-        '<input type="search" class="bp-ae-search form-input" placeholder="Search by title or filename…" />' +
+        '<input type="search" class="bp-ae-search form-input" placeholder="Find by title, filename, or filters…" aria-label="Search assets" />' +
         '<div class="bp-ae-toolbar-pills"></div>' +
+        '<div class="bp-ae-view-toggle" role="group" aria-label="Result view">' +
+        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="Grid view">Grid</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-list" data-view="list" title="List view">List</button>' +
+        "</div>" +
         '<label class="btn btn-primary btn-sm bp-ae-upload">' +
         "<span>Upload</span>" +
         '<input type="file" multiple hidden />' +
@@ -163,10 +190,14 @@
         '<input type="range" class="bp-ae-density" min="100" max="240" value="160" />' +
         "</label>" +
         "</header>" +
+        '<div class="bp-ae-find-bar text-sm" hidden></div>' +
         '<section class="bp-ae-grid-wrap">' +
         '<div class="bp-ae-loading text-sm text-muted" hidden>Loading assets…</div>' +
         '<div class="bp-ae-empty text-sm text-muted" hidden>No assets yet — upload a file to get started.</div>' +
         '<div class="bp-ae-grid media-grid"></div>' +
+        '<div class="bp-ae-load-more-wrap">' +
+        '<button type="button" class="btn btn-sm bp-ae-load-more" hidden>Load more</button>' +
+        "</div>" +
         "</section>" +
         '<footer class="bp-ae-filmstrip">' +
         '<div class="bp-ae-filmstrip-track"></div>' +
@@ -193,9 +224,11 @@
       this._collectionsEl = this.querySelector(".bp-ae-collections");
       this._gridWrapEl = this.querySelector(".bp-ae-grid-wrap");
       this._gridEl = this.querySelector(".bp-ae-grid");
+      this._loadMoreEl = this.querySelector(".bp-ae-load-more");
       this._filmstripEl = this.querySelector(".bp-ae-filmstrip-track");
       this._searchEl = this.querySelector(".bp-ae-search");
       this._pillsEl = this.querySelector(".bp-ae-toolbar-pills");
+      this._findBarEl = this.querySelector(".bp-ae-find-bar");
       this._countEl = this.querySelector(".bp-ae-count");
       this._loadingEl = this.querySelector(".bp-ae-loading");
       this._emptyEl = this.querySelector(".bp-ae-empty");
@@ -252,6 +285,25 @@
           if (e.key === "Escape") this._closeCollectionModal();
         });
       }
+
+      if (this._loadMoreEl) {
+        this._loadMoreEl.addEventListener("click", () => this._loadAssets(true));
+      }
+
+      this.querySelectorAll(".bp-ae-view-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const mode = btn.dataset.view || "grid";
+          if (mode === this._viewMode) return;
+          this._viewMode = mode;
+          this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
+            b.classList.toggle("is-active", b.dataset.view === mode);
+          });
+          if (this._gridEl) {
+            this._gridEl.classList.toggle("bp-ae-list", mode === "list");
+          }
+          this._renderGrid();
+        });
+      });
 
       document.addEventListener("keydown", (e) => {
         if (!this.isConnected || !this._selected) return;
@@ -359,28 +411,53 @@
       return label + ": " + value;
     }
 
+    _clearAllFilters() {
+      this._search = "";
+      if (this._searchEl) this._searchEl.value = "";
+      this._filterKind = "all";
+      this._facetSelections = {};
+      this._collectionId = null;
+      this._inspectorMode = "none";
+      this._shareInfo = null;
+      this._selected = null;
+      this._renderFilters();
+      this._renderCollections();
+      this._showEmptyInspector();
+      this._renderFacets();
+      this._renderToolbarPills();
+      this._loadAssets();
+    }
+
     _renderToolbarPills() {
       if (!this._pillsEl) return;
       const entries = this._activeFacetEntries();
       if (!entries.length) {
         this._pillsEl.innerHTML = "";
+        this._renderFindBar();
         return;
       }
-      this._pillsEl.innerHTML = entries
-        .map(([field, value]) => {
-          const label = FACET_LABELS[field] || field;
-          return (
-            '<button type="button" class="bp-ae-pill" data-field="' +
-            esc(field) +
-            '" data-value="' +
-            esc(value) +
-            '">' +
-            esc(this._pillLabel(field, value)) +
-            " ×</button>"
-          );
-        })
-        .join("");
+      this._pillsEl.innerHTML =
+        entries
+          .map(([field, value]) => {
+            return (
+              '<button type="button" class="bp-ae-pill" data-field="' +
+              esc(field) +
+              '" data-value="' +
+              esc(value) +
+              '">' +
+              esc(this._pillLabel(field, value)) +
+              " ×</button>"
+            );
+          })
+          .join("") +
+        (entries.length > 1
+          ? '<button type="button" class="bp-ae-pill bp-ae-pill--clear">Clear all</button>'
+          : "");
       this._pillsEl.querySelectorAll(".bp-ae-pill").forEach((btn) => {
+        if (btn.classList.contains("bp-ae-pill--clear")) {
+          btn.addEventListener("click", () => this._clearAllFilters());
+          return;
+        }
         btn.addEventListener("click", () => {
           const field = btn.dataset.field;
           const value = btn.dataset.value;
@@ -404,6 +481,39 @@
           this._loadAssets();
         });
       });
+      this._renderFindBar();
+    }
+
+    _renderFindBar() {
+      if (!this._findBarEl) return;
+      const entries = this._activeFacetEntries();
+      if (!entries.length) {
+        this._findBarEl.hidden = true;
+        this._findBarEl.innerHTML = "";
+        return;
+      }
+      const total = this._total;
+      const scope =
+        total > 0
+          ? total === 1
+            ? "1 asset matches"
+            : total.toLocaleString() + " assets match"
+          : "No assets match";
+      this._findBarEl.hidden = false;
+      this._findBarEl.innerHTML =
+        '<span class="bp-ae-find-scope">' +
+        esc(scope) +
+        '</span><span class="bp-ae-find-hint text-muted">Use Refine or clear filters to broaden</span>';
+    }
+
+    _emptyMessage() {
+      if (this._activeFacetEntries().length) {
+        return "No assets match these filters — try removing one or search for something broader.";
+      }
+      if (this._collectionId) {
+        return "This folder is empty — upload files or add assets from All assets.";
+      }
+      return "No assets yet — upload a file to get started.";
     }
 
     _toggleFacet(field, value) {
@@ -573,15 +683,21 @@
       this._inspectorBody.hidden = true;
     }
 
-    async _loadAssets() {
+    async _loadAssets(append) {
+      if (!append) {
+        this._offset = 0;
+        this._total = 0;
+      }
+
       this._loading = true;
       if (this._loadingEl) this._loadingEl.hidden = false;
-      if (this._emptyEl) this._emptyEl.hidden = true;
+      if (!append && this._emptyEl) this._emptyEl.hidden = true;
       if (this._gridWrapEl) this._gridWrapEl.classList.add("is-loading");
+      if (this._loadMoreEl) this._loadMoreEl.disabled = true;
 
       const params = new URLSearchParams({
-        limit: "500",
-        offset: "0",
+        limit: String(this._pageSize),
+        offset: String(this._offset),
         sort: this._search ? "relevance" : "created-desc"
       });
 
@@ -613,11 +729,20 @@
         if (data && data.result && data.result.facets) {
           this._facets = data.result.facets;
         }
-        this._assets = rows
+        if (data && data.result && typeof data.result.total === "number") {
+          this._total = data.result.total;
+        }
+        const page = rows
           .map((row) => mergeHit(row))
           .filter((d) => assetUrl(d) || assetThumbUrl(d));
+        if (append) {
+          this._assets = this._assets.concat(page);
+        } else {
+          this._assets = page;
+        }
+        this._offset = this._assets.length;
       } catch (_e) {
-        this._assets = [];
+        if (!append) this._assets = [];
       } finally {
         this._loading = false;
         if (this._loadingEl) this._loadingEl.hidden = true;
@@ -625,10 +750,55 @@
           this._gridWrapEl.classList.remove("is-loading");
           this._gridWrapEl.classList.add("is-loaded");
         }
+        if (this._loadMoreEl) {
+          this._loadMoreEl.disabled = false;
+          this._loadMoreEl.hidden = this._assets.length >= this._total || this._total === 0;
+        }
         this._renderFacets();
         this._renderToolbarPills();
         this._renderGrid();
       }
+    }
+
+    _cardThumb(doc) {
+      const kind = doc.bp_asset_kind || "other";
+      const thumbUrl = esc(assetThumbUrl(doc));
+      if (kind === "image" && thumbUrl) {
+        return '<img src="' + thumbUrl + '" alt="" loading="lazy" />';
+      }
+      const label = kind === "document" ? "PDF" : kind.toUpperCase();
+      return '<div class="bp-ae-file-icon">' + esc(label) + "</div>";
+    }
+
+    _renderListRow(doc) {
+      const id = doc._id || "";
+      const title = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
+      const kind = esc(doc.bp_asset_kind || "other");
+      const mime = esc(assetMime(doc) || "—");
+      const size = esc(formatSize(doc.fileInfo && doc.fileInfo.size) || "—");
+      const sel = this._selected && this._selected._id === id ? " is-selected" : "";
+      return (
+        '<button type="button" class="bp-ae-list-row' +
+        sel +
+        '" data-id="' +
+        esc(id) +
+        '">' +
+        '<span class="bp-ae-list-thumb">' +
+        this._cardThumb(doc) +
+        "</span>" +
+        '<span class="bp-ae-list-title">' +
+        title +
+        "</span>" +
+        '<span class="bp-ae-list-kind">' +
+        kind +
+        "</span>" +
+        '<span class="bp-ae-list-mime">' +
+        mime +
+        "</span>" +
+        '<span class="bp-ae-list-size">' +
+        size +
+        "</span></button>"
+      );
     }
 
     _visibleAssets() {
@@ -639,17 +809,16 @@
       const items = this._visibleAssets();
       if (this._countEl) {
         this._countEl.classList.remove("bp-ae-status-error");
-        const col = this._currentCollection();
-        if (col) {
-          this._countEl.textContent = items.length + " in " + (col.title || col.id);
-        } else {
-          this._countEl.textContent = items.length + " asset" + (items.length === 1 ? "" : "s");
-        }
+        this._countEl.textContent = this._countLabel();
       }
 
       if (!items.length) {
         if (this._gridEl) this._gridEl.innerHTML = "";
-        if (this._emptyEl) this._emptyEl.hidden = false;
+        if (this._emptyEl) {
+          this._emptyEl.hidden = false;
+          this._emptyEl.textContent = this._emptyMessage();
+        }
+        if (this._loadMoreEl) this._loadMoreEl.hidden = true;
         this._renderFilmstrip([]);
         return;
       }
@@ -657,45 +826,44 @@
       if (this._emptyEl) this._emptyEl.hidden = true;
 
       if (this._gridEl) {
-        this._gridEl.innerHTML = items
-          .map((doc) => {
-            const id = doc._id || "";
-            const thumbUrl = esc(assetThumbUrl(doc));
-            const title = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
-            const kind = doc.bp_asset_kind || "other";
-            const sel = this._selected && this._selected._id === id ? " is-selected" : "";
-            const proc = (assetPayload(doc).bp_processing_status || "").toLowerCase();
-            const procBadge =
-              proc === "processing"
-                ? '<span class="bp-ae-card-badge is-pulse">···</span>'
-                : "";
-            const thumb =
-              kind === "image"
-                ? '<img src="' + thumbUrl + '" alt="" loading="lazy" />'
-                : '<div class="bp-ae-file-icon">' + esc(kind) + "</div>";
-            return (
-              '<button type="button" class="bp-ae-card media-card' +
-              sel +
-              '" data-id="' +
-              esc(id) +
-              '">' +
-              procBadge +
-              '<div class="media-thumb">' +
-              thumb +
-              "</div>" +
-              '<div class="media-info">' +
-              '<div class="media-name">' +
-              title +
-              "</div>" +
-              '<div class="media-size">' +
-              esc(formatSize(doc.fileInfo && doc.fileInfo.size)) +
-              "</div>" +
-              "</div></button>"
-            );
-          })
-          .join("");
+        this._gridEl.classList.toggle("bp-ae-list", this._viewMode === "list");
+        if (this._viewMode === "list") {
+          this._gridEl.innerHTML = items.map((doc) => this._renderListRow(doc)).join("");
+        } else {
+          this._gridEl.innerHTML = items
+            .map((doc) => {
+              const id = doc._id || "";
+              const title = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
+              const sel = this._selected && this._selected._id === id ? " is-selected" : "";
+              const proc = (assetPayload(doc).bp_processing_status || "").toLowerCase();
+              const procBadge =
+                proc === "processing"
+                  ? '<span class="bp-ae-card-badge is-pulse">···</span>'
+                  : "";
+              return (
+                '<button type="button" class="bp-ae-card media-card' +
+                sel +
+                '" data-id="' +
+                esc(id) +
+                '">' +
+                procBadge +
+                '<div class="media-thumb">' +
+                this._cardThumb(doc) +
+                "</div>" +
+                '<div class="media-info">' +
+                '<div class="media-name">' +
+                title +
+                "</div>" +
+                '<div class="media-size">' +
+                esc(formatSize(doc.fileInfo && doc.fileInfo.size)) +
+                "</div>" +
+                "</div></button>"
+              );
+            })
+            .join("");
+        }
 
-        this._gridEl.querySelectorAll(".bp-ae-card").forEach((btn) => {
+        this._gridEl.querySelectorAll(".bp-ae-card, .bp-ae-list-row").forEach((btn) => {
           btn.addEventListener("click", () => {
             const doc = items.find((d) => d._id === btn.dataset.id);
             if (doc) this._select(doc);
@@ -1271,8 +1439,31 @@
     }
 
     _countLabel() {
-      const n = this._assets.length;
-      return n === 1 ? "1 asset" : n + " assets";
+      const loaded = this._assets.length;
+      const total = this._total;
+      const col = this._currentCollection();
+
+      if (col) {
+        if (total > loaded) {
+          return (
+            "Showing " +
+            loaded +
+            " of " +
+            total +
+            " in " +
+            (col.title || col.id)
+          );
+        }
+        return loaded + " in " + (col.title || col.id);
+      }
+
+      if (total > loaded) {
+        return "Showing " + loaded + " of " + total + " assets";
+      }
+      if (total === loaded && total > 0) {
+        return total === 1 ? "1 asset" : total + " assets";
+      }
+      return loaded === 1 ? "1 asset" : loaded + " assets";
     }
   }
 
