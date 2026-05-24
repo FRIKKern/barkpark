@@ -18,6 +18,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
+import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
 
 const DEBOUNCE_MS = 300;
 
@@ -29,6 +30,7 @@ class BpPaperEditor extends HTMLElement {
     this._blockId = null;
     this._blockType = "paragraph";
     this._debounceTimer = null;
+    this._slash = null; // SlashMenu instance (lazy, created on first trigger)
   }
 
   connectedCallback() {
@@ -54,7 +56,17 @@ class BpPaperEditor extends HTMLElement {
         }),
       ],
       content: blockToTiptap(block),
-      onUpdate: () => this._scheduleEmit(),
+      editorProps: {
+        // While the slash menu is open it OWNS the navigation keys (↑/↓/Enter/
+        // Esc/Tab) — return true so ProseMirror does not also act on them.
+        // When closed, every keystroke falls through to TipTap unchanged, so
+        // the existing marks/typing round-trip is untouched.
+        handleKeyDown: (_view, event) => this._onKeyDown(event),
+      },
+      onUpdate: () => {
+        this._scheduleEmit();
+        this._maybeSlash();
+      },
     });
   }
 
@@ -62,6 +74,10 @@ class BpPaperEditor extends HTMLElement {
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
+    }
+    if (this._slash) {
+      this._slash.destroy();
+      this._slash = null;
     }
     if (this._editor) {
       this._editor.destroy();
@@ -105,6 +121,118 @@ class BpPaperEditor extends HTMLElement {
         composed: true,
       }),
     );
+  }
+
+  // ── slash menu ─────────────────────────────────────────────────────────
+  //
+  // Trigger rule (deliberately conservative so a "/" inside prose never opens
+  // the menu): the menu opens ONLY when the editor holds a single empty block
+  // whose ENTIRE text is exactly "/" and the caret sits right after it — i.e.
+  // the user typed "/" at the start of an otherwise-empty line. Any other
+  // content (text before the slash, a second paragraph, a non-collapsed
+  // selection) keeps the menu closed.
+  _maybeSlash() {
+    if (!this._editor) return;
+
+    const { state } = this._editor;
+    const { selection, doc } = state;
+
+    // Caret only — never on a range selection.
+    if (!selection.empty) {
+      this._closeSlash();
+      return;
+    }
+
+    const text = this._editor.getText(); // plain text across the single block
+    const triggered =
+      text === "/" && selection.$from.parentOffset === 1 && doc.childCount <= 2;
+
+    if (triggered) {
+      this._openSlash();
+    } else {
+      this._closeSlash();
+    }
+  }
+
+  _openSlash() {
+    if (!this._slash) {
+      this._slash = new SlashMenu({
+        items: SLASH_ITEMS,
+        onChoose: (type) => this._chooseSlash(type),
+        onDismiss: () => this._dismissSlash(),
+      });
+    }
+    // Anchor the popup to the live caret rectangle.
+    const rect = this._caretRect();
+    this._slash.open(rect);
+  }
+
+  _closeSlash() {
+    if (this._slash) this._slash.close();
+  }
+
+  // The DOMRect of the current caret, used to position the popup at the cursor.
+  _caretRect() {
+    try {
+      const { from } = this._editor.state.selection;
+      const coords = this._editor.view.coordsAtPos(from);
+      return {
+        left: coords.left,
+        top: coords.top,
+        bottom: coords.bottom,
+      };
+    } catch (_e) {
+      const r = this._mount.getBoundingClientRect();
+      return { left: r.left, top: r.top, bottom: r.bottom };
+    }
+  }
+
+  // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when
+  // the menu is open; otherwise returns false so TipTap handles the key.
+  _onKeyDown(event) {
+    if (!this._slash || !this._slash.isOpen()) return false;
+
+    switch (event.key) {
+      case "ArrowDown":
+        this._slash.move(1);
+        return true;
+      case "ArrowUp":
+        this._slash.move(-1);
+        return true;
+      case "Enter":
+      case "Tab":
+        this._slash.choose();
+        return true;
+      case "Escape":
+        this._dismissSlash();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // User picked a type: erase the typed "/" from this block, close the menu,
+  // and emit the bubbling/composed `bp-slash-insert` event. The server creates
+  // the new block (default_block + insert-after) — this WC does NOT build it.
+  _chooseSlash(type) {
+    this._closeSlash();
+    // Remove the leading "/" so the trigger char never persists.
+    this._editor.chain().focus().setTextSelection({ from: 1, to: 2 }).deleteSelection().run();
+
+    this.dispatchEvent(
+      new CustomEvent("bp-slash-insert", {
+        detail: { type, afterId: this._blockId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the
+  // user may want to keep typing a real slash.
+  _dismissSlash() {
+    this._closeSlash();
+    this._editor.commands.focus();
   }
 
   // Property setter so LiveView / a parent can assign `el.block = {...}` before
