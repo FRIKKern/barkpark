@@ -1,0 +1,20 @@
+{
+  "name": "bp-paper-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TipTap-vanilla per-block premium editor for Barkpark papers. Bundles to a single committed Web Component artifact, mirroring the bp-* vendoring pattern.",
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-editor.bundle.js --minify",
+    "build:dev": "esbuild src/index.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-editor.bundle.js --sourcemap",
+    "smoke": "node src/__smoke.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "^2.11.5",
+    "@tiptap/pm": "^2.11.5",
+    "@tiptap/starter-kit": "^2.11.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}
