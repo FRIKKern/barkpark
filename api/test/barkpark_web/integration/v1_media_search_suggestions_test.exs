@@ -65,6 +65,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
 
     search(conn, "hero-suggest")
     search(conn, "hero-suggest")
+    search(conn, "hero-suggest")
     search(conn, "logo-suggest")
 
     suggest =
@@ -79,7 +80,26 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
     assert length(recent) >= 2
     assert Enum.any?(recent, &(&1["query"] == "logo-suggest"))
     assert Enum.any?(popular, &(&1["query"] == "hero-suggest"))
-    assert get_in(hd(popular), ["count"]) >= 2
+    assert get_in(hd(popular), ["count"]) >= 3
+  end
+
+  test "search recording skipped when x-bp-search-disable header is set", %{conn: conn} do
+    upload_named(conn, "disable-intel-demo.png")
+
+    resp =
+      conn
+      |> put_req_header("x-bp-search-disable", "1")
+      |> search("disable-intel-demo")
+
+    assert is_nil(resp["searchEventId"])
+
+    suggest =
+      conn
+      |> authed()
+      |> get(~p"/v1/media/production/search/suggestions")
+      |> json_response(200)
+
+    refute Enum.any?(suggest["result"]["recent"], &(&1["query"] == "disable-intel-demo"))
   end
 
   test "suggestions prefix filters popular queries", %{conn: conn} do
@@ -88,7 +108,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
     upload_named(conn, "beta-suggest.png")
 
     for q <- ["alpha", "alphabet", "beta"] do
-      search(conn, q)
+      for _ <- 1..3, do: search(conn, q)
     end
 
     suggest =

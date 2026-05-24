@@ -16,6 +16,7 @@ defmodule Barkpark.Search.Intelligence do
   @popular_window_days 30
   @retention_days 90
   @default_limit 8
+  @min_search_count 3
 
   @doc "Default retention for raw search events (days)."
   @spec retention_days() :: pos_integer()
@@ -31,10 +32,15 @@ defmodule Barkpark.Search.Intelligence do
       when is_binary(surface) and is_binary(scope) and is_map(context) do
     offset = Map.get(context, :offset, 0)
 
-    if offset > 0 do
-      :skipped
-    else
-      safe_record(surface, scope, context, total, duration_ms, opts)
+    cond do
+      Keyword.get(opts, :disabled, false) ->
+        :skipped
+
+      offset > 0 ->
+        :skipped
+
+      true ->
+        safe_record(surface, scope, context, total, duration_ms, opts)
     end
   rescue
     _ -> :skipped
@@ -65,11 +71,14 @@ defmodule Barkpark.Search.Intelligence do
   def suggestions(surface, scope, actor_key, prefix \\ nil, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
     limit = Keyword.get(opts, :limit, @default_limit)
+    min_count = Keyword.get(opts, :min_search_count, @min_search_count)
     prefix = normalize_prefix(prefix)
+
+    suggest_opts = [min_search_count: min_count]
 
     %{
       recent: recent_queries(surface, scope, actor_key, prefix, limit),
-      popular: popular_queries(surface, scope, prefix, limit),
+      popular: popular_queries(surface, scope, prefix, limit, suggest_opts),
       nohits: nohits_queries(surface, scope, prefix, min(limit, 5))
     }
   end
@@ -260,22 +269,71 @@ defmodule Barkpark.Search.Intelligence do
     }
   end
 
-  defp popular_queries(surface, scope, prefix, limit) do
-    cutoff = DateTime.add(DateTime.utc_now(), -@popular_window_days, :day)
+  defp popular_queries(surface, scope, prefix, limit, opts) do
+    min_count = Keyword.get(opts, :min_search_count, @min_search_count)
+    today = Date.utc_today()
+    window_start = Date.add(today, -@popular_window_days)
 
+    crystal_rows =
+      popular_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1))
+
+    today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
+    raw_rows = popular_from_events(surface, scope, prefix, today_start)
+
+    crystal_rows
+    |> merge_count_rows(raw_rows)
+    |> Enum.filter(fn row -> row.count >= min_count end)
+    |> Enum.sort_by(& &1.count, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn row ->
+      %{
+        query: row.query,
+        count: row.count,
+        resultCount: row.result_count
+      }
+    end)
+  end
+
+  defp popular_from_crystals(surface, scope, prefix, period_start, period_end) do
+    base =
+      from(c in Crystal,
+        where:
+          c.surface == ^surface and c.scope == ^scope and c.period == "day" and
+            c.period_start >= ^period_start and c.period_start <= ^period_end and
+            c.query_normalized != "" and c.query_normalized != "__quality__" and
+            c.success_count > 0,
+        group_by: c.query_normalized,
+        select: %{
+          query_normalized: c.query_normalized,
+          count: sum(c.success_count),
+          result_count: max(c.avg_result_count)
+        }
+      )
+
+    base
+    |> maybe_prefix_on_crystal(prefix)
+    |> Repo.all()
+    |> Enum.map(fn row ->
+      %{
+        query: row.query_normalized,
+        count: row.count,
+        result_count: round_result_count(row.result_count)
+      }
+    end)
+  end
+
+  defp popular_from_events(surface, scope, prefix, since) do
     from(e in Event,
       where:
-        e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^cutoff and
+        e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
           e.zero_hits == false and e.query_normalized != "",
       group_by: e.query_normalized,
       select: %{
         query_normalized: e.query_normalized,
         display_query: max(e.query),
         count: count(e.id),
-        lastResultCount: max(e.result_count)
-      },
-      order_by: [desc: count(e.id)],
-      limit: ^limit
+        result_count: max(e.result_count)
+      }
     )
     |> accepted_events()
     |> maybe_prefix_on_normalized(prefix)
@@ -284,28 +342,81 @@ defmodule Barkpark.Search.Intelligence do
       %{
         query: row.display_query || row.query_normalized,
         count: row.count,
-        resultCount: row.lastResultCount
+        result_count: row.result_count
       }
     end)
   end
 
   defp nohits_queries(surface, scope, prefix, limit) do
-    cutoff = DateTime.add(DateTime.utc_now(), -@popular_window_days, :day)
+    today = Date.utc_today()
+    window_start = Date.add(today, -@popular_window_days)
 
+    crystal_rows =
+      nohits_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1))
+
+    today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
+    raw_rows = nohits_from_events(surface, scope, prefix, today_start)
+
+    crystal_rows
+    |> merge_count_rows(raw_rows)
+    |> Enum.sort_by(& &1.count, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn row -> %{query: row.query, count: row.count} end)
+  end
+
+  defp nohits_from_crystals(surface, scope, prefix, period_start, period_end) do
+    base =
+      from(c in Crystal,
+        where:
+          c.surface == ^surface and c.scope == ^scope and c.period == "day" and
+            c.period_start >= ^period_start and c.period_start <= ^period_end and
+            c.query_normalized != "" and c.query_normalized != "__quality__" and
+            c.zero_hit_count > 0,
+        group_by: c.query_normalized,
+        select: %{
+          query_normalized: c.query_normalized,
+          count: sum(c.zero_hit_count)
+        }
+      )
+
+    base
+    |> maybe_prefix_on_crystal(prefix)
+    |> Repo.all()
+    |> Enum.map(fn row -> %{query: row.query_normalized, count: row.count} end)
+  end
+
+  defp nohits_from_events(surface, scope, prefix, since) do
     from(e in Event,
       where:
-        e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^cutoff and
+        e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
           e.zero_hits == true and e.query_normalized != "",
       group_by: e.query_normalized,
-      select: %{query: max(e.query), count: count(e.id)},
-      order_by: [desc: count(e.id)],
-      limit: ^limit
+      select: %{query: max(e.query), count: count(e.id)}
     )
     |> accepted_events()
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()
-    |> Enum.map(fn row -> %{query: row.query, count: row.count} end)
   end
+
+  defp merge_count_rows(primary, secondary) do
+    merged =
+      Enum.reduce(secondary, Map.new(primary, fn row -> {row.query, row} end), fn row, acc ->
+        Map.update(acc, row.query, row, fn existing ->
+          count = existing.count + row.count
+
+          result_count =
+            Map.get(row, :result_count) || Map.get(existing, :result_count) || 0
+
+          Map.merge(existing, %{count: count, result_count: result_count})
+        end)
+      end)
+
+    Map.values(merged)
+  end
+
+  defp round_result_count(nil), do: 0
+  defp round_result_count(value) when is_float(value), do: round(value)
+  defp round_result_count(value) when is_integer(value), do: value
 
   defp quality_stats(surface, scope, period, period_start) do
     case Repo.get_by(Crystal,
@@ -438,6 +549,13 @@ defmodule Barkpark.Search.Intelligence do
   defp maybe_prefix_on_normalized(queryable, prefix) do
     pattern = prefix <> "%"
     from(e in queryable, where: ilike(e.query_normalized, ^pattern))
+  end
+
+  defp maybe_prefix_on_crystal(queryable, nil), do: queryable
+
+  defp maybe_prefix_on_crystal(queryable, prefix) do
+    pattern = prefix <> "%"
+    from(c in queryable, where: ilike(c.query_normalized, ^pattern))
   end
 
   defp normalize_prefix(nil), do: nil

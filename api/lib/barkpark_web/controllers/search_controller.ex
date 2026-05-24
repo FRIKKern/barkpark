@@ -26,13 +26,16 @@ defmodule BarkparkWeb.SearchController do
         {docs, count} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+        record_opts = [
+          actor_key: SearchIntel.actor_key(conn),
+          parent_event_id: SearchIntel.parent_event_id(conn),
+          session_key: SearchIntel.session_key(conn),
+          source: SearchIntel.source(conn, "documents-api"),
+          disabled: SearchIntel.recording_disabled?(conn)
+        ]
+
         record_result =
-          SearchIntelligence.record(dataset, params, count, ms,
-            actor_key: SearchIntel.actor_key(conn),
-            parent_event_id: SearchIntel.parent_event_id(conn),
-            session_key: SearchIntel.session_key(conn),
-            source: SearchIntel.source(conn, "documents-api")
-          )
+          SearchIntelligence.record(dataset, params, count, ms, record_opts)
 
         search_event_id =
           case record_result do
