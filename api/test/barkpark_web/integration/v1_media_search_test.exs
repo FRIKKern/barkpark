@@ -125,6 +125,18 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
       cleanup(created["result"])
     end
 
+    test "q matches asset tags", %{conn: conn} do
+      tagged = upload_tagged(conn, "tagged-search.png", ["campaign", "spring"])
+
+      resp =
+        conn
+        |> get(~p"/v1/media/production/search?q=campaign&facets=kind")
+        |> json_response(200)
+
+      assert Enum.any?(resp["result"]["hits"], &(&1["id"] == tagged["id"]))
+      cleanup(tagged)
+    end
+
     test "kind filter via facet.kind selection", %{conn: conn} do
       png = upload_tagged(conn, "facet-kind.png", [])
 

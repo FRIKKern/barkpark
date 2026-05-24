@@ -306,19 +306,15 @@ defmodule BarkparkWeb.V1.MediaController do
   defp blank_to_nil(value), do: value
 
   defp search_actor_key(conn) do
-    case conn.assigns[:api_token] do
-      %{id: id} -> "token:" <> id
-      _ -> search_client_key(conn)
-    end
-  end
-
-  defp search_client_key(conn) do
     case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
       [client | _] when is_binary(client) and client != "" ->
         "client:" <> String.slice(client, 0, 64)
 
       _ ->
-        "anon"
+        case conn.assigns[:api_token] do
+          %{id: id} -> "token:" <> id
+          _ -> "anon"
+        end
     end
   end
 
