@@ -258,12 +258,12 @@ defmodule Barkpark.Media.Search do
     |> then(&{sql, &1})
   end
 
-  defp where_fragments(opts, extra \\ []) do
+  defp where_fragments(opts, extra) do
     parts = []
     params = []
     param_idx = 3
 
-    {parts, params, param_idx} =
+    {parts, params, _param_idx} =
       Enum.reduce(flat_filters(opts, extra), {parts, params, param_idx}, fn
         {:mime, value}, {parts, params, idx} ->
           {parts ++ ["AND m.mime_type LIKE $#{idx}"], params ++ ["#{value}%"], idx + 1}

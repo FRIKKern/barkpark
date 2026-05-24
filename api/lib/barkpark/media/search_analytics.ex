@@ -17,7 +17,12 @@ defmodule Barkpark.Media.SearchAnalytics do
   alias BarkparkWeb.V1.MediaSearchParams
 
   @popular_window_days 30
+  @retention_days 90
   @default_limit 8
+
+  @doc "Default retention for raw search events (days)."
+  @spec retention_days() :: pos_integer()
+  def retention_days, do: @retention_days
 
   @doc "Record a search event. Never raises — analytics must not break search."
   @spec record(String.t(), map(), non_neg_integer(), non_neg_integer(), keyword()) :: :ok
@@ -27,12 +32,28 @@ defmodule Barkpark.Media.SearchAnalytics do
     if offset > 0 do
       :ok
     else
-      do_record(dataset, params, total, duration_ms, opts)
+      enqueue_record(dataset, params, total, duration_ms, opts)
     end
   rescue
     _ -> :ok
   catch
     _, _ -> :ok
+  end
+
+  @doc """
+  Delete search events older than `retention_days` (default #{@retention_days}).
+  Returns the number of rows deleted.
+  """
+  @spec prune(keyword()) :: non_neg_integer()
+  def prune(opts \\ []) do
+    days = Keyword.get(opts, :retention_days, @retention_days)
+    cutoff = DateTime.add(DateTime.utc_now(), -days, :day)
+
+    {count, _} =
+      from(e in SearchEvent, where: e.inserted_at < ^cutoff)
+      |> Repo.delete_all()
+
+    count
   end
 
   @doc """
@@ -48,6 +69,26 @@ defmodule Barkpark.Media.SearchAnalytics do
       popular: popular_queries(dataset, prefix, limit),
       nohits: nohits_queries(dataset, prefix, min(limit, 5))
     }
+  end
+
+  defp enqueue_record(dataset, params, total, duration_ms, opts) do
+    if Application.get_env(:barkpark, :search_analytics_async, true) do
+      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+        safe_record(dataset, params, total, duration_ms, opts)
+      end)
+
+      :ok
+    else
+      safe_record(dataset, params, total, duration_ms, opts)
+    end
+  end
+
+  defp safe_record(dataset, params, total, duration_ms, opts) do
+    do_record(dataset, params, total, duration_ms, opts)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp do_record(dataset, params, total, duration_ms, opts) do

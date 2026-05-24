@@ -66,7 +66,13 @@ config :barkpark, :paperflow_ingest_token, nil
 config :barkpark, Oban,
   repo: Barkpark.Repo,
   queues: [default: 10, bokbasen: 4, plugins: 6],
-  plugins: [{Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}]
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 4 * * *", Barkpark.Workers.SearchAnalyticsPrune}
+     ]}
+  ]
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

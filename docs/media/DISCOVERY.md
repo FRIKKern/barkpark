@@ -114,7 +114,7 @@ Inspired by Algolia Query Suggestions and Typesense `popular_queries`:
 - Events logged on first-page `/v1/media/:dataset/search` only (`offset=0`).
 - Suggestions: `GET /v1/media/:dataset/search/suggestions?q=prefix`.
 - Postgres `pg_trgm` GIN index on `query` for prefix matching — no separate engine required yet.
-- **Retention:** table grows unbounded today; add TTL job before high-volume prod (e.g. 90-day prune).
+- **Retention:** pruned daily via Oban (`SearchAnalyticsPrune`, 90-day default); aggregates only read last 30 days.
 
 Implementation: `Barkpark.Media.SearchAnalytics`, `media_search_events` table, explorer suggest UI in `bp-asset-explorer.js`.
 

@@ -40,7 +40,7 @@ defmodule BarkparkWeb.PluginSettingsController do
       {:error, reason} ->
         conn
         |> put_status(:unprocessable_entity)
-        |> json(%{error: to_string(reason)})
+        |> json(%{error: inspect(reason)})
     end
   end
 
