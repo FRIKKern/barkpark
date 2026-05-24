@@ -581,6 +581,68 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert block["label"] == "Cover"
   end
 
+  # ── field-reference VIEW title resolution (Polish-1, barkpark-nkoy) ──────────
+  #
+  # View mode resolves the referenced doc's TITLE (not the raw id) through the
+  # full Content → Render spine. The renderer stays pure; Content injects a
+  # :ref_resolver bound to the dataset. A referable author doc must exist for
+  # the title to resolve; with no match the row falls back to the stored id.
+
+  @ref_view_slug "2026-05-24-ref-view-paper"
+
+  defp seed_author!(doc_id, title) do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "author",
+          "title" => "Authors",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset
+      )
+
+    {:ok, _} =
+      Content.upsert_document("author", %{"doc_id" => doc_id, "title" => title}, @dataset)
+  end
+
+  defp seed_ref_view_paper!(value) do
+    blocks = [
+      %{
+        "id" => "f-ref",
+        "type" => "field-reference",
+        "label" => "Author",
+        "refType" => "author",
+        "value" => value
+      }
+    ]
+
+    {:ok, paper} = Content.upsert_paper(%{slug: @ref_view_slug, dataset: @dataset, blocks: blocks})
+    paper
+  end
+
+  test "View mode renders the referenced doc's TITLE, not the raw id", %{conn: conn} do
+    seed_author!("ref-a1", "Solveig Aamodt")
+    seed_ref_view_paper!("ref-a1")
+
+    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@ref_view_slug}")
+
+    # The streamed read-only View shows the resolved title for the reference
+    # row; the raw doc id never appears as the displayed value.
+    assert html =~ "Solveig Aamodt"
+    refute html =~ ">ref-a1<"
+  end
+
+  test "View mode falls back to the raw id when the referenced doc is absent",
+       %{conn: conn} do
+    # No author doc seeded for "ghost-ref" → reference_title returns the id.
+    seed_ref_view_paper!("ghost-ref")
+
+    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@ref_view_slug}")
+
+    assert html =~ "ghost-ref"
+  end
+
   # ── v2 COMPOSITE field blocks (P2.3, barkpark-wxxa) ─────────────────────────
   #
   # composite / arrayOf / codelist / localizedText render as a nested

@@ -249,6 +249,49 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # field-reference View resolves the referenced doc's TITLE via the caller's
+  # :ref_resolver (Render stays pure — no DB here, a stub fn stands in for
+  # Content.reference_title/3). With no resolver it falls back to the raw id;
+  # an empty value renders the em-dash placeholder.
+  describe "render_block/2 — field-reference title resolution (Polish-1)" do
+    @ref_block %{
+      "id" => "f-ref",
+      "type" => "field-reference",
+      "label" => "Author",
+      "refType" => "author",
+      "value" => "a1"
+    }
+
+    test "resolves the referenced doc title when a :ref_resolver is supplied" do
+      resolver = fn "a1", "author" -> "Knut Melvaer" end
+      html = Render.render_block(@ref_block, %{ref_resolver: resolver})
+
+      assert html =~ "Knut Melvaer"
+      assert html =~ ~s(<span style="font-weight:bold">Author</span>)
+      refute html =~ ">a1<"
+    end
+
+    test "falls back to the raw id when no resolver is supplied" do
+      html = Render.render_block(@ref_block)
+      assert html =~ "a1"
+      refute html =~ "Knut Melvaer"
+    end
+
+    test "falls back to the raw id when the resolver can't find the doc" do
+      # Content.reference_title/3 returns the value unchanged on a miss.
+      resolver = fn value, _ref_type -> value end
+      html = Render.render_block(@ref_block, %{ref_resolver: resolver})
+      assert html =~ "a1"
+    end
+
+    test "renders an em-dash for an empty reference value (resolver never called)" do
+      block = Map.put(@ref_block, "value", "")
+      resolver = fn _v, _t -> flunk("resolver must not run for an empty value") end
+      html = Render.render_block(block, %{ref_resolver: resolver})
+      assert html =~ "—"
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"

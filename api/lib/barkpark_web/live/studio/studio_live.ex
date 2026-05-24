@@ -990,7 +990,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
           socket
         else
           # Switching back to View on a block-backed paper: rehydrate the stream.
-          stream(socket, :paper_blocks, paper_stream_items(paper_top_level_blocks(socket)),
+          stream(
+            socket,
+            :paper_blocks,
+            paper_stream_items(paper_top_level_blocks(socket), socket.assigns.dataset),
             reset: true
           )
         end
@@ -2282,7 +2285,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         # Opening (or jumping to) a paper always lands in read-only View mode.
         paper_edit_mode: false
       )
-      |> stream(:paper_blocks, paper_stream_items(blocks), reset: true)
+      |> stream(:paper_blocks, paper_stream_items(blocks, socket.assigns.dataset), reset: true)
     else
       socket
       |> assign(
@@ -2317,9 +2320,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Each stream item carries a stable id (the block id) and its rendered
   # fragment. Top-level blocks stream individually; a `section` renders as one
   # fragment (its children live inside it). Mirrors PaperLive.to_stream_items/1.
-  defp paper_stream_items(blocks) do
+  defp paper_stream_items(blocks, dataset) do
+    resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset) end
+
     Enum.map(blocks, fn block ->
-      %{id: Map.get(block, "id"), html: Render.render_block(block)}
+      %{id: Map.get(block, "id"), html: Render.render_block(block, %{ref_resolver: resolver})}
     end)
   end
 
@@ -2401,7 +2406,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         case Map.get(content, "blocks") do
           blocks when is_list(blocks) ->
             socket
-            |> stream(:paper_blocks, paper_stream_items(blocks), reset: true)
+            |> stream(:paper_blocks, paper_stream_items(blocks, dataset), reset: true)
             |> assign(:paper_doc, paper)
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
             |> assign(:paper_block_mode, true)

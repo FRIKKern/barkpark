@@ -265,6 +265,58 @@ defmodule Barkpark.Content do
   end
 
   @doc """
+  Resolve a referenced document's display title from a stored reference value.
+
+  `value` is a plain doc-id string (the v1 reference-field persistence model);
+  `ref_type` is the optional target schema (`""` when a paper field-reference
+  block has no refType set). Returns the title of the matching document, or the
+  original `value` as a fallback when no document is found / `value` is blank.
+
+  Cheap by design — a single `Repo.one` keyed on `(doc_id, dataset)`, narrowed
+  by `type` when `ref_type` is non-empty. The published id is preferred (a
+  reference value stores the published id); both the published row and its
+  `drafts.` twin satisfy the `doc_id IN (...)` clause, so an unpublished target
+  still resolves. Used by the View-mode renderer to show the title instead of
+  the raw id.
+  """
+  @spec reference_title(String.t() | nil, String.t() | nil, String.t()) :: String.t()
+  def reference_title(value, ref_type, dataset)
+
+  def reference_title(value, _ref_type, _dataset) when value in [nil, ""], do: value || ""
+
+  def reference_title(value, ref_type, dataset) when is_binary(value) do
+    pub_id = published_id(value)
+    draft = draft_id(pub_id)
+
+    query =
+      Document
+      |> where([d], d.dataset == ^dataset)
+      |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
+      |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
+      |> limit(1)
+
+    query =
+      if is_binary(ref_type) and ref_type != "" do
+        where(query, [d], d.type == ^ref_type)
+      else
+        query
+      end
+
+    case Repo.one(query) do
+      %Document{title: title} when is_binary(title) and title != "" -> title
+      _ -> value
+    end
+  end
+
+  # Render options carrying the field-reference title resolver bound to a
+  # dataset. Passed to `Render.render_block/2` / `render_blocks/2` so the
+  # View-mode `field-reference` row shows the referenced doc's TITLE instead of
+  # the raw id; everything else in `Render` stays pure.
+  defp render_opts(dataset) do
+    %{ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset) end}
+  end
+
+  @doc """
   Fetch a document with draft-first preference. Returns the draft if it
   exists, otherwise falls back to the published row, plus flags for
   whether the returned doc is the draft and whether a published version
@@ -1676,7 +1728,7 @@ defmodule Barkpark.Content do
 
     body_html =
       cond do
-        is_list(blocks) -> Render.render_blocks(blocks)
+        is_list(blocks) -> Render.render_blocks(blocks, render_opts(dataset))
         is_binary(attrs["body_html"]) -> attrs["body_html"]
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
@@ -1751,12 +1803,13 @@ defmodule Barkpark.Content do
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
-      body_html = Render.render_blocks(new_blocks)
+      render_opts = render_opts(dataset)
+      body_html = Render.render_blocks(new_blocks, render_opts)
 
       fragment_html =
         case affected.block do
           nil -> nil
-          block -> Render.render_block(block)
+          block -> Render.render_block(block, render_opts)
         end
 
       content =
