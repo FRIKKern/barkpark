@@ -287,6 +287,102 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
+  # ── v2 COMPOSITE field blocks (P2.3) ──────────────────────────────────────
+  # composite / arrayOf / codelist / localizedText carry their field CONFIG
+  # inline alongside a structured `value`. The Edit-mode control is the nested
+  # `PaperFieldBlock` LiveComponent (server-bound forms); View mode renders a
+  # labelled, read-only summary of the stored datum. As with the leaf field-*
+  # blocks every value flows through PdText, inheriting escape_html at walk
+  # time — no composite clause emits raw HTML.
+
+  # composite → labelled box, one sub-row per subfield (name: stringified value).
+  def compose_block(%{"type" => "composite"} = b) do
+    value = Map.get(b, "value", %{})
+    subfields = Map.get(b, "fields", [])
+
+    rows =
+      Enum.map(subfields, fn sub ->
+        name = Map.get(sub, "name", "")
+        sub_label = Map.get(sub, "title") || name
+        sub_value = composite_scalar(get_in_value(value, name))
+
+        %{
+          "kind" => "PdBox",
+          "style" => %{"flexDirection" => "row"},
+          "children" => [
+            %{"kind" => "PdText", "weight" => "bold", "children" => ["#{sub_label}: "]},
+            %{"kind" => "PdText", "children" => [sub_value]}
+          ]
+        }
+      end)
+
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b) | rows]
+    }
+  end
+
+  # arrayOf → labelled box, one PdText row per element (stringified).
+  def compose_block(%{"type" => "arrayOf"} = b) do
+    elements = Map.get(b, "value", [])
+
+    rows =
+      elements
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.map(fn {el, idx} ->
+        %{
+          "kind" => "PdBox",
+          "style" => %{"flexDirection" => "row"},
+          "children" => [
+            %{"kind" => "PdText", "children" => ["#{idx + 1}. "]},
+            %{"kind" => "PdText", "children" => [composite_scalar(el)]}
+          ]
+        }
+      end)
+
+    rows = if rows == [], do: [%{"kind" => "PdText", "children" => ["—"]}], else: rows
+
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b) | rows]
+    }
+  end
+
+  # codelist → labelled row, value is the selected code string.
+  def compose_block(%{"type" => "codelist"} = b) do
+    value = field_value_text(b)
+    field_row(b, if(value == "", do: "—", else: value))
+  end
+
+  # localizedText → labelled box, one row per language (lang: text).
+  def compose_block(%{"type" => "localizedText"} = b) do
+    value = Map.get(b, "value", %{})
+    languages = Map.get(b, "languages", [])
+
+    rows =
+      Enum.map(languages, fn lang ->
+        text = composite_scalar(get_in_value(value, lang))
+
+        %{
+          "kind" => "PdBox",
+          "style" => %{"flexDirection" => "row"},
+          "children" => [
+            %{"kind" => "PdText", "weight" => "bold", "children" => ["#{lang}: "]},
+            %{"kind" => "PdText", "children" => [text]}
+          ]
+        }
+      end)
+
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b) | rows]
+    }
+  end
+
   def compose_block(%{"type" => type}) do
     raise ArgumentError, "compose_block: unhandled block type #{type}"
   end
@@ -305,6 +401,34 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   defp field_value_text(b), do: to_string(Map.get(b, "value", ""))
+
+  # Flatten a composite/array/localized sub-value to a single display string.
+  # Maps and lists are rendered as compact, escaped summaries (the full
+  # structured edit lives in the PaperFieldBlock LiveComponent); scalars pass
+  # through to_string. nil → an em-dash so empty slots read as empty.
+  defp composite_scalar(nil), do: "—"
+  defp composite_scalar(v) when is_binary(v), do: v
+  defp composite_scalar(v) when is_number(v), do: to_string(v)
+  defp composite_scalar(true), do: "Yes"
+  defp composite_scalar(false), do: "No"
+
+  defp composite_scalar(v) when is_list(v) do
+    v |> Enum.map_join(", ", &composite_scalar/1)
+  end
+
+  defp composite_scalar(v) when is_map(v) do
+    v
+    |> Enum.map_join(", ", fn {k, val} -> "#{k}: #{composite_scalar(val)}" end)
+  end
+
+  defp composite_scalar(v), do: to_string(v)
+
+  # Read a value out of a possibly-stringy/atomy map by string key.
+  defp get_in_value(map, key) when is_map(map) do
+    Map.get(map, to_string(key), Map.get(map, key))
+  end
+
+  defp get_in_value(_, _), do: nil
 
   @hex_re ~r/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
   # Only a strict hex literal may reach the inline style attribute; otherwise

@@ -1,0 +1,401 @@
+defmodule BarkparkWeb.Studio.PaperFieldBlock do
+  @moduledoc """
+  Edit-mode control for a v2 COMPOSITE field block in the in-Studio paper
+  editor (P2.3, barkpark-wxxa). One nested `Phoenix.LiveComponent` per
+  composite block — `composite`, `arrayOf`, `codelist`, `localizedText`.
+
+  ## Why a LiveComponent (research verdict B)
+
+  The P2.1/P2.2 leaf + picker field blocks are client-side controls hosted
+  under `<div phx-update="ignore" phx-hook="BarkparkFieldBlockBridge">` — they
+  emit a `{op:"patch-block",…}` op via `pushEvent("paper-op")`. The v2
+  composites CANNOT use that pattern: they emit **server-bound**
+  `phx-change` / `phx-click` into a parent form, and the `arrayOf` reorder
+  buttons + (deferred) `TreeCodelistField` are themselves stateful server
+  surfaces. `phx-update="ignore"` would freeze them. So each composite block
+  becomes a nested LiveComponent whose inner field components target
+  `@myself`; on any inner change the component recomputes its OWN `value` and
+  notifies the parent paper LiveView with the SAME `:paper_op` message the
+  client bridge would have sent, routing through the canonical `paper_op/2`
+  pipeline (persist + stream broadcast).
+
+  ## Value shapes
+
+    * `composite`      → `%{sub_name => value}`
+    * `arrayOf`        → `[element, …]`
+    * `codelist`       → `"code"` (string) or `nil`
+    * `localizedText`  → `%{language => text}`
+
+  ## Stream ↔ LiveComponent state/focus
+
+  Edit mode is **assign-driven HTML**, NOT a stream (the streamed surface is
+  the read-only View pane; see `studio_live.ex` `studio_paper_view/1`). After a
+  `patch-block` op, `paper_op/2` re-syncs `paper_doc` and re-renders the
+  assign-driven editor, which re-sends `update/2` to this component with the
+  fresh block. To avoid clobbering an in-flight edit / losing input focus the
+  component updates its OWN `:value` assign locally on every inner change
+  BEFORE sending `:paper_op`. So when the server echo lands, the value the
+  component re-derives from `block["value"]` already matches what is in the
+  DOM — LiveView's diff is a no-op for the touched input and the caret is
+  preserved. `update/2` is idempotent: it always re-derives from `assigns.block`
+  but the local-first update means the echo never moves the cursor.
+
+  ## Config-carrying blocks
+
+  Each block carries its field CONFIG inline next to the `value`. The component
+  builds a `%Barkpark.Content.SchemaDefinition.Field{}` descriptor from that
+  inline config and hands it to the existing field component verbatim:
+
+    * composite     — `"fields"` → subfield descriptors
+    * arrayOf        — `"of"` element descriptor + `"ordered"` flag
+    * codelist       — `"codelistId"` + `"version"`
+    * localizedText  — `"languages"` + `"format"` + `"fallbackChain"`
+  """
+
+  use BarkparkWeb, :live_component
+
+  alias BarkparkWeb.Components.Fields.{
+    ArrayField,
+    CodelistField,
+    CompositeField,
+    LocalizedTextField
+  }
+
+  alias Barkpark.Content.SchemaDefinition.Field
+
+  @impl true
+  def update(%{block: block} = assigns, socket) do
+    field_type = Map.get(block, "type")
+
+    socket =
+      socket
+      |> assign(assigns)
+      |> assign(:block_id, Map.get(block, "id"))
+      |> assign(:field_type, field_type)
+      |> assign(:label, Map.get(block, "label", ""))
+      # Always re-derive value from the block. The local-first update on inner
+      # change means the server echo carries the value already in the DOM, so
+      # this re-derive is a no-op diff for the edited input (focus preserved).
+      |> assign(:value, derive_value(block))
+      |> assign(:field, build_field(block))
+
+    {:ok, socket}
+  end
+
+  # ── render dispatch — one inner field component per type ────────────────────
+
+  # NOTE on `path`: the inner field components separate composite subfields and
+  # localizedText languages with a literal `.` (e.g. `prefix.subname`). Phoenix
+  # decodes form params via `Plug.Conn.Query`, where `.` is NOT a nesting
+  # separator — only `[…]` nests. So a dotted path ALWAYS arrives as a flat
+  # key. We therefore render the inner components with `path=""`, which makes
+  # composite/localizedText inputs name themselves with the bare subfield/lang
+  # name (clean top-level keys), arrayOf inputs name `[0]` / `[1]` (bracket
+  # keys we parse), and codelist names itself with the empty key. `merge_change`
+  # parses these flat params back into the structured value.
+  @impl true
+  def render(%{field_type: "composite"} = assigns) do
+    ~H"""
+    <div id={@id} class="bp-paper-composite-block" data-field-type="composite" data-block-id={@block_id}>
+      <form phx-change="inner-change" phx-target={@myself}>
+        <CompositeField.composite_field field={@field} value={@value} on_change="inner-change" path="" />
+      </form>
+    </div>
+    """
+  end
+
+  def render(%{field_type: "arrayOf"} = assigns) do
+    ~H"""
+    <div id={@id} class="bp-paper-composite-block" data-field-type="arrayOf" data-block-id={@block_id}>
+      <form phx-change="inner-change" phx-target={@myself}>
+        <ArrayField.array_field
+          field={@field}
+          value={@value}
+          on_change="inner-change"
+          on_reorder="inner-array-op"
+          target={@myself}
+          path=""
+        />
+      </form>
+    </div>
+    """
+  end
+
+  def render(%{field_type: "codelist"} = assigns) do
+    ~H"""
+    <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id}>
+      <form phx-change="inner-change" phx-target={@myself}>
+        <CodelistField.codelist_field field={@field} value={@value} on_change="inner-change" path="value" />
+      </form>
+    </div>
+    """
+  end
+
+  def render(%{field_type: "localizedText"} = assigns) do
+    ~H"""
+    <div id={@id} class="bp-paper-composite-block" data-field-type="localizedText" data-block-id={@block_id}>
+      <form phx-change="inner-change" phx-target={@myself}>
+        <LocalizedTextField.localized_text_field
+          field={@field}
+          value={@value}
+          on_change="inner-change"
+          path=""
+        />
+      </form>
+    </div>
+    """
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div class="bp-paper-composite-block bp-paper-composite-unknown" data-block-id={@block_id}>
+      <p class="bp-paper-edit-readonly">
+        <%= @field_type %> blocks are not editable yet.
+      </p>
+    </div>
+    """
+  end
+
+  # ── inner events: recompute OWN value, notify parent via :paper_op ──────────
+
+  # An inner field input changed. Inner components render with `path=""`, so the
+  # changed values arrive as FLAT top-level params (minus the LiveView
+  # `_target` key). `merge_change` reassembles them into this block's
+  # structured value for the active type. Update the LOCAL value first
+  # (focus-preserving), then send the canonical patch-block op to the parent.
+  @impl true
+  def handle_event("inner-change", params, socket) do
+    params = Map.drop(params, ["_target", "_csrf_token"])
+    new_value = merge_change(socket.assigns.field_type, socket.assigns.value, params)
+
+    {:noreply, persist(socket, new_value)}
+  end
+
+  # arrayOf structural op (add / remove / move_up / move_down) on THIS block's
+  # own list value, replicating the parent `array_op` list helpers. We operate
+  # on the component's own value, then send the same patch-block op.
+  def handle_event("inner-array-op", %{"action" => action} = params, socket) do
+    list = List.wrap(socket.assigns.value)
+    idx = parse_idx(params["index"])
+
+    new_list =
+      case action do
+        "add_row" -> ArrayField.add_row(list, empty_element(socket.assigns.field))
+        "remove_row" -> ArrayField.remove_row(list, idx)
+        "move_up" -> ArrayField.move_up(list, idx)
+        "move_down" -> ArrayField.move_down(list, idx)
+        _ -> list
+      end
+
+    {:noreply, persist(socket, new_list)}
+  end
+
+  # ── value persistence ───────────────────────────────────────────────────────
+
+  # Update the component's own value assign (focus-preserving on the echo),
+  # then notify the paper LiveView with a patch-block op carrying the new
+  # value. The parent routes it through the canonical `paper_op/2` pipeline
+  # (Content.apply_paper_block_op → persist + broadcast + re-sync).
+  defp persist(socket, new_value) do
+    op = %{
+      "op" => "patch-block",
+      "id" => socket.assigns.block_id,
+      "patch" => %{"value" => new_value}
+    }
+
+    send(self(), {:paper_op, op})
+    assign(socket, :value, new_value)
+  end
+
+  # ── value derivation + merge ────────────────────────────────────────────────
+
+  defp derive_value(%{"type" => "arrayOf"} = block), do: List.wrap(Map.get(block, "value", []))
+  defp derive_value(%{"type" => "codelist"} = block), do: Map.get(block, "value")
+
+  defp derive_value(%{"type" => type} = block) when type in ["composite", "localizedText"],
+    do: Map.get(block, "value", %{}) || %{}
+
+  defp derive_value(block), do: Map.get(block, "value")
+
+  # composite: with `path=""` the subfield inputs carry the bare subfield name,
+  # so params arrive as a flat `%{sub_name => value}` map. Merge over the
+  # current map so untouched sub-fields survive a single-field change.
+  defp merge_change("composite", current, params) when is_map(params) do
+    Map.merge(current || %{}, params)
+  end
+
+  # localizedText: same flat shape — `%{lang => text}`.
+  defp merge_change("localizedText", current, params) when is_map(params) do
+    Map.merge(current || %{}, params)
+  end
+
+  # arrayOf: with `path=""` the row inputs name themselves `[0]`, `[1]`, … so
+  # params arrive as `%{"[0]" => v0, "[1]" => v1, …}`. Re-assemble an ordered
+  # list, keeping the current list's length as the floor so a blank/absent
+  # input does not truncate the list.
+  defp merge_change("arrayOf", current, params) when is_map(params) do
+    list = List.wrap(current)
+    by_idx = Map.new(params, fn {k, v} -> {bracket_index(k), v} end)
+    seen = by_idx |> Map.keys() |> Enum.reject(&(&1 < 0)) |> Enum.max(fn -> -1 end)
+    max_idx = max(length(list) - 1, seen)
+
+    if max_idx < 0 do
+      list
+    else
+      Enum.map(0..max_idx, fn i ->
+        case Map.get(by_idx, i) do
+          nil -> Enum.at(list, i)
+          v -> v
+        end
+      end)
+    end
+  end
+
+  # codelist: the single value rides under the `"value"` key (path="value"),
+  # so params arrive as `%{"value" => "code"}`.
+  defp merge_change("codelist", current, params) when is_map(params) do
+    case Map.get(params, "value") do
+      nil -> current
+      v -> v
+    end
+  end
+
+  defp merge_change(_type, current, _params), do: current
+
+  # ── Field descriptor construction from inline block config ──────────────────
+
+  # composite — subfields parsed into nested %Field{} descriptors.
+  defp build_field(%{"type" => "composite"} = block) do
+    %Field{
+      name: Map.get(block, "id"),
+      type: "composite",
+      title: Map.get(block, "label"),
+      fields: Enum.map(Map.get(block, "fields", []), &build_subfield/1)
+    }
+  end
+
+  # arrayOf — `of` element descriptor + `ordered` flag.
+  defp build_field(%{"type" => "arrayOf"} = block) do
+    %Field{
+      name: Map.get(block, "id"),
+      type: "arrayOf",
+      title: Map.get(block, "label"),
+      ordered: Map.get(block, "ordered", false) == true,
+      of: build_subfield(Map.get(block, "of", %{"type" => "string"}))
+    }
+  end
+
+  # codelist — `codelistId` + optional pinned `version`.
+  defp build_field(%{"type" => "codelist"} = block) do
+    %Field{
+      name: Map.get(block, "id"),
+      type: "codelist",
+      title: Map.get(block, "label"),
+      codelist_id: Map.get(block, "codelistId"),
+      version: Map.get(block, "version")
+    }
+  end
+
+  # localizedText — languages / format / fallbackChain.
+  defp build_field(%{"type" => "localizedText"} = block) do
+    %Field{
+      name: Map.get(block, "id"),
+      type: "localizedText",
+      title: Map.get(block, "label"),
+      languages: Map.get(block, "languages", []),
+      format: localized_format(Map.get(block, "format", "plain")),
+      fallback_chain: Map.get(block, "fallbackChain", [])
+    }
+  end
+
+  defp build_field(block) do
+    %Field{name: Map.get(block, "id"), type: Map.get(block, "type"), title: Map.get(block, "label")}
+  end
+
+  # A subfield / array-element descriptor. Recurses into nested composites,
+  # arrays, codelists, localizedText so deeply-nested config is honoured.
+  defp build_subfield(%{"type" => "composite"} = f) do
+    %Field{
+      name: Map.get(f, "name"),
+      type: "composite",
+      title: Map.get(f, "title"),
+      fields: Enum.map(Map.get(f, "fields", []), &build_subfield/1),
+      options: Map.get(f, "options"),
+      onix: Map.get(f, "onix")
+    }
+  end
+
+  defp build_subfield(%{"type" => "arrayOf"} = f) do
+    %Field{
+      name: Map.get(f, "name"),
+      type: "arrayOf",
+      title: Map.get(f, "title"),
+      ordered: Map.get(f, "ordered", false) == true,
+      of: build_subfield(Map.get(f, "of", %{"type" => "string"}))
+    }
+  end
+
+  defp build_subfield(%{"type" => "codelist"} = f) do
+    %Field{
+      name: Map.get(f, "name"),
+      type: "codelist",
+      title: Map.get(f, "title"),
+      codelist_id: Map.get(f, "codelistId"),
+      version: Map.get(f, "version")
+    }
+  end
+
+  defp build_subfield(%{"type" => "localizedText"} = f) do
+    %Field{
+      name: Map.get(f, "name"),
+      type: "localizedText",
+      title: Map.get(f, "title"),
+      languages: Map.get(f, "languages", []),
+      format: localized_format(Map.get(f, "format", "plain")),
+      fallback_chain: Map.get(f, "fallbackChain", [])
+    }
+  end
+
+  defp build_subfield(f) when is_map(f) do
+    %Field{
+      name: Map.get(f, "name"),
+      type: Map.get(f, "type", "string"),
+      title: Map.get(f, "title"),
+      options: Map.get(f, "options"),
+      onix: Map.get(f, "onix")
+    }
+  end
+
+  defp build_subfield(_), do: %Field{name: "item", type: "string"}
+
+  # An empty element for a freshly-added arrayOf row, shaped to the `of` type.
+  defp empty_element(%Field{of: %Field{type: "composite"}}), do: %{}
+  defp empty_element(%Field{of: %Field{type: "arrayOf"}}), do: []
+  defp empty_element(%Field{of: %Field{type: "localizedText"}}), do: %{}
+  defp empty_element(%Field{of: %Field{type: "codelist"}}), do: nil
+  defp empty_element(_), do: ""
+
+  defp localized_format("rich"), do: :rich
+  defp localized_format(_), do: :plain
+
+  defp parse_idx(idx) when is_binary(idx) do
+    case Integer.parse(idx) do
+      {n, _} -> n
+      _ -> -1
+    end
+  end
+
+  defp parse_idx(idx) when is_integer(idx), do: idx
+  defp parse_idx(_), do: -1
+
+  # Parse an arrayOf row key (`"[0]"`, `"[12]"`) to its integer index. Returns
+  # -1 for any key that is not a bracketed integer so it is skipped.
+  defp bracket_index(k) when is_binary(k) do
+    case Regex.run(~r/^\[(\d+)\]$/, k) do
+      [_, n] -> String.to_integer(n)
+      _ -> -1
+    end
+  end
+
+  defp bracket_index(_), do: -1
+end
