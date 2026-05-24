@@ -1,11 +1,12 @@
-defmodule Barkpark.Media.SearchCrystal do
+defmodule Barkpark.Search.Crystal do
   @moduledoc false
   use Ecto.Schema
 
   @primary_key {:id, :binary_id, autogenerate: true}
 
-  schema "media_search_crystals" do
-    field :dataset, :string
+  schema "search_intel_crystals" do
+    field :surface, :string
+    field :scope, :string
     field :period, :string
     field :period_start, :date
     field :query_normalized, :string, default: ""

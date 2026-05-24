@@ -1,11 +1,12 @@
-defmodule Barkpark.Media.SearchEvent do
+defmodule Barkpark.Search.Event do
   @moduledoc false
   use Ecto.Schema
 
   @primary_key {:id, :binary_id, autogenerate: true}
 
-  schema "media_search_events" do
-    field :dataset, :string
+  schema "search_intel_events" do
+    field :surface, :string
+    field :scope, :string
     field :query, :string, default: ""
     field :query_normalized, :string, default: ""
     field :filters, :map, default: %{}

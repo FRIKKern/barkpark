@@ -11,7 +11,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchAnalytics}
+  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchIntelligence}
   alias BarkparkWeb.V1.MediaSearchParams
 
   action_fallback BarkparkWeb.FallbackController
@@ -34,7 +34,7 @@ defmodule BarkparkWeb.V1.MediaController do
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     record_result =
-      SearchAnalytics.record(dataset, params, total, ms,
+      SearchIntelligence.record(dataset, params, total, ms,
         actor_key: search_actor_key(conn),
         parent_event_id: search_parent_event_id(conn),
         session_key: search_session_key(conn),
@@ -65,7 +65,7 @@ defmodule BarkparkWeb.V1.MediaController do
     period = params["period"] || "week"
 
     result =
-      SearchAnalytics.insights(dataset,
+      SearchIntelligence.insights(dataset,
         period: period,
         period_start: parse_period_start(params["periodStart"])
       )
@@ -78,7 +78,7 @@ defmodule BarkparkWeb.V1.MediaController do
     limit = parse_int(params["limit"], 8) |> min(20)
 
     result =
-      SearchAnalytics.suggestions(
+      SearchIntelligence.suggestions(
         dataset,
         search_actor_key(conn),
         prefix,

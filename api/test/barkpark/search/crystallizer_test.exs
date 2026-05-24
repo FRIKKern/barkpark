@@ -1,22 +1,23 @@
-defmodule Barkpark.Media.SearchCrystallizerTest do
+defmodule Barkpark.Search.CrystallizerTest do
   use Barkpark.DataCase, async: true
 
   import Ecto.Query
 
-  alias Barkpark.Media.{SearchCrystal, SearchEvent, SearchMergePattern}
-  alias Barkpark.Media.SearchCrystallizer
+  alias Barkpark.Search.{Crystal, Crystallizer, Event, MergePattern}
   alias Barkpark.Repo
+
+  @surface "media"
+  @scope "production"
 
   test "crystallize_period aggregates queries and merge patterns" do
     day = ~D[2026-05-20]
     start = DateTime.new!(day, ~T[10:00:00.000000], "Etc/UTC")
 
     {:ok, e1} =
-      insert_event("production", "Hero", "hero", %{}, false, "actor-1", start)
+      insert_event("Hero", "hero", %{}, false, "actor-1", start)
 
     {:ok, _e2} =
       insert_event(
-        "production",
         "Hero",
         "hero",
         %{"kind" => "image"},
@@ -28,7 +29,6 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
 
     _rejected =
       insert_event(
-        "production",
         "",
         "",
         %{},
@@ -40,15 +40,16 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
         "profanity"
       )
 
-    stats = SearchCrystallizer.crystallize_period("production", :day, day)
+    stats = Crystallizer.crystallize_period(@surface, @scope, :day, day)
 
     assert stats.events >= 3
     assert stats.crystals >= 2
     assert stats.merge_patterns >= 1
 
     crystal =
-      Repo.get_by!(SearchCrystal,
-        dataset: "production",
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
         period: "day",
         period_start: day,
         query_normalized: "hero",
@@ -58,8 +59,9 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
     assert crystal.search_count == 1
 
     filtered =
-      Repo.get_by!(SearchCrystal,
-        dataset: "production",
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
         period: "day",
         period_start: day,
         query_normalized: "hero",
@@ -69,8 +71,9 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
     assert filtered.search_count == 1
 
     quality =
-      Repo.get_by!(SearchCrystal,
-        dataset: "production",
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
         period: "day",
         period_start: day,
         query_normalized: "__quality__"
@@ -80,8 +83,10 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
 
     pattern =
       Repo.one!(
-        from(m in SearchMergePattern,
-          where: m.dataset == "production" and m.period == "day" and m.period_start == ^day,
+        from(m in MergePattern,
+          where:
+            m.surface == ^@surface and m.scope == ^@scope and m.period == "day" and
+              m.period_start == ^day,
           limit: 1
         )
       )
@@ -91,7 +96,6 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
   end
 
   defp insert_event(
-         dataset,
          query,
          normalized,
          filters,
@@ -102,9 +106,10 @@ defmodule Barkpark.Media.SearchCrystallizerTest do
          quality \\ "accepted",
          reject_reason \\ nil
        ) do
-    %SearchEvent{}
+    %Event{}
     |> Ecto.Changeset.change(%{
-      dataset: dataset,
+      surface: @surface,
+      scope: @scope,
       query: query,
       query_normalized: normalized,
       filters: filters,

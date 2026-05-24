@@ -3,7 +3,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
 
   alias Barkpark.Auth
   alias Barkpark.Media
-  alias Barkpark.Media.SearchEvent
+  alias Barkpark.Search.Event
   alias Barkpark.Plugins.Media.Assets
   alias Barkpark.Repo
 
@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
       ["read", "write", "admin"]
     )
 
-    Repo.delete_all(SearchEvent)
+    Repo.delete_all(Event)
     :ok
   end
 
