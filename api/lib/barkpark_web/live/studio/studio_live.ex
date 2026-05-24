@@ -2723,8 +2723,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
       </.document_header>
 
       <div class="editor-with-preview">
-        <div class="editor-body editor-panel-main">
-          <main class="bp-paper-shell" data-test-id="studio-paper-shell">
+        <div class="editor-body editor-panel-main bp-paper-body">
+          <main class="bp-paper-shell bp-paper-surface" data-test-id="studio-paper-shell">
             <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
                   container. It survives a handle_info DOM diff but would be
                   torn down by a remount/navigate — the no-reload proof. --%>
