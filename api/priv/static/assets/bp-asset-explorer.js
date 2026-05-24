@@ -167,6 +167,10 @@
       this._sort = "created-desc";
       this._loadAbort = null;
       this._scrollObserver = null;
+      this._suggestTimer = null;
+      this._suggestHideTimer = null;
+      this._suggestions = { recent: [], popular: [], nohits: [] };
+      this._searchClientId = this._ensureSearchClientId();
     }
 
     connectedCallback() {
@@ -188,7 +192,10 @@
         "</aside>" +
         '<main class="bp-ae-main">' +
         '<header class="bp-ae-toolbar">' +
-        '<input type="search" class="bp-ae-search form-input" placeholder="Find assets…  (/ to focus)" aria-label="Search assets" />' +
+        '<div class="bp-ae-search-wrap">' +
+        '<input type="search" class="bp-ae-search form-input" placeholder="Find assets…  (/ to focus)" aria-label="Search assets" autocomplete="off" aria-expanded="false" aria-controls="bp-ae-suggest-list" />' +
+        '<div class="bp-ae-suggest" id="bp-ae-suggest-list" hidden role="listbox"></div>' +
+        "</div>" +
         '<div class="bp-ae-toolbar-pills"></div>' +
         '<div class="bp-ae-view-toggle" role="group" aria-label="Result view">' +
         '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="Grid view">Grid</button>' +
@@ -248,6 +255,7 @@
       this._loadMoreEl = this.querySelector(".bp-ae-load-more");
       this._filmstripEl = this.querySelector(".bp-ae-filmstrip-track");
       this._searchEl = this.querySelector(".bp-ae-search");
+      this._suggestEl = this.querySelector(".bp-ae-suggest");
       this._pillsEl = this.querySelector(".bp-ae-toolbar-pills");
       this._findBarEl = this.querySelector(".bp-ae-find-bar");
       this._sortEl = this.querySelector(".bp-ae-sort");
@@ -281,9 +289,22 @@
           if (this._sortEl) this._sortEl.value = "created-desc";
         }
         this._renderToolbarPills();
+        this._scheduleSuggestFetch();
         clearTimeout(this._searchTimer);
         this._searchTimer = setTimeout(() => this._loadAssets(), 250);
       });
+      this._searchEl.addEventListener("focus", () => {
+        this._scheduleSuggestFetch();
+      });
+      this._searchEl.addEventListener("blur", () => {
+        clearTimeout(this._suggestHideTimer);
+        this._suggestHideTimer = setTimeout(() => this._hideSuggest(), 180);
+      });
+      if (this._suggestEl) {
+        this._suggestEl.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+        });
+      }
       this._uploadInput.addEventListener("change", (e) => {
         const files = e.target.files;
         if (files && files.length) this._uploadFiles(files);
@@ -399,7 +420,178 @@
       if (json) h["Content-Type"] = "application/json";
       const tok = this._token();
       if (tok) h["Authorization"] = "Bearer " + tok;
+      if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
       return h;
+    }
+
+    _ensureSearchClientId() {
+      const key = "bp-search-client:" + this._dataset();
+      try {
+        let id = sessionStorage.getItem(key);
+        if (!id) {
+          id =
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : "c" + Date.now().toString(36);
+          sessionStorage.setItem(key, id);
+        }
+        return id;
+      } catch (_e) {
+        return "anon-" + Date.now().toString(36);
+      }
+    }
+
+    _scheduleSuggestFetch() {
+      clearTimeout(this._suggestTimer);
+      this._suggestTimer = setTimeout(() => this._fetchSuggestions(), 120);
+    }
+
+    async _fetchSuggestions() {
+      if (!this._suggestEl) return;
+      const prefix = (this._search || "").trim();
+      const params = new URLSearchParams({ limit: "8" });
+      if (prefix) params.set("q", prefix);
+
+      try {
+        const r = await fetch(
+          this._mediaBase() + "/search/suggestions?" + params.toString(),
+          { credentials: "same-origin", headers: this._headers() }
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        this._suggestions = (data && data.result) || {
+          recent: [],
+          popular: [],
+          nohits: []
+        };
+        this._renderSuggest();
+      } catch (_e) {
+        /* optional */
+      }
+    }
+
+    _suggestLabel(item) {
+      if (item.query) return item.query;
+      return this._filtersSummary(item.filters || {});
+    }
+
+    _filtersSummary(filters) {
+      const parts = [];
+      if (filters.kind) parts.push(this._kindLabel(filters.kind));
+      const facets = filters.facets || {};
+      Object.entries(facets).forEach(([k, v]) => {
+        parts.push((FACET_LABELS[k] || k) + ": " + v);
+      });
+      return parts.length ? parts.join(" · ") : "Filtered search";
+    }
+
+    _renderSuggest() {
+      if (!this._suggestEl) return;
+      const recent = this._suggestions.recent || [];
+      const popular = this._suggestions.popular || [];
+      const nohits = this._suggestions.nohits || [];
+
+      if (!recent.length && !popular.length && !nohits.length) {
+        this._hideSuggest();
+        return;
+      }
+
+      let html = "";
+
+      this._suggestRecent = recent;
+      this._suggestPopular = popular;
+      this._suggestNohits = nohits;
+
+      if (recent.length) {
+        html +=
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">Recent</div>' +
+          recent
+            .map((item, i) => this._suggestRow(item, "recent", i))
+            .join("") +
+          "</div>";
+      }
+
+      if (popular.length) {
+        html +=
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">Popular</div>' +
+          popular
+            .map((item, i) => this._suggestRow(item, "popular", i, item.count))
+            .join("") +
+          "</div>";
+      }
+
+      if (nohits.length && !popular.length) {
+        html +=
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">No results before</div>' +
+          nohits
+            .map((item, i) =>
+              this._suggestRow({ query: item.query, filters: {} }, "nohits", i, item.count)
+            )
+            .join("") +
+          "</div>";
+      }
+
+      this._suggestEl.innerHTML = html;
+      this._suggestEl.hidden = false;
+      if (this._searchEl) this._searchEl.setAttribute("aria-expanded", "true");
+
+      this._suggestEl.querySelectorAll(".bp-ae-suggest-item").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const section = btn.dataset.section;
+          const idx = parseInt(btn.dataset.index, 10);
+          let payload = null;
+          if (section === "popular") payload = this._suggestPopular[idx];
+          else if (section === "recent") payload = this._suggestRecent[idx];
+          else if (section === "nohits") {
+            const row = this._suggestNohits[idx];
+            if (row) payload = { query: row.query, filters: {} };
+          }
+          if (payload) this._applySuggestion(payload);
+        });
+      });
+    }
+
+    _suggestRow(item, section, index, count) {
+      const label = esc(this._suggestLabel(item));
+      const meta =
+        typeof count === "number"
+          ? '<span class="bp-ae-suggest-meta">' + count + " searches</span>"
+          : item.resultCount != null
+            ? '<span class="bp-ae-suggest-meta">' + item.resultCount + " assets</span>"
+            : "";
+      return (
+        '<button type="button" class="bp-ae-suggest-item" role="option" data-section="' +
+        section +
+        '" data-index="' +
+        index +
+        '"><span class="bp-ae-suggest-label">' +
+        label +
+        "</span>" +
+        meta +
+        "</button>"
+      );
+    }
+
+    _applySuggestion(item) {
+      clearTimeout(this._suggestHideTimer);
+      const filters = item.filters || {};
+      this._search = item.query || "";
+      if (this._searchEl) this._searchEl.value = this._search;
+      this._filterKind = filters.kind || "all";
+      this._facetSelections = Object.assign({}, filters.facets || {});
+      this._sort = this._search ? "relevance" : "created-desc";
+      if (this._sortEl) this._sortEl.value = this._sort;
+      this._renderFilters();
+      this._hideSuggest();
+      this._renderToolbarPills();
+      this._loadAssets();
+    }
+
+    _hideSuggest() {
+      if (!this._suggestEl) return;
+      this._suggestEl.hidden = true;
+      this._suggestEl.innerHTML = "";
+      if (this._searchEl) this._searchEl.setAttribute("aria-expanded", "false");
     }
 
     _mediaBase() {

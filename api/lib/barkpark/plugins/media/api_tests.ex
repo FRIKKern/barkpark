@@ -15,6 +15,7 @@ defmodule Barkpark.Plugins.Media.ApiTests do
   def specs do
     [
       search_envelope(),
+      search_suggestions_envelope(),
       collections_list(),
       media_schemas_registered(),
       studio_media_tab(),
@@ -39,6 +40,21 @@ defmodule Barkpark.Plugins.Media.ApiTests do
         {:body_contains, ~s|"facets"|},
         {:body_contains, ~s|"total"|},
         {:duration_under_ms, 3_000}
+      ]
+    }
+  end
+
+  defp search_suggestions_envelope do
+    %{
+      name: "Media search suggestions returns recent and popular",
+      method: :get,
+      path: "/v1/media/production/search/suggestions?limit=5",
+      auth: :none,
+      asserts: [
+        {:status, 200},
+        {:body_contains, ~s|"recent"|},
+        {:body_contains, ~s|"popular"|},
+        {:duration_under_ms, 1_000}
       ]
     }
   end
