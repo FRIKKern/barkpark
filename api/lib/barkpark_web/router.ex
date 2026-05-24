@@ -338,6 +338,12 @@ defmodule BarkparkWeb.Router do
     delete "/:dataset/:id", WebhookController, :delete
   end
 
+  pipeline :media_processing_callback do
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RequireMediaProcessingCallbackToken
+  end
+
   # ── Media — upload requires token, serving is public ────────────────────
   scope "/media", BarkparkWeb do
     pipe_through :api
@@ -367,6 +373,12 @@ defmodule BarkparkWeb.Router do
     get "/:dataset/:id/relations", V1.MediaController, :relations
     get "/:dataset", V1.MediaController, :index
     get "/:dataset/:id", V1.MediaController, :show
+  end
+
+  scope "/v1/media", BarkparkWeb do
+    pipe_through :media_processing_callback
+
+    post "/:dataset/processing/:id/callback", V1.MediaProcessingController, :callback
   end
 
   scope "/v1/media", BarkparkWeb do

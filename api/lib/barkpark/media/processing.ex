@@ -6,6 +6,7 @@ defmodule Barkpark.Media.Processing do
   alias Barkpark.Content
   alias Barkpark.Media
   alias Barkpark.Media.{MediaFile, Probe, Renditions}
+  alias Barkpark.Media.{Cdn, Events}
   alias Barkpark.Plugins.Media.Assets
 
   @asset_type "mediaAsset"
@@ -21,7 +22,9 @@ defmodule Barkpark.Media.Processing do
         doc = set_status(doc, file, "processing")
         doc = maybe_probe_and_patch(doc, file)
         _ = Renditions.generate_all(file)
-        set_status(doc, file, "ready")
+        doc = set_status(doc, file, "ready")
+        Cdn.publish(file, doc)
+        Events.dispatch(file.dataset, "media.processed", file, doc)
         :ok
     end
   end

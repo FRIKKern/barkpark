@@ -4,7 +4,7 @@ defmodule Barkpark.Media.Delivery do
   """
 
   alias Barkpark.Content.Document
-  alias Barkpark.Media.{Access, MediaFile, Renditions, SignedUrl}
+  alias Barkpark.Media.{Access, Cdn, MediaFile, Renditions, SignedUrl}
 
   @immutable_cache "public, max-age=31536000, immutable"
 
@@ -78,11 +78,14 @@ defmodule Barkpark.Media.Delivery do
   defp maybe_sign(nil, _file, _opts), do: nil
 
   defp maybe_sign(path, file, opts) when is_binary(path) do
-    if Keyword.get(opts, :sign_urls, false) and token_visibility?(Keyword.get(opts, :asset_doc)) do
-      SignedUrl.sign(path, file.id)
-    else
-      path
-    end
+    signed =
+      if Keyword.get(opts, :sign_urls, false) and token_visibility?(Keyword.get(opts, :asset_doc)) do
+        SignedUrl.sign(path, file.id)
+      else
+        path
+      end
+
+    Cdn.public_url(signed)
   end
 
   defp token_visibility?(%Document{content: content}) when is_map(content) do

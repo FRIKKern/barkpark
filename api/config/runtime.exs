@@ -95,6 +95,58 @@ if is_binary(media_signing_secret) and media_signing_secret != "" do
   config :barkpark, :media_signing_secret, media_signing_secret
 end
 
+media_cdn_base =
+  case System.get_env("MEDIA_CDN_BASE_URL") do
+    val when is_binary(val) and val != "" -> val
+    _ -> nil
+  end
+
+media_cdn_invalidation =
+  case System.get_env("MEDIA_CDN_INVALIDATION_URL") do
+    url when is_binary(url) and url != "" ->
+      [
+        adapter: :http,
+        url: url,
+        secret: System.get_env("MEDIA_CDN_INVALIDATION_SECRET") || ""
+      ]
+
+    _ ->
+      [adapter: :noop]
+  end
+
+if media_cdn_base do
+  config :barkpark, :media_cdn,
+    base_url: media_cdn_base,
+    invalidation: media_cdn_invalidation
+end
+
+media_callback_token =
+  case System.get_env("MEDIA_PROCESSING_CALLBACK_TOKEN") do
+    val when is_binary(val) and val != "" -> val
+    _ -> nil
+  end
+
+if media_callback_token do
+  config :barkpark, :media_processing_callback_token, media_callback_token
+end
+
+media_webhook_url = System.get_env("MEDIA_WEBHOOK_URL")
+media_webhook_secret = System.get_env("MEDIA_WEBHOOK_SECRET")
+
+if is_binary(media_webhook_url) and media_webhook_url != "" do
+  events =
+    case System.get_env("MEDIA_WEBHOOK_EVENTS") do
+      nil -> ["media.uploaded", "media.processed", "media.deleted"]
+      "" -> ["media.uploaded", "media.processed", "media.deleted"]
+      list -> String.split(list, ",", trim: true)
+    end
+
+  config :barkpark, :media_webhooks,
+    endpoints: [
+      %{url: media_webhook_url, secret: media_webhook_secret || "", events: events}
+    ]
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

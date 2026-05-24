@@ -16,6 +16,7 @@ defmodule Barkpark.Plugins.Media do
 
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.Document
+  alias Barkpark.Media.Events
   alias Barkpark.Plugins.Media.{Assets, Codelists}
 
   @plugin_name "media"
@@ -45,7 +46,8 @@ defmodule Barkpark.Plugins.Media do
   @spec after_media_upload(map()) :: :ok
   def after_media_upload(%{media_file: media_file}) do
     case Assets.ensure_for_upload(media_file) do
-      {:ok, _doc} ->
+      {:ok, doc} ->
+        Events.dispatch(media_file.dataset, "media.uploaded", media_file, doc)
         Barkpark.Media.Processing.process(media_file)
         :ok
 
