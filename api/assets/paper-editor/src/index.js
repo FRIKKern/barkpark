@@ -16,9 +16,11 @@
 
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
 
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
+import { FormatBubble } from "./format-bubble.js";
 
 const DEBOUNCE_MS = 300;
 
@@ -31,6 +33,7 @@ class BpPaperEditor extends HTMLElement {
     this._blockType = "paragraph";
     this._debounceTimer = null;
     this._slash = null; // SlashMenu instance (lazy, created on first trigger)
+    this._bubble = null; // FormatBubble instance (selection format toolbar)
   }
 
   connectedCallback() {
@@ -54,6 +57,11 @@ class BpPaperEditor extends HTMLElement {
           // Marks/nodes left enabled by StarterKit: paragraph, bold, italic,
           // strike, code, bulletList, orderedList, listItem, history.
         }),
+        // Link mark — required for the format bubble's link button and so
+        // existing `link` inline nodes (convert.js already round-trips them)
+        // render + edit. openOnClick:false keeps clicks editing, not
+        // navigating; autolink off so typing a URL is not silently linkified.
+        Link.configure({ openOnClick: false, autolink: false }),
       ],
       content: blockToTiptap(block),
       editorProps: {
@@ -66,8 +74,23 @@ class BpPaperEditor extends HTMLElement {
       onUpdate: () => {
         this._scheduleEmit();
         this._maybeSlash();
+        if (this._bubble) this._bubble.update();
       },
+      // Selection-only changes (drag-select, shift-arrow, click-place) don't
+      // fire onUpdate — drive the format bubble from selectionUpdate too.
+      onSelectionUpdate: () => {
+        if (this._bubble) this._bubble.update();
+      },
+      // Focus leaving the editor (clicking another block / outside) must hide
+      // the bubble; refocusing re-evaluates the live selection.
+      onBlur: () => { if (this._bubble) this._bubble.update(); },
+      onFocus: () => { if (this._bubble) this._bubble.update(); },
     });
+
+    // Selection format toolbar (B6) — B / I / </> / link, shown on a non-empty
+    // text selection. Hand-rolled (no tippy) and fully decoupled from the
+    // patch-block round-trip and the slash menu.
+    this._bubble = new FormatBubble({ editor: this._editor });
   }
 
   disconnectedCallback() {
@@ -78,6 +101,10 @@ class BpPaperEditor extends HTMLElement {
     if (this._slash) {
       this._slash.destroy();
       this._slash = null;
+    }
+    if (this._bubble) {
+      this._bubble.destroy();
+      this._bubble = null;
     }
     if (this._editor) {
       this._editor.destroy();

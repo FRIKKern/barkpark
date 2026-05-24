@@ -658,6 +658,20 @@
     html[data-editor-focus="beta"] .editor-with-preview { justify-content: center; }
     html[data-editor-focus="beta"] .bp-paper-surface { margin: 0 auto; }
 
+    /* True-center nit (B6): the editor-body wrapper carries the Studio-shell
+       inset — `max-width:720px` + asymmetric `padding:20px 24px` and NO auto
+       margins — so it hugs the panel's LEFT edge. The 680px `.bp-paper-surface`
+       then centers inside that left-hugging 720px box, landing the column
+       ~44px left of true viewport center. In focus mode we drop the wrapper's
+       width cap and its left/right inset so the surface (margin:0 auto) is the
+       sole centering authority and the column sits symmetric in the viewport,
+       matching the original Portable-Doc true center. */
+    html[data-editor-focus="beta"] .editor-body.editor-panel-main {
+      max-width: none;
+      padding-left: 0;
+      padding-right: 0;
+    }
+
     /* ── Editor pane (used by StudioLive via document_header /
        editor_field / empty_editor in BarkparkWeb.StudioComponents).
        Originally hoisted from StudioLive's inline <style> so the now-
@@ -2071,6 +2085,121 @@
       background: var(--paper-bg); border: 1px solid var(--paper-rule);
       border-radius: 3px; padding: 0 4px; color: var(--paper-ink-soft);
       margin: 0 1px;
+    }
+
+    /* ── Selection format bubble (B6) — "1:1 with Portable-Doc". ───────────
+       Rendered into <body> by FormatBubble (src/format-bubble.js) and
+       positioned fixed above the text selection. Mirrors Portable-Doc's
+       `.paper-format-bubble`: a small warm pill — B / I / </> / link buttons
+       in a tight row, active marks pressed to the rust accent, plus an inline
+       link input row that drops in when the link button is pressed.
+
+       Like the slash popover this lives OUTSIDE `.bp-paper-surface`, so we
+       re-bind the `--paper-*` tokens here keyed on html[data-theme] — warm in
+       BOTH modes. Sits above block chrome (z 200) and the slash popover never
+       co-occurs (slash needs a caret; bubble needs a range). */
+    html[data-theme="light"] .bp-paper-format {
+      --paper-bg:          #fbfaf6;
+      --paper-bg-deep:     #f5f2e9;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+    }
+    html[data-theme="dark"] .bp-paper-format {
+      --paper-bg:          #1b1815;
+      --paper-bg-deep:     #221e1a;
+      --paper-ink:         #ece6dc;
+      --paper-ink-soft:    #b8ad9e;
+      --paper-rule:        rgba(236, 230, 220, 0.10);
+      --paper-accent:      #d97a5f;
+      --paper-accent-soft: rgba(217, 122, 95, 0.14);
+      --paper-chrome-bg:   #221e1a;
+      --paper-chrome-border: rgba(236, 230, 220, 0.14);
+    }
+    /* Pre-paint / no-theme fallback — warm light defaults + fonts. */
+    .bp-paper-format {
+      --paper-bg:          #fbfaf6;
+      --paper-bg-deep:     #f5f2e9;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+      --paper-font-serif:  'Source Serif 4', Georgia, 'Times New Roman', serif;
+      --paper-font-sans:   var(--font);
+      --paper-font-mono:   var(--font-mono);
+
+      position: fixed; z-index: 200;
+      display: flex; align-items: center; flex-wrap: wrap;
+      gap: 2px; padding: 3px 4px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.10);
+      font-family: var(--paper-font-sans);
+      animation: bp-paper-format-fade 0.12s ease-out;
+    }
+    @keyframes bp-paper-format-fade {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .bp-paper-format__btn {
+      width: 20px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 0; background: transparent; border-radius: 3px;
+      color: var(--paper-ink); font-family: inherit; font-size: 12px;
+      cursor: pointer; user-select: none; padding: 0;
+      transition: background 0.12s ease-out, color 0.12s ease-out;
+    }
+    .bp-paper-format__btn:hover { background: var(--paper-bg-deep); }
+    .bp-paper-format__btn--active,
+    .bp-paper-format__btn[aria-pressed="true"] {
+      background: var(--paper-accent-soft);
+      color: var(--paper-accent);
+    }
+    .bp-paper-format__btn--bold { font-weight: 800; font-family: var(--paper-font-serif); }
+    .bp-paper-format__btn--italic { font-style: italic; font-family: var(--paper-font-serif); }
+    .bp-paper-format__btn--code {
+      width: 24px; font-family: var(--paper-font-mono);
+      font-size: 11px; letter-spacing: -0.02em;
+    }
+    .bp-paper-format__btn--link { width: auto; padding: 0 5px; font-size: 11.5px; }
+    .bp-paper-format__btn:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px;
+    }
+    .bp-paper-format__sep {
+      width: 1px; height: 14px; background: var(--paper-rule); margin: 0 2px;
+    }
+    .bp-paper-format__link-row {
+      display: flex; align-items: center; gap: 4px;
+      flex-basis: 100%; margin-top: 3px; padding-top: 3px;
+      border-top: 1px solid var(--paper-rule);
+    }
+    .bp-paper-format__link-input {
+      width: 180px; height: 22px;
+      border: 1px solid var(--paper-rule); border-radius: 3px;
+      background: var(--paper-bg); padding: 0 6px;
+      font-family: var(--paper-font-sans); font-size: 12px;
+      color: var(--paper-ink); outline: none;
+    }
+    .bp-paper-format__link-input:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
+    .bp-paper-format__link-remove {
+      height: 22px;
+      border: 1px solid var(--paper-chrome-border); background: transparent;
+      border-radius: 3px; padding: 0 8px;
+      font-family: var(--paper-font-sans); font-size: 11.5px;
+      color: var(--paper-ink-soft); cursor: pointer;
+    }
+    .bp-paper-format__link-remove:hover {
+      color: var(--paper-accent); border-color: var(--paper-accent);
     }
   </style>
 </head>
