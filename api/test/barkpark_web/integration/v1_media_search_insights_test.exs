@@ -4,8 +4,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
   import Ecto.Query
 
   alias Barkpark.Auth
-  alias Barkpark.Media.SearchCrystallizer
-  alias Barkpark.Media.SearchEvent
+  alias Barkpark.Search.{Crystallizer, Event}
   alias Barkpark.Repo
 
   setup do
@@ -16,7 +15,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
       ["read", "write", "admin"]
     )
 
-    Repo.delete_all(SearchEvent)
+    Repo.delete_all(Event)
     :ok
   end
 
@@ -27,9 +26,10 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
     at = DateTime.new!(day, ~T[12:00:00.000000], "Etc/UTC")
 
     {:ok, a} =
-      %SearchEvent{}
+      %Event{}
       |> Ecto.Changeset.change(%{
-        dataset: "production",
+        surface: "media",
+        scope: "production",
         query: "campaign",
         query_normalized: "campaign",
         filters: %{},
@@ -41,9 +41,10 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
       |> Repo.insert()
 
     {:ok, _b} =
-      %SearchEvent{}
+      %Event{}
       |> Ecto.Changeset.change(%{
-        dataset: "production",
+        surface: "media",
+        scope: "production",
         query: "campaign",
         query_normalized: "campaign",
         filters: %{"kind" => "image"},
@@ -55,7 +56,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
       })
       |> Repo.insert()
 
-    SearchCrystallizer.crystallize_period("production", :day, day)
+    Crystallizer.crystallize_period("media", "production", :day, day)
 
     resp =
       conn
@@ -67,6 +68,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
 
     result = resp["result"]
     assert result["period"] == "day"
+    assert result["surface"] == "media"
+    assert result["scope"] == "production"
     assert is_list(result["topQueries"])
     assert is_list(result["mergePatterns"])
     assert is_list(result["hints"])
@@ -79,7 +82,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
     |> get(~p"/v1/media/production/search?q=fuck&limit=5")
     |> json_response(200)
 
-    refute Repo.one(from(e in SearchEvent, where: ilike(e.query, "%fuck%")))
-    assert Repo.get_by(SearchEvent, quality: "rejected", reject_reason: "profanity")
+    refute Repo.one(from(e in Event, where: ilike(e.query, "%fuck%")))
+    assert Repo.get_by(Event, quality: "rejected", reject_reason: "profanity")
   end
 end

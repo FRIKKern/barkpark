@@ -1,11 +1,12 @@
-defmodule Barkpark.Media.SearchMergePattern do
+defmodule Barkpark.Search.MergePattern do
   @moduledoc false
   use Ecto.Schema
 
   @primary_key {:id, :binary_id, autogenerate: true}
 
-  schema "media_search_merge_patterns" do
-    field :dataset, :string
+  schema "search_intel_merge_patterns" do
+    field :surface, :string
+    field :scope, :string
     field :period, :string
     field :period_start, :date
     field :from_fingerprint, :string

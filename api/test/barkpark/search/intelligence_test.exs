@@ -1,17 +1,17 @@
-defmodule Barkpark.Media.SearchAnalyticsTest do
+defmodule Barkpark.Search.IntelligenceTest do
   use Barkpark.DataCase, async: true
 
   import Ecto.Query
 
-  alias Barkpark.Media.SearchAnalytics
-  alias Barkpark.Media.SearchEvent
+  alias Barkpark.Search.{Event, Intelligence}
   alias Barkpark.Repo
 
   test "prune/1 deletes events older than retention window" do
     {:ok, old} =
-      %SearchEvent{}
+      %Event{}
       |> Ecto.Changeset.change(%{
-        dataset: "production",
+        surface: "media",
+        scope: "production",
         query: "stale",
         filters: %{},
         actor_key: "test",
@@ -22,13 +22,14 @@ defmodule Barkpark.Media.SearchAnalyticsTest do
 
     stale_at = DateTime.add(DateTime.utc_now(), -100, :day)
 
-    from(e in SearchEvent, where: e.id == ^old.id)
+    from(e in Event, where: e.id == ^old.id)
     |> Repo.update_all(set: [inserted_at: stale_at])
 
     {:ok, _fresh} =
-      %SearchEvent{}
+      %Event{}
       |> Ecto.Changeset.change(%{
-        dataset: "production",
+        surface: "media",
+        scope: "production",
         query: "fresh",
         filters: %{},
         actor_key: "test",
@@ -37,8 +38,8 @@ defmodule Barkpark.Media.SearchAnalyticsTest do
       })
       |> Repo.insert()
 
-    assert SearchAnalytics.prune(retention_days: 90) == 1
-    assert Repo.aggregate(SearchEvent, :count, :id) == 1
-    assert Repo.get_by(SearchEvent, query: "fresh")
+    assert Intelligence.prune(retention_days: 90) == 1
+    assert Repo.aggregate(Event, :count, :id) == 1
+    assert Repo.get_by(Event, query: "fresh")
   end
 end

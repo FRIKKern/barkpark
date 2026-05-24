@@ -4,15 +4,16 @@ defmodule Barkpark.Workers.SearchAnalyticsPruneTest do
 
   import Ecto.Query
 
-  alias Barkpark.Media.SearchEvent
+  alias Barkpark.Search.Event
   alias Barkpark.Repo
-  alias Barkpark.Workers.SearchAnalyticsPrune
+  alias Barkpark.Search.Workers.Prune
 
   test "perform/1 prunes stale search events" do
     {:ok, event} =
-      %SearchEvent{}
+      %Event{}
       |> Ecto.Changeset.change(%{
-        dataset: "production",
+        surface: "media",
+        scope: "production",
         query: "old",
         filters: %{},
         actor_key: "test",
@@ -23,10 +24,10 @@ defmodule Barkpark.Workers.SearchAnalyticsPruneTest do
 
     stale_at = DateTime.add(DateTime.utc_now(), -120, :day)
 
-    from(e in SearchEvent, where: e.id == ^event.id)
+    from(e in Event, where: e.id == ^event.id)
     |> Repo.update_all(set: [inserted_at: stale_at])
 
-    assert {:ok, %{deleted: 1}} = perform_job(SearchAnalyticsPrune, %{})
-    assert Repo.aggregate(SearchEvent, :count, :id) == 0
+    assert {:ok, %{deleted: 1}} = perform_job(Prune, %{})
+    assert Repo.aggregate(Event, :count, :id) == 0
   end
 end

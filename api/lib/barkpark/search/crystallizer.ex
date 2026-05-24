@@ -1,37 +1,36 @@
-defmodule Barkpark.Media.SearchCrystallizer do
+defmodule Barkpark.Search.Crystallizer do
   @moduledoc """
-  Roll raw `media_search_events` into day / week / month crystals and merge patterns.
+  Core crystallization — roll raw search events into day / week / month aggregates.
 
-  Crystals survive raw-event pruning and power long-horizon search improvement
-  (popular queries, facet-add after zero-hit, synonym candidates).
+  Surface-agnostic: operates on `search_intel_*` tables keyed by `surface` + `scope`.
   """
 
   import Ecto.Query
-  alias Barkpark.Media.{SearchCrystal, SearchEvent, SearchMergePattern, SearchQuerySanitizer}
+  alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer}
   alias Barkpark.Repo
 
   @chain_gap_minutes 30
 
-  @doc "Crystallize all datasets for yesterday plus week/month boundaries when due."
+  @doc "Crystallize all surface/scope pairs for yesterday plus week/month boundaries when due."
   @spec crystallize_due(Date.t()) :: map()
   def crystallize_due(%Date{} = today \\ Date.utc_today()) do
     yesterday = Date.add(today, -1)
 
-    datasets =
-      from(e in SearchEvent, select: e.dataset, distinct: true)
+    pairs =
+      from(e in Event, select: {e.surface, e.scope}, distinct: true)
       |> Repo.all()
 
     day_stats =
-      Enum.map(datasets, fn dataset ->
-        {dataset, crystallize_period(dataset, :day, yesterday)}
+      Enum.map(pairs, fn {surface, scope} ->
+        {{surface, scope}, crystallize_period(surface, scope, :day, yesterday)}
       end)
 
     week_stats =
       if Date.day_of_week(today) == 1 do
         week_start = Date.add(today, -7)
 
-        Enum.map(datasets, fn dataset ->
-          {dataset, crystallize_period(dataset, :week, week_start)}
+        Enum.map(pairs, fn {surface, scope} ->
+          {{surface, scope}, crystallize_period(surface, scope, :week, week_start)}
         end)
       else
         []
@@ -41,8 +40,8 @@ defmodule Barkpark.Media.SearchCrystallizer do
       if today.day == 1 do
         month_start = Date.add(Date.beginning_of_month(today), -1) |> Date.beginning_of_month()
 
-        Enum.map(datasets, fn dataset ->
-          {dataset, crystallize_period(dataset, :month, month_start)}
+        Enum.map(pairs, fn {surface, scope} ->
+          {{surface, scope}, crystallize_period(surface, scope, :month, month_start)}
         end)
       else
         []
@@ -55,23 +54,25 @@ defmodule Barkpark.Media.SearchCrystallizer do
     }
   end
 
-  @doc "Crystallize one dataset/period bucket (idempotent upsert)."
-  @spec crystallize_period(String.t(), :day | :week | :month, Date.t()) :: map()
-  def crystallize_period(dataset, period, period_start)
-      when is_binary(dataset) and period in [:day, :week, :month] do
+  @doc "Crystallize one surface/scope/period bucket (idempotent upsert)."
+  @spec crystallize_period(String.t(), String.t(), :day | :week | :month, Date.t()) :: map()
+  def crystallize_period(surface, scope, period, period_start)
+      when is_binary(surface) and is_binary(scope) and period in [:day, :week, :month] do
     {start_dt, end_dt} = period_bounds(period, period_start)
 
     events =
-      from(e in SearchEvent,
-        where: e.dataset == ^dataset and e.inserted_at >= ^start_dt and e.inserted_at < ^end_dt
+      from(e in Event,
+        where:
+          e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^start_dt and
+            e.inserted_at < ^end_dt
       )
       |> Repo.all()
 
     query_rows = aggregate_queries(events)
     merge_rows = detect_merge_patterns(events)
 
-    crystal_count = upsert_crystals(dataset, period, period_start, query_rows, events)
-    pattern_count = upsert_merge_patterns(dataset, period, period_start, merge_rows)
+    crystal_count = upsert_crystals(surface, scope, period, period_start, query_rows, events)
+    pattern_count = upsert_merge_patterns(surface, scope, period, period_start, merge_rows)
 
     %{
       events: length(events),
@@ -151,7 +152,7 @@ defmodule Barkpark.Media.SearchCrystallizer do
     grouped =
       accepted
       |> Enum.group_by(fn e ->
-        {e.query_normalized || SearchQuerySanitizer.normalize(e.query || ""),
+        {e.query_normalized || Sanitizer.normalize(e.query || ""),
          fingerprint(e.query_normalized || "", e.filters || %{})}
       end)
 
@@ -185,7 +186,7 @@ defmodule Barkpark.Media.SearchCrystallizer do
     {rows, rejected_count}
   end
 
-  defp upsert_crystals(dataset, period, period_start, {rows, rejected_count}, _events) do
+  defp upsert_crystals(surface, scope, period, period_start, {rows, rejected_count}, _events) do
     period_str = Atom.to_string(period)
 
     quality_row = %{
@@ -203,10 +204,11 @@ defmodule Barkpark.Media.SearchCrystallizer do
     Enum.map([quality_row | rows], fn row ->
       attrs = Map.put(row, :rejected_count, Map.get(row, :rejected_count, 0))
 
-      %SearchCrystal{}
+      %Crystal{}
       |> Ecto.Changeset.change(
         Map.merge(attrs, %{
-          dataset: dataset,
+          surface: surface,
+          scope: scope,
           period: period_str,
           period_start: period_start
         })
@@ -219,8 +221,9 @@ defmodule Barkpark.Media.SearchCrystallizer do
   defp upsert_crystal(changeset) do
     attrs = Ecto.Changeset.apply_changes(changeset)
 
-    case Repo.get_by(SearchCrystal,
-           dataset: attrs.dataset,
+    case Repo.get_by(Crystal,
+           surface: attrs.surface,
+           scope: attrs.scope,
            period: attrs.period,
            period_start: attrs.period_start,
            query_normalized: attrs.query_normalized,
@@ -297,12 +300,12 @@ defmodule Barkpark.Media.SearchCrystallizer do
       (next.parent_event_id && Map.get(events_by_id, next.parent_event_id) == prev)
   end
 
-  defp within_chain_gap?(%SearchEvent{} = a, %SearchEvent{} = b) do
+  defp within_chain_gap?(%Event{} = a, %Event{} = b) do
     DateTime.diff(b.inserted_at, a.inserted_at, :second) <= @chain_gap_minutes * 60
   end
 
-  defp event_state(%SearchEvent{} = e) do
-    q = e.query_normalized || SearchQuerySanitizer.normalize(e.query || "")
+  defp event_state(%Event{} = e) do
+    q = e.query_normalized || Sanitizer.normalize(e.query || "")
 
     %{
       query_normalized: q,
@@ -311,14 +314,15 @@ defmodule Barkpark.Media.SearchCrystallizer do
     }
   end
 
-  defp upsert_merge_patterns(dataset, period, period_start, rows) do
+  defp upsert_merge_patterns(surface, scope, period, period_start, rows) do
     period_str = Atom.to_string(period)
 
     Enum.map(rows, fn row ->
-      %SearchMergePattern{}
+      %MergePattern{}
       |> Ecto.Changeset.change(
         Map.merge(row, %{
-          dataset: dataset,
+          surface: surface,
+          scope: scope,
           period: period_str,
           period_start: period_start
         })
@@ -331,8 +335,9 @@ defmodule Barkpark.Media.SearchCrystallizer do
   defp upsert_merge_pattern(changeset) do
     attrs = Ecto.Changeset.apply_changes(changeset)
 
-    case Repo.get_by(SearchMergePattern,
-           dataset: attrs.dataset,
+    case Repo.get_by(MergePattern,
+           surface: attrs.surface,
+           scope: attrs.scope,
            period: attrs.period,
            period_start: attrs.period_start,
            from_fingerprint: attrs.from_fingerprint,

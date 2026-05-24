@@ -113,15 +113,15 @@ Inspired by Algolia Query Suggestions and Typesense `popular_queries`:
 
 - Events logged on first-page `/v1/media/:dataset/search` only (`offset=0`).
 - Suggestions: `GET /v1/media/:dataset/search/suggestions?q=prefix`.
-- **Quality gate:** `SearchQuerySanitizer` rejects profanity, spam, injection-ish input — bad text is never stored verbatim (rejected rows track reason only).
+- **Quality gate:** `Barkpark.Search.Sanitizer` rejects profanity, spam, injection-ish input — bad text is never stored verbatim (rejected rows track reason only).
 - **Lineage:** `X-BP-Search-Parent` links refinements; crystallizer also infers chains within 30 min per actor.
-- **Crystals:** nightly Oban job rolls raw events into **day / week / month** tables (`media_search_crystals`).
-- **Merge patterns:** `media_search_merge_patterns` captures transitions (`facet_add`, `zero_to_hit`, `query_replace`, …) for search improvement.
+- **Crystals:** nightly Oban job rolls raw events into **day / week / month** rows in `search_intel_crystals` (`surface=media`, `scope=dataset`).
+- **Merge patterns:** `search_intel_merge_patterns` captures transitions (`facet_add`, `zero_to_hit`, `query_replace`, …) for search improvement.
 - **Insights (admin):** `GET /v1/media/:dataset/search/insights?period=week` — top queries, merge patterns, quality stats, auto hints.
 - Postgres `pg_trgm` GIN index on `query` for prefix matching — no separate engine required yet.
 - **Retention:** crystallize at 03:30 UTC, prune raw events at 04:00 UTC (90-day default); crystals persist indefinitely.
 
-Implementation: `Barkpark.Media.SearchAnalytics`, `media_search_events` table, explorer suggest UI in `bp-asset-explorer.js`.
+Implementation: `Barkpark.Search.Intelligence` (core), `Barkpark.Media.SearchIntelligence` (DAM adapter). See `docs/search/INTELLIGENCE.md`.
 
 Future: promote repeated **nohits** to admin dashboard; sync **popular** into sidebar shortcuts; optional ParadeDB `pg_search` for asset full-text at scale (Phase 2).
 
