@@ -73,6 +73,7 @@ defmodule Barkpark.PortableDoc.Render do
   def render_block(block, opts \\ %{}) when is_map(block) do
     block
     |> resolve_ref_title(opts)
+    |> resolve_code_label(opts)
     |> compose_block()
     |> render_html(Map.put(opts, :doctype, false))
   end
@@ -98,6 +99,31 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   defp resolve_ref_title(block, _opts), do: block
+
+  # codelist View resolves the selected CODE → its human LABEL for display,
+  # using the same pure-renderer + injected-resolver pattern as
+  # `resolve_ref_title`. The caller supplies a `:codelist_resolver` fn in
+  # `opts` — `fn plugin, codelist_id, code -> label_string end` — typically
+  # `&Content.codelist_label(&1, &2, &3)`. We stash the resolved label on a
+  # transient `"_code_label"` key the codelist compose clause reads. With no
+  # resolver the block is untouched and View falls back to the raw code
+  # (pure unit tests stay Repo-free). The `plugin` discriminator defaults to
+  # `"core"` — the same default `CodelistField` carries — so blocks pointing
+  # at a non-core registry (e.g. OnixEdit) must set `"plugin"`.
+  defp resolve_code_label(%{"type" => "codelist", "value" => code} = block, opts)
+       when is_binary(code) and code != "" do
+    case Map.get(opts, :codelist_resolver) do
+      resolver when is_function(resolver, 3) ->
+        plugin = Map.get(block, "plugin", "core")
+        codelist_id = Map.get(block, "codelistId", "")
+        Map.put(block, "_code_label", to_string(resolver.(plugin, codelist_id, code)))
+
+      _ ->
+        block
+    end
+  end
+
+  defp resolve_code_label(block, _opts), do: block
 
   @doc """
   Render a full portable-doc block list to one concatenated HTML fragment, in
@@ -384,10 +410,23 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
-  # codelist → labelled row, value is the selected code string.
+  # codelist → labelled row. The stored value is the selected CODE; View shows
+  # the human LABEL when `resolve_code_label/2` stashed one on `"_code_label"`
+  # (the caller wired a `:codelist_resolver`), else falls back to the raw code,
+  # else an em-dash for an empty/unresolved value. Mirrors the field-reference
+  # id→title resolution exactly.
   def compose_block(%{"type" => "codelist"} = b) do
-    value = field_value_text(b)
-    field_row(b, if(value == "", do: "—", else: value))
+    code = field_value_text(b)
+    label = b |> Map.get("_code_label", "") |> to_string()
+
+    display =
+      cond do
+        code == "" -> "—"
+        label != "" -> label
+        true -> code
+      end
+
+    field_row(b, display)
   end
 
   # localizedText → labelled box, one row per language (lang: text).

@@ -99,7 +99,8 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
        readonly: false,
        field: nil,
        options: [],
-       tree_loader: nil
+       tree_loader: nil,
+       notify_id: nil
      )}
   end
 
@@ -123,6 +124,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       |> assign(:languages, languages)
       |> assign(:selected, selected)
       |> assign(:tree_loader, Map.get(assigns, :tree_loader, socket.assigns.tree_loader))
+      |> assign(:notify_id, Map.get(assigns, :notify_id, socket.assigns.notify_id))
       |> maybe_load_tree()
       |> auto_expand_to_selected()
 
@@ -147,6 +149,15 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     if socket.assigns.readonly do
       {:noreply, socket}
     else
+      # A row select only mutates this component's OWN `:selected` state — it
+      # re-renders the hidden `<input>`, but a server-driven value change does
+      # NOT fire the surrounding form's `phx-change`. So when a host wires
+      # `:notify_id`, push the picked code to the LiveView process; the host
+      # (StudioLive) routes it to that LiveComponent via `send_update/3`,
+      # which persists the value (the paper editor's patch-block path). Without
+      # `:notify_id` the component is a self-contained picker whose value is
+      # read by an explicit form submit — unchanged from before.
+      maybe_notify_select(socket, code)
       {:noreply, assign(socket, selected: code)}
     end
   end
@@ -157,6 +168,16 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
   def handle_event("tree_search_clear", _params, socket) do
     {:noreply, assign(socket, search_query: "", matched: nil)}
+  end
+
+  # Push the picked code to the LiveView process when a host wired `:notify_id`
+  # (the dom id of the LiveComponent to update). The LiveView's handle_info
+  # routes it via `send_update/3`. No-op when no host is listening.
+  defp maybe_notify_select(%{assigns: %{notify_id: nil}}, _code), do: :ok
+
+  defp maybe_notify_select(%{assigns: %{notify_id: notify_id}}, code) do
+    send(self(), {:tree_codelist_change, %{id: notify_id, value: code}})
+    :ok
   end
 
   # ── Loading ───────────────────────────────────────────────────────────────
