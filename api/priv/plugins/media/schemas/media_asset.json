@@ -57,6 +57,24 @@
       "options": ["ready", "processing", "failed"]
     },
     {
+      "name": "bp_cdn_status",
+      "title": "CDN status",
+      "type": "select",
+      "group": "file",
+      "options": ["pending", "published", "failed", "skipped"]
+    },
+    {
+      "name": "bp_external_processing",
+      "title": "External processing",
+      "type": "composite",
+      "group": "file",
+      "fields": [
+        { "name": "provider", "title": "Provider", "type": "string" },
+        { "name": "jobId", "title": "Job ID", "type": "string" },
+        { "name": "lastCallbackAt", "title": "Last callback", "type": "string" }
+      ]
+    },
+    {
       "name": "bp_visibility",
       "title": "Delivery visibility",
       "type": "select",

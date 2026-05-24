@@ -4,7 +4,7 @@ defmodule Barkpark.Media do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.{Cdn, Events, MediaFile}
   alias Barkpark.Plugins.Media.Assets
 
   @upload_dir Application.compile_env!(:barkpark, :media_upload_dir)
@@ -200,6 +200,10 @@ defmodule Barkpark.Media do
   def delete_file(id) do
     case get_file(id) do
       {:ok, file} ->
+        doc = asset_doc_for_file(file, file.dataset)
+        Cdn.invalidate(file)
+        Events.dispatch(file.dataset, "media.deleted", file, doc)
+
         full_path = Path.join(@upload_dir, file.path)
         File.rm(full_path)
         Barkpark.Media.Renditions.delete_for_file(file.id)

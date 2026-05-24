@@ -49,6 +49,7 @@ defmodule Barkpark.Media.AssetResponse do
       thumbnailUrl: Delivery.thumbnail_url(file, url_opts),
       previewUrl: Delivery.preview_url(file, url_opts),
       renditions: Delivery.rendition_urls(file, url_opts),
+      cdnUrls: Barkpark.Media.Cdn.url_map(file),
       mimeType: file.mime_type,
       size: file.size,
       createdAt: file.inserted_at,

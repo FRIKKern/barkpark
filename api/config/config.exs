@@ -45,6 +45,14 @@ config :barkpark, :preview,
 
 config :barkpark, :media_signing_secret, "dev-media-signing-secret-change-in-prod"
 
+config :barkpark, :media_cdn,
+  base_url: nil,
+  invalidation: [adapter: :noop]
+
+config :barkpark, :media_webhooks, endpoints: []
+
+config :barkpark, :media_processing_callback_token, "dev-media-processing-callback-token"
+
 # Fallback CORS allowlist for API routes without a dataset path segment
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
 config :barkpark, :default_cors_origins, []
