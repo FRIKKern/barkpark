@@ -1396,6 +1396,7 @@
   <script src="/assets/bp-reference-picker.js" defer></script>
   <script src="/assets/bp-document-preview.js" defer></script>
   <script src="/assets/bp-overflow-menu.js" defer></script>
+  <script src="/assets/bp-paper-editor.bundle.js" defer></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <script>
@@ -1461,6 +1462,25 @@
       },
       destroyed() {
         this.el.removeEventListener("bp-change", this._on);
+      }
+    };
+
+    // BarkparkPaperEditor — LV↔WC bridge for the per-block paper editor
+    // (<bp-paper-editor>). Mounted on the phx-update="ignore" wrapper that
+    // holds one custom element per rich-text block. The element emits a
+    // bubbling + composed `bp-op` CustomEvent whose detail is a portable-doc
+    // op ({op:"patch-block", id, patch}); we forward it verbatim to the
+    // server's `paper-op` handler. The server owns the model — no client
+    // state, no echo back into the WC.
+    Hooks.BarkparkPaperEditor = {
+      mounted() {
+        this._onOp = (e) => {
+          this.pushEvent("paper-op", e.detail);
+        };
+        this.el.addEventListener("bp-op", this._onOp);
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-op", this._onOp);
       }
     };
 

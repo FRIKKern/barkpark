@@ -1004,6 +1004,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})}
   end
 
+  # Op forwarded by the <bp-paper-editor> Web Component via the
+  # BarkparkPaperEditor JS hook. The WC owns the editing UX (debounced rich
+  # text) and emits a portable-doc op verbatim; we route it through the same
+  # canonical `paper_op/2` pipeline the form-based handlers use. The op arrives
+  # JSON-decoded with string keys: %{"op"=>"patch-block","id"=>_,"patch"=>%{}}.
+  # The server owns the model — `paper_op/2` applies, persists, broadcasts the
+  # `{:paper_block,…}` delta, and re-syncs `paper_doc`. No echo to the WC.
+  def handle_event("paper-op", %{"op" => _} = op, socket) do
+    {:noreply, paper_op(socket, op)}
+  end
+
   # Add a block. Default `insert-after` the focused block; `append-block` when
   # no anchor (empty doc or top-level add). A fresh immutable id is generated.
   def handle_event("paper-add-block", %{"block-type" => type} = params, socket) do
@@ -2528,34 +2539,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     ~H"""
     <%= case @type do %>
-      <% "heading" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
-          <input type="hidden" name="block_id" value={@id} />
-          <select name="level" class="bp-paper-edit-level">
-            <option :for={lvl <- 1..6} value={lvl} selected={Map.get(@block, "level", 2) == lvl}>
-              H<%= lvl %>
-            </option>
-          </select>
-          <input
-            type="text"
-            name="text"
-            class="bp-paper-edit-text"
-            value={Map.get(@block, "text", "")}
-            data-test-id="paper-field-text"
-          />
-          <button type="submit" class="btn btn-sm">Save</button>
-        </form>
-      <% "paragraph" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
-          <input type="hidden" name="block_id" value={@id} />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-text"
-          ><%= inline_to_text(Map.get(@block, "content", [])) %></textarea>
-          <button type="submit" class="btn btn-sm">Save</button>
-        </form>
+      <%!-- Rich-text blocks (paragraph / heading / list) are edited by the
+            <bp-paper-editor> Web Component. The phx-update="ignore" wrapper
+            keeps LiveView from re-diffing the WC's internal DOM (preserving
+            the caret across server updates); its id is stable per block id so
+            it survives re-renders. The WC reads its initial block from
+            data-block and emits debounced `bp-op` events that the
+            BarkparkPaperEditor hook forwards to the server's paper-op handler.
+            field-type blocks (callout/code/list-as-fields/section/divider/…)
+            keep their existing form-based editors below — out of scope here. --%>
+      <% t when t in ["paragraph", "heading", "list"] -> %>
+        <div
+          phx-update="ignore"
+          id={"paper-ed-" <> @id}
+          phx-hook="BarkparkPaperEditor"
+          class="bp-paper-edit-wc"
+          data-test-id="paper-block-editor-wc"
+        >
+          <bp-paper-editor data-block={Jason.encode!(@block)}></bp-paper-editor>
+        </div>
       <% "callout" -> %>
         <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
           <input type="hidden" name="block_id" value={@id} />
@@ -2595,22 +2597,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
             rows="5"
             data-test-id="paper-field-value"
           ><%= Map.get(@block, "value", "") %></textarea>
-          <button type="submit" class="btn btn-sm">Save</button>
-        </form>
-      <% "list" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
-          <input type="hidden" name="block_id" value={@id} />
-          <label class="bp-paper-edit-ordered">
-            <input type="checkbox" name="ordered" checked={Map.get(@block, "ordered") == true} /> Ordered
-          </label>
-          <input
-            :for={{item, idx} <- Enum.with_index(Map.get(@block, "items", []))}
-            type="text"
-            name={"item-#{idx}"}
-            class="bp-paper-edit-text"
-            value={inline_to_text(item)}
-            data-test-id={"paper-field-item-#{idx}"}
-          />
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "section" -> %>
