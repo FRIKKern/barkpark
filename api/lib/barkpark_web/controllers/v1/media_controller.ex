@@ -33,13 +33,16 @@ defmodule BarkparkWeb.V1.MediaController do
 
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+    record_opts = [
+      actor_key: SearchIntel.actor_key(conn),
+      parent_event_id: SearchIntel.parent_event_id(conn),
+      session_key: SearchIntel.session_key(conn),
+      source: SearchIntel.source(conn, "explorer"),
+      disabled: SearchIntel.recording_disabled?(conn)
+    ]
+
     record_result =
-      SearchIntelligence.record(dataset, params, total, ms,
-        actor_key: SearchIntel.actor_key(conn),
-        parent_event_id: SearchIntel.parent_event_id(conn),
-        session_key: SearchIntel.session_key(conn),
-        source: SearchIntel.source(conn, "explorer")
-      )
+      SearchIntelligence.record(dataset, params, total, ms, record_opts)
 
     search_event_id =
       case record_result do

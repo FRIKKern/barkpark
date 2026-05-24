@@ -54,6 +54,23 @@ defmodule BarkparkWeb.SearchIntel do
   end
 
   @doc false
+  def recording_disabled?(conn) do
+    header_disabled? =
+      case Plug.Conn.get_req_header(conn, "x-bp-search-disable") do
+        [value | _] -> value in ["1", "true", "yes"]
+        _ -> false
+      end
+
+    param_disabled? =
+      case conn.params do
+        %{"disableSearchIntel" => value} when value in ["1", "true", "yes"] -> true
+        _ -> false
+      end
+
+    header_disabled? or param_disabled?
+  end
+
+  @doc false
   def parse_period_start(nil), do: nil
 
   def parse_period_start(value) when is_binary(value) do
