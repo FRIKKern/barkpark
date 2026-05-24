@@ -72,9 +72,32 @@ defmodule Barkpark.PortableDoc.Render do
   """
   def render_block(block, opts \\ %{}) when is_map(block) do
     block
+    |> resolve_ref_title(opts)
     |> compose_block()
     |> render_html(Map.put(opts, :doctype, false))
   end
+
+  # field-reference View resolves the referenced doc's TITLE for display. The
+  # renderer itself stays pure (no Repo): the caller supplies a `:ref_resolver`
+  # fn in `opts` — `fn value, ref_type -> title_string end` — typically
+  # `&Content.reference_title(&1, &2, dataset)`. We stash the resolved title on
+  # a transient `"_ref_title"` key the field-reference compose clause reads;
+  # the key never reaches the AST/cache (compose only emits a Pd-tree). With no
+  # resolver the block is untouched and View falls back to the raw id, matching
+  # the prior behaviour (and keeping pure unit tests Repo-free).
+  defp resolve_ref_title(%{"type" => "field-reference", "value" => value} = block, opts)
+       when is_binary(value) and value != "" do
+    case Map.get(opts, :ref_resolver) do
+      resolver when is_function(resolver, 2) ->
+        ref_type = Map.get(block, "refType", "")
+        Map.put(block, "_ref_title", to_string(resolver.(value, ref_type)))
+
+      _ ->
+        block
+    end
+  end
+
+  defp resolve_ref_title(block, _opts), do: block
 
   @doc """
   Render a full portable-doc block list to one concatenated HTML fragment, in
@@ -256,14 +279,24 @@ defmodule Barkpark.PortableDoc.Render do
   # `value` is a plain string in both cases (a referenced doc id for reference;
   # an image URL for image), matching the v1 classic-field persistence model.
   #
-  # field-reference View: a labelled row whose value is the referenced doc id
-  # rendered as PdText (escaped at walk time). The doc *title* is resolved
-  # client-side by the WC in Edit mode; the server has only the id here, so View
-  # shows the id — a no-fetch, pure rendering of the stored datum. Empty value
-  # renders an em-dash placeholder.
+  # field-reference View: a labelled row showing the referenced doc's TITLE
+  # when it can be resolved, else the raw id, else an em-dash for empty values.
+  # The title is resolved by the caller's `:ref_resolver` (see render_block/2)
+  # and stashed on the transient `"_ref_title"` key; when no resolver is wired
+  # (pure unit tests, no dataset in scope) the key is absent and View falls
+  # back to the stored id — a no-fetch rendering of the raw datum.
   def compose_block(%{"type" => "field-reference"} = b) do
     value = field_value_text(b)
-    field_row(b, if(value == "", do: "—", else: value))
+    resolved = b |> Map.get("_ref_title", "") |> to_string()
+
+    display =
+      cond do
+        value == "" -> "—"
+        resolved != "" -> resolved
+        true -> value
+      end
+
+    field_row(b, display)
   end
 
   # field-image View: a labelled row with an <img> preview when a URL is set,

@@ -159,6 +159,18 @@ class BpReferencePicker extends HTMLElement {
   }
 
   async _search(term) {
+    // No ref-type (e.g. a paper field-reference block created with an empty
+    // refType): the typeahead can't fetch /v1/data/query/<dataset>/<type> —
+    // that route needs a concrete :type and 404s on an empty segment, so the
+    // dropdown would never populate and a reference could never be chosen.
+    // Fall back to the all-types title search endpoint (server-side q=), which
+    // requires a non-empty term. With a ref-type, keep the fast unbounded
+    // fetch + client-side filter (unchanged; byte-identical for the classic
+    // editor where refType is always set).
+    if (!this._refType) {
+      await this._searchAllTypes(term);
+      return;
+    }
     await this._ensureCandidates();
     const t = (term || "").trim().toLowerCase();
     const matches = (this._candidates || [])
@@ -169,6 +181,36 @@ class BpReferencePicker extends HTMLElement {
       })
       .slice(0, 50);
     this._renderDropdown(matches);
+  }
+
+  // All-types search via /v1/data/search/<dataset>?q=… — used only when no
+  // ref-type is set. The endpoint mandates a non-empty q, so an empty term
+  // closes the dropdown rather than fetching everything.
+  async _searchAllTypes(term) {
+    const t = (term || "").trim();
+    if (!t) {
+      this._renderDropdown([]);
+      return;
+    }
+    try {
+      const url = `/v1/data/search/${encodeURIComponent(this._dataset)}?q=${encodeURIComponent(t)}&perspective=published&limit=50`;
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) {
+        this._renderDropdown([]);
+        return;
+      }
+      const body = await res.json();
+      const docs =
+        (body && body.result && body.result.documents) ||
+        (body && body.documents) ||
+        [];
+      const matches = docs
+        .map((d) => ({ id: d._id || d.id || "", title: d.title || d._id || "" }))
+        .slice(0, 50);
+      this._renderDropdown(matches);
+    } catch (_e) {
+      this._renderDropdown([]);
+    }
   }
 
   async _ensureCandidates() {
