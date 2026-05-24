@@ -265,6 +265,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, do_autosave(socket, form)}
   end
 
+  # A v2 COMPOSITE field block's nested PaperFieldBlock LiveComponent (P2.3)
+  # changed its value. It sends the SAME patch-block op the client bridge sends
+  # for leaf blocks; route it through the canonical `paper_op/2` pipeline so
+  # composites persist + broadcast + re-sync exactly like every other edit.
+  def handle_info({:paper_op, %{"op" => _} = op}, socket) do
+    {:noreply, paper_op(socket, op)}
+  end
+
   # Subscribe to the specific doc being edited
   defp subscribe_to_doc(socket) do
     old_sub = socket.assigns[:subscribed_doc]
@@ -2721,6 +2729,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
             data-test-id="paper-field-field-image"
           ></bp-media-picker>
         </div>
+
+      <%!-- v2 COMPOSITE field blocks (P2.3). composite / arrayOf / codelist /
+            localizedText render as a nested PaperFieldBlock LiveComponent —
+            NOT inside phx-update="ignore". These controls emit server-bound
+            phx-change / phx-click into their own form (targeting @myself);
+            the component recomputes its value and sends a {:paper_op, …}
+            message that handle_info routes through the canonical paper_op/2
+            pipeline. The component is idempotent on update/2 + updates its own
+            value local-first, so the server echo never clobbers an in-flight
+            edit or steals input focus. --%>
+      <% t when t in ["composite", "arrayOf", "codelist", "localizedText"] -> %>
+        <.live_component
+          module={BarkparkWeb.Studio.PaperFieldBlock}
+          id={"paper-fb-" <> @id}
+          block={@block}
+        />
 
       <% _ -> %>
         <%!-- image / table and any other type are read-only in the MVP. --%>

@@ -40,6 +40,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
   attr :readonly, :boolean, default: false
+  # Optional `phx-target` for the reorder/add/remove buttons. Defaults to nil —
+  # buttons then bubble to the enclosing LiveView (the original contract used
+  # by DocumentEditLive). When a `Phoenix.LiveComponent.CID` is passed (e.g.
+  # `@myself` from PaperFieldBlock), the buttons target that component so their
+  # `phx-click` events route there instead of the parent LiveView.
+  attr :target, :any, default: nil
 
   def array_field(assigns) do
     assigns =
@@ -51,6 +57,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put_new(:plugin_name, "core")
       |> Map.put_new(:path, "")
       |> Map.put_new(:readonly, false)
+      |> Map.put_new(:target, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
       |> Map.put(:ordered?, !!assigns.field.ordered)
@@ -71,6 +78,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   type="button"
                   class="bp-array-btn bp-array-btn-up"
                   phx-click={@on_reorder}
+                  phx-target={@target}
                   phx-value-action="move_up"
                   phx-value-field={@field.name}
                   phx-value-path={@path}
@@ -82,6 +90,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   type="button"
                   class="bp-array-btn bp-array-btn-down"
                   phx-click={@on_reorder}
+                  phx-target={@target}
                   phx-value-action="move_down"
                   phx-value-field={@field.name}
                   phx-value-path={@path}
@@ -94,6 +103,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                 type="button"
                 class="bp-array-btn bp-array-btn-remove"
                 phx-click={@on_reorder}
+                phx-target={@target}
                 phx-value-action="remove_row"
                 phx-value-field={@field.name}
                 phx-value-path={@path}
@@ -112,6 +122,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         type="button"
         class="bp-array-btn bp-array-btn-add"
         phx-click={@on_reorder}
+        phx-target={@target}
         phx-value-action="add_row"
         phx-value-field={@field.name}
         phx-value-path={@path}
@@ -189,7 +200,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           on_reorder: assigns.on_reorder,
           plugin_name: assigns.plugin_name,
           path: row_path,
-          readonly: assigns.readonly
+          readonly: assigns.readonly,
+          target: Map.get(assigns, :target)
         })
 
       "codelist" ->
