@@ -999,4 +999,183 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert String.starts_with?(last["id"], "b-")
     assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
   end
+
+  # ── Polish-2 (barkpark-5srz): codelist field block fully usable ─────────────
+  # Two halves:
+  #   A) FLAT codelist — View resolves the selected CODE → its human LABEL via
+  #      the Content → Render spine (the renderer stays pure; Content injects a
+  #      :codelist_resolver). The picker is a real CodelistField bound to a
+  #      registered codelist, so selection works.
+  #   B) TREE codelist — PaperFieldBlock hosts the stateful TreeCodelistField
+  #      inside its form (variant:"tree"); a tree-row select propagates up
+  #      through the notify → send_update → patch-block pipeline and persists.
+  #
+  # Both register their codelists in-test (the dev seed populates OnixEdit, but
+  # the test DB starts empty) so they exercise the SAME registry path.
+
+  @codelist_view_slug "2026-05-24-codelist-view-paper"
+  @codelist_tree_slug "2026-05-24-codelist-tree-paper"
+
+  defp register_flat_codelist! do
+    {:ok, _} =
+      Content.Codelists.register("onixedit", "onixedit:list_15", %{
+        issue: "73",
+        name: "Title type",
+        values: [
+          %{code: "01", translations: [%{language: "eng", label: "Distinctive title"}]},
+          %{code: "05", translations: [%{language: "eng", label: "Abbreviated title"}]}
+        ]
+      })
+  end
+
+  defp register_tree_codelist! do
+    {:ok, _} =
+      Content.Codelists.register("onixedit", "onixedit:thema", %{
+        issue: "73",
+        name: "Thema subject category",
+        values: [
+          %{
+            code: "F",
+            translations: [%{language: "eng", label: "Fiction"}],
+            children: [
+              %{
+                code: "FB",
+                translations: [%{language: "eng", label: "Fiction: literary and general"}],
+                children: [
+                  %{
+                    code: "FBA",
+                    translations: [%{language: "eng", label: "Modern and contemporary fiction"}]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      })
+  end
+
+  defp seed_codelist_view_paper!(value) do
+    blocks = [
+      %{
+        "id" => "cl-flat",
+        "type" => "codelist",
+        "label" => "Title type",
+        "plugin" => "onixedit",
+        "codelistId" => "onixedit:list_15",
+        "version" => 73,
+        "variant" => "flat",
+        "value" => value
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(%{slug: @codelist_view_slug, dataset: @dataset, blocks: blocks})
+
+    paper
+  end
+
+  defp seed_codelist_tree_paper!(value) do
+    blocks = [
+      %{
+        "id" => "cl-tree",
+        "type" => "codelist",
+        "label" => "Thema subject category",
+        "plugin" => "onixedit",
+        "codelistId" => "onixedit:thema",
+        "version" => 73,
+        "variant" => "tree",
+        "value" => value
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(%{slug: @codelist_tree_slug, dataset: @dataset, blocks: blocks})
+
+    paper
+  end
+
+  test "View mode resolves a flat codelist's selected CODE to its LABEL", %{conn: conn} do
+    register_flat_codelist!()
+    seed_codelist_view_paper!("01")
+
+    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_view_slug}")
+
+    # The streamed read-only View shows the resolved label, not the bare code.
+    assert html =~ "Distinctive title"
+    # The raw code never appears as the standalone displayed value.
+    refute html =~ ">01<"
+  end
+
+  test "View mode falls back to the raw code when the codelist is unregistered",
+       %{conn: conn} do
+    # No codelist registered → codelist_label returns the code unchanged.
+    seed_codelist_view_paper!("99")
+
+    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_view_slug}")
+
+    assert html =~ "99"
+  end
+
+  test "Edit mode renders the flat CodelistField <select> bound to the registry",
+       %{conn: conn} do
+    register_flat_codelist!()
+    seed_codelist_view_paper!("01")
+
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_view_slug}")
+    edit_html = open_editor(view)
+
+    # The flat block hosts the native CodelistField <select> (not the disabled
+    # empty placeholder) — the registry is populated, so real options render.
+    assert edit_html =~ ~s(id="paper-fb-cl-flat")
+    assert edit_html =~ ~s(data-codelist-variant="flat")
+    assert edit_html =~ ~s(data-codelist-id="onixedit:onixedit:list_15")
+    # Selecting another code through the inner form persists via patch-block.
+    view
+    |> element(~s([data-block-id="cl-flat"] form))
+    |> render_change(%{"value" => "05"})
+
+    render(view)
+
+    block =
+      Content.paper_blocks(@codelist_view_slug, @dataset) |> Enum.find(&(&1["id"] == "cl-flat"))
+
+    assert block["value"] == "05"
+    assert block["plugin"] == "onixedit"
+  end
+
+  test "Edit mode hosts the TreeCodelistField for a variant:tree codelist block",
+       %{conn: conn} do
+    register_tree_codelist!()
+    seed_codelist_tree_paper!("FBA")
+
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_tree_slug}")
+    edit_html = open_editor(view)
+
+    # PaperFieldBlock hosts the stateful TreeCodelistField inside its form.
+    assert edit_html =~ ~s(id="paper-fb-cl-tree")
+    assert edit_html =~ ~s(data-codelist-variant="tree")
+    # The tree LiveComponent mounted with its stable id + tree markup.
+    assert edit_html =~ ~s(id="tree-cl-tree")
+    assert edit_html =~ "bp-tree-codelist"
+    assert edit_html =~ ~s(role="tree")
+    # The hidden input carries the current value home through the parent form.
+    assert edit_html =~ ~s(data-tree-selected="true")
+    # The pre-selected leaf is rendered as selected (auto-expanded to it).
+    assert edit_html =~ "Fiction"
+
+    # A tree-row select propagates up: TreeCodelistField notifies the LiveView,
+    # which send_updates the PaperFieldBlock, which persists the patch-block.
+    view
+    |> element(~s([data-block-id="cl-tree"] button[phx-click="tree_node_select"][phx-value-code="FB"]))
+    |> render_click()
+
+    render(view)
+
+    block =
+      Content.paper_blocks(@codelist_tree_slug, @dataset) |> Enum.find(&(&1["id"] == "cl-tree"))
+
+    assert block["type"] == "codelist"
+    assert block["value"] == "FB"
+    assert block["variant"] == "tree"
+  end
 end

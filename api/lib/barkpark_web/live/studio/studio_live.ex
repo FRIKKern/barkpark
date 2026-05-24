@@ -273,6 +273,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, paper_op(socket, op)}
   end
 
+  # A nested TreeCodelistField (hosted inside a codelist PaperFieldBlock) had a
+  # row selected. A server-driven hidden-input change does NOT fire the
+  # surrounding form's phx-change, so the tree notifies this LiveView with the
+  # picked code + the dom id of its hosting PaperFieldBlock. Route it back into
+  # that component via `send_update/3`; PaperFieldBlock's `%{tree_value: …}`
+  # clause then persists it through the canonical patch-block op pipeline.
+  def handle_info({:tree_codelist_change, %{id: id, value: code}}, socket) do
+    send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
+    {:noreply, socket}
+  end
+
   # Subscribe to the specific doc being edited
   defp subscribe_to_doc(socket) do
     old_sub = socket.assigns[:subscribed_doc]
@@ -1409,8 +1420,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
       "value" => []
     }
 
+  # codelist defaults to a REAL registered list so the picker is usable the
+  # moment a block is added. `plugin` is the registry discriminator (defaults
+  # to "core" in CodelistField; OnixEdit codelists live under "onixedit").
+  # `variant` selects the picker UI: "flat" (default) renders CodelistField's
+  # <select>/<datalist>; "tree" forces the hierarchical TreeCodelistField (see
+  # PaperFieldBlock). onixedit:list_15 ("Title type", 16 flat entries) is a
+  # small flat list — a clean default for the <select> path. Publishers may
+  # override `codelistId`/`plugin`/`version`/`variant` per their Expectations.
   defp default_block("codelist", id),
-    do: %{"id" => id, "type" => "codelist", "label" => "Code list", "codelistId" => "", "value" => ""}
+    do: %{
+      "id" => id,
+      "type" => "codelist",
+      "label" => "Code list",
+      "plugin" => "onixedit",
+      "codelistId" => "onixedit:list_15",
+      "version" => 73,
+      "variant" => "flat",
+      "value" => ""
+    }
 
   defp default_block("localizedText", id),
     do: %{
@@ -2323,8 +2351,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp paper_stream_items(blocks, dataset) do
     resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset) end
 
+    codelist_resolver = fn plugin, codelist_id, code ->
+      Content.codelist_label(plugin, codelist_id, code)
+    end
+
+    opts = %{ref_resolver: resolver, codelist_resolver: codelist_resolver}
+
     Enum.map(blocks, fn block ->
-      %{id: Map.get(block, "id"), html: Render.render_block(block, %{ref_resolver: resolver})}
+      %{id: Map.get(block, "id"), html: Render.render_block(block, opts)}
     end)
   end
 

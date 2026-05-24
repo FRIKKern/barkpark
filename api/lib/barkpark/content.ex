@@ -308,12 +308,42 @@ defmodule Barkpark.Content do
     end
   end
 
-  # Render options carrying the field-reference title resolver bound to a
-  # dataset. Passed to `Render.render_block/2` / `render_blocks/2` so the
-  # View-mode `field-reference` row shows the referenced doc's TITLE instead of
-  # the raw id; everything else in `Render` stays pure.
+  @doc """
+  Resolve a codelist CODE to its human LABEL for View-mode rendering.
+
+  Looks the code up in the registered codelist `(plugin, codelist_id)` via
+  `Barkpark.Content.Codelists.lookup/4` and returns its preferred-language
+  label. Falls back to the raw `code` when the codelist is unregistered, the
+  code is unknown, or `code`/`codelist_id` is blank. Dataset-independent —
+  the codelist registry is keyed by `(plugin, list_id)`, not by dataset.
+  """
+  @spec codelist_label(String.t() | nil, String.t() | nil, String.t() | nil) :: String.t()
+  def codelist_label(plugin, codelist_id, code)
+
+  def codelist_label(_plugin, _codelist_id, code) when code in [nil, ""], do: code || ""
+
+  def codelist_label(plugin, codelist_id, code)
+      when is_binary(plugin) and is_binary(codelist_id) and codelist_id != "" and is_binary(code) do
+    case Barkpark.Content.Codelists.lookup(plugin, codelist_id, code) do
+      %{label: label} when is_binary(label) and label != "" -> label
+      _ -> code
+    end
+  end
+
+  def codelist_label(_plugin, _codelist_id, code) when is_binary(code), do: code
+
+  # Render options carrying the resolvers bound to a dataset. Passed to
+  # `Render.render_block/2` / `render_blocks/2` so the View-mode
+  # `field-reference` row shows the referenced doc's TITLE instead of the raw
+  # id, and the `codelist` row shows the selected code's LABEL instead of the
+  # raw code; everything else in `Render` stays pure.
   defp render_opts(dataset) do
-    %{ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset) end}
+    %{
+      ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset) end,
+      codelist_resolver: fn plugin, codelist_id, code ->
+        codelist_label(plugin, codelist_id, code)
+      end
+    }
   end
 
   @doc """

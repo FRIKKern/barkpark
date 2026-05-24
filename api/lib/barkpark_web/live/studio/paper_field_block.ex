@@ -58,7 +58,8 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     ArrayField,
     CodelistField,
     CompositeField,
-    LocalizedTextField
+    LocalizedTextField,
+    TreeCodelistField
   }
 
   alias Barkpark.Content.SchemaDefinition.Field
@@ -73,6 +74,11 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       |> assign(:block_id, Map.get(block, "id"))
       |> assign(:field_type, field_type)
       |> assign(:label, Map.get(block, "label", ""))
+      # codelist-only: the registry plugin discriminator (defaults to "core",
+      # the same default CodelistField carries) and the picker variant
+      # ("flat" → CodelistField <select>/<datalist>; "tree" → TreeCodelistField).
+      |> assign(:plugin, Map.get(block, "plugin", "core"))
+      |> assign(:variant, codelist_variant(block))
       # Always re-derive value from the block. The local-first update on inner
       # change means the server echo carries the value already in the DOM, so
       # this re-derive is a no-op diff for the edited input (focus preserved).
@@ -80,6 +86,16 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       |> assign(:field, build_field(block))
 
     {:ok, socket}
+  end
+
+  # A tree-codelist row select arrives here via `send_update/3` (routed by the
+  # host LiveView from the nested TreeCodelistField's notify). It carries only
+  # the picked code under `:tree_value`. Persist it exactly like an inner form
+  # change: update OWN value local-first, then send the canonical patch-block
+  # op to the parent. The component's other assigns (block/field/variant) are
+  # already set from the prior `%{block: …}` update — `send_update` merges.
+  def update(%{tree_value: code}, socket) do
+    {:ok, persist(socket, code)}
   end
 
   # ── render dispatch — one inner field component per type ────────────────────
@@ -121,11 +137,54 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     """
   end
 
+  # codelist — two variants share the SAME surrounding form. The form's
+  # phx-change="inner-change" (targeting @myself) is what carries the picked
+  # value home in BOTH cases:
+  #
+  #   * "flat" → CodelistField renders a native <select>/<datalist>/(small-tree)
+  #     <select>; its own phx-change="inner-change" + path="value" fire the form
+  #     change as %{"value" => code}.
+  #   * "tree" → TreeCodelistField is a nested LiveComponent with its OWN
+  #     expand/select/search state. It does NOT phx-change; instead it writes the
+  #     picked code into a hidden `<input name="value">` inside this form. A
+  #     tree-row select re-renders that hidden input with the new value, and the
+  #     surrounding form's phx-change fires inner-change with %{"value" => code},
+  #     which `merge_change("codelist", …)` reads exactly like the flat path.
+  #
+  # The tree component gets a STABLE id derived from the block id so it mounts
+  # once and keeps its internal state across the parent's value echo (the same
+  # local-first idempotence the leaf composites rely on).
+  def render(%{field_type: "codelist", variant: "tree"} = assigns) do
+    ~H"""
+    <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id} data-codelist-variant="tree">
+      <form phx-change="inner-change" phx-target={@myself}>
+        <.live_component
+          module={TreeCodelistField}
+          id={"tree-" <> @block_id}
+          field={@field}
+          value={@value}
+          on_change="inner-change"
+          plugin_name={@plugin}
+          list_id={@field.codelist_id}
+          input_name="value"
+          notify_id={@id}
+        />
+      </form>
+    </div>
+    """
+  end
+
   def render(%{field_type: "codelist"} = assigns) do
     ~H"""
-    <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id}>
+    <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id} data-codelist-variant="flat">
       <form phx-change="inner-change" phx-target={@myself}>
-        <CodelistField.codelist_field field={@field} value={@value} on_change="inner-change" path="value" />
+        <CodelistField.codelist_field
+          field={@field}
+          value={@value}
+          on_change="inner-change"
+          plugin_name={@plugin}
+          path="value"
+        />
       </form>
     </div>
     """
@@ -377,6 +436,15 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
 
   defp localized_format("rich"), do: :rich
   defp localized_format(_), do: :plain
+
+  # Codelist picker variant. Explicit `"variant"` wins; otherwise "flat".
+  # Tree-vs-flat is an explicit block decision (not auto-derived from registry
+  # shape here) so a block author opts into the heavier tree LiveComponent
+  # deliberately — CodelistField still auto-promotes a large hierarchical flat
+  # block to a tree when the registry is hierarchical, but the PaperFieldBlock
+  # host honours the block's stated intent.
+  defp codelist_variant(%{"variant" => "tree"}), do: "tree"
+  defp codelist_variant(_), do: "flat"
 
   defp parse_idx(idx) when is_binary(idx) do
     case Integer.parse(idx) do
