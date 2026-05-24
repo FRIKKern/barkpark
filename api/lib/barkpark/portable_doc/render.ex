@@ -312,6 +312,39 @@ defmodule Barkpark.PortableDoc.Render do
 
   def compose_block(%{"type" => "divider"}, _style), do: %{"kind" => "PdHr"}
 
+  # ── diagram / figure blocks (P1 slice 2) ───────────────────────────────────
+  # `diagram` emits the canonical paperflow Mermaid figure. Unlike every other
+  # block, this clause emits HTML DIRECTLY (a `_raw` Pd-node the walker passes
+  # through verbatim) rather than composing to a styled PdText tree — the
+  # `<pre class="mermaid">` literal must reach the DOM byte-exact so the engine's
+  # `pre.mermaid` selector matches AND the static body_html extractor preserves
+  # it. The mermaid source is entity-encoded (& < >) so it round-trips through
+  # the extractor and Mermaid decodes it at runtime.
+  #
+  # In article mode: a bordered, parchment, inset figure card (mirrors doc.css
+  # `figure`); the figcaption is muted/italic with a bold "Figure N." run-in.
+  # In email/default mode: degrade gracefully — Mermaid never runs in email, so
+  # we render the caption then the source as a plain code block.
+  def compose_block(%{"type" => "diagram"} = b, style) do
+    source = to_string(Map.get(b, "source", ""))
+    caption = to_string(Map.get(b, "caption", ""))
+    %{"kind" => "_raw", "html" => diagram_html(source, caption, style)}
+  end
+
+  # generic `figure` — wraps a child block + caption. Cheap and clean: compose
+  # the child through the normal path, then wrap it in the same figure chrome
+  # as `diagram` (caption only, no mermaid). Article mode gets the card; email
+  # mode degrades to child + plain caption line.
+  def compose_block(%{"type" => "figure"} = b, style) do
+    caption = to_string(Map.get(b, "caption", ""))
+    child = Map.get(b, "child")
+
+    %{
+      "kind" => "_raw",
+      "html" => figure_html(child, caption, style)
+    }
+  end
+
   def compose_block(%{"type" => "code"} = b, _style) do
     children =
       Map.get(b, "value", "")
@@ -647,6 +680,105 @@ defmodule Barkpark.PortableDoc.Render do
   defp format_datetime(v) when is_binary(v), do: String.replace(v, "T", " ")
   defp format_datetime(v), do: to_string(v)
 
+  # ── diagram / figure HTML emission ─────────────────────────────────────────
+
+  # Entity-encode ONLY the three structural chars Mermaid source can carry
+  # (`&` first, then `<` `>`) — NOT quotes/apostrophes. The encoded text lives
+  # as the text content of `<pre class="mermaid">`, so it survives the static
+  # body_html extractor unchanged AND Mermaid's runtime reads `textContent`
+  # (which the browser decodes back to the literal `&`/`<`/`>`). Encoding quotes
+  # would be wrong here: Mermaid label syntax uses them and they're harmless as
+  # element text.
+  defp encode_mermaid(source) when is_binary(source) do
+    source
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
+
+  # Bold "Figure N." run-in: split a "Figure 1. rest" caption so the leading
+  # "Figure N." is bolded and the remainder stays plain. Falls back to the whole
+  # caption (no bold) when it doesn't match the convention.
+  defp figcaption_inner(""), do: ""
+
+  defp figcaption_inner(caption) do
+    case Regex.run(~r/^(Figure\s+\S+?\.)\s*(.*)$/s, caption) do
+      [_, lead, rest] ->
+        rest_html = if rest == "", do: "", else: " " <> escape_html(rest)
+        "<b>#{escape_html(lead)}</b>" <> rest_html
+
+      _ ->
+        escape_html(caption)
+    end
+  end
+
+  # The canonical paperflow figure for a Mermaid diagram. Article mode: a
+  # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
+  # is muted/italic with the bold "Figure N." run-in. Email mode degrades to the
+  # caption line + the source as a plain code block (Mermaid never runs there).
+  defp diagram_html(source, caption, :article) do
+    cap =
+      if caption == "" do
+        ""
+      else
+        ~s(<figcaption style="margin-top:0.8rem;color:#6a6a6a;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+      end
+
+    ~s(<figure style="margin:1.6rem 0;padding:1.2rem;background:#fbfaf6;border:1px solid #e6e2d8;border-radius:4px">) <>
+      ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
+      cap <>
+      "</figure>"
+  end
+
+  defp diagram_html(source, caption, _style) do
+    # Email / default: no Mermaid runtime, so show the source as a code block
+    # plus the caption. The `<pre class="mermaid">` literal is intentionally
+    # ABSENT here — the engine must not be triggered in email contexts.
+    cap =
+      if caption == "" do
+        ""
+      else
+        ~s(<div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">#{figcaption_inner(caption)}</div>)
+      end
+
+    ~s(<figure style="margin:16px 0">) <>
+      ~s(<pre style="background:#f3f4f6;padding:12px;font-family:#{@font_mono};font-size:0.9em;overflow:auto;white-space:pre-wrap">#{escape_html(source)}</pre>) <>
+      cap <>
+      "</figure>"
+  end
+
+  # Generic figure: a composed child block + caption. nil child → caption only.
+  defp figure_html(child, caption, style) do
+    child_html =
+      case child do
+        c when is_map(c) -> c |> compose_block(style) |> render_html(%{doctype: false, style: style})
+        _ -> ""
+      end
+
+    {open, cap} =
+      case style do
+        :article ->
+          c =
+            if caption == "",
+              do: "",
+              else:
+                ~s(<figcaption style="margin-top:0.8rem;color:#6a6a6a;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+
+          {~s(<figure style="margin:1.6rem 0">), c}
+
+        _ ->
+          c =
+            if caption == "",
+              do: "",
+              else:
+                ~s(<div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">#{figcaption_inner(caption)}</div>)
+
+          {~s(<figure style="margin:16px 0">), c}
+      end
+
+    open <> child_html <> cap <> "</figure>"
+  end
+
   # ── inline walker (kernel.ts composeInline) ────────────────────────────────
 
   defp compose_inline_children(nodes) when is_list(nodes) do
@@ -736,6 +868,13 @@ defmodule Barkpark.PortableDoc.Render do
   defp walk(%{"kind" => "PdImage"} = n, _width, _pal), do: image(n)
   defp walk(%{"kind" => "PdTable"} = n, width, pal), do: table(n, width, pal)
   defp walk(%{"kind" => "PdCallout"} = n, width, pal), do: callout(n, width, pal)
+
+  # `_raw` is a pre-rendered HTML escape hatch. The diagram / figure compose
+  # clauses emit it because their `<figure>` / `<pre class="mermaid">` markup
+  # must reach the DOM byte-exact (the Mermaid engine selects on `pre.mermaid`)
+  # — they can't round-trip through the PdText escape path. The HTML they carry
+  # is built from already-escaped parts in `diagram_html` / `figure_html`.
+  defp walk(%{"kind" => "_raw", "html" => html}, _width, _pal), do: html
 
   defp walk(%{"kind" => kind}, _width, _pal) do
     raise ArgumentError, "render_html: unhandled #{kind}"
