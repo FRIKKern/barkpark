@@ -1840,6 +1840,16 @@
     .bp-paper-edit-field[data-field-name] textarea {
       border-bottom: 0;
     }
+    /* The base `.bp-paper-edit-text { flex: 1 1 200px }` is a WIDTH basis, but the
+       field container is `display:flex; flex-direction:column`, so flexbox reads
+       the 200px as HEIGHT — blowing every single-line input up into a ~200px-tall
+       empty box (the "air"; the visible border is the :hover outline wrapping it).
+       Collapse single-line inputs to natural height; leave textareas (multi-line). */
+    .bp-paper-edit-field input.bp-paper-edit-text {
+      flex: 0 0 auto;
+      height: auto;
+      min-height: 0;
+    }
 
     /* Title → a large borderless serif H1 (32px/600), no label, no box. */
     .bp-paper-edit-field[data-field-name="title"] input[type="text"] {
