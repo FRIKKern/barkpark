@@ -22,6 +22,10 @@ case "${1:-}" in
   rotate-public-read)
     exec mix barkpark.rotate_public_read
     ;;
+  mix)
+    shift
+    exec mix "$@"
+    ;;
   *)
     export PHX_SERVER=true
     exec mix phx.server

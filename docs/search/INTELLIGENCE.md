@@ -1,7 +1,7 @@
 # Search Intelligence (Barkpark core)
 
 Surface-agnostic search analytics, crystallization, and improvement signals.
-Product surfaces (Media DAM today; document search later) plug in via thin adapters.
+Product surfaces (Media DAM, document search) plug in via thin adapters.
 
 ## Architecture
 
@@ -62,6 +62,27 @@ SearchIntelligence.record("production", conn_params, total, ms,
 
 WoodWing-style facet params are translated via `MediaSearchParams` inside the adapter.
 
+## Documents adapter
+
+`Barkpark.Content.SearchIntelligence` wraps `/v1/data/search/:dataset` with `surface: "documents"`.
+
+```elixir
+SearchIntelligence.record("production", params, count, ms,
+  actor_key: "...",
+  source: "studio-picker"
+)
+```
+
+Filters captured: `type`, `perspective` (`published` | `drafts` | `raw`).
+
+## HTTP (documents surface)
+
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `GET /v1/data/search/:dataset` | optional | Title search (+ `searchEventId`) |
+| `GET /v1/data/search/:dataset/suggestions` | optional | Recent / popular / nohits |
+| `GET /v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints |
+
 ## HTTP (media surface)
 
 | Endpoint | Auth | Purpose |
@@ -69,11 +90,13 @@ WoodWing-style facet params are translated via `MediaSearchParams` inside the ad
 | `GET /v1/media/:dataset/search/suggestions` | optional | Recent / popular / nohits |
 | `GET /v1/media/:dataset/search/insights` | admin | Crystals, merge patterns, hints |
 
-Headers for lineage:
+Headers for lineage (all surfaces):
 
 - `X-BP-Search-Client` — session actor
 - `X-BP-Search-Parent` — previous event id (refinement chain)
-- `X-BP-Search-Source` — `explorer`, `picker`, `api`
+- `X-BP-Search-Source` — `explorer`, `picker`, `studio-picker`, `api`
+
+Shared conn helpers: `BarkparkWeb.SearchIntel`.
 
 ## Adding a new surface
 
