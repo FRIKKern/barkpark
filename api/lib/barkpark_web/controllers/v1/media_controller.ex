@@ -64,11 +64,15 @@ defmodule BarkparkWeb.V1.MediaController do
   def search_insights(conn, %{"dataset" => dataset} = params) do
     period = params["period"] || "week"
 
-    result =
-      SearchIntelligence.insights(dataset,
-        period: period,
-        period_start: parse_period_start(params["periodStart"])
-      )
+    opts = [period: period]
+
+    opts =
+      case parse_period_start(params["periodStart"]) do
+        %Date{} = date -> Keyword.put(opts, :period_start, date)
+        _ -> opts
+      end
+
+    result = SearchIntelligence.insights(dataset, opts)
 
     json(conn, %{result: result, syncTags: ["bp:ds:#{dataset}:media:search:insights"]})
   end

@@ -85,4 +85,17 @@ defmodule BarkparkWeb.Integration.V1MediaSearchInsightsTest do
     refute Repo.one(from(e in Event, where: ilike(e.query, "%fuck%")))
     assert Repo.get_by(Event, quality: "rejected", reject_reason: "profanity")
   end
+
+  test "insights defaults periodStart when omitted", %{conn: conn} do
+    resp =
+      conn
+      |> authed()
+      |> get(~p"/v1/media/production/search/insights?period=week")
+      |> json_response(200)
+
+    result = resp["result"]
+    assert result["period"] == "week"
+    assert result["periodStart"] != nil
+    assert result["surface"] == "media"
+  end
 end
