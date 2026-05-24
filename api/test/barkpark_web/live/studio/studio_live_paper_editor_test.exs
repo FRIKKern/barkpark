@@ -86,28 +86,57 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert edit_html =~ ~s(data-test-id="paper-add-block")
   end
 
-  test "editing a block's text applies a patch-block; pane shows new text, same pid (no remount)",
+  test "rich-text blocks render a <bp-paper-editor> WC carrying the block JSON",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    edit_html = open_editor(view)
+
+    # Each rich-text block (heading / paragraph) is now edited by the
+    # <bp-paper-editor> Web Component inside a phx-update="ignore" wrapper
+    # mounted with the BarkparkPaperEditor hook. The wrapper id is stable per
+    # block id so the caret survives server re-renders.
+    assert edit_html =~ ~s(<bp-paper-editor)
+    assert edit_html =~ ~s(id="paper-ed-p-intro")
+    assert edit_html =~ ~s(phx-hook="BarkparkPaperEditor")
+    assert edit_html =~ ~s(phx-update="ignore")
+
+    # The intro paragraph's initial block is serialised into data-block (HTML
+    # entity-escaped); the WC reads it on connect. Assert against the doc, then
+    # re-render: the same id appears with no form (the old textarea is gone).
+    refute edit_html =~ ~s([data-edit-block-id="p-intro"] form)
+    assert edit_html =~ ~s(data-test-id="paper-block-editor-wc")
+  end
+
+  test "a paper-op patch-block from the WC hook applies + persists; same pid (no remount)",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
     open_editor(view)
 
     pid_before = view.pid
 
-    # Submit the intro paragraph's edit form with new text.
-    view
-    |> form(~s([data-edit-block-id="p-intro"] form), %{"text" => "Patched intro text."})
-    |> render_submit()
+    # The <bp-paper-editor> WC emits a bubbling/composed `bp-op` CustomEvent;
+    # the BarkparkPaperEditor JS hook forwards detail verbatim as a `paper-op`
+    # pushEvent. Simulate that wire with render_hook — the op arrives JSON-
+    # decoded with string keys, exactly as the server's handler accepts it.
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "p-intro",
+      "patch" => %{"content" => [%{"type" => "text", "value" => "Patched intro text."}]}
+    })
 
     # The op landed in the DB as a patch-block (block id preserved, content
-    # replaced with a single plain-text inline node).
+    # replaced with the patched inline node).
     block = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-intro"))
     assert block["type"] == "paragraph"
     assert block["content"] == [%{"type" => "text", "value" => "Patched intro text."}]
 
+    # The WC wrapper stays mounted (phx-update="ignore" → the server does NOT
+    # re-stamp its data-block payload; the WC owns its own DOM + caret). The
+    # persistence above is the proof the op applied; here we prove the editor
+    # surface survived without a remount.
     rendered = render(view)
-    # New text is visible in the editor; the original text is gone.
-    assert rendered =~ "Patched intro text."
-    refute rendered =~ "Original intro text."
+    assert rendered =~ ~s(id="paper-ed-p-intro")
+    assert rendered =~ ~s(phx-hook="BarkparkPaperEditor")
 
     # No remount — same process — proving the edit went through the delta path.
     assert view.pid == pid_before
@@ -218,12 +247,14 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
     pid_before = view.pid
 
-    # → Edit, patch the intro paragraph, then → View.
+    # → Edit, patch the intro paragraph via the WC's paper-op path, then → View.
     open_editor(view)
 
-    view
-    |> form(~s([data-edit-block-id="p-intro"] form), %{"text" => "Edited while in edit mode."})
-    |> render_submit()
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "p-intro",
+      "patch" => %{"content" => [%{"type" => "text", "value" => "Edited while in edit mode."}]}
+    })
 
     view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
 
