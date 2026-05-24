@@ -78,7 +78,12 @@ defmodule Barkpark.Search.Intelligence do
   def insights(surface, scope, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
     period = opts |> Keyword.get(:period, "week") |> to_string()
-    period_start = Keyword.get(opts, :period_start, default_period_start(period))
+
+    period_start =
+      case Keyword.get(opts, :period_start) do
+        %Date{} = date -> date
+        _ -> default_period_start(period)
+      end
 
     quality = quality_stats(surface, scope, period, period_start)
 
@@ -414,8 +419,9 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   defp default_period_start("day"), do: Date.add(Date.utc_today(), -1)
+  defp default_period_start("week"), do: Date.add(Date.utc_today(), -7)
   defp default_period_start("month"), do: Date.utc_today() |> Date.beginning_of_month()
-  defp default_period_start(_week), do: Date.add(Date.utc_today(), -7)
+  defp default_period_start(_), do: Date.add(Date.utc_today(), -7)
 
   defp maybe_prefix(queryable, nil), do: queryable
 
