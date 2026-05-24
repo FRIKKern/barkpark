@@ -1392,7 +1392,40 @@
     bp-rich-text-editor { display: block; min-height: 80px; padding: 8px; border: 1px solid var(--input); border-radius: var(--radius-sm); font-family: inherit; }
     bp-reference-picker { display: block; }
     bp-reference-picker .bp-ref-search-input { width: 100%; }
+    bp-reference-picker .bp-ref-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
+      max-height: min(320px, 50vh); overflow-y: auto;
+      background: var(--bg-popover, var(--bg-elevated, var(--bg)));
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      padding: 6px 0;
+    }
+    bp-reference-picker .bp-ref-dropdown-item {
+      display: block; width: 100%; padding: 8px 12px; border: none; background: transparent;
+      text-align: left; cursor: pointer; color: var(--fg); font-size: 13px;
+      border-bottom: 1px solid var(--border-muted);
+    }
     bp-reference-picker .bp-ref-dropdown-item:hover { background: var(--bg-accent); }
+    bp-reference-picker .bp-ref-dropdown-empty {
+      padding: 8px 12px; font-size: 13px; color: var(--fg-dim);
+    }
+    bp-reference-picker .bp-ref-suggest-section + .bp-ref-suggest-section {
+      border-top: 1px solid var(--border-muted); margin-top: 4px; padding-top: 4px;
+    }
+    bp-reference-picker .bp-ref-suggest-title {
+      padding: 4px 12px 2px; font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim);
+    }
+    bp-reference-picker .bp-ref-suggest-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      width: 100%; padding: 8px 12px; border: none; background: transparent;
+      text-align: left; font-size: 13px; color: var(--fg); cursor: pointer;
+    }
+    bp-reference-picker .bp-ref-suggest-item:hover { background: var(--bg-accent); }
+    bp-reference-picker .bp-ref-suggest-label {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    bp-reference-picker .bp-ref-suggest-meta { flex-shrink: 0; font-size: 11px; color: var(--fg-dim); }
 
     /* bp-overflow-menu — priority+ pattern (Task barkpark-smn).
        Host is a single-row flex container; rightmost items get

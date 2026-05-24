@@ -176,3 +176,22 @@ Paste handling: the v1 WC strips formatting and inserts plain text
 via the deprecated `document.execCommand("insertText")`. This is the
 safe XSS default. v2 will migrate to ProseMirror / TipTap or a
 manual paste sanitiser.
+
+## Search intelligence (pickers)
+
+Studio pickers that call search APIs participate in Barkpark core search
+analytics via HTTP headers (see `docs/search/INTELLIGENCE.md`):
+
+| Component | Source header | Session key |
+|-----------|---------------|-------------|
+| `bp-reference-picker` | `studio-picker` | `sessionStorage` `bp-search-client:documents:<dataset>` |
+| `bp-media-picker` | `media-picker` | `sessionStorage` `bp-search-client:media:<dataset>` |
+| `bp-asset-explorer` | `explorer` | same media key |
+
+All three send `X-BP-Search-Client`, optional `X-BP-Search-Parent` (from
+prior `searchEventId`), and record refinements into `search_intel_*` via
+the surface adapters (`Content.SearchIntelligence`, `Media.SearchIntelligence`).
+
+`bp-reference-picker` uses `/v1/data/search/:dataset` (typed or all-types),
+shows Recent / Popular suggestions on focus, and stores `searchEventId` from
+search responses for parent linkage on the next query.
