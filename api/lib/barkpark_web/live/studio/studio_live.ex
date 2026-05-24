@@ -1045,15 +1045,28 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, paper_op(socket, %{"op" => "remove-block", "id" => id})}
   end
 
-  # Reorder a top-level block one slot up/down. Implemented as two ops
-  # (remove-block then insert-after the new neighbour) — the simplest correct
-  # path that stays entirely on the op pipeline. Both ops broadcast their own
-  # delta; the second arrives with the next rev so the stream applies in order.
+  # Reorder a top-level block one slot up/down. Maps to ONE `move-block` op —
+  # a pure permutation, one DB write, one broadcast, one stream delta. The
+  # block keeps its id + content; only its position changes.
   def handle_event("paper-move-block", %{"id" => id, "dir" => dir}, socket) do
     blocks = paper_top_level_blocks(socket)
     idx = Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
 
     {:noreply, paper_reorder(socket, blocks, idx, dir)}
+  end
+
+  # Drag-handle reorder (enhancement). The BarkparkPaperSortable JS hook fires
+  # this on drop with the dragged block id and the id it was dropped after
+  # (`after-id` empty ⇒ dropped at the head). It resolves to the SAME
+  # `move-block` op the up/down buttons use — one atomic reorder.
+  def handle_event("paper-move-block-to", %{"id" => id} = params, socket) do
+    after_id =
+      case params["after-id"] do
+        a when is_binary(a) and a != "" -> a
+        _ -> nil
+      end
+
+    {:noreply, paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
   end
 
   # ── paper editor helpers ────────────────────────────────────────────────────
@@ -1082,35 +1095,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  # Reorder by removing then re-inserting after the neighbour in the target
-  # direction. No-ops at the boundaries. Two sequential ops keep us on the
-  # pipeline rather than mutating blocks directly.
+  # Reorder one slot in the target direction via a single `move-block` op.
+  # No-ops at the boundaries (no block / already at head moving up / already at
+  # tail moving down).
   defp paper_reorder(socket, _blocks, nil, _dir), do: socket
 
-  # Up: swap `moved` with its predecessor. Remove the predecessor, then
-  # re-insert it directly after `moved`. After the remove, `moved` shifts up
-  # one slot; the insert puts the old predecessor right below it — a clean
-  # one-slot-up move that also works when the destination is the head slot.
-  # `insert-after` is the only insertion op, so a swap is the simplest correct
-  # path (no "insert-before" exists).
+  # Up: land `moved` directly after the block two slots above it (the block
+  # before its current predecessor), or at the head (after: nil) when the
+  # predecessor is the head block.
   defp paper_reorder(socket, blocks, idx, "up") when idx > 0 do
     moved = Enum.at(blocks, idx)
-    pred = Enum.at(blocks, idx - 1)
-    remove = %{"op" => "remove-block", "id" => Map.get(pred, "id")}
-    insert = %{"op" => "insert-after", "afterId" => Map.get(moved, "id"), "block" => pred}
-    socket |> paper_op(remove) |> paper_op(insert)
+    after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
+    paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
   end
 
-  # Down: remove `moved`, re-insert it after the block that was below it. After
-  # the remove the successor shifts up to `idx`; inserting `moved` after it
-  # lands `moved` one slot lower.
+  # Down: land `moved` directly after the block currently below it.
   defp paper_reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
     moved = Enum.at(blocks, idx)
-    anchor = Enum.at(blocks, idx + 1)
-    anchor_id = Map.get(anchor, "id")
-    remove = %{"op" => "remove-block", "id" => Map.get(moved, "id")}
-    insert = %{"op" => "insert-after", "afterId" => anchor_id, "block" => moved}
-    socket |> paper_op(remove) |> paper_op(insert)
+    anchor_id = Map.get(Enum.at(blocks, idx + 1), "id")
+    paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => anchor_id})
   end
 
   defp paper_reorder(socket, _blocks, _idx, _dir), do: socket
@@ -2335,6 +2338,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
     |> assign(:paper_block_mode, true)
   end
 
+  defp apply_paper_delta(
+         socket,
+         %{op_kind: "move-block", block_id: id, fragment_html: html, position: pos} = frame
+       )
+       when is_integer(pos) do
+    # A reorder: the moved block kept its id + content, only its position
+    # changed. A LiveView stream cannot relocate an existing item by id, so we
+    # delete it then re-insert at its new top-level index — the View order now
+    # matches the Edit order. (Same id throughout: content is preserved.)
+    socket
+    |> stream_delete_by_dom_id(:paper_blocks, paper_block_dom_id(id))
+    |> stream_insert(:paper_blocks, %{id: id, html: html}, at: pos)
+    |> assign(:paper_rev, frame.rev)
+    |> assign(:paper_block_mode, true)
+  end
+
   defp apply_paper_delta(socket, %{block_id: id, fragment_html: html} = frame) do
     # patch-block / replace-block (and any new block whose top-level position is
     # unknown, e.g. one nested in a section): upsert by id, in place (no `at:`)
@@ -2568,14 +2587,40 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :api_token_raw, :string, default: ""
 
   defp paper_block_editor(assigns) do
+    assigns = assign(assigns, :last_index, length(assigns.blocks) - 1)
+
     ~H"""
-    <div id={"paper-editor-#{@slug}"} class="bp-paper-editor" data-test-id="studio-paper-block-editor">
+    <%!-- The whole block list is a drag-sortable surface. The
+          BarkparkPaperSortable hook makes ONLY the per-block grip draggable
+          (never the block body — the blocks hold contenteditable editors +
+          form inputs, so dragging the body would fight text selection/focus).
+          On drop it fires `paper-move-block-to` → the same `move-block` op the
+          ▲/▼ buttons use. The buttons are the robust core and work without JS;
+          drag is a progressive enhancement layered on top. --%>
+    <div
+      id={"paper-editor-#{@slug}"}
+      class="bp-paper-editor"
+      data-test-id="studio-paper-block-editor"
+      phx-hook="BarkparkPaperSortable"
+    >
       <p :if={@blocks == []} class="bp-paper-editor-empty">
         This paper has no blocks yet. Add one below.
       </p>
 
-      <div :for={block <- @blocks} class="bp-paper-edit-block" data-edit-block-id={Map.get(block, "id")}>
+      <div
+        :for={{block, index} <- Enum.with_index(@blocks)}
+        class="bp-paper-edit-block"
+        data-edit-block-id={Map.get(block, "id")}
+      >
         <div class="bp-paper-edit-toolbar">
+          <span
+            class="bp-paper-drag-grip"
+            data-drag-grip
+            draggable="true"
+            title="Drag to reorder"
+            aria-label="Drag to reorder block"
+            data-test-id="paper-drag-grip"
+          >⠿</span>
           <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
           <span class="bp-paper-edit-actions">
             <button
@@ -2585,6 +2630,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
               phx-click="paper-move-block"
               phx-value-id={Map.get(block, "id")}
               phx-value-dir="up"
+              disabled={index == 0}
+              data-test-id="paper-move-up"
             >▲</button>
             <button
               type="button"
@@ -2593,6 +2640,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
               phx-click="paper-move-block"
               phx-value-id={Map.get(block, "id")}
               phx-value-dir="down"
+              disabled={index == @last_index}
+              data-test-id="paper-move-down"
             >▼</button>
             <button
               type="button"

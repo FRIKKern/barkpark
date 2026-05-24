@@ -259,6 +259,72 @@ defmodule Barkpark.PortableDoc.PatchTest do
     end
   end
 
+  describe "move-block — top-level reorder, pure permutation" do
+    defp abc_doc do
+      doc_with([
+        %{"id" => "a", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "A"}]},
+        %{"id" => "b", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "B"}]},
+        %{"id" => "c", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "C"}]}
+      ])
+    end
+
+    test "moves a block to just after the named anchor" do
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "c", "after" => "a"})
+
+      assert Enum.map(blocks, & &1["id"]) == ["a", "c", "b"]
+    end
+
+    test "after: null moves the block to the front" do
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "c", "after" => nil})
+
+      assert Enum.map(blocks, & &1["id"]) == ["c", "a", "b"]
+    end
+
+    test "an absent after key also moves the block to the front" do
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "b"})
+
+      assert Enum.map(blocks, & &1["id"]) == ["b", "a", "c"]
+    end
+
+    test "moving to the tail (after the last block)" do
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "a", "after" => "c"})
+
+      assert Enum.map(blocks, & &1["id"]) == ["b", "c", "a"]
+    end
+
+    test "the moved block keeps its full content (no duplication)" do
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "c", "after" => nil})
+
+      moved = Enum.find(blocks, &(&1["id"] == "c"))
+      assert moved["content"] == [%{"type" => "text", "value" => "C"}]
+      # Exactly one copy of each id survives — a permutation, not a duplication.
+      assert length(blocks) == 3
+      assert Enum.uniq(Enum.map(blocks, & &1["id"])) == Enum.map(blocks, & &1["id"])
+    end
+
+    test "moving a block after itself is an idempotent no-op" do
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "b", "after" => "b"})
+
+      assert Enum.map(blocks, & &1["id"]) == ["a", "b", "c"]
+    end
+
+    test "block-not-found when the moved id does not exist at top level" do
+      assert {:error, {:block_not_found, "ghost", "move-block"}} =
+               Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "ghost"})
+    end
+
+    test "block-not-found when the anchor id does not exist" do
+      assert {:error, {:block_not_found, "ghost", "move-block"}} =
+               Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "a", "after" => "ghost"})
+    end
+  end
+
   describe "malformed input" do
     test "an unknown op discriminator returns :invalid_op" do
       doc = doc_with([])

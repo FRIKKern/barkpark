@@ -207,6 +207,96 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
              ["p-second", "h-1", "p-intro"]
   end
 
+  # ── P3.2: reorder via the single `move-block` op ────────────────────────────
+
+  # Slice the rendered HTML for one block (from its data-edit-block-id up to
+  # the next block / the add-block form), so per-button disabled state can be
+  # asserted independent of attribute ordering across the whole document.
+  defp block_html(html, id) do
+    [_, slice] =
+      Regex.run(
+        ~r/(data-edit-block-id="#{Regex.escape(id)}".*?)(?=data-edit-block-id=|data-test-id="paper-add-block")/s,
+        html
+      )
+
+    slice
+  end
+
+  test "move up/down buttons disable at the boundaries (first ▲ / last ▼)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    edit_html = open_editor(view)
+
+    # Whole <button> element (start tag) for a given move direction inside a
+    # block slice. Asserting on the tag captures `disabled` wherever HEEx places
+    # it among the attributes (source order: dir then disabled then test-id).
+    btn = fn slice, dir ->
+      [_, tag] = Regex.run(~r/(<button[^>]*phx-value-dir="#{dir}"[^>]*>)/s, slice)
+      tag
+    end
+
+    # First block (h-1): the up button is disabled, the down button is not.
+    h1 = block_html(edit_html, "h-1")
+    assert btn.(h1, "up") =~ "disabled"
+    refute btn.(h1, "down") =~ "disabled"
+
+    # Last block (p-second): the down button is disabled, the up button is not.
+    last = block_html(edit_html, "p-second")
+    assert btn.(last, "down") =~ "disabled"
+    refute btn.(last, "up") =~ "disabled"
+
+    # Middle block (p-intro): neither move button is disabled.
+    mid = block_html(edit_html, "p-intro")
+    refute btn.(mid, "up") =~ "disabled"
+    refute btn.(mid, "down") =~ "disabled"
+  end
+
+  test "moving up preserves the moved block's content (same id, same body)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+
+    before = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-second"))
+
+    view
+    |> element(~s([data-edit-block-id="p-second"] button[phx-value-dir="up"]))
+    |> render_click()
+
+    moved = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-second"))
+
+    # The block kept its identity AND its content across the reorder.
+    assert moved == before
+    assert moved["content"] == [%{"type" => "text", "value" => "Second paragraph."}]
+  end
+
+  test "the drag path (paper-move-block-to) reorders to a chosen anchor",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+
+    # A drop event from the BarkparkPaperSortable hook: drop p-second AFTER h-1.
+    render_hook(view, "paper-move-block-to", %{"id" => "p-second", "after-id" => "h-1"})
+
+    assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
+             ["h-1", "p-second", "p-intro"]
+  end
+
+  test "the drag path with an empty after-id moves the block to the front",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+
+    # Empty after-id ⇒ move-to-front (after: nil).
+    render_hook(view, "paper-move-block-to", %{"id" => "p-second", "after-id" => ""})
+
+    blocks = Content.paper_blocks(@slug, @dataset)
+    assert Enum.map(blocks, & &1["id"]) == ["p-second", "h-1", "p-intro"]
+
+    # Content of the moved block survived the move-to-front.
+    moved = Enum.find(blocks, &(&1["id"] == "p-second"))
+    assert moved["content"] == [%{"type" => "text", "value" => "Second paragraph."}]
+  end
+
   test "View → Edit → View round-trip re-populates the read-only stream (no remount)",
        %{conn: conn} do
     {:ok, view, html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
