@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         <div class="bp-field-body">
           <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
             <div class="bp-subfield" data-subfield-name={sub.name}>
-              <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
+              <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
                 <%= title_for(sub) %>
               </label>
               <%= if onix_el = onix_element(sub) do %>
@@ -76,7 +76,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         <div class="bp-field-body">
           <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
             <div class="bp-subfield" data-subfield-name={sub.name}>
-              <label class="bp-field-label" for={input_id(@field.name, sub.name)}>
+              <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
                 <%= title_for(sub) %>
               </label>
               <%= if onix_el = onix_element(sub) do %>
@@ -158,7 +158,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, ""),
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.field.name, sub.name),
+      input_id: input_id(assigns.path, assigns.field.name, sub.name),
       on_change: assigns.on_change,
       readonly: assigns.readonly,
       options: select_options(sub)
@@ -173,7 +173,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, ""),
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.field.name, sub.name),
+      input_id: input_id(assigns.path, assigns.field.name, sub.name),
       on_change: assigns.on_change,
       readonly: assigns.readonly,
       rows: text_rows(sub)
@@ -188,7 +188,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, ""),
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.field.name, sub.name),
+      input_id: input_id(assigns.path, assigns.field.name, sub.name),
       on_change: assigns.on_change,
       readonly: assigns.readonly
     }
@@ -403,7 +403,29 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   defp child_path("", child), do: child
   defp child_path(parent, child), do: "#{parent}.#{child}"
 
-  defp input_id(parent, child), do: "f-#{parent}-#{child}"
+  # DOM id for a subfield input + its label `for`. Must be UNIQUE across the
+  # whole form — when a composite is the element type of an arrayOf, the same
+  # `field.name`/`sub.name` pair repeats for every row, so a path-free
+  # `"f-<field>-<sub>"` collides (`f-contributor-name` on every row → LiveView
+  # raises on duplicate ids). We therefore fold in the `path` prefix (already
+  # row-unique: `[0]`, `[1]`, …) and sanitise non-id chars (`.`, `[`, `]`) to
+  # `-`. With an empty path (a top-level composite) this is byte-equivalent to
+  # the old `"f-<field>-<sub>"` shape, so non-array composites are unchanged.
+  defp input_id(path, parent, child) do
+    prefix =
+      case to_string(path || "") do
+        "" -> ""
+        p -> sanitize_id(p) <> "-"
+      end
+
+    "f-#{prefix}#{parent}-#{child}"
+  end
+
+  defp sanitize_id(s) do
+    s
+    |> String.replace(~r/[\[\].]+/, "-")
+    |> String.trim("-")
+  end
 
   defp input_type("boolean"), do: "checkbox"
   defp input_type("datetime"), do: "datetime-local"

@@ -53,6 +53,7 @@ export class SlashMenu {
 
     // Bound once so add/removeEventListener match.
     this._onDocPointer = (e) => this._handlePointer(e);
+    this._onDocKeydown = (e) => this._handleKeydown(e);
   }
 
   isOpen() {
@@ -67,6 +68,12 @@ export class SlashMenu {
       this._render();
       this._open = true;
       document.addEventListener("mousedown", this._onDocPointer, true);
+      // Capture-phase Escape so the menu reliably closes even when the
+      // keydown does not route through TipTap's editorProps.handleKeyDown
+      // (e.g. a JS-dispatched Escape in a verify run, or focus that has
+      // momentarily left the ProseMirror DOM). Capture + stopImmediatePropagation
+      // prevents the same Escape from leaking to other handlers.
+      document.addEventListener("keydown", this._onDocKeydown, true);
     }
     this._position(rect);
     this._syncActive();
@@ -77,6 +84,7 @@ export class SlashMenu {
     this._open = false;
     if (this._el) this._el.style.display = "none";
     document.removeEventListener("mousedown", this._onDocPointer, true);
+    document.removeEventListener("keydown", this._onDocKeydown, true);
   }
 
   destroy() {
@@ -198,5 +206,19 @@ export class SlashMenu {
     if (!this._el) return;
     if (this._el.contains(e.target)) return;
     this._onDismiss();
+  }
+
+  // Escape dismisses the open menu (keeps the typed "/"). Caught in the capture
+  // phase so it fires before — and instead of — any editor/global handler, and
+  // is swallowed so the Escape never leaks. This is the authoritative Esc path;
+  // index.js's editorProps.handleKeyDown remains as a same-behaviour fallback
+  // for the case where ProseMirror sees the key first.
+  _handleKeydown(e) {
+    if (!this._open) return;
+    if (e.key === "Escape" || e.key === "Esc") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this._onDismiss();
+    }
   }
 }

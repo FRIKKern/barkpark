@@ -106,9 +106,11 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   # separator — only `[…]` nests. So a dotted path ALWAYS arrives as a flat
   # key. We therefore render the inner components with `path=""`, which makes
   # composite/localizedText inputs name themselves with the bare subfield/lang
-  # name (clean top-level keys), arrayOf inputs name `[0]` / `[1]` (bracket
-  # keys we parse), and codelist names itself with the empty key. `merge_change`
-  # parses these flat params back into the structured value.
+  # name (clean top-level keys), arrayOf SCALAR rows name `[0]` / `[1]` and
+  # arrayOf COMPOSITE-element subfields name `[0].subname` / `[0].a.b` /
+  # `[0].tags[1]` (bracket-anchored keys we parse), and codelist names itself
+  # with the empty key. `merge_change` parses these flat params back into the
+  # structured value.
   @impl true
   def render(%{field_type: "composite"} = assigns) do
     ~H"""
@@ -288,25 +290,38 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     Map.merge(current || %{}, params)
   end
 
-  # arrayOf: with `path=""` the row inputs name themselves `[0]`, `[1]`, … so
-  # params arrive as `%{"[0]" => v0, "[1]" => v1, …}`. Re-assemble an ordered
-  # list, keeping the current list's length as the floor so a blank/absent
-  # input does not truncate the list.
+  # arrayOf: with `path=""` the row inputs name themselves by their position in
+  # the list. A SCALAR element names itself `[0]`, `[1]`, … (the bare bracket
+  # index). A COMPOSITE element's subfields name themselves `[0].amount`,
+  # `[0].currency`, … and a nested composite/array inside a composite element
+  # extends that further (`[0].price.amount`, `[0].tags[1]`). `Plug.Conn.Query`
+  # does NOT nest through `.` or a leading `[`, so EVERY one of these arrives as
+  # a FLAT param key. We parse each key into a path of mixed integer indices
+  # (from `[N]`) and string keys (from `.name`), then deep-merge each
+  # (path, value) into the current list. The current list's length is the floor
+  # so a blank/absent input never truncates it.
   defp merge_change("arrayOf", current, params) when is_map(params) do
     list = List.wrap(current)
-    by_idx = Map.new(params, fn {k, v} -> {bracket_index(k), v} end)
-    seen = by_idx |> Map.keys() |> Enum.reject(&(&1 < 0)) |> Enum.max(fn -> -1 end)
+
+    # Parse keys into {path, value}; drop any key we can't parse to a valid
+    # leading `[N]` index.
+    parsed =
+      params
+      |> Enum.map(fn {k, v} -> {parse_key_path(k), v} end)
+      |> Enum.reject(fn {path, _v} -> path == [] end)
+
+    seen =
+      parsed
+      |> Enum.map(fn {[idx | _], _} -> idx end)
+      |> Enum.max(fn -> -1 end)
+
     max_idx = max(length(list) - 1, seen)
 
     if max_idx < 0 do
       list
     else
-      Enum.map(0..max_idx, fn i ->
-        case Map.get(by_idx, i) do
-          nil -> Enum.at(list, i)
-          v -> v
-        end
-      end)
+      base = Enum.map(0..max_idx, fn i -> Enum.at(list, i) end)
+      Enum.reduce(parsed, base, fn {path, value}, acc -> put_path(acc, path, value) end)
     end
   end
 
@@ -456,14 +471,89 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   defp parse_idx(idx) when is_integer(idx), do: idx
   defp parse_idx(_), do: -1
 
-  # Parse an arrayOf row key (`"[0]"`, `"[12]"`) to its integer index. Returns
-  # -1 for any key that is not a bracketed integer so it is skipped.
-  defp bracket_index(k) when is_binary(k) do
-    case Regex.run(~r/^\[(\d+)\]$/, k) do
-      [_, n] -> String.to_integer(n)
-      _ -> -1
+  # Parse an arrayOf input NAME into a path of segments. The first segment is
+  # ALWAYS the integer list index (from a leading `[N]`); subsequent segments
+  # are string subfield keys (from `.name`) or integer indices (from `[N]`),
+  # honouring composites and nested arrays inside a composite element.
+  #
+  #   "[0]"                 -> [0]
+  #   "[0].amount"          -> [0, "amount"]
+  #   "[0].price.amount"    -> [0, "price", "amount"]
+  #   "[0].tags[1]"         -> [0, "tags", 1]
+  #
+  # Returns `[]` for any name without a valid leading `[N]` so the caller can
+  # skip it (e.g. a stray non-array param).
+  defp parse_key_path(k) when is_binary(k) do
+    case Regex.run(~r/^\[(\d+)\](.*)$/, k) do
+      [_, n, rest] -> [String.to_integer(n) | parse_rest_segments(rest)]
+      _ -> []
     end
   end
 
-  defp bracket_index(_), do: -1
+  defp parse_key_path(_), do: []
+
+  # Tokenise the remainder after the leading `[N]` into segments. `.name`
+  # yields a string key; `[N]` yields an integer index.
+  defp parse_rest_segments(""), do: []
+
+  defp parse_rest_segments(rest) when is_binary(rest) do
+    ~r/\.([^.\[\]]+)|\[(\d+)\]/
+    |> Regex.scan(rest)
+    |> Enum.map(fn
+      [_, name] when name != "" -> name
+      [_, "", idx] -> String.to_integer(idx)
+    end)
+  end
+
+  # Deep-set `value` at `path` (a list of integer indices / string keys) within
+  # `acc`, creating intermediate lists/maps as the path dictates. A single
+  # `[idx]` path replaces the whole element (the scalar-array contract).
+  defp put_path(acc, [idx], value) when is_integer(idx) and is_list(acc) do
+    replace_at_grow(acc, idx, value)
+  end
+
+  defp put_path(acc, [idx | rest], value) when is_integer(idx) and is_list(acc) do
+    child = Enum.at(acc, idx)
+    replace_at_grow(acc, idx, put_path_in(child, rest, value))
+  end
+
+  defp put_path(acc, _path, _value), do: acc
+
+  # Set into a composite element (map) or a nested array (list) within an
+  # element, following the remaining segments.
+  defp put_path_in(child, [key], value) when is_binary(key) do
+    Map.put(ensure_map(child), key, value)
+  end
+
+  defp put_path_in(child, [key | rest], value) when is_binary(key) do
+    m = ensure_map(child)
+    Map.put(m, key, put_path_in(Map.get(m, key), rest, value))
+  end
+
+  defp put_path_in(child, [idx], value) when is_integer(idx) do
+    replace_at_grow(ensure_list(child), idx, value)
+  end
+
+  defp put_path_in(child, [idx | rest], value) when is_integer(idx) do
+    l = ensure_list(child)
+    replace_at_grow(l, idx, put_path_in(Enum.at(l, idx), rest, value))
+  end
+
+  defp put_path_in(_child, [], value), do: value
+
+  defp ensure_map(m) when is_map(m), do: m
+  defp ensure_map(_), do: %{}
+
+  defp ensure_list(l) when is_list(l), do: l
+  defp ensure_list(_), do: []
+
+  # Replace element at `idx`, padding the list with nils if `idx` is past the
+  # current end so a freshly-added row's first edit can land.
+  defp replace_at_grow(list, idx, value) when idx < length(list) do
+    List.replace_at(list, idx, value)
+  end
+
+  defp replace_at_grow(list, idx, value) do
+    list ++ List.duplicate(nil, idx - length(list)) ++ [value]
+  end
 end
