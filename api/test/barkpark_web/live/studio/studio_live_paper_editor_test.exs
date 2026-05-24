@@ -839,6 +839,98 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert block["value"] == ["history", "norway", ""]
   end
 
+  # ── Polish-3 Fix 1: arrayOf-of-composite nested-key parsing ─────────────────
+  #
+  # When an arrayOf's `of` is a `composite`, each element's subfield inputs name
+  # themselves `[idx].subname` (and `[idx].nested.subname` for a composite
+  # inside the element). `Plug.Conn.Query` does NOT nest through `.` or a
+  # leading `[`, so every such input arrives as a FLAT param key. The previous
+  # arrayOf merge only matched bare `[idx]` keys, so composite-element subfield
+  # edits were silently dropped. These prove the merge now sets the right
+  # `value[index][subname]` and persists it.
+
+  @arraycomp_slug "2026-05-24-arraycomp-paper"
+
+  defp seed_arraycomp_paper! do
+    blocks = [
+      %{
+        "id" => "c-contributors",
+        "type" => "arrayOf",
+        "label" => "Contributors",
+        "ordered" => true,
+        "of" => %{
+          "name" => "contributor",
+          "type" => "composite",
+          "fields" => [
+            %{"name" => "name", "title" => "Name", "type" => "string"},
+            %{"name" => "role", "title" => "Role", "type" => "string"}
+          ]
+        },
+        "value" => [
+          %{"name" => "Ada Lovelace", "role" => "Author"},
+          %{"name" => "Grace Hopper", "role" => "Editor"}
+        ]
+      }
+    ]
+
+    {:ok, paper} = Content.upsert_paper(%{slug: @arraycomp_slug, dataset: @dataset, blocks: blocks})
+    paper
+  end
+
+  test "an inner-change on a composite element subfield inside an arrayOf updates the right nested value + persists",
+       %{conn: conn} do
+    seed_arraycomp_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@arraycomp_slug}")
+    open_editor(view)
+
+    pid_before = view.pid
+
+    # The composite-element subfield inputs name themselves `[idx].subname`.
+    # Edit element 1's `role` (Editor → Maintainer); the merge must set
+    # value[1][role] and leave element 0 + element 1's name untouched.
+    view
+    |> element(~s([data-block-id="c-contributors"] form))
+    |> render_change(%{"[1].role" => "Maintainer"})
+
+    render(view)
+
+    block =
+      Content.paper_blocks(@arraycomp_slug, @dataset)
+      |> Enum.find(&(&1["id"] == "c-contributors"))
+
+    assert block["type"] == "arrayOf"
+    # The edited subfield landed at value[1][role].
+    assert Enum.at(block["value"], 1)["role"] == "Maintainer"
+    # The other subfield of the same element survived.
+    assert Enum.at(block["value"], 1)["name"] == "Grace Hopper"
+    # Element 0 is wholly untouched.
+    assert Enum.at(block["value"], 0) == %{"name" => "Ada Lovelace", "role" => "Author"}
+    # No remount — the op went through the canonical delta path.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+  end
+
+  test "editing two subfields of the same arrayOf composite element in one change merges both",
+       %{conn: conn} do
+    seed_arraycomp_paper!()
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@arraycomp_slug}")
+    open_editor(view)
+
+    view
+    |> element(~s([data-block-id="c-contributors"] form))
+    |> render_change(%{"[0].name" => "Augusta Ada", "[0].role" => "Mathematician"})
+
+    render(view)
+
+    block =
+      Content.paper_blocks(@arraycomp_slug, @dataset)
+      |> Enum.find(&(&1["id"] == "c-contributors"))
+
+    assert Enum.at(block["value"], 0) == %{"name" => "Augusta Ada", "role" => "Mathematician"}
+    # The second element is preserved (list not truncated by the partial change).
+    assert Enum.at(block["value"], 1) == %{"name" => "Grace Hopper", "role" => "Editor"}
+  end
+
   # ── P3.1: every block type is creatable from the add-block UI ───────────────
   # The add-block <select> now offers every portable-doc block type (grouped by
   # optgroup). Each choice resolves to default_block/2 and is appended through

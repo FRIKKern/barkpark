@@ -269,6 +269,18 @@ class BpReferencePicker extends HTMLElement {
   }
 
   async _loadSelectedTitle() {
+    // No ref-type (a paper field-reference block created with an empty
+    // refType): the single-doc endpoint /v1/data/doc/<dataset>/<type>/<id>
+    // needs a concrete :type — with an empty refType the URL collapses to
+    // `…/doc/<dataset>//<id>` (double slash) and 404s, so the pill could
+    // never resolve its title. Fall back to the all-types title search
+    // endpoint (the same /v1/data/search route the picker uses with no
+    // ref-type), looking the value up by id. The TYPED path below stays
+    // byte-identical for the classic editor where refType is always set.
+    if (!this._refType) {
+      await this._loadSelectedTitleAllTypes();
+      return;
+    }
     try {
       const url = `/v1/data/doc/${encodeURIComponent(this._dataset)}/${encodeURIComponent(this._refType)}/${encodeURIComponent(this._value)}`;
       const res = await fetch(url, { credentials: "same-origin" });
@@ -276,6 +288,35 @@ class BpReferencePicker extends HTMLElement {
       const body = await res.json();
       const doc = (body && body.result) || body || {};
       const title = doc.title || doc._id || "";
+      if (title && this._value) {
+        this._selectedTitle = title;
+        if (this._mounted && this._value) this._render();
+      }
+    } catch (_e) {
+      // Silent: pill keeps showing the id as fallback.
+    }
+  }
+
+  // Resolve the current value's title when no ref-type is set, via the
+  // type-less /v1/data/search/<dataset>?q=<value> endpoint (real + reachable;
+  // GET, ILIKE on title). We match the returned doc whose _id equals the
+  // stored value and adopt its title. On any miss the pill keeps showing the
+  // raw id (the existing graceful fallback).
+  async _loadSelectedTitleAllTypes() {
+    const id = (this._value || "").trim();
+    if (!id) return;
+    try {
+      const url = `/v1/data/search/${encodeURIComponent(this._dataset)}?q=${encodeURIComponent(id)}&perspective=published&limit=50`;
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) return;
+      const body = await res.json();
+      const docs =
+        (body && body.result && body.result.documents) ||
+        (body && body.documents) ||
+        [];
+      const match =
+        docs.find((d) => (d._id || d.id) === id) || docs[0] || null;
+      const title = match && (match.title || match._id || match.id);
       if (title && this._value) {
         this._selectedTitle = title;
         if (this._mounted && this._value) this._render();
