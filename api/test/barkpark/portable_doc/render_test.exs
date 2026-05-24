@@ -489,6 +489,166 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # Article-render fidelity polish (P1 slice 3) — real semantic headings, a
+  # single `<pre>` code block, header-row table styling, the pullquote block,
+  # and the "§" section divider. Each case pins the article divergence AND the
+  # email no-regression guarantee (the email backend depends on byte-identical
+  # output).
+  describe "article fidelity — semantic headings (follow-up #1)" do
+    test "article heading level 1/2/3 emit real <h1>/<h2>/<h3> tags" do
+      h = fn level ->
+        block = %{"type" => "heading", "level" => level, "text" => "Heading"}
+        Render.render_block(block, %{style: :article})
+      end
+
+      assert h.(1) =~ ~r/<h1[ >]/
+      assert h.(1) =~ "</h1>"
+      assert h.(2) =~ ~r/<h2[ >]/
+      assert h.(2) =~ "</h2>"
+      assert h.(3) =~ ~r/<h3[ >]/
+      assert h.(3) =~ "</h3>"
+
+      # The level-sized rule still rides on the tag (sizing preserved).
+      assert h.(1) =~ "font-size:32px"
+      assert h.(2) =~ "font-size:24px"
+      assert h.(3) =~ "font-size:20px"
+
+      # No stray styled <span> heading anymore.
+      refute h.(1) =~ "<span"
+    end
+
+    test "article heading escapes its text" do
+      block = %{"type" => "heading", "level" => 2, "text" => "A < B & C"}
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ "A &lt; B &amp; C"
+    end
+
+    test "an out-of-range level clamps to <h2>" do
+      block = %{"type" => "heading", "level" => 9, "text" => "X"}
+      assert Render.render_block(block, %{style: :article}) =~ ~r/<h2[ >]/
+    end
+
+    test "email heading output is byte-unchanged (regression)" do
+      block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
+      # Default (email) and explicit :email — both the original bold span.
+      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+
+      assert Render.render_block(block, %{style: :email}) ==
+               ~s(<span style="font-weight:bold">Title</span>)
+
+      # Levels 2 and 3 in email are also the plain bold span (no <hN>).
+      assert Render.render_block(%{"type" => "heading", "level" => 2, "text" => "T"}, %{
+               style: :email
+             }) == ~s(<span style="font-weight:bold">T</span>)
+
+      refute Render.render_block(%{"type" => "heading", "level" => 2, "text" => "T"}) =~ "<h2"
+    end
+  end
+
+  describe "article fidelity — code block as a single <pre>" do
+    @code %{"id" => "c1", "type" => "code", "value" => "let x = 1\nif x < 2 & y > 0:"}
+
+    test "article mode renders one styled <pre> block (not per-line chips)" do
+      html = Render.render_block(@code, %{style: :article})
+
+      assert html =~ "<pre"
+      # Parchment background, terracotta left-border, horizontal scroll.
+      assert html =~ "background:#f1ede2"
+      assert html =~ "border-left:3px solid #a23925"
+      assert html =~ "overflow-x:auto"
+      # The value is escaped inside the single <pre> (no per-line <code> chips).
+      assert html =~ "if x &lt; 2 &amp; y &gt; 0:"
+      refute html =~ ~s(<code style="background:#f1ede2)
+    end
+
+    test "email mode keeps the per-line inline <code> chip stack (regression)" do
+      html = Render.render_block(@code, %{style: :email})
+      refute html =~ "<pre"
+      # Per-line PdInlineCode chips on the email/default palette bg.
+      assert html =~ ~s(<code style="background:#f3f4f6)
+    end
+  end
+
+  describe "article fidelity — table header styling" do
+    @table %{
+      "id" => "t1",
+      "type" => "table",
+      "rows" => [
+        [[%{"type" => "text", "value" => "Name"}], [%{"type" => "text", "value" => "Role"}]],
+        [[%{"type" => "text", "value" => "Pelle"}], [%{"type" => "text", "value" => "Author"}]]
+      ]
+    }
+
+    test "article mode emits a <thead>/<th> header band with the warm rule" do
+      html = Render.render_block(@table, %{style: :article})
+
+      assert html =~ "<thead>"
+      assert html =~ "<th "
+      # Uppercase, muted, 2px bottom rule under the header.
+      assert html =~ "text-transform:uppercase"
+      assert html =~ "border-bottom:2px solid #e6e2d8"
+      assert html =~ "color:#6a6a6a"
+      # Warm rule colour on body cells, never gray.
+      assert html =~ "border-bottom:1px solid #e6e2d8"
+      refute html =~ "#e5e7eb"
+      # Header text in the th, body text in the tbody.
+      assert html =~ "Name"
+      assert html =~ "Pelle"
+    end
+
+    test "email mode keeps the flat <td>-only gray table (regression)" do
+      html = Render.render_block(@table, %{style: :email})
+      refute html =~ "<thead>"
+      refute html =~ "<th "
+      assert html =~ ~s(<td style="border:1px solid #e5e7eb)
+    end
+  end
+
+  describe "article fidelity — pullquote block" do
+    @pull %{
+      "id" => "pq1",
+      "type" => "pullquote",
+      "content" => [%{"type" => "text", "value" => "The medium is the message."}]
+    }
+
+    test "article mode renders an italic, bordered, muted pullquote" do
+      html = Render.render_block(@pull, %{style: :article})
+
+      assert html =~ "The medium is the message."
+      assert html =~ "font-style:italic"
+      assert html =~ "border-left:3px solid #a23925"
+      assert html =~ "color:#6a6a6a"
+      assert html =~ "font-size:1.2rem"
+    end
+
+    test "email mode degrades to a plain italic span (no border cues)" do
+      html = Render.render_block(@pull, %{style: :email})
+      assert html =~ "The medium is the message."
+      assert html =~ "font-style:italic"
+      refute html =~ "border-left:3px solid"
+    end
+  end
+
+  describe "article fidelity — § section divider" do
+    @divider %{"id" => "d1", "type" => "divider"}
+
+    test "article mode renders the § glyph straddling a hairline rule" do
+      html = Render.render_block(@divider, %{style: :article})
+      assert html =~ "§"
+      assert html =~ "border-top:1px solid #e6e2d8"
+      refute html =~ "<hr"
+    end
+
+    test "email mode keeps a plain <hr> (regression)" do
+      html = Render.render_block(@divider, %{style: :email})
+
+      assert html ==
+               ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+
+      refute html =~ "§"
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"
