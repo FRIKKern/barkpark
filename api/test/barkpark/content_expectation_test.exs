@@ -62,10 +62,12 @@ defmodule Barkpark.ContentExpectationTest do
       {:ok, schema} = Content.get_schema("author", "test")
       exp = Content.resolve_expectation(schema)
 
+      # EX1 (barkpark-q39y): each derived field entry carries soft once-cardinality
+      # (max: 1, enforce: false). The trailing region carries no cardinality.
       assert exp.layout == [
-               %{"kind" => "field", "name" => "name"},
-               %{"kind" => "field", "name" => "slug"},
-               %{"kind" => "field", "name" => "bio"},
+               %{"kind" => "field", "name" => "name", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "slug", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "bio", "max" => 1, "enforce" => false},
                %{"kind" => "region", "name" => "body"}
              ]
 

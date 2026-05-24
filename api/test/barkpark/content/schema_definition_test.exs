@@ -427,10 +427,11 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
         ]
       }
 
+      # EX1 (barkpark-q39y): each derived field carries soft once-cardinality.
       assert SchemaDefinition.default_layout(schema) == [
-               %{"kind" => "field", "name" => "name"},
-               %{"kind" => "field", "name" => "slug"},
-               %{"kind" => "field", "name" => "bio"},
+               %{"kind" => "field", "name" => "name", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "slug", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "bio", "max" => 1, "enforce" => false},
                %{"kind" => "region", "name" => "body"}
              ]
     end
@@ -445,8 +446,8 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
       }
 
       assert SchemaDefinition.default_layout(schema) == [
-               %{"kind" => "field", "name" => "title"},
-               %{"kind" => "field", "name" => "body"},
+               %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "body", "max" => 1, "enforce" => false},
                %{"kind" => "region", "name" => "body"}
              ]
     end
@@ -514,8 +515,8 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
 
       assert SchemaDefinition.resolve_expectation(schema) == %{
                layout: [
-                 %{"kind" => "field", "name" => "name"},
-                 %{"kind" => "field", "name" => "role"},
+                 %{"kind" => "field", "name" => "name", "max" => 1, "enforce" => false},
+                 %{"kind" => "field", "name" => "role", "max" => 1, "enforce" => false},
                  %{"kind" => "region", "name" => "body"}
                ],
                prefill: %{"role" => "writer"}
