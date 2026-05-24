@@ -51,6 +51,7 @@ defmodule Barkpark.Structure do
         build_content_group(schemas),
         build_papers_group(schemas),
         build_books_group(schemas),
+        build_media_group(schemas, dataset),
         build_taxonomy_group(schemas),
         build_settings_group(schemas)
       ]
@@ -225,6 +226,50 @@ defmodule Barkpark.Structure do
     end
   end
 
+  # Plugin-owned media library schemas (Media plugin).
+  defp build_media_group(schemas, dataset) do
+    has_assets = Map.has_key?(schemas, "mediaAsset")
+    has_collections = Map.has_key?(schemas, "mediaCollection")
+
+    library_link = %Node{
+      id: "media-library",
+      title: "Media Library",
+      icon: "image",
+      type: :plugin_link,
+      filter: "/studio/#{dataset}/media"
+    }
+
+    cond do
+      has_assets and has_collections ->
+        [
+          %Node{
+            # Must NOT use id "media" — that collides with the MediaLive route
+            # at `/studio/:dataset/media` and breaks Structure navigation
+            # (push_patch cannot cross LiveViews).
+            id: "media-desk",
+            title: "Media",
+            icon: "🖼",
+            type: :list,
+            visibility: :private,
+            items: [
+              library_link,
+              doc_type_list_item(schemas["mediaAsset"]),
+              doc_type_list_item(schemas["mediaCollection"])
+            ]
+          }
+        ]
+
+      has_assets ->
+        [library_link, doc_type_list_item(schemas["mediaAsset"])]
+
+      has_collections ->
+        [library_link, doc_type_list_item(schemas["mediaCollection"])]
+
+      true ->
+        []
+    end
+  end
+
   # Taxonomy types — supporting content (authors, categories)
   defp build_taxonomy_group(schemas) do
     items = []
@@ -254,7 +299,7 @@ defmodule Barkpark.Structure do
       schemas
       |> Map.values()
       |> Enum.filter(&(&1.visibility == "private"))
-      |> Enum.reject(&(&1.name == "book"))
+      |> Enum.reject(&(&1.name in ["book", "mediaAsset", "mediaCollection"]))
 
     if private == [] do
       []

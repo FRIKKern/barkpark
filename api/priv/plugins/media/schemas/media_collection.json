@@ -1,0 +1,79 @@
+{
+  "name": "mediaCollection",
+  "title": "Media Collection",
+  "icon": "📁",
+  "visibility": "private",
+  "groups": [
+    { "name": "core", "title": "Core", "icon": "folder" },
+    { "name": "sharing", "title": "Sharing", "icon": "link" }
+  ],
+  "initial_values": {
+    "kind": "folder"
+  },
+  "fields": [
+    {
+      "name": "slug",
+      "title": "Slug",
+      "type": "slug",
+      "group": "core"
+    },
+    {
+      "name": "description",
+      "title": "Description",
+      "type": "text",
+      "group": "core",
+      "rows": 3
+    },
+    {
+      "name": "kind",
+      "title": "Collection kind",
+      "type": "select",
+      "group": "core",
+      "options": ["folder", "virtual"]
+    },
+    {
+      "name": "virtualFilter",
+      "title": "Virtual filter",
+      "type": "composite",
+      "group": "core",
+      "fields": [
+        { "name": "kind", "title": "Asset kind", "type": "string" },
+        { "name": "tags", "title": "Tags (comma-separated)", "type": "string" },
+        { "name": "q", "title": "Search text", "type": "string" },
+        { "name": "mimeType", "title": "MIME prefix", "type": "string" },
+        { "name": "visibility", "title": "Visibility", "type": "string" }
+      ]
+    },
+    {
+      "name": "parent",
+      "title": "Parent collection",
+      "type": "reference",
+      "refType": "mediaCollection",
+      "group": "core"
+    },
+    {
+      "name": "coverAsset",
+      "title": "Cover asset",
+      "type": "reference",
+      "refType": "mediaAsset",
+      "group": "core"
+    },
+    {
+      "name": "sortOrder",
+      "title": "Sort order",
+      "type": "string",
+      "group": "core"
+    },
+    {
+      "name": "shareLink",
+      "title": "Share link",
+      "type": "composite",
+      "group": "sharing",
+      "fields": [
+        { "name": "enabled", "title": "Enabled", "type": "boolean" },
+        { "name": "token", "title": "Token", "type": "string" },
+        { "name": "expiresAt", "title": "Expires at", "type": "string" }
+      ]
+    }
+  ]
+}

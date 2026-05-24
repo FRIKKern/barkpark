@@ -1,24 +1,30 @@
 // bp-media-picker — Studio image-field Web Component (Task #12 WI1).
 //
-// Wraps the existing /media + /media/upload endpoints. Owns:
-//   - thumbnail grid of previously uploaded images (GET /media)
-//   - upload button + drag-drop zone (POST /media/upload, multipart)
-//   - selected-state preview (current value)
-//   - Remove button (clears the field)
-//
-// The WC reads its bearer token from the `data-token` attribute. The
-// renderer in field_inputs.ex passes the raw session token plumbed
-// through `api_token_raw` (set by LiveAuth.:fetch_api_token from
-// session["api_token"]). The token is already known to the user — they
-// pasted it at /login — so rendering it in a DOM attribute is no leak.
-//
-// Bridge contract (docs/studio/web-components.md): emits a bubbling
-// CustomEvent("bp-change", { detail: { value } }). For v1 image fields
-// `detail.value` is a plain URL string so the hidden-input bridge
-// mirrors it directly into the form payload — keeping the server-side
-// shape byte-identical to the legacy renderer (a URL string under
-// `doc[<field>]`). The richer object {url, alt, width, height, mime}
-// is exposed via the `meta` getter for future v2 wiring.
+// Wraps /media + /media/upload and the native mediaAsset library
+// (bp-asset-browser). Emits bp-change with either a bare URL (legacy)
+// or JSON {"url","assetId"} when an asset document is known.
+
+function bpParseMediaValue(raw) {
+  if (!raw || typeof raw !== "string") return { url: "", assetId: "" };
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const o = JSON.parse(trimmed);
+      return {
+        url: o.url || "",
+        assetId: o.assetId || o.id || ""
+      };
+    } catch (_e) {
+      return { url: trimmed, assetId: "" };
+    }
+  }
+  return { url: trimmed, assetId: "" };
+}
+
+function bpSerializeMediaValue(url, assetId) {
+  if (assetId) return JSON.stringify({ url: url || "", assetId: assetId });
+  return url || "";
+}
 
 class BpMediaPicker extends HTMLElement {
   constructor() {
@@ -26,28 +32,58 @@ class BpMediaPicker extends HTMLElement {
     this._mounted = false;
     this._files = [];
     this._value = "";
-    this._meta = { url: "", alt: "", width: null, height: null, mime: "" };
+    this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
   }
 
   connectedCallback() {
     if (this._mounted) return;
     this._mounted = true;
 
-    this._value = this.getAttribute("value") || "";
-    this._meta.url = this._value;
+    const parsed = bpParseMediaValue(this.getAttribute("value") || "");
+    const raw = this.getAttribute("value") || "";
+
+    if (this._isReferenceMode()) {
+      this._value = raw;
+      this._meta.assetId = raw;
+      this._meta.url = parsed.url;
+      if (raw && !parsed.url) this._resolveReferencePreview(raw);
+    } else {
+      this._value = raw;
+      this._meta.url = parsed.url;
+      this._meta.assetId = parsed.assetId;
+    }
 
     this._render();
     this._loadFiles();
   }
 
+  async _resolveReferencePreview(docId) {
+    if (!docId) return;
+    const headers = { Accept: "application/json" };
+    const tok = this._token();
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+    try {
+      const url =
+        "/v1/data/doc/" +
+        encodeURIComponent(this._dataset()) +
+        "/mediaAsset/" +
+        encodeURIComponent(docId);
+      const r = await fetch(url, { credentials: "same-origin", headers: headers });
+      if (!r.ok) return;
+      const doc = await r.json();
+      const fi = doc.fileInfo || {};
+      this._meta.url = fi.url || "";
+      this._meta.mime = fi.mimeType || "";
+      this._renderPreview();
+    } catch (_e) {
+      /* preview optional */
+    }
+  }
+
   disconnectedCallback() {
-    // Listeners are bound to elements inside `this`; removed by GC when
-    // the element is detached. Defensive: drop refs so a re-mount
-    // re-runs connectedCallback() (LV hooks may detach + re-attach).
     this._mounted = false;
   }
 
-  // ── Public API ──────────────────────────────────────────────────
   get value() {
     return this._value;
   }
@@ -55,20 +91,40 @@ class BpMediaPicker extends HTMLElement {
   set value(v) {
     if (v === this._value) return;
     this._value = v || "";
-    this._meta.url = this._value;
+    if (this._isReferenceMode()) {
+      this._meta.assetId = this._value;
+      this._meta.url = "";
+      if (this._value) this._resolveReferencePreview(this._value);
+    } else {
+      const parsed = bpParseMediaValue(this._value);
+      this._meta.url = parsed.url;
+      this._meta.assetId = parsed.assetId;
+    }
     this._renderPreview();
   }
 
-  // Future v2 hook — richer selection metadata. v1 server only stores
-  // the URL string, so this is read-only and used only by tests / the
-  // browser console for inspection.
   get meta() {
     return Object.assign({}, this._meta);
   }
 
-  // ── Internals ───────────────────────────────────────────────────
+  _dataset() {
+    return this.getAttribute("dataset") || "production";
+  }
+
   _token() {
     return this.getAttribute("data-token") || "";
+  }
+
+  _isReferenceMode() {
+    return this.getAttribute("value-mode") === "reference";
+  }
+
+  _commitValue() {
+    if (this._isReferenceMode()) {
+      this._value = this._meta.assetId || "";
+    } else {
+      this._value = bpSerializeMediaValue(this._meta.url, this._meta.assetId);
+    }
   }
 
   _emit() {
@@ -86,11 +142,12 @@ class BpMediaPicker extends HTMLElement {
       '<div class="bp-mp-preview"></div>' +
       '<div class="bp-mp-actions">' +
       '<label class="bp-mp-upload btn btn-sm">' +
-      '<span>Upload</span>' +
+      "<span>Upload</span>" +
       '<input type="file" accept="image/*" hidden />' +
-      '</label>' +
+      "</label>" +
+      '<button type="button" class="bp-mp-browse btn btn-sm">Browse library</button>' +
       '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm" hidden>Remove</button>' +
-      '</div>' +
+      "</div>" +
       '<div class="bp-mp-dropzone">Drop image here</div>' +
       '<div class="bp-mp-grid"></div>';
 
@@ -99,6 +156,7 @@ class BpMediaPicker extends HTMLElement {
     this._dropEl = this.querySelector(".bp-mp-dropzone");
     this._fileInput = this.querySelector('input[type="file"]');
     this._clearBtn = this.querySelector(".bp-mp-clear");
+    this._browseBtn = this.querySelector(".bp-mp-browse");
 
     this._fileInput.addEventListener("change", (e) => {
       const f = e.target.files && e.target.files[0];
@@ -108,10 +166,12 @@ class BpMediaPicker extends HTMLElement {
 
     this._clearBtn.addEventListener("click", () => {
       this._value = "";
-      this._meta = { url: "", alt: "", width: null, height: null, mime: "" };
+      this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
       this._renderPreview();
       this._emit();
     });
+
+    this._browseBtn.addEventListener("click", () => this._openBrowser());
 
     this._dropEl.addEventListener("dragover", (e) => {
       e.preventDefault();
@@ -130,10 +190,29 @@ class BpMediaPicker extends HTMLElement {
     this._renderPreview();
   }
 
+  _openBrowser() {
+    const ensure = window.BpAssetBrowser && window.BpAssetBrowser.ensure;
+    if (!ensure) return;
+    const browser = ensure();
+    browser.open({
+      dataset: this._dataset(),
+      token: this._token(),
+      accept: "image/*",
+      onSelect: (detail) => this._selectAsset(detail)
+    });
+  }
+
   _renderPreview() {
     if (!this._previewEl) return;
-    if (this._value) {
-      const safeUrl = this._value.replace(/"/g, "&quot;");
+    let url = this._meta.url || bpParseMediaValue(this._value).url;
+    if (this._isReferenceMode() && !url && this._meta.assetId) {
+      this._previewEl.innerHTML =
+        '<div class="bp-mp-empty">Asset ' + this._meta.assetId.replace(/</g, "") + "</div>";
+      if (this._clearBtn) this._clearBtn.hidden = false;
+      return;
+    }
+    if (url) {
+      const safeUrl = url.replace(/"/g, "&quot;");
       this._previewEl.innerHTML =
         '<img class="bp-mp-preview-img" src="' + safeUrl + '" alt="" />';
       if (this._clearBtn) this._clearBtn.hidden = false;
@@ -148,7 +227,7 @@ class BpMediaPicker extends HTMLElement {
     if (!this._gridEl) return;
     if (!this._files.length) {
       this._gridEl.innerHTML =
-        '<div class="bp-mp-grid-empty">No uploads yet</div>';
+        '<div class="bp-mp-grid-empty">No uploads yet — try Browse library</div>';
       return;
     }
     const html = this._files
@@ -157,13 +236,20 @@ class BpMediaPicker extends HTMLElement {
         const n = (f.originalName || f.filename || "")
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;");
+        const aid = (f.assetDocId || "").replace(/"/g, "&quot;");
         return (
           '<div class="bp-mp-item" data-url="' +
           u +
           '" data-mime="' +
           (f.mimeType || "") +
+          '" data-asset-id="' +
+          aid +
           '">' +
-          '<img src="' + u + '" alt="' + n + '" />' +
+          '<img src="' +
+          u +
+          '" alt="' +
+          n +
+          '" />' +
           "</div>"
         );
       })
@@ -173,31 +259,47 @@ class BpMediaPicker extends HTMLElement {
       item.addEventListener("click", () => {
         this._select({
           url: item.dataset.url,
-          mime: item.dataset.mime || ""
+          mime: item.dataset.mime || "",
+          assetId: item.dataset.assetId || ""
         });
       });
     });
   }
 
   _select(file) {
-    this._value = file.url || "";
     this._meta = {
-      url: this._value,
+      url: file.url || "",
+      assetId: file.assetId || "",
       alt: file.alt || "",
       width: file.width || null,
       height: file.height || null,
       mime: file.mime || file.mimeType || ""
     };
+    this._commitValue();
     this._renderPreview();
     this._emit();
   }
 
+  _selectAsset(detail) {
+    if (!detail) return;
+    this._select({
+      url: detail.url,
+      assetId: detail.id,
+      mime: detail.mime,
+      alt: detail.title || ""
+    });
+  }
+
   async _loadFiles() {
+    const dataset = this._dataset();
     try {
-      const r = await fetch("/media?type=image/", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" }
-      });
+      const r = await fetch(
+        "/media?type=image/&dataset=" + encodeURIComponent(dataset),
+        {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" }
+        }
+      );
       if (!r.ok) return;
       const data = await r.json();
       this._files = (data && data.files) || [];
@@ -210,6 +312,7 @@ class BpMediaPicker extends HTMLElement {
   async _upload(file) {
     const fd = new FormData();
     fd.append("file", file);
+    fd.append("dataset", this._dataset());
     const headers = { Accept: "application/json" };
     const tok = this._token();
     if (tok) headers["Authorization"] = "Bearer " + tok;
@@ -225,9 +328,9 @@ class BpMediaPicker extends HTMLElement {
       this._select({
         url: data.url,
         mime: data.mimeType,
+        assetId: data.assetDocId || "",
         alt: ""
       });
-      // Refresh the grid so the new file appears.
       this._loadFiles();
     } catch (_e) {
       // Surface in console; UX-side handling deferred to v2.

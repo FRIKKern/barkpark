@@ -26,6 +26,7 @@ schemas = [
       %{name: "excerpt", title: "Excerpt", type: "text", rows: 3},
       %{name: "body", title: "Body", type: "richText"},
       %{name: "featuredImage", title: "Featured Image", type: "image"},
+      %{name: "featuredAsset", title: "Featured Asset", type: "reference", refType: "mediaAsset"},
       %{name: "author", title: "Author", type: "reference", refType: "author"},
       %{name: "featured", title: "Featured Post", type: "boolean"}
     ],
@@ -61,7 +62,8 @@ schemas = [
       %{name: "body", title: "Page Content", type: "richText"},
       %{name: "seoTitle", title: "SEO Title", type: "string"},
       %{name: "seoDescription", title: "SEO Description", type: "text", rows: 2},
-      %{name: "heroImage", title: "Hero Image", type: "image"}
+      %{name: "heroImage", title: "Hero Image", type: "image"},
+      %{name: "heroAsset", title: "Hero Asset", type: "reference", refType: "mediaAsset"}
     ]
   },
   %{

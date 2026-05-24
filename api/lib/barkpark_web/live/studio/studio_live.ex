@@ -107,6 +107,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # papers (the raw-HTML fallback). `paper_topic` is the subscribed
        # topic so it can be unsubscribed on navigation.
        editor_view: :form,
+       media_kind_filter: "all",
        paper_doc: nil,
        paper_rev: 0,
        paper_html: "",
@@ -2472,8 +2473,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # apply in order. This is the only place the paper stream is (re)set — the
     # `{:paper_block,…}` delta path NEVER rebuilds panes, so it never remounts.
     case editor && editor[:view] do
-      :paper -> setup_paper_view(socket, editor[:doc])
-      _ -> clear_paper_view(socket)
+      :paper ->
+        setup_paper_view(socket, editor[:doc])
+
+      :media_explorer ->
+        socket
+        |> clear_paper_view()
+        |> assign(
+          editor_view: :media_explorer,
+          media_kind_filter: editor[:kind_filter] || "all"
+        )
+
+      _ ->
+        socket
+        |> clear_paper_view()
+        |> assign(editor_view: :form, media_kind_filter: "all")
     end
   end
 
@@ -3246,6 +3260,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <bp-media-picker
             value={Map.get(@block, "value", "")}
+            dataset={Map.get(@block, "dataset", @dataset)}
             data-token={@api_token_raw}
             data-test-id="paper-field-field-image"
           ></bp-media-picker>
@@ -3425,7 +3440,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
            pane (convergence/papers-in-studio); every other doc type opens the
            field form via studio_editor_shell. The left structure pane + the
            Papers list pane (rendered above) stay visible either way. -->
-      <%= if @editor_view == :paper do %>
+      <%= cond do %>
+        <% @editor_view == :paper -> %>
         <.studio_paper_view
           paper_doc={@paper_doc}
           paper_rev={@paper_rev}
@@ -3435,7 +3451,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
           dataset={@dataset}
           streams={@streams}
         />
-      <% else %>
+        <% @editor_view == :media_explorer -> %>
+        <div
+          id={"media-explorer-#{@nav_desk || "all"}"}
+          class="editor-panel media-explorer-panel"
+          style="flex: 1; display: flex; min-height: 0; overflow: hidden;"
+        >
+          <bp-asset-explorer
+            dataset={@dataset}
+            data-token={Map.get(assigns, :api_token_raw, "")}
+            data-kind-filter={@media_kind_filter || "all"}
+            data-open-path={"/studio/#{@dataset}/" <> Enum.join(@nav_path, "/")}
+          />
+        </div>
+        <% true -> %>
         <%!-- Per-document Classic <-> Beta editor (Exp-P3.2, barkpark-g2ql).
               Beta reuses the premium block editor over the SAME
               content["blocks"] Classic projects from. The toggle (a `.editor-mode-toggle`

@@ -39,6 +39,17 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.RequireToken
   end
 
+  # Browser Studio uploads send `credentials: same-origin` with the session
+  # cookie; API clients still use Bearer. Requires `:fetch_session` upstream.
+  pipeline :media_mutate do
+    plug :fetch_session
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.RequireBearerOrSessionToken
+  end
+
   # Paperflow paper-ingest: JSON in, shared-secret bearer auth (NOT the
   # api_tokens table). Convergence MVP — masterplan Figure 6.
   pipeline :paperflow_ingest do
@@ -331,16 +342,45 @@ defmodule BarkparkWeb.Router do
   scope "/media", BarkparkWeb do
     pipe_through :api
 
+    get "/renditions/:id/:preset", MediaController, :serve_rendition
     get "/", MediaController, :index
     get "/:id/meta", MediaController, :show
     get "/files/*path", MediaController, :serve
   end
 
   scope "/media", BarkparkWeb do
-    pipe_through [:api, :require_token]
+    pipe_through :media_mutate
 
     post "/upload", MediaController, :upload
     delete "/:id", MediaController, :delete
+  end
+
+  # ── v1 Media — unified blob + mediaAsset metadata ───────────────────────
+  scope "/v1/media", BarkparkWeb do
+    pipe_through :api
+
+    get "/:dataset/search", V1.MediaController, :search
+    get "/:dataset/share/:token", V1.MediaCollectionsController, :share_view
+    get "/:dataset/collections", V1.MediaCollectionsController, :index
+    get "/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets
+    get "/:dataset/collections/:id", V1.MediaCollectionsController, :show
+    get "/:dataset/:id/relations", V1.MediaController, :relations
+    get "/:dataset", V1.MediaController, :index
+    get "/:dataset/:id", V1.MediaController, :show
+  end
+
+  scope "/v1/media", BarkparkWeb do
+    pipe_through :media_mutate
+
+    post "/:dataset/collections/:id/share", V1.MediaCollectionsController, :share
+    delete "/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share
+    post "/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member
+    delete "/:dataset/collections/:id/members/:asset_id", V1.MediaCollectionsController, :remove_member
+    post "/:dataset/upload", V1.MediaController, :upload
+    post "/:dataset/:id/checkout", V1.MediaController, :checkout
+    post "/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
+    patch "/:dataset/:id", V1.MediaController, :update
+    delete "/:dataset/:id", V1.MediaController, :delete
   end
 
   # ── Legacy compat ──────────────────────────────────────────────────────

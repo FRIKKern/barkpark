@@ -9,7 +9,8 @@ import Config
 
 config :barkpark,
   ecto_repos: [Barkpark.Repo],
-  generators: [timestamp_type: :utc_datetime, binary_id: true]
+  generators: [timestamp_type: :utc_datetime, binary_id: true],
+  media_upload_dir: Path.expand("../uploads", __DIR__)
 
 # Configure the endpoint
 config :barkpark, BarkparkWeb.Endpoint,
@@ -41,6 +42,8 @@ config :barkpark, :preview,
   secret: "dev-preview-secret-change-in-prod-please-32-chars",
   ttl_seconds: 600,
   issuer: "barkpark"
+
+config :barkpark, :media_signing_secret, "dev-media-signing-secret-change-in-prod"
 
 # Fallback CORS allowlist for API routes without a dataset path segment
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).

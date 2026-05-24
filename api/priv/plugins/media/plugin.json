@@ -1,0 +1,11 @@
+{
+  "plugin_name": "media",
+  "version": "0.1.0",
+  "description": "Native media library — one document per asset with rich metadata.",
+  "capabilities": ["schemas", "codelists"],
+  "module": "Barkpark.Plugins.Media",
+  "schemas": [
+    { "name": "mediaAsset", "version": "1", "file": "schemas/media_asset.json" },
+    { "name": "mediaCollection", "version": "1", "file": "schemas/media_collection.json" }
+  ]
+}

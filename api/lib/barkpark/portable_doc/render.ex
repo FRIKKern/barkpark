@@ -330,7 +330,7 @@ defmodule Barkpark.PortableDoc.Render do
   # inherits the renderer's `safe_url` scheme allowlist; the label stays bold
   # PdText. Empty value → a plain placeholder PdText line.
   def compose_block(%{"type" => "field-image"} = b) do
-    src = field_value_text(b)
+    src = media_field_url(Map.get(b, "value", ""))
 
     value_node =
       if src == "" do
@@ -473,6 +473,22 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   defp field_value_text(b), do: to_string(Map.get(b, "value", ""))
+
+  # Image fields may store a bare URL (v1) or JSON `{"url","assetId"}` (v2).
+  defp media_field_url(v) when is_binary(v) do
+    trimmed = String.trim(v)
+
+    if String.starts_with?(trimmed, "{") do
+      case Jason.decode(trimmed) do
+        {:ok, %{"url" => url}} when is_binary(url) and url != "" -> url
+        _ -> trimmed
+      end
+    else
+      trimmed
+    end
+  end
+
+  defp media_field_url(v), do: to_string(v || "")
 
   # Flatten a composite/array/localized sub-value to a single display string.
   # Maps and lists are rendered as compact, escaped summaries (the full
@@ -819,10 +835,15 @@ defmodule Barkpark.PortableDoc.Render do
   def safe_url(href) when is_binary(href) do
     trimmed = String.replace(href, ~r/^[\x00-\x20]+/, "")
 
-    if Regex.match?(@allowed_scheme, trimmed) do
-      escape_attr(trimmed)
-    else
-      "#"
+    cond do
+      String.starts_with?(trimmed, "/") ->
+        escape_attr(trimmed)
+
+      Regex.match?(@allowed_scheme, trimmed) ->
+        escape_attr(trimmed)
+
+      true ->
+        "#"
     end
   end
 

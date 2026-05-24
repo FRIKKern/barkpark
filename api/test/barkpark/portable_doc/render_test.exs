@@ -292,6 +292,24 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  describe "field-image v2 JSON values" do
+    test "extracts url from asset reference JSON for preview" do
+      block = %{
+        "type" => "field-image",
+        "label" => "Hero",
+        "value" =>
+          Jason.encode!(%{
+            "url" => "/media/files/2026/05/hero.jpg",
+            "assetId" => "drafts.asset-abc"
+          })
+      }
+
+      html = Render.render_block(block, %{})
+      assert html =~ ~s(src="/media/files/2026/05/hero.jpg")
+      refute html =~ "assetId"
+    end
+  end
+
   describe "safe_url/1 — scheme allowlist" do
     test "allows http/https/mailto/tel case-insensitively" do
       assert Render.safe_url("http://a.test") == "http://a.test"
@@ -304,6 +322,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.safe_url("javascript:alert(1)") == "#"
       assert Render.safe_url("data:text/html,<script>") == "#"
       assert Render.safe_url("\tjavascript:alert(1)") == "#"
+    end
+
+    test "allows same-origin root-relative paths" do
+      assert Render.safe_url("/media/files/2026/05/hero.jpg") ==
+               "/media/files/2026/05/hero.jpg"
     end
   end
 end

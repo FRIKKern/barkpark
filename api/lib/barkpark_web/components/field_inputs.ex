@@ -122,6 +122,25 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # reference → mediaAsset: visual picker (thumbnail grid + library browser).
+  def input(%{field: %{"type" => "reference", "name" => name, "refType" => "mediaAsset"}} = assigns) do
+    val = Map.get(assigns.editor_form, name, "")
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <div id={"bp-mp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-mp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <bp-media-picker
+        value={@v}
+        value-mode="reference"
+        dataset={@dataset}
+        data-bridge-target={"bp-mp-ref-hidden-#{@n}"}
+        data-token={@api_token_raw}
+      ></bp-media-picker>
+    </div>
+    """
+  end
+
   # reference: bp-reference-picker Web Component (Task #12 WI2) bridged
   # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
@@ -155,7 +174,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-media-picker value={@v} data-bridge-target={"bp-mp-hidden-#{@n}"} data-token={@api_token_raw}></bp-media-picker>
+      <bp-media-picker value={@v} dataset={@dataset} data-bridge-target={"bp-mp-hidden-#{@n}"} data-token={@api_token_raw}></bp-media-picker>
     </div>
     """
   end

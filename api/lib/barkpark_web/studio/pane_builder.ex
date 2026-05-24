@@ -211,6 +211,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         editor =
           cond do
+            type_name == "mediaAsset" and rest == [] ->
+              %{
+                view: :media_explorer,
+                type: type_name,
+                schema: schema,
+                kind_filter: desk_kind_filter(active_group)
+              }
+
             # A paper opens as a LIVE block view in the editor pane. Build a
             # `view: :paper` editor map carrying the paper document so
             # StudioLive can render + subscribe to the block stream.
@@ -327,6 +335,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> %{}
     end
   end
+
+  # Map schema desk-group names to bp-asset-explorer kind filters.
+  defp desk_kind_filter(nil), do: "all"
+  defp desk_kind_filter(%{"name" => "images"}), do: "image"
+  defp desk_kind_filter(%{"name" => "video"}), do: "video"
+  defp desk_kind_filter(%{"name" => "audio"}), do: "audio"
+  defp desk_kind_filter(%{"name" => "documents"}), do: "document"
+  defp desk_kind_filter(%{"name" => name}) when is_binary(name), do: "all"
+  defp desk_kind_filter(_), do: "all"
 
   @doc """
   Decide whether a nav pane should render as a narrow collapsed strip.

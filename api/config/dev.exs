@@ -69,3 +69,7 @@ config :barkpark, :default_cors_origins, ["http://localhost:3000", "http://local
 config :barkpark,
        :paperflow_ingest_token,
        System.get_env("PAPERFLOW_INGEST_TOKEN", "paperflow-dev-ingest-token")
+
+# Seeded by priv/repo/seeds.exs — injected into Studio LiveViews so local
+# media upload works without visiting /login first.
+config :barkpark, :dev_browser_token, "barkpark-dev-token"

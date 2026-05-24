@@ -118,6 +118,18 @@ defmodule BarkparkWeb.Integration.MediaTest do
       rm_uploaded(body)
     end
 
+    test "with session cookie (no Bearer header) → 201", %{conn: conn} do
+      resp =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => "barkpark-dev-token"})
+        |> post(~p"/media/upload", %{"file" => png_upload()})
+
+      assert resp.status == 201
+      body = json_response(resp, 201)
+      assert is_binary(body["id"])
+      rm_uploaded(body)
+    end
+
     test "without auth → 401", %{conn: conn} do
       resp = post(conn, ~p"/media/upload", %{"file" => png_upload()})
 

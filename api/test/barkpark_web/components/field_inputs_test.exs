@@ -230,6 +230,23 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
   # in-render Content.get_document/3 call). The Change/Remove + ref-selected
   # branch is byte-identical to legacy, deferred to integration coverage.
 
+  describe "mediaAsset reference clause" do
+    test "renders bp-media-picker in reference mode for mediaAsset refs" do
+      html =
+        render_input(%{
+          field: %{"type" => "reference", "name" => "featuredAsset", "refType" => "mediaAsset"},
+          editor_form: %{"featuredAsset" => "drafts.asset-abc"},
+          dataset: "production",
+          api_token_raw: "barkpark-dev-token"
+        })
+
+      assert html =~ ~r{<bp-media-picker[^>]*value-mode="reference"}
+      assert html =~ ~s(value="drafts.asset-abc")
+      assert html =~ ~s(dataset="production")
+      assert html =~ ~r{name="doc\[featuredAsset\]"}
+    end
+  end
+
   describe "image clause (Task #12 WI1 — bp-media-picker Web Component)" do
     test "renders bp-media-picker bridged via hidden input wrapper" do
       html =

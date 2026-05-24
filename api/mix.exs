@@ -58,6 +58,8 @@ defmodule Barkpark.MixProject do
       {:xml_builder, "~> 2.2"},
       {:cloak_ecto, "~> 1.2"},
       {:oban, "~> 2.17"},
+      # Media Phase 1 — image probe + renditions (requires libvips on host)
+      {:image, "~> 0.55"},
       # WI2: json schema validator dep
       {:ex_json_schema, "~> 0.10"},
       # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest

@@ -76,6 +76,25 @@ if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
 end
 
+media_signing_secret =
+  case System.get_env("MEDIA_SIGNING_SECRET") do
+    val when is_binary(val) and val != "" ->
+      val
+
+    _ ->
+      if config_env() == :prod do
+        skb =
+          System.get_env("SECRET_KEY_BASE") ||
+            raise "SECRET_KEY_BASE required to derive media signing secret"
+
+        Base.encode64(:crypto.hash(:sha256, "barkpark-media:" <> skb), padding: false)
+      end
+  end
+
+if is_binary(media_signing_secret) and media_signing_secret != "" do
+  config :barkpark, :media_signing_secret, media_signing_secret
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
