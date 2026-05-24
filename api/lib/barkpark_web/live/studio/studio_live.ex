@@ -6,9 +6,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.{Content, Media, Structure}
+  alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Presence
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
+
+  # `raw/1` lives in Phoenix.HTML; the :live_view macro imports
+  # Phoenix.HTML.Form but not the parent module, so import it here for the
+  # in-Studio paper block view (mirrors PaperLive).
+  import Phoenix.HTML, only: [raw: 1]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -89,8 +95,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # the draft has no published counterpart). The toggle button in
        # the editor header only surfaces when both sides exist.
        diff_visible: false,
-       published_doc: nil
+       published_doc: nil,
+       # ── In-Studio live paper view (convergence/papers-in-studio) ─────
+       # A paper opens LIVE inside the editor pane (read-only block stream),
+       # NOT the field form. `editor_view` is `:paper` while a paper is open,
+       # `:form` (the default) otherwise. The paper's per-doc topic is
+       # subscribed at open; `{:paper_block,…}` / `{:paper_updated,…}` frames
+       # update the pane in place with NO remount — mirroring PaperLive's
+       # streaming. `paper_rev` tracks the last applied monotonic streaming
+       # rev for gap detection; `paper_block_mode` flips false for HTML-only
+       # papers (the raw-HTML fallback). `paper_topic` is the subscribed
+       # topic so it can be unsubscribed on navigation.
+       editor_view: :form,
+       paper_doc: nil,
+       paper_rev: 0,
+       paper_html: "",
+       paper_block_mode: false,
+       paper_topic: nil
      )
+     |> stream(:paper_blocks, [])
      |> allow_upload(:image,
        accept: ~w(.jpg .jpeg .png .gif .webp .svg),
        max_entries: 1,
@@ -149,6 +172,46 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       {:noreply,
        assign(socket, editor_form: updated_form, save_status: "Updated by another user")}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # ── In-Studio live paper deltas (convergence/papers-in-studio) ──────────────
+  #
+  # A paper open in the editor pane subscribes to its per-doc topic
+  # (`doc:<dataset>:paper:<slug>` == Content.paper_topic/2). These frames patch
+  # the block stream / HTML in place — NO rebuild_panes, NO remount. Mirrors
+  # PaperLive's delta handling so the Gate-B streaming property holds inside
+  # the Studio. Frames that arrive while no paper is open are ignored.
+
+  @impl true
+  def handle_info({:paper_block, frame}, socket) do
+    cond do
+      socket.assigns[:editor_view] != :paper ->
+        {:noreply, socket}
+
+      # First block delta to a view still in HTML-only mode: no stream to
+      # append onto — adopt the block list wholesale via a refetch.
+      not socket.assigns.paper_block_mode ->
+        {:noreply, refetch_paper(socket)}
+
+      # Missed a frame — refetch the whole doc and re-stream from scratch.
+      paper_gap?(socket.assigns.paper_rev, frame.rev) ->
+        {:noreply, refetch_paper(socket)}
+
+      true ->
+        {:noreply, apply_paper_delta(socket, frame)}
+    end
+  end
+
+  def handle_info({:paper_updated, %{html: html} = msg}, socket) do
+    if socket.assigns[:editor_view] == :paper do
+      {:noreply,
+       socket
+       |> assign(:paper_html, html)
+       |> assign(:paper_block_mode, false)
+       |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
     else
       {:noreply, socket}
     end
@@ -1661,23 +1724,179 @@ defmodule BarkparkWeb.Studio.StudioLive do
     is_draft = (editor && editor[:is_draft]) || false
     has_published = (editor && editor[:has_published]) || false
 
-    assign(socket,
-      panes: panes,
-      editor_doc: editor_doc,
-      editor_schema: new_schema,
-      editor_type: editor_type,
-      editor_is_draft: is_draft,
-      editor_has_published: has_published,
-      editor_form: new_form,
-      save_status: socket.assigns[:save_status] || "",
-      nav_group: nav_group,
-      cross_violations: compute_cross_violations(new_schema, new_form),
-      published_doc: fetch_published_twin(editor_doc, editor_type, socket.assigns.dataset, is_draft, has_published),
-      diff_visible:
-        socket.assigns[:diff_visible] &&
-          editor_doc != nil && is_draft && has_published
-    )
-    |> maybe_refresh_content_preview()
+    socket =
+      assign(socket,
+        panes: panes,
+        editor_doc: editor_doc,
+        editor_schema: new_schema,
+        editor_type: editor_type,
+        editor_is_draft: is_draft,
+        editor_has_published: has_published,
+        editor_form: new_form,
+        save_status: socket.assigns[:save_status] || "",
+        nav_group: nav_group,
+        cross_violations: compute_cross_violations(new_schema, new_form),
+        published_doc:
+          fetch_published_twin(
+            editor_doc,
+            editor_type,
+            socket.assigns.dataset,
+            is_draft,
+            has_published
+          ),
+        diff_visible:
+          socket.assigns[:diff_visible] &&
+            editor_doc != nil && is_draft && has_published
+      )
+      |> maybe_refresh_content_preview()
+
+    # When the pane builder resolved a `view: :paper` editor (a paper opened
+    # in the editor pane), set up the live block view: stream the blocks (or
+    # adopt the HTML-only fallback) and remember the streaming rev so deltas
+    # apply in order. This is the only place the paper stream is (re)set — the
+    # `{:paper_block,…}` delta path NEVER rebuilds panes, so it never remounts.
+    case editor && editor[:view] do
+      :paper -> setup_paper_view(socket, editor[:doc])
+      _ -> clear_paper_view(socket)
+    end
+  end
+
+  # ── In-Studio live paper view (convergence/papers-in-studio) ────────────────
+  #
+  # The editor pane renders a paper's blocks LIVE, reusing PaperLive's render +
+  # delta logic. A block-backed paper streams each top-level block as a keyed
+  # stream item; an HTML-only (legacy) paper falls back to a raw-HTML re-assign.
+  # `{:paper_block,…}` / `{:paper_updated,…}` frames (handle_info below) patch
+  # the stream / HTML in place — no rebuild_panes, no remount.
+
+  defp setup_paper_view(socket, %{content: content} = paper) when is_map(content) do
+    blocks = Map.get(content, "blocks")
+    rev = Map.get(content, "rev") || 0
+    html = Map.get(content, "body_html") || ""
+
+    if is_list(blocks) do
+      socket
+      |> assign(
+        editor_view: :paper,
+        paper_doc: paper,
+        paper_rev: rev,
+        paper_html: html,
+        paper_block_mode: true
+      )
+      |> stream(:paper_blocks, paper_stream_items(blocks), reset: true)
+    else
+      socket
+      |> assign(
+        editor_view: :paper,
+        paper_doc: paper,
+        paper_rev: rev,
+        paper_html: html,
+        paper_block_mode: false
+      )
+      |> stream(:paper_blocks, [], reset: true)
+    end
+  end
+
+  defp setup_paper_view(socket, _paper), do: clear_paper_view(socket)
+
+  defp clear_paper_view(socket) do
+    if socket.assigns[:editor_view] == :paper do
+      assign(socket,
+        editor_view: :form,
+        paper_doc: nil,
+        paper_rev: 0,
+        paper_html: "",
+        paper_block_mode: false
+      )
+    else
+      assign(socket, editor_view: :form)
+    end
+  end
+
+  # Each stream item carries a stable id (the block id) and its rendered
+  # fragment. Top-level blocks stream individually; a `section` renders as one
+  # fragment (its children live inside it). Mirrors PaperLive.to_stream_items/1.
+  defp paper_stream_items(blocks) do
+    Enum.map(blocks, fn block ->
+      %{id: Map.get(block, "id"), html: Render.render_block(block)}
+    end)
+  end
+
+  # Stream dom ids are namespaced by the stream name (`:paper_blocks` →
+  # `"paper_blocks-<id>"`, per Phoenix.LiveView.LiveStream.default_id/2), so a
+  # remove-block delete-by-id must mirror that exact prefix — the UNDERSCORE in
+  # `paper_blocks` matters; a hyphen here would silently never match.
+  defp paper_block_dom_id(id), do: "paper_blocks-#{id}"
+
+  # A gap is any received rev that is not exactly the next one we expect. The
+  # first delta on a paper mounted at rev 0 (never-streamed) also refetches —
+  # correct: there is nothing to append onto. Mirrors PaperLive.gap?/2.
+  defp paper_gap?(last_rev, incoming_rev)
+       when is_integer(last_rev) and is_integer(incoming_rev) do
+    incoming_rev != last_rev + 1
+  end
+
+  defp paper_gap?(_last, _incoming), do: true
+
+  defp apply_paper_delta(socket, %{op_kind: "remove-block", block_id: id} = frame) do
+    socket
+    |> stream_delete_by_dom_id(:paper_blocks, paper_block_dom_id(id))
+    |> assign(:paper_rev, frame.rev)
+    |> assign(:paper_block_mode, true)
+  end
+
+  defp apply_paper_delta(
+         socket,
+         %{op_kind: kind, block_id: id, fragment_html: html, position: pos} = frame
+       )
+       when kind in ["append-block", "insert-after"] and is_integer(pos) do
+    # A NEW block enters the stream at its known top-level index so a
+    # mid-document insert-after lands in order — not appended to the end.
+    socket
+    |> stream_insert(:paper_blocks, %{id: id, html: html}, at: pos)
+    |> assign(:paper_rev, frame.rev)
+    |> assign(:paper_block_mode, true)
+  end
+
+  defp apply_paper_delta(socket, %{block_id: id, fragment_html: html} = frame) do
+    # patch-block / replace-block (and any new block whose top-level position is
+    # unknown, e.g. one nested in a section): upsert by id, in place (no `at:`)
+    # so editing a block never reorders it. The rev-gap path repairs residual
+    # ordering on the next full refetch.
+    socket
+    |> stream_insert(:paper_blocks, %{id: id, html: html})
+    |> assign(:paper_rev, frame.rev)
+    |> assign(:paper_block_mode, true)
+  end
+
+  defp refetch_paper(socket) do
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+    dataset = socket.assigns.dataset
+
+    case slug && Content.get_paper(slug, dataset) do
+      nil ->
+        socket
+
+      paper ->
+        content = paper.content || %{}
+
+        case Map.get(content, "blocks") do
+          blocks when is_list(blocks) ->
+            socket
+            |> stream(:paper_blocks, paper_stream_items(blocks), reset: true)
+            |> assign(:paper_doc, paper)
+            |> assign(:paper_rev, Map.get(content, "rev") || 0)
+            |> assign(:paper_block_mode, true)
+
+          _ ->
+            socket
+            |> assign(:paper_doc, paper)
+            |> assign(:paper_html, Map.get(content, "body_html") || "")
+            |> assign(:paper_rev, Map.get(content, "rev") || 0)
+            |> assign(:paper_block_mode, false)
+        end
+    end
   end
 
   # Fetch the published twin of the currently-open draft, if any. Returns
@@ -1738,6 +1957,82 @@ defmodule BarkparkWeb.Studio.StudioLive do
       [%{"name" => name} | _] -> name
       _ -> nil
     end
+  end
+
+  # ── In-Studio live paper view (function component) ──────────────────────────
+  #
+  # Renders a paper LIVE inside the editor pane. Block-backed papers stream each
+  # top-level block as a keyed `phx-update="stream"` item; HTML-only (legacy)
+  # papers render `raw(@paper_html)`. The `#paper-sentinel` element is rendered
+  # once OUTSIDE the streamed container so a `handle_info` DOM diff preserves it
+  # — the same no-reload proof PaperLive uses, now inside the Studio. Read-only:
+  # editing stays on the paper-ingest ops endpoint.
+  attr :paper_doc, :map, default: nil
+  attr :paper_rev, :integer, default: 0
+  attr :paper_html, :string, default: ""
+  attr :paper_block_mode, :boolean, default: false
+  attr :dataset, :string, required: true
+  attr :streams, :map, required: true
+
+  defp studio_paper_view(assigns) do
+    slug = assigns.paper_doc && assigns.paper_doc.doc_id
+    title = (assigns.paper_doc && assigns.paper_doc.title) || slug || "Paper"
+    assigns = assign(assigns, slug: slug, title: title)
+
+    ~H"""
+    <div class="editor-panel" data-test-id="studio-paper-editor">
+      <.document_header dataset={@dataset} title={@title}>
+        <:status_pill>
+          <span class="badge badge-published">paper</span>
+        </:status_pill>
+        <:actions>
+          <a
+            :if={@slug}
+            href={"/papers/#{@slug}"}
+            class="btn btn-ghost btn-sm"
+            target="_blank"
+            rel="noopener"
+            data-test-id="paper-open-standalone"
+          >
+            <.icon name="external-link" size={14} /> Open standalone
+          </a>
+        </:actions>
+      </.document_header>
+
+      <div class="editor-with-preview">
+        <div class="editor-body editor-panel-main">
+          <main class="bp-paper-shell" data-test-id="studio-paper-shell">
+            <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
+                  container. It survives a handle_info DOM diff but would be
+                  torn down by a remount/navigate — the no-reload proof. --%>
+            <div id="paper-sentinel" data-slug={@slug} hidden></div>
+
+            <%= cond do %>
+              <% is_nil(@slug) -> %>
+                <article id="paper-body" data-rev={@paper_rev}>
+                  <p id="paper-empty">No paper selected.</p>
+                </article>
+              <% @paper_block_mode -> %>
+                <%!-- Block-backed: each top-level block is its own keyed stream
+                      item. A delta patches/appends/deletes ONE of these. --%>
+                <article id="paper-body" data-rev={@paper_rev} phx-update="stream">
+                  <div
+                    :for={{dom_id, block} <- @streams.paper_blocks}
+                    id={dom_id}
+                    data-block-id={block.id}
+                  >
+                    {raw(block.html)}
+                  </div>
+                </article>
+              <% true -> %>
+                <%!-- HTML-only (legacy): whole opaque body, re-assigned on update. --%>
+                <article id="paper-body" data-rev={@paper_rev}>{raw(@paper_html)}</article>
+            <% end %>
+          </main>
+        </div>
+      </div>
+    </div>
+    """
   end
 
   # ── Render ─────────────────────────────────────────────────────────────────
@@ -1824,25 +2119,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     <span class="pane-item-label"><%= item.title %></span>
                   </a>
 
-                <% :paper_doc -> %>
-                  <%!-- A paper lists in the desk but opens in PaperLive
-                        (`/papers/:slug`), NOT the Studio form editor. It is an
-                        external link out of the StudioLive catch-all. --%>
-                  <a
-                    id={"paper-doc-#{item.id}"}
-                    href={item.href}
-                    class="pane-doc-item nav-paper-entry"
-                    data-test-id="nav-paper-entry"
-                  >
-                    <div class="bp-doc-row-body">
-                      <div class="pane-doc-title">
-                        <span class={"pane-doc-dot #{item.status || ""}"}></span>
-                        <%= item.title %>
-                      </div>
-                      <div class="pane-doc-id"><%= item.id %></div>
-                    </div>
-                  </a>
-
                 <% :doc -> %>
                   <% item_presences = PresenceState.on_doc(@presences, item.id) %>
                   <.pane_doc_item
@@ -1890,26 +2166,40 @@ defmodule BarkparkWeb.Studio.StudioLive do
            buttons. Migrating cleanly requires a custom-header slot on
            pane_column that fully replaces the default title row. See
            docs/superpowers/plans/2026-04-14-unified-pane-components.md. -->
-      <!-- Editor -->
-      <.studio_editor_shell
-        editor_doc={@editor_doc}
-        editor_schema={@editor_schema}
-        editor_type={@editor_type}
-        editor_form={@editor_form}
-        editor_is_draft={@editor_is_draft}
-        dataset={@dataset}
-        validation_errors={@validation_errors}
-        cross_violations={@cross_violations}
-        save_status={@save_status}
-        presences={@presences}
-        parent_assigns={assigns}
-        nav_group={@nav_group}
-        content_preview_rendered={@content_preview_rendered}
-        content_preview_visible={@content_preview_visible}
-        diff_visible={@diff_visible}
-        published_doc={@published_doc}
-        doc_actions={resolved_doc_actions(assigns)}
-      />
+      <!-- Editor — a paper opens as a LIVE read-only block view in this same
+           pane (convergence/papers-in-studio); every other doc type opens the
+           field form via studio_editor_shell. The left structure pane + the
+           Papers list pane (rendered above) stay visible either way. -->
+      <%= if @editor_view == :paper do %>
+        <.studio_paper_view
+          paper_doc={@paper_doc}
+          paper_rev={@paper_rev}
+          paper_html={@paper_html}
+          paper_block_mode={@paper_block_mode}
+          dataset={@dataset}
+          streams={@streams}
+        />
+      <% else %>
+        <.studio_editor_shell
+          editor_doc={@editor_doc}
+          editor_schema={@editor_schema}
+          editor_type={@editor_type}
+          editor_form={@editor_form}
+          editor_is_draft={@editor_is_draft}
+          dataset={@dataset}
+          validation_errors={@validation_errors}
+          cross_violations={@cross_violations}
+          save_status={@save_status}
+          presences={@presences}
+          parent_assigns={assigns}
+          nav_group={@nav_group}
+          content_preview_rendered={@content_preview_rendered}
+          content_preview_visible={@content_preview_visible}
+          diff_visible={@diff_visible}
+          published_doc={@published_doc}
+          doc_actions={resolved_doc_actions(assigns)}
+        />
+      <% end %>
       <!-- doc_actions flows through Registry.collect_doc_actions/1 with
            the host's `default_doc_actions/2` as :baseline. Plugins
            implementing resolve_doc_actions/2 can hide, reorder, or extend

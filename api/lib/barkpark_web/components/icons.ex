@@ -51,6 +51,8 @@ defmodule BarkparkWeb.Icons do
       ~s(<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>),
     "code" =>
       ~s(<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>),
+    "external-link" =>
+      ~s(<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>),
     "git-compare" =>
       ~s(<circle cx="5" cy="6" r="3"/><path d="M12 6h5a2 2 0 0 1 2 2v7"/><path d="m15 9-3-3 3-3"/><circle cx="19" cy="18" r="3"/><path d="M12 18H7a2 2 0 0 1-2-2V9"/><path d="m9 15 3 3-3 3"/>),
     "panel-right-open" =>

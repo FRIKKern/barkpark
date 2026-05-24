@@ -191,7 +191,7 @@ defmodule Barkpark.StructureTest do
       assert paper_node.visibility == :public
     end
 
-    test "a seeded paper is listed in the desk pane and opens via PaperLive" do
+    test "a seeded paper is listed in the desk pane as a selectable :doc row" do
       dataset = "structure_test_papers_listed"
       seed_paper_schema!(dataset)
 
@@ -208,10 +208,10 @@ defmodule Barkpark.StructureTest do
           ]
         })
 
-      # Drill into the "paper" doc-type-list pane.
+      # Drill into the "paper" doc-type-list pane (no slug → no editor yet).
       {panes, editor} = PaneBuilder.build(dataset, ["paper"])
 
-      # No Studio form editor opens for a paper — PaperLive owns it.
+      # No editor opens until a paper slug is selected.
       assert editor == nil
 
       paper_pane = List.last(panes)
@@ -219,11 +219,44 @@ defmodule Barkpark.StructureTest do
 
       item = Enum.find(paper_pane.items, fn i -> i.id == slug end)
       assert item, "expected the seeded paper to be listed in the desk pane"
-      # Listed rows are external links into PaperLive, not :doc form rows.
-      assert item.type == :paper_doc
-      assert item.href == "/papers/#{slug}"
+      # Rows are ordinary selectable :doc rows now — `phx-click="select"` drives
+      # Studio-internal navigation to /studio/:dataset/paper/:slug. NOT an
+      # external :paper_doc link out to /papers/:slug.
+      assert item.type == :doc
+      refute Map.has_key?(item, :href)
       # Title derived from the first heading block.
       assert item.title == "Desk Listing Paper"
+    end
+
+    test "selecting a paper opens a :paper view editor with the paper doc" do
+      dataset = "structure_test_papers_editor"
+      seed_paper_schema!(dataset)
+
+      slug = "2026-05-24-paper-editor"
+
+      {:ok, _doc} =
+        Content.upsert_paper(%{
+          slug: slug,
+          dataset: dataset,
+          blocks: [
+            %{"id" => "h", "type" => "heading", "text" => "Editor Paper"},
+            %{"id" => "p", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "body"}]}
+          ]
+        })
+
+      # Drill into /studio/:dataset/paper/:slug.
+      {panes, editor} = PaneBuilder.build(dataset, ["paper", slug])
+
+      # The list pane stays present (desk structure visible)...
+      paper_pane = List.last(panes)
+      assert paper_pane.type_name == "paper"
+
+      # ...and the editor resolves a :paper view carrying the paper document.
+      assert editor[:view] == :paper
+      assert editor[:type] == "paper"
+      assert editor[:doc].doc_id == slug
+      assert is_list(get_in(editor[:doc].content, ["blocks"]))
     end
   end
 

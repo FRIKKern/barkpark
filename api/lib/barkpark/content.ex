@@ -51,7 +51,7 @@ defmodule Barkpark.Content do
   # (`{:paper_updated, …}` whole-HTML, `{:paper_block, …}` delta) so
   # `BarkparkWeb.PaperLive` keeps working with minimal change.
   @paper_type "paper"
-  @paper_default_dataset "paperflow"
+  @paper_default_dataset "production"
 
   # ── Draft/Published helpers ────────────────────────────────────────────────
 
@@ -1611,7 +1611,11 @@ defmodule Barkpark.Content do
   # `papers` table into the unified `documents` table. The logic below is the
   # port of the former `Barkpark.Papers` context.
 
-  @doc "The default dataset papers live under (mirrors the paperflow side)."
+  @doc """
+  The default dataset papers live under. Convergence: papers are now
+  first-class documents in the `production` dataset (was `paperflow`),
+  so they surface in the Studio desk at `/studio/production`.
+  """
   def paper_default_dataset, do: @paper_default_dataset
 
   @doc "The document type discriminator for papers."
