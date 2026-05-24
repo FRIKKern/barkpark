@@ -146,4 +146,135 @@ defmodule Barkpark.PortableDoc.Synthesis do
   # Deterministic, collision-free synthetic ids so a re-synthesis of the same
   # doc yields identical block ids (idempotent in-memory open).
   defp synth_id(prefix, name, idx), do: "synth-#{prefix}-#{name}-#{idx}"
+
+  # ── Exp-P3.1 — Create-from-Expectation scaffold ──────────────────────────
+  #
+  # `scaffold/3` is `synthesize/3`'s create-time sibling. Where synthesis
+  # reproduces blocks for a LEGACY doc that already has values (skipping fields
+  # with no stored value), scaffold INSTANTIATES the Expectation for a BRAND-NEW
+  # document: ONE bound field-block per `field` layout entry (always present,
+  # even with an empty value), valued from `values` (provided content / row
+  # title) → `prefill` → empty, plus the body region's free blocks (a single
+  # empty paragraph placeholder when the new doc carries no body).
+  #
+  # The result feeds `Projection.project/3` so `content[fieldName]` +
+  # `content["body"]` are derived from the same blocks that were just built.
+  # Pure: no Repo, no mutation of inputs.
+
+  @doc """
+  Build the initial block list for a new Expectation-bearing document.
+
+  Arguments mirror `synthesize/3`:
+
+    * `layout`  — the schema's resolved Expectation layout (Exp-P1).
+    * `values`  — a string-keyed map of any caller-provided field values for the
+      new doc (the create attrs' `content` merged with the row `title` under
+      `"title"`). Wins over `prefill`.
+    * `prefill` — the schema's resolved Expectation `prefill` scaffold (Exp-P1):
+      the create-time floor for field values.
+    * `fields`  — the schema's `fields` list, for picking the `field-*` block
+      type per bound field.
+
+  Returns an ordered block list: one BOUND field-block per `field` entry (in
+  layout order, always emitted), with the body region's free blocks at the
+  `region` marker. Field value priority: `values[name]` → `prefill[name]` →
+  `""` (empty). A field-boolean with no value defaults to `false`.
+  """
+  @spec scaffold([map()], map(), map(), [map()]) :: [block()]
+  def scaffold(layout, values, prefill, fields)
+      when is_list(layout) and is_map(values) and is_map(prefill) and is_list(fields) do
+    type_by_name = field_type_index(fields)
+
+    layout
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {entry, idx} ->
+      case entry do
+        %{"kind" => "field", "name" => name} ->
+          scaffold_field_block(name, values, prefill, type_by_name, idx)
+
+        %{"kind" => "region", "name" => region} ->
+          scaffold_body_blocks(Map.get(values, region), idx)
+
+        _ ->
+          []
+      end
+    end)
+  end
+
+  # One bound field-block per field layout entry, ALWAYS emitted (unlike
+  # synthesis, which skips value-less fields). The value is resolved from the
+  # provided values, then prefill, then an empty default by block type.
+  defp scaffold_field_block(name, values, prefill, type_by_name, idx) do
+    block_type = Map.get(@field_block_types, Map.get(type_by_name, name), "field-string")
+    value = scaffold_value(name, values, prefill, block_type)
+
+    [
+      %{
+        "id" => synth_id("f", name, idx),
+        "type" => block_type,
+        "fieldName" => name,
+        "value" => value
+      }
+    ]
+  end
+
+  defp scaffold_value(name, values, prefill, block_type) do
+    cond do
+      Map.has_key?(values, name) -> Map.get(values, name)
+      Map.has_key?(prefill, name) -> Map.get(prefill, name)
+      block_type == "field-boolean" -> false
+      true -> ""
+    end
+  end
+
+  # The body region for a brand-new doc. An already-projected body map → reuse
+  # its blocks (a create that carried an explicit body). A non-empty string →
+  # one paragraph free-block. Empty/absent → a single EMPTY paragraph
+  # placeholder so the block editor opens with a writable body region.
+  defp scaffold_body_blocks(%{"blocks" => blocks}, _idx) when is_list(blocks), do: blocks
+
+  defp scaffold_body_blocks(text, idx) when is_binary(text) and text != "" do
+    [
+      %{
+        "id" => synth_id("body", "p", idx),
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => text}]
+      }
+    ]
+  end
+
+  defp scaffold_body_blocks(_other, idx) do
+    [%{"id" => synth_id("body", "p", idx), "type" => "paragraph", "content" => []}]
+  end
+
+  # ── Exp-P3.2 — Classic-save bound-only patch (the data-loss guard) ────────
+
+  @doc """
+  Patch ONLY the bound-block values in `blocks` from a `field => value` map,
+  leaving every FREE block and the overall block ORDER byte-identical.
+
+  This is the Classic-save reroute for a block-bearing document (Exp-P3.2): the
+  submitted Classic form is a flat field map, but the document's source of truth
+  is its block list. Rather than overwrite `content` from the field map (which
+  would drop free blocks and `content["blocks"]` entirely — the data-loss bug),
+  the caller maps each submitted field to the matching bound block and patches
+  just that block's `"value"`. A field with no matching bound block is ignored
+  (Classic baseline keys like `"status"` are not bound). A bound block whose
+  field is absent from `values` is left untouched.
+
+  Returns the new block list — same length, same order, free blocks `===` the
+  originals. Pure: no Repo, no mutation of inputs.
+  """
+  @spec patch_bound_values([block()], map()) :: [block()]
+  def patch_bound_values(blocks, values) when is_list(blocks) and is_map(values) do
+    Enum.map(blocks, fn block ->
+      name = block["fieldName"]
+
+      if is_binary(name) and name != "" and Map.has_key?(values, name) do
+        Map.put(block, "value", Map.get(values, name))
+      else
+        block
+      end
+    end)
+  end
 end
