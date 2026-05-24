@@ -32,7 +32,7 @@ defmodule Barkpark.Content do
     Validation
   }
 
-  alias Barkpark.PortableDoc.{Patch, Render}
+  alias Barkpark.PortableDoc.{Patch, Projection, Render, Synthesis}
 
   @drafts_prefix "drafts."
 
@@ -1760,6 +1760,52 @@ defmodule Barkpark.Content do
   end
 
   @doc """
+  Resolve the block list for editing a document — the stored
+  `content["blocks"]` when present, else a LAZILY SYNTHESIZED in-memory list
+  (Exp-P2, step 2.5) built from the schema's Expectation layout + the doc's
+  existing `content[fieldName]` values + body.
+
+  Returns `{blocks, synthesized?}`. When `synthesized?` is `true` the list was
+  built in memory and the stored row is UNTOUCHED — nothing is persisted until
+  the first op lands (the caller's first `apply_paper_block_op`/`upsert_paper`
+  write persists it). When `false`, `content["blocks"]` already existed and is
+  returned verbatim.
+
+  The synthesis round-trip is byte-equal: feeding the synthesized blocks back
+  through `Projection.project/3` reproduces the original `content[fieldName]`
+  values exactly (see `Barkpark.PortableDoc.Synthesis`).
+  """
+  @spec resolve_blocks_for_edit(map() | nil, String.t(), String.t()) :: {[map()], boolean()}
+  def resolve_blocks_for_edit(nil, _type, _dataset), do: {[], false}
+
+  def resolve_blocks_for_edit(%Document{} = doc, type, dataset) do
+    content = doc.content || %{}
+
+    case Map.get(content, "blocks") do
+      blocks when is_list(blocks) ->
+        {blocks, false}
+
+      _ ->
+        {synthesize_blocks(doc, type, dataset), true}
+    end
+  end
+
+  # Build the in-memory synthesized block list: resolve the Expectation layout
+  # for the doc's schema, fold the row `title` into the content map under
+  # "title" (so a bound title block picks it up — `title` lives on the row, not
+  # under content), and delegate to the pure Synthesis module.
+  defp synthesize_blocks(%Document{} = doc, type, dataset) do
+    {layout, fields} =
+      case get_schema(type, dataset) do
+        {:ok, schema} -> {resolve_expectation(schema).layout, schema.fields || []}
+        _ -> {SchemaDefinition.default_layout(%{}), []}
+      end
+
+    content_with_title = Map.put(doc.content || %{}, "title", doc.title)
+    Synthesis.synthesize(layout, content_with_title, fields)
+  end
+
+  @doc """
   Upsert a paper keyed by `{dataset, slug}` (as a type-"paper" document) and
   broadcast a **whole-HTML** frame on the per-doc topic.
 
@@ -1799,6 +1845,11 @@ defmodule Barkpark.Content do
       |> maybe_put_paper("goal_id", attrs["goal_id"])
       |> maybe_put_paper("event_type", attrs["event_type"])
       |> Map.put("rev", next_rev)
+      # Project-on-write (Exp-P2): when this write carries a block list, project
+      # the bound-field index + content["body"] from it. The SOLE writer of
+      # content[fieldName]/content["body"], alongside apply_paper_block_op/3.
+      # An HTML-only (legacy) write with no blocks skips projection untouched.
+      |> maybe_project(blocks, dataset)
 
     title = paper_title(content, slug)
 
@@ -1873,6 +1924,11 @@ defmodule Barkpark.Content do
         |> Map.put("blocks", new_blocks)
         |> Map.put("body_html", body_html)
         |> Map.put("rev", rev)
+        # Project-on-write (Exp-P2): the SOLE writer of content[fieldName] and
+        # content["body"]. Re-derives the bound-field index + body from the
+        # block list we just computed, so Classic queries stay in sync with the
+        # blocks and never drift.
+        |> Projection.project(new_blocks, render_opts)
 
       title = paper_title(content, slug)
 
@@ -1961,8 +2017,12 @@ defmodule Barkpark.Content do
     end)
   end
 
-  # `documents.title` is derived from the first heading block's text, falling
-  # back to the slug — the desk list needs a title.
+  # `documents.title` is derived, in priority order, from:
+  #   1. the PROJECTED bound title field (`content["title"]`) — Exp-P2: a bound
+  #      title field-block is the explicit, editor-authored title, so it wins
+  #      and the Classic query (Envelope) surfaces it as the row title;
+  #   2. the first heading block's text (legacy heading-driven papers);
+  #   3. the slug (the desk list always needs a title).
   defp paper_title(content, slug) when is_map(content) do
     blocks = Map.get(content, "blocks")
 
@@ -1973,7 +2033,7 @@ defmodule Barkpark.Content do
         end)
       end
 
-    heading_text || slug
+    blank_to_nil(Map.get(content, "title")) || heading_text || slug
   end
 
   defp blank_to_nil(""), do: nil
@@ -2017,6 +2077,16 @@ defmodule Barkpark.Content do
 
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # Project-on-write only when this write actually carries a block list. An
+  # HTML-only legacy paper write (no blocks) leaves content[fieldName]/body
+  # untouched — projection is the SOLE writer, so a no-block write must not
+  # invent an empty body.
+  defp maybe_project(content, blocks, dataset) when is_list(blocks) do
+    Projection.project(content, blocks, render_opts(dataset))
+  end
+
+  defp maybe_project(content, _blocks, _dataset), do: content
 
   # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
   # increments the stored integer otherwise.
