@@ -1,7 +1,6 @@
 defmodule Barkpark.Media do
   @moduledoc "Context for media file upload, storage, and retrieval."
 
-  import Ecto.Query, warn: false
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Media.{Cdn, Events, MediaFile}
