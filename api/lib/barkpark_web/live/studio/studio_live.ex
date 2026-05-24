@@ -1040,6 +1040,27 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, paper_op(socket, op)}
   end
 
+  # Slash-menu insert (P3.3). The <bp-paper-editor> WC emits a `bp-slash-insert`
+  # CustomEvent {type, afterId} when the user picks a type from the "/" popup;
+  # the BarkparkPaperEditor hook forwards it here. We build the block with the
+  # SAME default_block/2 + new_block_id/0 the add-block path uses and apply an
+  # `insert-after` op through the SAME paper_op/2 pipeline — no duplicated
+  # block-creation logic. A blank/empty afterId falls back to append-block.
+  def handle_event("paper-slash-insert", %{"type" => type} = params, socket) do
+    new = default_block(type, new_block_id())
+
+    op =
+      case params["afterId"] do
+        after_id when is_binary(after_id) and after_id != "" ->
+          %{"op" => "insert-after", "afterId" => after_id, "block" => new}
+
+        _ ->
+          %{"op" => "append-block", "block" => new}
+      end
+
+    {:noreply, paper_op(socket, op)}
+  end
+
   # Delete a block → remove-block by id.
   def handle_event("paper-delete-block", %{"id" => id}, socket) do
     {:noreply, paper_op(socket, %{"op" => "remove-block", "id" => id})}

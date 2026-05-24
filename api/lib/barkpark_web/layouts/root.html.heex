@@ -1387,6 +1387,67 @@
     .bp-paper-edit-readonly { color: var(--fg-dim); font-style: italic; font-size: 12px; }
     .bp-paper-add-block { display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px dashed var(--border); }
     .bp-paper-add-block label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+
+    /* Light editor-frame polish (P3.3): give the rich-text WC wrapper a
+       calm, intentional surface so the editable area reads as a "page". */
+    .bp-paper-edit-wc {
+      border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
+      background: var(--bg-card); padding: 8px 12px;
+      transition: border-color 0.12s;
+    }
+    .bp-paper-edit-wc:focus-within { border-color: var(--ring); }
+    .bp-paper-editor-body { outline: none; }
+    .bp-paper-editor-body :first-child { margin-top: 0; }
+    .bp-paper-editor-body p { margin: 0; }
+    .bp-paper-editor-body h1,
+    .bp-paper-editor-body h2,
+    .bp-paper-editor-body h3 { margin: 2px 0; line-height: 1.25; letter-spacing: -0.01em; }
+    .bp-paper-editor-body ul,
+    .bp-paper-editor-body ol { padding-left: 20px; }
+    .bp-paper-editor-body ul li { list-style: disc; }
+    .bp-paper-editor-body ol li { list-style: decimal; }
+    .bp-paper-editor-body code {
+      font-family: var(--font-mono); font-size: 0.9em;
+      background: var(--bg-muted); padding: 1px 4px; border-radius: 3px;
+    }
+
+    /* ── Slash menu (Notion-style "/" insert popup, P3.3) ─────────────────
+       Rendered into <body> by SlashMenu (src/slash-menu.js) and positioned
+       fixed at the caret. Grouped headers + selectable rows; the .is-active
+       row mirrors the keyboard cursor. */
+    .bp-slash-menu {
+      position: fixed; z-index: 200;
+      min-width: 220px; max-width: 280px; max-height: 320px;
+      overflow-y: auto;
+      padding: 6px;
+      background: var(--bg-popover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+    }
+    .bp-slash-group {
+      padding: 6px 8px 4px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--fg-dim);
+    }
+    .bp-slash-item {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 7px 8px;
+      background: transparent; border: none; border-radius: var(--radius-sm);
+      color: var(--fg); font-family: inherit; font-size: 13px;
+      text-align: left; cursor: pointer;
+      transition: background 0.08s;
+    }
+    .bp-slash-item:hover,
+    .bp-slash-item.is-active { background: var(--bg-accent); }
+    .bp-slash-hint {
+      flex: 0 0 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 4px;
+      background: var(--bg-muted); color: var(--fg-muted);
+      font-size: 11px; font-family: var(--font-mono);
+    }
+    .bp-slash-label { flex: 1; min-width: 0; }
   </style>
 </head>
 <body>
@@ -1478,9 +1539,20 @@
           this.pushEvent("paper-op", e.detail);
         };
         this.el.addEventListener("bp-op", this._onOp);
+
+        // Slash menu (P3.3): the WC emits a bubbling/composed `bp-slash-insert`
+        // CustomEvent {detail:{type, afterId}} when the user picks a block type
+        // from the "/" popup. Forward it verbatim to the server's
+        // paper-slash-insert handler, which builds the block (default_block +
+        // insert-after) through the SAME paper_op pipeline patch-block uses.
+        this._onSlash = (e) => {
+          this.pushEvent("paper-slash-insert", e.detail);
+        };
+        this.el.addEventListener("bp-slash-insert", this._onSlash);
       },
       destroyed() {
         this.el.removeEventListener("bp-op", this._onOp);
+        this.el.removeEventListener("bp-slash-insert", this._onSlash);
       }
     };
 

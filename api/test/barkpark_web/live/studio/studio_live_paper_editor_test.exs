@@ -876,4 +876,65 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     refute new_id in (Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]))
     refute render(view) =~ ~s(data-edit-block-id="#{new_id}")
   end
+
+  # ── P3.3: the Notion-style slash menu (barkpark-h5ef) ──────────────────────
+  # The <bp-paper-editor> WC emits a bubbling/composed `bp-slash-insert`
+  # CustomEvent {type, afterId} when the user picks a type from the "/" popup;
+  # the BarkparkPaperEditor hook forwards detail verbatim as a `paper-slash-
+  # insert` pushEvent. The server builds the block with the SAME default_block/2
+  # + new_block_id/0 the add-block path uses and applies an `insert-after` op
+  # through the SAME paper_op/2 pipeline. Simulate that wire with render_hook —
+  # the event arrives JSON-decoded with string keys, exactly as the handler
+  # accepts it.
+
+  test "a paper-slash-insert inserts a heading AFTER the anchor block + persists",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+
+    # Initial order: h-1, p-intro, p-second.
+    assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
+             ["h-1", "p-intro", "p-second"]
+
+    render_hook(view, "paper-slash-insert", %{"type" => "heading", "afterId" => "p-intro"})
+
+    blocks = Content.paper_blocks(@slug, @dataset)
+    ids = Enum.map(blocks, & &1["id"])
+
+    # The new heading landed DIRECTLY after p-intro (insert-after, not appended
+    # to the tail), with a fresh "b-" id.
+    intro_idx = Enum.find_index(ids, &(&1 == "p-intro"))
+    new_id = Enum.at(ids, intro_idx + 1)
+    refute new_id == "p-second"
+    assert String.starts_with?(new_id, "b-")
+
+    new = Enum.find(blocks, &(&1["id"] == new_id))
+    # default_block("heading", …) shape — proves the server reused the SAME
+    # block-creation path the add-block menu uses.
+    assert new["type"] == "heading"
+    assert new["level"] == 2
+
+    # The blocks below the anchor stay in order; p-second is now last.
+    assert List.last(ids) == "p-second"
+    # It renders in the editor (compose_block accepted it during render_blocks).
+    assert render(view) =~ ~s(data-edit-block-id="#{new_id}")
+  end
+
+  test "a paper-slash-insert with a blank afterId appends at the end",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+
+    before_count = Content.paper_blocks(@slug, @dataset) |> length()
+
+    render_hook(view, "paper-slash-insert", %{"type" => "paragraph", "afterId" => ""})
+
+    blocks = Content.paper_blocks(@slug, @dataset)
+    assert length(blocks) == before_count + 1
+
+    last = List.last(blocks)
+    assert last["type"] == "paragraph"
+    assert String.starts_with?(last["id"], "b-")
+    assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
+  end
 end
