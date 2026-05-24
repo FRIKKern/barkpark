@@ -97,6 +97,8 @@ Media Desk layout maps directly to the two modes:
 
 Future Phase 3 additions in this shell: saved searches (sidebar), bulk select on query, list column config.
 
+**Shipped in explorer (Phase 0+):** sort control, Format facet, scroll/load-more paging, list headers, `/` to focus search, inspector tags + document previews, session prefs for view/sort.
+
 ---
 
 ## References

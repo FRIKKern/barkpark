@@ -69,6 +69,7 @@
       thumbnailUrl: row.thumbnailUrl || nested.thumbnailUrl,
       previewUrl: row.previewUrl || nested.previewUrl,
       originalUrl: row.originalUrl || nested.originalUrl,
+      _updatedAt: nested._updatedAt || row.updatedAt,
       permissions: row.permissions || [],
       fileInfo: Object.assign({}, nested.fileInfo || {}, {
         url: (nested.fileInfo && nested.fileInfo.url) || row.originalUrl || row.url,
@@ -112,14 +113,24 @@
     { id: "other", label: "Other" }
   ];
 
-  const FACET_FIELDS = ["tags", "processing", "visibility", "status"];
+  const FACET_FIELDS = ["tags", "mimeType", "processing", "visibility", "status"];
   const FACET_LABELS = {
     tags: "Tags",
+    mimeType: "Format",
     processing: "Processing",
     visibility: "Visibility",
     status: "Status",
     kind: "Kind"
   };
+
+  const SORT_OPTIONS = [
+    { id: "created-desc", label: "Newest first" },
+    { id: "created-asc", label: "Oldest first" },
+    { id: "updated-desc", label: "Recently updated" },
+    { id: "relevance", label: "Best match" }
+  ];
+
+  const STORAGE_KEY = "bp-ae-prefs";
 
   function facetEntries(bucket) {
     if (!bucket) return [];
@@ -153,6 +164,9 @@
       this._offset = 0;
       this._pageSize = 50;
       this._viewMode = "grid";
+      this._sort = "created-desc";
+      this._loadAbort = null;
+      this._scrollObserver = null;
     }
 
     connectedCallback() {
@@ -174,12 +188,18 @@
         "</aside>" +
         '<main class="bp-ae-main">' +
         '<header class="bp-ae-toolbar">' +
-        '<input type="search" class="bp-ae-search form-input" placeholder="Find by title, filename, or filters…" aria-label="Search assets" />' +
+        '<input type="search" class="bp-ae-search form-input" placeholder="Find assets…  (/ to focus)" aria-label="Search assets" />' +
         '<div class="bp-ae-toolbar-pills"></div>' +
         '<div class="bp-ae-view-toggle" role="group" aria-label="Result view">' +
         '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="Grid view">Grid</button>' +
         '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-list" data-view="list" title="List view">List</button>' +
         "</div>" +
+        '<select class="form-input bp-ae-sort text-sm" aria-label="Sort results">' +
+        SORT_OPTIONS.map(
+          (o) =>
+            '<option value="' + o.id + '">' + esc(o.label) + "</option>"
+        ).join("") +
+        "</select>" +
         '<label class="btn btn-primary btn-sm bp-ae-upload">' +
         "<span>Upload</span>" +
         '<input type="file" multiple hidden />' +
@@ -197,6 +217,7 @@
         '<div class="bp-ae-grid media-grid"></div>' +
         '<div class="bp-ae-load-more-wrap">' +
         '<button type="button" class="btn btn-sm bp-ae-load-more" hidden>Load more</button>' +
+        '<div class="bp-ae-scroll-sentinel" aria-hidden="true"></div>' +
         "</div>" +
         "</section>" +
         '<footer class="bp-ae-filmstrip">' +
@@ -229,6 +250,9 @@
       this._searchEl = this.querySelector(".bp-ae-search");
       this._pillsEl = this.querySelector(".bp-ae-toolbar-pills");
       this._findBarEl = this.querySelector(".bp-ae-find-bar");
+      this._sortEl = this.querySelector(".bp-ae-sort");
+      this._densityLabelEl = this.querySelector(".bp-ae-density-label");
+      this._scrollSentinel = this.querySelector(".bp-ae-scroll-sentinel");
       this._countEl = this.querySelector(".bp-ae-count");
       this._loadingEl = this.querySelector(".bp-ae-loading");
       this._emptyEl = this.querySelector(".bp-ae-empty");
@@ -244,9 +268,18 @@
       this._renderFilters();
       this._loadCollections();
       this._applyKindFilterAttr();
+      this._restorePrefs();
 
       this._searchEl.addEventListener("input", (e) => {
         this._search = e.target.value || "";
+        if (this._search && this._sort === "created-desc") {
+          this._sort = "relevance";
+          if (this._sortEl) this._sortEl.value = "relevance";
+        }
+        if (!this._search && this._sort === "relevance") {
+          this._sort = "created-desc";
+          if (this._sortEl) this._sortEl.value = "created-desc";
+        }
         this._renderToolbarPills();
         clearTimeout(this._searchTimer);
         this._searchTimer = setTimeout(() => this._loadAssets(), 250);
@@ -290,6 +323,14 @@
         this._loadMoreEl.addEventListener("click", () => this._loadAssets(true));
       }
 
+      if (this._sortEl) {
+        this._sortEl.addEventListener("change", () => {
+          this._sort = this._sortEl.value || "created-desc";
+          this._savePrefs();
+          this._loadAssets();
+        });
+      }
+
       this.querySelectorAll(".bp-ae-view-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const mode = btn.dataset.view || "grid";
@@ -298,15 +339,22 @@
           this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
             b.classList.toggle("is-active", b.dataset.view === mode);
           });
-          if (this._gridEl) {
-            this._gridEl.classList.toggle("bp-ae-list", mode === "list");
-          }
+          this._syncToolbarChrome();
+          this._savePrefs();
           this._renderGrid();
         });
       });
 
+      this._bindScrollLoad();
+
       document.addEventListener("keydown", (e) => {
-        if (!this.isConnected || !this._selected) return;
+        if (!this.isConnected) return;
+        if (e.key === "/" && !/input|textarea|select/i.test(e.target.tagName)) {
+          e.preventDefault();
+          if (this._searchEl) this._searchEl.focus();
+          return;
+        }
+        if (!this._selected) return;
         if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
         if (e.key === "ArrowRight") this._selectRelative(1);
         if (e.key === "ArrowLeft") this._selectRelative(-1);
@@ -356,6 +404,80 @@
 
     _mediaBase() {
       return "/v1/media/" + encodeURIComponent(this._dataset());
+    }
+
+    _prefsKey() {
+      return STORAGE_KEY + ":" + this._dataset();
+    }
+
+    _restorePrefs() {
+      try {
+        const raw = sessionStorage.getItem(this._prefsKey());
+        if (!raw) return;
+        const prefs = JSON.parse(raw);
+        if (prefs.viewMode === "grid" || prefs.viewMode === "list") {
+          this._viewMode = prefs.viewMode;
+          this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
+            b.classList.toggle("is-active", b.dataset.view === this._viewMode);
+          });
+        }
+        if (prefs.sort && SORT_OPTIONS.some((o) => o.id === prefs.sort)) {
+          this._sort = prefs.sort;
+          if (this._sortEl) this._sortEl.value = this._sort;
+        }
+        this._syncToolbarChrome();
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+
+    _savePrefs() {
+      try {
+        sessionStorage.setItem(
+          this._prefsKey(),
+          JSON.stringify({ viewMode: this._viewMode, sort: this._sort })
+        );
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+
+    _syncToolbarChrome() {
+      const list = this._viewMode === "list";
+      if (this._densityLabelEl) this._densityLabelEl.hidden = list;
+      if (this._gridEl) this._gridEl.classList.toggle("bp-ae-list", list);
+    }
+
+    _effectiveSort() {
+      if (this._sort === "relevance" && !this._search) return "created-desc";
+      return this._sort || "created-desc";
+    }
+
+    _bindScrollLoad() {
+      if (!this._scrollSentinel || typeof IntersectionObserver === "undefined") return;
+      if (this._scrollObserver) this._scrollObserver.disconnect();
+      this._scrollObserver = new IntersectionObserver(
+        (entries) => {
+          const hit = entries.find((e) => e.isIntersecting);
+          if (!hit || this._loading) return;
+          if (this._assets.length >= this._total || this._total === 0) return;
+          this._loadAssets(true);
+        },
+        { root: this._gridWrapEl, rootMargin: "120px" }
+      );
+      this._scrollObserver.observe(this._scrollSentinel);
+    }
+
+    _updateLoadMoreBtn() {
+      if (!this._loadMoreEl) return;
+      const remaining = Math.max(0, this._total - this._assets.length);
+      if (remaining <= 0) {
+        this._loadMoreEl.hidden = true;
+        return;
+      }
+      this._loadMoreEl.hidden = false;
+      this._loadMoreEl.textContent =
+        "Load more · " + remaining.toLocaleString() + " remaining";
     }
 
     _toast(msg) {
@@ -684,6 +806,10 @@
     }
 
     async _loadAssets(append) {
+      if (this._loadAbort) this._loadAbort.abort();
+      this._loadAbort = new AbortController();
+      const signal = this._loadAbort.signal;
+
       if (!append) {
         this._offset = 0;
         this._total = 0;
@@ -698,7 +824,7 @@
       const params = new URLSearchParams({
         limit: String(this._pageSize),
         offset: String(this._offset),
-        sort: this._search ? "relevance" : "created-desc"
+        sort: this._effectiveSort()
       });
 
       let url;
@@ -707,7 +833,7 @@
         if (this._search) params.set("q", this._search);
         url = this._mediaBase() + "/collections/" + encodeURIComponent(this._collectionId) + "/assets?" + params.toString();
       } else {
-        params.set("facets", "kind,tags,processing,visibility,status");
+        params.set("facets", "kind,tags,mimeType,processing,visibility,status");
         if (this._filterKind && this._filterKind !== "all") {
           params.set("facet.kind", this._filterKind);
         }
@@ -721,7 +847,8 @@
       try {
         const r = await fetch(url, {
           credentials: "same-origin",
-          headers: this._headers()
+          headers: this._headers(),
+          signal: signal
         });
         if (!r.ok) throw new Error(String(r.status));
         const data = await r.json();
@@ -741,19 +868,19 @@
           this._assets = page;
         }
         this._offset = this._assets.length;
-      } catch (_e) {
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
         if (!append) this._assets = [];
       } finally {
+        if (signal.aborted) return;
         this._loading = false;
         if (this._loadingEl) this._loadingEl.hidden = true;
         if (this._gridWrapEl) {
           this._gridWrapEl.classList.remove("is-loading");
           this._gridWrapEl.classList.add("is-loaded");
         }
-        if (this._loadMoreEl) {
-          this._loadMoreEl.disabled = false;
-          this._loadMoreEl.hidden = this._assets.length >= this._total || this._total === 0;
-        }
+        if (this._loadMoreEl) this._loadMoreEl.disabled = false;
+        this._updateLoadMoreBtn();
         this._renderFacets();
         this._renderToolbarPills();
         this._renderGrid();
@@ -762,12 +889,29 @@
 
     _cardThumb(doc) {
       const kind = doc.bp_asset_kind || "other";
-      const thumbUrl = esc(assetThumbUrl(doc));
+      const thumbUrl = assetThumbUrl(doc);
+      const previewUrl = doc.previewUrl || thumbUrl;
       if (kind === "image" && thumbUrl) {
-        return '<img src="' + thumbUrl + '" alt="" loading="lazy" />';
+        return '<img src="' + esc(thumbUrl) + '" alt="" loading="lazy" />';
       }
-      const label = kind === "document" ? "PDF" : kind.toUpperCase();
+      if ((kind === "video" || kind === "document") && previewUrl && previewUrl !== thumbUrl) {
+        return (
+          '<img src="' +
+          esc(previewUrl) +
+          '" alt="" loading="lazy" class="bp-ae-preview-thumb" />'
+        );
+      }
+      const label =
+        kind === "document" ? "DOC" : kind === "video" ? "VID" : kind === "audio" ? "AUD" : kind.toUpperCase();
       return '<div class="bp-ae-file-icon">' + esc(label) + "</div>";
+    }
+
+    _listHeadHtml() {
+      return (
+        '<div class="bp-ae-list-head" aria-hidden="true">' +
+        "<span></span><span>Name</span><span>Kind</span><span>Format</span><span>Size</span>" +
+        "</div>"
+      );
     }
 
     _renderListRow(doc) {
@@ -828,7 +972,8 @@
       if (this._gridEl) {
         this._gridEl.classList.toggle("bp-ae-list", this._viewMode === "list");
         if (this._viewMode === "list") {
-          this._gridEl.innerHTML = items.map((doc) => this._renderListRow(doc)).join("");
+          this._gridEl.innerHTML =
+            this._listHeadHtml() + items.map((doc) => this._renderListRow(doc)).join("");
         } else {
           this._gridEl.innerHTML = items
             .map((doc) => {
@@ -915,7 +1060,17 @@
       this._inspectorMode = "asset";
       this._assetDetail = null;
       this._renderGrid();
+      this._scrollSelectedIntoView(doc);
       this._renderAssetInspector(doc);
+    }
+
+    _scrollSelectedIntoView(doc) {
+      if (!this._gridEl || !doc || !doc._id) return;
+      const el = Array.prototype.find.call(
+        this._gridEl.querySelectorAll("[data-id]"),
+        (node) => node.dataset.id === doc._id
+      );
+      if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
 
     _selectRelative(delta) {
@@ -945,12 +1100,19 @@
       const previewUrl = doc.previewUrl || originalUrl;
       const kind = doc.bp_asset_kind || payload.bp_asset_kind || "other";
       const fi = doc.fileInfo || {};
-      const preview =
-        kind === "image"
-          ? '<div class="bp-ae-inspector-preview"><img class="bp-ae-inspector-img" src="' +
-            esc(previewUrl) +
-            '" alt="" /></div>'
-          : '<div class="bp-ae-inspector-icon">' + esc(kind) + "</div>";
+      const tags = payload.tags || doc.tags;
+      const tagList = Array.isArray(tags) ? tags.filter(Boolean) : [];
+      const preview = this._inspectorPreview(doc, kind, previewUrl);
+
+      let tagsHtml = "";
+      if (tagList.length) {
+        tagsHtml =
+          "<dt>Tags</dt><dd>" +
+          tagList
+            .map((t) => '<span class="bp-ae-tag">' + esc(String(t)) + "</span>")
+            .join(" ") +
+          "</dd>";
+      }
 
       this._inspectorBody.innerHTML =
         preview +
@@ -974,6 +1136,7 @@
         "<dt>Updated</dt><dd>" +
         esc(fmtDate(doc._updatedAt || payload._updatedAt)) +
         "</dd>" +
+        tagsHtml +
         "</dl>" +
         '<div class="bp-ae-checkout-row text-sm" hidden></div>' +
         '<div class="bp-ae-relations text-sm" hidden></div>' +
@@ -1054,6 +1217,29 @@
 
       await this._fetchAssetDetail(doc);
       this._loadRelations(doc);
+    }
+
+    _inspectorPreview(doc, kind, previewUrl) {
+      const originalUrl = doc.originalUrl || assetUrl(doc);
+      if (kind === "image" && previewUrl) {
+        return (
+          '<div class="bp-ae-inspector-preview"><img class="bp-ae-inspector-img" src="' +
+          esc(previewUrl) +
+          '" alt="" /></div>'
+        );
+      }
+      if ((kind === "video" || kind === "document") && previewUrl && previewUrl !== originalUrl) {
+        return (
+          '<div class="bp-ae-inspector-preview"><img class="bp-ae-inspector-img" src="' +
+          esc(previewUrl) +
+          '" alt="" /><span class="bp-ae-preview-badge">' +
+          esc(kind === "video" ? "Video preview" : "Preview") +
+          "</span></div>"
+        );
+      }
+      const label =
+        kind === "document" ? "Document" : kind === "video" ? "Video" : kind === "audio" ? "Audio" : kind;
+      return '<div class="bp-ae-inspector-icon">' + esc(label) + "</div>";
     }
 
     async _fetchAssetDetail(doc) {
