@@ -2,7 +2,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   @moduledoc false
 
   import Ecto.Query
-  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
+  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -24,7 +24,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       base =
         Document
         |> where([d], d.dataset == ^scope)
-        |> scope_to_workspace(workspace_id, project_id)
+        |> scope_to_workspace_or_global(workspace_id, project_id)
         |> where_match(parsed, terms, config, relaxed)
 
       base = if type, do: where(base, [d], d.type == ^type), else: base

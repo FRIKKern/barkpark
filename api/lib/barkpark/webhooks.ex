@@ -109,7 +109,7 @@ defmodule Barkpark.Webhooks do
   # Apply the workspace/project tenant boundary from `opts`. Nil-safe via
   # Content.Scope: an absent workspace_id returns the query untouched.
   defp scope(query, opts) do
-    Scope.scope_to_workspace(
+    Scope.scope_to_workspace_or_global(
       query,
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)

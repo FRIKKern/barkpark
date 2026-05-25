@@ -6,7 +6,7 @@ defmodule Barkpark.Papers.Events do
   """
 
   import Ecto.Query
-  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
+  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Repo
   alias Barkpark.Papers.Event
 
@@ -109,7 +109,7 @@ defmodule Barkpark.Papers.Events do
   # Content.Scope filter. nil workspace_id leaves the query untouched (unscoped
   # / back-compat) — the same contract every scoped content read uses.
   defp scope_opts(query, opts) do
-    scope_to_workspace(
+    scope_to_workspace_or_global(
       query,
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)

@@ -56,7 +56,7 @@ defmodule BarkparkWeb.MediaController do
   def serve(conn, %{"path" => path_parts}) do
     relative_path = Enum.join(path_parts, "/")
 
-    with {:ok, file} <- Media.get_file_by_path(relative_path),
+    with {:ok, file} <- Media.get_file_by_path(relative_path, scope_opts(conn)),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :original) do
       full_path = Media.file_path(relative_path)
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.MediaController do
 
   @doc "Delete a media file."
   def delete(conn, %{"id" => id}) do
-    with {:ok, _} <- Media.delete_file(id) do
+    with {:ok, _} <- Media.delete_file(id, scope_opts(conn)) do
       json(conn, %{deleted: id})
     end
   end
