@@ -1390,6 +1390,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     |> Map.put("value", params["value"] || "")
   end
 
+  # diagram (barkpark-woxx): a Mermaid `source` textarea + an optional `caption`
+  # input → the flat {source, caption} shape Render.compose_block/2 reads
+  # (render.ex:348). Plain strings, no inline wrapping — the source is raw
+  # Mermaid text and the caption is a short figure label.
+  defp build_block_patch(%{"type" => "diagram"}, params) do
+    %{"source" => params["source"] || "", "caption" => params["caption"] || ""}
+  end
+
   # ── article-chrome blocks (barkpark-54kh) ──
   # eyebrow: single text input → flat "text" string (render reads `text`).
   defp build_block_patch(%{"type" => "eyebrow"}, params) do
@@ -1546,6 +1554,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp default_block("code", id),
     do: %{"id" => id, "type" => "code", "lang" => "", "value" => ""}
+
+  # ── visual blocks ──
+  # diagram (barkpark-woxx): a Mermaid block. `source` is raw Mermaid text,
+  # `caption` an optional figure label — the exact flat shape
+  # Render.compose_block/2 reads (render.ex:348). Empty defaults are valid: an
+  # empty `source` renders an empty `<pre class="mermaid">`.
+  defp default_block("diagram", id),
+    do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
 
   # ── article-chrome blocks (render-only until now; barkpark-54kh) ──
   # These mirror the Render.compose_block/2 shapes verbatim (render.ex):
@@ -3067,6 +3083,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
               <option value="ingress">Ingress</option>
               <option value="pullquote">Pullquote</option>
             </optgroup>
+            <optgroup label="Visual">
+              <option value="diagram">Diagram</option>
+            </optgroup>
             <optgroup label="Basic fields">
               <option value="field-string">String</option>
               <option value="field-slug">Slug</option>
@@ -3204,6 +3223,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
             rows="5"
             data-test-id="paper-field-value"
           ><%= Map.get(@block, "value", "") %></textarea>
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <%!-- diagram (barkpark-woxx): a Mermaid `source` textarea (mirrors the code
+            block's value textarea, monospace) + an optional caption input. Both
+            are flat strings on the block — build_block_patch reads them verbatim. --%>
+      <% "diagram" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <textarea
+            name="source"
+            class="bp-paper-edit-textarea bp-paper-edit-code"
+            rows="5"
+            placeholder="graph TD&#10;  A --> B"
+            data-test-id="paper-field-source"
+          ><%= Map.get(@block, "source", "") %></textarea>
+          <input
+            type="text"
+            name="caption"
+            class="bp-paper-edit-text"
+            placeholder="Caption (optional)"
+            value={Map.get(@block, "caption", "")}
+            data-test-id="paper-field-caption"
+          />
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <%!-- article-chrome blocks (barkpark-54kh). eyebrow + byline are a single

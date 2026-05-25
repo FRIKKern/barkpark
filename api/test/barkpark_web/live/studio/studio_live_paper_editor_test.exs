@@ -944,6 +944,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   @addable_block_types ~w(
     paragraph heading list callout code divider section
     eyebrow byline ingress pullquote
+    diagram
     field-string field-slug field-text field-boolean field-datetime field-color field-select
     field-reference field-image
     composite arrayOf codelist localizedText
@@ -963,6 +964,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   defp addable_block_valid?(%{"type" => "byline", "items" => []}), do: true
   defp addable_block_valid?(%{"type" => "ingress", "content" => []}), do: true
   defp addable_block_valid?(%{"type" => "pullquote", "content" => []}), do: true
+  # diagram (barkpark-woxx) — flat {source, caption} default, both "" (the exact
+  # shape Render.compose_block/2 reads at render.ex:348).
+  defp addable_block_valid?(%{"type" => "diagram", "source" => "", "caption" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-string", "value" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-slug", "value" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-text", "value" => ""}), do: true
@@ -1100,6 +1104,53 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     # items (round-trips through the edit form, not just the patch).
     html = render(view)
     assert html =~ ~s(value="Ada · Grace")
+  end
+
+  # ── diagram block (barkpark-woxx): insert + edit round-trip ────────────────
+  # The diagram block RENDERS (render.ex:348 → `<pre class="mermaid">`) but had
+  # no Beta editor path. These prove default_block("diagram", …) yields the flat
+  # {source:"", caption:""} default and build_block_patch maps a {source, caption}
+  # form submission through the SAME paper-edit-block → patch-block pipeline.
+
+  test "adding a diagram block yields the flat empty source+caption default",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "diagram")
+
+    block = block_after_edit(id)
+    # default_block("diagram", _) shape: type + flat empty source/caption strings.
+    assert block["type"] == "diagram"
+    assert block["source"] == ""
+    assert block["caption"] == ""
+  end
+
+  test "editing a diagram block writes flat source + caption strings",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "diagram")
+
+    submit_edit_form(view, id, %{"source" => "graph TD", "caption" => "Fig"})
+
+    block = block_after_edit(id)
+    # build_block_patch(%{"type"=>"diagram"}, …) maps source/caption verbatim.
+    assert block["type"] == "diagram"
+    assert block["source"] == "graph TD"
+    assert block["caption"] == "Fig"
+  end
+
+  test "a diagram edit pre-fills its source textarea + caption input",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "diagram")
+    submit_edit_form(view, id, %{"source" => "graph TD", "caption" => "Fig 1"})
+
+    html = render(view)
+    # Source round-trips into the textarea body; caption into the input value.
+    assert html =~ "graph TD"
+    assert html =~ ~s(value="Fig 1")
   end
 
   test "a freshly-added field block can be removed via its delete control (remove-block)",
