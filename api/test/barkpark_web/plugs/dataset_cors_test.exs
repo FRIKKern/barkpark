@@ -174,6 +174,61 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
     end
   end
 
+  describe "path-based tenancy prefix (/w/:ws/p/:project/…)" do
+    # The /w/:ws/p/:project prefix shifts every positional path index; the plug
+    # strips it before matching, so BOTH shapes must resolve the same dataset.
+    test "resolves the SAME dataset for the flat and the /w/p-prefixed query path" do
+      put_schema("ds_both", "post", ["https://both.example"])
+
+      flat =
+        build_conn(:get, "/v1/data/query/ds_both/post")
+        |> put_req_header("origin", "https://both.example")
+        |> call_plug()
+        |> send_resp(200, "ok")
+
+      prefixed =
+        build_conn(:get, "/w/acme/p/site/v1/data/query/ds_both/post")
+        |> put_req_header("origin", "https://both.example")
+        |> call_plug()
+        |> send_resp(200, "ok")
+
+      # Both shapes reflect the dataset's allowed origin identically.
+      assert get_resp_header(flat, "access-control-allow-origin") == ["https://both.example"]
+      assert get_resp_header(prefixed, "access-control-allow-origin") == ["https://both.example"]
+    end
+
+    test "prefixed path with a mismatched origin still fails closed (no ACAO)" do
+      put_schema("ds_both2", "post", ["https://allowed.example"])
+
+      prefixed =
+        build_conn(:get, "/w/acme/p/site/v1/data/query/ds_both2/post")
+        |> put_req_header("origin", "https://evil.example")
+        |> call_plug()
+        |> send_resp(200, "ok")
+
+      assert get_resp_header(prefixed, "access-control-allow-origin") == []
+    end
+
+    test "prefixed preview + schemas + webhooks shapes resolve the dataset" do
+      put_schema("ds_pfx", "post", ["https://pfx.example"])
+
+      for path <- [
+            "/w/acme/p/site/v1/preview/query/ds_pfx/post",
+            "/w/acme/p/site/v1/schemas/ds_pfx",
+            "/w/acme/p/site/v1/webhooks/ds_pfx"
+          ] do
+        conn =
+          build_conn(:get, path)
+          |> put_req_header("origin", "https://pfx.example")
+          |> call_plug()
+          |> send_resp(200, "ok")
+
+        assert get_resp_header(conn, "access-control-allow-origin") == ["https://pfx.example"],
+               "expected #{path} to resolve dataset ds_pfx"
+      end
+    end
+  end
+
   describe "unknown dataset" do
     test "never emits a wildcard ACAO, and never reflects" do
       # No schemas seeded for ds_ghost.

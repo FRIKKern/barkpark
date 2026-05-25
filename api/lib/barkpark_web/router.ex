@@ -20,6 +20,24 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
     plug BarkparkWeb.Plugs.RateLimit
     plug BarkparkWeb.Plugs.OptionalToken
+    # Back-compat tenancy shim: flat routes (no /w/:ws/p/:project slugs in the
+    # path) infer the seeded Default Workspace/Project so downstream code always
+    # has a scope. No-op once a resolver has already set the assigns.
+    plug BarkparkWeb.Plugs.AssignDefaultScope
+  end
+
+  # Tenancy-aware variant of :api for the path-scoped
+  # /w/:workspace_slug/p/:project_slug routes. Same base plugs as :api
+  # (sans AssignDefaultScope — the resolvers set the real scope), then
+  # resolves + membership-gates the workspace and resolves the project.
+  pipeline :scoped_api do
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.OptionalToken
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
   end
 
   pipeline :api_unlimited do
@@ -425,6 +443,123 @@ defmodule BarkparkWeb.Router do
     post "/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
     patch "/:dataset/:id", V1.MediaController, :update
     delete "/:dataset/:id", V1.MediaController, :delete
+  end
+
+  # ── Scoped tenancy routes ───────────────────────────────────────────────
+  # Path-based tenancy: /w/:workspace_slug/p/:project_slug/… mirrors the flat
+  # content data routes above. The `:scoped_api` pipeline resolves + membership-
+  # gates the workspace (403 cross-dataset read-leak fix) and resolves the
+  # project before routing. The `:dataset` segment stays the leaf — dataset is
+  # still a string in Wave 1; WHERE-clause scoping by workspace_id is a sibling
+  # CONTEXT task. The flat routes below remain the back-compat alias.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through :scoped_api
+
+    # Public reads (mirror of /v1/data public scope)
+    get "/v1/data/search/:dataset/suggestions", SearchController, :search_suggestions
+    post "/v1/data/search/:dataset/interaction", SearchController, :search_interaction
+    get "/v1/data/search/:dataset", SearchController, :search
+    get "/v1/data/query/:dataset/:type", QueryController, :index
+    get "/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show
+
+    # Preview reads
+    get "/v1/preview/query/:dataset/:type", QueryController, :index
+    get "/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show
+  end
+
+  # Token-required scoped reads (listen/export/analytics/history/revision).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :require_token]
+
+    get "/v1/data/listen/:dataset", ListenController, :listen
+    get "/v1/data/export/:dataset", ExportController, :export
+    get "/v1/data/analytics/:dataset", AnalyticsController, :index
+    get "/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index
+    get "/v1/data/revision/:dataset/:id", HistoryController, :show
+    post "/v1/data/revision/:dataset/:id/restore", HistoryController, :restore
+  end
+
+  # Scoped mutations — keep the :require_write gate (write-gate slice).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :require_token, :require_write, :idempotent]
+
+    post "/v1/data/mutate/:dataset", MutateController, :mutate
+  end
+
+  # Scoped admin reads (search insights/synonyms).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :require_admin]
+
+    get "/v1/data/search/:dataset/insights", SearchController, :search_insights
+    get "/v1/data/search/:dataset/synonyms", SearchController, :search_synonyms
+    post "/v1/data/search/:dataset/synonyms", SearchController, :create_search_synonym
+    delete "/v1/data/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym
+  end
+
+  # Scoped schema management (admin).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :require_admin]
+
+    get "/v1/schemas/:dataset", SchemaController, :index
+    get "/v1/schemas/:dataset/:name", SchemaController, :show
+    post "/v1/schemas/:dataset", SchemaController, :upsert
+    delete "/v1/schemas/:dataset/:name", SchemaController, :delete
+  end
+
+  # Scoped webhooks (admin).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :require_admin]
+
+    get "/v1/webhooks/:dataset", WebhookController, :index
+    get "/v1/webhooks/:dataset/:id", WebhookController, :show
+    post "/v1/webhooks/:dataset", WebhookController, :create
+    put "/v1/webhooks/:dataset/:id", WebhookController, :update
+    delete "/v1/webhooks/:dataset/:id", WebhookController, :delete
+  end
+
+  # Scoped v1 media — admin search ops.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :require_admin]
+
+    get "/v1/media/:dataset/search/insights", V1.MediaController, :search_insights
+    get "/v1/media/:dataset/search/synonyms", V1.MediaController, :search_synonyms
+    post "/v1/media/:dataset/search/synonyms", V1.MediaController, :create_search_synonym
+    delete "/v1/media/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym
+  end
+
+  # Scoped v1 media — public reads.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through :scoped_api
+
+    get "/v1/media/:dataset/search/suggestions", V1.MediaController, :search_suggestions
+    post "/v1/media/:dataset/search/interaction", V1.MediaController, :search_interaction
+    get "/v1/media/:dataset/search", V1.MediaController, :search
+    get "/v1/media/:dataset/share/:token", V1.MediaCollectionsController, :share_view
+    get "/v1/media/:dataset/collections", V1.MediaCollectionsController, :index
+    get "/v1/media/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets
+    get "/v1/media/:dataset/collections/:id", V1.MediaCollectionsController, :show
+    get "/v1/media/:dataset/:id/relations", V1.MediaController, :relations
+    get "/v1/media/:dataset", V1.MediaController, :index
+    get "/v1/media/:dataset/:id", V1.MediaController, :show
+  end
+
+  # Scoped v1 media — mutating (bearer-or-session).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through [:scoped_api, :media_mutate]
+
+    post "/v1/media/:dataset/collections/:id/share", V1.MediaCollectionsController, :share
+    delete "/v1/media/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share
+    post "/v1/media/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member
+
+    delete "/v1/media/:dataset/collections/:id/members/:asset_id",
+           V1.MediaCollectionsController,
+           :remove_member
+
+    post "/v1/media/:dataset/upload", V1.MediaController, :upload
+    post "/v1/media/:dataset/:id/checkout", V1.MediaController, :checkout
+    post "/v1/media/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
+    patch "/v1/media/:dataset/:id", V1.MediaController, :update
+    delete "/v1/media/:dataset/:id", V1.MediaController, :delete
   end
 
   # ── Legacy compat ──────────────────────────────────────────────────────
