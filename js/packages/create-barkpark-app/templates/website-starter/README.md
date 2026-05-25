@@ -85,12 +85,12 @@ app/
   contact/actions.ts      server action wrapping defineActions().createDoc
   hosted-demo-banner.tsx  banner shown only on barkpark.dev hosted demo
 lib/
-  barkpark.ts             typed fetch helpers around /v1/data/query + /v1/data/doc
+  barkpark.ts             typed fetch helpers around /w/<ws>/p/<proj>/v1/data/query + /doc
 schemas/
   page.ts post.ts author.ts
 seeds/
-  seed.ts                 POST /v1/data/mutate/production with Bearer token
-barkpark.config.ts        createClient() wiring from env
+  seed.ts                 POST /w/<ws>/p/<proj>/v1/data/mutate/production with Bearer token
+barkpark.config.ts        createClient() wiring from env (projectUrl, workspace, project, dataset)
 docker-compose.yml        Phoenix API + Postgres
 next.config.mjs tsconfig.json tailwind.config.ts postcss.config.js
 ```

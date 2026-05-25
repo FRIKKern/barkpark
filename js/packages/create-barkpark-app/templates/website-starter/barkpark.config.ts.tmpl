@@ -3,14 +3,24 @@ import { createClient } from '@barkpark/core'
 const projectUrl = process.env.BARKPARK_API_URL ?? 'http://localhost:4000'
 const dataset = process.env.BARKPARK_DATASET ?? 'production'
 
+// Set these to the workspace + project slugs you created in Barkpark Studio.
+// When both are set, the client scopes every request to
+// /w/<workspace>/p/<project>/v1/... (omit either to fall back to flat /v1/...).
+const workspace = process.env.BARKPARK_WORKSPACE ?? 'default'
+const project = process.env.BARKPARK_PROJECT ?? 'default'
+
 export const barkparkClient = createClient({
   projectUrl,
+  workspace,
+  project,
   dataset,
   apiVersion: '2026-01-01',
 })
 
 export const projectConfig = {
   name: '{{projectName}}',
+  workspace,
+  project,
   dataset,
   projectUrl,
 }

@@ -1,4 +1,5 @@
 import 'server-only'
+import { scopePrefix } from '@barkpark/core'
 import { createBarkparkServer } from '@barkpark/nextjs/server'
 import { barkparkClient } from '../barkpark.config'
 
@@ -9,6 +10,8 @@ export const barkpark = createBarkparkServer({
 
 const BASE = barkparkClient.config.projectUrl.replace(/\/+$/, '')
 const DATASET = barkparkClient.config.dataset
+// '/w/<workspace>/p/<project>' when both are set on the client, else '' (flat /v1).
+const SCOPE = scopePrefix(barkparkClient.config)
 
 export interface DocEnvelope<T> {
   result: T | null
@@ -19,7 +22,7 @@ export interface QueryEnvelope<T> {
 }
 
 async function get<T>(path: string, tags: string[]): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${BASE}${SCOPE}${path}`, {
     headers: { Accept: 'application/json' },
     next: { tags, revalidate: 60 },
   })
