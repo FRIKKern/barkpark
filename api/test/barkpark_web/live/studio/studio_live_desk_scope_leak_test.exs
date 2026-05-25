@@ -22,8 +22,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
 
   import Phoenix.LiveViewTest
 
+  alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @dataset "production"
 
@@ -35,6 +37,16 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
 
     {:ok, ws_b} = Tenancy.create_workspace(%{slug: "wsb", name: "Workspace B"})
     {:ok, proj_b} = Tenancy.create_project(ws_b, %{slug: "pb", name: "Project B"})
+
+    # The switcher + switch-workspace are now membership-gated (barkpark-g4a7).
+    # Mint a principal that is a member of workspace A (and Default, via the
+    # token's home workspace) so the scope switch to A is honoured. The
+    # principal is deliberately NOT a member of workspace B — its doc must
+    # still never leak into A's scoped desk.
+    raw = "desk-leak-test-" <> Ecto.UUID.generate()
+    {:ok, token} = Auth.create_token(raw, "desk-leak", @dataset, ["read", "write"], default_ws.id)
+    {:ok, _} = TenancyAuth.create_membership(ws_a.id, token.id, "member")
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
     {:ok, _schema} =
       Content.upsert_schema(
@@ -129,5 +141,33 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
 
     assert Keyword.get(opts, :workspace_id) == ws_a.id
     assert Keyword.get(opts, :project_id) == proj_a.id
+  end
+
+  # Task barkpark-f9s9: the secondary picker reads (image / reference /
+  # secondary-doc / revision / secondary-fetch) drop scope into the
+  # fail-closed nil-scope path unless they thread the socket scope. This
+  # asserts the reference picker is workspace-scoped: under workspace A's
+  # scope it offers A's `post` doc but NEVER B's.
+  test "the secondary-doc picker is workspace-scoped (no foreign workspace doc)", %{
+    conn: conn,
+    ws_a: ws_a
+  } do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+
+    # Open the secondary-doc picker after navigating into an editor so
+    # `editor_type` is set; navigate to A's doc, then open the picker.
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/post-a")
+    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+
+    render_click(view, "open-secondary-picker", %{})
+
+    candidate_titles =
+      :sys.get_state(view.pid).socket.assigns.secondary_candidates
+      |> Enum.map(& &1.title)
+
+    refute "BRAVO-ONLY-DOC" in candidate_titles,
+           "PICKER TENANCY LEAK: workspace B's doc appeared in workspace A's " <>
+             "secondary picker — the read dropped scope (got #{inspect(candidate_titles)})"
   end
 end

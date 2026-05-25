@@ -399,27 +399,40 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, socket}
 
       workspace ->
-        project = List.first(Tenancy.list_projects(workspace.id))
+        # Hard tenant boundary: a switch is honoured only when the mounted
+        # principal may reach the target workspace (membership), or — for the
+        # genuinely-anonymous/dev session that has no principal — when the
+        # target IS the workspace already on the socket (the seeded Default).
+        # Anything else is a foreign re-scope and is silently dropped.
+        if can_reach_workspace?(socket, workspace) do
+          project = List.first(Tenancy.list_projects(workspace.id))
 
-        {:noreply,
-         socket
-         |> assign(current_workspace: workspace, current_project: project)
-         |> rebuild_panes()}
+          {:noreply,
+           socket
+           |> assign(current_workspace: workspace, current_project: project)
+           |> rebuild_panes()}
+        else
+          {:noreply, socket}
+        end
     end
   end
 
   def handle_event("switch-project", %{"project" => slug}, socket) do
     ws = socket.assigns[:current_workspace]
 
-    case ws && Tenancy.get_project(ws.slug, slug) do
-      %{} = project ->
-        {:noreply,
-         socket
-         |> assign(current_project: project)
-         |> rebuild_panes()}
-
-      _ ->
-        {:noreply, socket}
+    # The project lives under the CURRENT workspace; the workspace itself is
+    # already membership-gated (mount + switch-workspace). Re-affirm the gate
+    # so a forged project switch can never re-scope to a workspace the
+    # principal lost access to mid-session.
+    with %{} = ws <- ws,
+         true <- can_reach_workspace?(socket, ws),
+         %{} = project <- Tenancy.get_project(ws.slug, slug) do
+      {:noreply,
+       socket
+       |> assign(current_project: project)
+       |> rebuild_panes()}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
@@ -570,7 +583,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── Image field events ──────────────────────────────────────────────────────
 
   def handle_event("open-image-picker", %{"field" => field_name}, socket) do
-    files = Media.list_files(socket.assigns.dataset, mime_type: "image/")
+    files =
+      Media.list_files(
+        socket.assigns.dataset,
+        [mime_type: "image/"] ++ ScopeHelpers.scope_opts(socket)
+      )
+
     {:noreply, assign(socket, image_picker_field: field_name, media_files: files)}
   end
 
@@ -627,7 +645,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── Reference field events ─────────────────────────────────────────────────
 
   def handle_event("open-ref-picker", %{"field" => field_name, "ref-type" => ref_type}, socket) do
-    docs = Content.list_documents(ref_type, socket.assigns.dataset, perspective: :drafts)
+    docs =
+      Content.list_documents(
+        ref_type,
+        socket.assigns.dataset,
+        [perspective: :drafts] ++ ScopeHelpers.scope_opts(socket)
+      )
 
     candidates =
       Enum.map(docs, fn doc ->
@@ -663,7 +686,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      revisions = Content.list_revisions(doc.doc_id, type, socket.assigns.dataset, limit: 30)
+      revisions =
+        Content.list_revisions(
+          doc.doc_id,
+          type,
+          socket.assigns.dataset,
+          [limit: 30] ++ ScopeHelpers.scope_opts(socket)
+        )
+
       {:noreply, assign(socket, show_history: true, revisions: revisions)}
     else
       {:noreply, socket}
@@ -871,7 +901,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
     candidates =
       if type do
         type
-        |> Content.list_documents(socket.assigns.dataset, perspective: :drafts)
+        |> Content.list_documents(
+          socket.assigns.dataset,
+          [perspective: :drafts] ++ ScopeHelpers.scope_opts(socket)
+        )
         |> Enum.map(fn d ->
           pub = Content.published_id(d.doc_id)
           %{id: pub, title: d.title || "Untitled", type: type}
@@ -904,7 +937,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
 
-    case Content.fetch_doc_with_draft(type, doc_id, dataset) do
+    case Content.fetch_doc_with_draft(type, doc_id, dataset, ScopeHelpers.scope_opts(socket)) do
       {nil, _, _} ->
         {:noreply, put_flash(socket, :error, "Document not found")}
 
@@ -1969,18 +2002,63 @@ defmodule BarkparkWeb.Studio.StudioLive do
     if socket.assigns[:current_workspace] do
       socket
     else
-      workspace = Tenancy.get_default_workspace()
-
-      project =
-        case workspace do
-          %{id: ws_id} ->
-            Tenancy.get_default_project() || List.first(Tenancy.list_projects(ws_id))
-
-          _ ->
-            nil
-        end
+      workspace = initial_workspace(socket)
+      project = initial_project(workspace)
 
       assign(socket, current_workspace: workspace, current_project: project)
+    end
+  end
+
+  # Resolve the initial project for the mounted workspace. The Default project
+  # is only meaningful UNDER the Default workspace — for any other (member)
+  # workspace the project MUST come from that workspace's own list, never the
+  # Default project of a different tenant. Falls back to the workspace's first
+  # project otherwise.
+  defp initial_project(%{id: ws_id}) do
+    default_under_workspace =
+      case Tenancy.get_default_project() do
+        %{workspace_id: ^ws_id} = proj -> proj
+        _ -> nil
+      end
+
+    default_under_workspace || List.first(Tenancy.list_projects(ws_id))
+  end
+
+  defp initial_project(_), do: nil
+
+  # Mount-scope derivation (Task barkpark-g4a7). With an authenticated
+  # principal, the initial workspace is the FIRST workspace it is a member of
+  # (`list_workspaces_for/1`, slug-ordered) — never a foreign or Default
+  # workspace it has no membership in. Only the genuinely-anonymous /
+  # single-tenant dev session (no principal, or a principal with zero
+  # memberships) falls back to the seeded Default, preserving the local-dev
+  # experience without ever exposing another tenant's workspace.
+  defp initial_workspace(socket) do
+    case socket.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token ->
+        case List.first(Tenancy.list_workspaces_for(token)) do
+          %{} = ws -> ws
+          _ -> Tenancy.get_default_workspace()
+        end
+
+      _ ->
+        Tenancy.get_default_workspace()
+    end
+  end
+
+  # Membership gate shared by the switch handlers (switch-workspace /
+  # switch-project). With a principal: defer to the canonical
+  # `Tenancy.Auth.member?/2`. Without one (anonymous / single-tenant dev):
+  # the only reachable workspace is the one already on the socket — the
+  # seeded Default — so the dev experience never regresses while no foreign
+  # workspace is reachable.
+  defp can_reach_workspace?(socket, %{id: ws_id} = _workspace) do
+    case socket.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token ->
+        Barkpark.Tenancy.Auth.member?(token, ws_id)
+
+      _ ->
+        match?(%{id: ^ws_id}, socket.assigns[:current_workspace])
     end
   end
 
