@@ -127,6 +127,57 @@
       resize: vertical;
     }
 
+    /* P6.U5 action bar — the paperflow doc action buttons (Create plan /
+       Grill / Build / Submit) rendered natively on the paper. A restrained
+       sticky row at the top of the article column, in the article palette
+       (parchment surface, terracotta accent, sans label). Scoped under
+       `.bp-paper-article` so non-article papers stay untouched. The bar is
+       rendered only when PaperLive derived a non-empty action set from
+       content["source_doc"]. */
+    .bp-paper-article .bp-paper-actions {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+      margin: 0 0 1.75rem;
+      padding: 0.75rem 0;
+      background: #fbfaf6;
+      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .bp-paper-article .bp-paper-action {
+      appearance: none;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: #a23925;
+      background: #fdfcf8;
+      border: 1px solid rgba(162, 57, 37, 0.35);
+      border-radius: 6px;
+      padding: 0.45rem 0.9rem;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+    .bp-paper-article .bp-paper-action:hover {
+      background: #a23925;
+      color: #fdfcf8;
+      border-color: #a23925;
+    }
+    .bp-paper-article .bp-paper-action:focus-visible {
+      outline: 2px solid #a23925;
+      outline-offset: 2px;
+    }
+    .bp-paper-article .bp-paper-action-ack {
+      font-size: 0.78rem;
+      font-style: italic;
+      color: #6a6a6a;
+      margin-left: 0.25rem;
+    }
+
     /* P6.U2 goal-path rail — a 240px sticky right-rail showing the paper's
        goal lifecycle as a Mermaid gitGraph plus a clickable event list. Scoped
        under `.bp-paper-article` so non-article papers are untouched. The shell
