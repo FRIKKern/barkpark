@@ -65,6 +65,25 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   @doc """
+  Record a click or select interaction against a prior search event.
+  Returns `{:ok, event_id}` or `:skipped`. Never raises.
+  """
+  @spec record_interaction(String.t(), String.t(), map(), keyword()) ::
+          {:ok, Ecto.UUID.t()} | :skipped
+  def record_interaction(surface, scope, attrs, opts \\ [])
+      when is_binary(surface) and is_binary(scope) and is_map(attrs) do
+    if Keyword.get(opts, :disabled, false) do
+      :skipped
+    else
+      safe_record_interaction(surface, scope, attrs, opts)
+    end
+  rescue
+    _ -> :skipped
+  catch
+    _, _ -> :skipped
+  end
+
+  @doc """
   Suggestions for autocomplete. Returns `%{recent: [], popular: [], nohits: []}`.
   """
   @spec suggestions(String.t(), String.t(), String.t(), String.t() | nil, keyword()) :: map()
@@ -194,6 +213,107 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
+  defp safe_record_interaction(surface, scope, attrs, opts) do
+    do_record_interaction(surface, scope, attrs, opts)
+  rescue
+    _ -> :skipped
+  catch
+    _, _ -> :skipped
+  end
+
+  defp do_record_interaction(surface, scope, attrs, opts) do
+    query_event_id = interaction_uuid(attrs, :query_event_id, "queryEventId")
+    object_id = interaction_string(attrs, :object_id, "objectId")
+    event_type = interaction_type(attrs)
+    position = interaction_position(attrs)
+
+    if is_nil(query_event_id) or object_id in [nil, ""] do
+      :skipped
+    else
+      case Repo.get(Event, query_event_id) do
+        %Event{surface: ^surface, scope: ^scope, event_type: "search"} = search ->
+          {:ok, event} =
+            insert_event(%{
+              surface: surface,
+              scope: scope,
+              event_type: event_type,
+              query: search.query,
+              query_normalized: search.query_normalized,
+              filters: search.filters || %{},
+              object_id: object_id,
+              position: position,
+              query_event_id: search.id,
+              result_count: 0,
+              zero_hits: false,
+              actor_key: Keyword.get(opts, :actor_key, "anon"),
+              parent_event_id: nil,
+              source: Keyword.get(opts, :source, "api"),
+              session_key: Keyword.get(opts, :session_key),
+              quality: "accepted",
+              reject_reason: nil,
+              duration_ms: nil
+            })
+
+          {:ok, event.id}
+
+        _ ->
+          :skipped
+      end
+    end
+  end
+
+  defp interaction_uuid(attrs, atom_key, string_key) do
+    value = Map.get(attrs, atom_key) || Map.get(attrs, string_key)
+
+    case value do
+      id when is_binary(id) ->
+        case Ecto.UUID.cast(String.trim(id)) do
+          {:ok, uuid} -> uuid
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp interaction_string(attrs, atom_key, string_key) do
+    case Map.get(attrs, atom_key) || Map.get(attrs, string_key) do
+      value when is_binary(value) ->
+        trimmed = String.trim(value)
+        if trimmed == "", do: nil, else: String.slice(trimmed, 0, 256)
+
+      value when not is_nil(value) ->
+        value |> to_string() |> String.trim() |> String.slice(0, 256)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp interaction_type(attrs) do
+    case Map.get(attrs, :type) || Map.get(attrs, "type") || Map.get(attrs, :event_type) ||
+           Map.get(attrs, "eventType") do
+      "select" -> "select"
+      "click" -> "click"
+      _ -> "click"
+    end
+  end
+
+  defp interaction_position(attrs) do
+    case Map.get(attrs, :position) || Map.get(attrs, "position") do
+      n when is_integer(n) and n >= 0 -> n
+      n when is_binary(n) ->
+        case Integer.parse(n) do
+          {i, _} when i >= 0 -> i
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
   defp insert_event(attrs) do
     %Event{}
     |> Ecto.Changeset.change(attrs)
@@ -220,7 +340,7 @@ defmodule Barkpark.Search.Intelligence do
 
   defp accepted_events(queryable) do
     from(e in queryable,
-      where: is_nil(e.quality) or e.quality == "accepted"
+      where: (is_nil(e.quality) or e.quality == "accepted") and e.event_type == "search"
     )
   end
 
@@ -444,7 +564,9 @@ defmodule Barkpark.Search.Intelligence do
       successCount: c.success_count,
       uniqueActors: c.unique_actors,
       avgResultCount: c.avg_result_count,
-      avgDurationMs: c.avg_duration_ms
+      avgDurationMs: c.avg_duration_ms,
+      clickCount: c.click_count,
+      ctr: c.ctr
     }
   end
 
@@ -482,12 +604,28 @@ defmodule Barkpark.Search.Intelligence do
 
     hints =
       Enum.reduce(top_queries, hints, fn q, acc ->
-        if q.zeroHitCount > 0 and q.zeroHitCount >= div(q.searchCount, 2) do
+        acc =
+          if q.zeroHitCount > 0 and q.zeroHitCount >= div(q.searchCount, 2) do
+            [
+              %{
+                kind: "nohits",
+                message: "Query \"#{q.query}\" has high zero-hit rate — consider synonyms or tags.",
+                query: q.query
+              }
+              | acc
+            ]
+          else
+            acc
+          end
+
+        if q.searchCount >= 10 and q.ctr < 0.1 do
           [
             %{
-              kind: "nohits",
-              message: "Query \"#{q.query}\" has high zero-hit rate — consider synonyms or tags.",
-              query: q.query
+              kind: "ctr",
+              message:
+                "Query \"#{q.query}\" has low CTR (#{Float.round(q.ctr * 100, 1)}%) despite volume — review ranking or titles.",
+              query: q.query,
+              ctr: q.ctr
             }
             | acc
           ]

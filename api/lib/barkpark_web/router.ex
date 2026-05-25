@@ -275,6 +275,7 @@ defmodule BarkparkWeb.Router do
     pipe_through :api
 
     get "/search/:dataset/suggestions", SearchController, :search_suggestions
+    post "/search/:dataset/interaction", SearchController, :search_interaction
     get "/search/:dataset", SearchController, :search
     get "/query/:dataset/:type", QueryController, :index
     get "/doc/:dataset/:type/:doc_id", QueryController, :show
@@ -379,6 +380,7 @@ defmodule BarkparkWeb.Router do
     pipe_through :api
 
     get "/:dataset/search/suggestions", V1.MediaController, :search_suggestions
+    post "/:dataset/search/interaction", V1.MediaController, :search_interaction
     get "/:dataset/search", V1.MediaController, :search
     get "/:dataset/share/:token", V1.MediaCollectionsController, :share_view
     get "/:dataset/collections", V1.MediaCollectionsController, :index

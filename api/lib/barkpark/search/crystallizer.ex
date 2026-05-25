@@ -142,12 +142,15 @@ defmodule Barkpark.Search.Crystallizer do
   end
 
   defp aggregate_queries(events) do
+    search_events = Enum.filter(events, &(&1.event_type == "search"))
+    interaction_events = Enum.filter(events, &(&1.event_type in ["click", "select"]))
+
     accepted =
-      Enum.filter(events, fn e ->
+      Enum.filter(search_events, fn e ->
         e.quality == "accepted" or is_nil(e.quality)
       end)
 
-    rejected_count = length(events) - length(accepted)
+    rejected_count = length(search_events) - length(accepted)
 
     grouped =
       accepted
@@ -161,6 +164,19 @@ defmodule Barkpark.Search.Crystallizer do
         actors = rows |> Enum.map(& &1.actor_key) |> Enum.uniq() |> length()
         zero_hits = Enum.count(rows, & &1.zero_hits)
         success = length(rows) - zero_hits
+        search_count = length(rows)
+
+        click_count =
+          interaction_events
+          |> Enum.count(fn c ->
+            c.query_normalized == query_normalized and
+              fingerprint(c.query_normalized || "", c.filters || %{}) == filter_fp
+          end)
+
+        ctr =
+          if search_count > 0,
+            do: Float.round(click_count / search_count, 4),
+            else: 0.0
 
         avg_results =
           rows |> Enum.map(& &1.result_count) |> avg_int()
@@ -174,12 +190,14 @@ defmodule Barkpark.Search.Crystallizer do
         %{
           query_normalized: query_normalized,
           filter_fingerprint: filter_fp,
-          search_count: length(rows),
+          search_count: search_count,
           zero_hit_count: zero_hits,
           success_count: success,
           unique_actors: actors,
           avg_result_count: avg_results,
-          avg_duration_ms: avg_ms
+          avg_duration_ms: avg_ms,
+          click_count: click_count,
+          ctr: ctr
         }
       end)
 
@@ -198,7 +216,9 @@ defmodule Barkpark.Search.Crystallizer do
       unique_actors: 0,
       avg_result_count: 0.0,
       avg_duration_ms: 0.0,
-      rejected_count: rejected_count
+      rejected_count: rejected_count,
+      click_count: 0,
+      ctr: 0.0
     }
 
     Enum.map([quality_row | rows], fn row ->
@@ -242,7 +262,9 @@ defmodule Barkpark.Search.Crystallizer do
             :unique_actors,
             :avg_result_count,
             :avg_duration_ms,
-            :rejected_count
+            :rejected_count,
+            :click_count,
+            :ctr
           ])
         )
         |> Repo.update!()
@@ -252,7 +274,10 @@ defmodule Barkpark.Search.Crystallizer do
   defp detect_merge_patterns(events) do
     accepted =
       events
-      |> Enum.filter(&( (&1.quality == "accepted" or is_nil(&1.quality)) and &1.actor_key))
+      |> Enum.filter(fn e ->
+        (e.quality == "accepted" or is_nil(e.quality)) and e.event_type == "search" and
+          e.actor_key
+      end)
       |> Enum.sort_by(& &1.inserted_at, DateTime)
 
     events_by_id = Map.new(accepted, &{&1.id, &1})

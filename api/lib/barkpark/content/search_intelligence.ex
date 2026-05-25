@@ -29,6 +29,10 @@ defmodule Barkpark.Content.SearchIntelligence do
     Intelligence.insights(@surface, scope, opts)
   end
 
+  def record_interaction(scope, attrs, opts \\ []) when is_binary(scope) and is_map(attrs) do
+    Intelligence.record_interaction(@surface, scope, attrs, opts)
+  end
+
   @doc false
   def context_from_params(params) when is_map(params) do
     %{

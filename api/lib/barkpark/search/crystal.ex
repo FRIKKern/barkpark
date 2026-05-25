@@ -18,6 +18,8 @@ defmodule Barkpark.Search.Crystal do
     field :avg_result_count, :float, default: 0.0
     field :avg_duration_ms, :float, default: 0.0
     field :rejected_count, :integer, default: 0
+    field :click_count, :integer, default: 0
+    field :ctr, :float, default: 0.0
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
