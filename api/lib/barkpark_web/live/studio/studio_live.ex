@@ -1390,6 +1390,35 @@ defmodule BarkparkWeb.Studio.StudioLive do
     |> Map.put("value", params["value"] || "")
   end
 
+  # ── article-chrome blocks (barkpark-54kh) ──
+  # eyebrow: single text input → flat "text" string (render reads `text`).
+  defp build_block_patch(%{"type" => "eyebrow"}, params) do
+    %{"text" => params["text"] || ""}
+  end
+
+  # byline: single text input split on " · " → "items" list (render re-joins
+  # the items with " · "). Blank/whitespace segments are dropped; an empty
+  # input yields [].
+  defp build_block_patch(%{"type" => "byline"}, params) do
+    items =
+      (params["text"] || "")
+      |> String.split("·")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    %{"items" => items}
+  end
+
+  # ingress / pullquote: a textarea → an inline "content" array, same MVP
+  # plain-text-to-inline wrapping the paragraph/callout editors use.
+  defp build_block_patch(%{"type" => "ingress"}, params) do
+    %{"content" => text_to_inline(params["text"] || "")}
+  end
+
+  defp build_block_patch(%{"type" => "pullquote"}, params) do
+    %{"content" => text_to_inline(params["text"] || "")}
+  end
+
   defp build_block_patch(%{"type" => "list"}, params) do
     # Each `item-N` param is one list item's plain text. Items keep their
     # 0-based order. An ordered/unordered toggle rides in `ordered`.
@@ -1517,6 +1546,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp default_block("code", id),
     do: %{"id" => id, "type" => "code", "lang" => "", "value" => ""}
+
+  # ── article-chrome blocks (render-only until now; barkpark-54kh) ──
+  # These mirror the Render.compose_block/2 shapes verbatim (render.ex):
+  #   eyebrow   → flat "text" string
+  #   byline    → "items" list (render joins with " · ")
+  #   ingress   → inline "content" array
+  #   pullquote → inline "content" array (rendered italic)
+  defp default_block("eyebrow", id),
+    do: %{"id" => id, "type" => "eyebrow", "text" => ""}
+
+  defp default_block("byline", id),
+    do: %{"id" => id, "type" => "byline", "items" => []}
+
+  defp default_block("ingress", id),
+    do: %{"id" => id, "type" => "ingress", "content" => []}
+
+  defp default_block("pullquote", id),
+    do: %{"id" => id, "type" => "pullquote", "content" => []}
 
   defp default_block("divider", id),
     do: %{"id" => id, "type" => "divider"}
@@ -3014,6 +3061,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
               <option value="divider">Divider</option>
               <option value="section">Section</option>
             </optgroup>
+            <optgroup label="Article chrome">
+              <option value="eyebrow">Eyebrow</option>
+              <option value="byline">Byline</option>
+              <option value="ingress">Ingress</option>
+              <option value="pullquote">Pullquote</option>
+            </optgroup>
             <optgroup label="Basic fields">
               <option value="field-string">String</option>
               <option value="field-slug">Slug</option>
@@ -3151,6 +3204,57 @@ defmodule BarkparkWeb.Studio.StudioLive do
             rows="5"
             data-test-id="paper-field-value"
           ><%= Map.get(@block, "value", "") %></textarea>
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <%!-- article-chrome blocks (barkpark-54kh). eyebrow + byline are a single
+            text input; ingress + pullquote are a textarea (plain-text MVP, like
+            the callout body). They mirror the callout/code form markup. --%>
+      <% "eyebrow" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <input
+            type="text"
+            name="text"
+            class="bp-paper-edit-text"
+            placeholder="Eyebrow (kicker) text"
+            value={Map.get(@block, "text", "")}
+            data-test-id="paper-field-eyebrow"
+          />
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "byline" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <input
+            type="text"
+            name="text"
+            class="bp-paper-edit-text"
+            placeholder="By line — separate names with ·"
+            value={Enum.join(Map.get(@block, "items", []), " · ")}
+            data-test-id="paper-field-byline"
+          />
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "ingress" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <textarea
+            name="text"
+            class="bp-paper-edit-textarea"
+            rows="3"
+            data-test-id="paper-field-ingress"
+          ><%= inline_to_text(Map.get(@block, "content", [])) %></textarea>
+          <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+      <% "pullquote" -> %>
+        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+          <input type="hidden" name="block_id" value={@id} />
+          <textarea
+            name="text"
+            class="bp-paper-edit-textarea"
+            rows="3"
+            data-test-id="paper-field-pullquote"
+          ><%= inline_to_text(Map.get(@block, "content", [])) %></textarea>
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "section" -> %>
