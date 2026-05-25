@@ -31,6 +31,11 @@ defmodule Barkpark.Papers.Event do
     field :workspace_id, :binary_id
     field :project_id, :binary_id
 
+    # W2 additive seam: a paper_event follows its paper's dataset. NULLABLE,
+    # dual-presence — `belongs_to` so the assoc + `dataset_id` field land. Not
+    # cast in the changeset yet (string still authoritative; stamped by backfill).
+    belongs_to :dataset, Barkpark.Tenancy.Dataset, type: :binary_id
+
     # P6.U6a (barkpark-jwai): NULL = pending intent; a timestamp = consumed by
     # the paperflow-side reader loop. Set on `Events.mark_processed/1`, never on
     # create — deliberately omitted from the changeset cast/validation.

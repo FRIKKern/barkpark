@@ -12,6 +12,13 @@ defmodule Barkpark.Auth.ApiToken do
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
 
+    # W2 additive seam. Association is `:dataset_entity` because the legacy
+    # `dataset` STRING field still occupies the `:dataset` name (dual presence).
+    # FK column is `dataset_id`; the string stays authoritative for now.
+    belongs_to :dataset_entity, Barkpark.Tenancy.Dataset,
+      foreign_key: :dataset_id,
+      type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 
