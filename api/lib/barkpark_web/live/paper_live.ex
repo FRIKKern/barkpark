@@ -48,7 +48,10 @@ defmodule BarkparkWeb.PaperLive do
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
-    paper = Content.get_paper(slug)
+    # PUBLIC surface: resolve the slug ONLY within the seeded Default (public)
+    # workspace. A bare `Content.get_paper/1` runs UNSCOPED and would resolve
+    # the slug across every tenant — the cross-workspace read leak (barkpark-w9dg).
+    paper = Content.get_public_paper(slug)
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
@@ -402,7 +405,10 @@ defmodule BarkparkWeb.PaperLive do
   # AND (W1.5-C) the paper's workspace/project so the recorded event follows the
   # paper/goal scope. Returns `{goal_id | nil, scope_opts}`.
   defp paper_goal_and_scope(slug) do
-    case Content.get_paper(slug) do
+    # PUBLIC surface — resolve the live paper within the Default (public)
+    # workspace only, matching mount (barkpark-w9dg). The resolved paper's OWN
+    # workspace/project still stamps the recorded event via paper_scope_opts/1.
+    case Content.get_public_paper(slug) do
       %{content: content} = paper when is_map(content) ->
         {Map.get(content, "goal_id"), paper_scope_opts(paper)}
 
@@ -561,7 +567,8 @@ defmodule BarkparkWeb.PaperLive do
   end
 
   defp refetch(socket) do
-    case Content.get_paper(socket.assigns.slug) do
+    # PUBLIC surface — same Default-workspace scoping as mount (barkpark-w9dg).
+    case Content.get_public_paper(socket.assigns.slug) do
       nil ->
         socket
 
