@@ -363,7 +363,14 @@ defmodule Barkpark.Media.Search do
   end
 
   defp tags_facet_sql(dataset, opts) do
-    {where_sql, params} = where_fragments(opts, skip_tags: true)
+    # BUG 2 fix: the raw-SQL tag-facet aggregation previously filtered on
+    # `m.dataset = $2` ONLY — no tenant scope — so it leaked tag counts across
+    # every workspace sharing the `dataset` STRING. Mirror the Ecto
+    # `scope_to_workspace/3` envelope here: bind workspace_id (and project_id
+    # when present) as parameters $3.. ahead of the dynamic filters. Same
+    # nil-means-unscoped back-compat as Content.Scope.
+    {scope_sql, scope_params, next_idx} = scope_fragments(opts, 3)
+    {where_sql, params} = where_fragments(opts, next_idx, skip_tags: true)
 
     sql = """
     SELECT tag, COUNT(DISTINCT m.id)
@@ -374,6 +381,7 @@ defmodule Barkpark.Media.Search do
       AND (d.content->>'mediaFileId')::uuid = m.id
     CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(d.content->'tags', '[]'::jsonb)) AS tag
     WHERE m.dataset = $2
+    #{scope_sql}
     #{where_sql}
     GROUP BY tag
     ORDER BY COUNT(DISTINCT m.id) DESC
@@ -382,14 +390,51 @@ defmodule Barkpark.Media.Search do
 
     {@asset_type, dataset}
     |> Tuple.to_list()
+    |> Kernel.++(scope_params)
     |> Kernel.++(params)
     |> then(&{sql, &1})
   end
 
-  defp where_fragments(opts, extra) do
+  # Build the workspace/project scope clause for the raw-SQL facet path,
+  # consuming parameter slots starting at `start_idx`. Returns
+  # `{sql_fragment, params, next_idx}` so the caller's dynamic filters pick up
+  # where this leaves off. A nil workspace_id is the unscoped back-compat path
+  # (no clause emitted), matching Barkpark.Content.Scope.scope_to_workspace/3.
+  defp scope_fragments(opts, start_idx) do
+    # `m.workspace_id` / `m.project_id` are :binary_id (uuid) columns. Raw
+    # Postgrex needs the 16-byte binary, not the UUID string — the Ecto path
+    # casts via the schema type, but `Repo.query/2` does not. Dump here; an
+    # unparseable id falls back to the unscoped branch (caught by uuid_param).
+    workspace_id = uuid_param(first_present([opts[:workspace_id]]))
+    project_id = uuid_param(first_present([opts[:project_id]]))
+
+    cond do
+      is_nil(workspace_id) ->
+        {"", [], start_idx}
+
+      is_nil(project_id) ->
+        {"AND m.workspace_id = $#{start_idx}", [workspace_id], start_idx + 1}
+
+      true ->
+        {"AND m.workspace_id = $#{start_idx} AND m.project_id = $#{start_idx + 1}",
+         [workspace_id, project_id], start_idx + 2}
+    end
+  end
+
+  # Dump a UUID string to the raw 16-byte binary Postgrex expects for a
+  # :binary_id column. Returns nil for a nil/invalid id (unscoped fallback).
+  defp uuid_param(nil), do: nil
+
+  defp uuid_param(id) when is_binary(id) do
+    case Ecto.UUID.dump(id) do
+      {:ok, bin} -> bin
+      :error -> nil
+    end
+  end
+
+  defp where_fragments(opts, param_idx, extra) do
     parts = []
     params = []
-    param_idx = 3
 
     {parts, params, _param_idx} =
       Enum.reduce(flat_filters(opts, extra), {parts, params, param_idx}, fn
@@ -464,7 +509,10 @@ defmodule Barkpark.Media.Search do
         case Keyword.get(opts, :parsed) || Keyword.get(opts, :q) do
           %{} = parsed when map_size(parsed) > 0 ->
             terms = parsed.terms ++ parsed.phrases
-            primary = hd(terms) || Map.get(parsed, :raw, "")
+            # BUG 1 guard: `hd([])` raises ArgumentError, 500ing the whole
+            # search on the zero-term media-recovery path. `List.first/1`
+            # returns nil on [], so we fall through to :raw / "" cleanly.
+            primary = List.first(terms) || Map.get(parsed, :raw, "")
             pattern = if primary != "", do: "%#{escape_like(primary)}%", else: "%"
 
             order_by(query, [m, d],
