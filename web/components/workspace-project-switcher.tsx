@@ -1,0 +1,115 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+/** A workspace and its selectable projects, for populating the switcher. */
+export interface WorkspaceOption {
+  /** Workspace slug, used in the `/w/<workspace>/...` path. */
+  slug: string;
+  /** Project slugs that live under this workspace. */
+  projects: string[];
+}
+
+interface WorkspaceProjectSwitcherProps {
+  /** Active workspace slug from the route params. */
+  workspace: string;
+  /** Active project slug from the route params. */
+  project: string;
+  /**
+   * Switchable scopes to offer. When omitted or empty, the switcher renders an
+   * honest "only current scope" state — `@barkpark/core` exposes no
+   * workspaces/projects list endpoint yet (see component docs / task report),
+   * so there is nothing to enumerate. Wire this prop up once a list source
+   * lands; the navigation below already targets the canonical scoped route.
+   */
+  options?: WorkspaceOption[];
+}
+
+/**
+ * Header control that shows the active `w/<workspace> · p/<project>` scope and,
+ * when given `options`, lets the user switch to another workspace/project.
+ *
+ * Selection navigates to `/w/<workspace>/p/<project>/` via the Next.js router —
+ * the same route tree the scoped layout/pages render under. With no `options`
+ * (the current reality: no list endpoint), it degrades to a static scope label
+ * rather than fabricating a list.
+ */
+export function WorkspaceProjectSwitcher({
+  workspace,
+  project,
+  options,
+}: WorkspaceProjectSwitcherProps) {
+  const router = useRouter();
+  const [ws, setWs] = useState(workspace);
+
+  const hasOptions = Array.isArray(options) && options.length > 0;
+
+  if (!hasOptions) {
+    // No list source available — show the current scope honestly.
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+        title="Only the current scope is available — no workspaces/projects list endpoint yet."
+      >
+        w/{workspace} · p/{project}
+      </span>
+    );
+  }
+
+  const projectsForWs =
+    options.find((o) => o.slug === ws)?.projects ?? [];
+
+  function goTo(nextWs: string, nextProject: string) {
+    if (!nextWs || !nextProject) return;
+    router.push(`/w/${nextWs}/p/${nextProject}/`);
+  }
+
+  function onWorkspaceChange(nextWs: string) {
+    setWs(nextWs);
+    const nextProjects =
+      options?.find((o) => o.slug === nextWs)?.projects ?? [];
+    // Keep the current project if it exists under the new workspace, else
+    // fall back to that workspace's first project.
+    const nextProject = nextProjects.includes(project)
+      ? project
+      : nextProjects[0];
+    if (nextProject) {
+      goTo(nextWs, nextProject);
+    }
+  }
+
+  const selectClass =
+    "rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300";
+
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs">
+      <span className="text-zinc-400">w/</span>
+      <select
+        aria-label="Workspace"
+        className={selectClass}
+        value={ws}
+        onChange={(e) => onWorkspaceChange(e.target.value)}
+      >
+        {options!.map((o) => (
+          <option key={o.slug} value={o.slug}>
+            {o.slug}
+          </option>
+        ))}
+      </select>
+      <span className="text-zinc-400">p/</span>
+      <select
+        aria-label="Project"
+        className={selectClass}
+        value={projectsForWs.includes(project) ? project : (projectsForWs[0] ?? "")}
+        onChange={(e) => goTo(ws, e.target.value)}
+      >
+        {projectsForWs.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
