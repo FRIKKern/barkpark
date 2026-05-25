@@ -1798,28 +1798,79 @@ defmodule Barkpark.Content do
 
   @doc "Search documents by title using ILIKE. Returns published docs by default."
   def search_documents(query, dataset, opts \\ []) do
+    alias Barkpark.Search.Synonyms
+
     type = Keyword.get(opts, :type)
     perspective = Keyword.get(opts, :perspective, :published)
     limit = Keyword.get(opts, :limit, 50) |> min(200)
     offset = Keyword.get(opts, :offset, 0)
 
-    pattern = "%" <> String.replace(query, "%", "\\%") <> "%"
+    terms = Synonyms.search_terms("documents", dataset, query)
+    terms = if terms == [], do: [String.trim(query)], else: terms
 
     base =
       Document
       |> where([d], d.dataset == ^dataset)
-      |> where([d], ilike(d.title, ^pattern))
+      |> where_document_search(terms)
 
     base = if type, do: where(base, [d], d.type == ^type), else: base
 
     base = search_perspective_filter(base, perspective)
 
     docs =
-      base |> order_by([d], desc: d.updated_at) |> limit(^limit) |> offset(^offset) |> Repo.all()
+      base
+      |> order_document_search(terms)
+      |> limit(^limit)
+      |> offset(^offset)
+      |> Repo.all()
 
     count = base |> select([d], count(d.id)) |> Repo.one()
 
     {docs, count}
+  end
+
+  defp where_document_search(queryable, terms) do
+    where(queryable, ^document_match_dynamic(terms))
+  end
+
+  defp document_match_dynamic(terms) do
+    Enum.reduce(terms, nil, fn term, dyn ->
+      pattern = search_like_pattern(term)
+
+      clause =
+        dynamic([d],
+          fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
+            ilike(d.title, ^pattern) or
+            fragment("similarity(?, ?) > 0.25", d.title, ^term)
+        )
+
+      if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
+    end)
+  end
+
+  defp order_document_search(queryable, terms) do
+    primary = hd(terms)
+
+    order_by(queryable, [d],
+      desc:
+        fragment(
+          "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?))",
+          d,
+          ^primary,
+          d.title,
+          ^primary
+        ),
+      desc: d.updated_at
+    )
+  end
+
+  defp search_like_pattern(term) do
+    escaped =
+      term
+      |> String.replace("%", "\\%")
+      |> String.replace("_", "\\_")
+
+    "%" <> escaped <> "%"
   end
 
   defp search_perspective_filter(query, :published) do

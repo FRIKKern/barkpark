@@ -12,6 +12,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Content.Errors
   alias Barkpark.Media
   alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchIntelligence}
+  alias Barkpark.Search.Synonyms
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
   action_fallback BarkparkWeb.FallbackController
@@ -79,6 +80,35 @@ defmodule BarkparkWeb.V1.MediaController do
     result = SearchIntelligence.insights(dataset, opts)
 
     json(conn, %{result: result, syncTags: ["bp:ds:#{dataset}:media:search:insights"]})
+  end
+
+  def search_synonyms(conn, %{"dataset" => dataset}) do
+    json(conn, %{
+      result: Synonyms.list("media", dataset),
+      syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]
+    })
+  end
+
+  def create_search_synonym(conn, %{"dataset" => dataset} = params) do
+    case Synonyms.create("media", dataset, params) do
+      {:ok, row} ->
+        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        validation_error(conn, changeset)
+    end
+  end
+
+  def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
+    case Synonyms.delete(id, "media", dataset) do
+      :ok ->
+        json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{message: "synonym not found"}})
+    end
   end
 
   def search_suggestions(conn, %{"dataset" => dataset} = params) do
@@ -354,5 +384,18 @@ defmodule BarkparkWeb.V1.MediaController do
 
   defp metadata_params(params) do
     Map.drop(params, ["dataset", "id"])
+  end
+
+  defp validation_error(conn, changeset) do
+    errors =
+      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+      end)
+
+    conn
+    |> put_status(422)
+    |> json(%{error: %{message: "validation failed", details: errors}})
   end
 end

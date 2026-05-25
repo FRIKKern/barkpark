@@ -314,6 +314,9 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_admin]
 
     get "/search/:dataset/insights", SearchController, :search_insights
+    get "/search/:dataset/synonyms", SearchController, :search_synonyms
+    post "/search/:dataset/synonyms", SearchController, :create_search_synonym
+    delete "/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym
   end
 
   # ── Schema management — requires admin token ────────────────────────────
@@ -374,6 +377,9 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_admin]
 
     get "/:dataset/search/insights", V1.MediaController, :search_insights
+    get "/:dataset/search/synonyms", V1.MediaController, :search_synonyms
+    post "/:dataset/search/synonyms", V1.MediaController, :create_search_synonym
+    delete "/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym
   end
 
   scope "/v1/media", BarkparkWeb do

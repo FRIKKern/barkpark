@@ -3,6 +3,7 @@ defmodule BarkparkWeb.SearchController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Envelope, Errors, SearchIntelligence}
+  alias Barkpark.Search.Synonyms
   alias BarkparkWeb.SearchIntel
 
   def search(conn, %{"dataset" => dataset} = params) do
@@ -91,6 +92,35 @@ defmodule BarkparkWeb.SearchController do
     })
   end
 
+  def search_synonyms(conn, %{"dataset" => dataset}) do
+    json(conn, %{
+      result: Synonyms.list("documents", dataset),
+      syncTags: ["bp:ds:#{dataset}:documents:search:synonyms"]
+    })
+  end
+
+  def create_search_synonym(conn, %{"dataset" => dataset} = params) do
+    case Synonyms.create("documents", dataset, params) do
+      {:ok, row} ->
+        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:documents:search:synonyms"]})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        validation_error(conn, changeset)
+    end
+  end
+
+  def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
+    case Synonyms.delete(id, "documents", dataset) do
+      :ok ->
+        json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:documents:search:synonyms"]})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{message: "synonym not found"}})
+    end
+  end
+
   def search_interaction(conn, %{"dataset" => dataset} = params) do
     record_opts = [
       actor_key: SearchIntel.actor_key(conn),
@@ -130,4 +160,17 @@ defmodule BarkparkWeb.SearchController do
   end
 
   defp parse_int(_, default), do: default
+
+  defp validation_error(conn, changeset) do
+    errors =
+      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+      end)
+
+    conn
+    |> put_status(422)
+    |> json(%{error: %{message: "validation failed", details: errors}})
+  end
 end
