@@ -17,11 +17,11 @@ interface WorkspaceProjectSwitcherProps {
   /** Active project slug from the route params. */
   project: string;
   /**
-   * Switchable scopes to offer. When omitted or empty, the switcher renders an
-   * honest "only current scope" state — `@barkpark/core` exposes no
-   * workspaces/projects list endpoint yet (see component docs / task report),
-   * so there is nothing to enumerate. Wire this prop up once a list source
-   * lands; the navigation below already targets the canonical scoped route.
+   * Switchable scopes to offer, fetched by the scoped layout from
+   * `@barkpark/core`'s tenancy list endpoints (`listWorkspaces` /
+   * `listProjects`). When omitted or empty — e.g. the list fetch failed — the
+   * switcher renders an honest "only current scope" state instead of crashing.
+   * The navigation below targets the canonical scoped route.
    */
   options?: WorkspaceOption[];
 }

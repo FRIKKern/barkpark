@@ -1106,6 +1106,27 @@ async function fetchRawDoc(config, path, init) {
   return data;
 }
 
+// src/tenancy.ts
+async function listWorkspaces(config) {
+  const { data } = await request(config, "/api/workspaces", {
+    kind: "read"
+  });
+  return data?.workspaces ?? [];
+}
+async function listProjects(config, workspaceSlug) {
+  if (typeof workspaceSlug !== "string" || workspaceSlug.length === 0) {
+    throw new BarkparkValidationError("listProjects requires a workspace slug", {
+      field: "workspaceSlug"
+    });
+  }
+  const { data } = await request(
+    config,
+    `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
+    { kind: "read" }
+  );
+  return data?.projects ?? [];
+}
+
 // src/handshake.ts
 function cacheKey(config) {
   return `${config.projectUrl}|${config.dataset}`;
@@ -1267,6 +1288,12 @@ function createClient(config) {
       const response = await fetchRawDoc(frozen, path, init);
       return response;
     },
+    async listWorkspaces() {
+      return listWorkspaces(frozen);
+    },
+    async listProjects(workspaceSlug) {
+      return listProjects(frozen, workspaceSlug);
+    },
     handshake() {
       return handshakeCache.get(frozen);
     },
@@ -1306,6 +1333,8 @@ exports.createTransaction = createTransaction;
 exports.defineActions = defineActions;
 exports.fetchRawDoc = fetchRawDoc;
 exports.getDoc = getDoc;
+exports.listProjects = listProjects;
+exports.listWorkspaces = listWorkspaces;
 exports.makeFilterExpression = makeFilterExpression;
 exports.publishDoc = publishDoc;
 exports.scopePrefix = scopePrefix;

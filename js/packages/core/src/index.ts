@@ -18,6 +18,13 @@ export { getDoc } from './doc'
 export { publishDoc, unpublishDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
+export { listWorkspaces, listProjects } from './tenancy'
+export type {
+  Project,
+  Workspace,
+  ListProjectsEnvelope,
+  ListWorkspacesEnvelope,
+} from './tenancy'
 
 // --- Filter / builder utilities (used by advanced callers + codegen) -------
 export { createDocsBuilder, makeFilterExpression, buildQueryString } from './filter-builder'

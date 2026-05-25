@@ -4,6 +4,8 @@
  * changes without an ADR amendment.
  */
 
+import type { Project, Workspace } from './tenancy'
+
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 export type ApiVersion = `${number}-${number}-${number}`
 
@@ -230,4 +232,14 @@ export interface BarkparkClient {
   listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */
   fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T>
+  /**
+   * List the workspaces the token can reach. Calls the top-level tenancy
+   * endpoint `GET /api/workspaces` — not dataset-scoped, not scopePrefix-prefixed.
+   */
+  listWorkspaces(): Promise<Workspace[]>
+  /**
+   * List the projects under a workspace via `GET /api/workspaces/:slug/projects`.
+   * Top-level tenancy endpoint — independent of the client's workspace/project scope.
+   */
+  listProjects(workspaceSlug: string): Promise<Project[]>
 }

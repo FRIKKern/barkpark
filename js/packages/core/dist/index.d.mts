@@ -1,8 +1,49 @@
+/** A workspace the token can reach (GET /api/workspaces). */
+interface Workspace {
+    id: string;
+    slug: string;
+    name: string;
+}
+/** A project under a workspace (GET /api/workspaces/:slug/projects). */
+interface Project {
+    id: string;
+    slug: string;
+    name: string;
+}
+/** Envelope returned by GET /api/workspaces. */
+interface ListWorkspacesEnvelope {
+    workspaces: Workspace[];
+}
+/** Envelope returned by GET /api/workspaces/:slug/projects. */
+interface ListProjectsEnvelope {
+    workspace: Workspace;
+    projects: Project[];
+}
+/**
+ * List the workspaces the configured token can reach.
+ *
+ * Calls `GET /api/workspaces` — a top-level tenancy endpoint, so the path is
+ * neither dataset-scoped nor `scopePrefix`-prefixed. Returns the typed
+ * `workspaces` array unwrapped from the `{ workspaces }` envelope.
+ * Prefer `client.listWorkspaces()`.
+ */
+declare function listWorkspaces(config: BarkparkClientConfig): Promise<Workspace[]>;
+/**
+ * List the projects under a workspace.
+ *
+ * Calls `GET /api/workspaces/:workspace_slug/projects` — top-level tenancy
+ * endpoint (not dataset-scoped, not `scopePrefix`-prefixed). Returns the typed
+ * `projects` array unwrapped from the `{ workspace, projects }` envelope.
+ * Prefer `client.listProjects(workspaceSlug)`.
+ */
+declare function listProjects(config: BarkparkClientConfig, workspaceSlug: string): Promise<Project[]>;
+
 /**
  * Public type surface for @barkpark/core v0.1.
  * Derived from ADRs 002/005/006/007/009/010/011. Do not add shape-breaking
  * changes without an ADR amendment.
  */
+
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 type ApiVersion = `${number}-${number}-${number}`;
 /** Phoenix perspectives (ADR-004 §Decision). */
@@ -205,6 +246,16 @@ interface BarkparkClient {
     listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T>;
     /** Escape hatch for arbitrary paths — bypasses envelope decoding. */
     fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T>;
+    /**
+     * List the workspaces the token can reach. Calls the top-level tenancy
+     * endpoint `GET /api/workspaces` — not dataset-scoped, not scopePrefix-prefixed.
+     */
+    listWorkspaces(): Promise<Workspace[]>;
+    /**
+     * List the projects under a workspace via `GET /api/workspaces/:slug/projects`.
+     * Top-level tenancy endpoint — independent of the client's workspace/project scope.
+     */
+    listProjects(workspaceSlug: string): Promise<Project[]>;
 }
 
 interface HandshakeCache {
@@ -552,4 +603,4 @@ declare function typedClient<C>(client: C): C;
  */
 declare function defineActions<C>(client: C): C;
 
-export { type ApiVersion, BarkparkAPIError, BarkparkAuthError, type BarkparkClient, type BarkparkClientConfig, BarkparkConflictError, type BarkparkDocument, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, type BarkparkHooks, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, type BuilderState, type CommitOptions, type DocsBuilder, type FilterExpression, type FilterOp, type FilterValue, type ListenEvent, type ListenHandle, type MetaResponse, type MutateEnvelope, type MutateResult, type OrderDirection, type OrderField, type OrderSpec, type PatchBuilder, type Perspective, type QueryOptions, type ReadEnvelope, type RequestContext, type ResponseContext, type TransactionBuilder, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createTransaction, defineActions, fetchRawDoc, getDoc, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };
+export { type ApiVersion, BarkparkAPIError, BarkparkAuthError, type BarkparkClient, type BarkparkClientConfig, BarkparkConflictError, type BarkparkDocument, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, type BarkparkHooks, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, type BuilderState, type CommitOptions, type DocsBuilder, type FilterExpression, type FilterOp, type FilterValue, type ListProjectsEnvelope, type ListWorkspacesEnvelope, type ListenEvent, type ListenHandle, type MetaResponse, type MutateEnvelope, type MutateResult, type OrderDirection, type OrderField, type OrderSpec, type PatchBuilder, type Perspective, type Project, type QueryOptions, type ReadEnvelope, type RequestContext, type ResponseContext, type TransactionBuilder, type Workspace, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createTransaction, defineActions, fetchRawDoc, getDoc, listProjects, listWorkspaces, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };

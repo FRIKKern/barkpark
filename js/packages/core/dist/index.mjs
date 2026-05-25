@@ -1104,6 +1104,27 @@ async function fetchRawDoc(config, path, init) {
   return data;
 }
 
+// src/tenancy.ts
+async function listWorkspaces(config) {
+  const { data } = await request(config, "/api/workspaces", {
+    kind: "read"
+  });
+  return data?.workspaces ?? [];
+}
+async function listProjects(config, workspaceSlug) {
+  if (typeof workspaceSlug !== "string" || workspaceSlug.length === 0) {
+    throw new BarkparkValidationError("listProjects requires a workspace slug", {
+      field: "workspaceSlug"
+    });
+  }
+  const { data } = await request(
+    config,
+    `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
+    { kind: "read" }
+  );
+  return data?.projects ?? [];
+}
+
 // src/handshake.ts
 function cacheKey(config) {
   return `${config.projectUrl}|${config.dataset}`;
@@ -1265,6 +1286,12 @@ function createClient(config) {
       const response = await fetchRawDoc(frozen, path, init);
       return response;
     },
+    async listWorkspaces() {
+      return listWorkspaces(frozen);
+    },
+    async listProjects(workspaceSlug) {
+      return listProjects(frozen, workspaceSlug);
+    },
     handshake() {
       return handshakeCache.get(frozen);
     },
@@ -1281,6 +1308,6 @@ function defineActions(client) {
   return client;
 }
 
-export { BarkparkAPIError, BarkparkAuthError, BarkparkConflictError, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createTransaction, defineActions, fetchRawDoc, getDoc, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };
+export { BarkparkAPIError, BarkparkAuthError, BarkparkConflictError, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createTransaction, defineActions, fetchRawDoc, getDoc, listProjects, listWorkspaces, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map
