@@ -67,23 +67,12 @@ defmodule Barkpark.Repo.Migrations.MovePapersToProduction do
     )
 
     # 3. Ensure the paper schema exists in production so the desk renders the
-    #    Papers node. Routed through Content.upsert_schema/2 (read-first, so a
-    #    re-run is a no-op) to avoid hand-encoding the jsonb-array columns.
-    Barkpark.Content.upsert_schema(
-      %{
-        "name" => "paper",
-        "title" => "Papers",
-        "icon" => "📰",
-        "visibility" => "public",
-        "fields" => [
-          %{"name" => "title", "title" => "Title", "type" => "string"},
-          %{"name" => "event_type", "title" => "Event Type", "type" => "string"},
-          %{"name" => "source_doc", "title" => "Source Doc", "type" => "string"},
-          %{"name" => "goal_id", "title" => "Goal", "type" => "string"}
-        ]
-      },
-      "production"
-    )
+    #    Papers node. Raw SQL (NOT Content.upsert_schema/2) so this migration
+    #    only ever touches the schema_definitions columns that exist AT THIS
+    #    POINT in history — later migrations add layout/prefill/workspace_id/
+    #    project_id, and calling app code here would SELECT them and crash on a
+    #    from-zero run. Idempotent via the (name, dataset) unique index.
+    upsert_paper_schema("production")
   end
 
   def down do
@@ -124,22 +113,9 @@ defmodule Barkpark.Repo.Migrations.MovePapersToProduction do
       []
     )
 
-    # Re-seed the paper schema under paperflow (idempotent).
-    Barkpark.Content.upsert_schema(
-      %{
-        "name" => "paper",
-        "title" => "Papers",
-        "icon" => "📰",
-        "visibility" => "public",
-        "fields" => [
-          %{"name" => "title", "title" => "Title", "type" => "string"},
-          %{"name" => "event_type", "title" => "Event Type", "type" => "string"},
-          %{"name" => "source_doc", "title" => "Source Doc", "type" => "string"},
-          %{"name" => "goal_id", "title" => "Goal", "type" => "string"}
-        ]
-      },
-      "paperflow"
-    )
+    # Re-seed the paper schema under paperflow (idempotent). Raw SQL, same
+    # reasoning as `up/0`.
+    upsert_paper_schema("paperflow")
 
     # Drop the production paper schema so the reverse leaves no stray empty
     # "Papers" node in the production desk (the prior migration owned the
@@ -147,6 +123,47 @@ defmodule Barkpark.Repo.Migrations.MovePapersToProduction do
     repo().query!(
       "DELETE FROM schema_definitions WHERE name = 'paper' AND dataset = 'production'",
       []
+    )
+  end
+
+  # ── helpers ────────────────────────────────────────────────────────────────
+
+  # Insert the `paper` schema row for `dataset` using ONLY the columns that
+  # exist on schema_definitions at this migration's point in history
+  # (id, name, title, icon, visibility, fields, dataset, timestamps). Every
+  # other column on the live table (cors_origins/actions/groups/desk_groups/
+  # initial_values/cross_validations, plus the later layout/prefill/
+  # workspace_id/project_id) is NOT NULL-with-default or nullable, so omitting
+  # them is safe. `fields` is jsonb[]; we unfold a JSON array via the chained
+  # $1::text::jsonb cast (the documented Postgrex jsonb-array workaround).
+  # ON CONFLICT (name, dataset) DO NOTHING keeps it idempotent / re-run safe.
+  defp upsert_paper_schema(dataset) do
+    fields_json =
+      Jason.encode!([
+        %{"name" => "title", "title" => "Title", "type" => "string"},
+        %{"name" => "event_type", "title" => "Event Type", "type" => "string"},
+        %{"name" => "source_doc", "title" => "Source Doc", "type" => "string"},
+        %{"name" => "goal_id", "title" => "Goal", "type" => "string"}
+      ])
+
+    repo().query!(
+      """
+      INSERT INTO schema_definitions
+        (id, name, title, icon, visibility, fields, dataset, inserted_at, updated_at)
+      VALUES (
+        gen_random_uuid(),
+        'paper',
+        'Papers',
+        '📰',
+        'public',
+        ARRAY(SELECT jsonb_array_elements($1::text::jsonb))::jsonb[],
+        $2,
+        now(),
+        now()
+      )
+      ON CONFLICT (name, dataset) DO NOTHING
+      """,
+      [fields_json, dataset]
     )
   end
 end

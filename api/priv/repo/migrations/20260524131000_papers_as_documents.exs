@@ -1,8 +1,6 @@
 defmodule Barkpark.Repo.Migrations.PapersAsDocuments do
   use Ecto.Migration
 
-  import Ecto.Query
-
   @moduledoc """
   Convergence: papers become first-class `documents` (type "paper").
 
@@ -205,20 +203,42 @@ defmodule Barkpark.Repo.Migrations.PapersAsDocuments do
 
   # Seed the `paper` schema for every dataset that has papers, plus the default
   # paperflow dataset, so the Studio desk renders a "Papers" node. Idempotent on
-  # (name, dataset) — routed through Content.upsert_schema/2 (which reads first,
-  # so re-running is a no-op for an existing row) to avoid hand-encoding the
-  # jsonb-array columns (`fields`, `actions`, …) in raw SQL.
+  # (name, dataset).
+  #
+  # Raw SQL, NOT Content.upsert_schema/2: that app code SELECTs the CURRENT
+  # SchemaDefinition struct, which includes columns (layout, prefill,
+  # workspace_id, project_id) added by LATER migrations. On a from-zero migrate
+  # those columns do not exist yet, so calling app code here crashes with
+  # undefined_column. We touch ONLY the schema_definitions columns that exist at
+  # this migration's point in history (id, name, title, icon, visibility,
+  # fields, dataset, timestamps); every other column is NOT NULL-with-default or
+  # nullable, so omitting it is safe. `fields` is jsonb[] — we unfold a JSON
+  # array via the chained $1::text::jsonb cast (the documented Postgrex
+  # jsonb-array workaround). ON CONFLICT (name, dataset) DO NOTHING keeps it
+  # re-run safe.
   defp seed_paper_schemas do
-    attrs = %{
-      "name" => "paper",
-      "title" => "Papers",
-      "icon" => paper_icon(),
-      "visibility" => "public",
-      "fields" => paper_fields()
-    }
+    fields_json = Jason.encode!(paper_fields())
 
     Enum.each(paper_datasets(), fn dataset ->
-      Barkpark.Content.upsert_schema(attrs, dataset)
+      repo().query!(
+        """
+        INSERT INTO schema_definitions
+          (id, name, title, icon, visibility, fields, dataset, inserted_at, updated_at)
+        VALUES (
+          gen_random_uuid(),
+          'paper',
+          'Papers',
+          $1,
+          'public',
+          ARRAY(SELECT jsonb_array_elements($2::text::jsonb))::jsonb[],
+          $3,
+          now(),
+          now()
+        )
+        ON CONFLICT (name, dataset) DO NOTHING
+        """,
+        [paper_icon(), fields_json, dataset]
+      )
     end)
   end
 
