@@ -6,10 +6,11 @@ defmodule BarkparkWeb.Contract.LegacyHeadersTest do
   @token "barkpark-dev-token"
 
   setup do
-    # w1.5-E (Goal barkpark-qprk): the legacy `/api/*` surface is now token-gated
-    # (`:require_token` runs before `LegacyDeprecation`). The deprecation headers
-    # are only emitted on an authenticated request — an anonymous call is halted
-    # with 401 before the header plug runs.
+    # w1.5-E (Goal barkpark-qprk) token-gated the legacy `/api/documents/*` CRUD
+    # surface (`:require_token` before `LegacyDeprecation`). The regate-fix kept
+    # `GET /api/schemas` PUBLIC — it is schema discovery, Default-scoped via
+    # AssignDefaultScope, no token required. The deprecation headers ride along
+    # on both the authed and anonymous schema reads.
     Auth.create_token(@token, "dev", "legacy-headers", ["read", "admin"])
     :ok
   end
@@ -25,8 +26,13 @@ defmodule BarkparkWeb.Contract.LegacyHeadersTest do
     refute get_resp_header(resp, "link") == []
   end
 
-  test "GET /api/schemas without auth → 401", %{conn: conn} do
+  test "GET /api/schemas without auth → 200 (public schema discovery)", %{conn: conn} do
     resp = get(conn, "/api/schemas")
-    assert resp.status == 401
+    assert resp.status == 200
+  end
+
+  test "GET /api/schemas without auth still carries Deprecation header", %{conn: conn} do
+    resp = get(conn, "/api/schemas")
+    assert get_resp_header(resp, "deprecation") == ["true"]
   end
 end

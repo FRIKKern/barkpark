@@ -600,6 +600,16 @@ defmodule BarkparkWeb.Router do
     get "/documents/:type/:id", LegacyController, :show
     post "/documents/:type", LegacyController, :create
     delete "/documents/:type/:id", LegacyController, :delete
+  end
+
+  # Legacy public schema discovery — intentionally NOT token-gated. w15-E
+  # over-gated this when it closed the B14 unauth hole on /api/documents/*;
+  # /api/schemas is public read, already Default-scoped via AssignDefaultScope
+  # in the :api pipeline. Kept :LegacyDeprecation so the deprecation headers
+  # still ride along.
+  scope "/api", BarkparkWeb do
+    pipe_through [:api, BarkparkWeb.Plugs.LegacyDeprecation]
+
     get "/schemas", LegacyController, :schemas
   end
 
