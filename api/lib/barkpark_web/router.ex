@@ -665,6 +665,20 @@ defmodule BarkparkWeb.Router do
     delete "/v1/media/:dataset/:id", V1.MediaController, :delete
   end
 
+  # ── Workspace / project switcher — membership-scoped LIST ───────────────
+  # The web switcher's read surface: which workspaces (and their projects) the
+  # bearer token's principal can reach. Membership-scoped in the context layer
+  # (`Tenancy.list_workspaces_for/1` INNER-JOINs `workspace_memberships`), so a
+  # non-member workspace never appears; the :projects action returns 404 for a
+  # non-member to avoid leaking existence. Token-gated only — NOT the path
+  # tenancy macro / scoped plugin mounts (those live under /w/:ws/p/:project).
+  scope "/api", BarkparkWeb do
+    pipe_through [:api, :require_token]
+
+    get "/workspaces", WorkspaceController, :index
+    get "/workspaces/:workspace_slug/projects", WorkspaceController, :projects
+  end
+
   # ── Legacy compat ──────────────────────────────────────────────────────
   # Deprecated back-compat for the Go TUI's original endpoints — the TUI
   # migrated OFF these (Goal barkpark-qprk, B14). Now token-gated (`:require_token`)

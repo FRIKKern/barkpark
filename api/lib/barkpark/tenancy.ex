@@ -9,7 +9,8 @@ defmodule Barkpark.Tenancy do
   import Ecto.Query, warn: false
 
   alias Barkpark.Repo
-  alias Barkpark.Tenancy.{Workspace, Project, Dataset}
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership}
 
   @default_slug "default"
 
@@ -89,6 +90,30 @@ defmodule Barkpark.Tenancy do
   def list_workspaces do
     Repo.all(from w in Workspace, order_by: w.slug)
   end
+
+  @doc """
+  List the Workspaces a principal is a MEMBER of, ordered by slug.
+
+  Accepts an `%ApiToken{}` struct or a raw principal id binary. The hard
+  tenant boundary: the query INNER-JOINs `workspace_memberships` on
+  `principal_id == <token id>` (and `principal_type == "api_token"`), so a
+  workspace the caller has no membership row in can never appear — there is no
+  unscoped fallback. A nil/unknown principal yields `[]`.
+  """
+  @spec list_workspaces_for(ApiToken.t() | binary() | nil) :: [Workspace.t()]
+  def list_workspaces_for(%ApiToken{id: principal_id}), do: list_workspaces_for(principal_id)
+
+  def list_workspaces_for(principal_id) when is_binary(principal_id) do
+    Repo.all(
+      from w in Workspace,
+        join: m in Membership,
+        on: m.workspace_id == w.id,
+        where: m.principal_id == ^principal_id and m.principal_type == "api_token",
+        order_by: w.slug
+    )
+  end
+
+  def list_workspaces_for(_), do: []
 
   @doc "List all Projects under a Workspace (accepts a struct or a workspace id)."
   @spec list_projects(Workspace.t() | binary()) :: [Project.t()]
