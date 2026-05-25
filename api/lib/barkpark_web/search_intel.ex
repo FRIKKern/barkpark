@@ -71,6 +71,71 @@ defmodule BarkparkWeb.SearchIntel do
   end
 
   @doc false
+  def tentative?(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-tentative") do
+      [value | _] -> value in ["1", "true", "yes"]
+      _ -> false
+    end
+  end
+
+  @doc false
+  def should_record?(conn) do
+    cond do
+      recording_disabled?(conn) -> false
+      tentative?(conn) -> false
+      client_tracked?(conn) -> record_committed?(conn)
+      true -> true
+    end
+  end
+
+  @doc false
+  def tags(conn) do
+    header_tags =
+      case Plug.Conn.get_req_header(conn, "x-bp-search-tags") do
+        [raw | _] -> parse_tags(raw)
+        _ -> []
+      end
+
+    param_tags =
+      case conn.params do
+        %{"searchTags" => raw} when is_binary(raw) -> parse_tags(raw)
+        %{"searchTags" => raw} when is_list(raw) -> normalize_tag_list(raw)
+        _ -> []
+      end
+
+    (header_tags ++ param_tags)
+    |> Enum.uniq()
+    |> Enum.take(8)
+  end
+
+  defp client_tracked?(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
+      [client | _] when is_binary(client) and client != "" -> true
+      _ -> false
+    end
+  end
+
+  defp record_committed?(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-record") do
+      [value | _] -> value in ["1", "true", "yes"]
+      _ -> false
+    end
+  end
+
+  defp parse_tags(raw) when is_binary(raw) do
+    raw
+    |> String.split(~r/[,;\s]+/u, trim: true)
+    |> normalize_tag_list()
+  end
+
+  defp normalize_tag_list(tags) do
+    tags
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.slice(&1, 0, 32))
+  end
+
+  @doc false
   def parse_period_start(nil), do: nil
 
   def parse_period_start(value) when is_binary(value) do

@@ -29,7 +29,7 @@ class BpReferencePicker extends HTMLElement {
     this._refType = "";
     this._dataset = "production";
     this._loading = false;
-    this._debounceMs = 200;
+    this._debounceMs = 350;
     this._debounceTimer = null;
     this._mounted = false;
     this._suggestions = { recent: [], popular: [], nohits: [] };
@@ -187,11 +187,13 @@ class BpReferencePicker extends HTMLElement {
     }
   }
 
-  _searchHeaders() {
+  _searchHeaders(opts) {
+    opts = opts || {};
     const h = { Accept: "application/json" };
     if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
     if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
     h["X-BP-Search-Source"] = "studio-picker";
+    if (opts.record) h["X-BP-Search-Record"] = "1";
     return h;
   }
 
@@ -258,7 +260,7 @@ class BpReferencePicker extends HTMLElement {
   async _fetchSearchResults(query) {
     const res = await fetch(this._searchUrl(query), {
       credentials: "same-origin",
-      headers: this._searchHeaders()
+      headers: this._searchHeaders({ record: true })
     });
     if (!res.ok) return [];
     const body = await res.json();

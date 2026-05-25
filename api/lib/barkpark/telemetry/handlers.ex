@@ -15,7 +15,8 @@ defmodule Barkpark.Telemetry.Handlers do
     [:barkpark, :oban, :job, :stop],
     [:barkpark, :oban, :job, :exception],
     [:barkpark, :plugin_settings, :read],
-    [:barkpark, :plugin_settings, :write]
+    [:barkpark, :plugin_settings, :write],
+    [:barkpark, :search, :intel, :record]
   ]
 
   @oban_events [
@@ -73,5 +74,13 @@ defmodule Barkpark.Telemetry.Handlers do
 
   def handle_event([:barkpark, :plugin_settings, kind], _measurements, metadata, _config) do
     Logger.info("plugin_settings.#{kind} plugin=#{inspect(metadata[:plugin_name])}")
+  end
+
+  def handle_event([:barkpark, :search, :intel, :record], _measurements, metadata, _config) do
+    Logger.debug(
+      "search.intel.record surface=#{inspect(metadata[:surface])} " <>
+        "scope=#{inspect(metadata[:scope])} result=#{inspect(metadata[:result])} " <>
+        "reason=#{inspect(metadata[:reason])}"
+    )
   end
 end

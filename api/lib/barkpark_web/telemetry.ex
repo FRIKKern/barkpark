@@ -75,6 +75,11 @@ defmodule BarkparkWeb.Telemetry do
           "The time the connection spent waiting before being checked out for the query"
       ),
 
+      sum("search.intel.record.count",
+        tags: [:surface, :result],
+        description: "Search intelligence record outcomes"
+      ),
+
       # VM Metrics
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),

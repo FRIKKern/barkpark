@@ -292,7 +292,13 @@
         this._renderToolbarPills();
         this._scheduleSuggestFetch();
         clearTimeout(this._searchTimer);
-        this._searchTimer = setTimeout(() => this._loadAssets(), 250);
+        this._searchTimer = setTimeout(() => this._loadAssets(), 350);
+      });
+      this._searchEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          clearTimeout(this._searchTimer);
+          this._loadAssets();
+        }
       });
       this._searchEl.addEventListener("focus", () => {
         this._scheduleSuggestFetch();
@@ -425,7 +431,8 @@
       return this.getAttribute("data-token") || "";
     }
 
-    _headers(json) {
+    _headers(json, opts) {
+      opts = opts || {};
       const h = { Accept: "application/json" };
       if (json) h["Content-Type"] = "application/json";
       const tok = this._token();
@@ -433,6 +440,7 @@
       if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
       if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
       h["X-BP-Search-Source"] = "explorer";
+      if (opts.record) h["X-BP-Search-Record"] = "1";
       return h;
     }
 
@@ -1069,7 +1077,7 @@
       try {
         const r = await fetch(url, {
           credentials: "same-origin",
-          headers: this._headers(),
+          headers: this._headers(false, { record: !!this._search }),
           signal: signal
         });
         if (!r.ok) throw new Error(String(r.status));

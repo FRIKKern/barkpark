@@ -51,6 +51,7 @@ defmodule BarkparkWeb.Integration.V1DataSearchSuggestionsTest do
   test "suggestions returns recent queries for client header", %{conn: conn} do
     conn
     |> put_req_header("x-bp-search-client", "studio-picker")
+    |> put_req_header("x-bp-search-record", "1")
     |> authed()
     |> get(~p"/v1/data/search/production?q=Suggest")
     |> json_response(200)
@@ -84,6 +85,7 @@ defmodule BarkparkWeb.Integration.V1DataSearchSuggestionsTest do
     search =
       conn
       |> put_req_header("x-bp-search-client", "studio-picker")
+      |> put_req_header("x-bp-search-record", "1")
       |> authed()
       |> get(~p"/v1/data/search/production?q=Suggest")
       |> json_response(200)

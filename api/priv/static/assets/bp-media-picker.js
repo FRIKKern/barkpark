@@ -134,7 +134,8 @@ class BpMediaPicker extends HTMLElement {
     }
   }
 
-  _searchHeaders(json) {
+  _searchHeaders(json, opts) {
+    opts = opts || {};
     const h = { Accept: "application/json" };
     if (json) h["Content-Type"] = "application/json";
     const tok = this._token();
@@ -143,6 +144,7 @@ class BpMediaPicker extends HTMLElement {
     if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
     if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
     h["X-BP-Search-Source"] = "media-picker";
+    if (opts.record) h["X-BP-Search-Record"] = "1";
     return h;
   }
 
@@ -359,7 +361,7 @@ class BpMediaPicker extends HTMLElement {
         "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString(),
         {
           credentials: "same-origin",
-          headers: this._searchHeaders()
+          headers: this._searchHeaders(false, { record: true })
         }
       );
       if (!r.ok) return;

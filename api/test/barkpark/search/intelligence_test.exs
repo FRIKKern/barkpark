@@ -71,6 +71,52 @@ defmodule Barkpark.Search.IntelligenceTest do
     assert Repo.aggregate(Event, :count, :id) == 0
   end
 
+  test "record/6 emits telemetry for outcomes" do
+    handler_id = "intel-record-test-#{System.unique_integer()}"
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:barkpark, :search, :intel, :record],
+        fn _event, measurements, metadata, _config ->
+          send(self(), {:telemetry, measurements, metadata})
+        end,
+        nil
+      )
+
+    assert {:ok, _id} =
+             Intelligence.record(@surface, @scope, %{query: "analytics", filters: %{}}, 2, 4)
+
+    assert_receive {:telemetry, %{count: 1},
+                    %{surface: "media", scope: "production", result: :ok}}
+
+    assert :skipped =
+             Intelligence.record(@surface, @scope, %{query: "x"}, 0, 1, record: false)
+
+    assert_receive {:telemetry, %{count: 1},
+                    %{surface: "media", scope: "production", result: :skipped}}
+
+    :telemetry.detach(handler_id)
+  end
+
+  test "suggestions ignore prefixes shorter than four letters" do
+    at = DateTime.utc_now()
+
+    for _ <- 1..3, do: insert_event("alphabet", "alphabet", false, at)
+    for _ <- 1..3, do: insert_event("beta", "beta", false, at)
+
+    filtered =
+      Intelligence.suggestions(@surface, @scope, "actor-1", "alph", min_search_count: 3)
+
+    assert filtered.popular != []
+    assert Enum.all?(filtered.popular, &String.starts_with?(&1.query, "alph"))
+
+    broad =
+      Intelligence.suggestions(@surface, @scope, "actor-1", "be", min_search_count: 3)
+
+    assert length(broad.popular) >= 2
+  end
+
   defp insert_event(query, normalized, zero_hits, at) do
     %Event{}
     |> Ecto.Changeset.change(%{

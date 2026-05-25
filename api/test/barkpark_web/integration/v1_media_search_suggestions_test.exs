@@ -53,10 +53,21 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
   end
 
   defp search(conn, q) do
+    conn =
+      conn
+      |> authed()
+      |> maybe_commit_search()
+
     conn
-    |> authed()
     |> get(~p"/v1/media/production/search?q=#{q}&limit=5")
     |> json_response(200)
+  end
+
+  defp maybe_commit_search(conn) do
+    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
+      [_ | _] -> Plug.Conn.put_req_header(conn, "x-bp-search-record", "1")
+      _ -> conn
+    end
   end
 
   test "search records events and suggestions returns recent and popular", %{conn: conn} do
@@ -114,7 +125,7 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
     suggest =
       conn
       |> authed()
-      |> get(~p"/v1/media/production/search/suggestions?q=alp")
+      |> get(~p"/v1/media/production/search/suggestions?q=alph")
       |> json_response(200)
 
     popular = suggest["result"]["popular"]
