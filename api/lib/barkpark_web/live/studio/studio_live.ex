@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   """
   use BarkparkWeb, :live_view
 
-  alias Barkpark.{Content, Media, Structure}
+  alias Barkpark.{Content, Media, Structure, Tenancy}
   alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Presence
@@ -149,9 +149,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    dataset = params["dataset"] || "production"
+    dataset = params["dataset"] || default_dataset()
     path = Map.get(params, "path", [])
     desk = params["desk"]
+
+    socket = ensure_tenancy_scope(socket)
 
     if connected?(socket) and socket.assigns[:dataset] != dataset do
       if old = socket.assigns[:dataset] do
@@ -378,6 +380,46 @@ defmodule BarkparkWeb.Studio.StudioLive do
      push_patch(socket,
        to: studio_path(socket.assigns.nav_path, socket.assigns.dataset, desk: desk)
      )}
+  end
+
+  # ── Workspace / Project scope switch (Task barkpark-k86v) ───────────────────
+  #
+  # The WorkspaceSwitcher component fires these on `<select>` change. The
+  # Studio route shape stays `/studio/:dataset`, so the workspace/project scope
+  # lives on the socket — switching is a pure LiveView event, not a URL
+  # navigation. Selecting a workspace re-defaults the project to that
+  # workspace's first project (the current project belongs to the OLD
+  # workspace, so it can't carry over). After re-assigning the scope we
+  # rebuild_panes so the desk/schemas reload for the chosen scope. Re-scoping
+  # the URL under `/w/:ws/p/:project` is the sibling task barkpark-4tuu.
+  def handle_event("switch-workspace", %{"workspace" => slug}, socket) do
+    case Tenancy.get_workspace_by_slug(slug) do
+      nil ->
+        {:noreply, socket}
+
+      workspace ->
+        project = List.first(Tenancy.list_projects(workspace.id))
+
+        {:noreply,
+         socket
+         |> assign(current_workspace: workspace, current_project: project)
+         |> rebuild_panes()}
+    end
+  end
+
+  def handle_event("switch-project", %{"project" => slug}, socket) do
+    ws = socket.assigns[:current_workspace]
+
+    case ws && Tenancy.get_project(ws.slug, slug) do
+      %{} = project ->
+        {:noreply,
+         socket
+         |> assign(current_project: project)
+         |> rebuild_panes()}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("expand-pane", %{"idx" => idx_str}, socket) do
@@ -1912,6 +1954,44 @@ defmodule BarkparkWeb.Studio.StudioLive do
     |> Enum.reverse()
     |> Enum.find_value(fn pane -> Map.get(pane, :type_name) end)
   end
+
+  # ── Tenancy scope (Task barkpark-k86v) ──────────────────────────────────────
+  #
+  # The dataset still lives in the URL (`/studio/:dataset`); the workspace /
+  # project scope lives on the socket. `ensure_tenancy_scope/1` seeds the
+  # scope to the seeded Default workspace/project the first time handle_params
+  # runs (and leaves it untouched once a switch event has set it), so the
+  # switcher always renders with a current selection rather than a bare
+  # "production" literal. When the tenancy backfill hasn't run (no Default
+  # workspace) the scope stays nil and the layout simply omits the switcher.
+  defp ensure_tenancy_scope(socket) do
+    if socket.assigns[:current_workspace] do
+      socket
+    else
+      workspace = Tenancy.get_default_workspace()
+
+      project =
+        case workspace do
+          %{id: ws_id} ->
+            Tenancy.get_default_project() || List.first(Tenancy.list_projects(ws_id))
+
+          _ ->
+            nil
+        end
+
+      assign(socket, current_workspace: workspace, current_project: project)
+    end
+  end
+
+  # The default dataset for a bare `/studio` mount. The `dataset` string stays
+  # the leaf discriminator and is ORTHOGONAL to workspace/project (per
+  # Content.Scope) — the Default-tenancy backfill assigned the seeded Default
+  # workspace/project to ALL pre-tenancy rows regardless of their dataset, and
+  # those rows live under the "production" dataset. So the Default scope's
+  # content is the "production" dataset; we resolve it through Content rather
+  # than hardcode the literal at the call sites. `list_datasets/0` always
+  # includes "production", so this is stable on a fresh DB.
+  def default_dataset, do: Content.default_dataset()
 
   defp studio_path(path, dataset, opts \\ []), do: studio_path_for(path, dataset, opts)
 

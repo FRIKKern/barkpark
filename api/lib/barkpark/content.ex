@@ -1433,6 +1433,20 @@ defmodule Barkpark.Content do
   # ── Schema Definitions ────────────────────────────────────────────────────
 
   @doc """
+  The default dataset for a bare Studio landing (no `:dataset` in the URL).
+
+  The `dataset` string is the leaf content discriminator and is orthogonal to
+  the workspace/project tenancy envelope (see `Barkpark.Content.Scope`): the
+  Default-tenancy backfill assigned the seeded Default workspace/project to all
+  pre-tenancy rows, which live under the `"production"` dataset. So the Default
+  scope's content is the `"production"` dataset. Resolving it here gives the
+  Studio LiveView, the dashboard, and the bare-`/studio` redirect ONE source
+  of truth instead of three scattered `"production"` literals.
+  """
+  @spec default_dataset() :: String.t()
+  def default_dataset, do: "production"
+
+  @doc """
   Return all datasets known to the system, sorted alphabetically.
   Always includes `"production"` so a brand-new DB still has something to show.
   """

@@ -84,6 +84,12 @@ defmodule Barkpark.Tenancy do
     Repo.one(query)
   end
 
+  @doc "List all Workspaces, ordered by slug."
+  @spec list_workspaces() :: [Workspace.t()]
+  def list_workspaces do
+    Repo.all(from w in Workspace, order_by: w.slug)
+  end
+
   @doc "List all Projects under a Workspace (accepts a struct or a workspace id)."
   @spec list_projects(Workspace.t() | binary()) :: [Project.t()]
   def list_projects(%Workspace{id: ws_id}), do: list_projects(ws_id)
