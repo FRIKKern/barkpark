@@ -9,6 +9,7 @@ import {
 } from './fixtures/handlers'
 import { getDoc } from '../src/doc'
 import { createDocsOperation } from '../src/docs'
+import { fetchRawDoc } from '../src/fetchRaw'
 import {
   BarkparkAPIError,
   BarkparkAuthError,
@@ -114,5 +115,126 @@ describe('createDocsOperation', () => {
     const docs = await createDocsOperation(cfg, 'post').find()
     // drafts perspective → fixture includes drafts.p2; published-only default would exclude it.
     expect(docs.some((d) => (d as { _id: string })._id === 'drafts.p2')).toBe(true)
+  })
+})
+
+describe('scoped read paths (workspace + project)', () => {
+  const scopedConfig: BarkparkClientConfig = {
+    ...baseConfig,
+    workspace: 'acme',
+    project: 'blog',
+  }
+  const PREFIX = '/w/acme/p/blog'
+
+  it('getDoc prepends /w/<ws>/p/<project> to the doc path when both set', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}${PREFIX}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json(
+          {
+            _id: 'p1',
+            _type: 'post',
+            _rev: '1111111111111111111111111111aaaa',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: 'x',
+            _updatedAt: 'x',
+          },
+          { status: 200, headers: { ETag: `"x"` } },
+        )
+      }),
+    )
+    await getDoc(scopedConfig, 'post', 'p1')
+    expect(seenPath).toBe(`${PREFIX}/v1/data/doc/${TEST_DATASET}/post/p1`)
+  })
+
+  it('getDoc stays flat /v1/... when workspace/project absent (back-compat)', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json(
+          {
+            _id: 'p1',
+            _type: 'post',
+            _rev: '1111111111111111111111111111aaaa',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: 'x',
+            _updatedAt: 'x',
+          },
+          { status: 200, headers: { ETag: `"x"` } },
+        )
+      }),
+    )
+    await getDoc(baseConfig, 'post', 'p1')
+    expect(seenPath).toBe(`/v1/data/doc/${TEST_DATASET}/post/p1`)
+  })
+
+  it('createDocsOperation prepends the scope prefix to the query path', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}${PREFIX}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json(
+          { perspective: 'published', documents: [], count: 0, limit: 10, offset: 0 },
+          { status: 200 },
+        )
+      }),
+    )
+    await createDocsOperation(scopedConfig, 'post').find()
+    expect(seenPath).toBe(`${PREFIX}/v1/data/query/${TEST_DATASET}/post`)
+  })
+
+  it('createDocsOperation stays flat /v1/... when scope absent (back-compat)', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json(
+          { perspective: 'published', documents: [], count: 0, limit: 10, offset: 0 },
+          { status: 200 },
+        )
+      }),
+    )
+    await createDocsOperation(baseConfig, 'post').find()
+    expect(seenPath).toBe(`/v1/data/query/${TEST_DATASET}/post`)
+  })
+
+  it('fetchRawDoc prepends the scope prefix to the caller path', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}${PREFIX}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({}, { status: 200 })
+      }),
+    )
+    await fetchRawDoc(scopedConfig, `/v1/data/doc/${TEST_DATASET}/post/p1`)
+    expect(seenPath).toBe(`${PREFIX}/v1/data/doc/${TEST_DATASET}/post/p1`)
+  })
+
+  it('fetchRawDoc does not double-prefix an already-scoped path', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}${PREFIX}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({}, { status: 200 })
+      }),
+    )
+    await fetchRawDoc(scopedConfig, `${PREFIX}/v1/data/doc/${TEST_DATASET}/post/p1`)
+    expect(seenPath).toBe(`${PREFIX}/v1/data/doc/${TEST_DATASET}/post/p1`)
+  })
+
+  it('fetchRawDoc stays flat when scope absent (back-compat)', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({}, { status: 200 })
+      }),
+    )
+    await fetchRawDoc(baseConfig, `/v1/data/doc/${TEST_DATASET}/post/p1`)
+    expect(seenPath).toBe(`/v1/data/doc/${TEST_DATASET}/post/p1`)
   })
 })

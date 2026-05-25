@@ -8,6 +8,7 @@
 // On 404, transport throws BarkparkNotFoundError; getDoc catches and returns { data: null }
 // so callers (client.doc) can treat missing as null per ADR-009 / w6.2-impl-spec §Status → class.
 
+import { scopePrefix } from './client'
 import { BarkparkNotFoundError } from './errors'
 import { request } from './transport'
 import type {
@@ -51,7 +52,7 @@ export async function getDoc<T = BarkparkDocument>(
 ): Promise<DocResult<T>> {
   const perspective = opts?.perspective ?? config.perspective
   const query = perspective !== undefined ? `?perspective=${encodeURIComponent(perspective)}` : ''
-  const path = `/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
+  const path = `${scopePrefix(config)}/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
 
   try {
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }

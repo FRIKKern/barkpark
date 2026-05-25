@@ -2,6 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import type { BarkparkClientConfig } from './types'
+import { scopePrefix } from './client'
 import { request, type TransportMethod, type TransportRequestOptions } from './transport'
 import { BarkparkValidationError } from './errors'
 
@@ -9,6 +10,12 @@ import { BarkparkValidationError } from './errors'
  * Escape hatch — returns the raw Response object for callers who need full control.
  * Pass any path relative to config.projectUrl (must start with '/').
  * Headers/body merge with transport defaults (Accept + Auth + request-tag).
+ *
+ * When the config sets both `workspace` and `project`, the caller-supplied path
+ * is prefixed with `scopePrefix(config)` (`/w/<ws>/p/<project>`) so the escape
+ * hatch routes through the same scoped surface as the typed read builders.
+ * Flat configs leave the path untouched (back-compat). Paths that already carry
+ * the scope prefix are left as-is to avoid double-prefixing.
  */
 export async function fetchRawDoc(
   config: BarkparkClientConfig,
@@ -17,6 +24,10 @@ export async function fetchRawDoc(
 ): Promise<Response> {
   if (!path.startsWith('/')) {
     throw new BarkparkValidationError(`fetchRaw path must start with "/"`, { field: 'path' })
+  }
+  const prefix = scopePrefix(config)
+  if (prefix.length > 0 && !path.startsWith(`${prefix}/`) && path !== prefix) {
+    path = `${prefix}${path}`
   }
   const method = ((init?.method ?? 'GET') as string).toUpperCase() as TransportMethod
   const opts: TransportRequestOptions = {
