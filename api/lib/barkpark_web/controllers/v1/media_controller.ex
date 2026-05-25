@@ -98,6 +98,20 @@ defmodule BarkparkWeb.V1.MediaController do
     })
   end
 
+  def search_interaction(conn, %{"dataset" => dataset} = params) do
+    record_opts = [
+      actor_key: SearchIntel.actor_key(conn),
+      session_key: SearchIntel.session_key(conn),
+      source: SearchIntel.source(conn, "explorer"),
+      disabled: SearchIntel.recording_disabled?(conn)
+    ]
+
+    case SearchIntelligence.record_interaction(dataset, params, record_opts) do
+      {:ok, id} -> json(conn, %{ok: true, interactionEventId: id})
+      _ -> json(conn, %{ok: true})
+    end
+  end
+
   def index(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
 

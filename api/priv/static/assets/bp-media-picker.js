@@ -146,6 +146,25 @@ class BpMediaPicker extends HTMLElement {
     return h;
   }
 
+  _recordSearchInteraction(objectId, position) {
+    if (!this._lastSearchEventId || !objectId) return;
+    const dataset = this._dataset();
+    fetch(
+      "/v1/media/" + encodeURIComponent(dataset) + "/search/interaction",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: this._searchHeaders(true),
+        body: JSON.stringify({
+          queryEventId: this._lastSearchEventId,
+          objectId: objectId,
+          position: position,
+          type: "select"
+        })
+      }
+    ).catch(function () {});
+  }
+
   _isReferenceMode() {
     return this.getAttribute("value-mode") === "reference";
   }
@@ -262,14 +281,16 @@ class BpMediaPicker extends HTMLElement {
       return;
     }
     const html = this._files
-      .map((f) => {
+      .map((f, idx) => {
         const u = (f.url || "").replace(/"/g, "&quot;");
         const n = (f.originalName || f.filename || "")
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;");
         const aid = (f.assetDocId || "").replace(/"/g, "&quot;");
         return (
-          '<div class="bp-mp-item" data-url="' +
+          '<div class="bp-mp-item" data-index="' +
+          idx +
+          '" data-url="' +
           u +
           '" data-mime="' +
           (f.mimeType || "") +
@@ -288,6 +309,9 @@ class BpMediaPicker extends HTMLElement {
     this._gridEl.innerHTML = html;
     this._gridEl.querySelectorAll(".bp-mp-item").forEach((item) => {
       item.addEventListener("click", () => {
+        const idx = parseInt(item.dataset.index, 10);
+        const assetId = item.dataset.assetId || "";
+        this._recordSearchInteraction(assetId, isNaN(idx) ? null : idx);
         this._select({
           url: item.dataset.url,
           mime: item.dataset.mime || "",

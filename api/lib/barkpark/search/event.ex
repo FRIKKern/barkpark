@@ -7,6 +7,7 @@ defmodule Barkpark.Search.Event do
   schema "search_intel_events" do
     field :surface, :string
     field :scope, :string
+    field :event_type, :string, default: "search"
     field :query, :string, default: ""
     field :query_normalized, :string, default: ""
     field :filters, :map, default: %{}
@@ -19,6 +20,9 @@ defmodule Barkpark.Search.Event do
     field :parent_event_id, :binary_id
     field :source, :string, default: "api"
     field :session_key, :string
+    field :object_id, :string
+    field :position, :integer
+    field :query_event_id, :binary_id
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end

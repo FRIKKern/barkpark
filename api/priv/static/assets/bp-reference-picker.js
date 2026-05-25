@@ -38,6 +38,7 @@ class BpReferencePicker extends HTMLElement {
     this._suggestNohits = [];
     this._searchClientId = null;
     this._lastSearchEventId = null;
+    this._lastSearchMatches = [];
   }
 
   connectedCallback() {
@@ -155,6 +156,8 @@ class BpReferencePicker extends HTMLElement {
   }
 
   _select(doc) {
+    const idx = this._lastSearchMatches.findIndex((d) => d.id === doc.id);
+    this._recordSearchInteraction(doc.id, idx >= 0 ? idx : null);
     this._value = doc.id;
     this._selectedTitle = doc.title || doc.id;
     this._hideDropdown();
@@ -198,6 +201,28 @@ class BpReferencePicker extends HTMLElement {
     }
   }
 
+  _recordSearchInteraction(objectId, position) {
+    if (!this._lastSearchEventId || !objectId) return;
+    const url =
+      "/v1/data/search/" +
+      encodeURIComponent(this._dataset) +
+      "/interaction";
+    fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: Object.assign(
+        { "Content-Type": "application/json" },
+        this._searchHeaders()
+      ),
+      body: JSON.stringify({
+        queryEventId: this._lastSearchEventId,
+        objectId: objectId,
+        position: position,
+        type: "select"
+      })
+    }).catch(function () {});
+  }
+
   async _search(term) {
     const t = (term || "").trim();
 
@@ -239,9 +264,10 @@ class BpReferencePicker extends HTMLElement {
     const body = await res.json();
     this._captureSearchEventId(body);
     const docs = body.documents || [];
-    return docs
+    this._lastSearchMatches = docs
       .map((d) => ({ id: d._id || d.id || "", title: d.title || d._id || "" }))
       .filter((d) => d.id);
+    return this._lastSearchMatches;
   }
 
   async _fetchSuggestions(prefix) {

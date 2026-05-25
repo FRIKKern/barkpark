@@ -90,6 +90,20 @@ defmodule BarkparkWeb.SearchController do
     })
   end
 
+  def search_interaction(conn, %{"dataset" => dataset} = params) do
+    record_opts = [
+      actor_key: SearchIntel.actor_key(conn),
+      session_key: SearchIntel.session_key(conn),
+      source: SearchIntel.source(conn, "documents-api"),
+      disabled: SearchIntel.recording_disabled?(conn)
+    ]
+
+    case SearchIntelligence.record_interaction(dataset, params, record_opts) do
+      {:ok, id} -> json(conn, %{ok: true, interactionEventId: id})
+      _ -> json(conn, %{ok: true})
+    end
+  end
+
   defp missing_q(conn) do
     env =
       {:error, :malformed}

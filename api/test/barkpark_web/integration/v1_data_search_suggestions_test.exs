@@ -79,4 +79,41 @@ defmodule BarkparkWeb.Integration.V1DataSearchSuggestionsTest do
     assert body["result"]["surface"] == "documents"
     assert body["result"]["scope"] == "production"
   end
+
+  test "interaction records click against search event", %{conn: conn} do
+    search =
+      conn
+      |> put_req_header("x-bp-search-client", "studio-picker")
+      |> authed()
+      |> get(~p"/v1/data/search/production?q=Suggest")
+      |> json_response(200)
+
+    search_id = search["searchEventId"]
+    assert is_binary(search_id)
+
+    interaction =
+      conn
+      |> put_req_header("x-bp-search-client", "studio-picker")
+      |> authed()
+      |> post(~p"/v1/data/search/production/interaction", %{
+        "queryEventId" => search_id,
+        "objectId" => "doc-suggest-1",
+        "position" => 0,
+        "type" => "select"
+      })
+      |> json_response(200)
+
+    assert interaction["ok"] == true
+    assert is_binary(interaction["interactionEventId"])
+
+    click =
+      Repo.get_by(Event,
+        surface: "documents",
+        event_type: "select",
+        object_id: "doc-suggest-1",
+        query_event_id: search_id
+      )
+
+    assert click
+  end
 end

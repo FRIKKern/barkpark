@@ -436,6 +436,24 @@
       return h;
     }
 
+    _recordSearchInteraction(doc) {
+      if (!this._lastSearchEventId || !this._search || !doc) return;
+      const objectId = doc._id || doc.id;
+      if (!objectId) return;
+      const idx = this._assets.findIndex((d) => d._id === objectId);
+      fetch(this._mediaBase() + "/search/interaction", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: Object.assign({ "Content-Type": "application/json" }, this._headers()),
+        body: JSON.stringify({
+          queryEventId: this._lastSearchEventId,
+          objectId: objectId,
+          position: idx >= 0 ? idx : null,
+          type: "click"
+        })
+      }).catch(function () {});
+    }
+
     _ensureSearchClientId() {
       const key = "bp-search-client:" + this._dataset();
       try {
@@ -1265,6 +1283,7 @@
     }
 
     _select(doc) {
+      this._recordSearchInteraction(doc);
       this._selected = doc;
       this._inspectorMode = "asset";
       this._assetDetail = null;
