@@ -124,4 +124,100 @@ defmodule BarkparkWeb.PluginRoutesTest do
              "expected zero plugin routes under plugins=[]; got #{inspect(routes)}"
     end
   end
+
+  # ── Describe 3 — workspace/project-scoped plugin mirrors (barkpark-4tuu) ─
+  #
+  # The flat plugin mounts stay as the Default-scoped back-compat alias;
+  # these prove the new `/w/:ws/p/:project/{studio,admin,v1/plugins}`
+  # mirrors mount the SAME plugin routes AND run ResolveWorkspace/
+  # ResolveProject (the hard tenant boundary) ahead of them.
+
+  describe "workspace/project-scoped plugin mirrors (barkpark-4tuu)" do
+    setup do
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+      Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+
+      # create_token/4 (no explicit workspace_id) binds to the seeded Default
+      # workspace AND creates a membership — so this token is a Default member
+      # with admin perms (the LV admin on_mount gate), but NOT a member of
+      # "scoped-plugin-other-ws".
+      raw = "scoped-plugin-admin-token-#{System.unique_integer([:positive])}"
+
+      {:ok, _api_token} =
+        Auth.create_token(raw, "scoped plugin admin", "production", ["read", "write", "admin"])
+
+      {:ok, other_ws} =
+        Barkpark.Tenancy.create_workspace(%{slug: "scoped-plugin-other-ws", name: "Other"})
+
+      {:ok, _other_proj} =
+        Barkpark.Tenancy.create_project(other_ws, %{slug: "other-proj", name: "Other"})
+
+      {:ok, raw_token: raw}
+    end
+
+    test "scoped + flat plugin routes both appear in Router introspection" do
+      paths = BarkparkWeb.Router.__routes__() |> Enum.map(& &1.path) |> MapSet.new()
+
+      # Flat back-compat alias still present.
+      assert @pilot_path in paths
+      assert "/v1/plugins/onixedit/export/:dataset/:id" in paths
+
+      # New workspace/project-scoped mirrors present.
+      assert "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping" in paths
+      assert "/w/:workspace_slug/p/:project_slug/admin/onixedit/bokbasen" in paths
+      assert "/w/:workspace_slug/p/:project_slug/admin/onixedit/staleness" in paths
+
+      assert "/w/:workspace_slug/p/:project_slug/v1/plugins/onixedit/export/:dataset/:id" in paths
+    end
+
+    test "scoped admin LV resolves workspace+project (member Bearer) and reaches the mount", %{
+      raw_token: raw
+    } do
+      conn =
+        build_conn()
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+        |> init_test_session(%{"api_token" => raw})
+        |> get("/w/default/p/default/studio/onixedit/ping")
+
+      body = html_response(conn, 200)
+
+      assert body =~ @body_marker
+      # The resolver plugs ran and set the hard-tenant-boundary assigns.
+      assert conn.assigns.current_workspace.slug == "default"
+      assert conn.assigns.current_project.slug == "default"
+    end
+
+    test "scoped admin LV → 403 for a token that is not a member of the target workspace", %{
+      raw_token: raw
+    } do
+      conn =
+        build_conn()
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+        |> init_test_session(%{"api_token" => raw})
+        |> get("/w/scoped-plugin-other-ws/p/other-proj/studio/onixedit/ping")
+
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    test "scoped admin LV → 404 for an unknown workspace slug", %{raw_token: raw} do
+      conn =
+        build_conn()
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+        |> init_test_session(%{"api_token" => raw})
+        |> get("/w/no-such-ws/p/default/studio/onixedit/ping")
+
+      assert conn.status == 404
+      assert Jason.decode!(conn.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "flat /studio/onixedit/ping still works (Default-scoped back-compat)", %{raw_token: raw} do
+      conn =
+        build_conn()
+        |> init_test_session(%{"api_token" => raw})
+        |> get(@pilot_path)
+
+      assert html_response(conn, 200) =~ @body_marker
+    end
+  end
 end

@@ -40,6 +40,27 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ResolveProject
   end
 
+  # Tenancy-aware variant of :browser for the path-scoped plugin LiveView
+  # mounts at /w/:workspace_slug/p/:project_slug/{studio,admin}. The base
+  # :browser plugs (session, flash, CSRF, secure headers, root layout), then
+  # the two resolver plugs so the plugin LiveViews participate in the hard
+  # tenant boundary — `current_workspace` / `current_project` land in the
+  # conn assigns, threaded into the LV session for ScopeHelpers.scope_opts/1.
+  # OptionalToken runs first so ResolveWorkspace's membership gate sees a
+  # Bearer token if one was sent; browser callers carry the session cookie
+  # instead, and the LV's own on_mount admin/ops hook is the UI auth gate.
+  pipeline :scoped_browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+    plug BarkparkWeb.Plugs.OptionalToken
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
+  end
+
   pipeline :api_unlimited do
     plug :accepts, ["json"]
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
@@ -257,6 +278,64 @@ defmodule BarkparkWeb.Router do
   # controller modules are fully qualified.
   scope "/v1/plugins" do
     pipe_through [:api, :require_admin]
+
+    plugin_routes(scope: :api)
+  end
+
+  # ── Plugin-contributed routes — workspace/project-scoped mirrors ──────
+  # Task barkpark-4tuu (Goal barkpark-G… W1). The four flat plugin mounts
+  # above keep working as the Default-scoped back-compat alias (mirroring
+  # how the rest of W1 left the flat `/v1/data`, `/media`, etc. in place);
+  # these mirrors mount the SAME plugin routes under the path-based tenant
+  # prefix `/w/:workspace_slug/p/:project_slug/{studio,admin,v1/plugins}` so
+  # plugin routes participate in the hard tenant boundary.
+  #
+  # Pipelines:
+  #   * browser scopes (admin/public/ops) use :scoped_browser — base
+  #     :browser plugs + ResolveWorkspace/ResolveProject so the workspace +
+  #     project land in conn assigns (ScopeHelpers.scope_opts/1 then reads
+  #     them in the plugin LVs). The LV's own on_mount admin/ops hook stays
+  #     the UI auth gate; ResolveWorkspace's membership gate enforces tenant
+  #     isolation (tokenless scoped browser access → 403; the flat /studio,
+  #     /admin paths remain the cookie-only back-compat surface).
+  #   * the :api scope uses :scoped_api + :require_admin — identical to the
+  #     flat /v1/plugins mount but with the resolvers replacing
+  #     AssignDefaultScope, so the export controller is workspace-scoped.
+  #
+  # live_session names MUST be unique across the router, hence the
+  # `scoped_plugin_*` prefix. Same no-alias rationale as the flat plugin
+  # scopes — plugin modules are fully qualified by their route specs.
+  scope "/w/:workspace_slug/p/:project_slug/studio" do
+    pipe_through :scoped_browser
+
+    live_session :scoped_plugin_admin,
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      plugin_routes(scope: :admin)
+    end
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/studio" do
+    pipe_through :scoped_browser
+
+    live_session :scoped_plugin_public,
+      layout: {BarkparkWeb.Layouts, :studio} do
+      plugin_routes(scope: :public)
+    end
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/admin" do
+    pipe_through :scoped_browser
+
+    live_session :scoped_plugin_ops,
+      on_mount: [{BarkparkWeb.LiveAuth, :ops}],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      plugin_routes(scope: :ops)
+    end
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/v1/plugins" do
+    pipe_through [:scoped_api, :require_admin]
 
     plugin_routes(scope: :api)
   end
