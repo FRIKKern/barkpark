@@ -1,7 +1,9 @@
 alias Barkpark.Repo
 alias Barkpark.Content.{Document, SchemaDefinition}
+alias Barkpark.Auth
 alias Barkpark.Auth.ApiToken
 alias Barkpark.Tenancy
+alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
 dataset = "production"
 
@@ -39,7 +41,19 @@ default_project =
 default_ws_id = default_workspace.id
 default_project_id = default_project.id
 
-IO.puts("Default scope: workspace=#{default_ws_id} project=#{default_project_id}")
+# Resolve the authoritative `dataset_id` for the seed dataset under the Default
+# project, get-or-creating the dataset row. This is the SAME key the read path
+# resolves to (Content.scope_to_dataset → resolve_read_dataset_id →
+# get_dataset): documents are filtered `WHERE dataset_id = <id>` with NO
+# NULL-fallback, so a seeded doc left with dataset_id = NULL is invisible to
+# every scoped read on a fresh DB. Stamp it onto every seeded document below,
+# mirroring Content.resolve_dataset_id_for_write / TenancyFixtures.create_document_in!.
+{:ok, %Barkpark.Tenancy.Dataset{id: default_dataset_id}} =
+  Tenancy.get_or_create_dataset(default_project_id, dataset)
+
+IO.puts(
+  "Default scope: workspace=#{default_ws_id} project=#{default_project_id} dataset_id=#{default_dataset_id}"
+)
 
 # SchemaDefinition.changeset/2 does not cast the tenancy FKs (they were added as
 # belongs_to without a cast slot); put_change them directly so seeded schemas
@@ -536,6 +550,7 @@ for doc_attrs <- documents do
     |> Map.put(:rev, :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
     |> Map.put(:workspace_id, default_ws_id)
     |> Map.put(:project_id, default_project_id)
+    |> Map.put(:dataset_id, default_dataset_id)
 
   %Document{}
   |> Document.changeset(doc_attrs)
@@ -547,15 +562,41 @@ IO.puts("Seeded #{length(documents)} documents")
 # ── Dev API Token ────────────────────────────────────────────────────────────
 
 dev_token = "barkpark-dev-token"
+dev_perms = ["read", "write", "admin"]
 
-%ApiToken{}
-|> ApiToken.changeset(%{
-  token_hash: ApiToken.hash_token(dev_token),
-  label: "dev-studio",
-  dataset: dataset,
-  permissions: ["read", "write", "admin"]
-})
-|> Repo.insert!(on_conflict: :nothing)
+# Mint the dev token through Auth.create_token so it is BOUND to the Default
+# workspace AND gets a `workspace_memberships` row (principal_type "api_token")
+# in the same transaction — without it ResolveWorkspace 403s every
+# /w/:ws/p/:project/... route and /api/workspaces returns empty. Passing
+# default_ws_id explicitly (rather than relying on the nil → default fallback)
+# guarantees the membership branch is taken even if get_default_workspace races.
+# Idempotent: on a re-run the token already exists (unique token_hash), so we
+# skip the insert and only backfill the workspace_id + membership if missing.
+case Auth.verify_token(dev_token) do
+  {:error, :unauthorized} ->
+    {:ok, _token} =
+      Auth.create_token(dev_token, "dev-studio", dataset, dev_perms, default_ws_id)
+
+  {:ok, %ApiToken{} = existing} ->
+    # Backfill an older seeded token (raw-insert era) that lacks workspace_id
+    # and/or its membership row.
+    existing =
+      if is_nil(existing.workspace_id) do
+        {:ok, updated} =
+          existing
+          |> ApiToken.changeset(%{workspace_id: default_ws_id})
+          |> Repo.update()
+
+        updated
+      else
+        existing
+      end
+
+    unless TenancyAuth.member?(existing, default_ws_id) do
+      role = TenancyAuth.role_for_permissions(existing.permissions)
+      {:ok, _membership} = TenancyAuth.create_membership(default_ws_id, existing.id, role)
+    end
+end
 
 IO.puts("Dev token created: #{dev_token}")
 IO.puts("Use with: curl -H 'Authorization: Bearer #{dev_token}' ...")
