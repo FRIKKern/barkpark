@@ -106,6 +106,14 @@ defmodule Barkpark.Media.Search do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
+    # W2 read-scope: resolve the dataset STRING → dataset_id within the read's
+    # project (opts :project_id, else Default) and filter the blob table by
+    # `m.dataset_id` authoritatively. Falls back to the legacy `m.dataset`
+    # STRING filter when no dataset row resolves (back-compat). The left-join to
+    # the linked asset Document keeps the `d.dataset` STRING mirror filter — the
+    # mirror stays consistent with dataset_id on every write.
+    dataset_id = resolve_dataset_id(dataset, opts)
+
     MediaFile
     |> from(as: :media)
     |> join(:left, [m], d in Document,
@@ -114,7 +122,7 @@ defmodule Barkpark.Media.Search do
         d.type == ^@asset_type and d.dataset == ^dataset and
           fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
     )
-    |> where([m], m.dataset == ^dataset)
+    |> scope_media_to_dataset(dataset, dataset_id)
     |> scope_to_workspace(workspace_id, project_id)
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
@@ -131,6 +139,36 @@ defmodule Barkpark.Media.Search do
     |> maybe_filter_tags(selections["tags"])
     |> maybe_filter_visibility(Keyword.get(opts, :visibility))
     |> maybe_filter_visibility(selections["visibility"])
+  end
+
+  # W2 read-scope. Resolve the dataset STRING → dataset_id within the read's
+  # project scope (opts :project_id, else the seeded Default project). Read-only
+  # — never creates a dataset on a search path. Returns nil when unresolvable,
+  # so the caller keeps the legacy `m.dataset` STRING filter.
+  defp resolve_dataset_id(dataset, opts) when is_binary(dataset) do
+    project_id = Keyword.get(opts, :project_id) || default_project_id()
+
+    case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
+      %Barkpark.Tenancy.Dataset{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp resolve_dataset_id(_dataset, _opts), do: nil
+
+  defp default_project_id do
+    case Barkpark.Tenancy.get_default_project() do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp scope_media_to_dataset(query, _dataset, dataset_id) when is_binary(dataset_id) do
+    where(query, [m], m.dataset_id == ^dataset_id)
+  end
+
+  defp scope_media_to_dataset(query, dataset, _dataset_id) do
+    where(query, [m], m.dataset == ^dataset)
   end
 
   defp paginate_ids(query, opts) do

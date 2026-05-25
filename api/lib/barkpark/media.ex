@@ -266,10 +266,41 @@ defmodule Barkpark.Media do
   # Stamp tenancy scope (:workspace_id / :project_id) onto write attrs when the
   # caller supplied it via opts. Only non-nil keys are added, so an unscoped
   # upload leaves the attr map untouched — mirrors `Barkpark.Content.put_scope_attrs`.
+  #
+  # W2 dual-write: also resolve the blob's `dataset` STRING → its `dataset_id`
+  # (within the resolved project — opts `:project_id` or the seeded Default
+  # project) and stamp BOTH. The string stays as a mirror; `dataset_id` is the
+  # new authoritative leaf for the (path, dataset_id) uniqueness. Degrades to no
+  # dataset_id (string-only) when the project/dataset can't be resolved.
   defp put_scope_attrs(attrs, opts) do
+    project_id = Keyword.get(opts, :project_id) || default_project_id()
+
     attrs
     |> maybe_put_scope_attr(:workspace_id, Keyword.get(opts, :workspace_id))
     |> maybe_put_scope_attr(:project_id, Keyword.get(opts, :project_id))
+    |> maybe_put_scope_attr(:dataset_id, resolve_dataset_id(attrs, project_id))
+  end
+
+  defp default_project_id do
+    case Barkpark.Tenancy.get_default_project() do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp resolve_dataset_id(_attrs, nil), do: nil
+
+  defp resolve_dataset_id(attrs, project_id) do
+    case Map.get(attrs, :dataset) || Map.get(attrs, "dataset") do
+      dataset when is_binary(dataset) ->
+        case Barkpark.Tenancy.get_or_create_dataset(project_id, dataset) do
+          {:ok, %Barkpark.Tenancy.Dataset{id: id}} -> id
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs

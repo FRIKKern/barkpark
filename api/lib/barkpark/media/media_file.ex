@@ -34,9 +34,14 @@ defmodule Barkpark.Media.MediaFile do
       :size,
       :dataset,
       :workspace_id,
-      :project_id
+      :project_id,
+      :dataset_id
     ])
     |> validate_required([:filename, :original_name, :path])
-    |> unique_constraint([:path, :dataset])
+    # W2 uniqueness flip: blob identity is now (path, dataset_id). The `dataset`
+    # STRING constraint is dropped at the DB level; the string stays as a mirror.
+    |> unique_constraint([:path, :dataset_id],
+      name: :media_files_path_dataset_id_index
+    )
   end
 end

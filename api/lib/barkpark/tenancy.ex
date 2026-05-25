@@ -195,4 +195,28 @@ defmodule Barkpark.Tenancy do
         end
     end
   end
+
+  @doc """
+  Resolve a bare dataset/scope STRING → its `dataset_id` under the seeded
+  Default project, get-or-creating the dataset row. Returns the id, or nil when
+  the Default project isn't seeded yet (fresh sandbox). Used by single-project
+  surfaces (search-intel synonyms / crystals / merge-patterns) whose only scope
+  key is the legacy STRING — the W2 dual-write threads the resolved id alongside
+  it so the flipped `(surface, dataset_id, …)` uniques stay meaningful.
+  """
+  @spec default_project_dataset_id(String.t()) :: binary() | nil
+  def default_project_dataset_id(slug) when is_binary(slug) do
+    case get_default_project() do
+      %Project{id: project_id} ->
+        case get_or_create_dataset(project_id, slug) do
+          {:ok, %Dataset{id: id}} -> id
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def default_project_dataset_id(_), do: nil
 end

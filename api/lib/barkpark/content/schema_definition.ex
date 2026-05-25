@@ -58,11 +58,17 @@ defmodule Barkpark.Content.SchemaDefinition do
       :layout,
       :prefill,
       :workspace_id,
-      :project_id
+      :project_id,
+      :dataset_id
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
-    |> unique_constraint([:name, :dataset])
+    # W2 uniqueness flip: schema identity is now (name, project_id) — a project
+    # holds one schema per name regardless of dataset (dupe-collapse already
+    # cleared cross-dataset collisions). The `dataset` STRING stays as a mirror.
+    |> unique_constraint([:name, :project_id],
+      name: :schema_definitions_name_project_id_index
+    )
   end
 
   # ─────────────────────────────────────────────────────────────────────────────

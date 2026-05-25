@@ -239,6 +239,7 @@ defmodule Barkpark.Search.Crystallizer do
           period: period_str,
           period_start: period_start
         })
+        |> put_dataset_id(scope)
       )
       |> upsert_crystal()
     end)
@@ -358,6 +359,7 @@ defmodule Barkpark.Search.Crystallizer do
           period: period_str,
           period_start: period_start
         })
+        |> put_dataset_id(scope)
       )
       |> upsert_merge_pattern()
     end)
@@ -426,4 +428,15 @@ defmodule Barkpark.Search.Crystallizer do
   end
 
   defp analytics_eligible?(_), do: true
+
+  # W2 dual-write: resolve the crystal/merge-pattern `scope` STRING → its
+  # `dataset_id` (under the seeded Default project) and stamp it alongside
+  # `scope` so the flipped `(surface, dataset_id, …)` uniques stay meaningful.
+  # The `scope` string remains the mirror; no-ops when unresolvable.
+  defp put_dataset_id(attrs, scope) when is_binary(scope) do
+    case Barkpark.Tenancy.default_project_dataset_id(scope) do
+      id when is_binary(id) -> Map.put(attrs, :dataset_id, id)
+      _ -> attrs
+    end
+  end
 end

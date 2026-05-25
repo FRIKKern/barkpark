@@ -3,15 +3,20 @@ defmodule Barkpark.ContentDatasetsTest do
   alias Barkpark.Content
 
   test "list_datasets returns sorted distinct values from schema_definitions and documents" do
+    # W2: schemas are PROJECT-scoped (one catalog per project) after the
+    # uniqueness flip to (name, project_id). Two schemas sharing a name under the
+    # same Default project now COLLAPSE into one row — so use DISTINCT names to
+    # cover the alpha/beta dataset strings (the `dataset` STRING mirror is what
+    # list_datasets reads).
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "post", "title" => "P", "visibility" => "public", "fields" => []},
+        %{"name" => "post_alpha", "title" => "P", "visibility" => "public", "fields" => []},
         "alpha"
       )
 
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "post", "title" => "P", "visibility" => "public", "fields" => []},
+        %{"name" => "post_beta", "title" => "P", "visibility" => "public", "fields" => []},
         "beta"
       )
 
