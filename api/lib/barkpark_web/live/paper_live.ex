@@ -79,9 +79,53 @@ defmodule BarkparkWeb.PaperLive do
       |> assign(:diff_html, nil)
       |> assign(:diff_from, nil)
       |> assign(:diff_to, nil)
+      # P6.U5 action buttons: the per-type action set derived from the paper's
+      # originating paperflow doc path (`content["source_doc"]`), mirroring
+      # doc.js. Empty when there's no/unknown source_doc → the bar renders not
+      # at all. `:last_action` acknowledges the most recent click inline.
+      |> assign(:paper_actions, paper_actions(paper))
+      |> assign(:last_action, nil)
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
+  end
+
+  # ── P6.U5 action buttons ──────────────────────────────────────────────────
+
+  # Derive the action set from the paper's originating paperflow doc path,
+  # mirroring doc.js's per-type button mapping. The path lives at
+  # `content["source_doc"]`. A `/specs/` doc gets create-plan + grill; a
+  # `/plans/` doc gets build + grill; a `/grills/` doc gets submit. Anything
+  # else (or a missing source_doc) yields [] → no bar is rendered (graceful).
+  defp paper_actions(%{content: content}) when is_map(content) do
+    case Map.get(content, "source_doc") do
+      path when is_binary(path) -> actions_for_path(path)
+      _ -> []
+    end
+  end
+
+  defp paper_actions(_), do: []
+
+  defp actions_for_path(path) do
+    cond do
+      String.contains?(path, "/specs/") ->
+        [
+          %{key: "create-plan", label: "Create plan from this spec"},
+          %{key: "grill", label: "Grill the spec"}
+        ]
+
+      String.contains?(path, "/plans/") ->
+        [
+          %{key: "build", label: "Build this plan"},
+          %{key: "grill", label: "Grill the plan"}
+        ]
+
+      String.contains?(path, "/grills/") ->
+        [%{key: "submit", label: "Submit"}]
+
+      true ->
+        []
+    end
   end
 
   # ── P6.U2 goal-path rail ──────────────────────────────────────────────────
@@ -171,6 +215,54 @@ defmodule BarkparkWeb.PaperLive do
 
   def handle_event("close-diff", _params, socket) do
     {:noreply, assign(socket, :diff_open, false)}
+  end
+
+  # ── P6.U5 action buttons ──────────────────────────────────────────────────
+
+  # Clicking an action button records the user's intent as a `paper_events`
+  # row (routing Option B: store-in-Barkpark; the orchestrator reads these rows
+  # separately, out of scope here — there is no daemon, no CLAUDE_TARGET nonce).
+  # The intent row also surfaces in the U2 rail's gitGraph (as an
+  # `action-<key>-N` commit) — the intended, queryable Option-B demonstration.
+  #
+  # goal_id is pulled from `content["goal_id"]`; a missing goal_id still records
+  # the row (Event.changeset only requires event_type + one of goal_id/slug, and
+  # we always pass paper_slug) so the action is never lost and never crashes.
+  def handle_event("paper-action", %{"action" => key}, socket) do
+    slug = socket.assigns.slug
+    label = action_label(socket.assigns.paper_actions, key)
+
+    _ =
+      Events.create_event(%{
+        "event_type" => "action:" <> key,
+        "goal_id" => action_goal_id(socket.assigns.slug),
+        "paper_slug" => slug,
+        "payload_html" => "<p>Action '#{key}' requested from /papers/#{slug}</p>",
+        "branch" => "main"
+      })
+
+    {:noreply, assign(socket, :last_action, label || key)}
+  end
+
+  # The human label for a clicked key, looked up in the derived action set so
+  # the inline confirmation reads "Requested: Build this plan". Falls back to
+  # the raw key if the set somehow lacks it.
+  defp action_label(actions, key) when is_list(actions) do
+    case Enum.find(actions, &(&1.key == key)) do
+      %{label: label} -> label
+      _ -> nil
+    end
+  end
+
+  # The goal id for the action row, re-read from the live paper's content. We
+  # re-fetch rather than carry a `:goal_id` assign so this stays a purely
+  # additive change to mount; a nil goal_id is recorded as-is (paper_slug keeps
+  # the row valid).
+  defp action_goal_id(slug) do
+    case Content.get_paper(slug) do
+      %{content: content} when is_map(content) -> Map.get(content, "goal_id")
+      _ -> nil
+    end
   end
 
   # Pull the streaming rev / cached HTML / blocks out of the paper document's
@@ -340,6 +432,28 @@ defmodule BarkparkWeb.PaperLive do
             down by a remount/navigate — the surviving-sentinel proof of
             no-reload. --%>
       <div id="paper-sentinel" data-slug={@slug} hidden></div>
+
+      <%!-- P6.U5 action bar. These are the paperflow doc action buttons
+            (Create plan / Grill / Build / Submit) rendered NATIVELY on the
+            paper. The set is derived from content["source_doc"] in mount; an
+            empty set (no/unknown source_doc) renders no bar at all. Each click
+            fires "paper-action" which records the intent as a paper_events
+            row (routing Option B — orchestrator reads them; no daemon, no
+            nonce). `:last_action` shows a small inline confirmation. --%>
+      <div :if={@paper_actions != []} id="paper-action-bar" class="bp-paper-actions">
+        <button
+          :for={action <- @paper_actions}
+          type="button"
+          class="bp-paper-action"
+          phx-click="paper-action"
+          phx-value-action={action.key}
+        >
+          {action.label}
+        </button>
+        <span :if={@last_action} class="bp-paper-action-ack" id="paper-action-ack">
+          Requested: {@last_action}
+        </span>
+      </div>
 
       <%= cond do %>
         <% not @found -> %>

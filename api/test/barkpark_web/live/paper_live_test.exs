@@ -446,4 +446,88 @@ defmodule BarkparkWeb.PaperLiveTest do
       assert Process.alive?(view.pid)
     end
   end
+
+  describe "P6.U5: action buttons (routing Option B — record intent as paper_events)" do
+    @action_slug "2026-05-25-action-buttons-demo"
+    @action_goal "g-action"
+
+    # Seed an article paper whose originating doc is a /plans/ doc and which
+    # carries a goal_id — so the action set is the plan pair (build + grill) and
+    # a click can be attributed to the goal.
+    defp seed_action_paper do
+      {:ok, paper} =
+        Content.upsert_paper(%{
+          "slug" => @action_slug,
+          "style" => "article",
+          "goal_id" => @action_goal,
+          "source_doc" => "/paperflow/plans/2026-05-25-convergence-plan.html",
+          "body_html" => "<p id=\"action-body\">Action demo body.</p>"
+        })
+
+      paper
+    end
+
+    test "a /plans/ paper renders the plan action bar (build + grill)", %{conn: conn} do
+      seed_action_paper()
+
+      {:ok, _view, html} = live(conn, "/papers/#{@action_slug}")
+
+      # The bar element + both plan buttons, each wired to "paper-action".
+      assert html =~ ~s(id="paper-action-bar")
+      assert html =~ "Build this plan"
+      assert html =~ "Grill the plan"
+      assert html =~ ~s(phx-click="paper-action")
+      assert html =~ ~s(phx-value-action="build")
+      assert html =~ ~s(phx-value-action="grill")
+    end
+
+    test "clicking an action button records an action:<key> paper_events row + acknowledges",
+         %{conn: conn} do
+      seed_action_paper()
+
+      {:ok, view, _html} = live(conn, "/papers/#{@action_slug}")
+
+      # No action events yet for this goal.
+      refute Enum.any?(
+               Events.list_for_goal(@action_goal),
+               &(&1.event_type == "action:build")
+             )
+
+      rendered =
+        view
+        |> element(~s(button[phx-value-action="build"]))
+        |> render_click()
+
+      # The UI acknowledges the click inline.
+      assert rendered =~ "Requested: Build this plan"
+
+      # A paper_events row now exists for the goal, typed action:build, with the
+      # intent payload — orchestrator-readable + visible in the U2 rail.
+      events = Events.list_for_goal(@action_goal)
+      build = Enum.find(events, &(&1.event_type == "action:build"))
+
+      assert build
+      assert build.paper_slug == @action_slug
+      assert build.goal_id == @action_goal
+      assert build.branch == "main"
+      assert build.payload_html =~ "Action 'build' requested from /papers/#{@action_slug}"
+    end
+
+    test "a paper WITHOUT a source_doc renders NO action bar", %{conn: conn} do
+      slug = "2026-05-25-no-source-doc-paper"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          "slug" => slug,
+          "style" => "article",
+          "body_html" => "<p id=\"no-source-body\">No source doc here.</p>"
+        })
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ "No source doc here."
+      refute html =~ ~s(id="paper-action-bar")
+      refute html =~ ~s(phx-click="paper-action")
+    end
+  end
 end
