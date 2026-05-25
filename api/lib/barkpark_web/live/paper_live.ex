@@ -42,6 +42,7 @@ defmodule BarkparkWeb.PaperLive do
   import Phoenix.HTML, only: [raw: 1]
 
   alias Barkpark.Content
+  alias Barkpark.Papers.Events
   alias Barkpark.PortableDoc.Render
 
   @impl true
@@ -51,6 +52,8 @@ defmodule BarkparkWeb.PaperLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
     end
+
+    rail_events = load_rail_events(paper)
 
     socket =
       socket
@@ -63,9 +66,73 @@ defmodule BarkparkWeb.PaperLive do
       # Non-article papers leave it false → email default, chrome unchanged.
       |> assign(:article?, paper_article?(paper))
       |> assign(:html, paper_html(paper))
+      # P6.U2 goal-path rail: events for this paper's goal (empty when no
+      # goal_id / no events → the rail is not rendered, article unchanged).
+      |> assign(:rail_events, rail_events)
+      |> assign(:rail_gitgraph, build_gitgraph(rail_events))
+      |> assign(:selected_event_id, nil)
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
+  end
+
+  # ── P6.U2 goal-path rail ──────────────────────────────────────────────────
+
+  # Load the lifecycle events for the paper's goal. U1 stores the goal id at
+  # `content["goal_id"]`; absent it (or with zero events) we return [] and the
+  # template renders no rail at all — the article reading column is unchanged.
+  defp load_rail_events(%{content: content}) when is_map(content) do
+    case Map.get(content, "goal_id") do
+      goal_id when is_binary(goal_id) and goal_id != "" -> Events.list_for_goal(goal_id)
+      _ -> []
+    end
+  end
+
+  defp load_rail_events(_), do: []
+
+  @doc false
+  # Build a VALID linear Mermaid gitGraph from the rail's events. One `commit`
+  # per event in inserted_at order (the context already sorts asc). Each commit
+  # id is `<sanitized-event_type>-<1-based-index>` so ids are unique and clean.
+  #
+  # v1 is deliberately LINEAR — every event is a commit on the default branch.
+  # The `branch` field is carried through to the assign (for a later unit) but
+  # we emit NO branch/checkout directives: they make gitGraph fragile.
+  # TODO U2.1: branch lanes — emit `branch`/`checkout` from each event's
+  #            `branch` field (alt-<n> / simplified-<n>) once a stable lane
+  #            layout is designed.
+  def build_gitgraph([]), do: nil
+
+  def build_gitgraph(events) when is_list(events) do
+    commits =
+      events
+      |> Enum.with_index(1)
+      |> Enum.map(fn {event, idx} ->
+        id = "#{sanitize_event_type(event.event_type)}-#{idx}"
+        "   commit id: \"#{id}\""
+      end)
+
+    Enum.join(["gitGraph" | commits], "\n")
+  end
+
+  # Mermaid commit ids are quoted, but keep them clean: lowercase, then collapse
+  # anything outside [a-z0-9-] to a single hyphen, trim stray edge hyphens.
+  defp sanitize_event_type(nil), do: "event"
+
+  defp sanitize_event_type(type) when is_binary(type) do
+    cleaned =
+      type
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9-]+/, "-")
+      |> String.trim("-")
+
+    if cleaned == "", do: "event", else: cleaned
+  end
+
+  @impl true
+  def handle_event("rail-select", %{"event-id" => id}, socket) do
+    # v1: selection highlight only. Article-swap / diff land in U3.
+    {:noreply, assign(socket, :selected_event_id, id)}
   end
 
   # Pull the streaming rev / cached HTML / blocks out of the paper document's
@@ -257,6 +324,31 @@ defmodule BarkparkWeb.PaperLive do
           <%!-- HTML-only (legacy): whole opaque body, re-assigned on update. --%>
           <article id="paper-body" data-rev={@rev}>{raw(@html)}</article>
       <% end %>
+
+      <%!-- P6.U2 goal-path rail. Rendered ONLY when there are events for the
+            paper's goal (empty list → no rail, article column unchanged).
+            The gitGraph <pre class="mermaid"> sits inside its OWN element
+            carrying phx-hook="PaperMermaid", so the engine runs over it on
+            mount exactly as it does for diagram blocks in the article. --%>
+      <aside :if={@rail_events != []} id="goal-path-rail" class="bp-goal-rail">
+        <h2 class="bp-goal-rail-title">Goal path</h2>
+        <div id="goal-path-graph" phx-hook="PaperMermaid">
+          <pre class="mermaid">{@rail_gitgraph}</pre>
+        </div>
+        <%!-- Clickable event list — doubles as the no-Mermaid fallback. Each
+              row selects (highlight only in v1); article-swap/diff is U3. --%>
+        <ol class="bp-goal-rail-events">
+          <li
+            :for={{event, idx} <- Enum.with_index(@rail_events, 1)}
+            class={["bp-goal-rail-event", event.id == @selected_event_id && "is-selected"]}
+            phx-click="rail-select"
+            phx-value-event-id={event.id}
+          >
+            <span class="bp-goal-rail-event-idx">{idx}</span>
+            <span class="bp-goal-rail-event-type">{event.event_type}</span>
+          </li>
+        </ol>
+      </aside>
     </main>
     """
   end

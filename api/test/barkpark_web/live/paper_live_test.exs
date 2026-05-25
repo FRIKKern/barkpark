@@ -21,6 +21,7 @@ defmodule BarkparkWeb.PaperLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
+  alias Barkpark.Papers.Events
 
   @slug "2026-05-23-convergence-demo"
 
@@ -256,6 +257,111 @@ defmodule BarkparkWeb.PaperLiveTest do
       # No remount on the fallback path either.
       assert view.pid == pid_before
       assert rendered =~ ~s(id="paper-sentinel")
+    end
+  end
+
+  describe "P6.U2: goal-path rail" do
+    @rail_slug "2026-05-25-goal-rail-demo"
+    @rail_goal "g-test"
+
+    # Seed a paper with a goal_id. upsert_paper with a present event_type
+    # creates the paper AND (via U1) one paper_event for the goal. We then add
+    # two more events for the same goal directly through the Events context so
+    # the rail has a 3-commit lineage.
+    defp seed_rail_paper do
+      {:ok, paper} =
+        Content.upsert_paper(%{
+          "slug" => @rail_slug,
+          "style" => "article",
+          "goal_id" => @rail_goal,
+          "event_type" => "goal-opened",
+          "blocks" => [
+            %{
+              "id" => "r-intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Rail demo body."}]
+            }
+          ]
+        })
+
+      {:ok, _} = Events.create_event(%{"goal_id" => @rail_goal, "event_type" => "plan-written"})
+      {:ok, _} = Events.create_event(%{"goal_id" => @rail_goal, "event_type" => "goal-snapshot"})
+
+      paper
+    end
+
+    test "renders the rail with a linear gitGraph commit per event", %{conn: conn} do
+      seed_rail_paper()
+
+      {:ok, _view, html} = live(conn, "/papers/#{@rail_slug}")
+
+      # The rail element is present.
+      assert html =~ ~s(id="goal-path-rail")
+      assert html =~ "Goal path"
+
+      # The gitGraph header + a commit per each of the 3 events, under the hook.
+      # The hook lives on #goal-path-graph which wraps the gitGraph <pre>.
+      assert html =~ ~s(phx-hook="PaperMermaid")
+      assert html =~ ~s(id="goal-path-graph")
+      assert html =~ "gitGraph"
+
+      # One unique, index-suffixed commit id per event, in inserted_at order.
+      # HEEx auto-escapes the `"` around each id to `&quot;` in the rendered
+      # HTML (the browser DOM hands Mermaid the unescaped text) — so match the
+      # escaping-agnostic `commit id:` + the bare id text.
+      assert html =~ "commit id:"
+      assert html =~ "goal-opened-1"
+      assert html =~ "plan-written-2"
+      assert html =~ "goal-snapshot-3"
+
+      # Exactly three commits emitted (no stray extra commit lines).
+      assert length(String.split(html, "commit id:")) - 1 == 3
+
+      # Event types render in the clickable fallback list, with click wiring.
+      assert html =~ "goal-opened"
+      assert html =~ "plan-written"
+      assert html =~ "goal-snapshot"
+      assert html =~ ~s(phx-click="rail-select")
+    end
+
+    test "rail-select highlights the chosen event row (selection only, no swap)",
+         %{conn: conn} do
+      seed_rail_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@rail_slug}")
+
+      # Pick the first event row and click it.
+      [event_id | _] =
+        Events.list_for_goal(@rail_goal) |> Enum.map(& &1.id)
+
+      rendered =
+        view
+        |> element(~s([phx-value-event-id="#{event_id}"]))
+        |> render_click()
+
+      # The selected row carries the highlight class; the article body is
+      # untouched (no swap/diff in v1).
+      assert rendered =~ "is-selected"
+      assert rendered =~ "Rail demo body."
+    end
+
+    test "a paper WITHOUT a goal_id renders NO rail", %{conn: conn} do
+      slug = "2026-05-25-no-goal-paper"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          "slug" => slug,
+          "style" => "article",
+          "body_html" => "<p id=\"no-goal-body\">No goal here.</p>"
+        })
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ "No goal here."
+      # Negative case: no rail element and no emitted gitGraph commits.
+      # (The word "gitGraph" alone appears in the layout's CSS comment, so we
+      # assert on the rail element + an actual `commit id:` line instead.)
+      refute html =~ ~s(id="goal-path-rail")
+      refute html =~ "commit id:"
     end
   end
 end

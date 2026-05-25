@@ -126,6 +126,81 @@
       border-radius: 5px;
       resize: vertical;
     }
+
+    /* P6.U2 goal-path rail — a 240px sticky right-rail showing the paper's
+       goal lifecycle as a Mermaid gitGraph plus a clickable event list. Scoped
+       under `.bp-paper-article` so non-article papers are untouched. The shell
+       centers a 720px reading column; the rail floats to the right of that
+       column (offset via a negative right margin) and sticks while scrolling.
+       On narrow viewports it falls back to a normal in-flow block under the
+       article. The <aside> is a child of <main>, sibling of the <article>. */
+    .bp-paper-article .bp-goal-rail {
+      width: 240px;
+      margin: 2.5rem 0 0 auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    @media (min-width: 1100px) {
+      .bp-paper-article .bp-goal-rail {
+        position: sticky;
+        top: 56px;
+        float: right;
+        margin: 0 -300px 1.5rem 1.5rem;
+      }
+    }
+    .bp-paper-article .bp-goal-rail-title {
+      margin: 0 0 0.75rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #a23925;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+    }
+    .bp-paper-article .bp-goal-rail #goal-path-graph {
+      margin: 0 0 1rem;
+    }
+    .bp-paper-article .bp-goal-rail .mermaid {
+      margin: 0;
+      background: none;
+      font-size: 0.8rem;
+    }
+    .bp-paper-article .bp-goal-rail-events {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .bp-paper-article .bp-goal-rail-event {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin: 0.1rem 0;
+      padding: 0.35rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: #3a3a3a;
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+    .bp-paper-article .bp-goal-rail-event:hover {
+      background: rgba(162, 57, 37, 0.06);
+    }
+    .bp-paper-article .bp-goal-rail-event.is-selected {
+      background: rgba(162, 57, 37, 0.12);
+      box-shadow: inset 3px 0 0 #a23925;
+    }
+    .bp-paper-article .bp-goal-rail-event-idx {
+      flex: 0 0 auto;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #a23925;
+      min-width: 1.1em;
+      text-align: right;
+    }
+    .bp-paper-article .bp-goal-rail-event-type {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+    }
   </style>
 </head>
 <body>
