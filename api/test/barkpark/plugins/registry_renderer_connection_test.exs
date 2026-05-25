@@ -15,7 +15,7 @@ defmodule Barkpark.Plugins.RegistryRendererConnectionTest do
   load order set `Application.get_env(:barkpark, :plugins, ...)` and restore
   it on exit, mirroring `RegistryResolverTest`.
   """
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
 

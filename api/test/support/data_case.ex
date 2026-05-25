@@ -30,6 +30,27 @@ defmodule Barkpark.DataCase do
   setup tags do
     Barkpark.DataCase.setup_sandbox(tags)
     Barkpark.DataCase.ensure_default_tenancy()
+    Barkpark.DataCase.reset_plugins_env()
+    :ok
+  end
+
+  @doc """
+  Force the `:barkpark, :plugins` Application env back to its boot baseline
+  (UNSET — config declares no `:plugins`).
+
+  Several plugin tests set this env to a non-empty load-order list, which
+  makes `Barkpark.Plugins.Registry.load_ordered_plugins/0` walk ONLY the
+  listed names. When such a value leaks across tests, an otherwise-correct
+  reader (Studio settings UI, resolver-output integration, media asset
+  hooks) sees a registry that excludes the very plugins it just registered
+  in its own setup — an order-dependent flake. Restoring the unset baseline
+  here (case-template setup runs before the test module's own setup) means
+  every DataCase test starts from the same registry-iteration source of
+  truth. Tests that legitimately set the env in their body still restore it
+  via their own `on_exit/1`.
+  """
+  def reset_plugins_env do
+    Application.delete_env(:barkpark, :plugins)
     :ok
   end
 

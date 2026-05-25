@@ -33,6 +33,10 @@ defmodule BarkparkWeb.ConnCase do
 
   setup tags do
     Barkpark.DataCase.setup_sandbox(tags)
+    # Restore the `:barkpark, :plugins` env to its unset boot baseline so a
+    # leaked load-order list from a sibling test can't hide plugins from the
+    # collectors this test exercises. See `Barkpark.DataCase.reset_plugins_env/0`.
+    Barkpark.DataCase.reset_plugins_env()
     :ets.delete_all_objects(:barkpark_rate_limiter)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end

@@ -28,7 +28,7 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
   restores it via `on_exit/1`.
   """
 
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
   import ExUnit.CaptureLog
 
   alias Barkpark.Plugins.Registry
