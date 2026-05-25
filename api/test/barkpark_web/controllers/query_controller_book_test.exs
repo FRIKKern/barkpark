@@ -1,12 +1,21 @@
 defmodule BarkparkWeb.QueryControllerBookTest do
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content}
+  alias Barkpark.{Auth, Content, Tenancy}
 
   @raw_token "wi2-test-token-#{System.unique_integer([:positive])}"
   @dataset "wi2_book_test"
 
   setup do
+    # Flat routes resolve the seeded Default workspace/project via
+    # AssignDefaultScope, and the query layer now filters reads by it. Stamp
+    # the same Default scope on these fixtures so they live where the flat
+    # route reads (mirrors the backfill: every flat-route row belongs to
+    # Default).
+    ws = Tenancy.get_default_workspace()
+    project = Tenancy.get_default_project()
+    scope = [workspace_id: ws.id, project_id: project.id]
+
     Content.upsert_schema(
       %{
         "name" => "post",
@@ -31,25 +40,28 @@ defmodule BarkparkWeb.QueryControllerBookTest do
       Content.create_document(
         "post",
         %{"_id" => "wi2-post-1", "title" => "Public Post"},
-        @dataset
+        @dataset,
+        scope
       )
 
-    {:ok, _} = Content.publish_document("wi2-post-1", "post", @dataset)
+    {:ok, _} = Content.publish_document("wi2-post-1", "post", @dataset, scope)
 
     {:ok, _} =
       Content.create_document(
         "book",
         %{"_id" => "wi2-book-1", "title" => "Published Book"},
-        @dataset
+        @dataset,
+        scope
       )
 
-    {:ok, _} = Content.publish_document("wi2-book-1", "book", @dataset)
+    {:ok, _} = Content.publish_document("wi2-book-1", "book", @dataset, scope)
 
     {:ok, _} =
       Content.create_document(
         "book",
         %{"_id" => "wi2-book-draft", "title" => "Draft Only Book"},
-        @dataset
+        @dataset,
+        scope
       )
 
     {:ok, _} = Auth.create_token(@raw_token, "wi2 test token", @dataset, ["read", "write"])

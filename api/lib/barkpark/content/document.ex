@@ -22,7 +22,17 @@ defmodule Barkpark.Content.Document do
 
   def changeset(document, attrs) do
     document
-    |> cast(attrs, [:doc_id, :type, :dataset, :title, :status, :content, :rev])
+    |> cast(attrs, [
+      :doc_id,
+      :type,
+      :dataset,
+      :title,
+      :status,
+      :content,
+      :rev,
+      :workspace_id,
+      :project_id
+    ])
     |> validate_required([:doc_id, :type])
     |> validate_inclusion(:status, ~w(draft published archived active planning completed))
     |> unique_constraint([:doc_id, :type, :dataset])

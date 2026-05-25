@@ -32,6 +32,8 @@ defmodule Barkpark.Content do
     Validation
   }
 
+  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
+
   alias Barkpark.PortableDoc.{Patch, Projection, Render, Synthesis}
 
   @drafts_prefix "drafts."
@@ -84,6 +86,15 @@ defmodule Barkpark.Content do
 
   The `:drafts` perspective merges draft/published pairs at SQL level via
   `DISTINCT ON`, so `limit` and `offset` are applied after the merge.
+
+  Tenancy scoping (Wave 1 hard boundary):
+    - `:workspace_id` — scope reads to a single workspace (nil = unscoped /
+                        pre-tenancy back-compat).
+    - `:project_id`   — further narrow to a single project (requires
+                        `:workspace_id`; nil = workspace-wide).
+
+  The workspace/project filter is applied IN ADDITION TO the dataset-string
+  filter via `Barkpark.Content.Scope.scope_to_workspace/3`.
   """
   def list_documents(type, dataset, opts \\ []) do
     perspective = Keyword.get(opts, :perspective, :raw)
@@ -91,10 +102,13 @@ defmodule Barkpark.Content do
     limit = opts |> Keyword.get(:limit, 100) |> min(1000) |> max(1)
     offset = opts |> Keyword.get(:offset, 0) |> max(0)
     order = Keyword.get(opts, :order, :updated_at_desc)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     base =
       Document
       |> where([d], d.type == ^type and d.dataset == ^dataset)
+      |> scope_to_workspace(workspace_id, project_id)
       |> apply_filter_map(filter_map)
 
     case perspective do
@@ -249,14 +263,32 @@ defmodule Barkpark.Content do
   defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
   defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
-  def get_document(doc_id, type, dataset)
+  @doc """
+  Fetch a single document by `{doc_id, type, dataset}`.
+
+  `opts` may carry tenancy scope:
+    - `:workspace_id` — scope the read to a workspace (nil = unscoped /
+                        pre-tenancy back-compat; used by internal mutation
+                        lookups that resolve the workspace another way).
+    - `:project_id`   — further narrow to a project (requires `:workspace_id`).
+
+  The workspace/project filter is applied IN ADDITION TO the dataset-string
+  filter via `Barkpark.Content.Scope.scope_to_workspace/3`.
+  """
+  def get_document(doc_id, type, dataset, opts \\ [])
+
+  def get_document(doc_id, type, dataset, _opts)
       when is_nil(doc_id) or is_nil(type) or is_nil(dataset) do
     {:error, :not_found}
   end
 
-  def get_document(doc_id, type, dataset) do
+  def get_document(doc_id, type, dataset, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     Document
     |> where([d], d.doc_id == ^doc_id and d.type == ^type and d.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -598,6 +630,7 @@ defmodule Barkpark.Content do
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
+      |> put_scope_attrs(opts)
 
     ctx = build_ctx(opts)
 
@@ -825,16 +858,20 @@ defmodule Barkpark.Content do
             {:error, {:halted, reason}}
 
           :ok ->
-            # Upsert the published version with draft's content
-            pub_attrs = %{
-              "doc_id" => pid,
-              "type" => type,
-              "dataset" => dataset,
-              "title" => draft.title,
-              "status" => "published",
-              "content" => draft.content,
-              "rev" => generate_rev()
-            }
+            # Upsert the published version with draft's content. Inherit the
+            # draft's tenancy scope so a publish never drops workspace_id/
+            # project_id on the published row.
+            pub_attrs =
+              %{
+                "doc_id" => pid,
+                "type" => type,
+                "dataset" => dataset,
+                "title" => draft.title,
+                "status" => "published",
+                "content" => draft.content,
+                "rev" => generate_rev()
+              }
+              |> inherit_scope_attrs(draft)
 
             {pub_result, prev_pub_rev} =
               case get_document(pid, type, dataset) do
@@ -891,16 +928,19 @@ defmodule Barkpark.Content do
             {:error, {:halted, reason}}
 
           :ok ->
-            # Create draft with published content
-            draft_attrs = %{
-              "doc_id" => did,
-              "type" => type,
-              "dataset" => dataset,
-              "title" => pub.title,
-              "status" => "draft",
-              "content" => pub.content,
-              "rev" => generate_rev()
-            }
+            # Create draft with published content. Inherit the published row's
+            # tenancy scope so an unpublish keeps workspace_id/project_id.
+            draft_attrs =
+              %{
+                "doc_id" => did,
+                "type" => type,
+                "dataset" => dataset,
+                "title" => pub.title,
+                "status" => "draft",
+                "content" => pub.content,
+                "rev" => generate_rev()
+              }
+              |> inherit_scope_attrs(pub)
 
             {draft_result, prev_draft_rev} =
               case get_document(did, type, dataset) do
@@ -1275,6 +1315,7 @@ defmodule Barkpark.Content do
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
+      |> put_scope_attrs(opts)
       # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
       # carries content["blocks"] re-derives content[fieldName]/content["body"]
       # from those blocks — the same project-on-write the paper path runs.
@@ -1353,6 +1394,33 @@ defmodule Barkpark.Content do
       user_id: Keyword.get(opts, :user_id)
     }
   end
+
+  # Stamp the tenancy scope onto write attrs when the caller supplied it via
+  # opts (`:workspace_id` / `:project_id`). Only non-nil scope keys are added,
+  # so a write WITHOUT scope opts leaves attrs untouched — the Document
+  # changeset only casts these keys when present, so an existing row's
+  # workspace_id/project_id is never nulled by an unscoped update. New rows
+  # created under a resolved scope are stamped on insert from that scope.
+  defp put_scope_attrs(attrs, opts) do
+    attrs
+    |> maybe_put_scope_attr("workspace_id", Keyword.get(opts, :workspace_id))
+    |> maybe_put_scope_attr("project_id", Keyword.get(opts, :project_id))
+  end
+
+  defp maybe_put_scope_attr(attrs, _key, nil), do: attrs
+  defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
+
+  # Copy the tenancy scope (workspace_id/project_id) from a source document
+  # onto write attrs — used by the draft↔published transitions (publish /
+  # unpublish) so the moved row keeps the scope of the row it was derived from.
+  # A nil source field is skipped, leaving the destination as-is.
+  defp inherit_scope_attrs(attrs, %Document{workspace_id: ws_id, project_id: project_id}) do
+    attrs
+    |> maybe_put_scope_attr("workspace_id", ws_id)
+    |> maybe_put_scope_attr("project_id", project_id)
+  end
+
+  defp inherit_scope_attrs(attrs, _), do: attrs
 
   defp fire_after({:ok, doc}, event, payload) do
     after_payload = %{payload | event: event, doc: doc}
