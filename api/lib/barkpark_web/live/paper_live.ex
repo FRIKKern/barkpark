@@ -85,6 +85,15 @@ defmodule BarkparkWeb.PaperLive do
       # at all. `:last_action` acknowledges the most recent click inline.
       |> assign(:paper_actions, paper_actions(paper))
       |> assign(:last_action, nil)
+      # P6.U4 Simplify control. `:simplify?` gates the button (true only when the
+      # paper carries a goal_id — Simplify applies to any goal-bearing paper).
+      # `:pending_simplify` holds the in-flight `simplified-<n>` branch name once a
+      # simplify-request is recorded this session — it gates Accept/Reject and
+      # carries the branch into those decision events. `:last_simplify` is the
+      # inline ack of the most recent simplify decision.
+      |> assign(:simplify?, paper_goal_id(paper) != nil)
+      |> assign(:pending_simplify, nil)
+      |> assign(:last_simplify, nil)
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
@@ -244,6 +253,105 @@ defmodule BarkparkWeb.PaperLive do
     {:noreply, assign(socket, :last_action, label || key)}
   end
 
+  # ── P6.U4 Simplify control ────────────────────────────────────────────────
+
+  # Clicking Simplify records the user's intent to run a leaning pass as a
+  # `paper_events` row on a fresh `simplified-<n>` branch (routing Option B:
+  # store-in-Barkpark; the orchestrator reads these rows separately). The
+  # actual leaning-pass subagent run AND the merge-to-source / branch-close are
+  # ORCHESTRATOR-SIDE and OUT OF SCOPE here — a later reader follow-on. U4 only
+  # records the request + the user's Accept/Reject decision.
+  #
+  # The branch index `n` = (count of this paper's events whose branch starts
+  # "simplified-") + 1, so repeated requests land on simplified-1, simplified-2,
+  # … The row also surfaces in the U2 rail's gitGraph (as a `simplify-request-N`
+  # commit) — the intended Option-B demonstration.
+  def handle_event("simplify-request", _params, socket) do
+    slug = socket.assigns.slug
+    goal_id = action_goal_id(slug)
+
+    # No goal_id → nothing to simplify against; skip gracefully (never crash).
+    if is_nil(goal_id) do
+      {:noreply, socket}
+    else
+      branch = "simplified-#{next_simplify_index(slug)}"
+
+      _ =
+        Events.create_event(%{
+          "event_type" => "simplify-request",
+          "goal_id" => goal_id,
+          "paper_slug" => slug,
+          "payload_html" =>
+            "<p>Simplify requested (#{branch}) for /papers/#{slug}</p>",
+          "branch" => branch
+        })
+
+      {:noreply,
+       socket
+       |> assign(:pending_simplify, branch)
+       |> assign(:last_simplify, "Simplify requested — #{branch}")}
+    end
+  end
+
+  # Accept the pending simplify candidate. Records the user's decision as a
+  # `simplify-accept` event on the pending branch. NOTE: this only records the
+  # decision — the actual merge-to-source HTML write / branch-close is the
+  # ORCHESTRATOR's job (out of scope here; a reader follow-on consumes this row).
+  def handle_event("simplify-accept", _params, socket) do
+    {:noreply, record_simplify_decision(socket, "simplify-accept", "Accepted")}
+  end
+
+  # Reject the pending simplify candidate. Records a `simplify-reject` decision
+  # on the pending branch. As with accept, the branch-close itself is the
+  # orchestrator's job (out of scope) — we only persist the user's intent.
+  def handle_event("simplify-reject", _params, socket) do
+    {:noreply, record_simplify_decision(socket, "simplify-reject", "Rejected")}
+  end
+
+  # Shared body for accept/reject: record the decision event on the pending
+  # branch (skip gracefully if there is no pending branch or no goal_id), ack
+  # inline, then clear `:pending_simplify` so the controls retract.
+  defp record_simplify_decision(socket, event_type, verb) do
+    slug = socket.assigns.slug
+    branch = socket.assigns.pending_simplify
+    goal_id = action_goal_id(slug)
+
+    if is_nil(branch) or is_nil(goal_id) do
+      socket
+    else
+      _ =
+        Events.create_event(%{
+          "event_type" => event_type,
+          "goal_id" => goal_id,
+          "paper_slug" => slug,
+          "payload_html" =>
+            "<p>#{verb} #{branch} for /papers/#{slug}</p>",
+          "branch" => branch
+        })
+
+      socket
+      |> assign(:pending_simplify, nil)
+      |> assign(:last_simplify, "#{verb} #{branch}")
+    end
+  end
+
+  # The next `simplified-<n>` index for this paper: 1 + how many of its events
+  # already sit on a `simplified-` branch. Counts the persisted rows (via
+  # list_for_paper) so the index is stable across reconnects, not just the
+  # session — repeated requests increment 1, 2, 3, …
+  defp next_simplify_index(slug) do
+    count =
+      slug
+      |> Events.list_for_paper()
+      |> Enum.count(fn event ->
+        is_binary(event.branch) and String.starts_with?(event.branch, "simplified-")
+      end)
+
+    count + 1
+  end
+
+  # ── P6.U5 action-button helpers ───────────────────────────────────────────
+
   # The human label for a clicked key, looked up in the derived action set so
   # the inline confirmation reads "Requested: Build this plan". Falls back to
   # the raw key if the set somehow lacks it.
@@ -257,7 +365,8 @@ defmodule BarkparkWeb.PaperLive do
   # The goal id for the action row, re-read from the live paper's content. We
   # re-fetch rather than carry a `:goal_id` assign so this stays a purely
   # additive change to mount; a nil goal_id is recorded as-is (paper_slug keeps
-  # the row valid).
+  # the row valid). Shared by the P6.U4 Simplify handlers, which need the same
+  # live goal_id lookup.
   defp action_goal_id(slug) do
     case Content.get_paper(slug) do
       %{content: content} when is_map(content) -> Map.get(content, "goal_id")
@@ -275,6 +384,17 @@ defmodule BarkparkWeb.PaperLive do
 
   defp paper_blocks(%{content: content}), do: Map.get(content || %{}, "blocks")
   defp paper_blocks(_), do: nil
+
+  # The paper's goal id, if any — used at mount to gate the P6.U4 Simplify
+  # button. A blank string counts as absent (no goal to simplify against).
+  defp paper_goal_id(%{content: content}) when is_map(content) do
+    case Map.get(content, "goal_id") do
+      goal_id when is_binary(goal_id) and goal_id != "" -> goal_id
+      _ -> nil
+    end
+  end
+
+  defp paper_goal_id(_), do: nil
 
   # The per-doc style marker. An article paper sets `content["style"] ==
   # "article"`; everything else (and the empty state) is the email default.
@@ -452,6 +572,47 @@ defmodule BarkparkWeb.PaperLive do
         </button>
         <span :if={@last_action} class="bp-paper-action-ack" id="paper-action-ack">
           Requested: {@last_action}
+        </span>
+      </div>
+
+      <%!-- P6.U4 Simplify control. Rendered ONLY for goal-bearing papers
+            (`content["goal_id"]` present → `@simplify?`); independent of the
+            U5 doc-type action set. Clicking Simplify fires "simplify-request",
+            which records a `simplify-request` paper_events row on a fresh
+            `simplified-<n>` branch (routing Option B — orchestrator reads it;
+            the leaning-pass run + merge-to-source are orchestrator-side, OUT
+            of scope here). Once a request is pending (`@pending_simplify`),
+            Accept/Reject render and record the user's decision on that branch.
+            `:last_simplify` shows a small inline confirmation. --%>
+      <div :if={@simplify?} id="paper-simplify" class="bp-paper-simplify">
+        <button
+          type="button"
+          class="bp-paper-action"
+          phx-click="simplify-request"
+        >
+          Simplify
+        </button>
+        <%!-- Accept/Reject appear once a simplify-request is pending this
+              session. They record the decision only; the actual branch-close /
+              merge-to-source is the orchestrator's job (out of scope). --%>
+        <span :if={@pending_simplify} class="bp-paper-simplify-decide">
+          <button
+            type="button"
+            class="bp-paper-action bp-paper-action-accept"
+            phx-click="simplify-accept"
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            class="bp-paper-action bp-paper-action-reject"
+            phx-click="simplify-reject"
+          >
+            Reject
+          </button>
+        </span>
+        <span :if={@last_simplify} class="bp-paper-action-ack" id="paper-simplify-ack">
+          {@last_simplify}
         </span>
       </div>
 

@@ -178,6 +178,36 @@
       margin-left: 0.25rem;
     }
 
+    /* P6.U4 Simplify control — a small row rendered for any goal-bearing
+       paper (independent of the U5 doc-type action set). Reuses the
+       `.bp-paper-action` button palette; the Accept/Reject pair appears only
+       once a simplify-request is pending. Accept reads as the affirmative
+       (filled terracotta on hover, like the other actions); Reject is muted
+       gray so the destructive choice doesn't shout. Scoped under
+       `.bp-paper-article` so non-article papers stay untouched. */
+    .bp-paper-article .bp-paper-simplify {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+      margin: 0 0 1.75rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .bp-paper-article .bp-paper-simplify-decide {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .bp-paper-article .bp-paper-action-reject {
+      color: #6a6a6a;
+      border-color: rgba(26, 26, 26, 0.18);
+    }
+    .bp-paper-article .bp-paper-action-reject:hover {
+      background: #6a6a6a;
+      color: #fdfcf8;
+      border-color: #6a6a6a;
+    }
+
     /* P6.U2 goal-path rail — a 240px sticky right-rail showing the paper's
        goal lifecycle as a Mermaid gitGraph plus a clickable event list. Scoped
        under `.bp-paper-article` so non-article papers are untouched. The shell
