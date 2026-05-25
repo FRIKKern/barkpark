@@ -2229,10 +2229,45 @@ defmodule Barkpark.Content do
     case result do
       {:ok, doc} ->
         broadcast_paper_update(doc)
+        # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
+        # gated strictly on a present `event_type` so ordinary streaming saves
+        # never create events. The paper save is the source of truth — an
+        # event-insert failure is logged and swallowed, never propagated.
+        maybe_append_paper_event(attrs, slug)
         {:ok, doc}
 
       error ->
         error
+    end
+  end
+
+  # Append a `paper_events` row when this upsert carries a non-empty
+  # `event_type`. Decoupled from Beads/W7 — pure Postgres via
+  # `Barkpark.Papers.Events`. Failures are logged, never raised.
+  defp maybe_append_paper_event(attrs, slug) do
+    event_type = attrs["event_type"]
+
+    if is_binary(event_type) and event_type != "" do
+      event_attrs = %{
+        "goal_id" => attrs["goal_id"],
+        "paper_slug" => slug,
+        "event_type" => event_type,
+        "source_doc" => attrs["source_doc"],
+        "payload_html" => attrs["payload_html"],
+        "branch" => attrs["branch"] || "main"
+      }
+
+      case Barkpark.Papers.Events.create_event(event_attrs) do
+        {:ok, _event} ->
+          :ok
+
+        {:error, reason} ->
+          require Logger
+          Logger.warning("paper_events append failed for #{inspect(slug)}: #{inspect(reason)}")
+          :ok
+      end
+    else
+      :ok
     end
   end
 
