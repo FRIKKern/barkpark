@@ -2180,11 +2180,61 @@ defmodule Barkpark.Content do
   @doc """
   Fetch a paper (a type-"paper" document) by slug (and dataset). Returns the
   `%Document{}` or `nil`. Papers are always published (no draft prefix).
+
+  SCOPE: `opts` may carry `:workspace_id` / `:project_id`; the read is then
+  scoped to that tenant. With NO scope opts the read is unscoped (`nil`
+  workspace_id → `scope_to_workspace/3` returns the query untouched) — that is
+  the INTERNAL, already-tenant-resolved caller path (e.g. `upsert_paper`'s
+  pre-write lookup, which keys on `{dataset, slug}` and stamps the resolved
+  scope itself). It is NOT the public read path: a public, unauthenticated
+  request MUST go through `get_public_paper/2`, which closes the cross-workspace
+  leak (barkpark-w9dg) by resolving the slug ONLY within the seeded Default
+  (public) workspace. See that function's doc for why.
   """
   def get_paper(slug, dataset \\ @paper_default_dataset, opts \\ []) when is_binary(slug) do
     case get_document(slug, @paper_type, dataset, opts) do
       {:ok, doc} -> doc
       {:error, :not_found} -> nil
+    end
+  end
+
+  @doc """
+  Resolve a paper for the PUBLIC, unauthenticated `/papers/:slug` surface.
+
+  Papers are stamped `workspace_id` on write and slugs are PER-WORKSPACE (the
+  Wave-2 uniqueness flip lifted the old global `(doc_id, type, dataset)` unique
+  index to a per-workspace `(doc_id, type, dataset_id)` one, so two workspaces
+  may each own a paper with the same slug). A bare `get_paper(slug)` runs
+  UNSCOPED — `scope_to_workspace(query, nil, …)` returns the query untouched —
+  so `Repo.one` resolves over EVERY tenant's rows. That is the
+  cross-workspace read leak: any visitor could read any workspace's paper by
+  slug, and on a same-slug collision the resolved row was non-deterministic
+  (barkpark-w9dg, P0).
+
+  The public paper surface is intentionally the seeded **Default** workspace —
+  that is where the flat, unauthenticated paperflow ingest lands by Default
+  fallback (`upsert_paper`'s scope contract), so it is the one deterministic
+  public tenant. This function resolves the Default workspace id and scopes the
+  read to it, so:
+
+    * a paper in ANY non-Default workspace is NEVER exposed here, and
+    * a slug resolves to AT MOST ONE row (the Default-workspace paper), never
+      "whatever row matched across all tenants."
+
+  Fail-closed (aligns with the s6t1 nil-scope direction): if the Default
+  workspace is not seeded, there IS no public tenant — we return `nil` rather
+  than fall back to an unscoped read. We never rely on
+  `scope_to_workspace(nil) = all-rows` for a public request.
+
+  Returns the `%Document{}` or `nil`.
+  """
+  def get_public_paper(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} when is_binary(ws_id) ->
+        get_paper(slug, dataset, workspace_id: ws_id)
+
+      _ ->
+        nil
     end
   end
 
@@ -2432,7 +2482,17 @@ defmodule Barkpark.Content do
     slug = attrs["slug"]
     dataset = attrs["dataset"] || @paper_default_dataset
 
-    existing = slug && get_paper(slug, dataset)
+    # The pre-write lookup MUST be scoped to THIS write's tenant, not unscoped.
+    # An unscoped `get_paper(slug, dataset)` resolves the slug across EVERY
+    # workspace (slugs are per-workspace), so a same-slug write in workspace B
+    # would find workspace A's row and UPDATE it — re-stamping A's row with B's
+    # scope and hijacking A's paper. Scoping the lookup to the write's resolved
+    # workspace keeps the two papers DISTINCT, matching the per-workspace
+    # uniqueness the Wave-2 index flip established (barkpark-w9dg). The scope is
+    # the explicit one in attrs, else the seeded Default — identical to the
+    # write-stamp fallback below, so the lookup sees exactly the row the write
+    # would update.
+    existing = slug && get_existing_paper_for_write(slug, dataset, attrs)
 
     blocks = attrs["blocks"]
 
@@ -2846,6 +2906,26 @@ defmodule Barkpark.Content do
 
       _ ->
         []
+    end
+  end
+
+  # The pre-write existing-paper lookup, SCOPED to this write's tenant so a
+  # same-slug write in workspace B never finds (and clobbers) workspace A's row
+  # (barkpark-w9dg). The scope mirrors the write-stamp fallback: an explicit
+  # workspace in attrs wins; absent it, the seeded Default workspace — so the
+  # flat, unscoped paperflow ingest keeps upserting its own Default-scoped row.
+  defp get_existing_paper_for_write(slug, dataset, attrs) do
+    case paper_scope_opts(attrs) do
+      [_ | _] = opts ->
+        get_paper(slug, dataset, opts)
+
+      [] ->
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: ws_id} when is_binary(ws_id) -> get_paper(slug, dataset, workspace_id: ws_id)
+          # No seeded Default (fresh sandbox) — fall back to the prior unscoped
+          # lookup so the very first single-tenant write still self-locates.
+          _ -> get_paper(slug, dataset)
+        end
     end
   end
 
