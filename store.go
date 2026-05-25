@@ -108,7 +108,7 @@ func (ds *DataStore) Mutate(mutations []map[string]interface{}) error {
 
 // Query fetches documents from the API by type, with optional filter.
 func (ds *DataStore) Query(typeName, filter string) []Doc {
-	endpoint := fmt.Sprintf("%s/api/documents/%s", ds.baseURL, typeName)
+	endpoint := ds.scopedURL("/v1/data/query/" + ds.Dataset + "/" + typeName)
 	if filter != "" {
 		endpoint += "?filter=" + url.QueryEscape(filter)
 	}
@@ -134,7 +134,7 @@ func (ds *DataStore) Query(typeName, filter string) []Doc {
 
 // Get fetches a single document by type and ID.
 func (ds *DataStore) Get(typeName, id string) (Doc, bool) {
-	endpoint := fmt.Sprintf("%s/api/documents/%s/%s", ds.baseURL, typeName, id)
+	endpoint := ds.scopedURL("/v1/data/doc/" + ds.Dataset + "/" + typeName + "/" + id)
 
 	resp, err := ds.client.Get(endpoint)
 	if err != nil {
@@ -154,43 +154,48 @@ func (ds *DataStore) Get(typeName, id string) (Doc, bool) {
 }
 
 // Upsert creates or updates a document via the API.
+//
+// The scoped /v1/data API has no per-type document POST — upsert is expressed
+// as a createOrReplace mutation routed through POST /v1/data/mutate/<dataset>.
 func (ds *DataStore) Upsert(typeName string, doc Doc) error {
-	endpoint := fmt.Sprintf("%s/api/documents/%s", ds.baseURL, typeName)
-
-	body, err := json.Marshal(doc)
-	if err != nil {
-		return err
+	create := map[string]interface{}{
+		"_type": typeName,
+	}
+	if doc.ID != "" {
+		create["_id"] = doc.ID
+	}
+	if doc.Title != "" {
+		create["title"] = doc.Title
+	}
+	if doc.Status != "" {
+		create["status"] = doc.Status
+	}
+	if doc.Category != "" {
+		create["category"] = doc.Category
+	}
+	if doc.Author != "" {
+		create["author"] = doc.Author
+	}
+	for k, v := range doc.Values {
+		create[k] = v
 	}
 
-	resp, err := ds.client.Post(endpoint, "application/json", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
-	}
-	return nil
+	mutation := map[string]interface{}{"createOrReplace": create}
+	return ds.Mutate([]map[string]interface{}{mutation})
 }
 
 // Delete removes a document via the API.
+//
+// The scoped /v1/data API has no DELETE verb — deletion is expressed as a
+// delete mutation routed through POST /v1/data/mutate/<dataset>.
 func (ds *DataStore) Delete(typeName, id string) bool {
-	endpoint := fmt.Sprintf("%s/api/documents/%s/%s", ds.baseURL, typeName, id)
-
-	req, err := http.NewRequest(http.MethodDelete, endpoint, nil)
-	if err != nil {
-		return false
+	mutation := map[string]interface{}{
+		"delete": map[string]interface{}{
+			"id":   id,
+			"type": typeName,
+		},
 	}
-
-	resp, err := ds.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	return resp.StatusCode == http.StatusOK
+	return ds.Mutate([]map[string]interface{}{mutation}) == nil
 }
 
 // StartSSE connects to the Phoenix SSE listener for real-time updates.
@@ -251,7 +256,10 @@ func (ds *DataStore) listenSSE(token string) error {
 }
 
 func (ds *DataStore) pollOnce() {
-	resp, err := ds.client.Get(ds.baseURL + "/api/documents/")
+	// Scoped change-detection fallback when the SSE listener drops. The legacy
+	// flat document list has no scoped equivalent; the export endpoint dumps
+	// the dataset, which hashes equivalently for change detection.
+	resp, err := ds.client.Get(ds.scopedURL("/v1/data/export/" + ds.Dataset))
 	if err != nil {
 		return
 	}
