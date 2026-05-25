@@ -26,6 +26,13 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       StudioLive). Looked up in the schema's `desk_groups` array. If
       the schema declares none (or the named group is absent), the
       pane renders unfiltered — back-compat with v1 schemas.
+
+    * `:scope` — the tenancy `[workspace_id: …, project_id: …]` keyword
+      (from `BarkparkWeb.ScopeHelpers.scope_opts(socket)`) threaded into
+      EVERY document read so the desk shows ONLY the active
+      workspace/project's content. Empty `[]` is nil-safe — the
+      `Barkpark.Content` query path no-ops on an absent scope, so the desk
+      keeps its pre-tenancy shape on an unscoped mount.
   """
   @spec build(String.t(), [String.t()]) :: {[map()], map() | nil}
   def build(dataset, nav_path), do: build(dataset, nav_path, [])
@@ -95,7 +102,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           end
 
         plugin_filter = if is_map(node.filter), do: node.filter, else: %{}
-        list_opts = [perspective: :drafts, filter_map: plugin_filter]
+        list_opts = [perspective: :drafts, filter_map: plugin_filter] ++ scope(opts)
         docs = Content.list_documents(type_name, dataset, list_opts)
 
         doc_pane = %{
@@ -122,7 +129,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         editor =
           case rest do
             [doc_id | _] ->
-              {doc, is_draft, has_pub} = Content.fetch_doc_with_draft(type_name, doc_id, dataset)
+              {doc, is_draft, has_pub} =
+                Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
 
               if doc && schema do
                 %{
@@ -159,7 +167,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         active_desk = Keyword.get(opts, :desk)
         active_group = find_desk_group(desk_groups, active_desk)
 
-        list_opts = [perspective: :drafts]
+        list_opts = [perspective: :drafts] ++ scope(opts)
 
         list_opts =
           if node.filter,
@@ -225,7 +233,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             paper? ->
               case rest do
                 [slug | _] ->
-                  case Content.get_paper(slug, dataset) do
+                  case Content.get_paper(slug, dataset, scope(opts)) do
                     nil ->
                       nil
 
@@ -249,7 +257,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               case rest do
                 [doc_id | _] ->
                   {doc, is_draft, has_pub} =
-                    Content.fetch_doc_with_draft(type_name, doc_id, dataset)
+                    Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
 
                   if doc && schema do
                     %{
@@ -277,7 +285,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           end
 
         if schema do
-          {doc, is_draft, has_pub} = Content.fetch_doc_with_draft(type_name, type_name, dataset)
+          {doc, is_draft, has_pub} =
+            Content.fetch_doc_with_draft(type_name, type_name, dataset, scope(opts))
 
           editor =
             if doc do
@@ -298,6 +307,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       _ ->
         {panes, nil}
+    end
+  end
+
+  # Pull the tenancy scope keyword threaded in via `build(.., scope: scope_opts)`.
+  # Returns the `[workspace_id: …, project_id: …]` list (or `[]` when no scope
+  # was threaded), ready to append onto a Content read's opts. Nil-safe: the
+  # Content query path no-ops on an empty/absent scope.
+  defp scope(opts) do
+    case Keyword.get(opts, :scope) do
+      kw when is_list(kw) -> kw
+      _ -> []
     end
   end
 

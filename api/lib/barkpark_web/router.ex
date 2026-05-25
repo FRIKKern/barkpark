@@ -51,6 +51,13 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
     plug BarkparkWeb.Plugs.RateLimit
     plug BarkparkWeb.Plugs.PreviewToken
+    # Tenancy shim: the flat /v1/preview/* routes carry no /w/:ws/p/:project
+    # slugs, so without this the preview-JWT draft reads ran UNSCOPED across
+    # every workspace (B9/barkpark-6xd9). Mirror :api — infer the seeded
+    # Default workspace/project. A path-scoped preview route (under
+    # /w/:ws/p/:project) sets the real scope via the resolvers, and
+    # AssignDefaultScope no-ops once an assign is already present.
+    plug BarkparkWeb.Plugs.AssignDefaultScope
   end
 
   pipeline :require_token do
