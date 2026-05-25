@@ -23,6 +23,11 @@ defmodule Barkpark.Papers.Event do
     field :payload_html, :string
     field :source_doc, :string
 
+    # P6.U6a (barkpark-jwai): NULL = pending intent; a timestamp = consumed by
+    # the paperflow-side reader loop. Set on `Events.mark_processed/1`, never on
+    # create — deliberately omitted from the changeset cast/validation.
+    field :processed_at, :utc_datetime_usec
+
     timestamps(type: :utc_datetime_usec)
   end
 

@@ -109,6 +109,10 @@ defmodule BarkparkWeb.Router do
     # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
     # auth; applies via Content.apply_paper_block_op, broadcasts a delta frame.
     post "/papers/:slug/ops", PaperIngestController, :apply_op
+    # P6.U6a loop-closer (barkpark-jwai): the paperflow-side reader loop (U6b)
+    # drains pending action:*/simplify-* intents here, then marks each done.
+    get "/intents", PaperIntentsController, :index
+    post "/intents/:id/processed", PaperIntentsController, :mark_processed
   end
 
   # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────
