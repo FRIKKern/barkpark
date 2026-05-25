@@ -34,6 +34,40 @@ defmodule Barkpark.Tenancy do
     Repo.get_by(Workspace, slug: slug)
   end
 
+  @doc "Fetch a Workspace by its id, or nil. `nil` id returns nil."
+  @spec get_workspace_by_id(binary() | nil) :: Workspace.t() | nil
+  def get_workspace_by_id(nil), do: nil
+  def get_workspace_by_id(id) when is_binary(id), do: Repo.get(Workspace, id)
+
+  @doc "Fetch a Project by its id, or nil. `nil` id returns nil."
+  @spec get_project_by_id(binary() | nil) :: Project.t() | nil
+  def get_project_by_id(nil), do: nil
+  def get_project_by_id(id) when is_binary(id), do: Repo.get(Project, id)
+
+  @doc """
+  Resolve the `{workspace_slug, project_slug}` pair for a record carrying
+  `workspace_id` / `project_id` columns (a Document, Webhook, …). Falls back
+  to the default slug (`"default"`) when an id is `nil` (pre-tenancy /
+  unscoped) or when the row no longer exists — keeping the emitted sync-tag
+  namespace well-formed in every path.
+  """
+  @spec resolve_scope_slugs(binary() | nil, binary() | nil) :: {String.t(), String.t()}
+  def resolve_scope_slugs(workspace_id, project_id) do
+    ws_slug =
+      case get_workspace_by_id(workspace_id) do
+        %Workspace{slug: slug} -> slug
+        nil -> @default_slug
+      end
+
+    project_slug =
+      case get_project_by_id(project_id) do
+        %Project{slug: slug} -> slug
+        nil -> @default_slug
+      end
+
+    {ws_slug, project_slug}
+  end
+
   @doc """
   Fetch a Project by its Workspace slug + Project slug. Returns nil when
   either the Workspace or the Project is absent.

@@ -15,6 +15,7 @@ defmodule Barkpark.Webhooks.Dispatcher do
 
   require Logger
   alias Barkpark.Webhooks
+  alias Barkpark.Tenancy
 
   @default_retry_delays_ms [1_000, 5_000, 30_000]
   @default_max_attempts 3
@@ -23,10 +24,14 @@ defmodule Barkpark.Webhooks.Dispatcher do
   Public entry point called from `Content.tap_broadcast/5`. Spawns one
   supervised Task per matching webhook so a slow endpoint cannot block
   callers or other deliveries.
+
+  `opts` may carry `:workspace_id` / `:project_id` so the delivered payload
+  emits workspace/project-scoped sync-tags. When absent, the scope is
+  resolved to the default slugs (pre-tenancy back-compat path).
   """
-  def dispatch_async(dataset, event, type, doc_id, document, event_id)
+  def dispatch_async(dataset, event, type, doc_id, document, event_id, opts \\ [])
       when is_integer(event_id) do
-    body = Jason.encode!(build_payload(event, type, doc_id, document, dataset))
+    body = Jason.encode!(build_payload(event, type, doc_id, document, dataset, opts))
     webhooks = Webhooks.active_webhooks_for(dataset, event, type)
 
     Enum.each(webhooks, fn wh ->
@@ -49,15 +54,36 @@ defmodule Barkpark.Webhooks.Dispatcher do
     end)
   end
 
-  @doc "Builds the JSON-serialisable payload map."
-  def build_payload(event, type, doc_id, document, dataset) do
+  @doc """
+  Builds the JSON-serialisable payload map.
+
+  `opts` may carry `:workspace_id` / `:project_id`; their slugs are resolved
+  via `Tenancy.resolve_scope_slugs/2` to form the workspace/project-scoped
+  sync-tags `bp:ws:<ws>:p:<project>:ds:<dataset>:*`. The legacy `bp:ds:*`
+  tags are retained for back-compat. The resolved slugs are also surfaced
+  on the payload as `workspace`/`project` (and the raw ids when given).
+  """
+  def build_payload(event, type, doc_id, document, dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    {ws_slug, project_slug} = Tenancy.resolve_scope_slugs(workspace_id, project_id)
+
+    scoped = "bp:ws:#{ws_slug}:p:#{project_slug}:ds:#{dataset}"
+
     %{
       event: event,
       type: type,
       doc_id: doc_id,
       document: document,
       dataset: dataset,
+      workspace: ws_slug,
+      project: project_slug,
+      workspace_id: workspace_id,
+      project_id: project_id,
       sync_tags: [
+        "#{scoped}:doc:#{doc_id}",
+        "#{scoped}:type:#{type}",
+        # Legacy dataset-only tags retained for back-compat.
         "bp:ds:#{dataset}:doc:#{doc_id}",
         "bp:ds:#{dataset}:type:#{type}"
       ],

@@ -1744,6 +1744,11 @@ defmodule Barkpark.Content do
           doc_id: doc.doc_id,
           rev: doc.rev,
           previous_rev: prev_rev,
+          # Additive workspace/project context (LOCKED #10): existing
+          # subscribers ignore unknown keys; the nextjs revalidate consumer
+          # and workspace-scoped subscribers filter on these.
+          workspace_id: doc.workspace_id,
+          project_id: doc.project_id,
           document: Envelope.render(doc),
           doc: %{
             doc_id: doc.doc_id,
@@ -1760,7 +1765,21 @@ defmodule Barkpark.Content do
 
         maybe_broadcast(global_topic, {:document_changed, msg})
         maybe_broadcast(doc_topic, {:doc_updated, msg})
-        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id)
+
+        # Additional workspace-scoped topic so consumers can subscribe by
+        # workspace without filtering the global stream. ADDITIVE — the
+        # global `documents:#{dataset}` topic above is untouched.
+        if doc.workspace_id do
+          maybe_broadcast(
+            "documents:ws:#{doc.workspace_id}:#{dataset}",
+            {:document_changed, msg}
+          )
+        end
+
+        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id,
+          workspace_id: doc.workspace_id,
+          project_id: doc.project_id
+        )
 
         {:ok, doc}
 
@@ -1780,13 +1799,15 @@ defmodule Barkpark.Content do
   end
 
   # Defer webhook dispatch when inside a transaction, fire immediately otherwise.
-  defp maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id) do
+  # `opts` carries `:workspace_id` / `:project_id` so the delivered payload
+  # emits workspace/project-scoped sync-tags.
+  defp maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts) do
     if Repo.in_transaction?() do
       queue = Process.get(:barkpark_deferred_webhooks, [])
 
       Process.put(
         :barkpark_deferred_webhooks,
-        [{dataset, action, type, doc_id, document, event_id} | queue]
+        [{dataset, action, type, doc_id, document, event_id, opts} | queue]
       )
     else
       Barkpark.Webhooks.Dispatcher.dispatch_async(
@@ -1795,7 +1816,8 @@ defmodule Barkpark.Content do
         type,
         doc_id,
         document,
-        event_id
+        event_id,
+        opts
       )
     end
   end
@@ -1815,14 +1837,15 @@ defmodule Barkpark.Content do
 
     webhook_queue
     |> Enum.reverse()
-    |> Enum.each(fn {dataset, action, type, doc_id, document, event_id} ->
+    |> Enum.each(fn {dataset, action, type, doc_id, document, event_id, opts} ->
       Barkpark.Webhooks.Dispatcher.dispatch_async(
         dataset,
         action,
         type,
         doc_id,
         document,
-        event_id
+        event_id,
+        opts
       )
     end)
   end

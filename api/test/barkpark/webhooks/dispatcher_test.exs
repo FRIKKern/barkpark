@@ -106,13 +106,50 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     assert is_binary(payload.timestamp)
   end
 
-  test "build_payload emits canonical bp:ds:* sync_tags for a publish event" do
+  test "build_payload retains legacy bp:ds:* sync_tags for back-compat" do
     payload = Dispatcher.build_payload("publish", "post", "p1", %{"_id" => "p1"}, "production")
 
-    assert payload.sync_tags == [
-             "bp:ds:production:doc:p1",
-             "bp:ds:production:type:post"
-           ]
+    # Legacy dataset-only tags must still be present (back-compat).
+    assert "bp:ds:production:doc:p1" in payload.sync_tags
+    assert "bp:ds:production:type:post" in payload.sync_tags
+  end
+
+  test "build_payload emits workspace/project-scoped sync_tags from scope opts" do
+    {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "acme", name: "Acme"})
+
+    {:ok, project} =
+      Barkpark.Tenancy.create_project(ws, %{slug: "blog", name: "Blog"})
+
+    payload =
+      Dispatcher.build_payload(
+        "publish",
+        "post",
+        "p1",
+        %{"_id" => "p1"},
+        "production",
+        workspace_id: ws.id,
+        project_id: project.id
+      )
+
+    # Workspace/project-scoped tags, resolved from the ids → slugs.
+    assert "bp:ws:acme:p:blog:ds:production:doc:p1" in payload.sync_tags
+    assert "bp:ws:acme:p:blog:ds:production:type:post" in payload.sync_tags
+    # Legacy tags still carried.
+    assert "bp:ds:production:doc:p1" in payload.sync_tags
+    assert "bp:ds:production:type:post" in payload.sync_tags
+    # Resolved slugs surfaced on the payload.
+    assert payload.workspace == "acme"
+    assert payload.project == "blog"
+    assert payload.workspace_id == ws.id
+    assert payload.project_id == project.id
+  end
+
+  test "build_payload falls back to default slugs when scope is unset" do
+    payload = Dispatcher.build_payload("publish", "post", "p1", %{"_id" => "p1"}, "production")
+
+    assert "bp:ws:default:p:default:ds:production:doc:p1" in payload.sync_tags
+    assert payload.workspace == "default"
+    assert payload.project == "default"
   end
 
   test "200 on first attempt succeeds without retry", %{webhook: wh} do
