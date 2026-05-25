@@ -33,6 +33,9 @@ export async function fetchPostBySlug(
     .where("slug", "eq", slug)
     .findOne();
   if (bySlug) return bySlug;
-  // Fall back to treating the param as a publishedId / _id.
-  return client.docs<PostDocument>("post").where("_id", "eq", slug).findOne();
+  // Fall back to treating the param as a publishedId / _id. The query API does
+  // not expose `_id` as a filterable field, so use the by-id doc endpoint
+  // (`client.doc`) which fetches `/v1/data/doc/<dataset>/<type>/<id>` directly
+  // and returns null on 404.
+  return client.doc<PostDocument>("post", slug);
 }

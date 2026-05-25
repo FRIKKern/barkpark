@@ -7,15 +7,30 @@ import {
 
 const projectUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+/**
+ * Server-side read token. Sent by `@barkpark/core` as `Authorization: Bearer`,
+ * so SSR fetches authenticate instead of going anonymous — required for the
+ * scoped `/w/:ws/p/:project/...` routes (anonymous → 403 "token lacks required
+ * permission") and the switcher's tenancy fetches (anonymous → 401).
+ *
+ * Intentionally NOT `NEXT_PUBLIC_*`: this module is `import "server-only"`, the
+ * token must never be bundled into client JS. Single-server-token model — every
+ * SSR request shares this read token. (Per-user / per-request tokens would be a
+ * separate auth design, not in scope here.) Falls back to `undefined` when
+ * unset, which core treats as anonymous (back-compat with public reads).
+ */
+const readToken = process.env.BARKPARK_READ_TOKEN;
+
 /** Defaults shared by every client this app builds. */
 const BASE_CONFIG = {
   projectUrl,
   dataset: "production",
   apiVersion: "2026-04-01",
   perspective: "published",
+  ...(readToken ? { token: readToken } : {}),
 } satisfies Pick<
   BarkparkClientConfig,
-  "projectUrl" | "dataset" | "apiVersion" | "perspective"
+  "projectUrl" | "dataset" | "apiVersion" | "perspective" | "token"
 >;
 
 /** Scope passed in from a `/w/:workspace/p/:project` route segment. */
