@@ -1096,7 +1096,16 @@ defmodule Barkpark.Plugins.Registry do
 
   defp safe_register_routes(module, ctx) do
     try do
-      if Code.ensure_loaded?(module) and function_exported?(module, :register_routes, 1) do
+      # `collect_routes/1` runs at router COMPILE time. `Code.ensure_loaded?`
+      # only succeeds when the plugin module's .beam already exists — which is
+      # NOT guaranteed during a single `mix compile` pass: Elixir's per-file
+      # compile order is dependency-driven, and nothing forces a plugin module
+      # to compile before the router. `Code.ensure_compiled/1` instead asks the
+      # compiler to (compile and) load the module, registering a compile-time
+      # dependency so the plugin is built first. This is the difference between
+      # plugin routes mounting deterministically vs only when the file-order
+      # lottery happens to favour them.
+      if module_available?(module) and function_exported?(module, :register_routes, 1) do
         case module.register_routes(ctx) do
           list when is_list(list) ->
             list
@@ -1128,6 +1137,20 @@ defmodule Barkpark.Plugins.Registry do
         )
 
         []
+    end
+  end
+
+  # True when `module` can be invoked. `Code.ensure_compiled/1` forces a
+  # compile-time dependency on the plugin module when called from the router
+  # macro (so it compiles before the router), and is a plain "is it loadable?"
+  # check at runtime. Returns true for `{:module, _}` and also for
+  # `{:error, :unavailable}` — the latter is what `ensure_compiled` returns for
+  # a module mid-compile in the SAME pass that already depends on us; in that
+  # case the module IS being built and `function_exported?` below confirms it.
+  defp module_available?(module) do
+    case Code.ensure_compiled(module) do
+      {:module, _} -> true
+      _ -> false
     end
   end
 

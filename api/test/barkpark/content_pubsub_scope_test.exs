@@ -72,14 +72,21 @@ defmodule Barkpark.ContentPubsubScopeTest do
     assert msg.project_id == project.id
   end
 
-  test "unscoped write still broadcasts on documents:<dataset> with nil scope" do
+  test "unscoped write still broadcasts on documents:<dataset>, carrying the Default scope" do
+    # A write with NO scope opts now lands in the seeded Default Workspace /
+    # Default Project (the backfill migration seeds them into every db,
+    # including test sandboxes) — see Content.put_scope_attrs. The broadcast
+    # carries that Default scope, not nil.
     Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
 
     {:ok, _doc} =
       Content.create_document("widget", %{"_id" => "ps-unscoped", "title" => "t"}, @dataset)
 
+    default_ws = Tenancy.get_default_workspace()
+    default_project = Tenancy.get_default_project()
+
     assert_receive {:document_changed, msg}, 1_000
-    assert msg.workspace_id == nil
-    assert msg.project_id == nil
+    assert msg.workspace_id == default_ws.id
+    assert msg.project_id == default_project.id
   end
 end

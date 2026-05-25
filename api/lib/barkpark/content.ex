@@ -1402,9 +1402,39 @@ defmodule Barkpark.Content do
   # workspace_id/project_id is never nulled by an unscoped update. New rows
   # created under a resolved scope are stamped on insert from that scope.
   defp put_scope_attrs(attrs, opts) do
+    {ws_id, project_id} = resolve_write_scope(attrs, opts)
+
     attrs
-    |> maybe_put_scope_attr("workspace_id", Keyword.get(opts, :workspace_id))
-    |> maybe_put_scope_attr("project_id", Keyword.get(opts, :project_id))
+    |> maybe_put_scope_attr("workspace_id", ws_id)
+    |> maybe_put_scope_attr("project_id", project_id)
+  end
+
+  # Resolve the {workspace_id, project_id} to stamp on a write. Explicit scope
+  # (opts, or an existing scope key already in attrs) ALWAYS wins. When the
+  # caller supplied no scope at all, fall back to the seeded Default Workspace /
+  # Default Project so unscoped (nil) fixtures land in Default and stay visible
+  # to Default-scoped flat-route reads. Degrades to nil when the backfill hasn't
+  # run yet (fresh test sandbox before seed) — never crashes.
+  defp resolve_write_scope(attrs, opts) do
+    opt_ws = Keyword.get(opts, :workspace_id)
+    opt_proj = Keyword.get(opts, :project_id)
+
+    cond do
+      not is_nil(opt_ws) ->
+        {opt_ws, opt_proj}
+
+      scope_key_present?(attrs) ->
+        {opt_ws, opt_proj}
+
+      true ->
+        ws = Barkpark.Tenancy.get_default_workspace()
+        proj = Barkpark.Tenancy.get_default_project()
+        {ws && ws.id, proj && proj.id}
+    end
+  end
+
+  defp scope_key_present?(attrs) do
+    Map.has_key?(attrs, "workspace_id") or Map.has_key?(attrs, :workspace_id)
   end
 
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs

@@ -153,15 +153,24 @@ defmodule Barkpark.ContentWorkspaceWriteScopeTest do
       assert doc.project_id == project.id
     end
 
-    test "a write with NO scope opts (fresh-DB / pre-backfill) lands unscoped, never nulling" do
+    test "a write with NO scope opts lands in the seeded Default scope" do
+      # The backfill migration seeds a Default Workspace/Project into every db
+      # (including test sandboxes), and an unscoped write now defaults to it
+      # (see Content.put_scope_attrs). Explicit scope still wins (covered above);
+      # this asserts the no-scope fallback so nil-scope fixtures stay visible to
+      # Default-scoped flat-route reads.
+      ws = Tenancy.get_default_workspace()
+      project = Tenancy.get_default_project()
+      assert ws, "Default Workspace must be seeded by the backfill migration"
+
       result =
         mutate(%{"_id" => "unscoped-write", "_type" => @type_name, "title" => "unscoped"},
           source: :api
         )
 
       {:ok, doc} = Content.get_document(result.id, @type_name, @shared_dataset)
-      assert is_nil(doc.workspace_id)
-      assert is_nil(doc.project_id)
+      assert doc.workspace_id == ws.id
+      assert doc.project_id == project.id
     end
   end
 end
