@@ -20,4 +20,14 @@ defmodule Barkpark.Search.SanitizerTest do
     assert {:reject, :spam} = Sanitizer.sanitize(";;;;;;;")
     assert {:reject, :spam} = Sanitizer.sanitize("drop table users")
   end
+
+  test "rejects configured exclude patterns" do
+    assert {:reject, :excluded} = Sanitizer.sanitize("test")
+    assert {:reject, :excluded} = Sanitizer.sanitize("QWERTY")
+  end
+
+  test "suggest gate requires four letters" do
+    assert {:reject, :too_short} = Sanitizer.suggest_sanitize("abc")
+    assert {:ok, "abcd"} = Sanitizer.suggest_sanitize("abcd")
+  end
 end

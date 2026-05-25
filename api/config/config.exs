@@ -63,6 +63,10 @@ config :barkpark, :default_cors_origins, []
 # PAPERFLOW_INGEST_TOKEN in prod; dev.exs/test.exs set a local default.
 config :barkpark, :paperflow_ingest_token, nil
 
+config :barkpark, :search_query_exclude_patterns, [
+  ~r/^(test|asdf|qwerty|foo|bar)$/i
+]
+
 config :barkpark, Oban,
   repo: Barkpark.Repo,
   queues: [default: 10, bokbasen: 4, plugins: 6],

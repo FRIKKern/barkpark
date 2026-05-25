@@ -8,6 +8,7 @@ defmodule Barkpark.Search.Sanitizer do
 
   @max_length 200
   @min_length 2
+  @min_suggest_length 4
 
   @spam_patterns [
     ~r/(.)\1{6,}/,
@@ -15,20 +16,32 @@ defmodule Barkpark.Search.Sanitizer do
   ]
 
   @spec sanitize(String.t() | nil) :: {:ok, String.t()} | {:reject, atom()}
-  def sanitize(nil), do: {:reject, :empty}
+  @spec sanitize(String.t() | nil, keyword()) :: {:ok, String.t()} | {:reject, atom()}
+  def sanitize(query, opts \\ [])
 
-  def sanitize(query) when is_binary(query) do
+  def sanitize(nil, _opts), do: {:reject, :empty}
+
+  def sanitize(query, opts) when is_binary(query) do
     trimmed = query |> String.trim() |> collapse_ws()
+    min_len = Keyword.get(opts, :min_length, @min_length)
 
     cond do
       trimmed == "" -> {:reject, :empty}
-      String.length(trimmed) < @min_length -> {:reject, :too_short}
+      String.length(trimmed) < min_len -> {:reject, :too_short}
       String.length(trimmed) > @max_length -> {:reject, :too_long}
+      excluded?(trimmed) -> {:reject, :excluded}
       profanity?(trimmed) -> {:reject, :profanity}
       spam?(trimmed) -> {:reject, :spam}
       true -> {:ok, normalize(trimmed)}
     end
   end
+
+  @doc "Stricter gate for autocomplete prefix filtering (min #{@min_suggest_length} letters)."
+  @spec suggest_sanitize(String.t() | nil) :: {:ok, String.t()} | {:reject, atom()}
+  def suggest_sanitize(query), do: sanitize(query, min_length: @min_suggest_length)
+
+  @doc false
+  def min_suggest_length, do: @min_suggest_length
 
   @spec normalize(String.t()) :: String.t()
   def normalize(query) when is_binary(query) do
@@ -68,4 +81,26 @@ defmodule Barkpark.Search.Sanitizer do
   end
 
   defp default_blocklist, do: ~w(fuck shit asshole bitch cunt)
+
+  defp excluded?(text) do
+    Enum.any?(exclude_patterns(), &Regex.match?(&1, text))
+  end
+
+  defp exclude_patterns do
+    Application.get_env(:barkpark, :search_query_exclude_patterns, [])
+    |> List.wrap()
+    |> Enum.map(&compile_pattern/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp compile_pattern(%Regex{} = pattern), do: pattern
+
+  defp compile_pattern(pattern) when is_binary(pattern) do
+    case Regex.compile(pattern, "i") do
+      {:ok, regex} -> regex
+      _ -> nil
+    end
+  end
+
+  defp compile_pattern(_), do: nil
 end

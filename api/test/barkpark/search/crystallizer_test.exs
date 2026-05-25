@@ -24,7 +24,7 @@ defmodule Barkpark.Search.CrystallizerTest do
         false,
         "actor-1",
         DateTime.add(start, 60, :second),
-        e1.id
+        parent: e1.id
       )
 
     _rejected =
@@ -35,9 +35,8 @@ defmodule Barkpark.Search.CrystallizerTest do
         true,
         "actor-2",
         DateTime.add(start, 120, :second),
-        nil,
-        "rejected",
-        "profanity"
+        quality: "rejected",
+        reject_reason: "profanity"
       )
 
     stats = Crystallizer.crystallize_period(@surface, @scope, :day, day)
@@ -95,6 +94,41 @@ defmodule Barkpark.Search.CrystallizerTest do
     assert pattern.pattern_type in ["facet_add", "query_and_facet_add", "filter_merge"]
   end
 
+  test "crystallize excludes test-tagged traffic from analytics" do
+    day = ~D[2026-05-24]
+    start = DateTime.new!(day, ~T[11:00:00.000000], "Etc/UTC")
+
+    insert_event("real", "real", %{}, false, "actor-1", start, tags: [])
+
+    insert_event(
+      "smoke",
+      "smoke",
+      %{},
+      false,
+      "actor-2",
+      DateTime.add(start, 30, :second),
+      tags: ["test"]
+    )
+
+    Crystallizer.crystallize_period(@surface, @scope, :day, day)
+
+    assert Repo.get_by(Crystal,
+             surface: @surface,
+             scope: @scope,
+             period: "day",
+             period_start: day,
+             query_normalized: "real"
+           )
+
+    refute Repo.get_by(Crystal,
+             surface: @surface,
+             scope: @scope,
+             period: "day",
+             period_start: day,
+             query_normalized: "smoke"
+           )
+  end
+
   defp insert_event(
          query,
          normalized,
@@ -102,10 +136,13 @@ defmodule Barkpark.Search.CrystallizerTest do
          zero_hits,
          actor,
          at,
-         parent \\ nil,
-         quality \\ "accepted",
-         reject_reason \\ nil
+         opts \\ []
        ) do
+    tags = Keyword.get(opts, :tags, [])
+    parent = Keyword.get(opts, :parent)
+    quality = Keyword.get(opts, :quality, "accepted")
+    reject_reason = Keyword.get(opts, :reject_reason)
+
     %Event{}
     |> Ecto.Changeset.change(%{
       surface: @surface,
@@ -119,6 +156,7 @@ defmodule Barkpark.Search.CrystallizerTest do
       quality: quality,
       reject_reason: reject_reason,
       parent_event_id: parent,
+      tags: tags,
       inserted_at: at
     })
     |> Repo.insert()

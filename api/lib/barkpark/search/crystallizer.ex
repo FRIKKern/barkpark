@@ -142,8 +142,15 @@ defmodule Barkpark.Search.Crystallizer do
   end
 
   defp aggregate_queries(events) do
-    search_events = Enum.filter(events, &(&1.event_type == "search"))
-    interaction_events = Enum.filter(events, &(&1.event_type in ["click", "select"]))
+    search_events =
+      events
+      |> Enum.filter(&(&1.event_type == "search"))
+      |> Enum.filter(&analytics_eligible?/1)
+
+    interaction_events =
+      events
+      |> Enum.filter(&(&1.event_type in ["click", "select"]))
+      |> Enum.filter(&analytics_eligible?/1)
 
     accepted =
       Enum.filter(search_events, fn e ->
@@ -276,7 +283,7 @@ defmodule Barkpark.Search.Crystallizer do
       events
       |> Enum.filter(fn e ->
         (e.quality == "accepted" or is_nil(e.quality)) and e.event_type == "search" and
-          e.actor_key
+          is_binary(e.actor_key) and e.actor_key != "" and analytics_eligible?(e)
       end)
       |> Enum.sort_by(& &1.inserted_at, DateTime)
 
@@ -411,4 +418,12 @@ defmodule Barkpark.Search.Crystallizer do
   defp avg_int(nums) do
     nums |> Enum.sum() |> Kernel./(length(nums)) |> Float.round(1)
   end
+
+  defp analytics_eligible?(%Event{source: "test"}), do: false
+
+  defp analytics_eligible?(%Event{tags: tags}) when is_list(tags) do
+    not Enum.member?(tags, "test")
+  end
+
+  defp analytics_eligible?(_), do: true
 end

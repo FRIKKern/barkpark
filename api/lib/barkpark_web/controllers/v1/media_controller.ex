@@ -38,7 +38,8 @@ defmodule BarkparkWeb.V1.MediaController do
       parent_event_id: SearchIntel.parent_event_id(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "explorer"),
-      disabled: SearchIntel.recording_disabled?(conn)
+      record: SearchIntel.should_record?(conn),
+      tags: SearchIntel.tags(conn)
     ]
 
     record_result =

@@ -32,20 +32,31 @@ defmodule Barkpark.Search.Intelligence do
       when is_binary(surface) and is_binary(scope) and is_map(context) do
     offset = Map.get(context, :offset, 0)
 
-    cond do
-      Keyword.get(opts, :disabled, false) ->
-        :skipped
+    result =
+      cond do
+        Keyword.get(opts, :disabled, false) ->
+          :skipped
 
-      offset > 0 ->
-        :skipped
+        Keyword.get(opts, :record, true) == false ->
+          :skipped
 
-      true ->
-        safe_record(surface, scope, context, total, duration_ms, opts)
-    end
+        offset > 0 ->
+          :skipped
+
+        true ->
+          safe_record(surface, scope, context, total, duration_ms, opts)
+      end
+
+    emit_record_telemetry(surface, scope, result)
+    result
   rescue
-    _ -> :skipped
+    _ ->
+      emit_record_telemetry(surface, scope, :error)
+      :skipped
   catch
-    _, _ -> :skipped
+    _, _ ->
+      emit_record_telemetry(surface, scope, :error)
+      :skipped
   end
 
   @doc """
@@ -91,7 +102,7 @@ defmodule Barkpark.Search.Intelligence do
       when is_binary(surface) and is_binary(scope) do
     limit = Keyword.get(opts, :limit, @default_limit)
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
-    prefix = normalize_prefix(prefix)
+    prefix = normalize_suggest_prefix(prefix)
 
     suggest_opts = [min_search_count: min_count]
 
@@ -163,6 +174,7 @@ defmodule Barkpark.Search.Intelligence do
     parent_event_id = Keyword.get(opts, :parent_event_id)
     source = Keyword.get(opts, :source, "api")
     session_key = Keyword.get(opts, :session_key)
+    tags = Keyword.get(opts, :tags, [])
 
     raw_query = Map.get(context, :query, "") || ""
     filters = Map.get(context, :filters, %{})
@@ -176,7 +188,8 @@ defmodule Barkpark.Search.Intelligence do
       duration_ms: duration_ms,
       parent_event_id: parent_event_id,
       source: source,
-      session_key: session_key
+      session_key: session_key,
+      tags: tags
     }
 
     case qualify_query(raw_query, filters) do
@@ -696,13 +709,33 @@ defmodule Barkpark.Search.Intelligence do
     from(c in queryable, where: ilike(c.query_normalized, ^pattern))
   end
 
-  defp normalize_prefix(nil), do: nil
-  defp normalize_prefix(""), do: nil
+  defp normalize_suggest_prefix(nil), do: nil
+  defp normalize_suggest_prefix(""), do: nil
 
-  defp normalize_prefix(prefix) when is_binary(prefix) do
-    prefix |> String.trim() |> case do
-      "" -> nil
-      trimmed -> Sanitizer.normalize(trimmed)
+  defp normalize_suggest_prefix(prefix) when is_binary(prefix) do
+    case Sanitizer.suggest_sanitize(prefix) do
+      {:ok, normalized} -> normalized
+      _ -> nil
     end
   end
+
+  defp emit_record_telemetry(surface, scope, result) do
+    {status, reason} =
+      case result do
+        {:ok, _} -> {:ok, nil}
+        :skipped -> {:skipped, nil}
+        {:rejected, reason} -> {:rejected, reason}
+        :error -> {:error, nil}
+        _ -> {:error, nil}
+      end
+
+    metadata =
+      %{surface: surface, scope: scope, result: status}
+      |> maybe_put_reason(reason)
+
+    :telemetry.execute([:barkpark, :search, :intel, :record], %{count: 1}, metadata)
+  end
+
+  defp maybe_put_reason(metadata, nil), do: metadata
+  defp maybe_put_reason(metadata, reason), do: Map.put(metadata, :reason, reason)
 end
