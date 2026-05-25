@@ -634,8 +634,13 @@ defmodule Barkpark.Content do
 
     ctx = build_ctx(opts)
 
+    # Scope the prev-doc lookup to the writer's workspace/project. An UNSCOPED
+    # lookup here would resolve (and then UPDATE/overwrite) another workspace's
+    # row that happens to share the (doc_id, type, dataset) leaf — the inner
+    # half of the B3 mutate leak. Scoped, a same-id write from a different
+    # workspace sees no prev_doc and falls through to an insert of its own row.
     prev_doc =
-      case get_document(doc_id, type, dataset) do
+      case get_document(doc_id, type, dataset, opts) do
         {:ok, d} -> d
         _ -> nil
       end
@@ -1090,7 +1095,7 @@ defmodule Barkpark.Content do
     # (Ecto rejects nil equality comparisons in queries).
     existing =
       if id && type do
-        case get_document(draft_id(id), type, dataset) do
+        case get_document(draft_id(id), type, dataset, opts) do
           {:ok, doc} -> doc
           _ -> nil
         end
@@ -1114,7 +1119,7 @@ defmodule Barkpark.Content do
     expected = if_rev(attrs)
 
     existing =
-      case id && get_document(draft_id(id), type, dataset) do
+      case id && get_document(draft_id(id), type, dataset, opts) do
         {:ok, doc} -> doc
         _ -> nil
       end
@@ -1129,7 +1134,7 @@ defmodule Barkpark.Content do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
-    case id && get_document(draft_id(id), type, dataset) do
+    case id && get_document(draft_id(id), type, dataset, opts) do
       {:ok, existing} ->
         case ensure_rev(existing, if_rev(attrs)) do
           :ok -> {:ok, existing, "noop"}
@@ -1159,7 +1164,7 @@ defmodule Barkpark.Content do
         with {:ok, doc} <- delete_document(id, type, dataset, opts), do: {:ok, doc, "delete"}
 
       expected ->
-        with {:ok, existing} <- get_document(id, type, dataset),
+        with {:ok, existing} <- get_document(id, type, dataset, opts),
              :ok <- ensure_rev(existing, expected),
              {:ok, doc} <- delete_document(id, type, dataset, opts) do
           {:ok, doc, "delete"}
@@ -1171,7 +1176,7 @@ defmodule Barkpark.Content do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
-    with {:ok, existing} <- get_document(id && draft_id(id), type, dataset),
+    with {:ok, existing} <- get_document(id && draft_id(id), type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(attrs)),
          {:ok, doc} <- create_document(type, attrs, dataset, opts) do
       {:ok, doc, "replace"}
@@ -1183,7 +1188,7 @@ defmodule Barkpark.Content do
          dataset,
          opts
        ) do
-    with {:ok, existing} <- get_document(id, type, dataset),
+    with {:ok, existing} <- get_document(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       merged =
         Map.merge(
@@ -1494,16 +1499,24 @@ defmodule Barkpark.Content do
     |> Enum.sort()
   end
 
-  def list_schemas(dataset) do
+  def list_schemas(dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     SchemaDefinition
     |> where([s], s.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> order_by([s], asc: s.name)
     |> Repo.all()
   end
 
-  def get_schema(name, dataset) do
+  def get_schema(name, dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     SchemaDefinition
     |> where([s], s.name == ^name and s.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -1528,11 +1541,15 @@ defmodule Barkpark.Content do
     SchemaDefinition.resolve_expectation(schema)
   end
 
-  def upsert_schema(attrs, dataset) do
+  def upsert_schema(attrs, dataset, opts \\ []) do
     name = Map.get(attrs, "name") || Map.get(attrs, :name)
-    attrs = Map.put(attrs, "dataset", dataset)
 
-    case name && get_schema(name, dataset) do
+    attrs =
+      attrs
+      |> Map.put("dataset", dataset)
+      |> put_scope_attrs(opts)
+
+    case name && get_schema(name, dataset, opts) do
       {:ok, existing} ->
         existing
         |> SchemaDefinition.changeset(attrs)
@@ -1545,8 +1562,8 @@ defmodule Barkpark.Content do
     end
   end
 
-  def delete_schema(name, dataset) do
-    case get_schema(name, dataset) do
+  def delete_schema(name, dataset, opts \\ []) do
+    case get_schema(name, dataset, opts) do
       {:ok, schema} -> Repo.delete(schema)
       error -> error
     end
@@ -1627,8 +1644,8 @@ defmodule Barkpark.Content do
   List every schema in a dataset in SDK envelope shape, plus a
   top-level `datasetSchemaHash` mirroring `schema_hash_for_dataset/1`.
   """
-  def list_schemas_for_sdk(dataset) when is_binary(dataset) do
-    schemas = list_schemas(dataset)
+  def list_schemas_for_sdk(dataset, opts \\ []) when is_binary(dataset) do
+    schemas = list_schemas(dataset, opts)
 
     %{
       schemas: Enum.map(schemas, &serialize_schema_for_sdk/1),
@@ -1725,9 +1742,13 @@ defmodule Barkpark.Content do
   # ── Analytics ───────────────────────────────────────────────────────────
 
   @doc "Count documents grouped by type, with published/draft breakdown."
-  def document_stats(dataset) do
+  def document_stats(dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     Document
     |> where([d], d.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> group_by([d], d.type)
     |> select([d], %{
       type: d.type,
@@ -1740,9 +1761,13 @@ defmodule Barkpark.Content do
   end
 
   @doc "Count total documents in a dataset."
-  def total_documents(dataset) do
+  def total_documents(dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     Document
     |> where([d], d.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> select([d], count(d.id))
     |> Repo.one()
   end
@@ -1750,9 +1775,12 @@ defmodule Barkpark.Content do
   @doc "Recent mutation activity — last N events."
   def recent_activity(dataset, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     MutationEvent
     |> where([e], e.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> order_by([e], desc: e.inserted_at)
     |> limit(^limit)
     |> select([e], %{
@@ -1910,6 +1938,10 @@ defmodule Barkpark.Content do
       rev: doc.rev,
       previous_rev: prev_rev,
       document: Envelope.render(doc),
+      # Stamp the tenancy scope from the source document so workspace-scoped
+      # analytics (recent_activity) only surface a workspace's own events.
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id,
       inserted_at: DateTime.utc_now()
     })
     |> Repo.insert!()
@@ -1924,7 +1956,11 @@ defmodule Barkpark.Content do
       title: doc.title,
       status: doc.status,
       content: doc.content,
-      action: action
+      action: action,
+      # Stamp the tenancy scope from the source document so workspace-scoped
+      # history reads only surface a workspace's own revisions.
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id
     })
     |> Repo.insert()
   end
@@ -1950,9 +1986,12 @@ defmodule Barkpark.Content do
   @doc "Stream all documents for a dataset as envelope maps. Optionally filter by type."
   def export_stream(dataset, opts \\ []) do
     type = Keyword.get(opts, :type)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     Document
     |> where([d], d.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
     end)
@@ -1966,17 +2005,32 @@ defmodule Barkpark.Content do
   @doc "List revisions for a document, newest first."
   def list_revisions(doc_id, type, dataset, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     Revision
     |> where([r], r.doc_id == ^published_id(doc_id) and r.type == ^type and r.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> order_by([r], desc: r.inserted_at)
     |> limit(^limit)
     |> Repo.all()
   end
 
-  @doc "Get a single revision by ID."
-  def get_revision(id) do
-    case Repo.get(Revision, id) do
+  @doc """
+  Get a single revision by ID, optionally workspace/project scoped.
+
+  Scoping prevents a member of one workspace from reading (or restoring) a
+  revision that belongs to another workspace's document via a guessed/leaked id.
+  """
+  def get_revision(id, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Revision
+    |> where([r], r.id == ^id)
+    |> scope_to_workspace(workspace_id, project_id)
+    |> Repo.one()
+    |> case do
       nil -> {:error, :not_found}
       rev -> {:ok, rev}
     end
@@ -1989,7 +2043,7 @@ defmodule Barkpark.Content do
   lifecycle-hook context (`:source`, `:user_id`).
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
-    with {:ok, rev} <- get_revision(revision_id) do
+    with {:ok, rev} <- get_revision(revision_id, opts) do
       attrs = %{
         "doc_id" => draft_id(rev.doc_id),
         "title" => rev.title,

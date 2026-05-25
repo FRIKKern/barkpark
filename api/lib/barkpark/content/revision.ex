@@ -21,7 +21,17 @@ defmodule Barkpark.Content.Revision do
 
   def changeset(revision, attrs) do
     revision
-    |> cast(attrs, [:doc_id, :type, :dataset, :title, :status, :content, :action])
+    |> cast(attrs, [
+      :doc_id,
+      :type,
+      :dataset,
+      :title,
+      :status,
+      :content,
+      :action,
+      :workspace_id,
+      :project_id
+    ])
     |> validate_required([:doc_id, :type, :action])
   end
 end

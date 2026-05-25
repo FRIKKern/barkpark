@@ -10,6 +10,8 @@ defmodule BarkparkWeb.FederatedSearchController do
   alias Barkpark.Search.Intelligence
   alias BarkparkWeb.SearchIntel
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   @default_surfaces ["documents", "media"]
 
   def search(conn, %{"dataset" => dataset} = params) do
@@ -17,11 +19,12 @@ defmodule BarkparkWeb.FederatedSearchController do
     q = params["q"] || ""
     limit = parse_int(params["limit"], 10)
     surfaces = parse_surfaces(params["surfaces"])
+    scope = scope_opts(conn)
 
     results =
       surfaces
       |> Enum.map(fn surface ->
-        Task.async(fn -> search_surface(surface, dataset, q, limit, params) end)
+        Task.async(fn -> search_surface(surface, dataset, q, limit, params, scope) end)
       end)
       |> Enum.map(&Task.await(&1, 30_000))
 
@@ -98,16 +101,17 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("documents", dataset, q, limit, params) do
+  defp search_surface("documents", dataset, q, limit, params, scope) do
     perspective = params["perspective"] || "published"
     type = params["type"]
 
-    opts = [
-      limit: limit,
-      offset: 0,
-      perspective: perspective,
-      type: type
-    ]
+    opts =
+      [
+        limit: limit,
+        offset: 0,
+        perspective: perspective,
+        type: type
+      ] ++ scope
 
     {docs, total, meta} = Content.search_documents(q, dataset, opts)
 
@@ -119,7 +123,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("media", dataset, q, limit, params) do
+  defp search_surface("media", dataset, q, limit, params, _scope) do
     opts = [
       q: q,
       limit: limit,
@@ -138,7 +142,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface(surface, _dataset, _q, _limit, _params) do
+  defp search_surface(surface, _dataset, _q, _limit, _params, _scope) do
     %{surface: surface, hits: [], total: 0, meta: %{}}
   end
 

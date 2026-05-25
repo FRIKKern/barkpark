@@ -50,7 +50,9 @@ defmodule Barkpark.Content.SchemaDefinition do
       :initial_values,
       :cross_validations,
       :layout,
-      :prefill
+      :prefill,
+      :workspace_id,
+      :project_id
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))

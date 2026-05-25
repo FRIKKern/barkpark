@@ -72,13 +72,16 @@ defmodule Barkpark.Search.QueryPipeline do
     limit = Keyword.get(opts, :limit, 50)
     offset = Map.get(context, :offset, 0) || Keyword.get(opts, :offset, 0)
 
-    retriever_opts = [
-      type: type,
-      perspective: perspective,
-      limit: limit,
-      offset: offset,
-      relaxed: false
-    ]
+    retriever_opts =
+      [
+        type: type,
+        perspective: perspective,
+        limit: limit,
+        offset: offset,
+        relaxed: false,
+        workspace_id: Keyword.get(opts, :workspace_id),
+        project_id: Keyword.get(opts, :project_id)
+      ]
 
     {hits, total} = DocumentsRetriever.search(scope, parsed, config, retriever_opts)
 

@@ -3,10 +3,13 @@ defmodule BarkparkWeb.AnalyticsController do
 
   alias Barkpark.Content
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   def index(conn, %{"dataset" => dataset}) do
-    types = Content.document_stats(dataset)
-    total = Content.total_documents(dataset)
-    activity = Content.recent_activity(dataset)
+    scope = scope_opts(conn)
+    types = Content.document_stats(dataset, scope)
+    total = Content.total_documents(dataset, scope)
+    activity = Content.recent_activity(dataset, scope)
 
     json(conn, %{
       dataset: dataset,

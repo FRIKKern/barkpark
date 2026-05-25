@@ -475,6 +475,7 @@ defmodule BarkparkWeb.Router do
     get "/v1/data/search/:dataset/suggestions", SearchController, :search_suggestions
     post "/v1/data/search/:dataset/interaction", SearchController, :search_interaction
     get "/v1/data/search/:dataset", SearchController, :search
+    get "/v1/search/:dataset", FederatedSearchController, :search
     get "/v1/data/query/:dataset/:type", QueryController, :index
     get "/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show
 

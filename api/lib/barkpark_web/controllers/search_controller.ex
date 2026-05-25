@@ -6,6 +6,8 @@ defmodule BarkparkWeb.SearchController do
   alias Barkpark.Search.{SurfaceConfigs, Synonyms}
   alias BarkparkWeb.SearchIntel
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   def search(conn, %{"dataset" => dataset} = params) do
     case params["q"] do
       nil ->
@@ -17,12 +19,13 @@ defmodule BarkparkWeb.SearchController do
       query ->
         t0 = System.monotonic_time(:microsecond)
 
-        opts = [
-          type: params["type"],
-          perspective: parse_perspective(params["perspective"]),
-          limit: parse_int(params["limit"], 50),
-          offset: parse_int(params["offset"], 0)
-        ]
+        opts =
+          [
+            type: params["type"],
+            perspective: parse_perspective(params["perspective"]),
+            limit: parse_int(params["limit"], 50),
+            offset: parse_int(params["offset"], 0)
+          ] ++ scope_opts(conn)
 
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)

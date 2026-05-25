@@ -4,11 +4,13 @@ defmodule BarkparkWeb.HistoryController do
   alias Barkpark.Content
   alias Barkpark.Content.{Envelope, Errors}
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   def index(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     limit = parse_int(params["limit"], 50)
 
     revisions =
-      Content.list_revisions(doc_id, type, dataset, limit: limit)
+      Content.list_revisions(doc_id, type, dataset, [limit: limit] ++ scope_opts(conn))
       |> Enum.map(&render_revision/1)
 
     json(conn, %{revisions: revisions, count: length(revisions)})
@@ -16,7 +18,7 @@ defmodule BarkparkWeb.HistoryController do
 
   def show(conn, %{"dataset" => _dataset, "id" => id}) do
     with :ok <- validate_uuid(id),
-         {:ok, rev} <- Content.get_revision(id) do
+         {:ok, rev} <- Content.get_revision(id, scope_opts(conn)) do
       json(conn, %{revision: render_revision_full(rev)})
     else
       {:error, :invalid_uuid} -> not_found(conn, "revision not found")
@@ -28,7 +30,7 @@ defmodule BarkparkWeb.HistoryController do
     type = get_type(conn, params)
 
     with :ok <- validate_uuid(id),
-         {:ok, doc} <- Content.restore_revision(id, type, dataset, source: :api) do
+         {:ok, doc} <- Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
       json(conn, %{restored: true, document: Envelope.render(doc)})
     else
       {:error, :invalid_uuid} ->

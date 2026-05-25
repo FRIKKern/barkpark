@@ -4,8 +4,10 @@ defmodule BarkparkWeb.ExportController do
   alias Barkpark.Content
   alias Barkpark.Repo
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   def export(conn, %{"dataset" => dataset} = params) do
-    opts = if params["type"], do: [type: params["type"]], else: []
+    opts = (if params["type"], do: [type: params["type"]], else: []) ++ scope_opts(conn)
 
     conn =
       conn

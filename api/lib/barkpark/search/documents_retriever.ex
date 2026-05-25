@@ -2,6 +2,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   @moduledoc false
 
   import Ecto.Query
+  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -14,6 +15,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
     limit = Keyword.get(opts, :limit, 50) |> min(200)
     offset = Keyword.get(opts, :offset, 0)
     relaxed = Keyword.get(opts, :relaxed, false)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     if terms == [] and Map.get(parsed, :phrases, []) == [] and Map.get(parsed, :prefixes, []) == [] do
       {[], 0}
@@ -21,6 +24,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       base =
         Document
         |> where([d], d.dataset == ^scope)
+        |> scope_to_workspace(workspace_id, project_id)
         |> where_match(parsed, terms, config, relaxed)
 
       base = if type, do: where(base, [d], d.type == ^type), else: base

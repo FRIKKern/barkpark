@@ -3,15 +3,17 @@ defmodule BarkparkWeb.SchemaController do
 
   alias Barkpark.Content
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   action_fallback BarkparkWeb.FallbackController
 
   def index(conn, %{"dataset" => dataset}) do
-    envelope = Content.list_schemas_for_sdk(dataset)
+    envelope = Content.list_schemas_for_sdk(dataset, scope_opts(conn))
     json(conn, Map.put(envelope, :_schemaVersion, 1))
   end
 
   def show(conn, %{"dataset" => dataset, "name" => name}) do
-    with {:ok, schema} <- Content.get_schema(name, dataset) do
+    with {:ok, schema} <- Content.get_schema(name, dataset, scope_opts(conn)) do
       json(conn, %{_schemaVersion: 1, schema: Content.serialize_schema_for_sdk(schema)})
     end
   end
@@ -19,7 +21,7 @@ defmodule BarkparkWeb.SchemaController do
   def upsert(conn, %{"dataset" => dataset} = params) do
     attrs = Map.drop(params, ["dataset"])
 
-    case Content.upsert_schema(attrs, dataset) do
+    case Content.upsert_schema(attrs, dataset, scope_opts(conn)) do
       {:ok, schema} ->
         conn
         |> put_status(:created)
@@ -31,7 +33,7 @@ defmodule BarkparkWeb.SchemaController do
   end
 
   def delete(conn, %{"dataset" => dataset, "name" => name}) do
-    with {:ok, _} <- Content.delete_schema(name, dataset) do
+    with {:ok, _} <- Content.delete_schema(name, dataset, scope_opts(conn)) do
       json(conn, %{deleted: name})
     end
   end
