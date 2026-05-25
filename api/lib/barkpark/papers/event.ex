@@ -23,6 +23,14 @@ defmodule Barkpark.Papers.Event do
     field :payload_html, :string
     field :source_doc, :string
 
+    # W1.5-C tenancy scope. A paper_event FOLLOWS its goal — its scope = the
+    # goal's (and its paper's) workspace/project. NULLABLE: NULL = unscoped /
+    # back-compat (paperflow ingest still sends FLAT). Stamped on create from
+    # the resolved workspace/project (Default fallback); queries filter by
+    # workspace_id only when a scope is provided (nil = unscoped read).
+    field :workspace_id, :binary_id
+    field :project_id, :binary_id
+
     # P6.U6a (barkpark-jwai): NULL = pending intent; a timestamp = consumed by
     # the paperflow-side reader loop. Set on `Events.mark_processed/1`, never on
     # create — deliberately omitted from the changeset cast/validation.
@@ -45,7 +53,9 @@ defmodule Barkpark.Papers.Event do
       :branch,
       :parent_event_id,
       :payload_html,
-      :source_doc
+      :source_doc,
+      :workspace_id,
+      :project_id
     ])
     |> validate_required([:event_type])
     |> validate_goal_or_paper()

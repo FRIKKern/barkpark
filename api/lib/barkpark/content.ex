@@ -2383,15 +2383,23 @@ defmodule Barkpark.Content do
       "rev" => generate_rev()
     }
 
-    # Stamp tenancy scope on the paper row. An ingest/Studio caller threads no
-    # scope opts here, so this falls back to the seeded Default workspace/project
-    # (same contract as create_document/4) — without it a NULL-workspace paper is
-    # invisible to the now-scoped Studio desk (B8/qucz). An update preserves the
-    # existing row's scope: put_scope_attrs only writes non-nil keys.
+    # Stamp tenancy scope on the paper row. W1.5-C: an ingest/Studio caller MAY
+    # thread an explicit workspace/project (via `attrs["workspace_id"]` /
+    # `["project_id"]`) — when present it ALWAYS wins, so the surface is ready
+    # the moment paperflow starts sending the goal's scope. Absent it, this
+    # falls back to the seeded Default workspace/project (same contract as
+    # create_document/4) — without that a NULL-workspace paper is invisible to
+    # the now-scoped Studio desk (B8/qucz). An UPDATE only re-stamps when the
+    # caller asserted an explicit scope; otherwise put_scope_attrs writes no
+    # scope keys at all and the existing row's scope is preserved.
+    scope_opts = paper_scope_opts(attrs)
+
     doc_attrs =
-      if existing,
-        do: doc_attrs,
-        else: put_scope_attrs(doc_attrs, [])
+      cond do
+        scope_opts != [] -> put_scope_attrs(doc_attrs, scope_opts)
+        existing -> doc_attrs
+        true -> put_scope_attrs(doc_attrs, [])
+      end
 
     changeset =
       Document.changeset(existing || %Document{}, doc_attrs)
@@ -2410,7 +2418,11 @@ defmodule Barkpark.Content do
         # gated strictly on a present `event_type` so ordinary streaming saves
         # never create events. The paper save is the source of truth — an
         # event-insert failure is logged and swallowed, never propagated.
-        maybe_append_paper_event(attrs, slug)
+        #
+        # W1.5-C: the event FOLLOWS the paper's (goal's) scope — stamp it with
+        # the saved doc's resolved workspace/project (Default fallback already
+        # applied to the doc above) so a goal's events share the goal's scope.
+        maybe_append_paper_event(attrs, slug, doc)
         {:ok, doc}
 
       error ->
@@ -2421,7 +2433,11 @@ defmodule Barkpark.Content do
   # Append a `paper_events` row when this upsert carries a non-empty
   # `event_type`. Decoupled from Beads/W7 — pure Postgres via
   # `Barkpark.Papers.Events`. Failures are logged, never raised.
-  defp maybe_append_paper_event(attrs, slug) do
+  #
+  # W1.5-C: the event inherits the saved paper document's workspace/project —
+  # the paper already resolved Default-fallback (new rows) or kept its existing
+  # scope (updates), so the event always lands in the paper/goal's workspace.
+  defp maybe_append_paper_event(attrs, slug, %Document{} = doc) do
     event_type = attrs["event_type"]
 
     if is_binary(event_type) and event_type != "" do
@@ -2431,7 +2447,9 @@ defmodule Barkpark.Content do
         "event_type" => event_type,
         "source_doc" => attrs["source_doc"],
         "payload_html" => attrs["payload_html"],
-        "branch" => attrs["branch"] || "main"
+        "branch" => attrs["branch"] || "main",
+        "workspace_id" => doc.workspace_id,
+        "project_id" => doc.project_id
       }
 
       case Barkpark.Papers.Events.create_event(event_attrs) do
@@ -2716,6 +2734,24 @@ defmodule Barkpark.Content do
 
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # W1.5-C: build [workspace_id: …, project_id: …] from an EXPLICIT scope the
+  # caller threaded through paper attrs (string keys, post-normalize). Returns
+  # [] when no workspace_id is present — the Default-fallback path then applies.
+  # project_id is only meaningful alongside a workspace_id (matches the
+  # scope_to_workspace contract).
+  defp paper_scope_opts(attrs) do
+    case attrs["workspace_id"] do
+      ws when is_binary(ws) and ws != "" ->
+        case attrs["project_id"] do
+          proj when is_binary(proj) and proj != "" -> [workspace_id: ws, project_id: proj]
+          _ -> [workspace_id: ws]
+        end
+
+      _ ->
+        []
+    end
+  end
 
   # Project-on-write only when this write actually carries a block list. An
   # HTML-only legacy paper write (no blocks) leaves content[fieldName]/body

@@ -284,8 +284,21 @@ defmodule BarkparkWeb.PaperLiveTest do
           ]
         })
 
-      {:ok, _} = Events.create_event(%{"goal_id" => @rail_goal, "event_type" => "plan-written"})
-      {:ok, _} = Events.create_event(%{"goal_id" => @rail_goal, "event_type" => "goal-snapshot"})
+      # W1.5-C: the rail now scopes events to the paper's OWN workspace, so the
+      # follow-up events must carry the paper's resolved scope (upsert_paper
+      # Default-stamped the paper above) to appear in the rail — mirroring how a
+      # real PaperLive write stamps the paper's workspace onto each event.
+      scope = %{"workspace_id" => paper.workspace_id, "project_id" => paper.project_id}
+
+      {:ok, _} =
+        Events.create_event(
+          Map.merge(scope, %{"goal_id" => @rail_goal, "event_type" => "plan-written"})
+        )
+
+      {:ok, _} =
+        Events.create_event(
+          Map.merge(scope, %{"goal_id" => @rail_goal, "event_type" => "goal-snapshot"})
+        )
 
       paper
     end

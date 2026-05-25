@@ -48,6 +48,7 @@ defmodule BarkparkWeb.PaperIngestController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Tenancy
 
   # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   @op_kinds ~w(append-block insert-after patch-block replace-block remove-block)
@@ -58,14 +59,16 @@ defmodule BarkparkWeb.PaperIngestController do
   # endpoint; an explicit `style` in the body overrides it.
   def ingest(conn, %{"slug" => slug, "blocks" => blocks} = params)
       when is_binary(slug) and slug != "" and is_list(blocks) do
-    attrs = %{
-      "slug" => slug,
-      "blocks" => blocks,
-      "style" => params["style"] || "article",
-      "source_doc" => params["source_doc"],
-      "event_type" => params["event_type"],
-      "goal_id" => params["goal_id"]
-    }
+    attrs =
+      %{
+        "slug" => slug,
+        "blocks" => blocks,
+        "style" => params["style"] || "article",
+        "source_doc" => params["source_doc"],
+        "event_type" => params["event_type"],
+        "goal_id" => params["goal_id"]
+      }
+      |> put_scope(conn, params)
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
@@ -88,14 +91,16 @@ defmodule BarkparkWeb.PaperIngestController do
   # Raw HTML path (legacy fallback). Stored verbatim — no article projection.
   def ingest(conn, %{"slug" => slug, "body_html" => body_html} = params)
       when is_binary(slug) and slug != "" and is_binary(body_html) do
-    attrs = %{
-      "slug" => slug,
-      "body_html" => body_html,
-      "style" => params["style"],
-      "source_doc" => params["source_doc"],
-      "event_type" => params["event_type"],
-      "goal_id" => params["goal_id"]
-    }
+    attrs =
+      %{
+        "slug" => slug,
+        "body_html" => body_html,
+        "style" => params["style"],
+        "source_doc" => params["source_doc"],
+        "event_type" => params["event_type"],
+        "goal_id" => params["goal_id"]
+      }
+      |> put_scope(conn, params)
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
@@ -195,4 +200,72 @@ defmodule BarkparkWeb.PaperIngestController do
   # per kind, id resolution); a shape failure there surfaces as a 422 above.
   defp valid_op_shape?(%{"op" => kind}) when kind in @op_kinds, do: true
   defp valid_op_shape?(_), do: false
+
+  # W1.5-C: thread an OPTIONAL workspace/project into the upsert attrs so a
+  # paper (and its emitted lifecycle event) lands in the goal's scope when
+  # paperflow starts sending it. The scope may arrive as either a JSON body
+  # field (`workspace`/`project`, OR the explicit id `workspace_id`/`project_id`)
+  # or an HTTP header (`x-barkpark-workspace` / `x-barkpark-project`, carrying a
+  # slug). Slugs are resolved to ids via Tenancy; an unknown slug resolves to no
+  # scope key → upsert_paper's Default fallback applies (never a hard error, so
+  # the flat paperflow ingest keeps working unchanged). When NO scope is given,
+  # the attrs are returned untouched and Default fallback handles it.
+  defp put_scope(attrs, conn, params) do
+    {ws_id, project_id} = resolve_scope(conn, params)
+
+    attrs
+    |> maybe_put("workspace_id", ws_id)
+    |> maybe_put("project_id", project_id)
+  end
+
+  # Resolve {workspace_id, project_id}. Precedence: explicit ids in the body win;
+  # then a workspace/project slug (body field or header). project is only
+  # resolved alongside a workspace. Returns {nil, nil} when nothing was provided
+  # or a slug didn't resolve.
+  defp resolve_scope(conn, params) do
+    cond do
+      is_binary(params["workspace_id"]) and params["workspace_id"] != "" ->
+        {params["workspace_id"], blank_to_nil(params["project_id"])}
+
+      true ->
+        ws_slug = scope_value(conn, params, "workspace", "x-barkpark-workspace")
+        resolve_from_slug(ws_slug, scope_value(conn, params, "project", "x-barkpark-project"))
+    end
+  end
+
+  defp resolve_from_slug(nil, _project_slug), do: {nil, nil}
+
+  defp resolve_from_slug(ws_slug, project_slug) do
+    case Tenancy.get_workspace_by_slug(ws_slug) do
+      %{id: ws_id} = ws -> {ws_id, resolve_project(ws, project_slug)}
+      _ -> {nil, nil}
+    end
+  end
+
+  defp resolve_project(_ws, nil), do: nil
+
+  defp resolve_project(ws, project_slug) do
+    case Tenancy.get_project(ws.slug, project_slug) do
+      %{id: project_id} -> project_id
+      _ -> nil
+    end
+  end
+
+  # A scope value: prefer the JSON body field, fall back to the HTTP header.
+  defp scope_value(conn, params, field, header) do
+    blank_to_nil(params[field]) || header_value(conn, header)
+  end
+
+  defp header_value(conn, header) do
+    case Plug.Conn.get_req_header(conn, header) do
+      [value | _] -> blank_to_nil(value)
+      _ -> nil
+    end
+  end
+
+  defp blank_to_nil(value) when is_binary(value) and value != "", do: value
+  defp blank_to_nil(_), do: nil
+
+  defp maybe_put(attrs, _key, nil), do: attrs
+  defp maybe_put(attrs, key, value), do: Map.put(attrs, key, value)
 end

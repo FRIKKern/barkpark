@@ -142,14 +142,35 @@ defmodule BarkparkWeb.PaperLive do
   # Load the lifecycle events for the paper's goal. U1 stores the goal id at
   # `content["goal_id"]`; absent it (or with zero events) we return [] and the
   # template renders no rail at all — the article reading column is unchanged.
-  defp load_rail_events(%{content: content}) when is_map(content) do
+  #
+  # W1.5-C: SCOPE the rail to the paper's OWN workspace/project so the rail
+  # never surfaces another workspace's events for a same-named goal. An
+  # unscoped paper (NULL workspace_id, pre-tenancy) reads unscoped — back-compat.
+  defp load_rail_events(%{content: content} = paper) when is_map(content) do
     case Map.get(content, "goal_id") do
-      goal_id when is_binary(goal_id) and goal_id != "" -> Events.list_for_goal(goal_id)
-      _ -> []
+      goal_id when is_binary(goal_id) and goal_id != "" ->
+        Events.list_for_goal(goal_id, paper_scope_opts(paper))
+
+      _ ->
+        []
     end
   end
 
   defp load_rail_events(_), do: []
+
+  # W1.5-C: the paper's OWN tenancy scope as Events query opts. NULL
+  # workspace_id (a pre-tenancy paper) yields [] → an unscoped read (the
+  # back-compat path). A scoped paper yields [workspace_id: …] (+ project_id
+  # when set) so reads and writes both stay inside the paper's workspace.
+  defp paper_scope_opts(%{workspace_id: ws_id, project_id: project_id})
+       when is_binary(ws_id) do
+    case project_id do
+      proj when is_binary(proj) -> [workspace_id: ws_id, project_id: proj]
+      _ -> [workspace_id: ws_id]
+    end
+  end
+
+  defp paper_scope_opts(_), do: []
 
   @doc false
   # Build a VALID linear Mermaid gitGraph from the rail's events. One `commit`
@@ -240,15 +261,21 @@ defmodule BarkparkWeb.PaperLive do
   def handle_event("paper-action", %{"action" => key}, socket) do
     slug = socket.assigns.slug
     label = action_label(socket.assigns.paper_actions, key)
+    {goal_id, scope} = paper_goal_and_scope(slug)
 
+    # W1.5-C: stamp the intent row with the paper's OWN workspace/project so the
+    # event follows the paper/goal scope (Default fallback when unscoped).
     _ =
-      Events.create_event(%{
-        "event_type" => "action:" <> key,
-        "goal_id" => action_goal_id(socket.assigns.slug),
-        "paper_slug" => slug,
-        "payload_html" => "<p>Action '#{key}' requested from /papers/#{slug}</p>",
-        "branch" => "main"
-      })
+      Events.create_event(
+        %{
+          "event_type" => "action:" <> key,
+          "goal_id" => goal_id,
+          "paper_slug" => slug,
+          "payload_html" => "<p>Action '#{key}' requested from /papers/#{slug}</p>",
+          "branch" => "main"
+        }
+        |> stamp_scope(scope)
+      )
 
     {:noreply, assign(socket, :last_action, label || key)}
   end
@@ -268,23 +295,26 @@ defmodule BarkparkWeb.PaperLive do
   # commit) — the intended Option-B demonstration.
   def handle_event("simplify-request", _params, socket) do
     slug = socket.assigns.slug
-    goal_id = action_goal_id(slug)
+    {goal_id, scope} = paper_goal_and_scope(slug)
 
     # No goal_id → nothing to simplify against; skip gracefully (never crash).
     if is_nil(goal_id) do
       {:noreply, socket}
     else
-      branch = "simplified-#{next_simplify_index(slug)}"
+      branch = "simplified-#{next_simplify_index(slug, scope)}"
 
       _ =
-        Events.create_event(%{
-          "event_type" => "simplify-request",
-          "goal_id" => goal_id,
-          "paper_slug" => slug,
-          "payload_html" =>
-            "<p>Simplify requested (#{branch}) for /papers/#{slug}</p>",
-          "branch" => branch
-        })
+        Events.create_event(
+          %{
+            "event_type" => "simplify-request",
+            "goal_id" => goal_id,
+            "paper_slug" => slug,
+            "payload_html" =>
+              "<p>Simplify requested (#{branch}) for /papers/#{slug}</p>",
+            "branch" => branch
+          }
+          |> stamp_scope(scope)
+        )
 
       {:noreply,
        socket
@@ -314,20 +344,23 @@ defmodule BarkparkWeb.PaperLive do
   defp record_simplify_decision(socket, event_type, verb) do
     slug = socket.assigns.slug
     branch = socket.assigns.pending_simplify
-    goal_id = action_goal_id(slug)
+    {goal_id, scope} = paper_goal_and_scope(slug)
 
     if is_nil(branch) or is_nil(goal_id) do
       socket
     else
       _ =
-        Events.create_event(%{
-          "event_type" => event_type,
-          "goal_id" => goal_id,
-          "paper_slug" => slug,
-          "payload_html" =>
-            "<p>#{verb} #{branch} for /papers/#{slug}</p>",
-          "branch" => branch
-        })
+        Events.create_event(
+          %{
+            "event_type" => event_type,
+            "goal_id" => goal_id,
+            "paper_slug" => slug,
+            "payload_html" =>
+              "<p>#{verb} #{branch} for /papers/#{slug}</p>",
+            "branch" => branch
+          }
+          |> stamp_scope(scope)
+        )
 
       socket
       |> assign(:pending_simplify, nil)
@@ -339,10 +372,10 @@ defmodule BarkparkWeb.PaperLive do
   # already sit on a `simplified-` branch. Counts the persisted rows (via
   # list_for_paper) so the index is stable across reconnects, not just the
   # session — repeated requests increment 1, 2, 3, …
-  defp next_simplify_index(slug) do
+  defp next_simplify_index(slug, scope) do
     count =
       slug
-      |> Events.list_for_paper()
+      |> Events.list_for_paper(scope)
       |> Enum.count(fn event ->
         is_binary(event.branch) and String.starts_with?(event.branch, "simplified-")
       end)
@@ -362,17 +395,34 @@ defmodule BarkparkWeb.PaperLive do
     end
   end
 
-  # The goal id for the action row, re-read from the live paper's content. We
-  # re-fetch rather than carry a `:goal_id` assign so this stays a purely
-  # additive change to mount; a nil goal_id is recorded as-is (paper_slug keeps
-  # the row valid). Shared by the P6.U4 Simplify handlers, which need the same
-  # live goal_id lookup.
-  defp action_goal_id(slug) do
+  # The goal id AND the paper's tenancy scope, re-read from the live paper. We
+  # re-fetch rather than carry assigns so this stays a purely additive change to
+  # mount; a nil goal_id is recorded as-is (paper_slug keeps the row valid).
+  # Shared by the U5 action + U4 Simplify handlers — both need the live goal_id
+  # AND (W1.5-C) the paper's workspace/project so the recorded event follows the
+  # paper/goal scope. Returns `{goal_id | nil, scope_opts}`.
+  defp paper_goal_and_scope(slug) do
     case Content.get_paper(slug) do
-      %{content: content} when is_map(content) -> Map.get(content, "goal_id")
-      _ -> nil
+      %{content: content} = paper when is_map(content) ->
+        {Map.get(content, "goal_id"), paper_scope_opts(paper)}
+
+      _ ->
+        {nil, []}
     end
   end
+
+  # Fold the paper's scope opts into a create_event attrs map as string keys.
+  # An unscoped paper (scope == []) leaves attrs untouched → upsert_paper's
+  # Events.create_event Default-stamping is NOT involved here (PaperLive writes
+  # events directly), so a nil scope means the row is unscoped (back-compat).
+  defp stamp_scope(attrs, scope) do
+    attrs
+    |> maybe_put_scope("workspace_id", Keyword.get(scope, :workspace_id))
+    |> maybe_put_scope("project_id", Keyword.get(scope, :project_id))
+  end
+
+  defp maybe_put_scope(attrs, _key, nil), do: attrs
+  defp maybe_put_scope(attrs, key, value), do: Map.put(attrs, key, value)
 
   # Pull the streaming rev / cached HTML / blocks out of the paper document's
   # `content` map (papers are type-"paper" documents now).

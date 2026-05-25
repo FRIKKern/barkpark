@@ -6,6 +6,7 @@ defmodule Barkpark.Papers.Events do
   """
 
   import Ecto.Query
+  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
   alias Barkpark.Repo
   alias Barkpark.Papers.Event
 
@@ -13,6 +14,11 @@ defmodule Barkpark.Papers.Events do
   Append a lifecycle event. Validates via `Event.changeset/2`
   (`event_type` required + at least one of `goal_id` / `paper_slug`).
   Returns `{:ok, %Event{}}` or `{:error, changeset}`.
+
+  W1.5-C: a paper_event FOLLOWS its goal — `workspace_id` / `project_id` in
+  `attrs` set the event's scope. The caller (upsert_paper, PaperLive) stamps
+  these from the resolved paper/goal scope (Default fallback when the caller
+  provides none) so a goal's events share the goal's workspace/project.
   """
   def create_event(attrs) when is_map(attrs) do
     %Event{}
@@ -22,20 +28,28 @@ defmodule Barkpark.Papers.Events do
 
   @doc """
   All events for a goal, oldest first (rail walks the lineage forward).
+
+  W1.5-C: `opts` may carry `:workspace_id` / `:project_id` to scope the read
+  to a single workspace/project. `nil` workspace_id (the default) returns the
+  query unscoped — pre-tenancy back-compat for callers that thread no scope.
   """
-  def list_for_goal(goal_id) when is_binary(goal_id) do
+  def list_for_goal(goal_id, opts \\ []) when is_binary(goal_id) do
     Event
     |> where([e], e.goal_id == ^goal_id)
+    |> scope_opts(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
 
   @doc """
   All events for a paper (by slug), oldest first.
+
+  W1.5-C: `opts` may carry `:workspace_id` / `:project_id` (nil = unscoped).
   """
-  def list_for_paper(paper_slug) when is_binary(paper_slug) do
+  def list_for_paper(paper_slug, opts \\ []) when is_binary(paper_slug) do
     Event
     |> where([e], e.paper_slug == ^paper_slug)
+    |> scope_opts(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
@@ -58,11 +72,15 @@ defmodule Barkpark.Papers.Events do
 
   Returns rows where `event_type LIKE 'action:%' OR LIKE 'simplify-%'` AND
   `processed_at IS NULL`, oldest first (the loop drains them in order).
+
+  W1.5-C: `opts` may carry `:workspace_id` / `:project_id` to drain only one
+  workspace's intents (nil = unscoped, all workspaces — pre-tenancy default).
   """
-  def list_pending_intents do
+  def list_pending_intents(opts \\ []) do
     Event
     |> where([e], is_nil(e.processed_at))
     |> where([e], like(e.event_type, "action:%") or like(e.event_type, "simplify-%"))
+    |> scope_opts(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
@@ -85,5 +103,16 @@ defmodule Barkpark.Papers.Events do
         |> Ecto.Changeset.change(processed_at: DateTime.utc_now())
         |> Repo.update()
     end
+  end
+
+  # Pull `:workspace_id` / `:project_id` from opts and pipe through the shared
+  # Content.Scope filter. nil workspace_id leaves the query untouched (unscoped
+  # / back-compat) — the same contract every scoped content read uses.
+  defp scope_opts(query, opts) do
+    scope_to_workspace(
+      query,
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
   end
 end
