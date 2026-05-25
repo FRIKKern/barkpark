@@ -32,7 +32,7 @@ defmodule Barkpark.Content do
     Validation
   }
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
+  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
 
   alias Barkpark.PortableDoc.{Patch, Projection, Render, Synthesis}
 
@@ -109,7 +109,7 @@ defmodule Barkpark.Content do
       Document
       |> where([d], d.type == ^type)
       |> scope_to_dataset(dataset, opts)
-      |> scope_to_workspace(workspace_id, project_id)
+      |> scope_to_workspace_or_global(workspace_id, project_id)
       |> apply_filter_map(filter_map)
 
     case perspective do
@@ -290,7 +290,7 @@ defmodule Barkpark.Content do
     Document
     |> where([d], d.doc_id == ^doc_id and d.type == ^type)
     |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -320,12 +320,13 @@ defmodule Barkpark.Content do
   `Repo.one`, which would raise `Ecto.MultipleResultsError` if the `limit(1)`
   guard were ever dropped.
   """
-  @spec reference_title(String.t() | nil, String.t() | nil, String.t()) :: String.t()
-  def reference_title(value, ref_type, dataset)
+  @spec reference_title(String.t() | nil, String.t() | nil, String.t(), keyword()) :: String.t()
+  def reference_title(value, ref_type, dataset, opts \\ [])
 
-  def reference_title(value, _ref_type, _dataset) when value in [nil, ""], do: value || ""
+  def reference_title(value, _ref_type, _dataset, _opts) when value in [nil, ""],
+    do: value || ""
 
-  def reference_title(value, ref_type, dataset) when is_binary(value) do
+  def reference_title(value, ref_type, dataset, opts) when is_binary(value) do
     pub_id = published_id(value)
     draft = draft_id(pub_id)
 
@@ -333,6 +334,14 @@ defmodule Barkpark.Content do
       Document
       |> where([d], d.dataset == ^dataset)
       |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
+      # Scope the reference resolution to the caller's tenant when supplied so a
+      # reference value never resolves a same-id doc in another workspace
+      # (barkpark-af50). Render-pipeline callers that pass no scope keep the
+      # explicit-global behaviour via scope_to_workspace_or_global/3.
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
       |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
 
     query =
@@ -848,7 +857,7 @@ defmodule Barkpark.Content do
     did = draft_id(published_doc_id)
     pid = published_id(published_doc_id)
 
-    case get_document(did, type, dataset) do
+    case get_document(did, type, dataset, opts) do
       {:ok, draft} ->
         ctx = build_ctx(opts)
 
@@ -881,7 +890,7 @@ defmodule Barkpark.Content do
               |> inherit_scope_attrs(draft)
 
             {pub_result, prev_pub_rev} =
-              case get_document(pid, type, dataset) do
+              case get_document(pid, type, dataset, opts) do
                 {:ok, existing} ->
                   {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
@@ -918,7 +927,7 @@ defmodule Barkpark.Content do
     pid = published_id(published_doc_id)
     did = draft_id(published_doc_id)
 
-    case get_document(pid, type, dataset) do
+    case get_document(pid, type, dataset, opts) do
       {:ok, pub} ->
         ctx = build_ctx(opts)
 
@@ -950,7 +959,7 @@ defmodule Barkpark.Content do
               |> inherit_scope_attrs(pub)
 
             {draft_result, prev_draft_rev} =
-              case get_document(did, type, dataset) do
+              case get_document(did, type, dataset, opts) do
                 {:ok, existing} ->
                   {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
 
@@ -977,10 +986,10 @@ defmodule Barkpark.Content do
   end
 
   @doc "Discard a draft without publishing. Published version (if any) remains."
-  def discard_draft(published_doc_id, type, dataset) do
+  def discard_draft(published_doc_id, type, dataset, opts \\ []) do
     did = draft_id(published_doc_id)
 
-    case get_document(did, type, dataset) do
+    case get_document(did, type, dataset, opts) do
       {:ok, draft} ->
         prev_rev = draft.rev
 
@@ -1006,7 +1015,7 @@ defmodule Barkpark.Content do
 
     existing =
       [pid, did]
-      |> Enum.map(fn id -> get_document(id, type, dataset) end)
+      |> Enum.map(fn id -> get_document(id, type, dataset, opts) end)
       |> Enum.filter(&match?({:ok, _}, &1))
       |> Enum.map(fn {:ok, doc} -> doc end)
 
@@ -1156,8 +1165,8 @@ defmodule Barkpark.Content do
     with {:ok, doc} <- unpublish_document(id, type, dataset, opts), do: {:ok, doc, "unpublish"}
   end
 
-  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset, _opts) do
-    with {:ok, doc} <- discard_draft(id, type, dataset), do: {:ok, doc, "discardDraft"}
+  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset, opts) do
+    with {:ok, doc} <- discard_draft(id, type, dataset, opts), do: {:ok, doc, "discardDraft"}
   end
 
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
@@ -1224,10 +1233,17 @@ defmodule Barkpark.Content do
   defp ensure_rev(%{rev: actual}, expected),
     do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
 
-  @doc "Find all documents that reference a given document ID."
-  def find_referencing_docs(doc_id, dataset) do
+  @doc """
+  Find all documents that reference a given document ID.
+
+  `opts` may carry `:workspace_id` / `:project_id`; when present the schema
+  scan and the per-type document scan are scoped to that tenant so the
+  reference search never crosses the workspace boundary (barkpark-af50).
+  Callers that pass no scope keep the explicit-global behaviour.
+  """
+  def find_referencing_docs(doc_id, dataset, opts \\ []) do
     pub_id = published_id(doc_id)
-    schemas = list_schemas(dataset)
+    schemas = list_schemas(dataset, opts)
 
     # Find all schema fields that are references
     ref_fields =
@@ -1238,7 +1254,7 @@ defmodule Barkpark.Content do
 
     # Search each type for docs that reference this ID
     Enum.flat_map(ref_fields, fn {type_name, field_name} ->
-      list_documents(type_name, dataset, perspective: :raw)
+      list_documents(type_name, dataset, [perspective: :raw] ++ opts)
       |> Enum.filter(fn doc ->
         val = get_in(doc.content || %{}, [field_name])
         val == pub_id
@@ -1249,13 +1265,19 @@ defmodule Barkpark.Content do
     end)
   end
 
-  @doc "Remove all references to a document ID from other documents."
-  def disconnect_references(doc_id, dataset) do
+  @doc """
+  Remove all references to a document ID from other documents.
+
+  `opts` may carry `:workspace_id` / `:project_id` — threaded into both the
+  referencing-doc scan and the per-doc read so the disconnect stays inside the
+  tenant boundary (barkpark-af50).
+  """
+  def disconnect_references(doc_id, dataset, opts \\ []) do
     _pub_id = published_id(doc_id)
-    refs = find_referencing_docs(doc_id, dataset)
+    refs = find_referencing_docs(doc_id, dataset, opts)
 
     Enum.each(refs, fn %{doc_id: ref_doc_id, type: type, field: field} ->
-      case get_document(ref_doc_id, type, dataset) do
+      case get_document(ref_doc_id, type, dataset, opts) do
         {:ok, doc} ->
           updated_content = Map.delete(doc.content || %{}, field)
           prev_rev = doc.rev
@@ -1592,7 +1614,7 @@ defmodule Barkpark.Content do
 
     SchemaDefinition
     |> scope_schema_to_dataset(dataset, opts)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     # dataset_id-bearing rows before legacy nil-dataset_id fixtures, then dedup
     # by name — one catalog entry per type even on a backfill/fixture overlap.
     |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
@@ -1607,7 +1629,7 @@ defmodule Barkpark.Content do
     SchemaDefinition
     |> where([s], s.name == ^name)
     |> scope_schema_to_dataset(dataset, opts)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     # A backfilled row (dataset_id set) and a legacy nil-dataset_id fixture of
     # the same name can both match the dataset-OR-string scope. Prefer the
     # backfilled (dataset_id-bearing) row and take exactly one — deterministic.
@@ -1844,7 +1866,7 @@ defmodule Barkpark.Content do
 
     Document
     |> where([d], d.dataset == ^dataset)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> group_by([d], d.type)
     |> select([d], %{
       type: d.type,
@@ -1863,7 +1885,7 @@ defmodule Barkpark.Content do
 
     Document
     |> where([d], d.dataset == ^dataset)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> select([d], count(d.id))
     |> Repo.one()
   end
@@ -1876,7 +1898,7 @@ defmodule Barkpark.Content do
 
     MutationEvent
     |> where([e], e.dataset == ^dataset)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> order_by([e], desc: e.inserted_at)
     |> limit(^limit)
     |> select([e], %{
@@ -2087,7 +2109,7 @@ defmodule Barkpark.Content do
 
     Document
     |> where([d], d.dataset == ^dataset)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
     end)
@@ -2106,7 +2128,7 @@ defmodule Barkpark.Content do
 
     Revision
     |> where([r], r.doc_id == ^published_id(doc_id) and r.type == ^type and r.dataset == ^dataset)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> order_by([r], desc: r.inserted_at)
     |> limit(^limit)
     |> Repo.all()
@@ -2124,7 +2146,7 @@ defmodule Barkpark.Content do
 
     Revision
     |> where([r], r.id == ^id)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -2182,14 +2204,15 @@ defmodule Barkpark.Content do
   `%Document{}` or `nil`. Papers are always published (no draft prefix).
 
   SCOPE: `opts` may carry `:workspace_id` / `:project_id`; the read is then
-  scoped to that tenant. With NO scope opts the read is unscoped (`nil`
-  workspace_id → `scope_to_workspace/3` returns the query untouched) — that is
-  the INTERNAL, already-tenant-resolved caller path (e.g. `upsert_paper`'s
-  pre-write lookup, which keys on `{dataset, slug}` and stamps the resolved
-  scope itself). It is NOT the public read path: a public, unauthenticated
-  request MUST go through `get_public_paper/2`, which closes the cross-workspace
-  leak (barkpark-w9dg) by resolving the slug ONLY within the seeded Default
-  (public) workspace. See that function's doc for why.
+  scoped to that tenant. With NO scope opts the read is an EXPLICIT global read
+  (`get_document` routes nil through `scope_to_workspace_or_global/3`, which
+  returns the query untouched) — that is the INTERNAL, already-tenant-resolved
+  caller path (e.g. `upsert_paper`'s pre-write lookup, which keys on
+  `{dataset, slug}` and stamps the resolved scope itself). It is NOT the public
+  read path: a public, unauthenticated request MUST go through
+  `get_public_paper/2`, which closes the cross-workspace leak (barkpark-w9dg) by
+  resolving the slug ONLY within the seeded Default (public) workspace. See that
+  function's doc for why.
   """
   def get_paper(slug, dataset \\ @paper_default_dataset, opts \\ []) when is_binary(slug) do
     case get_document(slug, @paper_type, dataset, opts) do
@@ -2204,12 +2227,12 @@ defmodule Barkpark.Content do
   Papers are stamped `workspace_id` on write and slugs are PER-WORKSPACE (the
   Wave-2 uniqueness flip lifted the old global `(doc_id, type, dataset)` unique
   index to a per-workspace `(doc_id, type, dataset_id)` one, so two workspaces
-  may each own a paper with the same slug). A bare `get_paper(slug)` runs
-  UNSCOPED — `scope_to_workspace(query, nil, …)` returns the query untouched —
-  so `Repo.one` resolves over EVERY tenant's rows. That is the
-  cross-workspace read leak: any visitor could read any workspace's paper by
-  slug, and on a same-slug collision the resolved row was non-deterministic
-  (barkpark-w9dg, P0).
+  may each own a paper with the same slug). A bare `get_paper(slug)` runs as an
+  EXPLICIT global read (`get_document` routes the nil workspace through
+  `scope_to_workspace_or_global/3`) — so `Repo.one` resolves over EVERY tenant's
+  rows. That is the cross-workspace read leak: any visitor could read any
+  workspace's paper by slug, and on a same-slug collision the resolved row was
+  non-deterministic (barkpark-w9dg, P0).
 
   The public paper surface is intentionally the seeded **Default** workspace —
   that is where the flat, unauthenticated paperflow ingest lands by Default
@@ -2223,8 +2246,8 @@ defmodule Barkpark.Content do
 
   Fail-closed (aligns with the s6t1 nil-scope direction): if the Default
   workspace is not seeded, there IS no public tenant — we return `nil` rather
-  than fall back to an unscoped read. We never rely on
-  `scope_to_workspace(nil) = all-rows` for a public request.
+  than fall back to an unscoped read. We never rely on an explicit-global read
+  for a public request.
 
   Returns the `%Document{}` or `nil`.
   """
@@ -2641,9 +2664,9 @@ defmodule Barkpark.Content do
   Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
   rev:}}` on success.
   """
-  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset)
+  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_map(op) do
-    with %Document{} = doc <- get_paper(slug, dataset),
+    with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
@@ -2741,7 +2764,7 @@ defmodule Barkpark.Content do
           {:ok, map()} | {:error, term()}
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ [])
       when is_binary(doc_id) and is_binary(type) and is_map(op) do
-    with {:ok, %Document{} = doc} <- get_document(doc_id, type, dataset),
+    with {:ok, %Document{} = doc} <- get_document(doc_id, type, dataset, opts),
          {blocks, _synth?} = resolve_blocks_for_edit(doc, type, dataset),
          {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
@@ -2924,6 +2947,26 @@ defmodule Barkpark.Content do
           %{id: ws_id} when is_binary(ws_id) -> get_paper(slug, dataset, workspace_id: ws_id)
           # No seeded Default (fresh sandbox) — fall back to the prior unscoped
           # lookup so the very first single-tenant write still self-locates.
+          _ -> get_paper(slug, dataset)
+        end
+    end
+  end
+
+  # The block-op doc load, SCOPED so a streaming op never resolves (and mutates)
+  # a same-slug paper in another workspace (barkpark-af50). Mirrors the
+  # write-side scope contract (get_existing_paper_for_write / get_public_paper):
+  # an explicit workspace in opts wins; absent it, the seeded Default workspace
+  # — the deterministic public/ingest tenant. Only when no Default is seeded
+  # (fresh sandbox) does it fall back to the prior unscoped lookup so a first
+  # single-tenant op still self-locates.
+  defp get_block_op_paper(slug, dataset, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      ws when is_binary(ws) and ws != "" ->
+        get_paper(slug, dataset, workspace_id: ws, project_id: Keyword.get(opts, :project_id))
+
+      _ ->
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: ws_id} when is_binary(ws_id) -> get_paper(slug, dataset, workspace_id: ws_id)
           _ -> get_paper(slug, dataset)
         end
     end

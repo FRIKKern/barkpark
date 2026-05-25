@@ -345,7 +345,7 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         {:ok, _} <- Media.delete_file(id) do
+         {:ok, _} <- Media.delete_file(id, scope_opts(conn)) do
       json(conn, %{result: %{deleted: id}, syncTags: ["bp:ds:#{dataset}:media"]})
     else
       error -> error

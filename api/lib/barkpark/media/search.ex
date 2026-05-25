@@ -12,7 +12,7 @@ defmodule Barkpark.Media.Search do
   """
 
   import Ecto.Query
-  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
+  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Content.Document
   alias Barkpark.Media.MediaFile
   alias Barkpark.Repo
@@ -123,7 +123,7 @@ defmodule Barkpark.Media.Search do
           fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
     )
     |> scope_media_to_dataset(dataset, dataset_id)
-    |> scope_to_workspace(workspace_id, project_id)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
     |> maybe_filter_text(dataset, opts)

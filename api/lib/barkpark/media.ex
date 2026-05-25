@@ -214,7 +214,7 @@ defmodule Barkpark.Media do
 
     MediaFile
     |> where([m], m.id == ^id)
-    |> Content.Scope.scope_to_workspace(workspace_id, project_id)
+    |> Content.Scope.scope_to_workspace_or_global(workspace_id, project_id)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -222,18 +222,40 @@ defmodule Barkpark.Media do
     end
   end
 
-  @doc "Get a media file by its storage-relative path."
-  @spec get_file_by_path(String.t()) :: {:ok, MediaFile.t()} | {:error, :not_found}
-  def get_file_by_path(relative_path) when is_binary(relative_path) do
-    case Repo.get_by(MediaFile, path: relative_path) do
+  @doc """
+  Get a media file by its storage-relative path.
+
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); when present
+  the path lookup is scoped through `Content.Scope.scope_to_workspace_or_global/3`
+  so a serve scoped to workspace B never resolves a blob owned by workspace A
+  (barkpark-af50). An unscoped lookup keeps the explicit-global behaviour, so the
+  public serve path is unchanged until a workspace is threaded in.
+  """
+  @spec get_file_by_path(String.t(), keyword()) :: {:ok, MediaFile.t()} | {:error, :not_found}
+  def get_file_by_path(relative_path, opts \\ []) when is_binary(relative_path) do
+    MediaFile
+    |> where([m], m.path == ^relative_path)
+    |> Content.Scope.scope_to_workspace_or_global(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> Repo.one()
+    |> case do
       nil -> {:error, :not_found}
       file -> {:ok, file}
     end
   end
 
-  @doc "Delete a media file from disk and DB."
-  def delete_file(id) do
-    case get_file(id) do
+  @doc """
+  Delete a media file from disk and DB.
+
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); the
+  about-to-delete read is scoped through `get_file/2` so a delete in workspace B
+  returns `{:error, :not_found}` for a blob owned by workspace A (barkpark-af50).
+  An unscoped delete keeps the explicit-global behaviour for back-compat.
+  """
+  def delete_file(id, opts \\ []) do
+    case get_file(id, opts) do
       {:ok, file} ->
         doc = asset_doc_for_file(file, file.dataset)
         Cdn.invalidate(file)

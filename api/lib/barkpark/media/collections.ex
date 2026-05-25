@@ -28,7 +28,7 @@ defmodule Barkpark.Media.Collections do
 
     Document
     |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
-    |> Scope.scope_to_workspace(opts[:workspace_id], opts[:project_id])
+    |> Scope.scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
     |> order_by([d], asc: d.title)
     |> limit(^limit)
     |> offset(^offset)

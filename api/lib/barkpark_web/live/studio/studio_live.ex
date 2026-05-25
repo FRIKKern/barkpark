@@ -711,7 +711,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      refs = Content.find_referencing_docs(doc.doc_id, socket.assigns.dataset)
+      refs =
+        Content.find_referencing_docs(
+          doc.doc_id,
+          socket.assigns.dataset,
+          ScopeHelpers.scope_opts(socket)
+        )
+
       {:noreply, assign(socket, show_delete: true, delete_refs: refs)}
     else
       {:noreply, socket}
@@ -728,7 +734,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     if doc && type do
       if params["disconnect"] == "true" do
-        Content.disconnect_references(doc.doc_id, socket.assigns.dataset)
+        Content.disconnect_references(
+          doc.doc_id,
+          socket.assigns.dataset,
+          ScopeHelpers.scope_opts(socket)
+        )
       end
 
       case Content.delete_document(doc.doc_id, type, socket.assigns.dataset, hook_opts(socket)) do
