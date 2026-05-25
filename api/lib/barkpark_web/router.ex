@@ -66,6 +66,12 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.Idempotency
   end
 
+  # Write-gate: rejects tokens lacking "write"/"admin" with 403 before the
+  # mutation reaches the controller. Must run after :require_token.
+  pipeline :require_write do
+    plug BarkparkWeb.Plugs.RequireWritePermission
+  end
+
   # Bare /studio and / redirect to the default dataset.
   scope "/", BarkparkWeb do
     pipe_through :browser
@@ -309,7 +315,7 @@ defmodule BarkparkWeb.Router do
 
   # ── Mutations — token + idempotency dedup ──────────────────────────────
   scope "/v1/data", BarkparkWeb do
-    pipe_through [:api, :require_token, :idempotent]
+    pipe_through [:api, :require_token, :require_write, :idempotent]
 
     post "/mutate/:dataset", MutateController, :mutate
   end
