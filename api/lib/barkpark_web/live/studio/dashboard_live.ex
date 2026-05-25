@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.DashboardLive do
 
   @impl true
   def mount(params, _session, socket) do
-    dataset = params["dataset"] || "production"
+    dataset = params["dataset"] || Content.default_dataset()
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")

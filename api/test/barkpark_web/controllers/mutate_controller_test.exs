@@ -5,6 +5,7 @@ defmodule BarkparkWeb.MutateControllerTest do
 
   setup do
     Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token("barkpark-readonly-token", "ro", "test", ["read"])
 
     Content.upsert_schema(
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
@@ -18,6 +19,34 @@ defmodule BarkparkWeb.MutateControllerTest do
     conn
     |> put_req_header("authorization", "Bearer barkpark-dev-token")
     |> put_req_header("content-type", "application/json")
+  end
+
+  defp authed_readonly(conn) do
+    conn
+    |> put_req_header("authorization", "Bearer barkpark-readonly-token")
+    |> put_req_header("content-type", "application/json")
+  end
+
+  describe "write-gate (RequireWritePermission plug)" do
+    # A read-only token must be rejected with 403 BEFORE Content.apply_mutations
+    # runs. We send an otherwise-invalid payload: a write token would reach
+    # validation (422); the read-only token is gated first (403).
+    test "read-only token is rejected with 403 at the write-gate", %{conn: conn} do
+      resp = conn |> authed_readonly() |> post("/v1/data/mutate/test", invalid_payload())
+
+      assert resp.status == 403
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "forbidden"
+    end
+
+    test "write-capable token passes the gate (reaches validation, not 403)", %{conn: conn} do
+      resp = conn |> authed() |> post("/v1/data/mutate/test", invalid_payload())
+
+      # Passed the gate — the write token reaches Content validation, which
+      # rejects the no-_type payload with 422. The point is it is NOT 403.
+      refute resp.status == 403
+      assert resp.status == 422
+    end
   end
 
   # A create without _type triggers Ecto.Changeset validate_required on Document

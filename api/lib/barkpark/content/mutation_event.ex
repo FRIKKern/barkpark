@@ -10,6 +10,10 @@ defmodule Barkpark.Content.MutationEvent do
     field :rev, :string
     field :previous_rev, :string
     field :document, :map
+
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     field :inserted_at, :utc_datetime_usec
   end
 end

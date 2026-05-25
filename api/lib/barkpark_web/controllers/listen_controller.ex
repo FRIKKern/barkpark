@@ -5,7 +5,7 @@ defmodule BarkparkWeb.ListenController do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Content.{Document, MutationEvent}
 
   def listen(conn, %{"dataset" => dataset} = params) do
     since =
@@ -13,6 +13,10 @@ defmodule BarkparkWeb.ListenController do
         [v | _] -> parse_int(v)
         _ -> parse_int(params["lastEventId"])
       end
+
+    # Tenancy scope from the resolved workspace (ResolveWorkspace /
+    # AssignDefaultScope). nil → unfiltered stream (pre-tenancy back-compat).
+    workspace_id = scope_workspace_id(conn)
 
     Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
 
@@ -27,7 +31,7 @@ defmodule BarkparkWeb.ListenController do
 
     conn =
       if since do
-        Enum.reduce(replay_since(dataset, since), conn, fn ev, c ->
+        Enum.reduce(replay_since(dataset, since, workspace_id), conn, fn ev, c ->
           case chunk(c, format_event(ev, dataset)) do
             {:ok, c2} -> c2
             _ -> c
@@ -37,16 +41,41 @@ defmodule BarkparkWeb.ListenController do
         conn
       end
 
-    listen_loop(conn, dataset)
+    listen_loop(conn, dataset, workspace_id)
   end
 
-  @doc "Return mutation_events for dataset with id > since, oldest first."
-  def replay_since(dataset, since) when is_integer(since) do
+  @doc """
+  Return mutation_events for dataset with id > since, oldest first.
+
+  With a non-nil `workspace_id`, only events whose document belongs to that
+  workspace are returned — the SSE stream is the hard tenant boundary for
+  real-time changes, mirroring the query-layer WHERE workspace_id filter.
+
+  The filter joins on the owning `documents` row (by `doc_id` + `dataset`)
+  rather than `mutation_events.workspace_id`, because the event row's own scope
+  column is not populated by the current write path; the document's scope is
+  the authoritative source. nil `workspace_id` → unfiltered (back-compat).
+  """
+  def replay_since(dataset, since, workspace_id \\ nil)
+
+  def replay_since(dataset, since, nil) when is_integer(since) do
     from(e in MutationEvent, where: e.dataset == ^dataset and e.id > ^since, order_by: e.id)
     |> Repo.all()
   end
 
-  def replay_since(_dataset, _), do: []
+  def replay_since(dataset, since, workspace_id)
+      when is_integer(since) and is_binary(workspace_id) do
+    from(e in MutationEvent,
+      join: d in Document,
+      on: d.doc_id == e.doc_id and d.dataset == e.dataset,
+      where: e.dataset == ^dataset and e.id > ^since and d.workspace_id == ^workspace_id,
+      order_by: e.id,
+      select: e
+    )
+    |> Repo.all()
+  end
+
+  def replay_since(_dataset, _, _), do: []
 
   @doc false
   def format_event(ev, dataset) do
@@ -72,33 +101,60 @@ defmodule BarkparkWeb.ListenController do
     "id: #{ev.id}\nevent: mutation\ndata: #{data}\n\n"
   end
 
-  defp listen_loop(conn, dataset) do
+  defp listen_loop(conn, dataset, workspace_id) do
     receive do
       {:document_changed, %{event_id: eid} = msg} ->
-        ev = %{
-          id: eid,
-          mutation: msg.mutation,
-          type: msg.type,
-          doc_id: msg.doc_id,
-          rev: msg.rev,
-          previous_rev: nil,
-          document: msg.document
-        }
+        if forward_event?(dataset, msg.doc_id, workspace_id) do
+          ev = %{
+            id: eid,
+            mutation: msg.mutation,
+            type: msg.type,
+            doc_id: msg.doc_id,
+            rev: msg.rev,
+            previous_rev: nil,
+            document: msg.document
+          }
 
-        case chunk(conn, format_event(ev, dataset)) do
-          {:ok, c} -> listen_loop(c, dataset)
-          _ -> conn
+          case chunk(conn, format_event(ev, dataset)) do
+            {:ok, c} -> listen_loop(c, dataset, workspace_id)
+            _ -> conn
+          end
+        else
+          # Event belongs to a different workspace — drop it, keep listening.
+          listen_loop(conn, dataset, workspace_id)
         end
 
       # Ignore legacy messages without event_id (defensive)
       {:document_changed, _} ->
-        listen_loop(conn, dataset)
+        listen_loop(conn, dataset, workspace_id)
     after
       30_000 ->
         case chunk(conn, ": keepalive\n\n") do
-          {:ok, c} -> listen_loop(c, dataset)
+          {:ok, c} -> listen_loop(c, dataset, workspace_id)
           _ -> conn
         end
+    end
+  end
+
+  # Workspace ownership gate for a live event. nil scope → forward everything
+  # (back-compat / unscoped listener). With a workspace, forward only when the
+  # event's document belongs to it; an orphaned/cross-workspace doc is dropped.
+  defp forward_event?(_dataset, _doc_id, nil), do: true
+
+  defp forward_event?(dataset, doc_id, workspace_id) when is_binary(workspace_id) do
+    Repo.exists?(
+      from(d in Document,
+        where:
+          d.doc_id == ^doc_id and d.dataset == ^dataset and
+            d.workspace_id == ^workspace_id
+      )
+    )
+  end
+
+  defp scope_workspace_id(conn) do
+    case conn.assigns[:current_workspace] do
+      %{id: id} -> id
+      _ -> nil
     end
   end
 

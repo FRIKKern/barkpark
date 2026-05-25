@@ -14,12 +14,25 @@ defmodule Barkpark.Content.Document do
     field :rev, :string
     field :search_vector, :any, virtual: true
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(document, attrs) do
     document
-    |> cast(attrs, [:doc_id, :type, :dataset, :title, :status, :content, :rev])
+    |> cast(attrs, [
+      :doc_id,
+      :type,
+      :dataset,
+      :title,
+      :status,
+      :content,
+      :rev,
+      :workspace_id,
+      :project_id
+    ])
     |> validate_required([:doc_id, :type])
     |> validate_inclusion(:status, ~w(draft published archived active planning completed))
     |> unique_constraint([:doc_id, :type, :dataset])

@@ -18,12 +18,16 @@ defmodule BarkparkWeb.QueryController do
       expand_spec = parse_expand(params["expand"])
 
       docs =
-        Content.list_documents(type, dataset,
-          perspective: perspective,
-          filter_map: filter_map,
-          limit: limit,
-          offset: offset,
-          order: order
+        Content.list_documents(
+          type,
+          dataset,
+          [
+            perspective: perspective,
+            filter_map: filter_map,
+            limit: limit,
+            offset: offset,
+            order: order
+          ] ++ scope_opts(conn)
         )
 
       rendered = Envelope.render_many(docs) |> Expand.expand(expand_spec, dataset)
@@ -48,7 +52,7 @@ defmodule BarkparkWeb.QueryController do
       t0 = System.monotonic_time(:microsecond)
       expand_spec = parse_expand(params["expand"])
 
-      with {:ok, doc} <- Content.get_document(doc_id, type, dataset) do
+      with {:ok, doc} <- Content.get_document(doc_id, type, dataset, scope_opts(conn)) do
         rendered =
           [Envelope.render(doc)]
           |> Expand.expand(expand_spec, dataset)
@@ -143,6 +147,23 @@ defmodule BarkparkWeb.QueryController do
       "bp:ds:#{dataset}:type:#{type}"
     ]
   end
+
+  # Tenancy scope opts pulled from the conn assigns set by ResolveWorkspace /
+  # ResolveProject (scoped routes) or AssignDefaultScope (flat back-compat
+  # routes). Completes the cross-dataset read-leak fix at the query layer: the
+  # route-level membership gate (s1) decides WHETHER the caller reaches a
+  # workspace; this WHERE workspace_id filter decides WHICH rows come back.
+  # When neither assign is set (a fresh DB before the Default backfill), the
+  # opts are empty and the read runs unscoped — Content.Scope no-ops on nil.
+  defp scope_opts(conn) do
+    []
+    |> put_scope(:workspace_id, conn.assigns[:current_workspace])
+    |> put_scope(:project_id, conn.assigns[:current_project])
+  end
+
+  defp put_scope(opts, _key, nil), do: opts
+  defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
+  defp put_scope(opts, _key, _other), do: opts
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 

@@ -15,6 +15,9 @@ defmodule Barkpark.Webhooks.Webhook do
     field :previous_secret_expires_at, :utc_datetime_usec
     field :active, :boolean, default: true
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 

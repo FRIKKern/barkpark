@@ -10,6 +10,12 @@
             current_section={assigns[:nav_section] || :structure}
           />
         <% end %>
+        <%= if assigns[:current_workspace] do %>
+          <BarkparkWeb.Studio.WorkspaceSwitcher.switcher
+            current_workspace={assigns[:current_workspace]}
+            current_project={assigns[:current_project]}
+          />
+        <% end %>
       </div>
     </:brand>
     <:tabs :if={assigns[:dataset]}>

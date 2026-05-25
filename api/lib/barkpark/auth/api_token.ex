@@ -10,15 +10,19 @@ defmodule Barkpark.Auth.ApiToken do
     field :dataset, :string, default: "production"
     field :permissions, {:array, :string}, default: ["read"]
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(token, attrs) do
     token
-    |> cast(attrs, [:token_hash, :label, :dataset, :permissions])
+    |> cast(attrs, [:token_hash, :label, :dataset, :permissions, :workspace_id])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)
   end
+
+  @type t :: %__MODULE__{}
 
   @doc "Hash a raw token string for storage/lookup."
   def hash_token(raw_token) do

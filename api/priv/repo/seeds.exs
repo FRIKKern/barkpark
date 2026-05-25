@@ -1,8 +1,55 @@
 alias Barkpark.Repo
 alias Barkpark.Content.{Document, SchemaDefinition}
 alias Barkpark.Auth.ApiToken
+alias Barkpark.Tenancy
 
 dataset = "production"
+
+# ── Default Workspace / Project (tenancy scope for all seed content) ─────────
+#
+# Wave 1 tenancy: every seeded schema_definition + document is stamped with the
+# Default Workspace / Default Project so a freshly-seeded DB has all content
+# under one tenant. The w1-s4 backfill migration seeds these rows on
+# `mix ecto.reset` (it runs BEFORE seeds.exs), but seeds also run standalone via
+# `mix run priv/repo/seeds.exs` — so reuse Tenancy.get_default_*; create only if
+# missing. Idempotent: a present Default is reused, never duplicated.
+
+default_workspace =
+  case Tenancy.get_default_workspace() do
+    nil ->
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"})
+      ws
+
+    ws ->
+      ws
+  end
+
+default_project =
+  case Tenancy.get_default_project() do
+    nil ->
+      {:ok, project} =
+        Tenancy.create_project(default_workspace, %{slug: "default", name: "Default Project"})
+
+      project
+
+    project ->
+      project
+  end
+
+default_ws_id = default_workspace.id
+default_project_id = default_project.id
+
+IO.puts("Default scope: workspace=#{default_ws_id} project=#{default_project_id}")
+
+# SchemaDefinition.changeset/2 does not cast the tenancy FKs (they were added as
+# belongs_to without a cast slot); put_change them directly so seeded schemas
+# land under Default. Documents cast workspace_id/project_id, so those go through
+# attrs instead.
+stamp_schema_scope = fn changeset ->
+  changeset
+  |> Ecto.Changeset.put_change(:workspace_id, default_ws_id)
+  |> Ecto.Changeset.put_change(:project_id, default_project_id)
+end
 
 # ── Schema Definitions ──────────────────────────────────────────────────────
 
@@ -161,6 +208,7 @@ schemas = [
 for schema_attrs <- schemas do
   %SchemaDefinition{}
   |> SchemaDefinition.changeset(schema_attrs)
+  |> stamp_schema_scope.()
   |> Repo.insert!(on_conflict: :nothing)
 end
 
@@ -191,6 +239,7 @@ paper_dataset = "production"
     %{name: "goal_id", title: "Goal", type: "string"}
   ]
 })
+|> stamp_schema_scope.()
 |> Repo.insert!(on_conflict: :nothing)
 
 IO.puts("Seeded paper schema (dataset=#{paper_dataset})")
@@ -483,7 +532,10 @@ documents = [
 
 for doc_attrs <- documents do
   doc_attrs =
-    Map.put(doc_attrs, :rev, :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
+    doc_attrs
+    |> Map.put(:rev, :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
+    |> Map.put(:workspace_id, default_ws_id)
+    |> Map.put(:project_id, default_project_id)
 
   %Document{}
   |> Document.changeset(doc_attrs)

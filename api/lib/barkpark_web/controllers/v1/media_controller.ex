@@ -22,7 +22,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def search(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
-    opts = MediaSearchParams.parse(params)
+    opts = MediaSearchParams.parse(params) ++ scope_opts(conn)
     {files, total, facets, meta} = Media.search_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset)
     render_opts = render_opts(conn, params)
@@ -191,13 +191,14 @@ defmodule BarkparkWeb.V1.MediaController do
   def index(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
 
-    opts = [
-      limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
-      offset: parse_int(params["offset"], 0),
-      mime_type: blank_to_nil(params["type"] || params["mimeType"]),
-      kind: blank_to_nil(params["kind"]),
-      q: blank_to_nil(params["q"])
-    ]
+    opts =
+      [
+        limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
+        offset: parse_int(params["offset"], 0),
+        mime_type: blank_to_nil(params["type"] || params["mimeType"]),
+        kind: blank_to_nil(params["kind"]),
+        q: blank_to_nil(params["q"])
+      ] ++ scope_opts(conn)
 
     {files, total} = Media.query_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset)
@@ -225,7 +226,7 @@ defmodule BarkparkWeb.V1.MediaController do
   def show(conn, %{"dataset" => dataset, "id" => id} = params) do
     t0 = System.monotonic_time(:microsecond)
 
-    with {:ok, file} <- Media.get_file(id),
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          true <- file.dataset == dataset do
       doc = Media.asset_doc_for_file(file, dataset)
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
@@ -242,7 +243,7 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def relations(conn, %{"dataset" => dataset, "id" => id} = params) do
-    with {:ok, file} <- Media.get_file(id),
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset) do
       graph = Relations.graph(file, dataset, render_opts(conn, params, dataset: dataset))
 
@@ -255,7 +256,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
     with :ok <- require_write(conn) do
-      case Media.upload(upload, dataset) do
+      case Media.upload(upload, dataset, scope_opts(conn)) do
         {:ok, file} ->
           doc = Media.asset_doc_for_file(file, dataset)
 
@@ -287,7 +288,7 @@ defmodule BarkparkWeb.V1.MediaController do
     metadata = metadata_params(params)
 
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(id),
+         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
          doc = Media.asset_doc_for_file(file, dataset),
          :ok <- ensure_edit(conn, file, doc),
@@ -303,7 +304,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def checkout(conn, %{"dataset" => dataset, "id" => id} = params) do
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(id),
+         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
          actor <- actor_label(conn),
          {:ok, doc} <- Checkout.checkout(file, actor, dataset) do
@@ -322,7 +323,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def undo_checkout(conn, %{"dataset" => dataset, "id" => id} = params) do
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(id),
+         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
          actor <- actor_label(conn),
          admin? <- admin?(conn),
@@ -342,7 +343,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def delete(conn, %{"dataset" => dataset, "id" => id}) do
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(id),
+         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
          {:ok, _} <- Media.delete_file(id) do
       json(conn, %{result: %{deleted: id}, syncTags: ["bp:ds:#{dataset}:media"]})
@@ -350,6 +351,20 @@ defmodule BarkparkWeb.V1.MediaController do
       error -> error
     end
   end
+
+  # Tenancy scope opts pulled from the conn assigns set by ResolveWorkspace /
+  # ResolveProject (scoped routes) or AssignDefaultScope (flat back-compat
+  # routes). Mirrors BarkparkWeb.QueryController.scope_opts/1. Empty when no
+  # scope assign is set (fresh DB pre-backfill) → Media helpers no-op on nil.
+  defp scope_opts(conn) do
+    []
+    |> put_scope(:workspace_id, conn.assigns[:current_workspace])
+    |> put_scope(:project_id, conn.assigns[:current_project])
+  end
+
+  defp put_scope(opts, _key, nil), do: opts
+  defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
+  defp put_scope(opts, _key, _other), do: opts
 
   defp ensure_dataset(%{dataset: ds}, ds), do: :ok
   defp ensure_dataset(_, _), do: {:error, :not_found}

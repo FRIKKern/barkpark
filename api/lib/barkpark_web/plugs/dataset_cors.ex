@@ -171,8 +171,16 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     @always_allowed_origins ++ Application.get_env(:barkpark, :default_cors_origins, [])
   end
 
+  # Path-based tenancy (Wave 1) prefixes content routes with
+  # `/w/:workspace_slug/p/:project_slug`, shifting every positional index. We
+  # strip that prefix first, then match the SAME shapes against the remainder —
+  # so both the flat (`/v1/data/...`) and the prefixed
+  # (`/w/_/p/_/v1/data/...`) forms resolve the dataset identically. The
+  # workspace/project slugs do not affect CORS (cors_origins is per-dataset in
+  # Wave 1); they are discarded by the strip. Flat-path behavior is unchanged —
+  # `strip_tenancy_prefix/1` is the identity for any path lacking the prefix.
   defp dataset_from_conn(conn) do
-    case conn.path_info do
+    case strip_tenancy_prefix(conn.path_info) do
       ["v1", "data", _, ds | _] ->
         {{:dataset, ds}, conn}
 
@@ -197,4 +205,10 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
         {:no_dataset, conn}
     end
   end
+
+  # Drop a leading ["w", workspace_slug, "p", project_slug] tenancy prefix when
+  # present; otherwise return the path_info unchanged (identity → flat paths
+  # keep their exact prior resolution).
+  defp strip_tenancy_prefix(["w", _ws, "p", _proj | rest]), do: rest
+  defp strip_tenancy_prefix(path_info), do: path_info
 end
