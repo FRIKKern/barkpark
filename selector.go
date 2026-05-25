@@ -10,15 +10,31 @@ import (
 )
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  SCOPE SELECTOR                                                         ║
-// ║                                                                         ║
-// ║  A modal manual-entry prompt for picking the active                     ║
-// ║  workspace / project / dataset. The scoped /v1/ API does not expose a   ║
-// ║  list-workspaces / list-projects endpoint, so v1 is a three-field       ║
-// ║  text-entry form rather than an API-listed picker. Applying the form    ║
-// ║  writes the three DataStore scope fields, re-loads schemas for the new  ║
-// ║  scope, and rebuilds the structure tree + panes.                        ║
+// ║  SCOPE SELECTOR                                                          ║
+// ║                                                                          ║
+// ║  A modal for picking the active workspace / project / dataset. The API   ║
+// ║  DOES expose membership-scoped list endpoints:                           ║
+// ║                                                                          ║
+// ║    GET /api/workspaces                  → {workspaces:[{id,slug,name}]}  ║
+// ║    GET /api/workspaces/:slug/projects   → {workspace, projects:[...]}    ║
+// ║                                                                          ║
+// ║  so the selector lists the workspaces the bearer token is a member of,   ║
+// ║  lists that workspace's projects on pick, then takes a dataset string.   ║
+// ║  If either list call fails (offline, 401/403/404, old server) the modal  ║
+// ║  silently degrades to manual three-field text entry — it never crashes.  ║
+// ║  Applying writes the three DataStore scope fields, reloads schemas for    ║
+// ║  the new scope, and rebuilds the structure tree + panes.                 ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
+
+// selectorStage is the step the modal is on.
+type selectorStage int
+
+const (
+	stageWorkspace selectorStage = iota // pick a workspace from the list
+	stageProject                        // pick a project from the list
+	stageDataset                        // enter a dataset name
+	stageManual                         // fallback: three free-text fields
+)
 
 const (
 	selFieldWorkspace = iota
@@ -32,14 +48,49 @@ var selFieldLabels = [selFieldCount]string{"Workspace", "Project", "Dataset"}
 // selectorState holds the transient UI state for the scope selector modal.
 type selectorState struct {
 	active bool
-	cursor int
-	inputs [selFieldCount]textinput.Model
-	err    string // last apply error, shown inline
+	stage  selectorStage
+
+	// List-driven stages.
+	workspaces []WorkspaceInfo
+	projects   []ProjectInfo
+	listCursor int // selected row within the active list stage
+
+	// Chosen-so-far values carried between stages.
+	chosenWorkspace string
+	chosenProject   string
+
+	// Dataset entry (stageDataset) and the manual fallback (stageManual).
+	datasetInput textinput.Model
+	cursor       int                       // active field in stageManual
+	inputs       [selFieldCount]textinput.Model
+
+	err string // last error, shown inline
 }
 
-// openSelector seeds the three inputs from the current scope and focuses the
-// first field. Idempotent: re-opening always re-seeds from the live scope.
+// openSelector opens the modal. It tries to list the membership-scoped
+// workspaces; on success it starts on the workspace-pick stage, otherwise it
+// degrades to the manual three-field form seeded from the live scope.
 func (m *model) openSelector() tea.Cmd {
+	m.selector = selectorState{active: true}
+
+	ws, err := m.ds.ListWorkspaces()
+	if err != nil || len(ws) == 0 {
+		m.seedManualSelector()
+		if err != nil {
+			m.selector.err = fmt.Sprintf("list unavailable (%v) — manual entry", err)
+		}
+		return textinput.Blink
+	}
+
+	m.selector.workspaces = ws
+	m.selector.stage = stageWorkspace
+	m.selector.listCursor = indexOfWorkspace(ws, m.ds.Workspace)
+	return textinput.Blink
+}
+
+// seedManualSelector configures the three free-text inputs from the live scope
+// and focuses the first. Used as the offline / API-failure fallback.
+func (m *model) seedManualSelector() {
 	values := [selFieldCount]string{m.ds.Workspace, m.ds.Project, m.ds.Dataset}
 	for i := 0; i < selFieldCount; i++ {
 		ti := textinput.New()
@@ -49,11 +100,22 @@ func (m *model) openSelector() tea.Cmd {
 		ti.SetValue(values[i])
 		m.selector.inputs[i] = ti
 	}
-	m.selector.active = true
+	m.selector.stage = stageManual
 	m.selector.cursor = 0
-	m.selector.err = ""
 	m.selector.inputs[0].Focus()
-	return textinput.Blink
+}
+
+// seedDatasetInput configures the dataset text field, seeded from the live
+// dataset, and focuses it.
+func (m *model) seedDatasetInput() {
+	ti := textinput.New()
+	ti.CharLimit = 100
+	ti.Width = 30
+	ti.Prompt = ""
+	ti.SetValue(m.ds.Dataset)
+	ti.Focus()
+	m.selector.datasetInput = ti
+	m.selector.stage = stageDataset
 }
 
 // closeSelector dismisses the modal without applying.
@@ -61,11 +123,196 @@ func (m *model) closeSelector() {
 	for i := range m.selector.inputs {
 		m.selector.inputs[i].Blur()
 	}
+	m.selector.datasetInput.Blur()
 	m.selector.active = false
 }
 
-// focusSelectorField moves the active text input to idx (clamped) and toggles
-// focus/blur so the cursor blinks on the right field.
+// indexOfWorkspace returns the index of the workspace whose slug matches, or 0.
+func indexOfWorkspace(list []WorkspaceInfo, slug string) int {
+	for i := range list {
+		if list[i].Slug == slug {
+			return i
+		}
+	}
+	return 0
+}
+
+// applyScope commits the chosen scope to the DataStore, reloads schemas, and
+// rebuilds the desk structure + panes. On any blank field it refuses and leaves
+// the modal open with an inline error. Schema-load failure is surfaced the same
+// way and the previous scope is left intact (loadSchemas only swaps the global
+// `schemas` on success).
+func (m *model) applyScope(ws, pr, dsName string) {
+	ws = strings.TrimSpace(ws)
+	pr = strings.TrimSpace(pr)
+	dsName = strings.TrimSpace(dsName)
+
+	if ws == "" || pr == "" || dsName == "" {
+		m.selector.err = "all three fields are required"
+		return
+	}
+
+	if err := loadSchemas(m.ds.baseURL, m.ds.token, ws, pr, dsName); err != nil {
+		m.selector.err = fmt.Sprintf("load failed: %v", err)
+		return
+	}
+
+	m.ds.Workspace = ws
+	m.ds.Project = pr
+	m.ds.Dataset = dsName
+
+	initRootStructure()
+	m.path = nil
+	m.selectedDoc = nil
+	m.editorSchema = nil
+	m.dirtyValues = nil
+	m.dirty = false
+	m.focus = focusState{Target: FocusPane, PaneIndex: 0}
+	m.rebuildPanes()
+
+	m.closeSelector()
+}
+
+// handleSelectorKey routes key input while the selector modal is open.
+func (m model) handleSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.selector.stage {
+	case stageWorkspace:
+		return m.handleWorkspaceStageKey(msg)
+	case stageProject:
+		return m.handleProjectStageKey(msg)
+	case stageDataset:
+		return m.handleDatasetStageKey(msg)
+	default:
+		return m.handleManualStageKey(msg)
+	}
+}
+
+func (m model) handleWorkspaceStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.closeSelector()
+		return m, nil
+	case "down", "tab", "j":
+		if m.selector.listCursor < len(m.selector.workspaces)-1 {
+			m.selector.listCursor++
+		}
+		return m, nil
+	case "up", "shift+tab", "k":
+		if m.selector.listCursor > 0 {
+			m.selector.listCursor--
+		}
+		return m, nil
+	case "m":
+		// Drop to manual entry on demand.
+		m.seedManualSelector()
+		return m, textinput.Blink
+	case "enter":
+		sel := m.selector.workspaces[m.selector.listCursor]
+		m.selector.chosenWorkspace = sel.Slug
+		m.selector.err = ""
+
+		projs, err := m.ds.ListProjects(sel.Slug)
+		if err != nil || len(projs) == 0 {
+			// Couldn't list projects — fall back to manual, but pre-fill the
+			// workspace the user already picked.
+			m.seedManualSelector()
+			m.selector.inputs[selFieldWorkspace].SetValue(sel.Slug)
+			if err != nil {
+				m.selector.err = fmt.Sprintf("no projects listed (%v) — manual entry", err)
+			} else {
+				m.selector.err = "no projects in this workspace — manual entry"
+			}
+			return m, textinput.Blink
+		}
+		m.selector.projects = projs
+		m.selector.listCursor = indexOfProject(projs, m.ds.Project)
+		m.selector.stage = stageProject
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleProjectStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Step back to the workspace list.
+		m.selector.stage = stageWorkspace
+		m.selector.err = ""
+		return m, nil
+	case "down", "tab", "j":
+		if m.selector.listCursor < len(m.selector.projects)-1 {
+			m.selector.listCursor++
+		}
+		return m, nil
+	case "up", "shift+tab", "k":
+		if m.selector.listCursor > 0 {
+			m.selector.listCursor--
+		}
+		return m, nil
+	case "enter":
+		m.selector.chosenProject = m.selector.projects[m.selector.listCursor].Slug
+		m.selector.err = ""
+		m.seedDatasetInput()
+		return m, textinput.Blink
+	}
+	return m, nil
+}
+
+func (m model) handleDatasetStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Step back to the project list.
+		m.selector.stage = stageProject
+		m.selector.err = ""
+		return m, nil
+	case "enter", "ctrl+s":
+		m.applyScope(m.selector.chosenWorkspace, m.selector.chosenProject, m.selector.datasetInput.Value())
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.selector.datasetInput, cmd = m.selector.datasetInput.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m model) handleManualStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.closeSelector()
+		return m, nil
+	case "tab", "down":
+		m.focusSelectorField(m.selector.cursor + 1)
+		return m, nil
+	case "shift+tab", "up":
+		m.focusSelectorField(m.selector.cursor - 1)
+		return m, nil
+	case "enter":
+		if m.selector.cursor < selFieldCount-1 {
+			m.focusSelectorField(m.selector.cursor + 1)
+			return m, nil
+		}
+		m.applyScope(
+			m.selector.inputs[selFieldWorkspace].Value(),
+			m.selector.inputs[selFieldProject].Value(),
+			m.selector.inputs[selFieldDataset].Value(),
+		)
+		return m, nil
+	case "ctrl+s":
+		m.applyScope(
+			m.selector.inputs[selFieldWorkspace].Value(),
+			m.selector.inputs[selFieldProject].Value(),
+			m.selector.inputs[selFieldDataset].Value(),
+		)
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.selector.inputs[m.selector.cursor], cmd =
+			m.selector.inputs[m.selector.cursor].Update(msg)
+		return m, cmd
+	}
+}
+
+// focusSelectorField moves the active manual text input to idx (clamped).
 func (m *model) focusSelectorField(idx int) {
 	if idx < 0 {
 		idx = 0
@@ -83,76 +330,13 @@ func (m *model) focusSelectorField(idx int) {
 	}
 }
 
-// applySelector commits the entered scope to the DataStore, reloads schemas,
-// and rebuilds the desk structure + panes. On any blank field it refuses and
-// leaves the modal open with an inline error. Schema-load failure is surfaced
-// the same way and the previous scope is restored.
-func (m *model) applySelector() {
-	ws := strings.TrimSpace(m.selector.inputs[selFieldWorkspace].Value())
-	pr := strings.TrimSpace(m.selector.inputs[selFieldProject].Value())
-	dsName := strings.TrimSpace(m.selector.inputs[selFieldDataset].Value())
-
-	if ws == "" || pr == "" || dsName == "" {
-		m.selector.err = "all three fields are required"
-		return
-	}
-
-	// loadSchemas assembles its result into a local slice and only assigns the
-	// package-global `schemas` on success, so a failed reload leaves the old
-	// schemas (and the old scope) intact — no rollback needed here.
-	if err := loadSchemas(m.ds.baseURL, m.ds.token, ws, pr, dsName); err != nil {
-		m.selector.err = fmt.Sprintf("load failed: %v", err)
-		return
-	}
-
-	m.ds.Workspace = ws
-	m.ds.Project = pr
-	m.ds.Dataset = dsName
-
-	// Rebuild the desk structure from the freshly loaded schemas and reset
-	// navigation to the new scope's root.
-	initRootStructure()
-	m.path = nil
-	m.selectedDoc = nil
-	m.editorSchema = nil
-	m.dirtyValues = nil
-	m.dirty = false
-	m.focus = focusState{Target: FocusPane, PaneIndex: 0}
-	m.rebuildPanes()
-
-	m.closeSelector()
-}
-
-// handleSelectorKey routes key input while the selector modal is open.
-func (m model) handleSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.closeSelector()
-		return m, nil
-	case "tab", "down":
-		m.focusSelectorField(m.selector.cursor + 1)
-		return m, nil
-	case "shift+tab", "up":
-		m.focusSelectorField(m.selector.cursor - 1)
-		return m, nil
-	case "enter":
-		// Enter advances through fields; on the last field it applies.
-		if m.selector.cursor < selFieldCount-1 {
-			m.focusSelectorField(m.selector.cursor + 1)
-			return m, nil
+func indexOfProject(list []ProjectInfo, slug string) int {
+	for i := range list {
+		if list[i].Slug == slug {
+			return i
 		}
-		m.applySelector()
-		return m, nil
-	case "ctrl+s":
-		// Apply from any field.
-		m.applySelector()
-		return m, nil
-	default:
-		var cmd tea.Cmd
-		m.selector.inputs[m.selector.cursor], cmd =
-			m.selector.inputs[m.selector.cursor].Update(msg)
-		return m, cmd
 	}
+	return 0
 }
 
 // renderSelector draws the modal centred over the body area.
@@ -162,25 +346,53 @@ func (m model) renderSelector(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 
-	for i := 0; i < selFieldCount; i++ {
-		label := "  " + selFieldLabels[i]
-		if i == m.selector.cursor {
-			lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(highlight).Render(label))
-		} else {
-			lines = append(lines, editorLabelStyle.Render(label))
+	switch m.selector.stage {
+	case stageWorkspace:
+		lines = append(lines, editorLabelStyle.Render("  Workspace"))
+		for i, ws := range m.selector.workspaces {
+			lines = append(lines, renderListRow(ws.Name, ws.Slug, i == m.selector.listCursor))
 		}
-		fieldStyle := editorFieldStyle
-		if i == m.selector.cursor {
-			fieldStyle = focusedFieldStyle
-		}
-		lines = append(lines, "  "+fieldStyle.Width(30).Render(m.selector.inputs[i].View()))
-	}
+		lines = append(lines, "")
+		lines = appendErr(lines, m.selector.err)
+		lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter pick  m manual  esc cancel"))
 
-	lines = append(lines, "")
-	if m.selector.err != "" {
-		lines = append(lines, "  "+statusDraft.Render(m.selector.err))
+	case stageProject:
+		lines = append(lines, editorLabelStyle.Render("  Project — "+m.selector.chosenWorkspace))
+		for i, pr := range m.selector.projects {
+			lines = append(lines, renderListRow(pr.Name, pr.Slug, i == m.selector.listCursor))
+		}
+		lines = append(lines, "")
+		lines = appendErr(lines, m.selector.err)
+		lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter pick  esc back"))
+
+	case stageDataset:
+		lines = append(lines, editorLabelStyle.Render(
+			fmt.Sprintf("  %s / %s", m.selector.chosenWorkspace, m.selector.chosenProject)))
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("  Dataset"))
+		lines = append(lines, "  "+focusedFieldStyle.Width(30).Render(m.selector.datasetInput.View()))
+		lines = append(lines, "")
+		lines = appendErr(lines, m.selector.err)
+		lines = append(lines, dimStyle.Render("  enter apply  ctrl+s apply  esc back"))
+
+	default: // stageManual
+		for i := 0; i < selFieldCount; i++ {
+			label := "  " + selFieldLabels[i]
+			if i == m.selector.cursor {
+				lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(highlight).Render(label))
+			} else {
+				lines = append(lines, editorLabelStyle.Render(label))
+			}
+			fieldStyle := editorFieldStyle
+			if i == m.selector.cursor {
+				fieldStyle = focusedFieldStyle
+			}
+			lines = append(lines, "  "+fieldStyle.Width(30).Render(m.selector.inputs[i].View()))
+		}
+		lines = append(lines, "")
+		lines = appendErr(lines, m.selector.err)
+		lines = append(lines, dimStyle.Render("  tab/↑↓ move  enter next/apply  ctrl+s apply  esc cancel"))
 	}
-	lines = append(lines, dimStyle.Render("  tab/↑↓ move  enter next/apply  ctrl+s apply  esc cancel"))
 
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
@@ -191,4 +403,24 @@ func (m model) renderSelector(width, height int) string {
 		Render(body)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// renderListRow draws one selectable workspace/project row.
+func renderListRow(name, slug string, selected bool) string {
+	label := name
+	if slug != "" && slug != name {
+		label = fmt.Sprintf("%s (%s)", name, slug)
+	}
+	if selected {
+		return lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("  ▸ " + label)
+	}
+	return editorLabelStyle.Render("    " + label)
+}
+
+// appendErr appends an inline error line when err is non-empty.
+func appendErr(lines []string, err string) []string {
+	if err != "" {
+		lines = append(lines, "  "+statusDraft.Render(err))
+	}
+	return lines
 }

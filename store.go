@@ -76,6 +76,21 @@ func (ds *DataStore) SetProgram(p *tea.Program) {
 	ds.program = p
 }
 
+// authGet issues a GET to url with the DataStore's bearer token attached.
+// Scoped /v1/ reads run ResolveWorkspace, which fails closed (403) for an
+// anonymous caller — so every read must carry the token, exactly like
+// Mutate/listenSSE do for their requests.
+func (ds *DataStore) authGet(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if ds.token != "" {
+		req.Header.Set("Authorization", "Bearer "+ds.token)
+	}
+	return ds.client.Do(req)
+}
+
 // Mutate sends a mutation to the Phoenix API (Sanity format).
 func (ds *DataStore) Mutate(mutations []map[string]interface{}) error {
 	endpoint := ds.scopedURL("/v1/data/mutate/" + ds.Dataset)
@@ -113,7 +128,7 @@ func (ds *DataStore) Query(typeName, filter string) []Doc {
 		endpoint += "?filter=" + url.QueryEscape(filter)
 	}
 
-	resp, err := ds.client.Get(endpoint)
+	resp, err := ds.authGet(endpoint)
 	if err != nil {
 		return nil
 	}
@@ -136,7 +151,7 @@ func (ds *DataStore) Query(typeName, filter string) []Doc {
 func (ds *DataStore) Get(typeName, id string) (Doc, bool) {
 	endpoint := ds.scopedURL("/v1/data/doc/" + ds.Dataset + "/" + typeName + "/" + id)
 
-	resp, err := ds.client.Get(endpoint)
+	resp, err := ds.authGet(endpoint)
 	if err != nil {
 		return Doc{}, false
 	}
@@ -196,6 +211,67 @@ func (ds *DataStore) Delete(typeName, id string) bool {
 		},
 	}
 	return ds.Mutate([]map[string]interface{}{mutation}) == nil
+}
+
+// WorkspaceInfo is one membership-scoped workspace from GET /api/workspaces.
+type WorkspaceInfo struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// ProjectInfo is one project from GET /api/workspaces/:slug/projects.
+type ProjectInfo struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// ListWorkspaces fetches the workspaces the bearer token is a member of via
+// GET /api/workspaces. This is a token-gated, NOT path-scoped, endpoint — it
+// lives under /api directly, not under /w/:ws/p/:project.
+func (ds *DataStore) ListWorkspaces() ([]WorkspaceInfo, error) {
+	resp, err := ds.authGet(ds.baseURL + "/api/workspaces")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list workspaces: status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Workspaces []WorkspaceInfo `json:"workspaces"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse workspaces: %w", err)
+	}
+	return result.Workspaces, nil
+}
+
+// ListProjects fetches the projects under a workspace via
+// GET /api/workspaces/:workspace_slug/projects. A non-member (or unknown slug)
+// returns 404, which surfaces here as an error.
+func (ds *DataStore) ListProjects(workspaceSlug string) ([]ProjectInfo, error) {
+	resp, err := ds.authGet(ds.baseURL + "/api/workspaces/" + url.PathEscape(workspaceSlug) + "/projects")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list projects: status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Workspace WorkspaceInfo `json:"workspace"`
+		Projects  []ProjectInfo `json:"projects"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse projects: %w", err)
+	}
+	return result.Projects, nil
 }
 
 // StartSSE connects to the Phoenix SSE listener for real-time updates.
@@ -259,7 +335,7 @@ func (ds *DataStore) pollOnce() {
 	// Scoped change-detection fallback when the SSE listener drops. The legacy
 	// flat document list has no scoped equivalent; the export endpoint dumps
 	// the dataset, which hashes equivalently for change detection.
-	resp, err := ds.client.Get(ds.scopedURL("/v1/data/export/" + ds.Dataset))
+	resp, err := ds.authGet(ds.scopedURL("/v1/data/export/" + ds.Dataset))
 	if err != nil {
 		return
 	}
