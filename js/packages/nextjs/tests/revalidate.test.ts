@@ -138,4 +138,116 @@ describe('revalidateBarkpark', () => {
     expect(mockedRevalidateTag).not.toHaveBeenCalled()
     expect(mockedRevalidatePath).not.toHaveBeenCalled()
   })
+
+  // ── s15: ingest the NEW workspace/project-scoped sync-tag shape ───────────
+
+  it('NEW scoped sync_tags → forwarded verbatim to revalidateTag', () => {
+    revalidateBarkpark({
+      event: 'publish',
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      workspace: 'acme',
+      project: 'blog',
+      sync_tags: [
+        'bp:ws:acme:p:blog:ds:production:doc:p1',
+        'bp:ws:acme:p:blog:ds:production:type:post',
+      ],
+    })
+
+    const calls = mockedRevalidateTag.mock.calls.map((c) => String(c[0]))
+    expect(calls).toContain('bp:ws:acme:p:blog:ds:production:doc:p1')
+    expect(calls).toContain('bp:ws:acme:p:blog:ds:production:type:post')
+    // Dedup holds across scoped + derived tags.
+    expect(new Set(calls).size).toBe(calls.length)
+  })
+
+  it('NEW: no sync_tags, {workspace, project, dataset, type, doc_id} → scoped tags constructed', () => {
+    revalidateBarkpark({
+      event: 'publish',
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      workspace: 'acme',
+      project: 'blog',
+    })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:_all')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(3)
+  })
+
+  it('NEW: dispatcher _slug spellings accepted for scope', () => {
+    revalidateBarkpark({
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      workspace_slug: 'acme',
+      project_slug: 'blog',
+    })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:_all')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(3)
+  })
+
+  it('NEW: partial scope (workspace only, no project) → falls back to LEGACY flat tags', () => {
+    revalidateBarkpark({
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      workspace: 'acme',
+    })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:_all')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(3)
+  })
+
+  it('LEGACY: no scope fields → flat bp:ds:* tags still constructed (back-compat)', () => {
+    revalidateBarkpark({
+      event: 'publish',
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+    })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:_all')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(3)
+  })
+
+  it('LEGACY sync_tags still forwarded verbatim alongside NEW capability', () => {
+    revalidateBarkpark({
+      type: 'post',
+      doc_id: 'p1',
+      dataset: 'production',
+      sync_tags: ['bp:ds:production:doc:p1', 'bp:ds:production:type:post'],
+    })
+
+    const calls = mockedRevalidateTag.mock.calls.map((c) => String(c[0]))
+    expect(calls).toContain('bp:ds:production:doc:p1')
+    expect(calls).toContain('bp:ds:production:type:post')
+    expect(new Set(calls).size).toBe(calls.length)
+  })
+
+  it('NEW: scoped ids/types fan out under the scoped prefix', () => {
+    revalidateBarkpark({
+      ids: ['a', 'b'],
+      types: ['t1', 't2'],
+      dataset: 'production',
+      workspace: 'acme',
+      project: 'blog',
+    })
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:doc:a')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:doc:b')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:type:t1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:type:t2')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:_all')
+  })
 })
