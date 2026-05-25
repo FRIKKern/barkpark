@@ -237,26 +237,14 @@ defmodule Barkpark.Plugins.BootstrapTest do
 
   # `Barkpark.Plugins.Registry` is a singleton GenServer whose state lives
   # outside the Ecto sandbox, so `Registry.register/2` calls leak between
-  # tests (and between test runs). The Registry currently exposes no public
-  # `unregister/1`, so we surgically remove the test stub from its state via
-  # `:sys.replace_state/2` — OTP's documented test/debug hook for cases
-  # exactly like this. Registered via `on_exit/2` so cleanup runs even when
-  # the body's assertions fail.
-  #
-  # The Registry caches reads in `:persistent_term` (key
-  # `{Barkpark.Plugins.Registry, :snapshot}`); a raw `:sys.replace_state`
-  # bypasses the GenServer's `handle_call`, so we manually purge the cache
-  # too. Once `Registry.unregister/1` lands, both pokes go away.
-  #
-  # TODO: if more tests start needing this pattern, promote a public
-  # `Barkpark.Plugins.Registry.unregister/1` and drop the direct state poke.
-  defp cleanup_stub_on_exit(plugin_name) do
-    ExUnit.Callbacks.on_exit(fn ->
-      :sys.replace_state(Barkpark.Plugins.Registry, fn state ->
-        %{state | plugins: Map.delete(state.plugins, plugin_name)}
-      end)
-
-      :persistent_term.erase({Barkpark.Plugins.Registry, :snapshot})
-    end)
+  # tests (and between test runs). `Barkpark.Plugins.Registry.reset/0` is the
+  # documented test-isolation hook: it restores the baseline plugin set (the
+  # boot-time discovery set) and re-snapshots `:persistent_term` to match, so
+  # any stub this test registered is cleared along with its cache footprint.
+  # Registered via `on_exit/2` so cleanup runs even when the body's
+  # assertions fail. The `plugin_name` argument is unused now that reset is
+  # whole-registry — kept for call-site readability.
+  defp cleanup_stub_on_exit(_plugin_name) do
+    ExUnit.Callbacks.on_exit(fn -> Barkpark.Plugins.Registry.reset() end)
   end
 end

@@ -16,7 +16,7 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
 
   # The Registry is a single named GenServer in the supervision tree,
   # so tests share state — keep this synchronous.
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
 

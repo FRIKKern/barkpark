@@ -6,7 +6,7 @@ defmodule Barkpark.Plugins.RegistryDeskItemsTest do
   composes with the host's `Barkpark.Structure.build/1`.
   """
 
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
 
@@ -82,6 +82,13 @@ defmodule Barkpark.Plugins.RegistryDeskItemsStructureTest do
   """
 
   use Barkpark.DataCase, async: false
+
+  # Reads the plugin registry via `Structure.build/1`; reset to the baseline
+  # plugin set so a sibling test's leaked fakes can't perturb the built tree.
+  setup do
+    Barkpark.Plugins.Registry.reset()
+    :ok
+  end
 
   test "Structure.build/1 appends plugin desk items after schema-discovery items" do
     structure = Barkpark.Structure.build("production")

@@ -7,7 +7,7 @@ defmodule Barkpark.Plugins.RegistryTopMenuTest do
   """
 
   # The Registry is a singleton in the supervision tree — shared state.
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
 

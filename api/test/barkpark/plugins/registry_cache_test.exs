@@ -20,7 +20,7 @@ defmodule Barkpark.Plugins.RegistryCacheTest do
   tests share state — keep this synchronous and use unique plugin names.
   """
 
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
 

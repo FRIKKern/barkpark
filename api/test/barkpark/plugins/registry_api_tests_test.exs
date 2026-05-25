@@ -21,7 +21,7 @@ defmodule Barkpark.Plugins.RegistryApiTestsTest do
   load-order list does not leak into sibling test files.
   """
 
-  use ExUnit.Case, async: false
+  use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
 

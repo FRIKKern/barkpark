@@ -130,6 +130,42 @@ defmodule Barkpark.Plugins.Registry do
     GenServer.call(@name, {:lookup, plugin_name})
   end
 
+  @doc """
+  Test-isolation helper — restores the Registry to its BASELINE plugin set
+  and re-snapshots `:persistent_term` to match.
+
+  The Registry is a process-global named GenServer whose `state.plugins`
+  map only ever grows (there is no production `unregister/1` — plugin
+  topology is compile-time static per the G1 grill decision). Across a
+  full `mix test` run, every test that calls `register/2` with a fake
+  plugin leaks that entry into the shared state AND into the
+  `:persistent_term` read cache. Sibling tests that assert exact collector
+  output (`collect_desk_items/1`, `collect_top_menu_entries/0`, the cache
+  snapshot shape, …) then fail order-dependently.
+
+  `reset/0` is the per-test cleanup that closes that leak. It:
+
+    * captures the baseline plugin set ONCE — the first time it is called,
+      it freezes whatever is registered at that moment (the boot-time
+      discovery set: OnixEdit, media). Every later reset restores exactly
+      that frozen baseline, so tests that depend on the real bundled
+      plugins (e.g. "OnixEdit's Bokbasen tab is reachable") keep passing.
+    * clears every test-registered fake back out of `state.plugins`.
+    * re-snapshots `:persistent_term` from the restored state via the same
+      `refresh_snapshot/1` path `register/2` uses — so a persistent_term
+      poison left by a sibling test is wiped, not merely re-derived from a
+      still-polluted GenServer state.
+
+  Intended for the test lifecycle (`setup` / `on_exit`) — wire it through a
+  shared support module (`Barkpark.RegistryCase`) rather than per-test. It
+  is safe to expose generally (idempotent, no external side effects) but
+  has no production caller.
+  """
+  @spec reset() :: :ok
+  def reset do
+    GenServer.call(@name, :reset)
+  end
+
   @spec all() :: [%{module: module(), manifest: map(), name: String.t()}]
   def all do
     case :persistent_term.get(@snapshot_key, nil) do
@@ -1373,7 +1409,11 @@ defmodule Barkpark.Plugins.Registry do
 
   @impl true
   def init(_opts) do
-    {:ok, %{plugins: %{}}}
+    # `baseline_plugins` is captured lazily on the first `reset/0` call —
+    # at boot we have nothing registered yet (discovery runs after the
+    # supervisor comes up, via SchemaBootstrap). `nil` means "not yet
+    # frozen". See `handle_call(:reset, …)`.
+    {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 
   @impl true
@@ -1402,5 +1442,27 @@ defmodule Barkpark.Plugins.Registry do
 
   def handle_call(:all, _from, state) do
     {:reply, Map.values(state.plugins), state}
+  end
+
+  # Test-isolation reset. Two phases:
+  #
+  #   1. First call freezes the current `state.plugins` as the baseline.
+  #      Because the first test's `setup` runs after boot discovery has
+  #      populated the registry, this captures OnixEdit + media + any other
+  #      bundled plugin — the "real" set tests expect to see.
+  #   2. Every call (including the first) restores `state.plugins` to the
+  #      frozen baseline and re-snapshots `:persistent_term` through the
+  #      same `refresh_snapshot/1` path `register/2` uses, so a poisoned
+  #      snapshot left by a sibling test is fully overwritten.
+  def handle_call(:reset, _from, state) do
+    baseline =
+      case state.baseline_plugins do
+        nil -> state.plugins
+        captured -> captured
+      end
+
+    new_state = %{state | plugins: baseline, baseline_plugins: baseline}
+    refreshed = refresh_snapshot(new_state)
+    {:reply, :ok, refreshed}
   end
 end
