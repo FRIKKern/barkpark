@@ -46,9 +46,11 @@ defmodule BarkparkWeb.Router do
   # the two resolver plugs so the plugin LiveViews participate in the hard
   # tenant boundary — `current_workspace` / `current_project` land in the
   # conn assigns, threaded into the LV session for ScopeHelpers.scope_opts/1.
-  # OptionalToken runs first so ResolveWorkspace's membership gate sees a
-  # Bearer token if one was sent; browser callers carry the session cookie
-  # instead, and the LV's own on_mount admin/ops hook is the UI auth gate.
+  # OptionalSessionToken runs first so ResolveWorkspace's membership gate
+  # sees a token from EITHER a Bearer header OR the signed-in browser's
+  # session cookie (`session["api_token"]`) — a real member with only the
+  # cookie resolves their token and clears the gate instead of 403'ing
+  # before mount. The LV's own on_mount admin/ops hook is the UI auth gate.
   pipeline :scoped_browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -56,7 +58,7 @@ defmodule BarkparkWeb.Router do
     plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
-    plug BarkparkWeb.Plugs.OptionalToken
+    plug BarkparkWeb.Plugs.OptionalSessionToken
     plug BarkparkWeb.Plugs.ResolveWorkspace
     plug BarkparkWeb.Plugs.ResolveProject
   end
@@ -309,7 +311,8 @@ defmodule BarkparkWeb.Router do
     pipe_through :scoped_browser
 
     live_session :scoped_plugin_admin,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.PluginScopeSession, :scope}],
+      session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :admin)
     end
@@ -319,6 +322,8 @@ defmodule BarkparkWeb.Router do
     pipe_through :scoped_browser
 
     live_session :scoped_plugin_public,
+      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}],
+      session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :public)
     end
@@ -328,7 +333,8 @@ defmodule BarkparkWeb.Router do
     pipe_through :scoped_browser
 
     live_session :scoped_plugin_ops,
-      on_mount: [{BarkparkWeb.LiveAuth, :ops}],
+      on_mount: [{BarkparkWeb.LiveAuth, :ops}, {BarkparkWeb.PluginScopeSession, :scope}],
+      session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :ops)
     end
