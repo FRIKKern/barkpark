@@ -34,7 +34,9 @@ defmodule Barkpark.Webhooks.Webhook do
       :secret,
       :previous_secret,
       :previous_secret_expires_at,
-      :active
+      :active,
+      :workspace_id,
+      :project_id
     ])
     |> validate_required([:name, :url])
     |> validate_format(:url, ~r/^https?:\/\//)

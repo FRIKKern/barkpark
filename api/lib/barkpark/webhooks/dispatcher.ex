@@ -32,7 +32,11 @@ defmodule Barkpark.Webhooks.Dispatcher do
   def dispatch_async(dataset, event, type, doc_id, document, event_id, opts \\ [])
       when is_integer(event_id) do
     body = Jason.encode!(build_payload(event, type, doc_id, document, dataset, opts))
-    webhooks = Webhooks.active_webhooks_for(dataset, event, type)
+    # Scope selection to the changed doc's workspace/project so a content
+    # change in workspace B never selects (or delivers to) workspace A's
+    # webhooks. `opts` carries `:workspace_id` / `:project_id`; an unscoped
+    # caller (no workspace_id) keeps the dataset-only behaviour.
+    webhooks = Webhooks.active_webhooks_for(dataset, event, type, opts)
 
     Enum.each(webhooks, fn wh ->
       Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->

@@ -3,15 +3,16 @@ defmodule BarkparkWeb.WebhookController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Webhooks
+  alias BarkparkWeb.ScopeHelpers
 
   def index(conn, %{"dataset" => dataset}) do
-    hooks = Webhooks.list_webhooks(dataset)
+    hooks = Webhooks.list_webhooks(dataset, ScopeHelpers.scope_opts(conn))
     json(conn, %{webhooks: Enum.map(hooks, &render_webhook/1)})
   end
 
   def show(conn, %{"id" => id}) do
     with :ok <- validate_uuid(id),
-         {:ok, wh} <- Webhooks.get_webhook(id) do
+         {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)) do
       json(conn, %{webhook: render_webhook(wh)})
     else
       _ -> webhook_not_found(conn)
@@ -21,7 +22,7 @@ defmodule BarkparkWeb.WebhookController do
   def create(conn, %{"dataset" => dataset} = params) do
     attrs = Map.put(params, "dataset", dataset)
 
-    case Webhooks.create_webhook(attrs) do
+    case Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
       {:ok, wh} ->
         conn |> put_status(201) |> json(%{webhook: render_webhook(wh)})
 
@@ -32,7 +33,7 @@ defmodule BarkparkWeb.WebhookController do
 
   def update(conn, %{"id" => id} = params) do
     with :ok <- validate_uuid(id),
-         {:ok, wh} <- Webhooks.get_webhook(id),
+         {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
          {:ok, updated} <- Webhooks.update_webhook(wh, params) do
       json(conn, %{webhook: render_webhook(updated)})
     else
@@ -44,7 +45,7 @@ defmodule BarkparkWeb.WebhookController do
 
   def delete(conn, %{"id" => id}) do
     with :ok <- validate_uuid(id),
-         {:ok, wh} <- Webhooks.get_webhook(id),
+         {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
          {:ok, _} <- Webhooks.delete_webhook(wh) do
       json(conn, %{deleted: id})
     else
