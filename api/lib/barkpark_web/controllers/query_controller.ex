@@ -5,6 +5,8 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Expand
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   action_fallback BarkparkWeb.FallbackController
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
@@ -148,22 +150,12 @@ defmodule BarkparkWeb.QueryController do
     ]
   end
 
-  # Tenancy scope opts pulled from the conn assigns set by ResolveWorkspace /
-  # ResolveProject (scoped routes) or AssignDefaultScope (flat back-compat
-  # routes). Completes the cross-dataset read-leak fix at the query layer: the
-  # route-level membership gate (s1) decides WHETHER the caller reaches a
-  # workspace; this WHERE workspace_id filter decides WHICH rows come back.
-  # When neither assign is set (a fresh DB before the Default backfill), the
-  # opts are empty and the read runs unscoped — Content.Scope no-ops on nil.
-  defp scope_opts(conn) do
-    []
-    |> put_scope(:workspace_id, conn.assigns[:current_workspace])
-    |> put_scope(:project_id, conn.assigns[:current_project])
-  end
-
-  defp put_scope(opts, _key, nil), do: opts
-  defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
-  defp put_scope(opts, _key, _other), do: opts
+  # Tenancy scope opts come from BarkparkWeb.ScopeHelpers.scope_opts/1, the
+  # shared seam over the conn assigns set by ResolveWorkspace / ResolveProject
+  # (scoped routes) or AssignDefaultScope (flat back-compat routes). Completes
+  # the cross-dataset read-leak fix at the query layer: the route-level
+  # membership gate decides WHETHER the caller reaches a workspace; this WHERE
+  # workspace_id filter decides WHICH rows come back.
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 

@@ -29,6 +29,7 @@ defmodule Barkpark.DataCase do
 
   setup tags do
     Barkpark.DataCase.setup_sandbox(tags)
+    Barkpark.DataCase.ensure_default_tenancy()
     :ok
   end
 
@@ -38,6 +39,19 @@ defmodule Barkpark.DataCase do
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+  end
+
+  @doc """
+  Guarantee the seeded Default Workspace/Project exist inside the per-test
+  sandbox. The backfill migration (20260527110200) seeds them at the schema
+  level, so this is a no-op read in the normal case — but a per-test sandbox
+  that started before/without that committed data gets them created here, so
+  the flat back-compat (Default-scope) reads and the tenancy fixtures behave.
+  Idempotent: only inserts when absent.
+  """
+  def ensure_default_tenancy do
+    _ = Barkpark.TenancyFixtures.ensure_default_scope!()
+    :ok
   end
 
   @doc """
