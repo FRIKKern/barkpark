@@ -1065,6 +1065,35 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})}
   end
 
+  # Continuous (debounced) autosave for the form-based per-block editors
+  # (callout/code/eyebrow/byline/ingress/pullquote/section/diagram). The shared
+  # `<form>` carries `phx-change="paper-block-autosave"` + `phx-debounce="500"`,
+  # so every keystroke (after the 500ms idle) persists WITHOUT the explicit Save
+  # button — the Save button (`paper-edit-block`) stays as a no-harm fallback.
+  #
+  # This mirrors `paper-edit-block`'s apply: resolve the block, build the same
+  # patch, route the same `patch-block` op through the SAME `paper_op/2`
+  # pipeline. The ONLY difference is the affordance — autosave is QUIET: it sets
+  # the "✓ Auto-saved" status and never raises the "Saved" flash nor the
+  # save-cancelled/failed semantics of the explicit path. An unknown/missing
+  # block resolves to nil → `build_block_patch(nil, …)` yields `%{}` (no-op
+  # patch) → never crashes.
+  def handle_event("paper-block-autosave", %{"block_id" => id} = params, socket) do
+    block = paper_block_by_id(socket, id)
+    patch = build_block_patch(block, params)
+
+    socket =
+      socket
+      |> paper_op(%{"op" => "patch-block", "id" => id, "patch" => patch})
+      |> assign(save_status: "Auto-saved")
+
+    {:noreply, socket}
+  end
+
+  # Guard: a change event without a block_id (shouldn't happen — the hidden
+  # input always rides along — but defends against a stale/partial form) → no-op.
+  def handle_event("paper-block-autosave", _params, socket), do: {:noreply, socket}
+
   # Op forwarded by the <bp-paper-editor> Web Component via the
   # BarkparkPaperEditor JS hook. The WC owns the editing UX (debounced rich
   # text) and emits a portable-doc op verbatim; we route it through the same
@@ -3185,7 +3214,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <bp-paper-editor data-block={Jason.encode!(@block)}></bp-paper-editor>
         </div>
       <% "callout" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <select name="tone" class="bp-paper-edit-tone">
             <option :for={t <- ~w(info success warning danger neutral)} value={t} selected={Map.get(@block, "tone") == t}>
@@ -3208,7 +3242,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "code" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <input
             type="text"
@@ -3229,7 +3268,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
             block's value textarea, monospace) + an optional caption input. Both
             are flat strings on the block — build_block_patch reads them verbatim. --%>
       <% "diagram" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <textarea
             name="source"
@@ -3252,7 +3296,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
             text input; ingress + pullquote are a textarea (plain-text MVP, like
             the callout body). They mirror the callout/code form markup. --%>
       <% "eyebrow" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <input
             type="text"
@@ -3265,7 +3314,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "byline" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <input
             type="text"
@@ -3278,7 +3332,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "ingress" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <textarea
             name="text"
@@ -3289,7 +3348,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "pullquote" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <textarea
             name="text"
@@ -3300,7 +3364,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "section" -> %>
-        <form class="bp-paper-edit-form" phx-submit="paper-edit-block">
+        <form
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+        >
           <input type="hidden" name="block_id" value={@id} />
           <input
             type="text"

@@ -1153,6 +1153,101 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert html =~ ~s(value="Fig 1")
   end
 
+  # ── barkpark-hogk: per-block edit form auto-saves on debounced change ───────
+  # The shared per-block edit <form> now carries phx-change="paper-block-autosave"
+  # (phx-debounce=500). A `render_change` on that form persists the new field
+  # values through the SAME build_block_patch → patch-block pipeline the explicit
+  # Save uses — WITHOUT a Save submit. The Save button stays as a fallback.
+
+  # Fire a debounced change on the block's edit form (autosave path). The hidden
+  # block_id rides along in the form; we pass it explicitly too (matching the
+  # change params LiveView sends with the input that changed).
+  defp autosave_edit_form(view, id, params) do
+    view
+    |> element(~s([data-edit-block-id="#{id}"] form.bp-paper-edit-form))
+    |> render_change(Map.put(params, "block_id", id))
+  end
+
+  test "a callout block auto-saves on change (no Save submit)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "callout")
+
+    # phx-change → paper-block-autosave persists WITHOUT a render_submit.
+    autosave_edit_form(view, id, %{
+      "tone" => "warning",
+      "title" => "Heads up",
+      "text" => "Continuously saved body."
+    })
+
+    block = block_after_edit(id)
+    assert block["type"] == "callout"
+    assert block["tone"] == "warning"
+    assert block["title"] == "Heads up"
+    assert block["content"] == [%{"type" => "text", "value" => "Continuously saved body."}]
+  end
+
+  test "a code block auto-saves on change (no Save submit)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "code")
+
+    autosave_edit_form(view, id, %{"lang" => "elixir", "value" => "IO.puts(:ok)"})
+
+    block = block_after_edit(id)
+    assert block["type"] == "code"
+    assert block["lang"] == "elixir"
+    assert block["value"] == "IO.puts(:ok)"
+  end
+
+  test "a diagram block auto-saves source + caption on change (no Save submit)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "diagram")
+
+    autosave_edit_form(view, id, %{"source" => "graph LR", "caption" => "Auto fig"})
+
+    block = block_after_edit(id)
+    assert block["type"] == "diagram"
+    assert block["source"] == "graph LR"
+    assert block["caption"] == "Auto fig"
+  end
+
+  test "autosave with an unknown/missing block_id is a quiet no-op (never crashes)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    pid_before = view.pid
+
+    # Fire the autosave event directly with a block_id that resolves to nil →
+    # build_block_patch(nil, …) → %{} → harmless patch-block on a missing id.
+    render_hook(view, "paper-block-autosave", %{
+      "block_id" => "does-not-exist",
+      "text" => "ignored"
+    })
+
+    # No remount, process still alive — the guard held.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+  end
+
+  # Regression: the explicit Save (render_submit / paper-edit-block) still
+  # persists exactly as before — autosave is purely additive.
+  test "the explicit Save still persists a diagram edit (paper-edit-block fallback)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "diagram")
+
+    submit_edit_form(view, id, %{"source" => "sequenceDiagram", "caption" => "Saved fig"})
+
+    block = block_after_edit(id)
+    assert block["type"] == "diagram"
+    assert block["source"] == "sequenceDiagram"
+    assert block["caption"] == "Saved fig"
+  end
+
   test "a freshly-added field block can be removed via its delete control (remove-block)",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
