@@ -530,4 +530,144 @@ defmodule BarkparkWeb.PaperLiveTest do
       refute html =~ ~s(phx-click="paper-action")
     end
   end
+
+  describe "P6.U4: Simplify control (routing Option B — record simplify intent + decision as paper_events)" do
+    @simplify_slug "2026-05-25-simplify-demo"
+    @simplify_goal "g-simplify"
+
+    # Seed a goal-bearing article paper. Simplify applies to ANY paper with a
+    # goal_id, independent of source_doc — so we deliberately omit source_doc
+    # here (no U5 action bar) to prove Simplify is its own control.
+    defp seed_simplify_paper do
+      {:ok, paper} =
+        Content.upsert_paper(%{
+          "slug" => @simplify_slug,
+          "style" => "article",
+          "goal_id" => @simplify_goal,
+          "body_html" => "<p id=\"simplify-body\">Simplify demo body.</p>"
+        })
+
+      paper
+    end
+
+    test "a goal-bearing paper renders the Simplify button", %{conn: conn} do
+      seed_simplify_paper()
+
+      {:ok, _view, html} = live(conn, "/papers/#{@simplify_slug}")
+
+      assert html =~ ~s(id="paper-simplify")
+      assert html =~ "Simplify"
+      assert html =~ ~s(phx-click="simplify-request")
+      # No request pending yet → no Accept/Reject controls.
+      refute html =~ ~s(phx-click="simplify-accept")
+      refute html =~ ~s(phx-click="simplify-reject")
+    end
+
+    test "clicking Simplify records a simplify-request on simplified-1 + reveals Accept/Reject",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+
+      # No simplify events yet for this paper.
+      refute Enum.any?(
+               Events.list_for_paper(@simplify_slug),
+               &(&1.event_type == "simplify-request")
+             )
+
+      rendered =
+        view
+        |> element(~s(button[phx-click="simplify-request"]))
+        |> render_click()
+
+      # A simplify-request row now exists on the first branch.
+      events = Events.list_for_paper(@simplify_slug)
+      req = Enum.find(events, &(&1.event_type == "simplify-request"))
+
+      assert req
+      assert req.branch == "simplified-1"
+      assert req.goal_id == @simplify_goal
+      assert req.paper_slug == @simplify_slug
+      assert req.payload_html =~ "simplified-1"
+
+      # The UI acknowledges + now offers Accept/Reject.
+      assert rendered =~ "Simplify requested — simplified-1"
+      assert rendered =~ ~s(phx-click="simplify-accept")
+      assert rendered =~ ~s(phx-click="simplify-reject")
+    end
+
+    test "a second Simplify click increments the branch index to simplified-2",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+      rendered = view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      branches =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.filter(&(&1.event_type == "simplify-request"))
+        |> Enum.map(& &1.branch)
+        |> Enum.sort()
+
+      assert branches == ["simplified-1", "simplified-2"]
+      assert rendered =~ "Simplify requested — simplified-2"
+    end
+
+    test "clicking Accept records a simplify-accept event on the pending branch",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+      rendered = view |> element(~s(button[phx-click="simplify-accept"])) |> render_click()
+
+      accept =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-accept"))
+
+      assert accept
+      assert accept.branch == "simplified-1"
+      assert accept.goal_id == @simplify_goal
+      assert accept.paper_slug == @simplify_slug
+
+      # Ack shown + the decision controls retract (pending cleared).
+      assert rendered =~ "Accepted simplified-1"
+      refute rendered =~ ~s(phx-click="simplify-accept")
+    end
+
+    test "clicking Reject records a simplify-reject event on the pending branch",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+      rendered = view |> element(~s(button[phx-click="simplify-reject"])) |> render_click()
+
+      reject =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-reject"))
+
+      assert reject
+      assert reject.branch == "simplified-1"
+      assert rendered =~ "Rejected simplified-1"
+      refute rendered =~ ~s(phx-click="simplify-reject")
+    end
+
+    test "a paper WITHOUT a goal_id renders NO Simplify button", %{conn: conn} do
+      slug = "2026-05-25-no-goal-simplify-paper"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          "slug" => slug,
+          "style" => "article",
+          "body_html" => "<p id=\"no-goal-simplify-body\">No goal, no simplify.</p>"
+        })
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ "No goal, no simplify."
+      refute html =~ ~s(id="paper-simplify")
+      refute html =~ ~s(phx-click="simplify-request")
+    end
+  end
 end
