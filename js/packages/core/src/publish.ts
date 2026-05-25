@@ -3,7 +3,7 @@
 
 import type { BarkparkClientConfig, MutateEnvelope, MutateResult } from './types'
 import { request } from './transport'
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 import { BarkparkValidationError } from './errors'
 
 /**

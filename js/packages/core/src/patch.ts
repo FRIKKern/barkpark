@@ -9,7 +9,7 @@ import type {
   PatchBuilder,
 } from './types'
 import { request, type TransportRequestOptions } from './transport'
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 import { BarkparkAPIError, BarkparkValidationError } from './errors'
 
 interface PatchState {

@@ -30,31 +30,6 @@ const DATASET_RE = /^[a-z0-9][a-z0-9_-]*$/
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/
 const PERSPECTIVES: ReadonlyArray<Perspective> = ['published', 'drafts', 'raw']
 
-/**
- * Path prefix that scopes every operation to a workspace + project.
- *
- * Returns `/w/${workspace}/p/${project}` only when BOTH `workspace` and
- * `project` are set on the config; otherwise returns `''` so callers fall back
- * to the flat `/v1/...` routes (back-compat). This is the single source the
- * per-operation path builders prepend — they must never compute the prefix
- * themselves.
- *
- * @example
- *   scopePrefix({ workspace: 'acme', project: 'blog', ... }) // '/w/acme/p/blog'
- *   scopePrefix({ ...flatConfig })                           // ''
- */
-export function scopePrefix(config: BarkparkClientConfig): string {
-  if (
-    typeof config.workspace === 'string' &&
-    config.workspace.length > 0 &&
-    typeof config.project === 'string' &&
-    config.project.length > 0
-  ) {
-    return `/w/${config.workspace}/p/${config.project}`
-  }
-  return ''
-}
-
 function validateConfig(config: BarkparkClientConfig): void {
   if (typeof config.projectUrl !== 'string' || config.projectUrl.length === 0) {
     throw new BarkparkValidationError('invalid projectUrl: must be absolute http(s) URL', {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createClient, scopePrefix } from '../src/client'
+import { createClient } from '../src/client'
+import { scopePrefix } from '../src/scope'
 import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 

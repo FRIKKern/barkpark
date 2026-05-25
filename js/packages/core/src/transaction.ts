@@ -10,7 +10,7 @@ import type {
   BarkparkDocument,
 } from './types'
 import { request } from './transport'
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 import { BarkparkValidationError } from './errors'
 
 type Mutation =

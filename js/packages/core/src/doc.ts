@@ -8,7 +8,7 @@
 // On 404, transport throws BarkparkNotFoundError; getDoc catches and returns { data: null }
 // so callers (client.doc) can treat missing as null per ADR-009 / w6.2-impl-spec §Status → class.
 
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 import { BarkparkNotFoundError } from './errors'
 import { request } from './transport'
 import type {

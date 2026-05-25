@@ -6,7 +6,8 @@
 // ADR-011 for the contracts backing each export.
 
 // --- Client factory + handshake --------------------------------------------
-export { createClient, scopePrefix } from './client'
+export { createClient } from './client'
+export { scopePrefix } from './scope'
 export { createHandshakeCache } from './handshake'
 
 // --- Operation factories (composable without createClient) -----------------

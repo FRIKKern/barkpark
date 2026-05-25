@@ -11,7 +11,7 @@
 // the body is flat: { perspective, documents: T[], count, limit, offset }.
 // We accept both.
 
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
 import type {

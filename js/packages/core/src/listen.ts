@@ -23,7 +23,7 @@ import {
   BarkparkNetworkError,
 } from './errors'
 import { detectEdgeRuntime } from './util/edge-detect'
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 
 export interface ListenOptions {
   perspective?: Perspective

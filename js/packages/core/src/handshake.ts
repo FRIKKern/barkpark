@@ -3,7 +3,7 @@
 
 import type { BarkparkClientConfig, MetaResponse } from './types'
 import { request } from './transport'
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 
 export interface HandshakeCache {
   /** Fetch + cache /v1/meta. Dedupes concurrent calls by projectUrl+dataset. */

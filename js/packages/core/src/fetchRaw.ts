@@ -2,7 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import type { BarkparkClientConfig } from './types'
-import { scopePrefix } from './client'
+import { scopePrefix } from './scope'
 import { request, type TransportMethod, type TransportRequestOptions } from './transport'
 import { BarkparkValidationError } from './errors'
 
