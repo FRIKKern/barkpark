@@ -14,6 +14,9 @@ defmodule Barkpark.Content.Document do
     field :rev, :string
     field :search_vector, :any, virtual: true
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 

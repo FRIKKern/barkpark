@@ -12,6 +12,9 @@ defmodule Barkpark.Media.MediaFile do
     field :size, :integer
     field :dataset, :string, default: "production"
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 

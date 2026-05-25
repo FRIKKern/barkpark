@@ -21,6 +21,9 @@ defmodule Barkpark.Search.Crystal do
     field :click_count, :integer, default: 0
     field :ctr, :float, default: 0.0
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 end

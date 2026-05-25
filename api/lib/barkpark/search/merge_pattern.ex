@@ -15,6 +15,9 @@ defmodule Barkpark.Search.MergePattern do
     field :transition_count, :integer, default: 0
     field :success_count, :integer, default: 0
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+    belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 end

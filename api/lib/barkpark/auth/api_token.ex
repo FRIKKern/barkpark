@@ -10,6 +10,8 @@ defmodule Barkpark.Auth.ApiToken do
     field :dataset, :string, default: "production"
     field :permissions, {:array, :string}, default: ["read"]
 
+    belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 
