@@ -943,6 +943,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   # `addable_block_valid?/1` below — module attributes cannot hold closures.
   @addable_block_types ~w(
     paragraph heading list callout code divider section
+    eyebrow byline ingress pullquote
     field-string field-slug field-text field-boolean field-datetime field-color field-select
     field-reference field-image
     composite arrayOf codelist localizedText
@@ -956,6 +957,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   defp addable_block_valid?(%{"type" => "code"}), do: true
   defp addable_block_valid?(%{"type" => "divider"}), do: true
   defp addable_block_valid?(%{"type" => "section", "blocks" => b}) when is_list(b), do: true
+  # article-chrome blocks (barkpark-54kh) — empty default shapes matching
+  # Render.compose_block/2 (flat text / items list / inline content array).
+  defp addable_block_valid?(%{"type" => "eyebrow", "text" => ""}), do: true
+  defp addable_block_valid?(%{"type" => "byline", "items" => []}), do: true
+  defp addable_block_valid?(%{"type" => "ingress", "content" => []}), do: true
+  defp addable_block_valid?(%{"type" => "pullquote", "content" => []}), do: true
   defp addable_block_valid?(%{"type" => "field-string", "value" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-slug", "value" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-text", "value" => ""}), do: true
@@ -1007,6 +1014,92 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
       assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
     end
+  end
+
+  # ── article-chrome blocks (barkpark-54kh): insert + edit round-trips ───────
+  # eyebrow / byline / ingress / pullquote RENDER (render.ex) but had no Beta
+  # editor path. These prove default_block/2 + the per-block edit form +
+  # build_block_patch/2 land the correct portable-doc shape through the SAME
+  # paper-edit-block → patch-block pipeline the callout/code forms use.
+
+  # Insert a fresh chrome block of `type` through the add-block UI (the SAME
+  # default_block/2 path the slash menu uses) and return its id. The editor must
+  # already be open (the form lives in the block editor).
+  defp insert_chrome_block(view, type) do
+    view
+    |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => type})
+    |> render_submit()
+
+    Content.paper_blocks(@slug, @dataset) |> List.last() |> Map.get("id")
+  end
+
+  defp submit_edit_form(view, id, params) do
+    view
+    |> element(~s([data-edit-block-id="#{id}"] form.bp-paper-edit-form))
+    |> render_submit(Map.put(params, "block_id", id))
+  end
+
+  defp block_after_edit(id), do: Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == id))
+
+  test "editing an eyebrow block writes a flat text string", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "eyebrow")
+
+    submit_edit_form(view, id, %{"text" => "Field notes"})
+
+    block = block_after_edit(id)
+    assert block["type"] == "eyebrow"
+    assert block["text"] == "Field notes"
+  end
+
+  test "editing a byline block splits ' · ' into an items list", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "byline")
+
+    submit_edit_form(view, id, %{"text" => "Ada Lovelace · Grace Hopper"})
+
+    block = block_after_edit(id)
+    assert block["type"] == "byline"
+    assert block["items"] == ["Ada Lovelace", "Grace Hopper"]
+  end
+
+  test "editing an ingress block wraps text in an inline content array", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "ingress")
+
+    submit_edit_form(view, id, %{"text" => "The lead paragraph."})
+
+    block = block_after_edit(id)
+    assert block["type"] == "ingress"
+    assert block["content"] == [%{"type" => "text", "value" => "The lead paragraph."}]
+  end
+
+  test "editing a pullquote block wraps text in an inline content array", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "pullquote")
+
+    submit_edit_form(view, id, %{"text" => "A quote worth pulling."})
+
+    block = block_after_edit(id)
+    assert block["type"] == "pullquote"
+    assert block["content"] == [%{"type" => "text", "value" => "A quote worth pulling."}]
+  end
+
+  test "a byline edit pre-fills its input from the items list joined by ' · '",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    open_editor(view)
+    id = insert_chrome_block(view, "byline")
+    submit_edit_form(view, id, %{"text" => "Ada · Grace"})
+
+    # Re-render the editor: the byline input is pre-filled with the re-joined
+    # items (round-trips through the edit form, not just the patch).
+    html = render(view)
+    assert html =~ ~s(value="Ada · Grace")
   end
 
   test "a freshly-added field block can be removed via its delete control (remove-block)",

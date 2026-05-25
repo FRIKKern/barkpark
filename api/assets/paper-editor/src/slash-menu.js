@@ -25,6 +25,11 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
 
+  { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
+  { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },
+  { group: "Article chrome", type: "ingress", label: "Ingress", hint: "¶", desc: "lead paragraph" },
+  { group: "Article chrome", type: "pullquote", label: "Pullquote", hint: "❝", desc: "highlighted quote" },
+
   { group: "Basic fields", type: "field-string", label: "String", hint: "T", desc: "single-line value" },
   { group: "Basic fields", type: "field-slug", label: "Slug", hint: "/", desc: "url-safe key" },
   { group: "Basic fields", type: "field-text", label: "Long text", hint: "¶", desc: "multi-line value" },
