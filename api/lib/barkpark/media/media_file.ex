@@ -20,7 +20,16 @@ defmodule Barkpark.Media.MediaFile do
 
   def changeset(media_file, attrs) do
     media_file
-    |> cast(attrs, [:filename, :original_name, :path, :mime_type, :size, :dataset])
+    |> cast(attrs, [
+      :filename,
+      :original_name,
+      :path,
+      :mime_type,
+      :size,
+      :dataset,
+      :workspace_id,
+      :project_id
+    ])
     |> validate_required([:filename, :original_name, :path])
     |> unique_constraint([:path, :dataset])
   end

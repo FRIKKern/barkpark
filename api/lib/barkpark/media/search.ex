@@ -12,6 +12,7 @@ defmodule Barkpark.Media.Search do
   """
 
   import Ecto.Query
+  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
   alias Barkpark.Content.Document
   alias Barkpark.Media.MediaFile
   alias Barkpark.Repo
@@ -64,6 +65,8 @@ defmodule Barkpark.Media.Search do
   def build_query(dataset, opts) when is_binary(dataset) do
     selections = Keyword.get(opts, :facet_selections, %{})
     opts = Keyword.put_new(opts, :dataset, dataset)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     MediaFile
     |> from(as: :media)
@@ -74,6 +77,7 @@ defmodule Barkpark.Media.Search do
           fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
     )
     |> where([m], m.dataset == ^dataset)
+    |> scope_to_workspace(workspace_id, project_id)
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
     |> maybe_filter_search(Keyword.get(opts, :q), dataset)

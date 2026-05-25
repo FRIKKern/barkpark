@@ -11,7 +11,7 @@ defmodule BarkparkWeb.MediaController do
   def upload(conn, %{"file" => upload}) do
     dataset = Map.get(conn.params, "dataset", "production")
 
-    case Media.upload(upload, dataset) do
+    case Media.upload(upload, dataset, scope_opts(conn)) do
       {:ok, file} ->
         conn
         |> put_status(:created)
@@ -37,7 +37,7 @@ defmodule BarkparkWeb.MediaController do
   def index(conn, params) do
     dataset = Map.get(params, "dataset", "production")
     mime_filter = Map.get(params, "type")
-    files = Media.list_files(dataset, mime_type: mime_filter)
+    files = Media.list_files(dataset, [mime_type: mime_filter] ++ scope_opts(conn))
 
     json(conn, %{
       files: Enum.map(files, &render_file(&1, conn)),
@@ -47,7 +47,7 @@ defmodule BarkparkWeb.MediaController do
 
   @doc "Get a single media file metadata."
   def show(conn, %{"id" => id}) do
-    with {:ok, file} <- Media.get_file(id) do
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)) do
       json(conn, render_file(file, conn))
     end
   end
@@ -138,6 +138,21 @@ defmodule BarkparkWeb.MediaController do
       json(conn, %{deleted: id})
     end
   end
+
+  # Tenancy scope opts pulled from the conn assigns set by ResolveWorkspace /
+  # ResolveProject (scoped routes) or AssignDefaultScope (flat back-compat
+  # routes). Mirrors BarkparkWeb.QueryController.scope_opts/1. When neither
+  # assign is set (a fresh DB before the Default backfill) the opts are empty
+  # and the call runs unscoped — Media.Scope helpers no-op on nil.
+  defp scope_opts(conn) do
+    []
+    |> put_scope(:workspace_id, conn.assigns[:current_workspace])
+    |> put_scope(:project_id, conn.assigns[:current_project])
+  end
+
+  defp put_scope(opts, _key, nil), do: opts
+  defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
+  defp put_scope(opts, _key, _other), do: opts
 
   defp render_file(file, conn) do
     dataset = Map.get(conn.params, "dataset", file.dataset)

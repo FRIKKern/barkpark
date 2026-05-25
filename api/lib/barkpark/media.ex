@@ -1,6 +1,7 @@
 defmodule Barkpark.Media do
   @moduledoc "Context for media file upload, storage, and retrieval."
 
+  import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Media.{Cdn, Events, MediaFile}
@@ -13,8 +14,15 @@ defmodule Barkpark.Media do
 
   def upload_dir, do: @upload_dir
 
-  @doc "Save an uploaded file to disk and create a DB record."
-  def upload(plug_upload, dataset) when is_binary(dataset) do
+  @doc """
+  Save an uploaded file to disk and create a DB record.
+
+  `opts` may carry tenancy scope stamped onto the new row on insert (mirrors
+  `Barkpark.Content` write scoping):
+    * `:workspace_id` — stamp the owning workspace (nil = unscoped / pre-tenancy).
+    * `:project_id`   — stamp the owning project (nil = workspace-wide).
+  """
+  def upload(plug_upload, dataset, opts \\ []) when is_binary(dataset) do
     %Plug.Upload{filename: original_name, path: temp_path, content_type: content_type} =
       plug_upload
 
@@ -38,17 +46,25 @@ defmodule Barkpark.Media do
     # Detect MIME type
     mime_type = content_type || MIME.from_path(original_name)
 
-    # Create DB record
-    result =
-      %MediaFile{}
-      |> MediaFile.changeset(%{
+    # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
+    # `opts` when the caller supplied a resolved scope — mirrors
+    # `Barkpark.Content` write scoping so a new blob is owned by the workspace
+    # it was uploaded into. Without scope opts the keys are absent and the row
+    # keeps its pre-tenancy (nil) shape.
+    attrs =
+      %{
         filename: filename,
         original_name: original_name,
         path: relative_path,
         mime_type: mime_type,
         size: size,
         dataset: dataset
-      })
+      }
+      |> put_scope_attrs(opts)
+
+    result =
+      %MediaFile{}
+      |> MediaFile.changeset(attrs)
       |> Repo.insert()
 
     case result do
@@ -93,7 +109,9 @@ defmodule Barkpark.Media do
         :collection,
         :tags,
         :visibility,
-        :sort
+        :sort,
+        :workspace_id,
+        :project_id
       ])
       |> Keyword.put_new(:limit, 50)
       |> Keyword.put_new(:offset, 0)
@@ -178,9 +196,26 @@ defmodule Barkpark.Media do
     end)
   end
 
-  @doc "Get a single media file by ID."
-  def get_file(id) do
-    case Repo.get(MediaFile, id) do
+  @doc """
+  Get a single media file by ID.
+
+  `opts` may carry tenancy scope (mirrors `Barkpark.Content.get_document`):
+    * `:workspace_id` — scope the read to a workspace (nil = unscoped).
+    * `:project_id`   — further narrow to a project (requires `:workspace_id`).
+
+  The workspace/project filter is applied via
+  `Barkpark.Content.Scope.scope_to_workspace/3`, so a get scoped to workspace B
+  returns `{:error, :not_found}` for a blob owned by workspace A.
+  """
+  def get_file(id, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    MediaFile
+    |> where([m], m.id == ^id)
+    |> Content.Scope.scope_to_workspace(workspace_id, project_id)
+    |> Repo.one()
+    |> case do
       nil -> {:error, :not_found}
       file -> {:ok, file}
     end
@@ -226,6 +261,18 @@ defmodule Barkpark.Media do
   def file_path(relative_path) do
     Path.join(@upload_dir, relative_path)
   end
+
+  # Stamp tenancy scope (:workspace_id / :project_id) onto write attrs when the
+  # caller supplied it via opts. Only non-nil keys are added, so an unscoped
+  # upload leaves the attr map untouched — mirrors `Barkpark.Content.put_scope_attrs`.
+  defp put_scope_attrs(attrs, opts) do
+    attrs
+    |> maybe_put_scope_attr(:workspace_id, Keyword.get(opts, :workspace_id))
+    |> maybe_put_scope_attr(:project_id, Keyword.get(opts, :project_id))
+  end
+
+  defp maybe_put_scope_attr(attrs, _key, nil), do: attrs
+  defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
 
   defp unique_filename(original_name) do
     ext = Path.extname(original_name)
