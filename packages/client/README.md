@@ -1,5 +1,14 @@
 # @barkpark/client
 
+> **⚠️ DEPRECATED — superseded by [`@barkpark/core`](../../js/packages/core).**
+>
+> This standalone client is no longer maintained and has no importers in the
+> monorepo. It predates the workspace/project hierarchy: its URL builders emit
+> only the flat `/v1/...` shape and were **not** updated for the
+> `/w/:workspace/p/:project/v1/...` routing the API now serves. Use
+> `@barkpark/core`'s `createClient`, which supports both scoped and flat URLs.
+> Nothing new should be built against this package.
+
 Framework-agnostic TypeScript client for the Barkpark v1 HTTP API.
 
 - Strongly typed envelope + errors

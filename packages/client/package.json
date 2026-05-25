@@ -1,7 +1,8 @@
 {
   "name": "@barkpark/client",
   "version": "0.0.1",
-  "description": "Framework-agnostic TypeScript client for the Barkpark v1 HTTP API",
+  "description": "[DEPRECATED] Framework-agnostic TypeScript client for the Barkpark v1 HTTP API — superseded by @barkpark/core",
+  "deprecated": "superseded by @barkpark/core",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
