@@ -12,6 +12,7 @@ defmodule Barkpark.Content.Document do
     field :status, :string, default: "draft"
     field :content, :map, default: %{}
     field :rev, :string
+    field :search_vector, :any, virtual: true
 
     timestamps(type: :utc_datetime_usec)
   end

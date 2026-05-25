@@ -10,7 +10,7 @@ defmodule Barkpark.Search.Intelligence do
   """
 
   import Ecto.Query
-  alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer}
+  alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer, Synonyms}
   alias Barkpark.Repo
 
   @popular_window_days 30
@@ -125,6 +125,7 @@ defmodule Barkpark.Search.Intelligence do
       end
 
     quality = quality_stats(surface, scope, period, period_start)
+    prev_counts = previous_period_search_counts(surface, scope, period, period_start)
 
     top_queries =
       from(c in Crystal,
@@ -136,7 +137,7 @@ defmodule Barkpark.Search.Intelligence do
         limit: 20
       )
       |> Repo.all()
-      |> Enum.map(&crystal_payload/1)
+      |> Enum.map(&crystal_payload(&1, prev_counts))
 
     merge_patterns =
       from(m in MergePattern,
@@ -157,6 +158,8 @@ defmodule Barkpark.Search.Intelligence do
       quality: quality,
       topQueries: top_queries,
       mergePatterns: merge_patterns,
+      synonymCandidates:
+        Synonyms.candidates(surface, scope, period: period, period_start: period_start),
       hints: improvement_hints(top_queries, merge_patterns, quality)
     }
   end
@@ -568,11 +571,32 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
-  defp crystal_payload(%Crystal{} = c) do
+  defp previous_period_search_counts(surface, scope, period, period_start) do
+    prev_start = previous_period_start(period, period_start)
+
+    from(c in Crystal,
+      where:
+        c.surface == ^surface and c.scope == ^scope and c.period == ^period and
+          c.period_start == ^prev_start and c.query_normalized != "__quality__",
+      select: {c.query_normalized, c.search_count}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp previous_period_start("week", start), do: Date.add(start, -7)
+  defp previous_period_start("day", start), do: Date.add(start, -1)
+  defp previous_period_start("month", start), do: Date.add(start, -30)
+  defp previous_period_start(_, start), do: Date.add(start, -7)
+
+  defp crystal_payload(%Crystal{} = c, prev_counts) do
+    prev = Map.get(prev_counts, c.query_normalized, 0)
+
     %{
       query: c.query_normalized,
       filterFingerprint: c.filter_fingerprint,
       searchCount: c.search_count,
+      searchCountDelta: c.search_count - prev,
       zeroHitCount: c.zero_hit_count,
       successCount: c.success_count,
       uniqueActors: c.unique_actors,

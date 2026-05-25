@@ -15,6 +15,7 @@ defmodule Barkpark.Media.Search do
   alias Barkpark.Content.Document
   alias Barkpark.Media.MediaFile
   alias Barkpark.Repo
+  alias Barkpark.Search.Synonyms
 
   @asset_type "mediaAsset"
   @facet_fields ~w(kind tags mimeType status processing collection visibility)
@@ -62,6 +63,7 @@ defmodule Barkpark.Media.Search do
   @spec build_query(String.t(), keyword()) :: Ecto.Query.t()
   def build_query(dataset, opts) when is_binary(dataset) do
     selections = Keyword.get(opts, :facet_selections, %{})
+    opts = Keyword.put_new(opts, :dataset, dataset)
 
     MediaFile
     |> from(as: :media)
@@ -74,7 +76,7 @@ defmodule Barkpark.Media.Search do
     |> where([m], m.dataset == ^dataset)
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
-    |> maybe_filter_search(Keyword.get(opts, :q))
+    |> maybe_filter_search(Keyword.get(opts, :q), dataset)
     |> maybe_filter_kind(Keyword.get(opts, :kind))
     |> maybe_filter_kind(selections["kind"])
     |> maybe_filter_status(Keyword.get(opts, :status))
@@ -335,7 +337,10 @@ defmodule Barkpark.Media.Search do
       "relevance" ->
         case Keyword.get(opts, :q) do
           q when is_binary(q) and q != "" ->
-            pattern = "%#{escape_like(q)}%"
+            dataset = Keyword.fetch!(opts, :dataset)
+            terms = Synonyms.search_terms("media", dataset, q)
+            terms = if terms == [], do: [q], else: terms
+            pattern = "%#{escape_like(hd(terms))}%"
 
             order_by(query, [m, d],
               desc:
@@ -368,26 +373,32 @@ defmodule Barkpark.Media.Search do
     end
   end
 
-  defp maybe_filter_search(query, nil), do: query
-  defp maybe_filter_search(query, ""), do: query
+  defp maybe_filter_search(query, nil, _dataset), do: query
+  defp maybe_filter_search(query, "", _dataset), do: query
 
-  defp maybe_filter_search(query, q) when is_binary(q) do
-    pattern = "%#{escape_like(q)}%"
-    text_search_where(query, pattern)
-  end
+  defp maybe_filter_search(query, q, dataset) when is_binary(q) and is_binary(dataset) do
+    terms = Synonyms.search_terms("media", dataset, q)
+    terms = if terms == [], do: [q], else: terms
+    patterns = Enum.map(terms, fn term -> "%#{escape_like(term)}%" end)
 
-  defp text_search_where(query, pattern) do
-    where(
-      query,
-      [m, d],
-      ilike(m.original_name, ^pattern) or ilike(m.filename, ^pattern) or
-        ilike(d.title, ^pattern) or
-        fragment(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?)",
-          d.content,
-          ^pattern
-        )
-    )
+    dynamic =
+      Enum.reduce(patterns, nil, fn pattern, dyn ->
+        clause =
+          dynamic(
+            [m, d],
+            ilike(m.original_name, ^pattern) or ilike(m.filename, ^pattern) or
+              ilike(d.title, ^pattern) or
+              fragment(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?)",
+                d.content,
+                ^pattern
+              )
+          )
+
+        if dyn, do: dynamic([m, d], ^dyn or ^clause), else: clause
+      end)
+
+    where(query, ^dynamic)
   end
 
   defp maybe_filter_kind(query, nil), do: query
