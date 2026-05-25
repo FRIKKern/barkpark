@@ -117,8 +117,8 @@ lib/
 schemas/
   post.ts author.ts tag.ts
 seeds/
-  seed.ts                      POST /v1/data/mutate with Bearer token
-barkpark.config.ts             createClient() wiring from env
+  seed.ts                      POST /w/<ws>/p/<proj>/v1/data/mutate with Bearer token
+barkpark.config.ts             createClient() wiring from env (projectUrl, workspace, project, dataset)
 docker-compose.yml             Phoenix API + Postgres
 next.config.mjs tsconfig.json tailwind.config.ts postcss.config.js
 ```

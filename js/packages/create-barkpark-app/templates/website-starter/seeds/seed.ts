@@ -7,6 +7,12 @@
 const API = process.env.BARKPARK_API_URL ?? 'http://localhost:4000'
 const DATASET = process.env.BARKPARK_DATASET ?? 'production'
 const TOKEN = process.env.BARKPARK_TOKEN ?? 'barkpark-dev-token'
+// Set BARKPARK_WORKSPACE / BARKPARK_PROJECT to the slugs you created in Studio.
+// When both are set, requests are scoped to /w/<workspace>/p/<project>/v1/...;
+// otherwise they fall back to the flat /v1/... routes.
+const WORKSPACE = process.env.BARKPARK_WORKSPACE ?? 'default'
+const PROJECT = process.env.BARKPARK_PROJECT ?? 'default'
+const SCOPE = WORKSPACE && PROJECT ? `/w/${WORKSPACE}/p/${PROJECT}` : ''
 
 interface Mutation {
   create?: Record<string, unknown>
@@ -15,7 +21,7 @@ interface Mutation {
 }
 
 async function mutate(mutations: Mutation[]): Promise<void> {
-  const res = await fetch(`${API}/v1/data/mutate/${DATASET}`, {
+  const res = await fetch(`${API}${SCOPE}/v1/data/mutate/${DATASET}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -39,7 +45,7 @@ function portableTextParagraph(text: string): Record<string, unknown> {
 }
 
 async function main(): Promise<void> {
-  console.log(`Seeding ${API} (dataset: ${DATASET})...`)
+  console.log(`Seeding ${API}${SCOPE} (dataset: ${DATASET})...`)
 
   await mutate([
     {
