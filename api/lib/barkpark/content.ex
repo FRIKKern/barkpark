@@ -422,12 +422,12 @@ defmodule Barkpark.Content do
 
       {doc | nil, is_draft :: boolean, has_published :: boolean}
   """
-  @spec fetch_doc_with_draft(String.t(), String.t(), String.t()) ::
+  @spec fetch_doc_with_draft(String.t(), String.t(), String.t(), keyword()) ::
           {Document.t() | nil, boolean(), boolean()}
-  def fetch_doc_with_draft(type, doc_id, dataset) do
+  def fetch_doc_with_draft(type, doc_id, dataset, opts \\ []) do
     pub_id = published_id(doc_id)
-    draft_r = get_document(draft_id(pub_id), type, dataset)
-    pub_r = get_document(pub_id, type, dataset)
+    draft_r = get_document(draft_id(pub_id), type, dataset, opts)
+    pub_r = get_document(pub_id, type, dataset, opts)
 
     {doc, is_draft} =
       case draft_r do
@@ -2031,8 +2031,8 @@ defmodule Barkpark.Content do
   Fetch a paper (a type-"paper" document) by slug (and dataset). Returns the
   `%Document{}` or `nil`. Papers are always published (no draft prefix).
   """
-  def get_paper(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
-    case get_document(slug, @paper_type, dataset) do
+  def get_paper(slug, dataset \\ @paper_default_dataset, opts \\ []) when is_binary(slug) do
+    case get_document(slug, @paper_type, dataset, opts) do
       {:ok, doc} -> doc
       {:error, :not_found} -> nil
     end
@@ -2328,6 +2328,16 @@ defmodule Barkpark.Content do
       "content" => content,
       "rev" => generate_rev()
     }
+
+    # Stamp tenancy scope on the paper row. An ingest/Studio caller threads no
+    # scope opts here, so this falls back to the seeded Default workspace/project
+    # (same contract as create_document/4) — without it a NULL-workspace paper is
+    # invisible to the now-scoped Studio desk (B8/qucz). An update preserves the
+    # existing row's scope: put_scope_attrs only writes non-nil keys.
+    doc_attrs =
+      if existing,
+        do: doc_attrs,
+        else: put_scope_attrs(doc_attrs, [])
 
     changeset =
       Document.changeset(existing || %Document{}, doc_attrs)

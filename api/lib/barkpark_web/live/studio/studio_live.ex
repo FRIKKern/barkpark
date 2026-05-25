@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Presence
+  alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
 
   # `raw/1` lives in Phoenix.HTML; the :live_view macro imports
@@ -1821,7 +1822,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # consistently — every Studio-originated write tags itself
   # `source: :studio` and threads the socket's user_id when present.
   defp hook_opts(socket) do
-    [source: :studio, user_id: socket.assigns[:user_id]]
+    [source: :studio, user_id: socket.assigns[:user_id]] ++ ScopeHelpers.scope_opts(socket)
   end
 
   # ── Content preview side-pane (Goal barkpark-G1, task s3) ──────────
@@ -2582,7 +2583,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp rebuild_panes(socket) do
     {panes, editor} =
       PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path,
-        desk: socket.assigns[:nav_desk]
+        desk: socket.assigns[:nav_desk],
+        scope: ScopeHelpers.scope_opts(socket)
       )
 
     new_schema = editor && editor[:schema]
