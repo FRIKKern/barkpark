@@ -4,9 +4,14 @@ defmodule BarkparkWeb.LiveAuthTest do
 
   The Phase 7 WI6 admin LV was protected by the `:admin` `on_mount`
   hook, so non-admin operators could not reach the publish console.
-  WI5 introduces an `:ops` permission that grants `/admin/bokbasen`
+  WI5 introduces an `:ops` permission that grants `/admin/onixedit/bokbasen`
   access without exposing the full admin surface (settings reveal,
   schema CRUD). Backwards-compat: existing `admin` tokens still pass.
+
+  The Bokbasen LV moved from the host namespace (`/admin/bokbasen`) into
+  the OnixEdit plugin namespace (`/admin/onixedit/bokbasen`, Goal G3.s4);
+  the legacy path is now an auth-blind 301 redirect (LegacyRedirectController),
+  so the `:ops` on_mount gate is asserted against the real LV path.
 
   Drives the gate through the real router (no direct on_mount call) so
   the assertions also pin the `live_session :admin_ops` wiring.
@@ -32,32 +37,32 @@ defmodule BarkparkWeb.LiveAuthTest do
     {:ok, conn: conn}
   end
 
-  describe "/admin/bokbasen — :ops on_mount hook" do
+  describe "/admin/onixedit/bokbasen — :ops on_mount hook" do
     test "grants access to a token with the ops permission", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @ops_token})
-      assert {:ok, _view, html} = live(conn, "/admin/bokbasen")
+      assert {:ok, _view, html} = live(conn, "/admin/onixedit/bokbasen")
       assert html =~ "Bokbasen Submissions"
     end
 
     test "grants access to an admin token (backwards-compat)", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      assert {:ok, _view, html} = live(conn, "/admin/bokbasen")
+      assert {:ok, _view, html} = live(conn, "/admin/onixedit/bokbasen")
       assert html =~ "Bokbasen Submissions"
     end
 
     test "redirects a token without ops or admin", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @reader_token})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/bokbasen")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/bokbasen")
     end
 
     test "redirects when no session token is present", %{conn: conn} do
       conn = init_test_session(conn, %{})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/bokbasen")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/bokbasen")
     end
 
     test "redirects when the session token is unknown to the DB", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => "no-such-token-anywhere"})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/bokbasen")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/bokbasen")
     end
   end
 
