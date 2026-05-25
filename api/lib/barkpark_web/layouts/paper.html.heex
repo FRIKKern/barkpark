@@ -201,6 +201,119 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.78rem;
     }
+
+    /* P6.U3 diff selection markers — shift-clicking two rail rows marks them
+       as the A / B endpoints of a diff. RailDiffSelect toggles these classes;
+       they read as a subtle accent outline distinct from the plain
+       `is-selected` highlight (which still fires on a non-shift click). */
+    .bp-paper-article .bp-goal-rail-event.is-diff-a,
+    .bp-paper-article .bp-goal-rail-event.is-diff-b {
+      box-shadow: inset 3px 0 0 #2f7a4d;
+      background: rgba(47, 122, 77, 0.1);
+    }
+
+    /* P6.U3 diff modal — opens when two rail nodes are shift-clicked. A
+       full-viewport overlay (backdrop + centered panel) over the article. The
+       diff body reuses the article palette: a parchment panel, monospace diff
+       lines, restrained add/del/ctx coloring. Scoped under `.bp-paper-article`
+       like the rest; the modal markup is a child of <main>. */
+    .bp-paper-article .bp-diff-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .bp-paper-article .bp-diff-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(20, 18, 14, 0.55);
+    }
+    .bp-paper-article .bp-diff-panel {
+      position: relative;
+      z-index: 1;
+      width: min(760px, 100%);
+      max-height: 80vh;
+      overflow: auto;
+      background: #fdfcf8;
+      border: 1px solid rgba(26, 26, 26, 0.12);
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(20, 18, 14, 0.3);
+      padding: 1.25rem 1.5rem 1.5rem;
+    }
+    .bp-paper-article .bp-diff-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin: 0 0 1rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+    }
+    .bp-paper-article .bp-diff-title {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #3a3a3a;
+    }
+    .bp-paper-article .bp-diff-from,
+    .bp-paper-article .bp-diff-to {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #a23925;
+    }
+    .bp-paper-article .bp-diff-arrow {
+      margin: 0 0.4rem;
+      color: #8a8a8a;
+    }
+    .bp-paper-article .bp-diff-close {
+      flex: 0 0 auto;
+      border: none;
+      background: none;
+      font-size: 1.4rem;
+      line-height: 1;
+      color: #6a6a6a;
+      cursor: pointer;
+      padding: 0 0.25rem;
+      border-radius: 4px;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .bp-paper-article .bp-diff-close:hover {
+      background: rgba(162, 57, 37, 0.08);
+      color: #a23925;
+    }
+
+    /* The diff body itself — TextDiff.format_diff_html/1 emits
+       <pre class="bp-diff"> of one <span class="bp-diff-line bp-diff-{…}">
+       per line. Monospace, line-per-row, add greenish / del reddish / ctx
+       muted — restrained so it reads as an article aside, not a terminal. */
+    .bp-paper-article .bp-diff {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bp-paper-article .bp-diff-line {
+      display: block;
+      padding: 0 0.5rem;
+      border-radius: 2px;
+    }
+    .bp-paper-article .bp-diff-add {
+      background: rgba(47, 122, 77, 0.12);
+      color: #1f5c39;
+    }
+    .bp-paper-article .bp-diff-del {
+      background: rgba(162, 57, 37, 0.1);
+      color: #8a2d1c;
+    }
+    .bp-paper-article .bp-diff-ctx {
+      color: #6a6a6a;
+    }
   </style>
 </head>
 <body>
@@ -243,6 +356,55 @@
         },
         mounted() { this.runMermaid(); },
         updated() { this.runMermaid(); }
+      },
+
+      // P6.U3 RailDiffSelect: shift-click two rail event rows to open a
+      // line-diff of their payloads. A SHIFT+click marks a row (up to two:
+      // .is-diff-a then .is-diff-b); the second shift+click pushes
+      // "open-diff" {from, to} and clears the selection. A PLAIN click is left
+      // entirely alone so the row's own phx-click="rail-select" still fires —
+      // we only act (and only preventDefault) when the shift key is held.
+      // Guarded for the no-document/SSR case the file already assumes.
+      RailDiffSelect: {
+        mounted() {
+          if (typeof document === "undefined" || !this.el) return;
+          this.selected = [];
+          this.onClick = (e) => {
+            if (!e.shiftKey) return; // plain click → rail-select unaffected
+            let row = e.target.closest("[phx-value-event-id]");
+            if (!row || !this.el.contains(row)) return;
+            let id = row.getAttribute("phx-value-event-id");
+            if (!id) return;
+            // Shift+click is a diff-pick, not a select: swallow the event so it
+            // doesn't also trigger the row's rail-select.
+            e.preventDefault();
+            e.stopPropagation();
+            if (this.selected.length === 0) {
+              this.clearMarks();
+              row.classList.add("is-diff-a");
+              this.selected = [id];
+            } else if (this.selected.length === 1) {
+              if (id === this.selected[0]) return; // same row twice → ignore
+              row.classList.add("is-diff-b");
+              this.pushEvent("open-diff", { from: this.selected[0], to: id });
+              this.selected = [];
+              this.clearMarks();
+            }
+          };
+          // Capture phase so we intercept the shift+click before the row's own
+          // phx-click handler runs.
+          this.el.addEventListener("click", this.onClick, true);
+        },
+        clearMarks() {
+          this.el.querySelectorAll(".is-diff-a, .is-diff-b").forEach((n) => {
+            n.classList.remove("is-diff-a", "is-diff-b");
+          });
+        },
+        destroyed() {
+          if (this.el && this.onClick) {
+            this.el.removeEventListener("click", this.onClick, true);
+          }
+        }
       }
     };
 

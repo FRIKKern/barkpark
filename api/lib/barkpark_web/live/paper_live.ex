@@ -43,6 +43,7 @@ defmodule BarkparkWeb.PaperLive do
 
   alias Barkpark.Content
   alias Barkpark.Papers.Events
+  alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
 
   @impl true
@@ -71,6 +72,13 @@ defmodule BarkparkWeb.PaperLive do
       |> assign(:rail_events, rail_events)
       |> assign(:rail_gitgraph, build_gitgraph(rail_events))
       |> assign(:selected_event_id, nil)
+      # P6.U3 diff modal: shift-clicking two rail nodes opens a line-diff of
+      # their event payloads. Closed at mount; the modal renders only when
+      # `:diff_open` flips true (via the "open-diff" event below).
+      |> assign(:diff_open, false)
+      |> assign(:diff_html, nil)
+      |> assign(:diff_from, nil)
+      |> assign(:diff_to, nil)
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
@@ -133,6 +141,36 @@ defmodule BarkparkWeb.PaperLive do
   def handle_event("rail-select", %{"event-id" => id}, socket) do
     # v1: selection highlight only. Article-swap / diff land in U3.
     {:noreply, assign(socket, :selected_event_id, id)}
+  end
+
+  # ── P6.U3 diff modal ──────────────────────────────────────────────────────
+
+  # Shift-clicking two rail nodes pushes "open-diff" with the two event ids.
+  # Load both events; if both exist, line-diff their `payload_html` and open
+  # the modal. A missing event is a no-op (no crash) with a gentle flash — the
+  # rail row could have been for an event that has since been pruned.
+  def handle_event("open-diff", %{"from" => from_id, "to" => to_id}, socket) do
+    from = Events.get_event(from_id)
+    to = Events.get_event(to_id)
+
+    if from && to do
+      chunks = TextDiff.diff_lines(from.payload_html, to.payload_html)
+
+      socket =
+        socket
+        |> assign(:diff_open, true)
+        |> assign(:diff_html, TextDiff.format_diff_html(chunks))
+        |> assign(:diff_from, from.event_type)
+        |> assign(:diff_to, to.event_type)
+
+      {:noreply, socket}
+    else
+      {:noreply, put_flash(socket, :error, "One of the selected events no longer exists.")}
+    end
+  end
+
+  def handle_event("close-diff", _params, socket) do
+    {:noreply, assign(socket, :diff_open, false)}
   end
 
   # Pull the streaming rev / cached HTML / blocks out of the paper document's
@@ -335,9 +373,12 @@ defmodule BarkparkWeb.PaperLive do
         <div id="goal-path-graph" phx-hook="PaperMermaid">
           <pre class="mermaid">{@rail_gitgraph}</pre>
         </div>
-        <%!-- Clickable event list — doubles as the no-Mermaid fallback. Each
-              row selects (highlight only in v1); article-swap/diff is U3. --%>
-        <ol class="bp-goal-rail-events">
+        <%!-- Clickable event list — doubles as the no-Mermaid fallback. A
+              PLAIN click selects (highlight only, via "rail-select"). A
+              SHIFT+click is intercepted by the RailDiffSelect hook to pick two
+              rows and push "open-diff" — the U3 diff modal below renders the
+              line-diff of the two events' payloads. --%>
+        <ol class="bp-goal-rail-events" id="goal-path-events" phx-hook="RailDiffSelect">
           <li
             :for={{event, idx} <- Enum.with_index(@rail_events, 1)}
             class={["bp-goal-rail-event", event.id == @selected_event_id && "is-selected"]}
@@ -349,6 +390,32 @@ defmodule BarkparkWeb.PaperLive do
           </li>
         </ol>
       </aside>
+
+      <%!-- P6.U3 diff modal. Rendered ONLY when two rail nodes were shift-
+            clicked (open-diff). The overlay + close button both fire
+            "close-diff"; clicks inside the panel are stopped so the panel
+            stays open. `{raw(@diff_html)}` is the TextDiff output — every line
+            is HTML-escaped at format time, so the untrusted payload_html is
+            shown as text, never executed. --%>
+      <div :if={@diff_open} id="bp-diff-modal" class="bp-diff-overlay">
+        <%!-- Backdrop is its own element behind the panel; clicking it closes
+              the modal. The panel sits above it and does NOT carry the close
+              click, so clicks inside the panel never bubble to a close. --%>
+        <div class="bp-diff-backdrop" phx-click="close-diff" aria-hidden="true"></div>
+        <div class="bp-diff-panel" role="dialog" aria-modal="true">
+          <div class="bp-diff-head">
+            <h2 class="bp-diff-title">
+              <span class="bp-diff-from">{@diff_from}</span>
+              <span class="bp-diff-arrow">→</span>
+              <span class="bp-diff-to">{@diff_to}</span>
+            </h2>
+            <button type="button" class="bp-diff-close" phx-click="close-diff" aria-label="Close diff">
+              ×
+            </button>
+          </div>
+          {raw(@diff_html)}
+        </div>
+      </div>
     </main>
     """
   end

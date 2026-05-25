@@ -364,4 +364,86 @@ defmodule BarkparkWeb.PaperLiveTest do
       refute html =~ "commit id:"
     end
   end
+
+  describe "P6.U3: diff modal" do
+    @diff_slug "2026-05-25-diff-modal-demo"
+    @diff_goal "g-diff"
+
+    # Seed a paper with a goal_id plus two events whose payload_html differs by
+    # one line — so the diff has a stable context line, one removed, one added.
+    defp seed_diff_paper do
+      {:ok, paper} =
+        Content.upsert_paper(%{
+          "slug" => @diff_slug,
+          "style" => "article",
+          "body_html" => "<p id=\"diff-body\">Diff demo body.</p>"
+        })
+
+      {:ok, a} =
+        Events.create_event(%{
+          "goal_id" => @diff_goal,
+          "paper_slug" => @diff_slug,
+          "event_type" => "plan-written",
+          "payload_html" => "shared line\nORIGINAL middle\ntail line"
+        })
+
+      {:ok, b} =
+        Events.create_event(%{
+          "goal_id" => @diff_goal,
+          "paper_slug" => @diff_slug,
+          "event_type" => "plan-grilled",
+          "payload_html" => "shared line\nREVISED middle\ntail line"
+        })
+
+      {paper, a, b}
+    end
+
+    test "open-diff renders the modal with added/removed lines; close-diff hides it",
+         %{conn: conn} do
+      {_paper, a, b} = seed_diff_paper()
+
+      {:ok, view, html} = live(conn, "/papers/#{@diff_slug}")
+
+      # Modal is NOT present before any diff is opened.
+      refute html =~ ~s(id="bp-diff-modal")
+
+      # Push the open-diff hook event with the two seeded event ids.
+      rendered = render_hook(view, "open-diff", %{"from" => a.id, "to" => b.id})
+
+      # The modal renders, titled with both event types...
+      assert rendered =~ ~s(id="bp-diff-modal")
+      assert rendered =~ "plan-written"
+      assert rendered =~ "plan-grilled"
+
+      # ...and shows the diff body: shared context line, removed + added line.
+      assert rendered =~ ~s(class="bp-diff")
+      assert rendered =~ "shared line"
+      assert rendered =~ ~s(bp-diff-del)
+      assert rendered =~ "ORIGINAL middle"
+      assert rendered =~ ~s(bp-diff-add)
+      assert rendered =~ "REVISED middle"
+
+      # Close it via the close button → modal gone.
+      closed =
+        view
+        |> element(~s(button.bp-diff-close))
+        |> render_click()
+
+      refute closed =~ ~s(id="bp-diff-modal")
+    end
+
+    test "open-diff with a missing event is a no-op (no crash, no modal)",
+         %{conn: conn} do
+      {_paper, a, _b} = seed_diff_paper()
+
+      {:ok, view, _html} = live(conn, "/papers/#{@diff_slug}")
+
+      missing = Ecto.UUID.generate()
+      rendered = render_hook(view, "open-diff", %{"from" => a.id, "to" => missing})
+
+      # No modal, and the LiveView is still alive (the missing event was guarded).
+      refute rendered =~ ~s(id="bp-diff-modal")
+      assert Process.alive?(view.pid)
+    end
+  end
 end
