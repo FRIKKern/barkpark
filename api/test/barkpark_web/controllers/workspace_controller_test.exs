@@ -126,4 +126,161 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
     end
   end
+
+  describe "POST /api/workspaces" do
+    test "201 — creates workspace, owner membership, Default project + production dataset",
+         %{conn: conn, raw_token: raw} do
+      slug = "fresh-ws-#{System.unique_integer([:positive])}"
+
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces", %{"name" => "Fresh WS", "slug" => slug})
+
+      assert resp.status == 201
+      body = Jason.decode!(resp.resp_body)
+      assert body["workspace"]["slug"] == slug
+      assert body["workspace"]["name"] == "Fresh WS"
+
+      ws = Tenancy.get_workspace_by_slug(slug)
+      assert ws
+
+      # Creator is an admin-tier (owner) member.
+      membership = TenancyAuth.membership(body_token_id(raw), ws.id)
+      assert membership
+      assert membership.role == "owner"
+
+      # Default project + production dataset bootstrapped + immediately usable.
+      project = Tenancy.get_project(slug, "default")
+      assert project
+      assert project.name == "Default Project"
+      assert Tenancy.get_dataset(project, "production")
+    end
+
+    test "201 — derives the slug from the name when slug omitted", %{conn: conn, raw_token: raw} do
+      name = "My Cool Space #{System.unique_integer([:positive])}"
+
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces", %{"name" => name})
+
+      assert resp.status == 201
+      slug = Jason.decode!(resp.resp_body)["workspace"]["slug"]
+      assert slug =~ ~r/^[a-z0-9][a-z0-9-]*$/
+      assert Tenancy.get_workspace_by_slug(slug)
+    end
+
+    test "422 — duplicate slug (clean conflict)", %{conn: conn, raw_token: raw} do
+      slug = "dup-ws-#{System.unique_integer([:positive])}"
+
+      assert conn |> authed(raw) |> post("/api/workspaces", %{"name" => "A", "slug" => slug})
+             |> Map.get(:status) == 201
+
+      resp = conn |> authed(raw) |> post("/api/workspaces", %{"name" => "B", "slug" => slug})
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "validation_failed"
+    end
+
+    test "422 — missing name", %{conn: conn, raw_token: raw} do
+      resp = conn |> authed(raw) |> post("/api/workspaces", %{})
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "validation_failed"
+    end
+
+    test "unauthenticated → 401", %{conn: conn} do
+      resp = post(conn, "/api/workspaces", %{"name" => "Nope"})
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
+  describe "POST /api/workspaces/:workspace_slug/projects" do
+    test "201 for a member — creates project + production dataset", %{
+      conn: conn,
+      raw_token: raw,
+      member_ws: member_ws
+    } do
+      slug = "new-proj-#{System.unique_integer([:positive])}"
+
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces/#{member_ws.slug}/projects", %{
+          "name" => "New Proj",
+          "slug" => slug
+        })
+
+      assert resp.status == 201
+      assert Jason.decode!(resp.resp_body)["project"]["slug"] == slug
+
+      project = Tenancy.get_project(member_ws.slug, slug)
+      assert project
+      assert Tenancy.get_dataset(project, "production")
+    end
+
+    test "404 for a NON-member workspace (no existence leak)", %{
+      conn: conn,
+      raw_token: raw,
+      other_ws: other_ws
+    } do
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces/#{other_ws.slug}/projects", %{"name" => "Sneaky"})
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+      # The leak guard: no project was created in the workspace we don't own.
+      refute Tenancy.get_project(other_ws.slug, "sneaky")
+    end
+
+    test "404 for an unknown workspace slug", %{conn: conn, raw_token: raw} do
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces/no-such-ws/projects", %{"name" => "X"})
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "422 for a duplicate project slug within the workspace", %{
+      conn: conn,
+      raw_token: raw,
+      member_ws: member_ws
+    } do
+      slug = "dup-proj-#{System.unique_integer([:positive])}"
+
+      assert conn
+             |> authed(raw)
+             |> post("/api/workspaces/#{member_ws.slug}/projects", %{"name" => "A", "slug" => slug})
+             |> Map.get(:status) == 201
+
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces/#{member_ws.slug}/projects", %{"name" => "B", "slug" => slug})
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "validation_failed"
+    end
+
+    test "unauthenticated → 401", %{conn: conn, member_ws: member_ws} do
+      resp = post(conn, "/api/workspaces/#{member_ws.slug}/projects", %{"name" => "X"})
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
+  # Resolve the api_token id for the raw bearer used in setup, so membership
+  # assertions don't depend on the controller echoing the token.
+  defp body_token_id(raw) do
+    {:ok, token} = Auth.verify_token(raw)
+    token.id
+  end
 end

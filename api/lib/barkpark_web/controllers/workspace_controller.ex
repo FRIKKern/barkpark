@@ -29,6 +29,70 @@ defmodule BarkparkWeb.WorkspaceController do
     json(conn, %{workspaces: Enum.map(workspaces, &render_workspace/1)})
   end
 
+  @doc """
+  POST /api/workspaces — create a Workspace owned by the bearer token.
+
+  Any authenticated token may create a workspace; the creator is bound as an
+  `"owner"` Membership in the same transaction, and a Default Project +
+  "production" Dataset are bootstrapped so the workspace is immediately usable.
+  201 + the created workspace; 422 (via FallbackController) on an invalid /
+  duplicate slug.
+  """
+  def create(conn, params) do
+    token = conn.assigns[:api_token]
+    attrs = workspace_attrs(params)
+
+    with {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, token) do
+      conn
+      |> put_status(:created)
+      |> json(%{workspace: render_workspace(workspace)})
+    end
+  end
+
+  @doc """
+  POST /api/workspaces/:workspace_slug/projects — create a Project (+ its
+  "production" Dataset) under a workspace the caller is a MEMBER of.
+
+  A non-member (and an unknown slug) both collapse to 404 — the same no-leak
+  convention as the `projects` LIST action. 201 + the created project on
+  success; 422 on an invalid / duplicate slug.
+  """
+  def create_project(conn, %{"workspace_slug" => slug} = params) do
+    token = conn.assigns[:api_token]
+
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.member?(token, workspace.id),
+         {:ok, project} <-
+           Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
+      conn
+      |> put_status(:created)
+      |> json(%{project: render_project(project)})
+    else
+      # A changeset error flows to the FallbackController (422). Anything else
+      # (unknown slug / non-member) collapses to 404 — no existence leak.
+      {:error, %Ecto.Changeset{}} = err -> err
+      _ -> {:error, :not_found}
+    end
+  end
+
+  # Build the workspace create-attrs from the request body — only :name and an
+  # optional :slug are honoured (slug derived from name when absent in the
+  # context). Other body keys are ignored.
+  defp workspace_attrs(params) do
+    %{}
+    |> maybe_put(:name, params["name"])
+    |> maybe_put(:slug, params["slug"])
+  end
+
+  defp project_attrs(params) do
+    %{}
+    |> maybe_put(:name, params["name"])
+    |> maybe_put(:slug, params["slug"])
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
   def projects(conn, %{"workspace_slug" => slug}) do
     token = conn.assigns[:api_token]
 

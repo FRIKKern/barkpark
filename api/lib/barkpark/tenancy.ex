@@ -11,8 +11,12 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @default_slug "default"
+  @default_project_slug "default"
+  @default_project_name "Default Project"
+  @production_dataset_slug "production"
 
   @doc "Returns the seeded Default Workspace, or nil if the backfill hasn't run."
   @spec get_default_workspace() :: Workspace.t() | nil
@@ -144,6 +148,116 @@ defmodule Barkpark.Tenancy do
     |> Project.changeset(Map.put(attrs, :workspace_id, ws_id))
     |> Repo.insert()
   end
+
+  @doc """
+  Bootstrap a brand-new, immediately-usable Workspace for the creating token,
+  atomically (single `Repo.transaction`):
+
+    1. the Workspace itself,
+    2. a Membership binding the api_token as `"owner"`,
+    3. a Default Project, and
+    4. a "production" Dataset under that project.
+
+  `attrs` carries `:name` (required) and an optional `:slug` — when the slug is
+  absent it is derived from the name (`slugify/1`). `owner_token` is the
+  authenticated `%ApiToken{}` (or its id) calling POST /api/workspaces.
+
+  Returns `{:ok, workspace}` with the freshly-created Default Project
+  preloaded under `workspace.projects` (and the Dataset under that project's
+  `:datasets`) so the controller can render them without a reload, or
+  `{:error, changeset}`. A duplicate workspace slug surfaces as a clean
+  changeset error on the unique constraint.
+  """
+  @spec create_workspace_with_owner(map(), ApiToken.t() | binary()) ::
+          {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
+  def create_workspace_with_owner(attrs, %ApiToken{id: principal_id}),
+    do: create_workspace_with_owner(attrs, principal_id)
+
+  def create_workspace_with_owner(attrs, principal_id) when is_binary(principal_id) do
+    ws_attrs = put_derived_slug(attrs)
+
+    Repo.transaction(fn ->
+      with {:ok, workspace} <- create_workspace(ws_attrs),
+           {:ok, _membership} <-
+             TenancyAuth.create_membership(workspace.id, principal_id, "owner"),
+           {:ok, project} <-
+             create_project(workspace, %{
+               slug: @default_project_slug,
+               name: @default_project_name
+             }),
+           {:ok, dataset} <-
+             create_dataset(project, %{
+               slug: @production_dataset_slug,
+               name: @production_dataset_slug
+             }) do
+        _ = dataset
+        %{workspace | projects: [project]}
+      else
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  @doc """
+  Create a Project under `workspace` PLUS its "production" Dataset, atomically.
+  `attrs` carries `:name` (required) and an optional `:slug` (derived from the
+  name when absent). Returns `{:ok, project}`, or `{:error, changeset}`
+  (project slug collides within the workspace → clean unique-constraint error).
+  The "production" Dataset is created in the same transaction.
+  """
+  @spec create_project_with_dataset(Workspace.t() | binary(), map()) ::
+          {:ok, Project.t()} | {:error, Ecto.Changeset.t()}
+  def create_project_with_dataset(%Workspace{id: ws_id}, attrs),
+    do: create_project_with_dataset(ws_id, attrs)
+
+  def create_project_with_dataset(ws_id, attrs) when is_binary(ws_id) do
+    project_attrs = put_derived_slug(attrs)
+
+    Repo.transaction(fn ->
+      with {:ok, project} <- create_project(ws_id, project_attrs),
+           {:ok, _dataset} <-
+             create_dataset(project, %{
+               slug: @production_dataset_slug,
+               name: @production_dataset_slug
+             }) do
+        project
+      else
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  # Ensure `attrs` carries a :slug, deriving it from :name when absent/blank.
+  # Leaves an explicit slug untouched (the changeset validates its format).
+  defp put_derived_slug(attrs) do
+    case slug_value(attrs) do
+      slug when is_binary(slug) and slug != "" ->
+        attrs
+
+      _ ->
+        Map.put(attrs, slug_key(attrs), slugify(name_value(attrs)))
+    end
+  end
+
+  defp slug_value(attrs), do: Map.get(attrs, :slug) || Map.get(attrs, "slug")
+  defp name_value(attrs), do: Map.get(attrs, :name) || Map.get(attrs, "name") || ""
+  defp slug_key(attrs), do: if(Map.has_key?(attrs, "name"), do: "slug", else: :slug)
+
+  @doc """
+  Slugify a name into a workspace/project slug: downcase, collapse any run of
+  non-alphanumerics to a single hyphen, trim leading/trailing hyphens. Returns
+  `""` for an all-symbol/blank input — the changeset's `validate_required` +
+  `validate_format` then surface a clean error.
+  """
+  @spec slugify(String.t()) :: String.t()
+  def slugify(name) when is_binary(name) do
+    name
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
+  end
+
+  def slugify(_), do: ""
 
   # --- Datasets (Wave 2) ----------------------------------------------------
   #

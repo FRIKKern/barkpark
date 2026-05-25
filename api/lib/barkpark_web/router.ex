@@ -683,6 +683,12 @@ defmodule BarkparkWeb.Router do
 
     get "/workspaces", WorkspaceController, :index
     get "/workspaces/:workspace_slug/projects", WorkspaceController, :projects
+
+    # Create surface: any authenticated token may create a workspace (becomes
+    # its owner-member, + Default project + production dataset); project
+    # creation is member-gated (non-member → 404, no existence leak).
+    post "/workspaces", WorkspaceController, :create
+    post "/workspaces/:workspace_slug/projects", WorkspaceController, :create_project
   end
 
   # ── Legacy compat ──────────────────────────────────────────────────────
