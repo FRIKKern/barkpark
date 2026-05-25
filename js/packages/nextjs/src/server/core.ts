@@ -47,6 +47,31 @@ function resolveScopePrefix(cfg: BarkparkServerConfig): string {
   return scopePrefix(resolved)
 }
 
+/**
+ * Build the cache-tag namespace prefix for this server config. Mirrors how
+ * {@link resolveScopePrefix} resolves workspace/project (server-config value
+ * takes precedence over the client's). When BOTH a workspace and a project
+ * resolve, returns the SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>` prefix —
+ * the exact grammar the s15 revalidate ingestion parses — so generated tags
+ * round-trip with webhook-driven invalidation. Otherwise returns the LEGACY
+ * flat `bp:ds:<dataset>` prefix (back-compat).
+ */
+function resolveTagPrefix(cfg: BarkparkServerConfig): string {
+  const clientConfig = cfg.client.config
+  const dataset = clientConfig.dataset
+  const workspace = cfg.workspace ?? clientConfig.workspace
+  const project = cfg.project ?? clientConfig.project
+  if (
+    typeof workspace === 'string' &&
+    workspace.length > 0 &&
+    typeof project === 'string' &&
+    project.length > 0
+  ) {
+    return `bp:ws:${workspace}:p:${project}:ds:${dataset}`
+  }
+  return `bp:ds:${dataset}`
+}
+
 function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspective: string | undefined): string {
   const { client } = cfg
   const baseUrl = client.config.projectUrl.replace(/\/+$/, '')
@@ -129,21 +154,24 @@ export async function barkparkFetchInner<T = unknown>(
   const dm = await draftMode()
   const isDraft = dm.isEnabled === true
 
-  const dataset = cfg.client.config.dataset
-  const dsTag = `bp:ds:${dataset}:_all`
+  // Namespace prefix: SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>` when
+  // workspace+project are configured (matches the s15 revalidate ingest
+  // grammar), else LEGACY flat `bp:ds:<dataset>` (back-compat).
+  const prefix = resolveTagPrefix(cfg)
+  const dsTag = `${prefix}:_all`
   const userTags = opts.tags ?? []
   const knownSyncTags = opts.syncTags ?? []
 
-  // Canonical auto-tags so `revalidateTag('bp:ds:<ds>:doc:<id>')` and
+  // Canonical auto-tags so `revalidateTag('<prefix>:doc:<id>')` and
   // `:type:<type>` fired by the webhook bridge actually match this fetch.
   // Order: [dsTag, typeTag?, docTag?, ...userTags, ...knownSyncTags]
   // — userTags trail the canonical set so caller-provided tags still win
   // ordering for user-visible assertions.
   const autoTags: string[] = []
   if (typeof opts.type === 'string' && opts.type.length > 0) {
-    autoTags.push(`bp:ds:${dataset}:type:${opts.type}`)
+    autoTags.push(`${prefix}:type:${opts.type}`)
     if (typeof opts.id === 'string' && opts.id.length > 0) {
-      autoTags.push(`bp:ds:${dataset}:doc:${opts.id}`)
+      autoTags.push(`${prefix}:doc:${opts.id}`)
     }
   }
 

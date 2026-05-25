@@ -29,6 +29,12 @@ defmodule Barkpark.Content.SchemaDefinition do
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 
+    # W2 additive seam. `:dataset_entity` — the legacy `dataset` STRING field
+    # still owns `:dataset` (dual presence). FK column is `dataset_id`.
+    belongs_to :dataset_entity, Barkpark.Tenancy.Dataset,
+      foreign_key: :dataset_id,
+      type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -52,11 +58,18 @@ defmodule Barkpark.Content.SchemaDefinition do
       :layout,
       :prefill,
       :workspace_id,
-      :project_id
+      :project_id,
+      :dataset_id
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
-    |> unique_constraint([:name, :dataset])
+    # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
+    # can hold the same schema NAME in distinct datasets (e.g. "post" in
+    # production + test), so the dataset_id leaf keeps them from colliding. The
+    # `dataset` STRING stays as a mirror.
+    |> unique_constraint([:name, :dataset_id],
+      name: :schema_definitions_name_dataset_id_index
+    )
   end
 
   # ─────────────────────────────────────────────────────────────────────────────

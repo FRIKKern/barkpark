@@ -107,7 +107,8 @@ defmodule Barkpark.Content do
 
     base =
       Document
-      |> where([d], d.type == ^type and d.dataset == ^dataset)
+      |> where([d], d.type == ^type)
+      |> scope_to_dataset(dataset, opts)
       |> scope_to_workspace(workspace_id, project_id)
       |> apply_filter_map(filter_map)
 
@@ -287,7 +288,8 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     Document
-    |> where([d], d.doc_id == ^doc_id and d.type == ^type and d.dataset == ^dataset)
+    |> where([d], d.doc_id == ^doc_id and d.type == ^type)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace(workspace_id, project_id)
     |> Repo.one()
     |> case do
@@ -1406,12 +1408,41 @@ defmodule Barkpark.Content do
   # changeset only casts these keys when present, so an existing row's
   # workspace_id/project_id is never nulled by an unscoped update. New rows
   # created under a resolved scope are stamped on insert from that scope.
+  #
+  # W2 dual-write: alongside the workspace/project scope, resolve the row's
+  # `dataset` STRING → its `dataset_id` (within the resolved project) and stamp
+  # BOTH. The string stays the safety-net mirror; `dataset_id` is the new
+  # authoritative scoping key. Degrades to no `dataset_id` key (string-only)
+  # when the project or dataset string can't be resolved — never crashes a
+  # write, and the changeset leaves an existing row's dataset_id untouched.
   defp put_scope_attrs(attrs, opts) do
     {ws_id, project_id} = resolve_write_scope(attrs, opts)
+    dataset_id = resolve_dataset_id_for_write(attrs, project_id)
 
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
+    |> maybe_put_scope_attr("dataset_id", dataset_id)
+  end
+
+  # Resolve the `dataset_id` to stamp on a write from the row's `dataset` STRING
+  # + the resolved `project_id`. Returns the id, or nil when either is missing
+  # (the caller then stamps nothing — keeping the string-only mirror). Uses
+  # get_or_create_dataset so a brand-new dataset string lands a row on first
+  # write rather than silently dropping the id.
+  defp resolve_dataset_id_for_write(attrs, project_id) do
+    dataset = Map.get(attrs, "dataset") || Map.get(attrs, :dataset)
+
+    cond do
+      is_nil(project_id) or not is_binary(dataset) ->
+        nil
+
+      true ->
+        case Barkpark.Tenancy.get_or_create_dataset(project_id, dataset) do
+          {:ok, %Barkpark.Tenancy.Dataset{id: id}} -> id
+          _ -> nil
+        end
+    end
   end
 
   # Resolve the {workspace_id, project_id} to stamp on a write. Explicit scope
@@ -1442,6 +1473,57 @@ defmodule Barkpark.Content do
     Map.has_key?(attrs, "workspace_id") or Map.has_key?(attrs, :workspace_id)
   end
 
+  # W2 read-scope: resolve the incoming `dataset` STRING → its `dataset_id`
+  # within the read's project scope (opts `:project_id`, else the seeded Default
+  # project). Returns the id, or nil when no matching dataset row exists — in
+  # which case the caller keeps the legacy `dataset` STRING filter (back-compat:
+  # a read against a never-written dataset string returns no rows either way).
+  # Read-only (Repo.get_by) — never creates a dataset on a read path.
+  defp resolve_read_dataset_id(dataset, opts) when is_binary(dataset) do
+    project_id = Keyword.get(opts, :project_id) || read_default_project_id()
+
+    case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
+      %Barkpark.Tenancy.Dataset{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp resolve_read_dataset_id(_dataset, _opts), do: nil
+
+  defp read_default_project_id do
+    case Barkpark.Tenancy.get_default_project() do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  # Apply the W2 dataset scope to a read query. When the dataset string resolves
+  # to a `dataset_id`, filter authoritatively by `x.dataset_id`. Otherwise fall
+  # back to the legacy `x.dataset` STRING filter (the mirror still works for
+  # datasets that predate a row or live outside the resolved project).
+  defp scope_to_dataset(query, dataset, opts) do
+    case resolve_read_dataset_id(dataset, opts) do
+      id when is_binary(id) -> where(query, [x], x.dataset_id == ^id)
+      _ -> where(query, [x], x.dataset == ^dataset)
+    end
+  end
+
+  # Schema-specific dataset scope. Like scope_to_dataset, but ALSO matches rows
+  # whose `dataset_id` is NULL but whose `dataset` STRING equals the requested
+  # one — legacy/pre-tenancy schema fixtures that the W2 dual-write never
+  # stamped. The dataset STRING and dataset_id are 1:1 within a project, so the
+  # OR never crosses datasets; get_schema/3 orders dataset_id-first + limit 1 to
+  # resolve the (rare) backfilled-vs-fixture overlap deterministically.
+  defp scope_schema_to_dataset(query, dataset, opts) do
+    case resolve_read_dataset_id(dataset, opts) do
+      id when is_binary(id) ->
+        where(query, [s], s.dataset_id == ^id or (is_nil(s.dataset_id) and s.dataset == ^dataset))
+
+      _ ->
+        where(query, [s], s.dataset == ^dataset)
+    end
+  end
+
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs
   defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
 
@@ -1449,10 +1531,15 @@ defmodule Barkpark.Content do
   # onto write attrs — used by the draft↔published transitions (publish /
   # unpublish) so the moved row keeps the scope of the row it was derived from.
   # A nil source field is skipped, leaving the destination as-is.
-  defp inherit_scope_attrs(attrs, %Document{workspace_id: ws_id, project_id: project_id}) do
+  defp inherit_scope_attrs(attrs, %Document{
+         workspace_id: ws_id,
+         project_id: project_id,
+         dataset_id: dataset_id
+       }) do
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
+    |> maybe_put_scope_attr("dataset_id", dataset_id)
   end
 
   defp inherit_scope_attrs(attrs, _), do: attrs
@@ -1504,10 +1591,13 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     SchemaDefinition
-    |> where([s], s.dataset == ^dataset)
+    |> scope_schema_to_dataset(dataset, opts)
     |> scope_to_workspace(workspace_id, project_id)
-    |> order_by([s], asc: s.name)
+    # dataset_id-bearing rows before legacy nil-dataset_id fixtures, then dedup
+    # by name — one catalog entry per type even on a backfill/fixture overlap.
+    |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
     |> Repo.all()
+    |> Enum.uniq_by(& &1.name)
   end
 
   def get_schema(name, dataset, opts \\ []) do
@@ -1515,8 +1605,14 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     SchemaDefinition
-    |> where([s], s.name == ^name and s.dataset == ^dataset)
+    |> where([s], s.name == ^name)
+    |> scope_schema_to_dataset(dataset, opts)
     |> scope_to_workspace(workspace_id, project_id)
+    # A backfilled row (dataset_id set) and a legacy nil-dataset_id fixture of
+    # the same name can both match the dataset-OR-string scope. Prefer the
+    # backfilled (dataset_id-bearing) row and take exactly one — deterministic.
+    |> order_by([s], asc_nulls_last: s.dataset_id)
+    |> limit(1)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}

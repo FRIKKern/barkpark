@@ -35,15 +35,18 @@ defmodule Barkpark.Search.Synonyms do
       {:error, invalid_changeset("from and to are required")}
     else
       %Synonym{}
-      |> Ecto.Changeset.change(%{
-        surface: surface,
-        scope: scope,
-        from_query: from_q,
-        to_query: to_q,
-        kind: kind,
-        source: source,
-        enabled: Map.get(attrs, "enabled", true)
-      })
+      |> Ecto.Changeset.change(
+        %{
+          surface: surface,
+          scope: scope,
+          from_query: from_q,
+          to_query: to_q,
+          kind: kind,
+          source: source,
+          enabled: Map.get(attrs, "enabled", true)
+        }
+        |> put_dataset_id(scope)
+      )
       |> Repo.insert()
       |> case do
         {:ok, row} -> {:ok, synonym_payload(row)}
@@ -307,5 +310,17 @@ defmodule Barkpark.Search.Synonyms do
     %Synonym{}
     |> Ecto.Changeset.change()
     |> Ecto.Changeset.add_error(:from_query, message)
+  end
+
+  # W2 dual-write: resolve the synonym's `scope` STRING → its `dataset_id`
+  # (within the seeded Default project — the search surface is single-project
+  # today) and stamp it alongside `scope`. Keeps the new `(surface, dataset_id,
+  # ...)` unique index meaningful; the `scope` string stays as the mirror.
+  # No-ops (leaves attrs unchanged) when the dataset can't be resolved.
+  defp put_dataset_id(attrs, scope) when is_binary(scope) do
+    case Barkpark.Tenancy.default_project_dataset_id(scope) do
+      id when is_binary(id) -> Map.put(attrs, :dataset_id, id)
+      _ -> attrs
+    end
   end
 end

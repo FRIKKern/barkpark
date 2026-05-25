@@ -73,6 +73,7 @@ function makeClient(opts: {
   publishResult?: MutateResult
   unpublishResult?: MutateResult
   commitError?: unknown
+  scope?: { workspace?: string; project?: string }
 } = {}): MockClient {
   const calls: MockClient['calls'] = {
     txCreate: [],
@@ -123,6 +124,7 @@ function makeClient(opts: {
       projectUrl: 'http://localhost:4000',
       dataset: 'production',
       apiVersion: '2026-04-01',
+      ...(opts.scope ?? {}),
     },
     withConfig() { return client as unknown as BarkparkClient },
     async doc() { return null },
@@ -237,6 +239,52 @@ describe('defineActions', () => {
         actions.patchDoc('p1', { set: { title: 'x' }, ifMatch: 'rev-old' }),
       ).rejects.toBe(conflict)
       expect(revalidateTag).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('cache-tag namespace (scoped vs flat)', () => {
+    it('flat bp:ds:* tags when workspace+project NOT configured (back-compat)', async () => {
+      const { client } = makeClient()
+      const actions = defineActions({ client })
+      await actions.createDoc({ _type: 'post' })
+
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+      const calls = revalidateTag.mock.calls.map((c) => String(c[0]))
+      for (const t of calls) expect(t).not.toContain('bp:ws:')
+    })
+
+    it('scoped bp:ws:<ws>:p:<project>:ds:* tags when client.config has workspace+project', async () => {
+      const { client } = makeClient({ scope: { workspace: 'acme', project: 'blog' } })
+      const actions = defineActions({ client })
+      await actions.createDoc({ _type: 'post' })
+
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:type:post')
+      // Generated grammar MUST match what the s15 revalidate ingest parses.
+      const calls = revalidateTag.mock.calls.map((c) => String(c[0]))
+      for (const t of calls)
+        expect(t).toMatch(/^bp:ws:acme:p:blog:ds:production:(?:doc:.+|type:.+)$/)
+    })
+
+    it('config workspace/project override the client config values', async () => {
+      const { client } = makeClient({ scope: { workspace: 'acme', project: 'blog' } })
+      const actions = defineActions({ client, workspace: 'ws2', project: 'pr2' })
+      await actions.publish('p1', 'post')
+
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ws:ws2:p:pr2:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ws:ws2:p:pr2:ds:production:type:post')
+    })
+
+    it('flat tags when only workspace resolves (both required, mirrors scopePrefix)', async () => {
+      const { client } = makeClient({ scope: { workspace: 'acme' } })
+      const actions = defineActions({ client })
+      await actions.unpublish('p1', 'post')
+
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+      const calls = revalidateTag.mock.calls.map((c) => String(c[0]))
+      for (const t of calls) expect(t).not.toContain('bp:ws:')
     })
   })
 

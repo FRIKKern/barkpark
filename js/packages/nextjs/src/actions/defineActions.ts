@@ -22,6 +22,15 @@ export interface DefineActionsConfig {
   schemas?: Record<string, ActionSchema>
   /** Dataset used when formatting revalidate tags. Defaults to the client's dataset. */
   dataset?: string
+  /**
+   * Workspace slug used when formatting SCOPED revalidate tags. Defaults to the
+   * client's `config.workspace`. When BOTH workspace + project resolve, fanned-out
+   * tags use the scoped `bp:ws:<ws>:p:<project>:ds:<dataset>:…` shape; otherwise
+   * the legacy flat `bp:ds:<dataset>:…` shape (back-compat).
+   */
+  workspace?: string
+  /** Project slug used when formatting SCOPED revalidate tags. Defaults to the client's `config.project`. See {@link workspace}. */
+  project?: string
 }
 
 /** Payload for {@link BarkparkActions.patchDoc}. */
@@ -52,11 +61,32 @@ export interface BarkparkActions {
 
 // Phoenix does not (yet) surface syncTags in the mutate envelope (api/lib/barkpark_web/
 // controllers/mutate_controller.ex returns only `{transactionId, results}`). We format
-// the canonical `bp:ds:<dataset>:doc:<id>` / `:type:<type>` tags client-side — when the
+// the canonical `<prefix>:doc:<id>` / `:type:<type>` tags client-side — when the
 // server starts emitting syncTags on the envelope, swap this to read them verbatim.
-function fanOutTags(dataset: string, id: string, type: string): void {
-  revalidateTag(`bp:ds:${dataset}:doc:${id}`)
-  revalidateTag(`bp:ds:${dataset}:type:${type}`)
+//
+// `prefix` is SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>` when workspace+project
+// are configured (matches the s15 revalidate ingest grammar), else LEGACY flat
+// `bp:ds:<dataset>` (back-compat).
+function fanOutTags(prefix: string, id: string, type: string): void {
+  revalidateTag(`${prefix}:doc:${id}`)
+  revalidateTag(`${prefix}:type:${type}`)
+}
+
+/**
+ * Build the cache-tag namespace prefix. Mirrors `scopePrefix`'s
+ * both-required rule: SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>` only when a
+ * workspace AND a project resolve, else LEGACY flat `bp:ds:<dataset>`.
+ */
+function buildTagPrefix(dataset: string, workspace?: string, project?: string): string {
+  if (
+    typeof workspace === 'string' &&
+    workspace.length > 0 &&
+    typeof project === 'string' &&
+    project.length > 0
+  ) {
+    return `bp:ws:${workspace}:p:${project}:ds:${dataset}`
+  }
+  return `bp:ds:${dataset}`
 }
 
 /**
@@ -90,6 +120,9 @@ function fanOutTags(dataset: string, id: string, type: string): void {
 export function defineActions(config: DefineActionsConfig): BarkparkActions {
   const { client, schemas } = config
   const dataset = config.dataset ?? client.config.dataset
+  const workspace = config.workspace ?? client.config.workspace
+  const project = config.project ?? client.config.project
+  const prefix = buildTagPrefix(dataset, workspace, project)
 
   return {
     async createDoc(input) {
@@ -102,7 +135,7 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       if (result === undefined) {
         throw new Error('createDoc: mutate envelope contained no results')
       }
-      fanOutTags(dataset, result.id, input._type)
+      fanOutTags(prefix, result.id, input._type)
       return result
     },
 
@@ -113,19 +146,19 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       }
       const commitOpts = patch.ifMatch !== undefined ? { ifMatch: patch.ifMatch } : undefined
       const result = await builder.commit(commitOpts)
-      fanOutTags(dataset, result.id, result.document._type)
+      fanOutTags(prefix, result.id, result.document._type)
       return result
     },
 
     async publish(id, type) {
       const result = await client.publish(id, type)
-      fanOutTags(dataset, result.id, type)
+      fanOutTags(prefix, result.id, type)
       return result
     },
 
     async unpublish(id, type) {
       const result = await client.unpublish(id, type)
-      fanOutTags(dataset, result.id, type)
+      fanOutTags(prefix, result.id, type)
       return result
     },
   }

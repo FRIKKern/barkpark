@@ -17,6 +17,12 @@ defmodule Barkpark.Content.Document do
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 
+    # W2 additive seam. Association is `:dataset_entity` because the legacy
+    # `dataset` STRING field still owns the `:dataset` name (dual presence).
+    belongs_to :dataset_entity, Barkpark.Tenancy.Dataset,
+      foreign_key: :dataset_id,
+      type: :binary_id
+
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -31,10 +37,17 @@ defmodule Barkpark.Content.Document do
       :content,
       :rev,
       :workspace_id,
-      :project_id
+      :project_id,
+      :dataset_id
     ])
     |> validate_required([:doc_id, :type])
     |> validate_inclusion(:status, ~w(draft published archived active planning completed))
-    |> unique_constraint([:doc_id, :type, :dataset])
+    # W2 uniqueness flip: the row's identity leaf is now (doc_id, type,
+    # dataset_id). The `dataset` STRING constraint is dropped at the DB level
+    # (see migration 20260527134000); naming the flipped index here keeps the
+    # changeset error mapped to the right constraint.
+    |> unique_constraint([:doc_id, :type, :dataset_id],
+      name: :documents_doc_id_type_dataset_id_index
+    )
   end
 end

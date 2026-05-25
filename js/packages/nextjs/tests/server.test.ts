@@ -222,6 +222,61 @@ describe('barkparkFetch — workspace/project scoping', () => {
   })
 })
 
+describe('barkparkFetch — cache-tag namespace (scoped vs flat)', () => {
+  function nextTags(init: unknown): string[] {
+    const i = init as RequestInit & { next?: { tags?: string[] } }
+    return i.next?.tags ?? []
+  }
+
+  it('flat bp:ds:* tags when workspace+project NOT configured (back-compat)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
+    )
+    await barkparkFetch(makeCfg(), { type: 'post', id: 'p1' })
+    const tags = nextTags(fetchSpy.mock.calls[0]![1])
+    expect(tags).toContain('bp:ds:production:_all')
+    expect(tags).toContain('bp:ds:production:type:post')
+    expect(tags).toContain('bp:ds:production:doc:p1')
+    for (const t of tags) expect(t).not.toContain('bp:ws:')
+  })
+
+  it('scoped bp:ws:<ws>:p:<project>:ds:* tags when workspace+project set on server config', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
+    )
+    await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), { type: 'post', id: 'p1' })
+    const tags = nextTags(fetchSpy.mock.calls[0]![1])
+    expect(tags).toContain('bp:ws:acme:p:blog:ds:production:_all')
+    expect(tags).toContain('bp:ws:acme:p:blog:ds:production:type:post')
+    expect(tags).toContain('bp:ws:acme:p:blog:ds:production:doc:p1')
+    // The generated grammar MUST match what the s15 revalidate ingest parses.
+    for (const t of tags) {
+      if (t.startsWith('bp:'))
+        expect(t).toMatch(/^bp:ws:acme:p:blog:ds:production:(?:_all|type:.+|doc:.+)$/)
+    }
+  })
+
+  it('scoped tags inherited from client.config when server config omits scope', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(makeCfg(undefined, { workspace: 'acme', project: 'blog' }), { type: 'post' })
+    const tags = nextTags(fetchSpy.mock.calls[0]![1])
+    expect(tags).toContain('bp:ws:acme:p:blog:ds:production:_all')
+    expect(tags).toContain('bp:ws:acme:p:blog:ds:production:type:post')
+  })
+
+  it('flat tags when only workspace is set (both required, mirrors scopePrefix)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(makeCfg({ workspace: 'acme' }), { type: 'post' })
+    const tags = nextTags(fetchSpy.mock.calls[0]![1])
+    expect(tags).toContain('bp:ds:production:_all')
+    for (const t of tags) expect(t).not.toContain('bp:ws:')
+  })
+})
+
 describe('createBarkparkServer + defineLive', () => {
   it('createBarkparkServer returns barkparkFetch + defineLive (no Live components — those live on the client entry)', () => {
     const out = createBarkparkServer(makeCfg())

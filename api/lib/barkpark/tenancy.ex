@@ -9,7 +9,7 @@ defmodule Barkpark.Tenancy do
   import Ecto.Query, warn: false
 
   alias Barkpark.Repo
-  alias Barkpark.Tenancy.{Workspace, Project}
+  alias Barkpark.Tenancy.{Workspace, Project, Dataset}
 
   @default_slug "default"
 
@@ -119,4 +119,104 @@ defmodule Barkpark.Tenancy do
     |> Project.changeset(Map.put(attrs, :workspace_id, ws_id))
     |> Repo.insert()
   end
+
+  # --- Datasets (Wave 2) ----------------------------------------------------
+  #
+  # A Dataset lives under a Project; it promotes the plain `dataset` string to
+  # a row. Additive seam only — the string stays authoritative for now.
+
+  @doc "Fetch a Dataset by its id, or nil. `nil` id returns nil."
+  @spec get_dataset_by_id(binary() | nil) :: Dataset.t() | nil
+  def get_dataset_by_id(nil), do: nil
+  def get_dataset_by_id(id) when is_binary(id), do: Repo.get(Dataset, id)
+
+  @doc """
+  Fetch a Dataset by its Project (struct or id) + slug. Returns nil when the
+  Project has no Dataset with that slug.
+  """
+  @spec get_dataset(Project.t() | binary(), String.t()) :: Dataset.t() | nil
+  def get_dataset(%Project{id: project_id}, slug), do: get_dataset(project_id, slug)
+
+  def get_dataset(project_id, slug) when is_binary(project_id) and is_binary(slug) do
+    Repo.get_by(Dataset, project_id: project_id, slug: slug)
+  end
+
+  @doc "List all Datasets under a Project (accepts a struct or a project id), ordered by slug."
+  @spec list_datasets(Project.t() | binary()) :: [Dataset.t()]
+  def list_datasets(%Project{id: project_id}), do: list_datasets(project_id)
+
+  def list_datasets(project_id) when is_binary(project_id) do
+    Repo.all(from d in Dataset, where: d.project_id == ^project_id, order_by: d.slug)
+  end
+
+  @doc """
+  Create a Dataset under the given Project (struct or id). The project_id in
+  `attrs` is overridden by the resolved project.
+  """
+  @spec create_dataset(Project.t() | binary(), map()) ::
+          {:ok, Dataset.t()} | {:error, Ecto.Changeset.t()}
+  def create_dataset(%Project{id: project_id}, attrs), do: create_dataset(project_id, attrs)
+
+  def create_dataset(project_id, attrs) when is_binary(project_id) do
+    %Dataset{}
+    |> Dataset.changeset(Map.put(attrs, :project_id, project_id))
+    |> Repo.insert()
+  end
+
+  @doc """
+  Fetch the Dataset with `slug` under `project` (struct or id), creating it
+  (slug = name = slug) when absent. Returns `{:ok, dataset}` or
+  `{:error, changeset}`. Tolerates a concurrent insert by re-fetching on the
+  unique-constraint conflict.
+  """
+  @spec get_or_create_dataset(Project.t() | binary(), String.t()) ::
+          {:ok, Dataset.t()} | {:error, Ecto.Changeset.t()}
+  def get_or_create_dataset(%Project{id: project_id}, slug),
+    do: get_or_create_dataset(project_id, slug)
+
+  def get_or_create_dataset(project_id, slug)
+      when is_binary(project_id) and is_binary(slug) do
+    case get_dataset(project_id, slug) do
+      %Dataset{} = dataset ->
+        {:ok, dataset}
+
+      nil ->
+        case create_dataset(project_id, %{slug: slug, name: slug}) do
+          {:ok, dataset} ->
+            {:ok, dataset}
+
+          {:error, changeset} ->
+            # Lost a race — the row now exists; re-fetch rather than surface
+            # the unique-constraint error.
+            case get_dataset(project_id, slug) do
+              %Dataset{} = dataset -> {:ok, dataset}
+              nil -> {:error, changeset}
+            end
+        end
+    end
+  end
+
+  @doc """
+  Resolve a bare dataset/scope STRING → its `dataset_id` under the seeded
+  Default project, get-or-creating the dataset row. Returns the id, or nil when
+  the Default project isn't seeded yet (fresh sandbox). Used by single-project
+  surfaces (search-intel synonyms / crystals / merge-patterns) whose only scope
+  key is the legacy STRING — the W2 dual-write threads the resolved id alongside
+  it so the flipped `(surface, dataset_id, …)` uniques stay meaningful.
+  """
+  @spec default_project_dataset_id(String.t()) :: binary() | nil
+  def default_project_dataset_id(slug) when is_binary(slug) do
+    case get_default_project() do
+      %Project{id: project_id} ->
+        case get_or_create_dataset(project_id, slug) do
+          {:ok, %Dataset{id: id}} -> id
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def default_project_dataset_id(_), do: nil
 end

@@ -23,6 +23,7 @@ defmodule Barkpark.Search.Crystal do
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+    belongs_to :dataset, Barkpark.Tenancy.Dataset, type: :binary_id
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end

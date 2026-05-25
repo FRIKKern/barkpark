@@ -14,6 +14,12 @@ defmodule Barkpark.Content.MutationEvent do
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 
+    # W2 additive seam. `:dataset_entity` — the legacy `dataset` STRING field
+    # still owns `:dataset` (dual presence). FK column is `dataset_id`.
+    belongs_to :dataset_entity, Barkpark.Tenancy.Dataset,
+      foreign_key: :dataset_id,
+      type: :binary_id
+
     field :inserted_at, :utc_datetime_usec
   end
 end
