@@ -72,6 +72,17 @@ function makeSpyConfig(
   return { config, calls }
 }
 
+/** Spy config scoped to a workspace + project — exercises scopePrefix(). */
+function makeScopedSpyConfig(
+  response: MutateEnvelope = { transactionId: 'tx_spy', results: [] },
+): { config: BarkparkClientConfig; calls: SpyCall[] } {
+  const { config, calls } = makeSpyConfig(response)
+  return {
+    config: { ...config, workspace: 'acme', project: 'blog' },
+    calls,
+  }
+}
+
 describe('transaction', () => {
   it('commits a single create mutation and returns MutateEnvelope', async () => {
     const { config, calls } = makeSpyConfig({
@@ -176,6 +187,52 @@ describe('transaction', () => {
     expect(() =>
       createTransaction(config).patch('p1', (b) => b.set({ _rev: 'r1' } as any)),
     ).toThrow(BarkparkValidationError)
+  })
+})
+
+describe('scoped write paths (workspace + project)', () => {
+  it('transaction.commit hits flat /v1/... without workspace/project', async () => {
+    const { config, calls } = makeSpyConfig()
+    await createTransaction(config).create({ _type: 'post', title: 'x' }).commit()
+    expect(calls[0]!.url).toBe('http://spy.local/v1/data/mutate/production')
+  })
+
+  it('transaction.commit hits /w/.../p/.../v1/... when scoped', async () => {
+    const { config, calls } = makeScopedSpyConfig()
+    await createTransaction(config).create({ _type: 'post', title: 'x' }).commit()
+    expect(calls[0]!.url).toBe(
+      'http://spy.local/w/acme/p/blog/v1/data/mutate/production',
+    )
+  })
+
+  it('publishDoc / unpublishDoc honor the scope prefix', async () => {
+    const okResult: MutateEnvelope = {
+      transactionId: 'tx_scope',
+      results: [
+        {
+          id: 'p1',
+          operation: 'publish',
+          document: {
+            _id: 'p1',
+            _type: 'post',
+            _rev: 'r1',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: '2026-04-12T09:11:20Z',
+            _updatedAt: '2026-04-12T09:11:20Z',
+          },
+        },
+      ],
+    }
+    const scoped = makeScopedSpyConfig(okResult)
+    await publishDoc(scoped.config, 'p1', 'post')
+    expect(scoped.calls[0]!.url).toBe(
+      'http://spy.local/w/acme/p/blog/v1/data/mutate/production',
+    )
+
+    const flat = makeSpyConfig(okResult)
+    await unpublishDoc(flat.config, 'p1', 'post')
+    expect(flat.calls[0]!.url).toBe('http://spy.local/v1/data/mutate/production')
   })
 })
 

@@ -10,6 +10,7 @@ import type {
   BarkparkDocument,
 } from './types'
 import { request } from './transport'
+import { scopePrefix } from './client'
 import { BarkparkValidationError } from './errors'
 
 type Mutation =
@@ -162,7 +163,7 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       }
       const { data } = await request<MutateEnvelope>(
         config,
-        `/v1/data/mutate/${config.dataset}`,
+        `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
         {
           method: 'POST',
           body: { mutations },

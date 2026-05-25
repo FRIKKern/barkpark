@@ -3,6 +3,7 @@
 
 import type { BarkparkClientConfig, MutateEnvelope, MutateResult } from './types'
 import { request } from './transport'
+import { scopePrefix } from './client'
 import { BarkparkValidationError } from './errors'
 
 /**
@@ -24,7 +25,7 @@ export async function publishDoc(
   }
   const { data } = await request<MutateEnvelope>(
     config,
-    `/v1/data/mutate/${config.dataset}`,
+    `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
     {
       method: 'POST',
       body: { mutations: [{ publish: { id, type } }] },
@@ -58,7 +59,7 @@ export async function unpublishDoc(
   }
   const { data } = await request<MutateEnvelope>(
     config,
-    `/v1/data/mutate/${config.dataset}`,
+    `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
     {
       method: 'POST',
       body: { mutations: [{ unpublish: { id, type } }] },
