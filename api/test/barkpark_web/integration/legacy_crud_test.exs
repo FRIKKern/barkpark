@@ -31,6 +31,8 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.{Auth, Content}
 
   @token "barkpark-dev-token"
@@ -88,11 +90,23 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
   # ── Tests ──────────────────────────────────────────────────────────────
 
   describe "GET /api/documents/:type" do
-    test "without auth → 200 + JSON list + deprecation headers", %{conn: conn} do
+    test "without auth → 401 (legacy now requires a token, w1.5-E)", %{conn: conn} do
+      # Wave 1.5-E (Goal barkpark-qprk): the legacy `/api/documents/*` surface
+      # was UNAUTHENTICATED + UNSCOPED — a tenancy hole. It now sits behind
+      # `:require_token`; an anonymous read is rejected with 401.
       {:ok, _} =
         Content.create_document(@type_name, %{"_id" => "lc-list-1", "title" => "L1"}, "production")
 
       resp = get(conn, ~p"/api/documents/#{@type_name}")
+
+      assert resp.status == 401
+    end
+
+    test "with auth → 200 + JSON list + deprecation headers", %{conn: conn} do
+      {:ok, _} =
+        Content.create_document(@type_name, %{"_id" => "lc-list-2", "title" => "L2"}, "production")
+
+      resp = conn |> authed() |> get(~p"/api/documents/#{@type_name}")
 
       assert resp.status == 200
       assert_legacy_headers(resp)
@@ -101,23 +115,14 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
       assert body["type"] == @type_name
       assert is_list(body["documents"])
       assert is_integer(body["count"])
-      assert Enum.any?(body["documents"], &(&1["id"] == "drafts.lc-list-1"))
+      assert Enum.any?(body["documents"], &(&1["id"] == "drafts.lc-list-2"))
     end
 
-    test "with auth → identical shape (the route is optional-auth)", %{conn: conn} do
-      {:ok, _} =
-        Content.create_document(@type_name, %{"_id" => "lc-list-2", "title" => "L2"}, "production")
-
-      resp = conn |> authed() |> get(~p"/api/documents/#{@type_name}")
-      assert resp.status == 200
-      assert_legacy_headers(resp)
-    end
-
-    test "unknown type — documents actual behaviour (likely 200 + empty list)", %{conn: conn} do
-      # Per `tmp/api-gap-analysis.md` finding 1, the public surface answers
-      # 200+empty rather than 404 for unknown types. Pinning the observed
-      # value here makes any drift loud; the policy decision lives in s8.
-      resp = get(conn, ~p"/api/documents/nosuchtype")
+    test "unknown type — documents actual behaviour (200 + empty list, authed)", %{conn: conn} do
+      # Per `tmp/api-gap-analysis.md` finding 1, the surface answers 200+empty
+      # rather than 404 for unknown types. Pinning the observed value here makes
+      # any drift loud. Now requires auth (w1.5-E) — anonymous would 401.
+      resp = conn |> authed() |> get(~p"/api/documents/nosuchtype")
       assert resp.status == 200
       assert_legacy_headers(resp)
 
@@ -133,7 +138,7 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
       {:ok, _} =
         Content.create_document(@type_name, %{"_id" => "lc-show-1", "title" => "S1"}, "production")
 
-      resp = get(conn, ~p"/api/documents/#{@type_name}/drafts.lc-show-1")
+      resp = conn |> authed() |> get(~p"/api/documents/#{@type_name}/drafts.lc-show-1")
       assert resp.status == 200
       assert_legacy_headers(resp)
 
@@ -143,7 +148,7 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
     end
 
     test "unknown id → 404 + headers still injected", %{conn: conn} do
-      resp = get(conn, ~p"/api/documents/#{@type_name}/does-not-exist")
+      resp = conn |> authed() |> get(~p"/api/documents/#{@type_name}/does-not-exist")
       assert resp.status == 404
       assert_legacy_headers(resp)
     end
@@ -185,6 +190,55 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
 
       assert {:error, :not_found} =
                Content.get_document("drafts.lc-del-1", @type_name, "production")
+    end
+  end
+
+  # ── Tenancy: Default-scope isolation (w1.5-E, Goal barkpark-qprk) ────────
+  #
+  # The legacy surface assigns the seeded Default workspace via the `:api`
+  # pipeline's `AssignDefaultScope` and threads `scope_opts(conn)` into the
+  # Content reads. A token-authed read must therefore return ONLY Default-scope
+  # docs — a row stamped to a different (non-Default) workspace must not leak.
+  describe "tenancy scope" do
+    test "authed list returns only Default-scope docs, never workspace-A's", %{conn: conn} do
+      {default_ws, default_proj} = ensure_default_scope!()
+
+      # A doc in a DIFFERENT workspace, same (type, dataset) leaf as Default.
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+
+      {:ok, _other} =
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-ten-otherws", "title" => "OtherWS"},
+          "production",
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        )
+
+      # A doc explicitly in Default — the row the legacy read SHOULD surface.
+      {:ok, _mine} =
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-ten-default", "title" => "Default"},
+          "production",
+          workspace_id: default_ws.id,
+          project_id: default_proj.id
+        )
+
+      body =
+        conn
+        |> authed()
+        |> get(~p"/api/documents/#{@type_name}")
+        |> json_response(200)
+
+      ids = Enum.map(body["documents"], & &1["id"])
+
+      assert "drafts.lc-ten-default" in ids,
+             "expected the Default-scope doc to be visible, got #{inspect(ids)}"
+
+      refute "drafts.lc-ten-otherws" in ids,
+             "CROSS-WORKSPACE LEAK: workspace-A's doc leaked into the Default-scoped legacy read"
     end
   end
 end

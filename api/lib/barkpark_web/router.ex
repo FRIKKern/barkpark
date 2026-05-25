@@ -587,8 +587,14 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Legacy compat ──────────────────────────────────────────────────────
+  # Deprecated back-compat for the Go TUI's original endpoints — the TUI
+  # migrated OFF these (Goal barkpark-qprk, B14). Now token-gated (`:require_token`)
+  # and Default-scoped: the `:api` pipeline's `AssignDefaultScope` seeds the
+  # Default workspace/project, and `LegacyController` threads `scope_opts(conn)`
+  # into the Content reads/writes — closing the unauthenticated + unscoped
+  # tenancy hole while mirroring the flat `/v1/data` Default-scope contract.
   scope "/api", BarkparkWeb do
-    pipe_through [:api, BarkparkWeb.Plugs.LegacyDeprecation]
+    pipe_through [:api, :require_token, BarkparkWeb.Plugs.LegacyDeprecation]
 
     get "/documents/:type", LegacyController, :index
     get "/documents/:type/:id", LegacyController, :show

@@ -1,6 +1,8 @@
 defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -174,6 +176,62 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
 
       cleanup_upload(created)
       cleanup_collection(collection)
+    end
+  end
+
+  # ── Tenancy: workspace-scope isolation (w1.5-E, Goal barkpark-qprk) ──────
+  #
+  # The flat `/v1/media/:dataset/collections` surface assigns the seeded
+  # Default workspace via `AssignDefaultScope` and threads `scope_opts(conn)`
+  # into `Collections.list/get`. A Default-scoped `index` must therefore return
+  # ONLY Default-scope collections — a collection stamped to a different
+  # workspace must not leak across the boundary.
+  describe "tenancy scope" do
+    test "Default-scoped collection list never returns workspace-A's collection", %{conn: conn} do
+      {default_ws, default_proj} = ensure_default_scope!()
+
+      # A collection in a DIFFERENT (non-Default) workspace.
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+
+      other_id = "col-ten-otherws-#{System.unique_integer([:positive])}"
+
+      {:ok, _other} =
+        Content.upsert_document(
+          "mediaCollection",
+          %{"doc_id" => other_id, "title" => "OtherWS", "content" => %{"kind" => "folder"}},
+          "production",
+          source: :api,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        )
+
+      # A collection explicitly in Default — the row the list SHOULD surface.
+      mine_id = "col-ten-default-#{System.unique_integer([:positive])}"
+
+      {:ok, _mine} =
+        Content.upsert_document(
+          "mediaCollection",
+          %{"doc_id" => mine_id, "title" => "DefaultWS", "content" => %{"kind" => "folder"}},
+          "production",
+          source: :api,
+          workspace_id: default_ws.id,
+          project_id: default_proj.id
+        )
+
+      body =
+        conn
+        |> authed()
+        |> get(~p"/v1/media/production/collections")
+        |> json_response(200)
+
+      ids = Enum.map(body["result"]["collections"], & &1["id"])
+
+      assert "drafts.#{mine_id}" in ids or mine_id in ids,
+             "expected the Default-scope collection to be visible, got #{inspect(ids)}"
+
+      refute "drafts.#{other_id}" in ids or other_id in ids,
+             "CROSS-WORKSPACE LEAK: workspace-A's collection leaked into the Default-scoped list"
     end
   end
 

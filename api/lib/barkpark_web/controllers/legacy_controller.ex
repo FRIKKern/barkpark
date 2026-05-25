@@ -3,6 +3,8 @@ defmodule BarkparkWeb.LegacyController do
 
   use BarkparkWeb, :controller
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   alias Barkpark.Content
 
   action_fallback BarkparkWeb.FallbackController
@@ -11,7 +13,13 @@ defmodule BarkparkWeb.LegacyController do
 
   def index(conn, %{"type" => type} = params) do
     filter_map = parse_legacy_filter(Map.get(params, "filter"))
-    documents = Content.list_documents(type, @dataset, filter_map: filter_map, limit: 10_000)
+
+    documents =
+      Content.list_documents(
+        type,
+        @dataset,
+        [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
+      )
 
     json(conn, %{
       type: type,
@@ -21,7 +29,7 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def show(conn, %{"type" => type, "id" => doc_id}) do
-    with {:ok, doc} <- Content.get_document(doc_id, type, @dataset) do
+    with {:ok, doc} <- Content.get_document(doc_id, type, @dataset, scope_opts(conn)) do
       json(conn, render_legacy_doc(doc))
     end
   end
@@ -39,7 +47,7 @@ defmodule BarkparkWeb.LegacyController do
       "content" => Map.drop(attrs, ["id", "doc_id", "title", "status", "updatedAt"])
     }
 
-    case Content.upsert_document(type, internal_attrs, @dataset, source: :api) do
+    case Content.upsert_document(type, internal_attrs, @dataset, [source: :api] ++ scope_opts(conn)) do
       {:ok, doc} ->
         conn
         |> put_status(:created)
@@ -56,7 +64,7 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def delete(conn, %{"type" => type, "id" => doc_id}) do
-    case Content.delete_document(doc_id, type, @dataset, source: :api) do
+    case Content.delete_document(doc_id, type, @dataset, [source: :api] ++ scope_opts(conn)) do
       {:ok, _} ->
         json(conn, %{deleted: doc_id})
 
@@ -71,7 +79,7 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def schemas(conn, _params) do
-    schemas = Content.list_schemas(@dataset)
+    schemas = Content.list_schemas(@dataset, scope_opts(conn))
 
     json(
       conn,

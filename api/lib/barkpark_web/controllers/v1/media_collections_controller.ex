@@ -5,6 +5,8 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   use BarkparkWeb, :controller
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   alias Barkpark.Auth
   alias Barkpark.Media
   alias Barkpark.Media.{AssetResponse, Collections, Share}
@@ -21,7 +23,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
     collections =
       dataset
-      |> Collections.list(limit: limit, offset: offset)
+      |> Collections.list([limit: limit, offset: offset] ++ scope_opts(conn))
       |> Enum.map(&Collections.render/1)
 
     json(conn, %{
@@ -31,7 +33,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   end
 
   def show(conn, %{"dataset" => dataset, "id" => id}) do
-    with {:ok, collection} <- Collections.get(id, dataset) do
+    with {:ok, collection} <- Collections.get(id, dataset, scope_opts(conn)) do
       json(conn, %{
         result: Collections.render(collection),
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}"]
@@ -42,8 +44,8 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   def assets(conn, %{"dataset" => dataset, "id" => id} = params) do
     t0 = System.monotonic_time(:microsecond)
 
-    with {:ok, _collection} <- Collections.get(id, dataset) do
-      opts = MediaSearchParams.parse(params)
+    with {:ok, _collection} <- Collections.get(id, dataset, scope_opts(conn)) do
+      opts = MediaSearchParams.parse(params) ++ scope_opts(conn)
 
       {files, total, facets} = Collections.assets(id, dataset, opts)
       docs = Media.asset_docs_for_files(files, dataset)
@@ -144,7 +146,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(asset_id),
          :ok <- ensure_dataset(file, dataset),
-         {:ok, doc} <- Collections.add_member(id, file, dataset) do
+         {:ok, doc} <- Collections.add_member(id, file, dataset, scope_opts(conn)) do
       json(conn, %{
         result: AssetResponse.render(file, doc, dataset: dataset, conn: conn),
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}", "bp:ds:#{dataset}:media:#{asset_id}"]
@@ -156,7 +158,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(asset_id),
          :ok <- ensure_dataset(file, dataset),
-         {:ok, doc} <- Collections.remove_member(id, file, dataset) do
+         {:ok, doc} <- Collections.remove_member(id, file, dataset, scope_opts(conn)) do
       json(conn, %{
         result: AssetResponse.render(file, doc, dataset: dataset, conn: conn),
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}", "bp:ds:#{dataset}:media:#{asset_id}"]

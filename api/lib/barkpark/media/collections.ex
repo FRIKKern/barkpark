@@ -6,6 +6,7 @@ defmodule Barkpark.Media.Collections do
   import Ecto.Query
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias Barkpark.Media
   alias Barkpark.Media.MediaFile
   alias Barkpark.Repo
@@ -13,7 +14,13 @@ defmodule Barkpark.Media.Collections do
   @collection_type "mediaCollection"
   @asset_type "mediaAsset"
 
-  @doc "List collection documents for a dataset."
+  # Keys threaded into the tenancy WHERE clause (`Content.Scope`). Membership
+  # writes and inner doc reads are dataset-keyed; the scope opts ride the
+  # collection list/get reads so a workspace-B caller never sees workspace-A
+  # collections (Wave 1.5 media-collections scope, Goal barkpark-qprk).
+  @scope_keys [:workspace_id, :project_id]
+
+  @doc "List collection documents for a dataset (workspace-scoped via opts)."
   @spec list(String.t(), keyword()) :: [Document.t()]
   def list(dataset, opts \\ []) when is_binary(dataset) do
     limit = Keyword.get(opts, :limit, 200) |> min(1000)
@@ -21,16 +28,18 @@ defmodule Barkpark.Media.Collections do
 
     Document
     |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
+    |> Scope.scope_to_workspace(opts[:workspace_id], opts[:project_id])
     |> order_by([d], asc: d.title)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
   end
 
-  @doc "Fetch a collection document by id."
-  @spec get(String.t(), String.t()) :: {:ok, Document.t()} | {:error, :not_found}
-  def get(collection_id, dataset) when is_binary(collection_id) and is_binary(dataset) do
-    case Content.get_document(collection_id, @collection_type, dataset) do
+  @doc "Fetch a collection document by id (workspace-scoped via opts)."
+  @spec get(String.t(), String.t(), keyword()) :: {:ok, Document.t()} | {:error, :not_found}
+  def get(collection_id, dataset, opts \\ [])
+      when is_binary(collection_id) and is_binary(dataset) do
+    case Content.get_document(collection_id, @collection_type, dataset, scope_opts(opts)) do
       {:ok, doc} -> {:ok, doc}
       _ -> {:error, :not_found}
     end
@@ -39,7 +48,7 @@ defmodule Barkpark.Media.Collections do
   @doc "Search assets belonging to a collection."
   @spec assets(String.t(), String.t(), keyword()) :: {[struct()], non_neg_integer(), map()}
   def assets(collection_id, dataset, opts \\ []) when is_binary(collection_id) do
-    with {:ok, collection} <- get(collection_id, dataset) do
+    with {:ok, collection} <- get(collection_id, dataset, opts) do
       search_opts = collection_search_opts(collection, collection_id, opts)
       {files, total, facets, _meta} = Media.search_files(dataset, search_opts)
       {files, total, facets}
@@ -48,19 +57,21 @@ defmodule Barkpark.Media.Collections do
     end
   end
 
-  @doc "Add an asset blob to a folder collection."
-  @spec add_member(String.t(), %MediaFile{}, String.t()) :: {:ok, Document.t()} | {:error, term()}
-  def add_member(collection_id, %MediaFile{} = file, dataset) do
-    with {:ok, _collection} <- get(collection_id, dataset),
+  @doc "Add an asset blob to a folder collection (workspace-scoped via opts)."
+  @spec add_member(String.t(), %MediaFile{}, String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def add_member(collection_id, %MediaFile{} = file, dataset, opts \\ []) do
+    with {:ok, _collection} <- get(collection_id, dataset, opts),
          {:ok, doc} <- Media.patch_asset_metadata(file, %{}, dataset) do
       patch_membership(doc, file, dataset, collection_id, :add)
     end
   end
 
-  @doc "Remove an asset blob from a folder collection."
-  @spec remove_member(String.t(), %MediaFile{}, String.t()) :: {:ok, Document.t()} | {:error, term()}
-  def remove_member(collection_id, %MediaFile{} = file, dataset) do
-    with {:ok, _collection} <- get(collection_id, dataset),
+  @doc "Remove an asset blob from a folder collection (workspace-scoped via opts)."
+  @spec remove_member(String.t(), %MediaFile{}, String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def remove_member(collection_id, %MediaFile{} = file, dataset, opts \\ []) do
+    with {:ok, _collection} <- get(collection_id, dataset, opts),
          %Document{} = doc <- Media.asset_doc_for_file(file, dataset) do
       patch_membership(doc, file, dataset, collection_id, :remove)
     else
@@ -89,6 +100,10 @@ defmodule Barkpark.Media.Collections do
       updatedAt: doc.updated_at
     }
   end
+
+  # Keep only the tenancy keys so the rest of `opts` (limit/offset/sort/…) never
+  # leaks into the keyed `Content.get_document` read.
+  defp scope_opts(opts), do: Keyword.take(opts, @scope_keys)
 
   defp collection_search_opts(%Document{content: content}, collection_id, opts) do
     base =
