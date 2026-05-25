@@ -13,6 +13,8 @@ import {
   createElement,
 } from 'react'
 import type { ReactElement, ReactNode } from 'react'
+import { scopePrefix } from '@barkpark/core'
+import type { BarkparkClientConfig } from '@barkpark/core'
 
 type DocId = string
 
@@ -33,6 +35,13 @@ export interface ResolvedDoc {
 export interface BarkparkReferenceClient {
   doc?: <T = ResolvedDoc>(type: string, id: DocId) => Promise<T | null>
   fetchRaw?: <T = ResolvedDoc>(path: string, init?: unknown) => Promise<T>
+  /**
+   * The client's resolved config. When present, the derived `fetchRaw` fetcher
+   * scopes the path to `scopePrefix(config)` and uses the configured `dataset`
+   * instead of a hardcoded fallback. The real `@barkpark/core` client exposes
+   * this; a structurally-compatible config (workspace/project/dataset) is enough.
+   */
+  config?: Pick<BarkparkClientConfig, 'workspace' | 'project' | 'dataset'>
 }
 
 /** Props for {@link BarkparkReference}. */
@@ -83,18 +92,40 @@ function extractId(
   return { id: null, resolved: null }
 }
 
+/**
+ * Build the doc-read path for an unresolved reference id.
+ *
+ * Scope-aware: when the client carries a `config` with both `workspace` and
+ * `project`, the path is prefixed with `scopePrefix(config)` (→ `/w/:ws/p/:proj`)
+ * and uses the configured `dataset`. Unscoped (or no config) falls back to the
+ * flat `/v1/...` route the API still serves for back-compat. The literal
+ * "production" dataset is only used as a last resort when no config is present.
+ */
+function buildDocPath(
+  config: BarkparkReferenceClient['config'],
+  id: DocId,
+): string {
+  const dataset = config?.dataset ?? 'production'
+  const prefix = config
+    ? scopePrefix(config as BarkparkClientConfig)
+    : ''
+  return `${prefix}/v1/data/doc/${dataset}/${id}`
+}
+
 function resolveFetcher(
   props: BarkparkReferenceProps,
 ): (id: DocId) => Promise<ResolvedDoc | null> {
   if (props.fetcher) return props.fetcher
   const client = props.client
   if (client?.fetchRaw) {
-    // Best-effort: dataset defaults to "production". Users who need a
-    // different dataset or access token behavior should pass `fetcher`.
+    // Derive a fetcher from the client. Scope + dataset come from the client's
+    // config (workspace/project/dataset); see buildDocPath. Users who need
+    // bespoke perspective/token behavior should pass `fetcher` instead.
     const fetchRaw = client.fetchRaw
+    const config = client.config
     return async (id) => {
       try {
-        return await fetchRaw<ResolvedDoc>(`/v1/data/doc/production/${id}`)
+        return await fetchRaw<ResolvedDoc>(buildDocPath(config, id))
       } catch {
         return null
       }
