@@ -41,7 +41,8 @@ defmodule Barkpark.Media.Collections do
   def assets(collection_id, dataset, opts \\ []) when is_binary(collection_id) do
     with {:ok, collection} <- get(collection_id, dataset) do
       search_opts = collection_search_opts(collection, collection_id, opts)
-      Media.search_files(dataset, search_opts)
+      {files, total, facets, _meta} = Media.search_files(dataset, search_opts)
+      {files, total, facets}
     else
       _ -> {[], 0, %{}}
     end

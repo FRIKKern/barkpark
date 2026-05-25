@@ -98,15 +98,16 @@ defmodule Barkpark.Media do
       |> Keyword.put_new(:limit, 50)
       |> Keyword.put_new(:offset, 0)
 
-    {files, total, _} = Barkpark.Media.Search.search(dataset, search_opts)
+    {files, total, _facets, _meta} = Barkpark.Media.Search.search(dataset, search_opts)
     {files, total}
   end
 
   @doc """
-  Faceted search. Returns `{files, total, facets}`.
+  Faceted search. Returns `{files, total, facets, meta}`.
   See `Barkpark.Media.Search` for supported options.
   """
-  @spec search_files(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map()}
+  @spec search_files(String.t(), keyword()) ::
+          {[MediaFile.t()], non_neg_integer(), map(), map()}
   def search_files(dataset, opts \\ []) when is_binary(dataset) do
     Barkpark.Media.Search.search(dataset, opts)
   end

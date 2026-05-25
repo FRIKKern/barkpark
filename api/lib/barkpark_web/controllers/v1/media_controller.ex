@@ -12,7 +12,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Content.Errors
   alias Barkpark.Media
   alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchIntelligence}
-  alias Barkpark.Search.Synonyms
+  alias Barkpark.Search.{SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
   action_fallback BarkparkWeb.FallbackController
@@ -23,7 +23,7 @@ defmodule BarkparkWeb.V1.MediaController do
   def search(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
     opts = MediaSearchParams.parse(params)
-    {files, total, facets} = Media.search_files(dataset, opts)
+    {files, total, facets, meta} = Media.search_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset)
     render_opts = render_opts(conn, params)
 
@@ -40,7 +40,8 @@ defmodule BarkparkWeb.V1.MediaController do
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "explorer"),
       record: SearchIntel.should_record?(conn),
-      tags: SearchIntel.tags(conn)
+      tags: SearchIntel.tags(conn),
+      metadata: search_metadata(meta)
     ]
 
     record_result =
@@ -52,14 +53,22 @@ defmodule BarkparkWeb.V1.MediaController do
         _ -> nil
       end
 
+    next_cursor = Barkpark.Media.Search.next_cursor(files)
+    has_more = next_cursor != nil and length(files) >= opts[:limit]
+
     json(conn, %{
       result: %{
         hits: hits,
         total: total,
         limit: opts[:limit],
         offset: opts[:offset],
-        facets: facets
+        facets: facets,
+        nextCursor: next_cursor,
+        hasMore: has_more
       },
+      parsedQuery: meta[:parsed],
+      highlights: meta[:highlights] || %{},
+      recovery: meta[:recovery],
       searchEventId: search_event_id,
       syncTags: ["bp:ds:#{dataset}:media"],
       ms: ms
@@ -93,6 +102,42 @@ defmodule BarkparkWeb.V1.MediaController do
     case Synonyms.create("media", dataset, params) do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        validation_error(conn, changeset)
+    end
+  end
+
+  def promote_search_synonym(conn, %{"dataset" => dataset} = params) do
+    case Synonyms.promote("media", dataset, params) do
+      {:ok, row} ->
+        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+      {:error, :missing_fields} ->
+        conn |> put_status(422) |> json(%{error: %{message: "from and to are required"}})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        validation_error(conn, changeset)
+    end
+  end
+
+  def preview_search_synonym(conn, %{"dataset" => dataset} = params) do
+    q = params["q"] || params["from"]
+    result = Synonyms.preview("media", dataset, q, params)
+    json(conn, %{result: result})
+  end
+
+  def search_settings(conn, %{"dataset" => dataset}) do
+    json(conn, %{
+      result: SurfaceConfigs.get("media", dataset),
+      syncTags: ["bp:ds:#{dataset}:media:search:settings"]
+    })
+  end
+
+  def update_search_settings(conn, %{"dataset" => dataset} = params) do
+    case SurfaceConfigs.upsert("media", dataset, params) do
+      {:ok, row} ->
+        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:settings"]})
 
       {:error, %Ecto.Changeset{} = changeset} ->
         validation_error(conn, changeset)
@@ -385,6 +430,17 @@ defmodule BarkparkWeb.V1.MediaController do
   defp metadata_params(params) do
     Map.drop(params, ["dataset", "id"])
   end
+
+  defp search_metadata(meta) when is_map(meta) do
+    %{}
+    |> maybe_put_meta("recovery", meta[:recovery])
+    |> maybe_put_meta("parsed", meta[:parsed])
+  end
+
+  defp search_metadata(_), do: %{}
+
+  defp maybe_put_meta(map, _key, nil), do: map
+  defp maybe_put_meta(map, key, value), do: Map.put(map, key, value)
 
   defp validation_error(conn, changeset) do
     errors =

@@ -36,8 +36,7 @@ class BpReferencePicker extends HTMLElement {
     this._suggestRecent = [];
     this._suggestPopular = [];
     this._suggestNohits = [];
-    this._searchClientId = null;
-    this._lastSearchEventId = null;
+    this._searchIntel = { clientId: null, parentEventId: null };
     this._lastSearchMatches = [];
   }
 
@@ -47,7 +46,7 @@ class BpReferencePicker extends HTMLElement {
     this._value = this.getAttribute("value") || "";
     this._refType = this.getAttribute("ref-type") || "";
     this._dataset = this.getAttribute("dataset") || "production";
-    this._searchClientId = this._ensureSearchClientId();
+    this._searchIntel.clientId = BpSearchIntel.clientId("documents", this._dataset);
     this._render();
     if (this._value) this._loadSelectedTitle();
   }
@@ -170,59 +169,27 @@ class BpReferencePicker extends HTMLElement {
     this._debounceTimer = setTimeout(() => this._search(term), this._debounceMs);
   }
 
-  _ensureSearchClientId() {
-    const key = "bp-search-client:documents:" + this._dataset;
-    try {
-      let id = sessionStorage.getItem(key);
-      if (!id) {
-        id =
-          typeof crypto !== "undefined" && crypto.randomUUID
-            ? crypto.randomUUID()
-            : "c" + Date.now().toString(36);
-        sessionStorage.setItem(key, id);
-      }
-      return id;
-    } catch (_e) {
-      return "anon-" + Date.now().toString(36);
-    }
-  }
-
   _searchHeaders(opts) {
     opts = opts || {};
-    const h = { Accept: "application/json" };
-    if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
-    if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
-    h["X-BP-Search-Source"] = "studio-picker";
-    if (opts.record) h["X-BP-Search-Record"] = "1";
-    return h;
+    return BpSearchIntel.searchHeaders(this._searchIntel, {
+      source: "studio-picker",
+      record: opts.record
+    });
   }
 
   _captureSearchEventId(body) {
-    if (body && body.searchEventId) {
-      this._lastSearchEventId = body.searchEventId;
-    }
+    BpSearchIntel.captureEventId(this._searchIntel, body);
   }
 
   _recordSearchInteraction(objectId, position) {
-    if (!this._lastSearchEventId || !objectId) return;
-    const url =
-      "/v1/data/search/" +
-      encodeURIComponent(this._dataset) +
-      "/interaction";
-    fetch(url, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: Object.assign(
-        { "Content-Type": "application/json" },
-        this._searchHeaders()
-      ),
-      body: JSON.stringify({
-        queryEventId: this._lastSearchEventId,
-        objectId: objectId,
-        position: position,
-        type: "select"
-      })
-    }).catch(function () {});
+    BpSearchIntel.trackInteraction(
+      "documents",
+      this._dataset,
+      this._searchIntel,
+      objectId,
+      position,
+      { source: "studio-picker" }
+    );
   }
 
   async _search(term) {

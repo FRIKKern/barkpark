@@ -7,7 +7,7 @@ defmodule Barkpark.Search.Synonyms do
   """
 
   import Ecto.Query
-  alias Barkpark.Search.{MergePattern, Sanitizer, Synonym}
+  alias Barkpark.Search.{Crystal, MergePattern, Sanitizer, Synonym}
   alias Barkpark.Repo
 
   @kinds ~w(one_way alt_correction)
@@ -128,13 +128,17 @@ defmodule Barkpark.Search.Synonyms do
       )
       |> Repo.all()
       |> Enum.map(fn row ->
+        from_q = fingerprint_query(row.from_fingerprint)
+        to_q = fingerprint_query(row.to_fingerprint)
+
         %{
-          from: fingerprint_query(row.from_fingerprint),
-          to: fingerprint_query(row.to_fingerprint),
+          from: from_q,
+          to: to_q,
           kind: "one_way",
           source: "auto",
           transitions: row.transition_count,
-          reason: "zero_to_hit"
+          reason: "zero_to_hit",
+          evidence: candidate_evidence(surface, scope, from_q, to_q, row.transition_count)
         }
       end)
       |> Enum.reject(fn c -> c.from in [nil, ""] or c.to in [nil, ""] end)
@@ -151,6 +155,106 @@ defmodule Barkpark.Search.Synonyms do
     |> Enum.reject(fn c -> MapSet.member?(existing, {c.from, c.to}) end)
     |> Enum.uniq_by(fn c -> {c.from, c.to} end)
   end
+
+  @spec promote(String.t(), String.t(), map()) ::
+          {:ok, map()} | {:error, :invalid | :missing_fields | Ecto.Changeset.t()}
+  def promote(surface, scope, attrs) when is_binary(surface) and is_binary(scope) do
+    from_q = normalize_field(attrs, :from_query, "from")
+    to_q = normalize_field(attrs, :to_query, "to")
+
+    if from_q in [nil, ""] or to_q in [nil, ""] do
+      {:error, :missing_fields}
+    else
+      create(surface, scope, %{
+        "from" => from_q,
+        "to" => to_q,
+        "kind" => Map.get(attrs, "kind") || Map.get(attrs, :kind) || "one_way",
+        "source" => "auto"
+      })
+    end
+  end
+
+  @spec preview(String.t(), String.t(), String.t() | nil, map()) :: map()
+  def preview(surface, scope, query, attrs \\ %{})
+      when is_binary(surface) and is_binary(scope) do
+    from_q = normalize_field(attrs, :from_query, "from") || query
+    to_q = normalize_field(attrs, :to_query, "to")
+
+    before =
+      if is_binary(from_q) and from_q != "" do
+        preview_count(surface, scope, from_q)
+      else
+        0
+      end
+
+    after_count =
+      if is_binary(to_q) and to_q != "" do
+        preview_count(surface, scope, to_q)
+      else
+        before
+      end
+
+    %{
+      from: from_q,
+      to: to_q,
+      beforeCount: before,
+      afterCount: after_count
+    }
+  end
+
+  defp preview_count("documents", scope, query) do
+    {_, count, _} = Barkpark.Content.search_documents(query, scope, limit: 1)
+    count
+  end
+
+  defp preview_count("media", scope, query) do
+    {_, count, _, _} = Barkpark.Media.Search.search(scope, q: query, limit: 1)
+    count
+  end
+
+  defp preview_count(_, _, _), do: 0
+
+  defp candidate_evidence(surface, scope, from_q, to_q, transitions) do
+    from_stats = crystal_stats(surface, scope, from_q)
+    to_stats = crystal_stats(surface, scope, to_q)
+
+    from_zero =
+      if from_stats.search_count > 0 do
+        from_stats.zero_hit_count / from_stats.search_count
+      else
+        0.0
+      end
+
+    confidence =
+      transitions
+      |> Kernel./(10)
+      |> min(1.0)
+      |> Kernel.*(0.5)
+      |> Kernel.+(to_stats.ctr * 0.5)
+      |> Float.round(2)
+
+    %{
+      fromZeroHitRate: Float.round(from_zero, 2),
+      toCtr: Float.round(to_stats.ctr, 2),
+      confidence: confidence
+    }
+  end
+
+  defp crystal_stats(surface, scope, query) when is_binary(query) do
+    case Repo.get_by(Crystal,
+           surface: surface,
+           scope: scope,
+           period: "week",
+           period_start: Date.add(Date.utc_today(), -7),
+           query_normalized: Sanitizer.normalize(query),
+           filter_fingerprint: ""
+         ) do
+      nil -> %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
+      row -> %{search_count: row.search_count, zero_hit_count: row.zero_hit_count, ctr: row.ctr || 0.0}
+    end
+  end
+
+  defp crystal_stats(_, _, _), do: %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
 
   @doc false
   def fingerprint_query(fingerprint) when is_binary(fingerprint) do

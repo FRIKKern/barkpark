@@ -3,7 +3,7 @@ defmodule BarkparkWeb.SearchController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Envelope, Errors, SearchIntelligence}
-  alias Barkpark.Search.Synonyms
+  alias Barkpark.Search.{SurfaceConfigs, Synonyms}
   alias BarkparkWeb.SearchIntel
 
   def search(conn, %{"dataset" => dataset} = params) do
@@ -24,7 +24,7 @@ defmodule BarkparkWeb.SearchController do
           offset: parse_int(params["offset"], 0)
         ]
 
-        {docs, count} = Content.search_documents(query, dataset, opts)
+        {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
         record_opts = [
@@ -33,7 +33,8 @@ defmodule BarkparkWeb.SearchController do
           session_key: SearchIntel.session_key(conn),
           source: SearchIntel.source(conn, "documents-api"),
           record: SearchIntel.should_record?(conn),
-          tags: SearchIntel.tags(conn)
+          tags: SearchIntel.tags(conn),
+          metadata: search_metadata(meta)
         ]
 
         record_result =
@@ -49,6 +50,9 @@ defmodule BarkparkWeb.SearchController do
           documents: Envelope.render_many(docs),
           count: count,
           query: query,
+          parsedQuery: meta[:parsed],
+          highlights: meta[:highlights] || %{},
+          recovery: meta[:recovery],
           searchEventId: search_event_id,
           ms: ms
         })
@@ -109,6 +113,43 @@ defmodule BarkparkWeb.SearchController do
     end
   end
 
+  def promote_search_synonym(conn, %{"dataset" => dataset} = params) do
+    case Synonyms.promote("documents", dataset, params) do
+      {:ok, row} ->
+        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:documents:search:synonyms"]})
+
+      {:error, reason} when reason in [:invalid, :missing_fields] ->
+        conn |> put_status(422) |> json(%{error: %{message: "from and to are required"}})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        validation_error(conn, changeset)
+    end
+  end
+
+  def preview_search_synonym(conn, %{"dataset" => dataset} = params) do
+    q = params["q"] || params["from"]
+
+    result = Synonyms.preview("documents", dataset, q, params)
+    json(conn, %{result: result})
+  end
+
+  def search_settings(conn, %{"dataset" => dataset}) do
+    json(conn, %{
+      result: SurfaceConfigs.get("documents", dataset),
+      syncTags: ["bp:ds:#{dataset}:documents:search:settings"]
+    })
+  end
+
+  def update_search_settings(conn, %{"dataset" => dataset} = params) do
+    case SurfaceConfigs.upsert("documents", dataset, params) do
+      {:ok, row} ->
+        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:documents:search:settings"]})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        validation_error(conn, changeset)
+    end
+  end
+
   def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
     case Synonyms.delete(id, "documents", dataset) do
       :ok ->
@@ -160,6 +201,17 @@ defmodule BarkparkWeb.SearchController do
   end
 
   defp parse_int(_, default), do: default
+
+  defp search_metadata(meta) when is_map(meta) do
+    %{}
+    |> maybe_put_meta("recovery", meta[:recovery])
+    |> maybe_put_meta("parsed", meta[:parsed])
+  end
+
+  defp search_metadata(_), do: %{}
+
+  defp maybe_put_meta(map, _key, nil), do: map
+  defp maybe_put_meta(map, key, value), do: Map.put(map, key, value)
 
   defp validation_error(conn, changeset) do
     errors =

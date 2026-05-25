@@ -126,6 +126,7 @@ defmodule Barkpark.Search.Intelligence do
 
     quality = quality_stats(surface, scope, period, period_start)
     prev_counts = previous_period_search_counts(surface, scope, period, period_start)
+    rates = search_rates(surface, scope, period, period_start)
 
     top_queries =
       from(c in Crystal,
@@ -160,9 +161,41 @@ defmodule Barkpark.Search.Intelligence do
       mergePatterns: merge_patterns,
       synonymCandidates:
         Synonyms.candidates(surface, scope, period: period, period_start: period_start),
+      zeroHitRate: rates.zero_hit_rate,
+      recoveryRate: rates.recovery_rate,
       hints: improvement_hints(top_queries, merge_patterns, quality)
     }
   end
+
+  defp search_rates(surface, scope, period, period_start) do
+    rows =
+      from(e in Event,
+        where:
+          e.surface == ^surface and e.scope == ^scope and e.event_type == "search" and
+            (is_nil(e.quality) or e.quality == "accepted") and e.inserted_at >= ^period_start_dt(period, period_start),
+        select: {e.zero_hits, e.metadata}
+      )
+      |> Repo.all()
+
+    total = length(rows)
+
+    zero_hits = Enum.count(rows, fn {zh, _} -> zh end)
+
+    recoveries =
+      Enum.count(rows, fn {_, meta} ->
+        is_map(meta) and Map.get(meta, "recovery") not in [nil, ""]
+      end)
+
+    %{
+      zero_hit_rate: if(total > 0, do: Float.round(zero_hits / total, 3), else: 0.0),
+      recovery_rate: if(total > 0, do: Float.round(recoveries / total, 3), else: 0.0)
+    }
+  end
+
+  defp period_start_dt("day", %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+  defp period_start_dt("week", %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+  defp period_start_dt("month", %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+  defp period_start_dt(_, %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
 
   defp safe_record(surface, scope, context, total, duration_ms, opts) do
     do_record(surface, scope, context, total, duration_ms, opts)
@@ -178,6 +211,7 @@ defmodule Barkpark.Search.Intelligence do
     source = Keyword.get(opts, :source, "api")
     session_key = Keyword.get(opts, :session_key)
     tags = Keyword.get(opts, :tags, [])
+    metadata = Keyword.get(opts, :metadata, %{})
 
     raw_query = Map.get(context, :query, "") || ""
     filters = Map.get(context, :filters, %{})
@@ -192,7 +226,8 @@ defmodule Barkpark.Search.Intelligence do
       parent_event_id: parent_event_id,
       source: source,
       session_key: session_key,
-      tags: tags
+      tags: tags,
+      metadata: metadata
     }
 
     case qualify_query(raw_query, filters) do

@@ -1,174 +1,109 @@
 # Search Intelligence Roadmap
 
-Phased plan derived from Algolia, Typesense, Postgres, and Elixir best-practice research (May 2026). Builds on the shipped core (`Barkpark.Search.*`, `search_intel_*`, media + documents surfaces).
+Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and relevance-engineering research (May 2026). Builds on `Barkpark.Search.*`, `search_intel_*`, media + documents surfaces.
 
-**Principle:** Postgres remembers and explains; search engines (today: ILIKE/pg_trgm) retrieve. Do not add Algolia/Typesense as a dependency until Postgres search latency fails SLA.
+**Principle:** Postgres remembers and explains; search engines retrieve. No Algolia/Typesense dependency until Postgres search latency fails SLA.
+
+**Detailed plan for next phases:** [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md)
 
 ---
 
-## Current state (shipped)
+## Shipped (Phases 0–5 ✓)
+
+| Phase | Summary | Commit / prod |
+|-------|---------|---------------|
+| **0** | Surface-safe unique indexes, suggest indexes, trgm on `query_normalized` | `cf5de75` |
+| **1** | Crystal-backed popular/nohits, `min_search_count`, `X-BP-Search-Disable` | `cf5de75` |
+| **2** | Click/select events, CTR on crystals, interaction API, JS wiring | `9052f95` |
+| **3** | Tags, test exclusion, 4-char suggest gate, exclude patterns, debounced record, telemetry | `69ce1bb` |
+| **4** | `search_synonyms`, admin CRUD, auto candidates, apply in search, `searchCountDelta` | `cdf6597` |
+| **5** | Document `search_vector` FTS + trgm hybrid; media synonym expansion | `cdf6597` |
 
 | Layer | Status |
 |-------|--------|
-| Core API | `Intelligence.record/suggest/insights/prune` |
+| Core API | `Intelligence.record/suggest/insights/prune/record_interaction` |
 | Surfaces | `media`, `documents` adapters |
+| Synonyms | `Barkpark.Search.Synonyms` + admin routes |
 | Suggestions | recent / popular / nohits |
 | Crystallization | day / week / month + merge patterns |
 | Quality gate | `Sanitizer` + `__quality__` crystal |
-| Client lineage | `X-BP-Search-*`, `searchEventId`, Studio pickers wired |
+| Client lineage | `X-BP-Search-*`, `searchEventId`, debounce, Studio pickers |
 | Retention | 90-day raw events; crystals indefinite |
 
 ---
 
-## Phase 0 — Correctness (P0, ~1 day)
+## Up next (Phases 6–10)
 
-**Why:** Elixir + Postgres research flagged a real multi-surface collision risk.
-
-| Task | Detail |
-|------|--------|
-| Fix unique indexes | Add `surface` to `search_intel_crystals` and `search_intel_merge_patterns` unique constraints (currently `scope, period, …` only — media + documents on `production` can collide) |
-| Suggest indexes | Partial index `(surface, scope, actor_key, inserted_at DESC) WHERE quality = 'accepted'`; prefix index on `query_normalized text_pattern_ops` |
-| trgm alignment | GIN on `query_normalized` (not just raw `query`) |
-| Tests | Surface-isolated crystal upsert; merge_pattern upsert across two surfaces |
-
-**Exit:** Migration runs clean; test proves documents + media crystals coexist on same scope.
+| Phase | Focus | Effort | Doc |
+|-------|-------|--------|-----|
+| **6** | Relevance: `QueryPipeline`, field weights, query parse, zero-hit recovery, highlights | ~2 wk | [PLAN §6](PLAN-PHASES-6-10.md#phase-6--relevance-engineering-p1-2-weeks) |
+| **7** | Intelligence product: golden eval harness, synonym evidence, promote/preview, richer insights | ~2 wk | [PLAN §7](PLAN-PHASES-6-10.md#phase-7--intelligence-productization-p1-2-weeks) |
+| **8** | Unified discovery: federated search, cursor pagination, `bp-search-intel.js`, ⌘K | ~1.5 wk | [PLAN §8](PLAN-PHASES-6-10.md#phase-8--unified-discovery-p2-15-weeks) |
+| **9** | Scale: async record, partitions, SQL crystallize | trigger-based | [PLAN §9](PLAN-PHASES-6-10.md#phase-9--scale--ops-p2-trigger-based) |
+| **10** | Optional Typesense retriever (intelligence stays Postgres) | pain-gated | [PLAN §10](PLAN-PHASES-6-10.md#phase-10--optional-external-retriever-p3-pain-gated) |
 
 ---
 
-## Phase 1 — Suggest read path (P0, ~2 days)
+## Phase archive (0–5 detail)
 
-**Why:** Algolia/Typesense serve popular from aggregates; Barkpark re-scans 30 days of raw events on every autocomplete request.
+<details>
+<summary>Phase 0 — Correctness (shipped)</summary>
 
-| Task | Detail |
-|------|--------|
-| Popular from crystals | Roll up last 30 days of **day** crystals for `popular` and `nohits` buckets |
-| Keep recent on raw | Per-`actor_key` recent stays on events (Algolia has no equivalent; Typesense uses user id) |
-| `min_search_count` | Hide popular suggestions with count < 3 (Algolia `minPopularity` analog) |
-| Result validation | At crystallize time, optionally re-run search; drop popular rows that are now zero-hit (Algolia `min_hits`) |
-| `X-BP-Search-Disable` | Header or param to skip recording (Typesense `enable_analytics: false`, Algolia `analytics: false`) |
-| Smoke/tests | Suggestions still work after raw events older than 30d are pruned |
+- Fix unique indexes with `surface`
+- Suggest indexes; trgm on `query_normalized`
+- Surface-isolation tests
+</details>
 
-**Exit:** `/suggestions` p95 stable as event volume grows; popular survives prune.
+<details>
+<summary>Phase 1 — Suggest read path (shipped)</summary>
 
----
+- Popular/nohits from day crystals
+- `min_search_count: 3`
+- `X-BP-Search-Disable`
+</details>
 
-## Phase 2 — Click & CTR events (P1, ~3 days)
+<details>
+<summary>Phase 2 — Click & CTR (shipped)</summary>
 
-**Why:** Algolia Insights + Typesense `counter` rules; biggest gap vs industry maturity.
+- `event_type` click/select
+- `POST …/interaction`
+- Crystal `click_count`, `ctr`
+</details>
 
-| Task | Detail |
-|------|--------|
-| Event type column | `event_type`: `search` \| `click` \| `select` (default `search`) |
-| Click payload | `object_id`, `position`, `query_event_id` (FK to originating search) |
-| HTTP endpoint | `POST …/search/interaction` or extend existing routes with click body |
-| JS | Explorer + pickers send click on result select; chain via `searchEventId` |
-| Crystals | Add `click_count`, `ctr` to crystal rollups |
-| Insights | Expose CTR in `/insights`; hint when CTR low but volume high |
+<details>
+<summary>Phase 3 — Quality & segmentation (shipped)</summary>
 
-**Exit:** Admin insights show CTR per top query; click linked to search event.
+- Event `tags[]`, test exclusion
+- 4-letter suggest prefix
+- Exclude patterns, debounced record, telemetry
+</details>
 
----
+<details>
+<summary>Phase 4 — Synonym loop (shipped)</summary>
 
-## Phase 3 — Quality, segmentation, debounce (P1, ~2 days)
+- `search_synonyms` table
+- Admin CRUD, `synonymCandidates`, apply at query time
+- `searchCountDelta` on week crystals
+</details>
 
-**Why:** Algolia `analyticsTags`, banned expressions, Typesense 4s debounce.
+<details>
+<summary>Phase 5 — Document FTS (shipped)</summary>
 
-| Task | Detail |
-|------|--------|
-| `tags` on events | JSON array or reuse `source` + new `tags[]` for segmentation (studio, api, test) |
-| Exclude test traffic | `source: test` / header disable excluded from popular crystals |
-| Stricter suggest gate | `min_letters: 4` for suggestions (keep record at 2 for analytics) |
-| Regex exclude list | Config `:search_query_exclude_patterns` (Algolia banned expressions) |
-| Debounced record | Client: only record search after 300–400ms idle OR on Enter (Typesense 4s analog — use shorter for CMS) |
-| Telemetry | `[:barkpark, :search, :intel, :record]` with `:ok`, `:skipped`, `:rejected`, `:error` |
-
-**Exit:** Smoke tests do not pollute popular; Grafana-ready telemetry events.
-
----
-
-## Phase 4 — Query understanding loop (P2, ~1 week)
-
-**Why:** Algolia synonyms + Typesense nohits → synonym discovery; Barkpark already has hints.
-
-| Task | Detail |
-|------|--------|
-| `search_synonyms` table | `surface`, `scope`, `from`, `to`, `kind` (one_way \| alt_correction), `source` (manual \| auto) |
-| Admin UI | Studio or API: promote nohit crystal → synonym candidate |
-| Auto candidates | Export `zero_to_hit` merge patterns as synonym suggestions |
-| Apply in search | Documents FTS + media search consult synonym map before query |
-| Trending | `search_count_delta` on week crystals (Algolia Recommend velocity lite) |
-
-**Exit:** Top nohit query can be promoted to synonym and improves results without redeploy.
-
----
-
-## Phase 5 — Content search quality (P2, ~1 week)
-
-**Why:** Postgres research; documents use ILIKE today.
-
-| Task | Detail |
-|------|--------|
-| FTS on documents | Generated `tsvector` on title + slug; GIN index; `ts_rank` in `Content.search_documents` |
-| Hybrid fallback | If FTS returns 0, fall back to pg_trgm `%` similarity (typo layer) |
-| Media search | Evaluate ILIKE vs trgm on filename/title at current corpus size |
-| ParadeDB pilot | Only if >500k rows or fuzzy p95 > 100ms (defer otherwise) |
-
-**Exit:** Document search ranked; intelligence layer unchanged.
-
----
-
-## Phase 6 — Scale & ops (P2, as volume demands)
-
-**Why:** Postgres research retention/partitioning guidance.
-
-| Task | Detail |
-|------|--------|
-| Async record | Oban `:search_intel` queue insert; search never waits on DB |
-| Crystal retention | Day crystals 90d; week/month 2y (document policy) |
-| Partition events | Monthly RANGE on `inserted_at`; DROP partition instead of DELETE prune |
-| SQL crystallize | Move heavy day aggregation to SQL `INSERT…SELECT` when >100k events/day |
-| Optional session table | `search_intel_session_recent` if autocomplete QPS hot |
-| Shared JS module | `bp-search-intel.js` — client id, headers, debounce (dedupe 3 pickers) |
-
-**Exit:** Prune is O(1) partition drop; crystallize bounded memory.
-
----
-
-## Phase 7 — Optional external engine (P3, only if needed)
-
-**Why:** Typesense research — engine for retrieval, Postgres for intelligence.
-
-| Trigger | Action |
-|---------|--------|
-| Need sub-50ms fuzzy faceted search at scale | Typesense collection per surface; presets per UI |
-| Do **not** move analytics to Typesense | Mirror top crystals → Typesense `popular_queries` collection only if CDN autocomplete needs it |
-| Skip Algolia SaaS | Unless enterprise SLA requires it |
-
----
-
-## What we deliberately skip
-
-| Feature | Reason |
-|---------|--------|
-| Algolia Recommend ML | No co-purchase graph; CMS not storefront |
-| Personalized suggestions | Needs click volume + user profiles |
-| Full Rules / merchandising engine | CMS editorial workflow differs |
-| Separate suggestions index rebuild | Crystals + Postgres sufficient |
-| Redis for recent | Actor-key query fine until high QPS |
+- Generated `search_vector` on title
+- Hybrid FTS + ILIKE + trgm
+</details>
 
 ---
 
 ## Suggested execution order
 
 ```
-Phase 0 ──► Phase 1 ──► Phase 2
-                │
-                ├──► Phase 3 (parallel with 2)
-                │
-Phase 4 ◄── after Phase 2 (clicks improve synonym quality)
-Phase 5 ◄── independent; parallel after Phase 0
-Phase 6 ◄── when events > 5M or prune > 30s
-Phase 7 ◄── only on search latency pain
+[SHIPPED] Phase 0 ──► 1 ──► 2 ──► 3 ──► 4 ──► 5
+
+[NEXT]    Phase 6 (QueryPipeline) ──► 7 (eval + promote) ──► 8 (federated + JS)
+
+[LATER]   Phase 9 when events > 5M or prune > 30s
+          Phase 10 only on search latency pain
 ```
 
 ---
@@ -179,14 +114,27 @@ Phase 7 ◄── only on search latency pain
 |--------|--------|
 | Suggest p95 | < 50ms at 100k events/scope |
 | Popular accuracy | Zero stale zero-hit terms in top 10 |
-| CTR coverage | >50% of searches have click tracking (Phase 2+) |
-| Nohit rate | Visible in insights; downward trend after synonym loop |
-| Multi-surface | Zero crystal collisions across media/documents |
+| CTR coverage | >60% searches with click tracking (Phase 7+) |
+| Nohit rate | Downward trend after synonym + recovery loop |
+| Golden eval | No NDCG regression on ranking PRs (Phase 7+) |
+| Multi-surface | Zero crystal collisions |
+
+---
+
+## What we deliberately skip
+
+| Feature | Reason |
+|---------|--------|
+| Algolia Recommend ML | No co-purchase graph; CMS not storefront |
+| Personalized suggestions | Needs click volume + user profiles |
+| Full Rules / merchandising engine | CMS editorial workflow differs |
+| Algolia SaaS | Postgres sufficient until Phase 10 trigger |
+| Redis for recent | Actor-key query fine until Phase 9 |
 
 ---
 
 ## References
 
-- `docs/search/INTELLIGENCE.md` — architecture
+- [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md) — detailed Phases 6–10
+- [`INTELLIGENCE.md`](INTELLIGENCE.md) — architecture
 - `docs/media/DISCOVERY.md` — media search surface
-- Research swarm (May 2026): Algolia, Typesense, Postgres, Elixir reports

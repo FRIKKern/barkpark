@@ -21,6 +21,7 @@ defmodule Barkpark.Search.Event do
     field :source, :string, default: "api"
     field :session_key, :string
     field :tags, {:array, :string}, default: []
+    field :metadata, :map, default: %{}
     field :object_id, :string
     field :position, :integer
     field :query_event_id, :binary_id

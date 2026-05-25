@@ -569,3 +569,7 @@ case Barkpark.Codelists.EDItEUR.seed_thema() do
   {:error, reason} ->
     IO.puts(:stderr, "Thema seed reported errors: #{inspect(reason)}")
 end
+
+IO.puts("\n=== Seeding search surface config defaults ===")
+Barkpark.Search.SurfaceConfigs.seed_defaults!()
+IO.puts("Search surface config defaults seeded")

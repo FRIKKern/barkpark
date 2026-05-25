@@ -70,5 +70,26 @@ defmodule BarkparkWeb.Contract.SearchSynonymsTest do
 
     body = json_response(conn, 200)
     assert is_list(body["result"]["synonymCandidates"])
+    assert Map.has_key?(body["result"], "zeroHitRate")
+    assert Map.has_key?(body["result"], "recoveryRate")
+  end
+
+  test "admin can preview and promote synonym candidate", %{conn: conn} do
+    conn =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> get("/v1/data/search/test/synonyms/preview", %{"q" => "hero", "from" => "hero", "to" => "phoenix"})
+
+    preview = json_response(conn, 200)["result"]
+    assert Map.has_key?(preview, "beforeCount")
+    assert Map.has_key?(preview, "afterCount")
+
+    conn =
+      conn
+      |> recycle()
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> post("/v1/data/search/test/synonyms/promote", %{"from" => "guide", "to" => "phoenix"})
+
+    assert json_response(conn, 200)["result"]["from"] == "guide"
   end
 end

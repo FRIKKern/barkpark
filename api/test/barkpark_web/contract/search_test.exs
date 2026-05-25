@@ -82,4 +82,21 @@ defmodule BarkparkWeb.Contract.SearchTest do
     body = Jason.decode!(resp.resp_body)
     assert length(body["documents"]) == 1
   end
+
+  test "exclude token removes matching documents", %{conn: conn} do
+    resp = get(conn, "/v1/data/search/test", %{"q" => "phoenix -wright"})
+    body = Jason.decode!(resp.resp_body)
+    titles = Enum.map(body["documents"], & &1["title"])
+    assert "Elixir Phoenix Guide" in titles
+    refute "Phoenix Wright" in titles
+    assert body["count"] == 1
+    assert is_map(body["parsedQuery"])
+  end
+
+  test "returns enrichment fields", %{conn: conn} do
+    resp = get(conn, "/v1/data/search/test", %{"q" => "phoenix"})
+    body = Jason.decode!(resp.resp_body)
+    assert Map.has_key?(body, "highlights")
+    assert Map.has_key?(body, "parsedQuery")
+  end
 end

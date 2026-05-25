@@ -33,8 +33,7 @@ class BpMediaPicker extends HTMLElement {
     this._files = [];
     this._value = "";
     this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
-    this._searchClientId = null;
-    this._lastSearchEventId = null;
+    this._searchIntel = { clientId: null, parentEventId: null };
   }
 
   connectedCallback() {
@@ -117,54 +116,32 @@ class BpMediaPicker extends HTMLElement {
     return this.getAttribute("data-token") || "";
   }
 
-  _ensureSearchClientId() {
-    const key = "bp-search-client:media:" + this._dataset();
-    try {
-      let id = sessionStorage.getItem(key);
-      if (!id) {
-        id =
-          typeof crypto !== "undefined" && crypto.randomUUID
-            ? crypto.randomUUID()
-            : "c" + Date.now().toString(36);
-        sessionStorage.setItem(key, id);
-      }
-      return id;
-    } catch (_e) {
-      return "anon-" + Date.now().toString(36);
-    }
-  }
-
   _searchHeaders(json, opts) {
     opts = opts || {};
-    const h = { Accept: "application/json" };
-    if (json) h["Content-Type"] = "application/json";
+    if (!this._searchIntel.clientId) {
+      this._searchIntel.clientId = BpSearchIntel.clientId("media", this._dataset());
+    }
     const tok = this._token();
-    if (tok) h["Authorization"] = "Bearer " + tok;
-    if (!this._searchClientId) this._searchClientId = this._ensureSearchClientId();
-    if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
-    if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
-    h["X-BP-Search-Source"] = "media-picker";
-    if (opts.record) h["X-BP-Search-Record"] = "1";
-    return h;
+    return BpSearchIntel.searchHeaders(this._searchIntel, {
+      contentType: !!json,
+      authorization: tok ? "Bearer " + tok : undefined,
+      source: "media-picker",
+      record: opts.record
+    });
   }
 
   _recordSearchInteraction(objectId, position) {
-    if (!this._lastSearchEventId || !objectId) return;
-    const dataset = this._dataset();
-    fetch(
-      "/v1/media/" + encodeURIComponent(dataset) + "/search/interaction",
+    BpSearchIntel.trackInteraction(
+      "media",
+      this._dataset(),
+      this._searchIntel,
+      objectId,
+      position,
       {
-        method: "POST",
-        credentials: "same-origin",
-        headers: this._searchHeaders(true),
-        body: JSON.stringify({
-          queryEventId: this._lastSearchEventId,
-          objectId: objectId,
-          position: position,
-          type: "select"
-        })
+        source: "media-picker",
+        authorization: this._token() ? "Bearer " + this._token() : undefined
       }
-    ).catch(function () {});
+    );
   }
 
   _isReferenceMode() {
@@ -366,7 +343,7 @@ class BpMediaPicker extends HTMLElement {
       );
       if (!r.ok) return;
       const data = await r.json();
-      if (data && data.searchEventId) this._lastSearchEventId = data.searchEventId;
+      if (data && data.searchEventId) BpSearchIntel.captureEventId(this._searchIntel, data);
       const hits = (data && data.result && data.result.hits) || [];
       this._files = hits
         .map((hit) => ({

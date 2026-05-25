@@ -45,6 +45,7 @@ Product surfaces (Media DAM, document search) plug in via thin adapters.
 | `Barkpark.Search.Event` | Raw event schema |
 | `Barkpark.Search.Crystal` | Crystallized stats schema |
 | `Barkpark.Search.MergePattern` | Transition pattern schema |
+| `Barkpark.Search.Synonyms` | Synonym map + candidates (Phase 4) |
 | `Barkpark.Search.Workers.Crystallize` | Nightly Oban job (03:30 UTC) |
 | `Barkpark.Search.Workers.Prune` | Raw event prune (04:00 UTC) |
 
@@ -79,16 +80,23 @@ Filters captured: `type`, `perspective` (`published` | `drafts` | `raw`).
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /v1/data/search/:dataset` | optional | Title search (+ `searchEventId`) |
+| `GET /v1/data/search/:dataset` | optional | Hybrid title search (+ `searchEventId`) |
 | `GET /v1/data/search/:dataset/suggestions` | optional | Recent / popular / nohits |
-| `GET /v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints |
+| `GET /v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints, synonymCandidates |
+| `GET /v1/data/search/:dataset/synonyms` | admin | List synonym map |
+| `POST /v1/data/search/:dataset/synonyms` | admin | Create synonym |
+| `DELETE /v1/data/search/:dataset/synonyms/:id` | admin | Delete synonym |
 
 ## HTTP (media surface)
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
+| `GET /v1/media/:dataset/search` | optional | Faceted search (+ `searchEventId`) |
 | `GET /v1/media/:dataset/search/suggestions` | optional | Recent / popular / nohits |
 | `GET /v1/media/:dataset/search/insights` | admin | Crystals, merge patterns, hints |
+| `GET /v1/media/:dataset/search/synonyms` | admin | List synonym map |
+| `POST /v1/media/:dataset/search/synonyms` | admin | Create synonym |
+| `DELETE /v1/media/:dataset/search/synonyms/:id` | admin | Delete synonym |
 
 Headers for lineage (all surfaces):
 
@@ -111,6 +119,19 @@ Shared conn helpers: `BarkparkWeb.SearchIntel`.
 # config/config.exs or runtime.exs
 config :barkpark, :search_query_blocklist, ["custom", "blocked", "terms"]
 ```
+
+## Roadmap
+
+Phases 0–5 shipped. Phases 6–8: QueryPipeline, surface settings, golden eval (`mix search.eval`), federated `GET /v1/search/:dataset`, shared `bp-search-intel.js`. See [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
+
+## Phase 7 admin runbook (synonym promotion)
+
+1. **Inspect no-hits** — `GET /v1/data/search/:dataset/insights` (or media equivalent). Check `zeroHitRate`, `recoveryRate`, and `synonymCandidates`.
+2. **Preview a candidate** — `GET …/synonyms/preview?q=…&from=…&to=…` returns `{beforeCount, afterCount}` without writing.
+3. **Promote** — `POST …/synonyms/promote` with `{from, to}` from a candidate row.
+4. **Regression gate** — `mix search.eval --surface documents --dataset pipeline` locally after seeding; CI runs `golden_eval_test.exs`.
+
+Surface settings (Phase 6): `GET/PUT …/search/settings` for `searchableFields`, `zeroHitStrategy`, `typoPolicy`, `highlightFields`.
 
 ## Deprecated
 

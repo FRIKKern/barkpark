@@ -1,0 +1,4 @@
+{"q":"phoenix","expect_ids":["p1","p2"],"max_rank":10}
+{"q":"phoenix -wright","expect_ids":["p1"],"must_exclude":["p2"],"max_rank":5}
+{"q":"react","expect_ids":[],"max_rank":3}
+{"q":"elixir","expect_ids":["p1"],"max_rank":3}

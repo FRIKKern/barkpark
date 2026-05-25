@@ -15,40 +15,61 @@ defmodule Barkpark.Media.Search do
   alias Barkpark.Content.Document
   alias Barkpark.Media.MediaFile
   alias Barkpark.Repo
-  alias Barkpark.Search.Synonyms
+  alias Barkpark.Search.{MediaRetriever, QueryParser, QueryPipeline, SurfaceConfigs}
 
   @asset_type "mediaAsset"
   @facet_fields ~w(kind tags mimeType status processing collection visibility)
 
   @doc """
-  Search media assets. Returns `{files, total, facets}`.
+  Search media assets. Returns `{files, total, facets, meta}`.
   """
-  @spec search(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map()}
+  @spec search(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map(), map()}
   def search(dataset, opts \\ []) when is_binary(dataset) do
-    query = build_query(dataset, opts)
+    config = SurfaceConfigs.get("media", dataset)
+    q = Keyword.get(opts, :q)
 
-    total =
-      query
-      |> exclude(:order_by)
-      |> exclude(:limit)
-      |> exclude(:offset)
-      |> select([m, _d], count(m.id, :distinct))
-      |> Repo.one()
-
-    page_ids = paginate_ids(query, opts)
-
-    files =
-      if page_ids == [] do
-        []
-      else
-        files_by_id =
-          MediaFile
-          |> where([m], m.id in ^page_ids)
-          |> Repo.all()
-          |> Map.new(&{&1.id, &1})
-
-        Enum.map(page_ids, &Map.fetch!(files_by_id, &1))
+    parsed =
+      case q do
+        v when is_binary(v) and v != "" -> QueryParser.parse(v)
+        _ -> QueryParser.parse("")
       end
+
+    search_fn = fn p, relaxed ->
+      inner_opts =
+        opts
+        |> Keyword.put(:parsed, p)
+        |> Keyword.put(:pipeline_config, config)
+        |> Keyword.put(:relaxed, relaxed)
+
+      query = build_query(dataset, inner_opts)
+
+      total =
+        query
+        |> exclude(:order_by)
+        |> exclude(:limit)
+        |> exclude(:offset)
+        |> select([m, _d], count(m.id, :distinct))
+        |> Repo.one()
+
+      page_ids = paginate_ids(query, inner_opts)
+
+      files =
+        if page_ids == [] do
+          []
+        else
+          files_by_id =
+            MediaFile
+            |> where([m], m.id in ^page_ids)
+            |> Repo.all()
+            |> Map.new(&{&1.id, &1})
+
+          Enum.map(page_ids, &Map.fetch!(files_by_id, &1))
+        end
+
+      {files, total || 0}
+    end
+
+    {files, total, recovery} = QueryPipeline.media_recovery(parsed, config, search_fn)
 
     facets =
       case Keyword.get(opts, :facets, []) do
@@ -56,7 +77,24 @@ defmodule Barkpark.Media.Search do
         fields -> compute_facets(dataset, opts, fields)
       end
 
-    {files, total || 0, facets}
+    docs = Barkpark.Media.asset_docs_for_files(files, dataset)
+
+    highlights =
+      Barkpark.Search.Highlighter.highlight_media(files, parsed, config, docs)
+
+    meta = %{
+      parsed: QueryParser.to_map(parsed),
+      highlights: highlights,
+      recovery: recovery
+    }
+
+    {files, total, facets, meta}
+  end
+
+  @spec search_legacy(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map()}
+  def search_legacy(dataset, opts \\ []) when is_binary(dataset) do
+    {files, total, facets, _meta} = search(dataset, opts)
+    {files, total, facets}
   end
 
   @doc "Build the shared search query (used by list + search)."
@@ -76,7 +114,7 @@ defmodule Barkpark.Media.Search do
     |> where([m], m.dataset == ^dataset)
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
-    |> maybe_filter_search(Keyword.get(opts, :q), dataset)
+    |> maybe_filter_text(dataset, opts)
     |> maybe_filter_kind(Keyword.get(opts, :kind))
     |> maybe_filter_kind(selections["kind"])
     |> maybe_filter_status(Keyword.get(opts, :status))
@@ -94,16 +132,62 @@ defmodule Barkpark.Media.Search do
   defp paginate_ids(query, opts) do
     limit = Keyword.get(opts, :limit, 50)
     offset = Keyword.get(opts, :offset, 0)
+    cursor = Keyword.get(opts, :cursor)
+
     fetch = limit + offset + 20
 
-    query
-    |> apply_sort(opts)
-    |> limit(^fetch)
-    |> select([m, _d], m.id)
-    |> Repo.all()
-    |> Enum.uniq()
+    ordered =
+      query
+      |> apply_sort(opts)
+      |> limit(^fetch)
+      |> select([m, _d], {m.id, m.inserted_at})
+
+    rows =
+      if cursor do
+        decode_cursor(cursor)
+        |> case do
+          {:ok, cursor_id, cursor_at} ->
+            ordered
+            |> where([m, _d], m.inserted_at < ^cursor_at or (m.inserted_at == ^cursor_at and m.id < ^cursor_id))
+            |> Repo.all()
+
+          _ ->
+            Repo.all(ordered)
+        end
+      else
+        Repo.all(ordered)
+      end
+
+    rows
+    |> Enum.uniq_by(fn {id, _} -> id end)
+    |> Enum.map(fn {id, _} -> id end)
     |> Enum.drop(offset)
     |> Enum.take(limit)
+  end
+
+  @doc false
+  def encode_cursor(%MediaFile{} = file) do
+    payload = Jason.encode!(%{id: file.id, at: DateTime.to_iso8601(file.inserted_at)})
+    Base.url_encode64(payload, padding: false)
+  end
+
+  @doc false
+  def next_cursor(files) do
+    case List.last(files) do
+      nil -> nil
+      file -> encode_cursor(file)
+    end
+  end
+
+  defp decode_cursor(cursor) when is_binary(cursor) do
+    with {:ok, bin} <- Base.url_decode64(cursor, padding: false),
+         {:ok, %{"id" => id, "at" => at}} <- Jason.decode(bin),
+         {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, dt, _} <- DateTime.from_iso8601(at) do
+      {:ok, uuid, dt}
+    else
+      _ -> :error
+    end
   end
 
   defp compute_facets(dataset, opts, fields) do
@@ -335,12 +419,30 @@ defmodule Barkpark.Media.Search do
   defp apply_sort(query, opts) do
     case Keyword.get(opts, :sort, "created-desc") do
       "relevance" ->
-        case Keyword.get(opts, :q) do
+        case Keyword.get(opts, :parsed) || Keyword.get(opts, :q) do
+          %{} = parsed when map_size(parsed) > 0 ->
+            terms = parsed.terms ++ parsed.phrases
+            primary = hd(terms) || Map.get(parsed, :raw, "")
+            pattern = if primary != "", do: "%#{escape_like(primary)}%", else: "%"
+
+            order_by(query, [m, d],
+              desc:
+                fragment(
+                  "CASE WHEN ? ILIKE ? OR ? ILIKE ? OR ? ILIKE ? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?) THEN 1 ELSE 0 END",
+                  d.title,
+                  ^pattern,
+                  m.original_name,
+                  ^pattern,
+                  m.filename,
+                  ^pattern,
+                  d.content,
+                  ^pattern
+                ),
+              desc: m.inserted_at
+            )
+
           q when is_binary(q) and q != "" ->
-            dataset = Keyword.fetch!(opts, :dataset)
-            terms = Synonyms.search_terms("media", dataset, q)
-            terms = if terms == [], do: [q], else: terms
-            pattern = "%#{escape_like(hd(terms))}%"
+            pattern = "%#{escape_like(q)}%"
 
             order_by(query, [m, d],
               desc:
@@ -373,32 +475,25 @@ defmodule Barkpark.Media.Search do
     end
   end
 
-  defp maybe_filter_search(query, nil, _dataset), do: query
-  defp maybe_filter_search(query, "", _dataset), do: query
+  defp maybe_filter_text(query, dataset, opts) do
+    parsed = Keyword.get(opts, :parsed)
+    config = Keyword.get(opts, :pipeline_config, SurfaceConfigs.get("media", dataset))
+    relaxed = Keyword.get(opts, :relaxed, false)
 
-  defp maybe_filter_search(query, q, dataset) when is_binary(q) and is_binary(dataset) do
-    terms = Synonyms.search_terms("media", dataset, q)
-    terms = if terms == [], do: [q], else: terms
-    patterns = Enum.map(terms, fn term -> "%#{escape_like(term)}%" end)
+    cond do
+      is_map(parsed) and map_size(parsed) > 0 ->
+        MediaRetriever.apply_to_query(query, dataset, parsed, config, relaxed: relaxed)
 
-    dynamic =
-      Enum.reduce(patterns, nil, fn pattern, dyn ->
-        clause =
-          dynamic(
-            [m, d],
-            ilike(m.original_name, ^pattern) or ilike(m.filename, ^pattern) or
-              ilike(d.title, ^pattern) or
-              fragment(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?)",
-                d.content,
-                ^pattern
-              )
-          )
+      true ->
+        q = Keyword.get(opts, :q)
 
-        if dyn, do: dynamic([m, d], ^dyn or ^clause), else: clause
-      end)
-
-    where(query, ^dynamic)
+        if q in [nil, ""] do
+          query
+        else
+          parsed = QueryParser.parse(q)
+          MediaRetriever.apply_to_query(query, dataset, parsed, config, relaxed: relaxed)
+        end
+    end
   end
 
   defp maybe_filter_kind(query, nil), do: query

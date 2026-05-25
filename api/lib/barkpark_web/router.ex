@@ -274,6 +274,13 @@ defmodule BarkparkWeb.Router do
     get "/meta", MetaController, :index
   end
 
+  # ── Federated discovery ─────────────────────────────────────────────────
+  scope "/v1", BarkparkWeb do
+    pipe_through :api
+
+    get "/search/:dataset", FederatedSearchController, :search
+  end
+
   # ── Public API — read-only, respects schema visibility ──────────────────
   scope "/v1/data", BarkparkWeb do
     pipe_through :api
@@ -318,8 +325,12 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_admin]
 
     get "/search/:dataset/insights", SearchController, :search_insights
+    get "/search/:dataset/settings", SearchController, :search_settings
+    put "/search/:dataset/settings", SearchController, :update_search_settings
     get "/search/:dataset/synonyms", SearchController, :search_synonyms
+    get "/search/:dataset/synonyms/preview", SearchController, :preview_search_synonym
     post "/search/:dataset/synonyms", SearchController, :create_search_synonym
+    post "/search/:dataset/synonyms/promote", SearchController, :promote_search_synonym
     delete "/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym
   end
 
@@ -381,8 +392,12 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_admin]
 
     get "/:dataset/search/insights", V1.MediaController, :search_insights
+    get "/:dataset/search/settings", V1.MediaController, :search_settings
+    put "/:dataset/search/settings", V1.MediaController, :update_search_settings
     get "/:dataset/search/synonyms", V1.MediaController, :search_synonyms
+    get "/:dataset/search/synonyms/preview", V1.MediaController, :preview_search_synonym
     post "/:dataset/search/synonyms", V1.MediaController, :create_search_synonym
+    post "/:dataset/search/synonyms/promote", V1.MediaController, :promote_search_synonym
     delete "/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym
   end
 

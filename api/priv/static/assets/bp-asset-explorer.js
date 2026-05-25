@@ -170,8 +170,10 @@
       this._suggestTimer = null;
       this._suggestHideTimer = null;
       this._suggestions = { recent: [], popular: [], nohits: [] };
-      this._searchClientId = this._ensureSearchClientId();
-      this._lastSearchEventId = null;
+      this._searchIntel = {
+        clientId: BpSearchIntel.clientId("media", this._dataset()),
+        parentEventId: null
+      };
     }
 
     connectedCallback() {
@@ -433,50 +435,33 @@
 
     _headers(json, opts) {
       opts = opts || {};
-      const h = { Accept: "application/json" };
-      if (json) h["Content-Type"] = "application/json";
       const tok = this._token();
-      if (tok) h["Authorization"] = "Bearer " + tok;
-      if (this._searchClientId) h["X-BP-Search-Client"] = this._searchClientId;
-      if (this._lastSearchEventId) h["X-BP-Search-Parent"] = this._lastSearchEventId;
-      h["X-BP-Search-Source"] = "explorer";
-      if (opts.record) h["X-BP-Search-Record"] = "1";
-      return h;
+      const intel = BpSearchIntel.searchHeaders(this._searchIntel, {
+        contentType: !!json,
+        authorization: tok ? "Bearer " + tok : undefined,
+        source: "explorer",
+        record: opts.record
+      });
+      return intel;
     }
 
     _recordSearchInteraction(doc) {
-      if (!this._lastSearchEventId || !this._search || !doc) return;
+      if (!this._search || !doc) return;
       const objectId = doc._id || doc.id;
       if (!objectId) return;
       const idx = this._assets.findIndex((d) => d._id === objectId);
-      fetch(this._mediaBase() + "/search/interaction", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: Object.assign({ "Content-Type": "application/json" }, this._headers()),
-        body: JSON.stringify({
-          queryEventId: this._lastSearchEventId,
-          objectId: objectId,
-          position: idx >= 0 ? idx : null,
-          type: "click"
-        })
-      }).catch(function () {});
-    }
-
-    _ensureSearchClientId() {
-      const key = "bp-search-client:" + this._dataset();
-      try {
-        let id = sessionStorage.getItem(key);
-        if (!id) {
-          id =
-            typeof crypto !== "undefined" && crypto.randomUUID
-              ? crypto.randomUUID()
-              : "c" + Date.now().toString(36);
-          sessionStorage.setItem(key, id);
+      BpSearchIntel.trackInteraction(
+        "media",
+        this._dataset(),
+        this._searchIntel,
+        objectId,
+        idx >= 0 ? idx : null,
+        {
+          source: "explorer",
+          type: "click",
+          authorization: this._token() ? "Bearer " + this._token() : undefined
         }
-        return id;
-      } catch (_e) {
-        return "anon-" + Date.now().toString(36);
-      }
+      );
     }
 
     _scheduleSuggestFetch() {
@@ -1090,9 +1075,9 @@
           this._total = data.result.total;
         }
         if (data && data.searchEventId) {
-          this._lastSearchEventId = data.searchEventId;
+          BpSearchIntel.captureEventId(this._searchIntel, data);
         } else if (!append) {
-          this._lastSearchEventId = null;
+          this._searchIntel.parentEventId = null;
         }
         const page = rows
           .map((row) => mergeHit(row))

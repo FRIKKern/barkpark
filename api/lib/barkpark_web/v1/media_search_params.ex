@@ -10,6 +10,7 @@ defmodule BarkparkWeb.V1.MediaSearchParams do
     [
       limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
       offset: parse_int(params["offset"], 0),
+      cursor: blank_to_nil(params["cursor"]),
       q: blank_to_nil(params["q"]),
       mime_type: blank_to_nil(params["type"] || params["mimeType"]),
       kind: blank_to_nil(params["kind"]),
