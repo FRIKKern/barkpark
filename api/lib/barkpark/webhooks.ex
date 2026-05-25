@@ -1,26 +1,78 @@
 defmodule Barkpark.Webhooks do
   import Ecto.Query
   alias Barkpark.Repo
+  alias Barkpark.Content.Scope
   alias Barkpark.Webhooks.{Webhook, Delivery}
 
-  def list_webhooks(dataset) do
+  @doc """
+  List webhooks for a dataset, optionally scoped to a workspace/project.
+
+  `opts` may carry `:workspace_id` / `:project_id`; when present the list is
+  filtered through `Content.Scope.scope_to_workspace/3` IN ADDITION TO the
+  dataset filter — the same hard tenant boundary the Content reads enforce.
+  A `nil`/absent `workspace_id` keeps the pre-tenancy unscoped behaviour.
+  """
+  def list_webhooks(dataset, opts \\ []) do
     Webhook
     |> where([w], w.dataset == ^dataset)
+    |> scope(opts)
     |> order_by([w], asc: w.name)
     |> Repo.all()
   end
 
-  def get_webhook(id) do
-    case Repo.get(Webhook, id) do
+  @doc """
+  Fetch a webhook by id, optionally scoped to a workspace/project.
+
+  `opts` may carry `:workspace_id` / `:project_id`; when present the lookup is
+  scoped so a workspace-A member cannot fetch (and therefore cannot update or
+  delete) a workspace-B webhook by guessing its id — out-of-scope ids return
+  `{:error, :not_found}`. A `nil`/absent `workspace_id` keeps the unscoped
+  lookup (internal callers / pre-tenancy).
+  """
+  def get_webhook(id, opts \\ []) do
+    query =
+      Webhook
+      |> where([w], w.id == ^id)
+      |> scope(opts)
+
+    case Repo.one(query) do
       nil -> {:error, :not_found}
       webhook -> {:ok, webhook}
     end
   end
 
-  def create_webhook(attrs) do
+  @doc """
+  Create a webhook, optionally stamping it with a workspace/project scope.
+
+  `opts` may carry `:workspace_id` / `:project_id`; when present they are
+  stamped onto the row so the webhook is owned by the creating tenant and is
+  selectable only under that scope. Explicit scope keys already in `attrs`
+  win; an absent `workspace_id` leaves the row unscoped (pre-tenancy).
+  """
+  def create_webhook(attrs, opts \\ []) do
     %Webhook{}
-    |> Webhook.changeset(attrs)
+    |> Webhook.changeset(put_scope_attrs(attrs, opts))
     |> Repo.insert()
+  end
+
+  # Stamp workspace_id/project_id from opts onto string-keyed attrs. Only
+  # non-nil keys are added, and an explicit scope already in attrs is left
+  # untouched — mirrors `Content.put_scope_attrs/2` (minus the Default
+  # fallback, which the webhook write path does not need).
+  defp put_scope_attrs(attrs, opts) do
+    attrs
+    |> maybe_put_scope("workspace_id", Keyword.get(opts, :workspace_id))
+    |> maybe_put_scope("project_id", Keyword.get(opts, :project_id))
+  end
+
+  defp maybe_put_scope(attrs, _key, nil), do: attrs
+
+  defp maybe_put_scope(attrs, key, value) do
+    if Map.has_key?(attrs, key) or Map.has_key?(attrs, String.to_existing_atom(key)) do
+      attrs
+    else
+      Map.put(attrs, key, value)
+    end
   end
 
   def update_webhook(%Webhook{} = webhook, attrs) do
@@ -33,12 +85,35 @@ defmodule Barkpark.Webhooks do
     Repo.delete(webhook)
   end
 
-  def active_webhooks_for(dataset, event, type) do
+  @doc """
+  Select the active webhooks that fire for an event, optionally scoped to a
+  workspace/project.
+
+  `opts` may carry `:workspace_id` / `:project_id` (threaded from the changed
+  doc's scope). When present, the selection is filtered through
+  `Content.Scope.scope_to_workspace/3` so a content change in workspace B never
+  selects workspace A's webhooks — the cross-tenant delivery leak guard. The
+  dataset + events + types filters are unchanged; this ADDS the workspace
+  envelope around them. A `nil`/absent `workspace_id` keeps the pre-tenancy
+  unscoped behaviour (matches every webhook in the dataset).
+  """
+  def active_webhooks_for(dataset, event, type, opts \\ []) do
     Webhook
     |> where([w], w.dataset == ^dataset and w.active == true)
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.events, w.events, ^event))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type))
+    |> scope(opts)
     |> Repo.all()
+  end
+
+  # Apply the workspace/project tenant boundary from `opts`. Nil-safe via
+  # Content.Scope: an absent workspace_id returns the query untouched.
+  defp scope(query, opts) do
+    Scope.scope_to_workspace(
+      query,
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
   end
 
   @doc """
