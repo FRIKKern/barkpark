@@ -80,6 +80,8 @@ type model struct {
 	textInput   textinput.Model   // text input for current field
 	dirtyValues map[string]string // unsaved field changes (fieldName -> value)
 	dirty       bool              // has unsaved changes
+	// Scope selector (workspace/project/dataset picker)
+	selector selectorState
 }
 
 func initialModel(ds *DataStore) model {
@@ -282,6 +284,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// ── Scope selector modal: all input goes to the selector ──
+	if m.selector.active {
+		return m.handleSelectorKey(msg)
+	}
+
 	// ── Editing mode: all input goes to the text input ──
 	if m.editing {
 		switch key {
@@ -312,6 +319,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	// ── Open scope selector (workspace/project/dataset) ──
+	case "s":
+		return m, m.openSelector()
 
 	// ── Switch pane / drill ──
 	case "tab":
@@ -665,7 +676,14 @@ func (m model) View() string {
 		columns = append(columns, m.renderEmptyState(editorWidth, ph))
 	}
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
+	var body string
+	if m.selector.active {
+		// Replace the column body with the centred scope-selector modal.
+		bodyHeight := ph
+		body = m.renderSelector(m.width, bodyHeight)
+	} else {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, columns...)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, toolbar, body, helpBar)
 }
 
@@ -700,7 +718,8 @@ func (m model) renderToolbar() string {
 	}
 
 	left := logo + "  " + tabs + "  " + bc
-	right := dimStyle.Render("Ctrl+K Search")
+	scope := fmt.Sprintf("%s/%s/%s", m.ds.Workspace, m.ds.Project, m.ds.Dataset)
+	right := breadcrumbStyle.Render("⌗ "+scope) + dimStyle.Render("  s switch")
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
@@ -713,12 +732,14 @@ func (m model) renderToolbar() string {
 
 func (m model) renderHelpBar() string {
 	var help string
-	if m.editing {
+	if m.selector.active {
+		help = " tab/j/k move  enter next/apply  ctrl+s apply  esc cancel"
+	} else if m.editing {
 		help = " type to edit  enter confirm  esc cancel"
 	} else if m.focus.Target == FocusEditor {
-		help = " j/k fields  enter edit  space toggle  ctrl+s save  esc back"
+		help = " j/k fields  enter edit  space toggle  ctrl+s save  s scope  esc back"
 	} else {
-		help = " j/k navigate  h/l switch pane  enter select  esc back  q quit"
+		help = " j/k navigate  h/l switch pane  enter select  s scope  esc back  q quit"
 	}
 	return toolbarStyle.Width(m.width).Render(dimStyle.Render(help))
 }
