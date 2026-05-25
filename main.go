@@ -18,9 +18,23 @@ func main() {
 		apiToken = "barkpark-dev-token"
 	}
 
+	// Workspace/Project/Dataset scope for the /w/:ws/p/:project/v1/ routing.
+	workspace := os.Getenv("BARKPARK_WORKSPACE")
+	if workspace == "" {
+		workspace = "default"
+	}
+	project := os.Getenv("BARKPARK_PROJECT")
+	if project == "" {
+		project = "default"
+	}
+	dataset := os.Getenv("BARKPARK_DATASET")
+	if dataset == "" {
+		dataset = "production"
+	}
+
 	// Load schemas from Phoenix API
-	fmt.Fprintf(os.Stderr, "Connecting to %s...\n", apiURL)
-	if err := loadSchemas(apiURL, apiToken); err != nil {
+	fmt.Fprintf(os.Stderr, "Connecting to %s (workspace=%s project=%s dataset=%s)...\n", apiURL, workspace, project, dataset)
+	if err := loadSchemas(apiURL, apiToken, workspace, project, dataset); err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
 		os.Exit(1)
@@ -33,6 +47,9 @@ func main() {
 	// Create API client
 	ds := NewDataStore(apiURL)
 	ds.SetToken(apiToken)
+	ds.Workspace = workspace
+	ds.Project = project
+	ds.Dataset = dataset
 
 	// Start TUI
 	p := tea.NewProgram(initialModel(ds), tea.WithAltScreen())
