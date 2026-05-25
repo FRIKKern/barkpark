@@ -91,6 +91,65 @@ defmodule Barkpark.Papers.EventsTest do
     end
   end
 
+  describe "list_pending_intents/0 and mark_processed/1" do
+    test "returns only unprocessed actionable intents; excludes lifecycle + processed" do
+      goal_id = "bd-intents"
+
+      {:ok, build} =
+        Events.create_event(%{
+          "goal_id" => goal_id,
+          "event_type" => "action:build"
+        })
+
+      {:ok, simplify} =
+        Events.create_event(%{
+          "goal_id" => goal_id,
+          "event_type" => "simplify-request"
+        })
+
+      # A lifecycle event — NOT an intent, must be excluded.
+      {:ok, _opened} =
+        Events.create_event(%{
+          "goal_id" => goal_id,
+          "event_type" => "goal-opened"
+        })
+
+      # An actionable intent that has already been processed — must be excluded.
+      {:ok, grill} =
+        Events.create_event(%{
+          "goal_id" => goal_id,
+          "event_type" => "action:grill"
+        })
+
+      {:ok, _} = Events.mark_processed(grill.id)
+
+      pending_ids = Events.list_pending_intents() |> Enum.map(& &1.id)
+
+      assert pending_ids == [build.id, simplify.id]
+      refute grill.id in pending_ids
+    end
+
+    test "mark_processed/1 stamps processed_at and drops the row from pending" do
+      {:ok, intent} =
+        Events.create_event(%{
+          "goal_id" => "bd-mark",
+          "event_type" => "action:review"
+        })
+
+      assert is_nil(intent.processed_at)
+      assert intent.id in (Events.list_pending_intents() |> Enum.map(& &1.id))
+
+      assert {:ok, marked} = Events.mark_processed(intent.id)
+      assert marked.processed_at
+
+      refute intent.id in (Events.list_pending_intents() |> Enum.map(& &1.id))
+    end
+
+    test "mark_processed/1 on a bad id returns {:error, :not_found}" do
+      assert {:error, :not_found} = Events.mark_processed(Ecto.UUID.generate())
+    end
+  end
+
   describe "Content.upsert_paper/1 event append" do
     test "appends exactly one event when event_type is present" do
       slug = "wired-paper"
