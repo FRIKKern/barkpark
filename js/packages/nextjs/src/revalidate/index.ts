@@ -7,14 +7,21 @@ import { revalidateTag, revalidatePath } from 'next/cache'
  * Payload accepted by {@link revalidateBarkpark}.
  *
  * Canonical shape (emitted by the Phoenix webhook dispatcher):
- *   `{ event, type, doc_id, document, dataset, sync_tags }`
+ *   `{ event, type, doc_id, document, dataset, workspace, project, sync_tags }`
  *
- * `sync_tags` — already canonical `bp:ds:<dataset>:doc:<id>` /
- * `bp:ds:<dataset>:type:<type>` entries — is preferred when present.
- * Falls back to constructing canonical tags from `dataset` + `doc_id` + `type`.
+ * `sync_tags` — emitted by the dispatcher in either the NEW workspace/project
+ * scoped shape `bp:ws:<ws>:p:<project>:ds:<dataset>:doc:<id>` /
+ * `:type:<type>` or the LEGACY flat shape `bp:ds:<dataset>:doc:<id>` /
+ * `:type:<type>` — is preferred when present. Each entry is forwarded verbatim
+ * to `revalidateTag`, so both shapes pass through unchanged.
+ *
+ * When `sync_tags` is absent, tags are constructed from the payload fields.
+ * If `workspace` + `project` resolve (s7 scoped payloads), SCOPED `bp:ws:*`
+ * tags are constructed; otherwise the LEGACY flat `bp:ds:*` tags are
+ * constructed (back-compat).
  *
  * Legacy shape fields (`_id`, `_type`, `ids`, `types`) are still accepted for
- * back-compat; they only produce canonical tags when `dataset` is also set.
+ * back-compat; they only produce tags when `dataset` is also set.
  *
  * Path-based revalidation (`path`, `paths`) remains gated behind
  * `BARKPARK_ALLOW_ALL_REVALIDATE=1`.
@@ -27,6 +34,17 @@ export interface RevalidatePayload {
   document?: { _id?: string; _type?: string }
   dataset?: string
   sync_tags?: readonly string[]
+
+  /**
+   * Workspace/project scope (s7 scoped payloads). When BOTH resolve, constructed
+   * fallback tags use the scoped `bp:ws:<ws>:p:<project>:ds:<dataset>:…` shape.
+   * Both the canonical (`workspace`/`project`) and the dispatcher `_slug`
+   * spellings (`workspace_slug`/`project_slug`) are accepted.
+   */
+  workspace?: string
+  project?: string
+  workspace_slug?: string
+  project_slug?: string
 
   /** Path-based revalidation (opt-in via env). */
   path?: string
@@ -47,15 +65,42 @@ function allowAllRevalidate(): boolean {
   return v === '1' || v === 'true'
 }
 
+function nonEmpty(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0
+}
+
+/**
+ * Build the tag namespace prefix for field-derived tags.
+ *
+ * Returns the SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>` prefix when both a
+ * workspace and a project slug resolve (s7 scoped payloads); otherwise the
+ * LEGACY flat `bp:ds:<dataset>` prefix (back-compat). Returns `null` when no
+ * dataset is present — no tag can be constructed.
+ */
+function tagPrefix(payload: RevalidatePayload): string | null {
+  const ds = payload.dataset
+  if (!nonEmpty(ds)) return null
+
+  const ws = payload.workspace ?? payload.workspace_slug
+  const project = payload.project ?? payload.project_slug
+  if (nonEmpty(ws) && nonEmpty(project)) {
+    return `bp:ws:${ws}:p:${project}:ds:${ds}`
+  }
+  return `bp:ds:${ds}`
+}
+
 /**
  * Fan out cache invalidations for one or more Barkpark documents.
  *
  * Preferred input is the Phoenix webhook payload
- * `{ event, type, doc_id, document, dataset, sync_tags }`. When `sync_tags`
- * is present, each entry is passed verbatim to `revalidateTag`. Otherwise
- * canonical `bp:ds:<dataset>:doc:<id>` / `:type:<type>` / `:_all` tags are
- * constructed from `dataset`, `doc_id`, and `type` (or their legacy
- * `_id`/`_type`/`ids`/`types` equivalents).
+ * `{ event, type, doc_id, document, dataset, workspace, project, sync_tags }`.
+ * When `sync_tags` is present, each entry is passed verbatim to `revalidateTag`
+ * — so both the NEW scoped `bp:ws:<ws>:p:<project>:ds:<dataset>:…` shape and
+ * the LEGACY flat `bp:ds:<dataset>:…` shape flow through unchanged. Otherwise
+ * tags are constructed from fields: SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>`
+ * when `workspace` + `project` resolve (s7), else LEGACY flat `bp:ds:<dataset>`
+ * (back-compat), each with `:doc:<id>` / `:type:<type>` / `:_all` suffixes from
+ * `doc_id`/`type` (or their legacy `_id`/`_type`/`ids`/`types` equivalents).
  *
  * Tags are deduped before `revalidateTag` fires so double-invalidation is
  * avoided when both `sync_tags` and derived tags overlap.
@@ -94,27 +139,29 @@ export function revalidateBarkpark(payload?: RevalidatePayload | string): void {
   }
 
   // Fall back to / augment with tags constructed from Phoenix or legacy fields.
-  const ds = payload.dataset
-  if (typeof ds === 'string' && ds.length > 0) {
-    tags.add(`bp:ds:${ds}:_all`)
+  // The prefix is SCOPED (bp:ws:<ws>:p:<project>:ds:<dataset>) when the payload
+  // carries workspace+project (s7), else the LEGACY flat bp:ds:<dataset>.
+  const prefix = tagPrefix(payload)
+  if (prefix !== null) {
+    tags.add(`${prefix}:_all`)
 
     const docId = payload.doc_id ?? payload._id ?? payload.document?._id
     const type = payload.type ?? payload._type ?? payload.document?._type
-    if (typeof docId === 'string' && docId.length > 0) {
-      tags.add(`bp:ds:${ds}:doc:${docId}`)
+    if (nonEmpty(docId)) {
+      tags.add(`${prefix}:doc:${docId}`)
     }
-    if (typeof type === 'string' && type.length > 0) {
-      tags.add(`bp:ds:${ds}:type:${type}`)
+    if (nonEmpty(type)) {
+      tags.add(`${prefix}:type:${type}`)
     }
 
     if (payload.ids) {
       for (const id of payload.ids) {
-        if (typeof id === 'string' && id.length > 0) tags.add(`bp:ds:${ds}:doc:${id}`)
+        if (nonEmpty(id)) tags.add(`${prefix}:doc:${id}`)
       }
     }
     if (payload.types) {
       for (const t of payload.types) {
-        if (typeof t === 'string' && t.length > 0) tags.add(`bp:ds:${ds}:type:${t}`)
+        if (nonEmpty(t)) tags.add(`${prefix}:type:${t}`)
       }
     }
   }
