@@ -99,8 +99,10 @@ MIX_ENV=dev mix ecto.reset            # drops, migrates, seeds — fires path (a
 mix phx.server &                      # boot the app — fires path (b)
 sleep 2
 curl -s -H "Authorization: Bearer barkpark-dev-token" \
-  http://localhost:4000/v1/schemas/production | jq '.[] | .name'
+  http://localhost:4000/w/acme/p/web/v1/schemas/production | jq '.[] | .name'
 ```
+
+> Flat alias: `GET /v1/schemas/production` (no `/w/.../p/...` prefix) → resolves the `Default` workspace + project. See `docs/api-v1.md` §1a and §8.
 
 You should see every v1 seed schema (`post`, `page`, `author`, …) plus every
 plugin schema (`book` from OnixEdit, plus whatever new plugins declared).
@@ -118,7 +120,7 @@ second is a no-op upsert on identical fields.
   (rare), invoke `Bootstrap.register_all_schemas/0` from a remote console to
   install that plugin's schemas.
 - **Visibility.** Plugin schemas typically use `visibility: "private"`,
-  which puts them behind admin-token auth on `GET /v1/schemas/production`.
+  which puts them behind admin-token auth on `GET /w/:workspace_slug/p/:project_slug/v1/schemas/production` (flat alias: `GET /v1/schemas/production`).
   Both `"public"` and `"private"` round-trip through the changeset.
 - **Bokbasen.** Despite the name, `Barkpark.Plugins.OnixEdit.Bokbasen.*`
   is a sub-namespace of the OnixEdit plugin — it implements the publish

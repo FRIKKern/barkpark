@@ -522,9 +522,11 @@ live:
 
 ```bash
 curl -s -H "Authorization: Bearer barkpark-dev-token" \
-  http://89.167.28.206/v1/schemas/production \
+  http://89.167.28.206/w/acme/p/web/v1/schemas/production \
   | jq '.[] | select(.name=="my_type") | .name'
 ```
+
+> Flat alias: `GET /v1/schemas/production` (no `/w/.../p/...` prefix) → resolves the `Default` workspace + project. See `docs/api-v1.md` §1a and §8.
 
 If you edited `register_routes/1`, the router beam may be stale — nuke it and
 recompile (HIGHWAY.md Appendix B). And if anything looks off, the

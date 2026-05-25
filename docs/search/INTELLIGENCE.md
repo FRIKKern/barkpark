@@ -65,7 +65,7 @@ WoodWing-style facet params are translated via `MediaSearchParams` inside the ad
 
 ## Documents adapter
 
-`Barkpark.Content.SearchIntelligence` wraps `/v1/data/search/:dataset` with `surface: "documents"`.
+`Barkpark.Content.SearchIntelligence` wraps `/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset` with `surface: "documents"`.
 
 ```elixir
 SearchIntelligence.record("production", params, count, ms,
@@ -78,25 +78,31 @@ Filters captured: `type`, `perspective` (`published` | `drafts` | `raw`).
 
 ## HTTP (documents surface)
 
+Endpoints are addressed under the workspace + project prefix (the canonical form). The flat `/v1/data/search/*` paths remain as the `Default`/`Default` back-compat alias — see `docs/api-v1.md` §1a.
+
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /v1/data/search/:dataset` | optional | Hybrid title search (+ `searchEventId`) |
-| `GET /v1/data/search/:dataset/suggestions` | optional | Recent / popular / nohits |
-| `GET /v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints, synonymCandidates |
-| `GET /v1/data/search/:dataset/synonyms` | admin | List synonym map |
-| `POST /v1/data/search/:dataset/synonyms` | admin | Create synonym |
-| `DELETE /v1/data/search/:dataset/synonyms/:id` | admin | Delete synonym |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset` | optional | Hybrid title search (+ `searchEventId`) |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/suggestions` | optional | Recent / popular / nohits |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints, synonymCandidates |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms` | admin | List synonym map |
+| `POST /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms` | admin | Create synonym |
+| `DELETE /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms/:id` | admin | Delete synonym |
+
+> Flat alias: `GET /v1/data/search/:dataset[/suggestions|/insights|/synonyms]`, `POST /v1/data/search/:dataset/synonyms`, `DELETE /v1/data/search/:dataset/synonyms/:id` → resolves the `Default` workspace + project.
 
 ## HTTP (media surface)
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /v1/media/:dataset/search` | optional | Faceted search (+ `searchEventId`) |
-| `GET /v1/media/:dataset/search/suggestions` | optional | Recent / popular / nohits |
-| `GET /v1/media/:dataset/search/insights` | admin | Crystals, merge patterns, hints |
-| `GET /v1/media/:dataset/search/synonyms` | admin | List synonym map |
-| `POST /v1/media/:dataset/search/synonyms` | admin | Create synonym |
-| `DELETE /v1/media/:dataset/search/synonyms/:id` | admin | Delete synonym |
+| `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search` | optional | Faceted search (+ `searchEventId`) |
+| `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/suggestions` | optional | Recent / popular / nohits |
+| `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/insights` | admin | Crystals, merge patterns, hints |
+| `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms` | admin | List synonym map |
+| `POST /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms` | admin | Create synonym |
+| `DELETE /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms/:id` | admin | Delete synonym |
+
+> Flat alias: `GET /v1/media/:dataset/search[/suggestions|/insights|/synonyms]`, `POST /v1/media/:dataset/search/synonyms`, `DELETE /v1/media/:dataset/search/synonyms/:id` → resolves the `Default` workspace + project.
 
 Headers for lineage (all surfaces):
 
@@ -122,11 +128,11 @@ config :barkpark, :search_query_blocklist, ["custom", "blocked", "terms"]
 
 ## Roadmap
 
-Phases 0–5 shipped. Phases 6–8: QueryPipeline, surface settings, golden eval (`mix search.eval`), federated `GET /v1/search/:dataset`, shared `bp-search-intel.js`. See [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
+Phases 0–5 shipped. Phases 6–8: QueryPipeline, surface settings, golden eval (`mix search.eval`), federated `GET /w/:workspace_slug/p/:project_slug/v1/search/:dataset` (flat alias `GET /v1/search/:dataset` → `Default` workspace + project), shared `bp-search-intel.js`. See [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
 
 ## Phase 7 admin runbook (synonym promotion)
 
-1. **Inspect no-hits** — `GET /v1/data/search/:dataset/insights` (or media equivalent). Check `zeroHitRate`, `recoveryRate`, and `synonymCandidates`.
+1. **Inspect no-hits** — `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/insights` (flat alias `GET /v1/data/search/:dataset/insights` → `Default`; or media equivalent). Check `zeroHitRate`, `recoveryRate`, and `synonymCandidates`.
 2. **Preview a candidate** — `GET …/synonyms/preview?q=…&from=…&to=…` returns `{beforeCount, afterCount}` without writing.
 3. **Promote** — `POST …/synonyms/promote` with `{from, to}` from a candidate row.
 4. **Regression gate** — `mix search.eval --surface documents --dataset pipeline` locally after seeding; CI runs `golden_eval_test.exs`.
