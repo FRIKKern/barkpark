@@ -13,6 +13,7 @@ import {
   BarkparkTimeoutError,
   BarkparkValidationError,
   buildQueryString,
+  scopePrefix,
 } from '@barkpark/core'
 
 import type { BarkparkFetchOptions, BarkparkServerConfig } from './types'
@@ -24,9 +25,32 @@ interface BuiltRequest {
   init: RequestInit & { next?: { tags?: string[]; revalidate?: number | false } }
 }
 
+/**
+ * Resolve the workspace/project scope prefix for this server config. The server
+ * config's `workspace`/`project` (when set) take precedence over the client's
+ * `client.config` values; both must resolve before `scopePrefix` emits a prefix.
+ * Returns `/w/<ws>/p/<project>` when scoped, `''` for the flat `/v1/...` routes
+ * (back-compat).
+ */
+function resolveScopePrefix(cfg: BarkparkServerConfig): string {
+  const clientConfig = cfg.client.config
+  // Spread first, then only assign workspace/project when a value resolves —
+  // under exactOptionalPropertyTypes we must not write `undefined` onto an
+  // optional `string` field. Server-config values take precedence over the client's.
+  const resolved = { ...clientConfig }
+  const workspace = cfg.workspace ?? clientConfig.workspace
+  const project = cfg.project ?? clientConfig.project
+  if (workspace !== undefined) resolved.workspace = workspace
+  else delete resolved.workspace
+  if (project !== undefined) resolved.project = project
+  else delete resolved.project
+  return scopePrefix(resolved)
+}
+
 function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspective: string | undefined): string {
   const { client } = cfg
   const baseUrl = client.config.projectUrl.replace(/\/+$/, '')
+  const scope = resolveScopePrefix(cfg)
   const dataset = client.config.dataset
   if (opts.id !== undefined) {
     if (opts.type === undefined || opts.type.length === 0) {
@@ -34,7 +58,7 @@ function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspec
     }
     const path = `/v1/data/doc/${encodeURIComponent(dataset)}/${encodeURIComponent(opts.type)}/${encodeURIComponent(opts.id)}`
     const qs = perspective !== undefined ? `?perspective=${encodeURIComponent(perspective)}` : ''
-    return `${baseUrl}${path}${qs}`
+    return `${baseUrl}${scope}${path}${qs}`
   }
   if (opts.type === undefined || opts.type.length === 0) {
     throw new BarkparkValidationError('barkparkFetch: type is required when id is not set', { field: 'type' })
@@ -44,7 +68,7 @@ function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspec
   if (filterQs.length > 0) parts.push(filterQs)
   if (perspective !== undefined) parts.push(`perspective=${encodeURIComponent(perspective)}`)
   const qs = parts.length > 0 ? `?${parts.join('&')}` : ''
-  return `${baseUrl}/v1/data/query/${encodeURIComponent(dataset)}/${encodeURIComponent(opts.type)}${qs}`
+  return `${baseUrl}${scope}/v1/data/query/${encodeURIComponent(dataset)}/${encodeURIComponent(opts.type)}${qs}`
 }
 
 function defaultHeaders(cfg: BarkparkServerConfig, extra?: Record<string, string>): Record<string, string> {

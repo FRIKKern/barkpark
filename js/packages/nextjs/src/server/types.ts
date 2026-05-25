@@ -6,10 +6,19 @@ import type { BuilderState } from '@barkpark/core'
 
 /** Config passed to createBarkparkServer / defineLive. */
 export interface BarkparkServerConfig<C extends BarkparkClient = BarkparkClient> {
-  /** Configured @barkpark/core client. The server reads `client.config` for projectUrl/dataset/apiVersion. */
+  /** Configured @barkpark/core client. The server reads `client.config` for projectUrl/dataset/apiVersion (and workspace/project, unless overridden below). */
   client: C
   /** Server-only Bearer token used on the draft branch. MUST never reach the browser bundle. */
   serverToken: string
+  /**
+   * Optional workspace slug. Mirrors / overrides `client.config.workspace`. When BOTH `workspace`
+   * and `project` resolve (server-config value taking precedence over the client's), the server
+   * prepends the `/w/<ws>/p/<project>` scope to every `/v1/...` URL it builds; otherwise the flat
+   * `/v1/...` routes are used (back-compat).
+   */
+  workspace?: string
+  /** Optional project slug. Mirrors / overrides `client.config.project`. See {@link workspace}. */
+  project?: string
   /** Browser-exposed preview token (used by createDraftModeRoutes / SSE). Optional in v0.1. */
   browserToken?: string
   /** Per-call defaults applied by barkparkFetch. */
