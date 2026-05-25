@@ -12,23 +12,24 @@ import { barkparkFetch, createBarkparkServer, defineLive } from '../src/server/i
 import type { BarkparkServerConfig } from '../src/server/index'
 
 interface FakeClient {
-  config: { projectUrl: string; dataset: string; apiVersion: string }
+  config: { projectUrl: string; dataset: string; apiVersion: string; workspace?: string; project?: string }
 }
 
-function makeClient(): FakeClient {
+function makeClient(scope?: { workspace?: string; project?: string }): FakeClient {
   return {
     config: {
       projectUrl: 'http://localhost:4000',
       dataset: 'production',
       apiVersion: '2026-01-01',
+      ...(scope ?? {}),
     },
   }
 }
 
-function makeCfg(extra?: Partial<BarkparkServerConfig>): BarkparkServerConfig {
+function makeCfg(extra?: Partial<BarkparkServerConfig>, clientScope?: { workspace?: string; project?: string }): BarkparkServerConfig {
   // unsafe cast — test fake client supplies only what server core reads
   return {
-    client: makeClient() as unknown as BarkparkServerConfig['client'],
+    client: makeClient(clientScope) as unknown as BarkparkServerConfig['client'],
     serverToken: 's-tok-123',
     ...extra,
   }
@@ -155,6 +156,69 @@ describe('barkparkFetch — draft branch', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2)
     const secondInit = fetchSpy.mock.calls[1]![1] as RequestInit
     expect((secondInit.headers as Record<string, string>).Authorization).toBe('Bearer s-tok-123')
+  })
+})
+
+describe('barkparkFetch — workspace/project scoping', () => {
+  it('flat /v1 routes when neither workspace nor project is configured (back-compat)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(makeCfg(), { type: 'post' })
+    const [url] = fetchSpy.mock.calls[0]!
+    expect(url as string).toBe('http://localhost:4000/v1/data/query/production/post')
+    expect(url as string).not.toContain('/w/')
+  })
+
+  it('flat /v1 routes when only workspace is set (both required)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(makeCfg({ workspace: 'acme' }), { type: 'post' })
+    const [url] = fetchSpy.mock.calls[0]!
+    expect(url as string).not.toContain('/w/')
+    expect(url as string).toContain('/v1/data/query/production/post')
+  })
+
+  it('scopes the query URL when workspace + project set on the server config', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), { type: 'post' })
+    const [url] = fetchSpy.mock.calls[0]!
+    expect(url as string).toBe('http://localhost:4000/w/acme/p/blog/v1/data/query/production/post')
+  })
+
+  it('scopes the single-doc URL (id branch) and preserves perspective', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
+    )
+    await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), { type: 'post', id: 'p1', perspective: 'raw' })
+    const [url] = fetchSpy.mock.calls[0]!
+    expect(url as string).toBe(
+      'http://localhost:4000/w/acme/p/blog/v1/data/doc/production/post/p1?perspective=raw',
+    )
+  })
+
+  it('inherits workspace/project from client.config when server config omits them', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(makeCfg(undefined, { workspace: 'acme', project: 'blog' }), { type: 'post' })
+    const [url] = fetchSpy.mock.calls[0]!
+    expect(url as string).toBe('http://localhost:4000/w/acme/p/blog/v1/data/query/production/post')
+  })
+
+  it('server config workspace/project override the client config values', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(envelope({ documents: [] })),
+    )
+    await barkparkFetch(
+      makeCfg({ workspace: 'override-ws', project: 'override-pr' }, { workspace: 'acme', project: 'blog' }),
+      { type: 'post' },
+    )
+    const [url] = fetchSpy.mock.calls[0]!
+    expect(url as string).toBe('http://localhost:4000/w/override-ws/p/override-pr/v1/data/query/production/post')
   })
 })
 
