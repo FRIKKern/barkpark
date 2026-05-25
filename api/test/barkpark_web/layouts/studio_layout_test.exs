@@ -52,9 +52,12 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
   end
 
   describe "Studio chrome leaks intentionally to /admin (Task #9 regression guard)" do
-    test "renders shell + topbar + brand + sign-out on /admin/bokbasen", %{conn: conn} do
+    test "renders shell + topbar + brand + sign-out on /admin/onixedit/bokbasen", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, _view, html} = live(conn, "/admin/bokbasen")
+      # /admin/bokbasen now 301s to /admin/onixedit/bokbasen (LV moved into
+      # the OnixEdit plugin namespace, G3.s4). The chrome guard asserts on the
+      # live mount point, which keeps the Studio chrome per the Boss revision.
+      {:ok, _view, html} = live(conn, "/admin/onixedit/bokbasen")
 
       # Studio chrome must be present (Boss revision: admin keeps chrome
       # so the Task #9 nav-disappears fix does not regress).

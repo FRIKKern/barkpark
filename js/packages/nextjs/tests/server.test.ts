@@ -130,13 +130,14 @@ describe('barkparkFetch — draft branch', () => {
       .mockResolvedValueOnce(jsonResponse(envelope({ documents: [{ _id: 'p1' }] })))
 
     const cfg = makeCfg({ reissuePreviewToken: reissue })
-    const out = await barkparkFetch<{ documents: Array<{ _id: string }> }>(cfg, { type: 'post' })
+    const out = await barkparkFetch<{ result: { documents: Array<{ _id: string }> } }>(cfg, { type: 'post' })
 
     expect(reissue).toHaveBeenCalledOnce()
     expect(fetchSpy).toHaveBeenCalledTimes(2)
     const secondInit = fetchSpy.mock.calls[1]![1] as RequestInit
     expect((secondInit.headers as Record<string, string>).Authorization).toBe('Bearer fresh-tok')
-    expect(out.documents[0]!._id).toBe('p1')
+    // barkparkFetch returns the full Phoenix envelope; documents live under .result.
+    expect(out.result.documents[0]!._id).toBe('p1')
   })
 
   it('on second 401 throws BarkparkAuthError', async () => {
@@ -295,7 +296,9 @@ describe('createBarkparkServer + defineLive', () => {
     const cfg = makeCfg()
     const top = createBarkparkServer(cfg)
     const inner = defineLive(cfg)
-    await expect(top.barkparkFetch({ type: 'post' })).resolves.toEqual({ documents: [] })
-    await expect(inner.barkparkFetch({ type: 'post' })).resolves.toEqual({ documents: [] })
+    // barkparkFetch returns the full Phoenix envelope, not the unwrapped result.
+    const expected = envelope({ documents: [] })
+    await expect(top.barkparkFetch({ type: 'post' })).resolves.toEqual(expected)
+    await expect(inner.barkparkFetch({ type: 'post' })).resolves.toEqual(expected)
   })
 })

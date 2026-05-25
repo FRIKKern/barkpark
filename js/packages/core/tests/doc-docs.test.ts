@@ -10,10 +10,7 @@ import {
 import { getDoc } from '../src/doc'
 import { createDocsOperation } from '../src/docs'
 import { fetchRawDoc } from '../src/fetchRaw'
-import {
-  BarkparkAPIError,
-  BarkparkAuthError,
-} from '../src/errors'
+import { BarkparkAuthError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {

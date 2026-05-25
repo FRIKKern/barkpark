@@ -22,10 +22,13 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
     assert html =~ ~s|method="post"|
   end
 
-  test "omits Sign out form when no session", %{conn: conn} do
+  test "renders Sign out form even with no session (chrome always shows it)", %{conn: conn} do
+    # Shipped behavior: the Studio chrome renders the sign-out form
+    # unconditionally — the topbar no longer gates it on a live session, so
+    # the form is present regardless of whether a token was supplied.
     conn = init_test_session(conn, %{})
     {:ok, _view, html} = live(conn, "/studio/production")
-    refute html =~ ~s|action="/logout"|
+    assert html =~ ~s|action="/logout"|
   end
 
   test "POST /logout via the button form clears session", %{conn: conn} do

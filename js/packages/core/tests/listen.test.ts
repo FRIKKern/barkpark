@@ -148,8 +148,9 @@ describe('createListenHandle', () => {
     )
     const handle = createListenHandle(config, 'post', undefined, { maxReconnects: 3 })
     await expect(async () => {
-      for await (const _evt of handle) {
-        /* not reached */
+      const it = handle[Symbol.asyncIterator]()
+      while (!(await it.next()).done) {
+        /* drain until it throws — no event is reached */
       }
     }).rejects.toBeInstanceOf(BarkparkAuthError)
     expect(attempts).toBe(1)
@@ -163,8 +164,9 @@ describe('createListenHandle', () => {
     )
     const handle = createListenHandle(config, 'post', undefined, { maxReconnects: 0 })
     await expect(async () => {
-      for await (const _evt of handle) {
-        /* not reached */
+      const it = handle[Symbol.asyncIterator]()
+      while (!(await it.next()).done) {
+        /* drain until it throws — no event is reached */
       }
     }).rejects.toBeInstanceOf(BarkparkAPIError)
   })

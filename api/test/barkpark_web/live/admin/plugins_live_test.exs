@@ -7,8 +7,8 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
     * Auth gate — unauthenticated and non-admin tokens are redirected.
     * Renders one card per registered plugin with callback impl / default
       markers (the OnixEdit plugin registered at app boot exposes both
-      shapes — overridden `action_handlers/0` etc., default
-      `register_routes/1` etc.).
+      shapes — overridden `action_handlers/0`, `register_routes/1` etc.;
+      default `validate_settings/1` etc.).
     * Reload-plugin event flashes success and refreshes the last
       bootstrap row via `Plugins.RunStatus`.
     * Reload-all event walks every plugin and flashes the aggregate.
@@ -67,9 +67,12 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
                ~s|[data-test-plugin="onixedit"] [data-test-callback="action_handlers"][data-test-callback-status="implemented"]|
              )
 
+      # OnixEdit now implements register_routes/1 (onixedit.ex:205 — the
+      # legacy /admin/bokbasen 301 + onixedit consoles), so the callback row
+      # surfaces as "implemented", not the former "default".
       assert has_element?(
                view,
-               ~s|[data-test-plugin="onixedit"] [data-test-callback="register_routes"][data-test-callback-status="default"]|
+               ~s|[data-test-plugin="onixedit"] [data-test-callback="register_routes"][data-test-callback-status="implemented"]|
              )
     end
 

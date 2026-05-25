@@ -9,8 +9,13 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
   setup do
+    # Own, non-colliding token. The seeded `barkpark-dev-token` (raw value)
+    # carries the label "dev-studio"; minting the same raw value here would
+    # hit the unique token_hash constraint and silently leave the seeded
+    # "dev-studio" label in place, so `checkedOutBy` came back "dev-studio".
+    # A dedicated raw token makes the asserted "dev" label deterministic.
     Auth.create_token(
-      "barkpark-dev-token",
+      "governance-dev-token",
       "dev",
       "v1-media-governance",
       ["read", "write", "admin"]
@@ -43,7 +48,7 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
     end
   end
 
-  defp authed(conn), do: put_req_header(conn, "authorization", "Bearer barkpark-dev-token")
+  defp authed(conn), do: put_req_header(conn, "authorization", "Bearer governance-dev-token")
 
   defp other_editor(conn, token),
     do: put_req_header(conn, "authorization", "Bearer #{token}")
