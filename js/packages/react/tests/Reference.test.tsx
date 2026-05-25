@@ -6,7 +6,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { act, render, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { BarkparkReference } from '../src/Reference'
-import type { ResolvedDoc } from '../src/Reference'
+import type {
+  ResolvedDoc,
+  BarkparkReferenceClient,
+} from '../src/Reference'
 
 function renderDoc(doc: ResolvedDoc): ReactElement {
   return <div data-testid={`doc-${doc._id}`}>{String(doc.title ?? '')}</div>
@@ -186,6 +189,47 @@ describe('BarkparkReference', () => {
     )
     expect((await findByTestId('doc-post-abc')).textContent).toBe('raw-post-abc')
     expect(fetcher).toHaveBeenCalledWith('post-abc')
+  })
+
+  it('derives a scope-aware fetcher from a client config (workspace/project)', async () => {
+    const paths: string[] = []
+    const client: BarkparkReferenceClient = {
+      fetchRaw: async <T = ResolvedDoc>(path: string): Promise<T> => {
+        paths.push(path)
+        return { _id: 'scoped-1', _type: 'post', title: 'Scoped' } as T
+      },
+      config: { workspace: 'acme', project: 'blog', dataset: 'staging' },
+    }
+    const { findByTestId } = await renderAsync(
+      <BarkparkReference ref={{ _ref: 'scoped-1' }} client={client}>
+        {renderDoc}
+      </BarkparkReference>,
+    )
+    await findByTestId('doc-scoped-1')
+    expect(paths.length).toBeGreaterThan(0)
+    // Scoped: /w/:ws/p/:proj prefix + configured dataset, no hardcoded literal.
+    expect(paths[0]).toBe('/w/acme/p/blog/v1/data/doc/staging/scoped-1')
+    expect(paths.every((p) => !p.includes('production'))).toBe(true)
+  })
+
+  it('falls back to a flat path when the client config is unscoped', async () => {
+    const paths: string[] = []
+    const client: BarkparkReferenceClient = {
+      fetchRaw: async <T = ResolvedDoc>(path: string): Promise<T> => {
+        paths.push(path)
+        return { _id: 'flat-1', _type: 'post', title: 'Flat' } as T
+      },
+      // No workspace/project → flat /v1 route, configured dataset still used.
+      config: { dataset: 'staging' },
+    }
+    const { findByTestId } = await renderAsync(
+      <BarkparkReference ref={{ _ref: 'flat-1' }} client={client}>
+        {renderDoc}
+      </BarkparkReference>,
+    )
+    await findByTestId('doc-flat-1')
+    expect(paths[0]).toBe('/v1/data/doc/staging/flat-1')
+    expect(paths.every((p) => !p.includes('production'))).toBe(true)
   })
 
   it('renders sibling refs to the same id without firing onCycle', async () => {
