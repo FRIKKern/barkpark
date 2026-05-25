@@ -37,6 +37,8 @@ defmodule Barkpark.Plugins.Bootstrap do
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.Registry
   alias Barkpark.Plugins.RunStatus
+  alias Barkpark.Repo
+  alias Barkpark.Tenancy
 
   @drop_keys [:__meta__, :id, :inserted_at, :updated_at]
 
@@ -57,11 +59,12 @@ defmodule Barkpark.Plugins.Bootstrap do
   @spec register_all_schemas() ::
           {:ok, non_neg_integer()} | {:error, [{String.t(), term()}]}
   def register_all_schemas do
+    scope = default_scope()
     plugins = Registry.all()
 
     {ok_count, errors} =
       Enum.reduce(plugins, {0, []}, fn plugin, {ok_acc, err_acc} ->
-        case install_for_plugin(plugin) do
+        case install_for_plugin(plugin, scope) do
           {:ok, n} -> {ok_acc + n, err_acc}
           {:error, reason} -> {ok_acc, [{plugin.name, reason} | err_acc]}
         end
@@ -71,6 +74,35 @@ defmodule Barkpark.Plugins.Bootstrap do
       [] -> {:ok, ok_count}
       _ -> {:error, Enum.reverse(errors)}
     end
+  end
+
+  # Resolve the Default Workspace/Project so bootstrap-registered plugin schemas
+  # land under the same tenant as the v1 seeds. Returns
+  # `{workspace_id, project_id}` or `{nil, nil}` when the backfill hasn't run —
+  # in which case scope stamping is a no-op and the schema lands unscoped
+  # (matching legacy pre-tenancy behaviour). Read-only; never raises — a missing
+  # tenancy table (boot before the tenancy migration) degrades to unscoped.
+  defp default_scope do
+    case Tenancy.get_default_workspace() do
+      nil ->
+        {nil, nil}
+
+      ws ->
+        project_id =
+          case Tenancy.get_default_project() do
+            nil -> nil
+            project -> project.id
+          end
+
+        {ws.id, project_id}
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Plugins.Bootstrap: could not resolve Default tenancy scope — schemas land unscoped: #{Exception.message(e)}"
+      )
+
+      {nil, nil}
   end
 
   @doc """
@@ -85,7 +117,7 @@ defmodule Barkpark.Plugins.Bootstrap do
   @spec install_by_name(String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
   def install_by_name(plugin_name) when is_binary(plugin_name) do
     case Registry.lookup(plugin_name) do
-      {:ok, entry} -> install_for_plugin(entry)
+      {:ok, entry} -> install_for_plugin(entry, default_scope())
       :error -> {:error, :unknown_plugin}
     end
   end
@@ -99,14 +131,17 @@ defmodule Barkpark.Plugins.Bootstrap do
 
   Records the result into `RunStatus` under `:bootstrap`.
   """
-  @spec install_for_plugin(map()) :: {:ok, non_neg_integer()} | {:error, term()}
-  def install_for_plugin(%{name: name, module: module}) do
-    result = do_install_for_plugin(name, module)
+  @spec install_for_plugin(map(), {binary() | nil, binary() | nil}) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def install_for_plugin(plugin, scope \\ {nil, nil})
+
+  def install_for_plugin(%{name: name, module: module}, scope) do
+    result = do_install_for_plugin(name, module, scope)
     RunStatus.record(:bootstrap, name, result)
     result
   end
 
-  defp do_install_for_plugin(name, module) do
+  defp do_install_for_plugin(name, module, scope) do
     cond do
       not Code.ensure_loaded?(module) ->
         Logger.warning(
@@ -121,7 +156,7 @@ defmodule Barkpark.Plugins.Bootstrap do
       true ->
         try do
           schemas = module.register_schemas([])
-          upsert_schemas(name, schemas)
+          upsert_schemas(name, schemas, scope)
         rescue
           e ->
             Logger.error(
@@ -133,16 +168,16 @@ defmodule Barkpark.Plugins.Bootstrap do
     end
   end
 
-  defp upsert_schemas(plugin_name, schemas) when is_list(schemas) do
+  defp upsert_schemas(plugin_name, schemas, scope) when is_list(schemas) do
     Enum.reduce_while(schemas, {:ok, 0}, fn schema, {:ok, n} ->
-      case upsert_one(plugin_name, schema) do
+      case upsert_one(plugin_name, schema, scope) do
         :ok -> {:cont, {:ok, n + 1}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp upsert_schemas(plugin_name, other) do
+  defp upsert_schemas(plugin_name, other, _scope) do
     Logger.error(
       "Plugins.Bootstrap: plugin #{inspect(plugin_name)} returned non-list from register_schemas/1: #{inspect(other)}"
     )
@@ -150,7 +185,7 @@ defmodule Barkpark.Plugins.Bootstrap do
     {:error, {:invalid_return, other}}
   end
 
-  defp upsert_one(plugin_name, %SchemaDefinition{} = schema) do
+  defp upsert_one(plugin_name, %SchemaDefinition{} = schema, scope) do
     # Normalise to a fully string-keyed map BEFORE handing to
     # `Content.upsert_schema/2`. The struct's keys are atoms but plugin
     # `register_schemas/1` impls typically build :fields from
@@ -169,6 +204,8 @@ defmodule Barkpark.Plugins.Bootstrap do
 
     case Content.upsert_schema(attrs, dataset) do
       {:ok, %SchemaDefinition{} = saved} ->
+        stamp_scope(saved, scope)
+
         Logger.info(
           "Plugins.Bootstrap: registered schema #{inspect(saved.name)} (dataset=#{inspect(saved.dataset)}, visibility=#{inspect(saved.visibility)}) from plugin #{inspect(plugin_name)}"
         )
@@ -184,13 +221,34 @@ defmodule Barkpark.Plugins.Bootstrap do
     end
   end
 
-  defp upsert_one(plugin_name, other) do
+  defp upsert_one(plugin_name, other, _scope) do
     Logger.warning(
       "Plugins.Bootstrap: plugin #{inspect(plugin_name)} register_schemas/1 returned non-SchemaDefinition entry: #{inspect(other)} — skipping"
     )
 
     {:error, {:invalid_entry, other}}
   end
+
+  # Stamp the Default tenancy scope onto a freshly upserted schema row.
+  # `Content.upsert_schema/2` routes through `SchemaDefinition.changeset/2`,
+  # which does NOT cast the tenancy FKs, so the saved row carries nil scope.
+  # Force the columns here via `Ecto.Changeset.change/2` so bootstrap-registered
+  # schemas live under the same Default workspace/project as the v1 seeds.
+  # No-ops when no Default exists (backfill not run) or when the row is already
+  # scoped — keeps the bootstrap idempotent and never re-stamps an
+  # operator-moved schema.
+  defp stamp_scope(_saved, {nil, _project_id}), do: :ok
+
+  defp stamp_scope(%SchemaDefinition{workspace_id: ws} = saved, {ws_id, project_id})
+       when is_nil(ws) do
+    saved
+    |> Ecto.Changeset.change(%{workspace_id: ws_id, project_id: project_id})
+    |> Repo.update!()
+
+    :ok
+  end
+
+  defp stamp_scope(_saved, _scope), do: :ok
 
   # ─── Key normalisation ─────────────────────────────────────────────────
 
