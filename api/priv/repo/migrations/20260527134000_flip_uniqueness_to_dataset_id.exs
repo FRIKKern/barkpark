@@ -25,10 +25,10 @@ defmodule Barkpark.Repo.Migrations.FlipUniquenessToDatasetId do
   ## Indexes flipped (ADD new, then DROP old — string column itself kept)
 
     * documents:           (doc_id, type, dataset)        -> (doc_id, type, dataset_id)
-    * schema_definitions:   (name, dataset)               -> (name, project_id)
-                            (schemas are PROJECT-scoped: one shared catalog per
-                            project; the dupe-collapse 20260527133000 already
-                            cleared cross-dataset collisions)
+    * schema_definitions:   (name, dataset)               -> (name, dataset_id)
+                            (schemas are DATASET-scoped: a project can hold the
+                            same schema NAME in distinct datasets — the
+                            dataset_id leaf keeps them from colliding)
     * media_files:          (path, dataset)               -> (path, dataset_id)
     * search_synonyms:      (surface, scope, ...)         -> (surface, dataset_id, ...)
     * search_intel_crystals:(surface, scope, ...)         -> (surface, dataset_id, ...)
@@ -57,9 +57,9 @@ defmodule Barkpark.Repo.Migrations.FlipUniquenessToDatasetId do
                      name: :documents_doc_id_type_dataset_index
                    )
 
-    # ── schema_definitions: (name, dataset) -> (name, project_id) ────────────
-    create unique_index(:schema_definitions, [:name, :project_id],
-             name: :schema_definitions_name_project_id_index
+    # ── schema_definitions: (name, dataset) -> (name, dataset_id) ────────────
+    create unique_index(:schema_definitions, [:name, :dataset_id],
+             name: :schema_definitions_name_dataset_id_index
            )
 
     drop_if_exists unique_index(:schema_definitions, [:name, :dataset],
@@ -150,8 +150,8 @@ defmodule Barkpark.Repo.Migrations.FlipUniquenessToDatasetId do
              name: :schema_definitions_name_dataset_index
            )
 
-    drop_if_exists unique_index(:schema_definitions, [:name, :project_id],
-                     name: :schema_definitions_name_project_id_index
+    drop_if_exists unique_index(:schema_definitions, [:name, :dataset_id],
+                     name: :schema_definitions_name_dataset_id_index
                    )
 
     # media_files
