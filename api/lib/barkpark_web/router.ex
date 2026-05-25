@@ -66,6 +66,7 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
     plug BarkparkWeb.Plugs.RateLimit
     plug BarkparkWeb.Plugs.RequireBearerOrSessionToken
+    plug BarkparkWeb.Plugs.AssignDefaultScope
   end
 
   # Paperflow paper-ingest: JSON in, shared-secret bearer auth (NOT the
