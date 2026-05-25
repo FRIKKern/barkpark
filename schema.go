@@ -56,11 +56,13 @@ func findSchema(name string) *Schema {
 	return nil
 }
 
-// loadSchemas fetches schema definitions from the Phoenix API.
-func loadSchemas(baseURL, token string) error {
+// loadSchemas fetches schema definitions from the Phoenix API, scoped onto the
+// /w/<workspace>/p/<project>/v1/schemas/<dataset> routing.
+func loadSchemas(baseURL, token, workspace, project, dataset string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	req, err := http.NewRequest("GET", baseURL+"/v1/schemas/production", nil)
+	schemasURL := fmt.Sprintf("%s/w/%s/p/%s/v1/schemas/%s", baseURL, workspace, project, dataset)
+	req, err := http.NewRequest("GET", schemasURL, nil)
 	if err != nil {
 		return fmt.Errorf("fetch schemas: %w", err)
 	}

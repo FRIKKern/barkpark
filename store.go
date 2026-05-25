@@ -32,20 +32,38 @@ type DataStoreRefreshMsg struct{}
 
 // DataStore is an HTTP client that talks to the Phoenix API.
 type DataStore struct {
-	baseURL  string
-	token    string
-	client   *http.Client
-	program  *tea.Program
-	mu       sync.RWMutex
-	lastHash string
+	baseURL string
+	token   string
+	// Workspace/Project/Dataset scope the /v1/ endpoints onto the new
+	// /w/:workspace_slug/p/:project_slug routing. Defaults: "default"/"default"/"production".
+	Workspace string
+	Project   string
+	Dataset   string
+	client    *http.Client
+	program   *tea.Program
+	mu        sync.RWMutex
+	lastHash  string
 }
 
-// NewDataStore creates an API-backed DataStore.
+// NewDataStore creates an API-backed DataStore with default scope.
 func NewDataStore(baseURL string) *DataStore {
 	return &DataStore{
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 5 * time.Second},
+		baseURL:   baseURL,
+		Workspace: "default",
+		Project:   "default",
+		Dataset:   "production",
+		client:    &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// scopedURL builds a workspace/project-scoped /v1/ endpoint of the form
+//
+//	<baseURL>/w/<Workspace>/p/<Project><suffix>
+//
+// where suffix is a leading-slash path segment (e.g. "/v1/data/mutate/<dataset>").
+// This is the single place that knows the scoped URL scheme.
+func (ds *DataStore) scopedURL(suffix string) string {
+	return fmt.Sprintf("%s/w/%s/p/%s%s", ds.baseURL, ds.Workspace, ds.Project, suffix)
 }
 
 // SetToken sets the API token for authenticated requests.
@@ -60,7 +78,7 @@ func (ds *DataStore) SetProgram(p *tea.Program) {
 
 // Mutate sends a mutation to the Phoenix API (Sanity format).
 func (ds *DataStore) Mutate(mutations []map[string]interface{}) error {
-	endpoint := fmt.Sprintf("%s/v1/data/mutate/production", ds.baseURL)
+	endpoint := ds.scopedURL("/v1/data/mutate/" + ds.Dataset)
 	body, err := json.Marshal(map[string]interface{}{"mutations": mutations})
 	if err != nil {
 		return err
@@ -201,7 +219,7 @@ func (ds *DataStore) StartSSE(token string) {
 }
 
 func (ds *DataStore) listenSSE(token string) error {
-	sseURL := ds.baseURL + "/v1/data/listen/production"
+	sseURL := ds.scopedURL("/v1/data/listen/" + ds.Dataset)
 	req, err := http.NewRequest("GET", sseURL, nil)
 	if err != nil {
 		return err
