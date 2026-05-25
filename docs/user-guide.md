@@ -6,6 +6,19 @@ For people who edit content in Barkpark Studio (not for developers). If you are 
 
 A headless CMS for book metadata (ONIX 3.0 first-class) plus generic content (posts, pages, projects). Multi-pane Studio in the browser at `/studio/<dataset>` (default dataset: `production`).
 
+### Where your content lives — Workspace → Project → Dataset
+
+Content is organized in three nested levels:
+
+- A **Workspace** is the top-level boundary. It's the tenancy line: your API token belongs to one workspace, and you only ever see content in that workspace. Most teams have one.
+- A **Workspace** contains **Projects** — a way to group related content (e.g. one project per site or product).
+- A **Project** contains **Datasets** — `production`, `staging`, etc. A dataset is a collection of documents.
+- A **Dataset** contains **Documents** — the books, posts, and pages you actually edit.
+
+If you've used Barkpark before this change, everything you already had lives in a **Default** workspace and a **Default** project — it was moved there automatically with nothing lost. You don't have to do anything; the Studio and the old links keep working.
+
+When you talk to the HTTP API directly, content URLs now carry your workspace and project, e.g. `/w/<workspace>/p/<project>/v1/data/query/production/post`. The old flat `/v1/data/...` URLs still work and point at the Default workspace + project. Developers: see `docs/api-v1.md` and `docs/auth.md`.
+
 Three things you should know before clicking around:
 
 1. **Every document has a draft and (sometimes) a published version.** Drafts live at `doc_id = "drafts.X"`; published at `X`. Editing a published doc creates a draft alongside; publishing copies the draft to published and removes the draft. The status pill at the top of the editor tells you which you're looking at.

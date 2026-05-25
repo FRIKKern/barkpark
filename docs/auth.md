@@ -5,12 +5,54 @@ backed by `api_tokens` (SHA256 token hash + permission list per token).
 Browser LiveViews read the same token from `session["api_token"]` via the
 `BarkparkWeb.LiveAuth` `on_mount` hooks.
 
+## Tenancy — token ↔ workspace
+
+The principal of a request is the API token, and every token is bound to
+exactly one **workspace** (the tenancy boundary; see the
+Workspace → Project → Dataset hierarchy in `docs/api-v1.md` §1a). The
+binding is two facts that must agree:
+
+- `api_tokens.workspace_id` — the workspace the token belongs to.
+- a `workspace_memberships` row — the token's principal is a member of
+  that workspace.
+
+Content/data requests carry the workspace + project in the path
+(`/w/:workspace_slug/p/:project_slug/v1/data/...`). The server resolves
+the workspace and project from the path and enforces tenancy **before**
+any permission check:
+
+| Situation | Result |
+|---|---|
+| `:workspace_slug` does not resolve to a workspace | `404 not_found` |
+| Workspace resolves, but the token has no `workspace_memberships` row for it | `403 forbidden` |
+| Workspace resolves and the token is a member | proceed to permission checks below |
+
+Every content read and write is scoped by the resolved workspace — a token
+can only see and mutate documents in its own workspace. There is no
+cross-workspace read.
+
+### Write gate
+
+The core mutate endpoint
+(`POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset`)
+enforces the `write` permission **after** tenancy passes. A token that is a
+valid member of the workspace but lacks `write` (a read-only token) gets
+`403 forbidden` on mutate. Reads remain available to such a token.
+
+### Default workspace + flat alias
+
+The old flat content paths (`/v1/data/:dataset/*`, etc.) still work and
+resolve to a `"Default"` workspace + `"Default"` project. Existing content
+was auto-backfilled into `Default`/`Default` with zero data loss. The dev
+token (below) is a member of `Default`, so flat-route callers keep working
+unchanged.
+
 ## Roles (permissions list on `ApiToken.permissions`)
 
 | Permission | Grants                                                              | Surfaces                                                     |
 |------------|---------------------------------------------------------------------|--------------------------------------------------------------|
-| `read`     | Public reads on private datasets / private schemas                  | `/v1/data/query/*`, `/media`                                 |
-| `write`    | Mutations (create, patch, publish, unpublish, delete)               | `POST /v1/data/mutate/:dataset`, `POST /media/upload`        |
+| `read`     | Public reads on private datasets / private schemas                  | `/w/:workspace_slug/p/:project_slug/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
+| `write`    | Mutations (create, patch, publish, unpublish, delete)               | `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` (flat alias `POST /v1/data/mutate/:dataset`), `POST /media/upload` |
 | `ops`      | Operate the Bokbasen publish pipeline (read-only on plugin secrets) | `/admin/bokbasen` LiveView                                   |
 | `admin`    | All of the above + plugin-settings reveal/audit + schema CRUD       | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*`, `/v1/plugins/onixedit/export/*` |
 
@@ -57,7 +99,9 @@ HTTP-only operator endpoints land.
 ## Dev token
 
 `barkpark-dev-token` (seeded in `priv/repo/seeds.exs`) carries
-`["read", "write", "admin"]` and therefore satisfies every gate in
-this document. Production deployments should issue narrower tokens
-per persona (publisher gets `ops`; everyone else gets `read`/`write`
-without `admin` or `ops`).
+`["read", "write", "admin"]` and is bound to the `Default` workspace
+(with a `workspace_memberships` row), so it satisfies every gate in this
+document and works on both the scoped and flat-alias routes. Production
+deployments should issue narrower tokens per persona (publisher gets
+`ops`; everyone else gets `read`/`write` without `admin` or `ops`), each
+bound to the workspace its principal belongs to.

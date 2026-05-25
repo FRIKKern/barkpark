@@ -4,13 +4,41 @@
 
 Barkpark v1 HTTP API. This document is the frozen contract for all `/v1` endpoints. Any breaking change to the shapes documented here requires bumping the URL prefix to `/v2`.
 
+## 1a. Workspace → Project → Dataset hierarchy
+
+Content lives in a three-level hierarchy:
+
+- A **Workspace** is the tenancy boundary. Every API token is bound to exactly one workspace, and every content read and write is scoped by workspace.
+- A **Workspace** contains **Projects**.
+- A **Project** contains **Datasets**.
+- A **Dataset** is a collection of **Documents** (the envelopes described in Section 3).
+
+All content/data endpoints are addressed under the workspace + project prefix:
+
+```
+/w/:workspace_slug/p/:project_slug/v1/data/...
+```
+
+`:dataset` is still a string path segment within that prefix (e.g. `production`). A first-class datasets table is planned for Wave 2; in Wave 1 the dataset is addressed by the existing string segment.
+
+**Back-compat alias.** The old flat paths — `/v1/data/:dataset/*` and the other `/v1/*` content routes without a `/w/.../p/...` prefix — still work. They resolve to a `"Default"` workspace and `"Default"` project. Existing content was auto-backfilled into `Default`/`Default` with zero data loss, so flat callers keep working unchanged. New integrations should use the scoped prefix.
+
+Throughout this document each endpoint shows the **scoped path** as canonical; the flat form is noted as the alias.
+
 ## 2. Base URL & Authentication
 
 ```
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. The development token is `barkpark-dev-token` (read + write + admin). CORS is open (`*`) on all `/v1` routes.
+Private endpoints require `Authorization: Bearer <token>`. The development token is `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS is open (`*`) on all `/v1` routes.
+
+**Tenancy enforcement.** A request resolves its workspace and project from the path. The token's workspace must match:
+
+- Unknown `:workspace_slug` → `404 not_found`.
+- Known workspace, but the token's principal is not a member → `403 forbidden`.
+
+See `docs/auth.md` for token→workspace binding, membership, and the write-permission gate.
 
 Endpoints marked **[public]** work without a token (restricted by schema visibility). Endpoints marked **[token]** require any valid token. Endpoints marked **[admin]** require a token with admin permission.
 
@@ -33,7 +61,7 @@ All other keys come from stored document content plus `title`. User fields canno
 **Example:**
 
 ```bash
-curl localhost:4000/v1/data/doc/production/post/p1 | jq
+curl localhost:4000/w/acme/p/web/v1/data/doc/production/post/p1 | jq
 ```
 
 ```json
@@ -53,9 +81,11 @@ curl localhost:4000/v1/data/doc/production/post/p1 | jq
 
 ---
 
-## 4. `GET /v1/data/query/:dataset/:type` [public]
+## 4. `GET /w/:workspace_slug/p/:project_slug/v1/data/query/:dataset/:type` [public]
 
-List documents. Returns 404 if the schema's `visibility` is `"private"`.
+> Flat alias: `GET /v1/data/query/:dataset/:type` → resolves the `Default` workspace + project.
+
+List documents. Returns 404 if the schema's `visibility` is `"private"` (and 404/403 per Section 2 if the workspace is unknown / the token is a non-member).
 
 **Query parameters:**
 
@@ -86,7 +116,7 @@ List documents. Returns 404 if the schema's `visibility` is `"private"`.
 **Example:**
 
 ```bash
-curl "localhost:4000/v1/data/query/production/post?limit=2&order=_createdAt:desc"
+curl "localhost:4000/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:desc"
 ```
 
 ```json
@@ -122,14 +152,16 @@ curl "localhost:4000/v1/data/query/production/post?limit=2&order=_createdAt:desc
 
 ---
 
-## 5. `GET /v1/data/doc/:dataset/:type/:doc_id` [public]
+## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
+
+> Flat alias: `GET /v1/data/doc/:dataset/:type/:doc_id` → resolves the `Default` workspace + project.
 
 Fetch a single document by id. Returns the envelope directly at the top level (no wrapper object). Returns 404 if not found or if the schema's `visibility` is `"private"`.
 
 **Example:**
 
 ```bash
-curl localhost:4000/v1/data/doc/production/post/p1
+curl localhost:4000/w/acme/p/web/v1/data/doc/production/post/p1
 ```
 
 Response: a single envelope object (see Section 3).
@@ -142,7 +174,7 @@ When a query or doc request carries `?expand=true` (or `?expand=author,category`
 
 **Example request:**
 
-    curl "localhost:4000/v1/data/query/production/post?limit=1&expand=true"
+    curl "localhost:4000/w/acme/p/web/v1/data/query/production/post?limit=1&expand=true"
 
 **Example response (abbreviated):**
 
@@ -168,9 +200,13 @@ Missing references (the referenced document does not exist in the dataset) stay 
 
 ---
 
-## 6. `POST /v1/data/mutate/:dataset` [token]
+## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
+
+> Flat alias: `POST /v1/data/mutate/:dataset` → resolves the `Default` workspace + project.
 
 Apply a batch of mutations atomically.
+
+**Write gate.** This endpoint enforces the `write` permission. A read-only token (no `write`) gets `403 forbidden`, even on its own workspace. Tenancy is still enforced first: a non-member token gets `403`, an unknown workspace gets `404`.
 
 **Request body:**
 
@@ -271,7 +307,7 @@ For `validation_failed`, a `details` map of field-level errors is included.
 
 ```bash
 TOKEN="barkpark-dev-token"
-curl -X POST localhost:4000/v1/data/mutate/production \
+curl -X POST localhost:4000/w/acme/p/web/v1/data/mutate/production \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"create":{"_type":"post","_id":"hello","title":"Hello"}}]}'
@@ -279,11 +315,13 @@ curl -X POST localhost:4000/v1/data/mutate/production \
 
 ---
 
-## 7. `GET /v1/data/listen/:dataset` [token]
+## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
-Server-Sent Events stream of document mutations.
+> Flat alias: `GET /v1/data/listen/:dataset` → resolves the `Default` workspace + project.
 
-**Resuming:** Supply `Last-Event-ID: <int>` request header (or `?lastEventId=<int>` query param for browsers that cannot set headers). The server replays all `mutation_events` rows with `id > last-event-id` for that dataset (oldest first), then streams live events.
+Server-Sent Events stream of document mutations. The stream is scoped to the resolved workspace + project.
+
+**Resuming:** Supply `Last-Event-ID: <int>` request header (or `?lastEventId=<int>` query param for browsers that cannot set headers). The server replays all `mutation_events` rows with `id > last-event-id` for that workspace/project/dataset (oldest first), then streams live events.
 
 **Response headers:**
 
@@ -328,14 +366,18 @@ data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello
 TOKEN="barkpark-dev-token"
 curl -N -H "Authorization: Bearer $TOKEN" \
      -H "Last-Event-ID: 0" \
-     localhost:4000/v1/data/listen/production
+     localhost:4000/w/acme/p/web/v1/data/listen/production
 ```
 
 ---
 
 ## 8. Schema endpoints [admin]
 
-### `GET /v1/schemas/:dataset`
+Schema endpoints are scoped under the workspace + project prefix like the rest of the content surface. The flat `/v1/schemas/*` forms remain as the `Default`/`Default` back-compat alias.
+
+### `GET /w/:workspace_slug/p/:project_slug/v1/schemas/:dataset`
+
+> Flat alias: `GET /v1/schemas/:dataset`.
 
 ```json
 {
@@ -352,7 +394,9 @@ curl -N -H "Authorization: Bearer $TOKEN" \
 }
 ```
 
-### `GET /v1/schemas/:dataset/:name`
+### `GET /w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name`
+
+> Flat alias: `GET /v1/schemas/:dataset/:name`.
 
 ```json
 {
@@ -367,11 +411,15 @@ curl -N -H "Authorization: Bearer $TOKEN" \
 }
 ```
 
-### `POST /v1/schemas/:dataset`
+### `POST /w/:workspace_slug/p/:project_slug/v1/schemas/:dataset`
+
+> Flat alias: `POST /v1/schemas/:dataset`.
 
 Upsert a schema definition. Returns 201 with the schema object on success.
 
-### `DELETE /v1/schemas/:dataset/:name`
+### `DELETE /w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name`
+
+> Flat alias: `DELETE /v1/schemas/:dataset/:name`.
 
 ```json
 { "deleted": "post" }
@@ -382,7 +430,7 @@ Upsert a schema definition. Returns 201 with the schema object on success.
 ```bash
 TOKEN="barkpark-dev-token"
 curl -H "Authorization: Bearer $TOKEN" \
-     localhost:4000/v1/schemas/production | jq '._schemaVersion'
+     localhost:4000/w/acme/p/web/v1/schemas/production | jq '._schemaVersion'
 ```
 
 ---
@@ -393,9 +441,9 @@ All errors return `{"error": {"code": "...", "message": "..."}}` (plus `details`
 
 | Code | HTTP Status | Meaning |
 |------|-------------|---------|
-| `not_found` | 404 | Document or schema not found |
+| `not_found` | 404 | Document or schema not found, or unknown `:workspace_slug` |
 | `unauthorized` | 401 | Missing or invalid token |
-| `forbidden` | 403 | Token lacks required permission |
+| `forbidden` | 403 | Token lacks required permission, OR is not a member of the resolved workspace, OR is read-only on a write endpoint |
 | `schema_unknown` | 404 | No schema registered for this type |
 | `rev_mismatch` | 409 | `ifRevisionID` did not match current rev |
 | `conflict` | 409 | Document already exists (on `create`) |
