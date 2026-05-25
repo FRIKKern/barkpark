@@ -4,18 +4,20 @@
       <div class="studio-bar-brand">
         <div class="sidebar-brand-icon">B</div>
         <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
-        <%= if assigns[:dataset] do %>
-          <BarkparkWeb.Studio.DatasetSwitcher.switcher
-            current={@dataset}
-            current_section={assigns[:nav_section] || :structure}
-          />
-        <% end %>
         <%= if assigns[:current_workspace] do %>
           <BarkparkWeb.Studio.WorkspaceSwitcher.switcher
             current_workspace={assigns[:current_workspace]}
             current_project={assigns[:current_project]}
+            current_dataset={assigns[:dataset]}
             principal={assigns[:api_token]}
           />
+        <% else %>
+          <%= if assigns[:dataset] do %>
+            <BarkparkWeb.Studio.DatasetSwitcher.switcher
+              current={@dataset}
+              current_section={assigns[:nav_section] || :structure}
+            />
+          <% end %>
         <% end %>
       </div>
     </:brand>

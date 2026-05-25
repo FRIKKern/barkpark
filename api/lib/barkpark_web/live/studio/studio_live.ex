@@ -407,10 +407,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
         if can_reach_workspace?(socket, workspace) do
           project = List.first(Tenancy.list_projects(workspace.id))
 
+          # Cascade: the new workspace's project carries its OWN datasets — the
+          # old dataset slug belongs to the old project and may not exist here.
+          # Re-scope the dataset to the new project's default (production-first,
+          # else first) and patch the URL leaf so handle_params re-subscribes +
+          # rebuilds against the chosen dataset. When the project has no dataset
+          # rows we keep the current slug (the string seam stays authoritative).
           {:noreply,
            socket
            |> assign(current_workspace: workspace, current_project: project)
-           |> rebuild_panes()}
+           |> rescope_dataset_for_project(project)}
         else
           {:noreply, socket}
         end
@@ -427,12 +433,44 @@ defmodule BarkparkWeb.Studio.StudioLive do
     with %{} = ws <- ws,
          true <- can_reach_workspace?(socket, ws),
          %{} = project <- Tenancy.get_project(ws.slug, slug) do
+      # Cascade (barkpark-dgpf): reload the Dataset select for the new project
+      # and auto-select that project's default dataset (a "production" slug if
+      # present, else the first), then re-scope to it via push_patch. The
+      # Dataset is chosen from the project's datasets, not a free string.
       {:noreply,
        socket
        |> assign(current_project: project)
-       |> rebuild_panes()}
+       |> rescope_dataset_for_project(project)}
     else
       _ -> {:noreply, socket}
+    end
+  end
+
+  # ── Dataset scope switch (Task barkpark-dgpf) ───────────────────────────────
+  #
+  # The Dataset is the FAR-RIGHT control of the Workspace · Project · Dataset
+  # trio and IS the `/studio/:dataset` URL leaf. Its options are the CURRENT
+  # project's datasets (`Tenancy.list_datasets/1`), so a switch is honoured only
+  # when the chosen slug actually belongs to the current project — a forged slug
+  # for another project's dataset is silently dropped. On a valid pick we
+  # push_patch to `/studio/:slug`; handle_params re-subscribes the documents
+  # topic and rebuilds the panes against the new dataset. The workspace/project
+  # scope on the socket is untouched (the dataset is the project's leaf).
+  def handle_event("switch-dataset", %{"dataset" => slug}, socket) do
+    project = socket.assigns[:current_project]
+
+    cond do
+      not is_binary(slug) or slug == "" ->
+        {:noreply, socket}
+
+      slug == socket.assigns[:dataset] ->
+        {:noreply, socket}
+
+      project_has_dataset?(project, slug) ->
+        {:noreply, push_patch(socket, to: studio_path([], slug))}
+
+      true ->
+        {:noreply, socket}
     end
   end
 
@@ -2035,6 +2073,54 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp initial_project(_), do: nil
+
+  # ── Project → Dataset cascade (Task barkpark-dgpf) ──────────────────────────
+  #
+  # After a workspace/project switch, the Dataset select must reload for the
+  # new project AND auto-select that project's default dataset. The default is
+  # the "production" slug when the project has one, else the first dataset
+  # (slug-ordered by `Tenancy.list_datasets/1`). Re-scoping is a push_patch to
+  # the new dataset's URL leaf so handle_params re-subscribes the documents
+  # topic and rebuilds the panes — same path a manual Dataset switch takes.
+  #
+  # When the project has NO dataset rows (string-seam-only / not yet seeded) we
+  # keep the current `dataset` string and just rebuild_panes so the scope still
+  # reloads — the `dataset` string stays authoritative per Content.Scope.
+  defp rescope_dataset_for_project(socket, %{} = project) do
+    case default_dataset_for_project(project) do
+      %{slug: slug} when is_binary(slug) and slug != "" ->
+        if slug == socket.assigns[:dataset] do
+          rebuild_panes(socket)
+        else
+          push_patch(socket, to: studio_path([], slug))
+        end
+
+      _ ->
+        rebuild_panes(socket)
+    end
+  end
+
+  defp rescope_dataset_for_project(socket, _), do: rebuild_panes(socket)
+
+  # The project's default dataset row: prefer the canonical "production" slug,
+  # else the first (slug-ordered) dataset. nil when the project has none.
+  defp default_dataset_for_project(%{} = project) do
+    datasets = Tenancy.list_datasets(project)
+    Enum.find(datasets, &(&1.slug == Content.default_dataset())) || List.first(datasets)
+  end
+
+  defp default_dataset_for_project(_), do: nil
+
+  # True iff `slug` names a dataset under the given project — the membership
+  # gate for a Dataset switch (the switch-dataset handler refuses any slug not
+  # in the current project's dataset rows).
+  defp project_has_dataset?(%{} = project, slug) when is_binary(slug) do
+    project
+    |> Tenancy.list_datasets()
+    |> Enum.any?(&(&1.slug == slug))
+  end
+
+  defp project_has_dataset?(_, _), do: false
 
   # Mount-scope derivation (Task barkpark-g4a7). With an authenticated
   # principal, the initial workspace is the FIRST workspace it is a member of
