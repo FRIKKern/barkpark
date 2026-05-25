@@ -14,6 +14,12 @@ import type {
 } from './types.js'
 
 /**
+ * @deprecated Superseded by `@barkpark/core`. This standalone client predates the
+ * workspace/project hierarchy: its URL builders emit only the flat `/v1/...` shape
+ * and were never updated for the `/w/:workspace/p/:project/v1/...` routing. It has
+ * no importers in the monorepo (the lockfile marks it `extraneous`). Use
+ * `@barkpark/core`'s `createClient` instead. Do not add features here.
+ *
  * Framework-agnostic client for the Barkpark v1 HTTP API.
  *
  * See docs/api-v1.md for the full HTTP contract. This client is a thin,
