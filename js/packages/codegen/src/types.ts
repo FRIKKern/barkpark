@@ -10,6 +10,18 @@ export interface BarkparkCodegenConfig {
   input: string
   /** Destination path for the generated TypeScript module. */
   output: string
+  /**
+   * Optional workspace slug. When provided together with {@link project},
+   * schema fetches use the scoped path
+   * `/w/<workspace>/p/<project>/v1/schemas/<dataset>`. Omit both to keep the
+   * flat back-compat path `/v1/schemas/<dataset>`.
+   */
+  workspace?: string
+  /**
+   * Optional project slug. See {@link workspace} — both are required together
+   * to select the scoped schema path.
+   */
+  project?: string
 }
 
 /**

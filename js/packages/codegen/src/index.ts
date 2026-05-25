@@ -2,6 +2,8 @@
 // Copyright 2026 Barkpark contributors
 
 export type { BarkparkCodegenConfig, BarkparkSchemaJson } from './types'
+export type { SchemaUrlOptions } from './schema-url'
+export { buildSchemaPath } from './schema-url'
 import type { BarkparkCodegenConfig } from './types'
 
 /**
