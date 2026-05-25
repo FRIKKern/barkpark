@@ -64,6 +64,8 @@ export interface BarkparkHooks {
 /** Config passed to createClient. */
 export interface BarkparkClientConfig extends BarkparkHooks {
   projectUrl: string                // e.g. 'http://89.167.28.206:4000' — no trailing slash
+  workspace?: string                // optional slug; scopes paths to /w/:workspace/p/:project (back-compat: omit for flat /v1)
+  project?: string                  // optional slug; both workspace + project required together for scoped paths
   dataset: string                   // 'production'
   apiVersion: ApiVersion            // REQUIRED, YYYY-MM-DD
   token?: string                    // Bearer for write + listen + admin surfaces

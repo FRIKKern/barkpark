@@ -26,7 +26,34 @@ import { createHandshakeCache, type HandshakeCache } from './handshake'
 
 const API_VERSION_RE = /^\d{4}-\d{2}-\d{2}$/
 const DATASET_RE = /^[a-z0-9][a-z0-9_-]*$/
+// Workspace / project slugs mirror DATASET_RE — lowercase, leading alnum, then alnum/_/-.
+const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/
 const PERSPECTIVES: ReadonlyArray<Perspective> = ['published', 'drafts', 'raw']
+
+/**
+ * Path prefix that scopes every operation to a workspace + project.
+ *
+ * Returns `/w/${workspace}/p/${project}` only when BOTH `workspace` and
+ * `project` are set on the config; otherwise returns `''` so callers fall back
+ * to the flat `/v1/...` routes (back-compat). This is the single source the
+ * per-operation path builders prepend — they must never compute the prefix
+ * themselves.
+ *
+ * @example
+ *   scopePrefix({ workspace: 'acme', project: 'blog', ... }) // '/w/acme/p/blog'
+ *   scopePrefix({ ...flatConfig })                           // ''
+ */
+export function scopePrefix(config: BarkparkClientConfig): string {
+  if (
+    typeof config.workspace === 'string' &&
+    config.workspace.length > 0 &&
+    typeof config.project === 'string' &&
+    config.project.length > 0
+  ) {
+    return `/w/${config.workspace}/p/${config.project}`
+  }
+  return ''
+}
 
 function validateConfig(config: BarkparkClientConfig): void {
   if (typeof config.projectUrl !== 'string' || config.projectUrl.length === 0) {
@@ -53,6 +80,27 @@ function validateConfig(config: BarkparkClientConfig): void {
       'invalid dataset: must match /^[a-z0-9][a-z0-9_-]*$/',
       { field: 'dataset' },
     )
+  }
+
+  // workspace / project are optional (back-compat with flat /v1 routes). When
+  // present they must be non-empty slugs. They are independent fields here;
+  // scopePrefix() decides whether scoped paths are emitted (requires both).
+  if (config.workspace !== undefined) {
+    if (typeof config.workspace !== 'string' || config.workspace.length === 0 || !SLUG_RE.test(config.workspace)) {
+      throw new BarkparkValidationError(
+        'invalid workspace: must match /^[a-z0-9][a-z0-9_-]*$/',
+        { field: 'workspace' },
+      )
+    }
+  }
+
+  if (config.project !== undefined) {
+    if (typeof config.project !== 'string' || config.project.length === 0 || !SLUG_RE.test(config.project)) {
+      throw new BarkparkValidationError(
+        'invalid project: must match /^[a-z0-9][a-z0-9_-]*$/',
+        { field: 'project' },
+      )
+    }
   }
 
   if (typeof config.apiVersion !== 'string' || !API_VERSION_RE.test(config.apiVersion)) {
