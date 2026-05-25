@@ -64,7 +64,7 @@ WoodWing-style facet params are translated via `MediaSearchParams` inside the ad
 
 ## Documents adapter
 
-`Barkpark.Content.SearchIntelligence` wraps `/v1/data/search/:dataset` with `surface: "documents"`.
+`Barkpark.Content.SearchIntelligence` wraps `/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset` with `surface: "documents"`.
 
 ```elixir
 SearchIntelligence.record("production", params, count, ms,
@@ -77,18 +77,24 @@ Filters captured: `type`, `perspective` (`published` | `drafts` | `raw`).
 
 ## HTTP (documents surface)
 
+Endpoints are addressed under the workspace + project prefix (the canonical form). The flat `/v1/data/search/*` paths remain as the `Default`/`Default` back-compat alias — see `docs/api-v1.md` §1a.
+
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /v1/data/search/:dataset` | optional | Title search (+ `searchEventId`) |
-| `GET /v1/data/search/:dataset/suggestions` | optional | Recent / popular / nohits |
-| `GET /v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset` | optional | Title search (+ `searchEventId`) |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/suggestions` | optional | Recent / popular / nohits |
+| `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/insights` | admin | Crystals, merge patterns, hints |
+
+> Flat alias: `GET /v1/data/search/:dataset[/suggestions|/insights]` → resolves the `Default` workspace + project.
 
 ## HTTP (media surface)
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /v1/media/:dataset/search/suggestions` | optional | Recent / popular / nohits |
-| `GET /v1/media/:dataset/search/insights` | admin | Crystals, merge patterns, hints |
+| `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/suggestions` | optional | Recent / popular / nohits |
+| `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/insights` | admin | Crystals, merge patterns, hints |
+
+> Flat alias: `GET /v1/media/:dataset/search/[suggestions|insights]` → resolves the `Default` workspace + project.
 
 Headers for lineage (all surfaces):
 

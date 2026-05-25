@@ -734,12 +734,14 @@ Verify the action surfaces:
 
 ```bash
 curl -s -H "Authorization: Bearer barkpark-dev-token" \
-  http://89.167.28.206/v1/schemas/production \
+  http://89.167.28.206/w/acme/p/web/v1/schemas/production \
   | jq '.[] | select(.name=="book") | .actions[] | .name'
 # "export_onix"
 # "publish_to_bokbasen"
 # "publish_to_vlie"
 ```
+
+> Flat alias: `GET /v1/schemas/production` (no `/w/.../p/...` prefix) → resolves the `Default` workspace + project. See `docs/api-v1.md` §1a and §8.
 
 Open a book document in Studio. The action bar shows three buttons. Click
 "Publish to Vlie", run a dry-run, see the ONIX preview, confirm. The pill

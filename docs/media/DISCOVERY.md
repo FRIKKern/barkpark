@@ -111,13 +111,15 @@ Inspired by Algolia Query Suggestions and Typesense `popular_queries`:
 | **popular** | Dataset-wide, 30 days, non-zero hits | Team trending queries |
 | **nohits** | Zero-result queries | Content-gap / synonym signals |
 
-- Events logged on first-page `/v1/media/:dataset/search` only (`offset=0`).
-- Suggestions: `GET /v1/media/:dataset/search/suggestions?q=prefix`.
+- Events logged on first-page `/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search` only (`offset=0`).
+- Suggestions: `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/suggestions?q=prefix`.
 - **Quality gate:** `Barkpark.Search.Sanitizer` rejects profanity, spam, injection-ish input — bad text is never stored verbatim (rejected rows track reason only).
 - **Lineage:** `X-BP-Search-Parent` links refinements; crystallizer also infers chains within 30 min per actor.
 - **Crystals:** nightly Oban job rolls raw events into **day / week / month** rows in `search_intel_crystals` (`surface=media`, `scope=dataset`).
 - **Merge patterns:** `search_intel_merge_patterns` captures transitions (`facet_add`, `zero_to_hit`, `query_replace`, …) for search improvement.
-- **Insights (admin):** `GET /v1/media/:dataset/search/insights?period=week` — top queries, merge patterns, quality stats, auto hints.
+- **Insights (admin):** `GET /w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/insights?period=week` — top queries, merge patterns, quality stats, auto hints.
+
+> Flat alias: the media search paths above also resolve without the `/w/.../p/...` prefix — `/v1/media/:dataset/search[/suggestions|/insights]` → the `Default` workspace + project. See `docs/api-v1.md` §1a.
 - Postgres `pg_trgm` GIN index on `query` for prefix matching — no separate engine required yet.
 - **Retention:** crystallize at 03:30 UTC, prune raw events at 04:00 UTC (90-day default); crystals persist indefinitely.
 
