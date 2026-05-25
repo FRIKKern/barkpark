@@ -11,6 +11,7 @@
 // the body is flat: { perspective, documents: T[], count, limit, offset }.
 // We accept both.
 
+import { scopePrefix } from './client'
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
 import type {
@@ -53,7 +54,7 @@ export function createDocsOperation<T = BarkparkDocument>(
     if (qs.length > 0) parts.push(qs)
     if (perspective !== undefined) parts.push(`perspective=${encodeURIComponent(perspective)}`)
     const query = parts.length > 0 ? `?${parts.join('&')}` : ''
-    const path = `/v1/data/query/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}${query}`
+    const path = `${scopePrefix(config)}/v1/data/query/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}${query}`
 
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
     if (opts?.signal !== undefined) reqOpts.signal = opts.signal
