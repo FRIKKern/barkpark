@@ -17,6 +17,25 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenReplayTest do
     :ok
   end
 
+  # W2 scope: real document writes go through Content.create_document/upsert_document,
+  # which stamps workspace_id/project_id/dataset_id from the resolved (Default) scope.
+  # This fixture inserts via the changeset directly, so we supply the same Default
+  # scope keys — otherwise dataset_id is nil and the W2 dataset_id-authoritative
+  # read path (Content.get_document) can't find the row.
+  defp default_scope_attrs do
+    ws = Barkpark.Tenancy.get_default_workspace()
+    project = Barkpark.Tenancy.get_default_project()
+    dataset = project && Barkpark.Tenancy.get_dataset(project.id, "production")
+
+    %{}
+    |> put_scope_key("workspace_id", ws && ws.id)
+    |> put_scope_key("project_id", project && project.id)
+    |> put_scope_key("dataset_id", dataset && dataset.id)
+  end
+
+  defp put_scope_key(map, _key, nil), do: map
+  defp put_scope_key(map, key, value), do: Map.put(map, key, value)
+
   defp seed_book(doc_id) do
     content =
       @full_book_path
@@ -25,15 +44,17 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenReplayTest do
 
     {:ok, doc} =
       %Document{}
-      |> Document.changeset(%{
-        "doc_id" => doc_id,
-        "type" => "book",
-        "dataset" => "production",
-        "title" => "Replay Test Book",
-        "status" => "draft",
-        "content" => content,
-        "rev" => "rev_" <> doc_id
-      })
+      |> Document.changeset(
+        Map.merge(default_scope_attrs(), %{
+          "doc_id" => doc_id,
+          "type" => "book",
+          "dataset" => "production",
+          "title" => "Replay Test Book",
+          "status" => "draft",
+          "content" => content,
+          "rev" => "rev_" <> doc_id
+        })
+      )
       |> Repo.insert()
 
     doc
