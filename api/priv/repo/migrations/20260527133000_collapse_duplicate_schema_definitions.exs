@@ -3,8 +3,9 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
 
   @moduledoc """
   Wave-2 GATE: collapse duplicate `schema_definitions` rows so the planned
-  uniqueness flip to `(name, project_id)` (grill decision #3 — schemas are
-  project-scoped: one shared catalog per project) won't collide.
+  uniqueness flip to `(name, dataset_id)` (`20260527134000` — schemas are
+  DATASET-scoped: a project may legitimately hold the same schema NAME in
+  distinct datasets) won't collide WITHIN a dataset.
 
   ## Why duplicates exist
 
@@ -15,16 +16,26 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
     * `20260524131000_papers_as_documents` seeds it in `paperflow` (plus any
       dataset that has papers).
 
-  Both inserts carry IDENTICAL substantive content (same fields, title, icon,
-  visibility). Each is keyed by the `(name, dataset)` unique index, so both
-  rows coexist. Wave-1's Default-tenancy backfill (`20260527110200`) then
-  stamped BOTH rows with the SAME Default `project_id`. Result: two rows that
-  share `(name="paper", project_id=<Default>)` but differ only by their
-  `dataset` string — a collision-in-waiting for the `(name, project_id)` flip.
+  These two rows are GENUINELY DIFFERENT `paper` schemas — production-paper and
+  paperflow-paper diverge in their substantive fields. Each is keyed by the
+  `(name, dataset)` unique index, so both rows coexist. Wave-1's Default-tenancy
+  backfill (`20260527110200`) stamped BOTH rows with the SAME Default
+  `project_id`, and `20260527132000` backfilled each row's `dataset_id`
+  (production -> production dataset, paperflow -> paperflow dataset). They share
+  `(name="paper", project_id=<Default>)` but have DISTINCT `dataset_id`s.
+
+  Grouping by `(name, project_id)` would lump these two distinct schemas into
+  one group, and — because their substantive content differs — the STOP-guard
+  would refuse to collapse and dead-end the migration on real data. We group by
+  `(name, dataset_id)` INSTEAD — the SAME key the `20260527134000` flip uses for
+  uniqueness — so the two genuinely-different paper schemas fall into SEPARATE
+  single-row groups, no collapse is attempted, and both survive. Only TRUE
+  duplicates (same name AND same dataset_id, byte-identical) are collapsed —
+  exactly the rows that WOULD violate the flip's `(name, dataset_id)` index.
 
   ## What this does (GUARDED + REVERSIBLE)
 
-  1. Find every `(name, project_id)` group with >1 row.
+  1. Find every `(name, dataset_id)` group with >1 row.
   2. For each group, compare the rows' SUBSTANTIVE content — every column
      EXCEPT `id`, `dataset`, `dataset_id`, `inserted_at`, `updated_at`. If any
      two rows in a group DIFFER substantively, RAISE — we refuse to destroy
@@ -38,7 +49,7 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
   the in-app `schema_id` is the schema NAME, not the row id), so deleting a
   redundant row orphans nothing — no repointing is required.
 
-  Idempotent: once collapsed, no `(name, project_id)` group has >1 row, so the
+  Idempotent: once collapsed, no `(name, dataset_id)` group has >1 row, so the
   second run finds nothing and is a no-op.
 
   ## Reversibility
@@ -55,7 +66,10 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
 
   # Substantive columns — everything that defines what the schema IS. A group
   # is "byte-identical" iff all rows share the same tuple of these values.
-  # Deliberately EXCLUDES id / dataset / dataset_id / inserted_at / updated_at.
+  # Deliberately EXCLUDES id / dataset / dataset_id / inserted_at / updated_at —
+  # `dataset_id` is the GROUP KEY (all rows in a group share it), so it is not
+  # part of the byte-identical comparison; the comparison is over the real
+  # schema fields only.
   @substantive_columns ~w(
     name
     title
@@ -92,25 +106,25 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
       []
     )
 
-    # Every (name, project_id) group with more than one row. We treat
-    # project_id IS NULL as its own group bucket (no Default project anchored
-    # yet) — those rows can still collide on the future index where both are
-    # NULL, but Postgres unique indexes treat NULLs as distinct, so a NULL
-    # group is harmless; we still collapse identical NULL-project dupes for
-    # cleanliness.
+    # Every (name, dataset_id) group with more than one row — the SAME key the
+    # 20260527134000 flip enforces uniqueness on. We treat dataset_id IS NULL as
+    # its own group bucket (dataset not yet anchored) — those rows can still
+    # collide on the future index where both are NULL, but Postgres unique
+    # indexes treat NULLs as distinct, so a NULL group is harmless; we still
+    # collapse identical NULL-dataset dupes for cleanliness.
     %{rows: group_rows} =
       repo().query!(
         """
-        SELECT name, project_id
+        SELECT name, dataset_id
         FROM schema_definitions
-        GROUP BY name, project_id
+        GROUP BY name, dataset_id
         HAVING count(*) > 1
         """,
         []
       )
 
-    Enum.each(group_rows, fn [name, project_id] ->
-      collapse_group(name, project_id)
+    Enum.each(group_rows, fn [name, dataset_id] ->
+      collapse_group(name, dataset_id)
     end)
   end
 
@@ -139,8 +153,8 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
-  defp collapse_group(name, project_id) do
-    {where_clause, params} = group_filter(name, project_id)
+  defp collapse_group(name, dataset_id) do
+    {where_clause, params} = group_filter(name, dataset_id)
 
     %{rows: rows, columns: columns} =
       repo().query!(
@@ -165,7 +179,7 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
 
       unless diff == [] do
         raise """
-        Refusing to collapse schema_definitions group #{inspect({name, project_id})}:
+        Refusing to collapse schema_definitions group #{inspect({name, dataset_id})}:
         rows differ in substantive columns and are NOT byte-identical duplicates.
         Survivor id=#{survivor["id"]} (dataset=#{survivor["dataset"]});
         conflicting id=#{row["id"]} (dataset=#{row["dataset"]}).
@@ -194,9 +208,9 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
   end
 
   # WHERE fragment that selects exactly the rows of one group, handling the
-  # NULL project_id case (which `= $2` would never match).
-  defp group_filter(name, nil), do: {"name = $1 AND project_id IS NULL", [name]}
-  defp group_filter(name, project_id), do: {"name = $1 AND project_id = $2", [name, uuid(project_id)]}
+  # NULL dataset_id case (which `= $2` would never match).
+  defp group_filter(name, nil), do: {"name = $1 AND dataset_id IS NULL", [name]}
+  defp group_filter(name, dataset_id), do: {"name = $1 AND dataset_id = $2", [name, uuid(dataset_id)]}
 
   # Return the list of substantive columns where survivor and row differ.
   # Comparison is on the raw decoded values Postgrex returns (jsonb -> maps,
