@@ -42,6 +42,16 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
   # selection, the current workspace is unioned in when present (it was set
   # from the Default backfill in `ensure_tenancy_scope/1`).
   attr :principal, :any, default: nil
+  # Whether the "+ New workspace" / "+ New project" affordances are shown.
+  # Creation needs an API token (the owner principal); a genuinely-anonymous
+  # session with no dev fallback (`api_token == nil`) hides them entirely —
+  # there is no principal to own the new workspace's Membership. StudioLive
+  # passes `assigns[:api_token] != nil`.
+  attr :can_create, :boolean, default: false
+  # Which inline create form is open: `"workspace"`, `"project"`, or nil
+  # (both closed). The "＋" button toggles this via `toggle-create`; submitting
+  # or re-clicking closes it. Lives on the socket so it survives re-renders.
+  attr :create_open, :string, default: nil
 
   def switcher(assigns) do
     workspaces =
@@ -85,6 +95,29 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
           <% end %>
         </select>
       <% end %>
+      <%= if @can_create do %>
+        <button
+          type="button"
+          class="workspace-switcher-add"
+          title="New workspace"
+          aria-label="New workspace"
+          phx-click="toggle-create"
+          phx-value-target="workspace"
+        >＋</button>
+      <% end %>
+      <%= if @can_create and @create_open == "workspace" do %>
+        <form class="workspace-switcher-create" phx-submit="create-workspace">
+          <input
+            type="text"
+            name="name"
+            class="workspace-switcher-create-input"
+            placeholder="Workspace name"
+            autocomplete="off"
+            autofocus
+          />
+          <button type="submit" class="workspace-switcher-create-submit">Create</button>
+        </form>
+      <% end %>
     </label>
     <label class="workspace-switcher">
       <span class="workspace-switcher-label">Project</span>
@@ -98,6 +131,29 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
             </option>
           <% end %>
         </select>
+      <% end %>
+      <%= if @can_create and @current_workspace != nil do %>
+        <button
+          type="button"
+          class="workspace-switcher-add"
+          title="New project"
+          aria-label="New project"
+          phx-click="toggle-create"
+          phx-value-target="project"
+        >＋</button>
+      <% end %>
+      <%= if @can_create and @current_workspace != nil and @create_open == "project" do %>
+        <form class="workspace-switcher-create" phx-submit="create-project">
+          <input
+            type="text"
+            name="name"
+            class="workspace-switcher-create-input"
+            placeholder="Project name"
+            autocomplete="off"
+            autofocus
+          />
+          <button type="submit" class="workspace-switcher-create-submit">Create</button>
+        </form>
       <% end %>
     </label>
     <label class="dataset-switcher">

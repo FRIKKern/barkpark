@@ -138,7 +138,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # whether that list was synthesized (nothing on disk yet).
        editor_mode: :classic,
        editor_blocks: [],
-       editor_blocks_synth?: false
+       editor_blocks_synth?: false,
+       # ── Switcher create affordances (Task barkpark-ylrw) ──────────────
+       # Which inline "+ New" form the WorkspaceSwitcher shows: "workspace",
+       # "project", or nil (both closed). The "＋" buttons toggle this via
+       # `toggle-create`; a successful create or a re-click closes it. The
+       # affordances themselves are hidden when `api_token` is nil (no
+       # principal to own a new workspace) — see the layout's `can_create`.
+       create_open: nil
      )
      |> stream(:paper_blocks, [])
      |> allow_upload(:image,
@@ -473,6 +480,85 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, socket}
     end
   end
+
+  # ── Switcher create affordances (Task barkpark-ylrw) ────────────────────────
+  #
+  # The WorkspaceSwitcher's "＋" buttons toggle a tiny inline name form on the
+  # Workspace / Project control. Creation reuses the just-merged atomic context
+  # (`Tenancy.create_workspace_with_owner/2` + `create_project_with_dataset/2`)
+  # — workspace creation needs a principal to own the Membership, so all three
+  # handlers no-op when `api_token` is nil (the affordance is also hidden in the
+  # layout's `can_create`, but the handler re-guards against a forged event).
+
+  # Open/close one inline form. Re-clicking the open target closes it; a
+  # different target swaps. Pure assign flip — no DB, no navigation.
+  def handle_event("toggle-create", %{"target" => target}, socket)
+      when target in ["workspace", "project"] do
+    next = if socket.assigns[:create_open] == target, do: nil, else: target
+    {:noreply, assign(socket, create_open: next)}
+  end
+
+  def handle_event("toggle-create", _params, socket), do: {:noreply, socket}
+
+  # Create a workspace + its owner Membership + Default project + production
+  # dataset (one atomic context call), then switch the whole scope to it:
+  # current_workspace = the new ws, current_project = its Default project,
+  # dataset = the project's production dataset (push_patch re-subscribes +
+  # rebuilds). On success the form closes; on error it stays open with a flash.
+  def handle_event("create-workspace", %{"name" => name}, socket) do
+    case socket.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token ->
+        case Tenancy.create_workspace_with_owner(%{name: name}, token) do
+          {:ok, workspace} ->
+            project = List.first(workspace.projects) || initial_project(workspace)
+
+            {:noreply,
+             socket
+             |> assign(create_open: nil, current_workspace: workspace, current_project: project)
+             |> put_flash(:info, "Workspace created")
+             |> rescope_dataset_for_project(project)}
+
+          {:error, changeset} ->
+            {:noreply, put_flash(socket, :error, create_error(changeset, "workspace"))}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Sign in to create a workspace")}
+    end
+  end
+
+  def handle_event("create-workspace", _params, socket), do: {:noreply, socket}
+
+  # Create a project (+ its production dataset) under the CURRENT workspace,
+  # then switch to it (current_project + the new dataset). The workspace stays;
+  # the dataset cascade re-scopes via push_patch. Same token gate + error
+  # surfacing as create-workspace. No-op when there is no current workspace.
+  def handle_event("create-project", %{"name" => name}, socket) do
+    ws = socket.assigns[:current_workspace]
+
+    cond do
+      not match?(%Barkpark.Auth.ApiToken{}, socket.assigns[:api_token]) ->
+        {:noreply, put_flash(socket, :error, "Sign in to create a project")}
+
+      is_nil(ws) ->
+        {:noreply, socket}
+
+      true ->
+        case Tenancy.create_project_with_dataset(ws, %{name: name}) do
+          {:ok, project} ->
+            {:noreply,
+             socket
+             |> assign(create_open: nil, current_project: project)
+             |> put_flash(:info, "Project created")
+             |> rescope_dataset_for_project(project)}
+
+          {:error, changeset} ->
+            {:noreply, put_flash(socket, :error, create_error(changeset, "project"))}
+        end
+    end
+  end
+
+  def handle_event("create-project", _params, socket), do: {:noreply, socket}
 
   def handle_event("expand-pane", %{"idx" => idx_str}, socket) do
     # "Expand" a collapsed pane = truncate the nav path so this pane
@@ -2110,6 +2196,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp default_dataset_for_project(_), do: nil
+
+  # Flash text for a failed create. Surfaces the first changeset error (e.g. a
+  # blank name → "name can't be blank", or a slug collision) so the user sees
+  # WHY; falls back to a generic message when no field error is extractable.
+  defp create_error(%Ecto.Changeset{} = changeset, what) do
+    errors =
+      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+      end)
+
+    case errors |> Map.to_list() |> List.first() do
+      {field, [msg | _]} -> "Could not create #{what}: #{field} #{msg}"
+      _ -> "Could not create #{what}"
+    end
+  end
+
+  defp create_error(_, what), do: "Could not create #{what}"
 
   # True iff `slug` names a dataset under the given project — the membership
   # gate for a Dataset switch (the switch-dataset handler refuses any slug not

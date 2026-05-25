@@ -354,6 +354,130 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     end
   end
 
+  # ── Task barkpark-ylrw: "+ New workspace" / "+ New project" affordances ─────
+  #
+  # The switcher exposes a "＋" button on the Workspace + Project controls that
+  # toggles a tiny inline name form. Submitting reuses the atomic create-with-
+  # bootstrap context (create_workspace_with_owner / create_project_with_dataset)
+  # and auto-switches the whole scope to the new workspace/project + its
+  # production dataset. A blank name flashes an error + creates nothing. An
+  # anonymous session (no token, no dev fallback) never renders the affordance.
+  describe "create affordances (barkpark-ylrw)" do
+    test "create-workspace builds ws + owner membership + Default project + production dataset, switches to it",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      # The "＋ New workspace" button is present (token-backed session).
+      assert view
+             |> element(~s(button[phx-click="toggle-create"][phx-value-target="workspace"]))
+             |> has_element?()
+
+      # Toggle the form open, then submit a name.
+      render_click(
+        element(view, ~s(button[phx-click="toggle-create"][phx-value-target="workspace"]))
+      )
+
+      assert view |> element(~s(form[phx-submit="create-workspace"])) |> has_element?()
+
+      render_submit(element(view, ~s(form[phx-submit="create-workspace"])), %{
+        "name" => "Brand New Co"
+      })
+
+      # The workspace exists with the full bootstrap (owner membership +
+      # Default project + production dataset) — verified via Tenancy.
+      ws = Tenancy.get_workspace_by_slug("brand-new-co")
+      assert ws, "create-workspace must persist the workspace (slug derived from name)"
+
+      # The mounted principal is the OWNER of the new workspace.
+      token = :sys.get_state(view.pid).socket.assigns.api_token
+      assert TenancyAuth.member?(token, ws.id)
+
+      owner =
+        Barkpark.Repo.get_by(Barkpark.Tenancy.Membership,
+          workspace_id: ws.id,
+          principal_id: token.id
+        )
+
+      assert owner && owner.role == "owner",
+             "create-workspace must make the creator the OWNER"
+
+      project = Tenancy.get_project(ws.slug, "default")
+      assert project, "create-workspace must create a Default project (slug 'default')"
+      assert Enum.any?(Tenancy.list_datasets(project), &(&1.slug == "production")),
+             "create-workspace must create the production dataset"
+
+      # The switcher now shows the new workspace as the current scope.
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.current_workspace.slug == "brand-new-co"
+      assert assigns.current_project.id == project.id
+      assert assigns.dataset == "production"
+    end
+
+    test "create-project in the current workspace creates project + dataset and switches to it",
+         %{conn: conn, acme_ws: acme_ws} do
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      # Mount scope is the slug-first member workspace (acme). Open the Project
+      # create form and submit.
+      render_click(
+        element(view, ~s(button[phx-click="toggle-create"][phx-value-target="project"]))
+      )
+
+      render_submit(element(view, ~s(form[phx-submit="create-project"])), %{
+        "name" => "Fresh Project"
+      })
+
+      project = Tenancy.get_project(acme_ws.slug, "fresh-project")
+      assert project, "create-project must persist the project under the current workspace"
+      assert Enum.any?(Tenancy.list_datasets(project), &(&1.slug == "production")),
+             "create-project must create the production dataset"
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.current_workspace.slug == acme_ws.slug
+      assert assigns.current_project.slug == "fresh-project"
+      assert assigns.dataset == "production"
+    end
+
+    test "blank workspace name flashes an error and creates nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      before = Tenancy.list_workspaces_for(:sys.get_state(view.pid).socket.assigns.api_token)
+
+      render_click(
+        element(view, ~s(button[phx-click="toggle-create"][phx-value-target="workspace"]))
+      )
+
+      html =
+        render_submit(element(view, ~s(form[phx-submit="create-workspace"])), %{"name" => ""})
+
+      assert html =~ "Could not create workspace"
+
+      after_ws = Tenancy.list_workspaces_for(:sys.get_state(view.pid).socket.assigns.api_token)
+      assert length(after_ws) == length(before),
+             "a blank name must create no workspace"
+
+      # The form stays open so the user can fix + retry.
+      assert :sys.get_state(view.pid).socket.assigns.create_open == "workspace"
+    end
+
+    test "an anonymous session (no token) does NOT render the create affordance" do
+      # A FRESH conn with NO api_token in the session map (the setup conn carries
+      # the test token, so build a clean one). In :test there is no dev
+      # browser-token fallback, so api_token resolves to nil → can_create false.
+      anon_conn = Plug.Test.init_test_session(Phoenix.ConnTest.build_conn(), %{})
+      {:ok, view, html} = live(anon_conn, "/studio/#{@dataset}")
+
+      assert :sys.get_state(view.pid).socket.assigns.api_token == nil
+
+      refute html =~ ~s(phx-click="toggle-create"),
+             "anonymous (no-token) session must not expose the + New create affordance"
+
+      refute view
+             |> element(~s(button[phx-click="toggle-create"]))
+             |> has_element?()
+    end
+  end
+
   # First index of the Workspace label — tolerates either the <select> chrome
   # or the single-option static-label rendering.
   defp ws_label_pos(html), do: label_pos(html, "Workspace")
