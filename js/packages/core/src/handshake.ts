@@ -3,6 +3,7 @@
 
 import type { BarkparkClientConfig, MetaResponse } from './types'
 import { request } from './transport'
+import { scopePrefix } from './client'
 
 export interface HandshakeCache {
   /** Fetch + cache /v1/meta. Dedupes concurrent calls by projectUrl+dataset. */
@@ -43,7 +44,10 @@ export function createHandshakeCache(): HandshakeCache {
       if (entry?.inflight) return entry.inflight
 
       const inflight = (async () => {
-        const { data } = await request<MetaResponse>(config, `/v1/meta?dataset=${encodeURIComponent(config.dataset)}`, {
+        // scopePrefix() is invoked at request time (not module top-level) so the
+        // handshake ↔ client import cycle stays benign. '' when unscoped (back-compat).
+        const prefix = scopePrefix(config)
+        const { data } = await request<MetaResponse>(config, `${prefix}/v1/meta?dataset=${encodeURIComponent(config.dataset)}`, {
           method: 'GET',
           kind: 'read',
         })

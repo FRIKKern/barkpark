@@ -23,6 +23,7 @@ import {
   BarkparkNetworkError,
 } from './errors'
 import { detectEdgeRuntime } from './util/edge-detect'
+import { scopePrefix } from './client'
 
 export interface ListenOptions {
   perspective?: Perspective
@@ -104,7 +105,10 @@ export function createListenHandle<T = BarkparkDocument>(
             }
 
             const base = config.projectUrl.replace(/\/+$/, '')
-            const url = new URL(`${base}/v1/data/listen/${config.dataset}`)
+            // scopePrefix() is invoked at request time (not module top-level) so the
+            // listen ↔ client import cycle stays benign. '' when unscoped (back-compat).
+            const prefix = scopePrefix(config)
+            const url = new URL(`${base}${prefix}/v1/data/listen/${config.dataset}`)
             if (type) url.searchParams.set('types', type)
             const p = opts?.perspective ?? config.perspective
             if (p) url.searchParams.set('perspective', p)
