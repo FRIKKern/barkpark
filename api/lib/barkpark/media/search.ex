@@ -27,6 +27,16 @@ defmodule Barkpark.Media.Search do
   @spec search(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map(), map()}
   def search(dataset, opts \\ []) when is_binary(dataset) do
     config = SurfaceConfigs.get("media", dataset)
+
+    # Resolve the dataset STRING → dataset_id ONCE per request and thread it
+    # through opts. The dataset_id is INVARIANT within a search — without this,
+    # every build_query call (count + page + each facet field) re-runs
+    # resolve_dataset_id, hitting Tenancy.get_dataset + get_default_project
+    # (~9 re-resolutions per search: 7 facets + count + page). build_query reads
+    # opts[:dataset_id] when present and skips the roundtrips. Byte-identical to
+    # the per-call path (same get_dataset → Dataset.id, same NULL-tolerant nil).
+    opts = Keyword.put(opts, :dataset_id, resolve_dataset_id(dataset, opts))
+
     q = Keyword.get(opts, :q)
 
     parsed =
@@ -112,7 +122,18 @@ defmodule Barkpark.Media.Search do
     # STRING filter when no dataset row resolves (back-compat). The left-join to
     # the linked asset Document keeps the `d.dataset` STRING mirror filter — the
     # mirror stays consistent with dataset_id on every write.
-    dataset_id = resolve_dataset_id(dataset, opts)
+    #
+    # Resolve-once: search/2 pre-resolves the (invariant) dataset_id and threads
+    # it via opts[:dataset_id], so we skip the Tenancy.get_dataset +
+    # get_default_project roundtrips on every build_query (facets + count + page).
+    # has_key? distinguishes "threaded" (use as-is, including a resolved nil) from
+    # "not threaded" (direct build_query/list callers → resolve here as before).
+    dataset_id =
+      if Keyword.has_key?(opts, :dataset_id) do
+        Keyword.get(opts, :dataset_id)
+      else
+        resolve_dataset_id(dataset, opts)
+      end
 
     MediaFile
     |> from(as: :media)
