@@ -9,6 +9,7 @@ defmodule Barkpark.Media.AssetResponse do
   alias Barkpark.Media.Access
   alias Barkpark.Media.Delivery
   alias Barkpark.Media.MediaFile
+  alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Plugins.Registry
 
   @doc "Render a unified asset map from a blob row and optional linked document."
@@ -29,7 +30,18 @@ defmodule Barkpark.Media.AssetResponse do
               nil
 
             doc_id ->
-              case Barkpark.Content.get_document(doc_id, "mediaAsset", dataset) do
+              # Thread scope from the %MediaFile{} row — post-keystone, doc_id
+              # collisions across workspaces are legal, so the unscoped read
+              # could raise (multi-row) or return the wrong tenant. The file
+              # already carries workspace_id/project_id; reuse the canonical
+              # helper so this stays in lockstep with collections.ex /
+              # checkout.ex / processing.ex.
+              case Barkpark.Content.get_document(
+                     doc_id,
+                     "mediaAsset",
+                     dataset,
+                     PluginAssets.file_scope_opts(file)
+                   ) do
                 {:ok, doc} -> doc
                 _ -> nil
               end

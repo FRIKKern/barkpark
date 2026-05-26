@@ -1580,7 +1580,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     dataset = socket.assigns.dataset
 
     with %{doc_id: doc_id} <- doc,
-         {:ok, fresh} <- Content.get_document(doc_id, type, dataset) do
+         {:ok, fresh} <- Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
       {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
 
       assign(socket,
@@ -3127,7 +3127,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
             editor_type,
             socket.assigns.dataset,
             is_draft,
-            has_published
+            has_published,
+            ScopeHelpers.scope_opts(socket)
           ),
         diff_visible:
           socket.assigns[:diff_visible] &&
@@ -3360,13 +3361,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # we deliberately don't refresh `published_doc` on autosave: the
   # published twin doesn't change while the user types, so refetching on
   # every keystroke would just burn DB round-trips.
-  defp fetch_published_twin(nil, _type, _dataset, _is_draft, _has_published), do: nil
-  defp fetch_published_twin(_doc, nil, _dataset, _is_draft, _has_published), do: nil
-  defp fetch_published_twin(_doc, _type, _dataset, false, _has_published), do: nil
-  defp fetch_published_twin(_doc, _type, _dataset, _is_draft, false), do: nil
+  defp fetch_published_twin(nil, _type, _dataset, _is_draft, _has_published, _scope_opts), do: nil
+  defp fetch_published_twin(_doc, nil, _dataset, _is_draft, _has_published, _scope_opts), do: nil
+  defp fetch_published_twin(_doc, _type, _dataset, false, _has_published, _scope_opts), do: nil
+  defp fetch_published_twin(_doc, _type, _dataset, _is_draft, false, _scope_opts), do: nil
 
-  defp fetch_published_twin(doc, type, dataset, true, true) do
-    case Content.get_document(Content.published_id(doc.doc_id), type, dataset) do
+  defp fetch_published_twin(doc, type, dataset, true, true, scope_opts) do
+    case Content.get_document(Content.published_id(doc.doc_id), type, dataset, scope_opts) do
       {:ok, pub} -> pub
       _ -> nil
     end
@@ -4102,6 +4103,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
       presences={@presences}
       editor_doc={@editor_doc}
       dataset={@dataset}
+      current_workspace={@current_workspace}
+      current_project={@current_project}
     />
 
     <%!-- Beta focus mode mirror (Task barkpark-270j). This 0×0 element carries
