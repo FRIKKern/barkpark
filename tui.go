@@ -80,6 +80,11 @@ type model struct {
 	textInput   textinput.Model   // text input for current field
 	dirtyValues map[string]string // unsaved field changes (fieldName -> value)
 	dirty       bool              // has unsaved changes
+	// Transient status line — surfaces save outcomes (errors + confirmations).
+	// status holds the message; statusErr flags it as a failure (red vs green).
+	// Both are cleared by the next key action so the line stays ephemeral.
+	status    string
+	statusErr bool
 	// Scope selector (workspace/project/dataset picker)
 	selector selectorState
 }
@@ -283,6 +288,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Any keystroke dismisses the transient status line. saveDocument re-sets
+	// it after this, so the save outcome still surfaces on the ctrl+s press.
+	m.clearStatus()
 
 	// ── Scope selector modal: all input goes to the selector ──
 	if m.selector.active {
@@ -571,10 +580,31 @@ func (m *model) saveDocument() {
 		},
 	}
 
-	if err := m.ds.Mutate([]map[string]interface{}{mutation}); err == nil {
-		m.dirtyValues = nil
-		m.dirty = false
+	if err := m.ds.Mutate([]map[string]interface{}{mutation}); err != nil {
+		// Surface the failure — a tenancy 403, a 422 validation reject, or a
+		// network drop would otherwise vanish and leave the doc dirty with no
+		// feedback. The error string carries the status code + server body.
+		m.setStatus(fmt.Sprintf("save failed: %v", err), true)
+		return
 	}
+	m.dirtyValues = nil
+	m.dirty = false
+	m.setStatus("saved", false)
+}
+
+// setStatus stores a transient status-line message. ok=false marks it an error
+// (rendered red); ok=true marks it a confirmation (rendered green). The message
+// is cleared by clearStatus on the next key action.
+func (m *model) setStatus(msg string, isErr bool) {
+	m.status = msg
+	m.statusErr = isErr
+}
+
+// clearStatus wipes any pending status message. Called at the top of each key
+// action so a status line only lingers until the user's next keystroke.
+func (m *model) clearStatus() {
+	m.status = ""
+	m.statusErr = false
 }
 
 // scrollToField adjusts viewport to keep the focused field visible.
@@ -731,6 +761,19 @@ func (m model) renderToolbar() string {
 // ── Help bar ─────────────────────────────────────────────────────────────────
 
 func (m model) renderHelpBar() string {
+	// A pending status message takes over the bar — a failed save (red) or a
+	// "saved" confirmation (green) must be impossible to miss.
+	if m.status != "" {
+		style := statusPublished // green = ok
+		prefix := "✓ "
+		if m.statusErr {
+			style = statusDraft // amber/red = error
+			prefix = "✕ "
+		}
+		msg := truncate(prefix+m.status, m.width-2)
+		return toolbarStyle.Width(m.width).Render(style.Bold(true).Render(" " + msg))
+	}
+
 	var help string
 	if m.selector.active {
 		help = " tab/j/k move  enter next/apply  ctrl+s apply  esc cancel"
