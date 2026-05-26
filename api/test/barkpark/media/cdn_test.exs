@@ -1,7 +1,10 @@
 defmodule Barkpark.Media.CdnTest do
-  use ExUnit.Case, async: true
+  # async: false — this module toggles the global :media_cdn Application env, and
+  # Cdn reads config straight from Application.get_env (no test-scoped injection
+  # path), so concurrent tests reading :media_cdn would race. Correctness over a
+  # tiny parallelism gain.
+  use ExUnit.Case, async: false
 
-  alias Barkpark.Media
   alias Barkpark.Media.Cdn
   alias Barkpark.Media.MediaFile
 
@@ -35,10 +38,16 @@ defmodule Barkpark.Media.CdnTest do
 
   test "invalidate_paths posts to HTTP adapter" do
     bypass = Bypass.open()
+    test_pid = self()
 
+    # Capture the request into the test process instead of asserting inside the
+    # Bypass handler. An assertion failure here would raise in the Cowboy/Bypass
+    # process (not the test process), surfacing as a connection error or on-exit
+    # verification failure that races the test's :ok return rather than a clean
+    # assertion. We forward method/path/body and assert in the test process.
     Bypass.expect_once(bypass, "POST", "/purge", fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      assert Jason.decode!(body)["paths"] == ["/media/files/x.png"]
+      send(test_pid, {:cdn_request, conn.method, conn.request_path, body})
       Plug.Conn.resp(conn, 204, "")
     end)
 
@@ -47,5 +56,8 @@ defmodule Barkpark.Media.CdnTest do
     )
 
     assert :ok = Cdn.invalidate_paths(["/media/files/x.png"])
+
+    assert_receive {:cdn_request, "POST", "/purge", body}
+    assert Jason.decode!(body)["paths"] == ["/media/files/x.png"]
   end
 end
