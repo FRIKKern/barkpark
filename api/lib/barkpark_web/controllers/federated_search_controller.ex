@@ -73,8 +73,8 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp surface_payload(%{surface: "media", hits: files, total: total, meta: meta, dataset: dataset}) do
-    docs = Media.asset_docs_for_files(files, dataset)
+  defp surface_payload(%{surface: "media", hits: files, total: total, meta: meta, dataset: dataset, scope: scope}) do
+    docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
 
     hits =
@@ -123,13 +123,14 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("media", dataset, q, limit, params, _scope) do
-    opts = [
-      q: q,
-      limit: limit,
-      offset: 0,
-      sort: params["sort"] || "relevance"
-    ]
+  defp search_surface("media", dataset, q, limit, params, scope) do
+    opts =
+      [
+        q: q,
+        limit: limit,
+        offset: 0,
+        sort: params["sort"] || "relevance"
+      ] ++ scope
 
     {files, total, _facets, meta} = Media.search_files(dataset, opts)
 
@@ -138,7 +139,8 @@ defmodule BarkparkWeb.FederatedSearchController do
       hits: files,
       total: total,
       meta: meta,
-      dataset: dataset
+      dataset: dataset,
+      scope: scope
     }
   end
 
