@@ -321,7 +321,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # Subscribe to new doc if editing
     case socket.assigns do
       %{editor_type: type, editor_doc: %{doc_id: doc_id}} when not is_nil(type) ->
-        topic = "doc:#{socket.assigns.dataset}:#{type}:#{Content.published_id(doc_id)}"
+        # Workspace-scope the subscription (barkpark-rwva, P1). The per-doc
+        # topic now carries the owning workspace; subscribe with the editor's
+        # current workspace so an edit to another tenant's colliding
+        # (type, pubid) doc never lands here. nil current_workspace (no Default
+        # seeded) normalizes identically on both sides via doc_topic/4.
+        ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+
+        topic =
+          Content.doc_topic(
+            Content.published_id(doc_id),
+            type,
+            ws_id,
+            socket.assigns.dataset
+          )
+
         Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
         assign(socket, subscribed_doc: topic)
 
