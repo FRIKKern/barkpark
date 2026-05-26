@@ -245,7 +245,13 @@ defmodule BarkparkWeb.V1.MediaController do
   def relations(conn, %{"dataset" => dataset, "id" => id} = params) do
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset) do
-      graph = Relations.graph(file, dataset, render_opts(conn, params, dataset: dataset))
+      # Thread the tenancy scope into the relation graph so every back-link
+      # query + related-asset/file resolution is bounded to the caller's
+      # workspace — the related assets/titles/signed-urls in another workspace
+      # sharing the `dataset` STRING no longer leak (barkpark-m21z). The scope
+      # opts ride alongside the render keys; graph/3 splits them.
+      graph_opts = render_opts(conn, params, dataset: dataset) ++ scope_opts(conn)
+      graph = Relations.graph(file, dataset, graph_opts)
 
       json(conn, %{
         result: graph,
