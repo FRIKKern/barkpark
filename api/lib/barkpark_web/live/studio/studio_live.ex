@@ -425,21 +425,36 @@ defmodule BarkparkWeb.Studio.StudioLive do
         # genuinely-anonymous/dev session that has no principal — when the
         # target IS the workspace already on the socket (the seeded Default).
         # Anything else is a foreign re-scope and is silently dropped.
-        if can_reach_workspace?(socket, workspace) do
-          project = List.first(Tenancy.list_projects(workspace.id))
+        cond do
+          not can_reach_workspace?(socket, workspace) ->
+            {:noreply, socket}
 
-          # Cascade: the new workspace's project carries its OWN datasets — the
-          # old dataset slug belongs to the old project and may not exist here.
-          # Re-scope the dataset to the new project's default (production-first,
-          # else first) and patch the URL leaf so handle_params re-subscribes +
-          # rebuilds against the chosen dataset. When the project has no dataset
-          # rows we keep the current slug (the string seam stays authoritative).
-          {:noreply,
-           socket
-           |> assign(current_workspace: workspace, current_project: project)
-           |> rescope_dataset_for_project(project)}
-        else
-          {:noreply, socket}
+          # Hard scope invariant (barkpark-yxz2): never switch INTO a workspace
+          # that has zero projects. `initial_project/1` is non-nil whenever the
+          # workspace has any project (it prefers the Default project, else the
+          # first), so a nil result here means the workspace is genuinely
+          # project-less. Assigning `current_project: nil` and proceeding would
+          # let a later scoped write (new-document / do_autosave) build
+          # scope_opts with NO :project_id — ScopeHelpers drops the nil key and
+          # `resolve_write_scope` falls back to the Default tenant, leaking the
+          # doc across the boundary. Refuse the switch and keep the prior scope.
+          is_nil(initial_project(workspace)) ->
+            {:noreply,
+             put_flash(socket, :error, "Workspace has no projects yet — create one first")}
+
+          true ->
+            project = initial_project(workspace)
+
+            # Cascade: the new workspace's project carries its OWN datasets — the
+            # old dataset slug belongs to the old project and may not exist here.
+            # Re-scope the dataset to the new project's default (production-first,
+            # else first) and patch the URL leaf so handle_params re-subscribes +
+            # rebuilds against the chosen dataset. When the project has no dataset
+            # rows we keep the current slug (the string seam stays authoritative).
+            {:noreply,
+             socket
+             |> assign(current_workspace: workspace, current_project: project)
+             |> rescope_dataset_for_project(project)}
         end
     end
   end

@@ -478,6 +478,131 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     end
   end
 
+  # ── Task barkpark-yxz2: refuse switch INTO a project-less workspace ──────────
+  #
+  # The bug: `switch-workspace` assigned `current_project: nil` when the target
+  # workspace had ZERO projects (List.first over an empty list), then proceeded.
+  # A later scoped write (new-document / do_autosave) builds scope_opts with no
+  # :project_id — ScopeHelpers drops the nil key and `resolve_write_scope` falls
+  # back to the Default tenant, so the doc lands in Default's rows (a hard
+  # boundary cross). The fix refuses the switch with a flash and keeps the prior
+  # scope, so `current_project` is NEVER nil while a write can fire.
+  describe "project-less workspace switch (barkpark-yxz2)" do
+    setup %{conn: conn} do
+      # A member workspace with ZERO projects — the switch target that used to
+      # leave current_project nil.
+      {:ok, empty_ws} = Tenancy.create_workspace(%{slug: "empty-co", name: "Empty Co"})
+      {:ok, token} = Auth.verify_token(session_raw(conn))
+      {:ok, _} = TenancyAuth.create_membership(empty_ws.id, token.id, "member")
+      assert Tenancy.list_projects(empty_ws.id) == []
+      {:ok, empty_ws: empty_ws}
+    end
+
+    test "switching to a project-less workspace is REFUSED — scope unchanged, current_project NOT nil, flash shown",
+         %{conn: conn, empty_ws: empty_ws, acme_ws: acme_ws, acme_blog: acme_blog} do
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      before_ws = :sys.get_state(view.pid).socket.assigns.current_workspace.slug
+
+      html =
+        render_change(element(view, ~s(select[name="workspace"])), %{
+          "workspace" => empty_ws.slug
+        })
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+
+      # The switch is refused: the prior (acme) scope is intact.
+      assert assigns.current_workspace.slug == before_ws
+      assert assigns.current_workspace.slug == acme_ws.slug
+
+      # THE INVARIANT: current_project is never nil after a switch event. It must
+      # still point at the prior workspace's project, not have been nulled.
+      refute is_nil(assigns.current_project),
+             "SCOPE INVARIANT BREACH: switch into a project-less workspace left current_project nil"
+
+      assert assigns.current_project.slug == acme_blog.slug
+
+      # A user-facing flash explains the refusal.
+      assert html =~ "Workspace has no projects yet",
+             "a refused project-less switch must surface a flash"
+    end
+
+    test "a write after a refused project-less switch does NOT leak into the Default tenant",
+         %{conn: conn, empty_ws: empty_ws} do
+      default_ws = Tenancy.get_default_workspace()
+      default_project = Tenancy.get_default_project()
+
+      before_count = doc_count(default_ws.id, default_project.id)
+
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      # Attempt the bad switch (refused), then fire a real scoped write.
+      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => empty_ws.slug})
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      # Scope stayed on the prior (acme) workspace — NOT the empty one, NOT Default.
+      refute assigns.current_workspace.id == empty_ws.id
+      refute assigns.current_workspace.id == default_ws.id
+      refute is_nil(assigns.current_project)
+
+      # New-document write under the (intact) prior scope. Dispatch the event
+      # directly so the probe doesn't depend on which desk pane rendered the
+      # button — `new-document` resolves the write scope via hook_opts/scope_opts.
+      render_click(view, "new-document", %{"type" => "post"})
+
+      after_count = doc_count(default_ws.id, default_project.id)
+      assert after_count == before_count,
+             "TENANT LEAK: a write after a refused project-less switch landed in the Default tenant"
+    end
+
+    test "switching to a workspace WITH projects selects its default project and write lands there, not Default",
+         %{conn: conn, acme_ws: acme_ws, acme_blog: acme_blog} do
+      default_ws = Tenancy.get_default_workspace()
+      default_project = Tenancy.get_default_project()
+      default_before = doc_count(default_ws.id, default_project.id)
+
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      # Move to Default first, then switch to acme so the handler runs for a
+      # workspace with projects (initial_project must be non-nil + chosen).
+      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => default_ws.slug})
+      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => acme_ws.slug})
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.current_workspace.slug == acme_ws.slug
+      # initial_project resolved a real project for the target workspace.
+      refute is_nil(assigns.current_project)
+      assert assigns.current_project.slug == acme_blog.slug
+
+      acme_before = doc_count(acme_ws.id, acme_blog.id)
+
+      render_click(view, "new-document", %{"type" => "post"})
+
+      # The write landed in the acme/blog project, not Default.
+      assert doc_count(acme_ws.id, acme_blog.id) == acme_before + 1,
+             "a write after a legit switch must land in the target project"
+
+      assert doc_count(default_ws.id, default_project.id) == default_before,
+             "a write after a legit switch must NOT touch the Default tenant"
+    end
+  end
+
+  # Count documents stamped with the given workspace + project ids — the
+  # authoritative "where did the doc land" probe (the bug crossed this boundary).
+  defp doc_count(ws_id, project_id) do
+    import Ecto.Query
+
+    Barkpark.Repo.aggregate(
+      from(d in Barkpark.Content.Document,
+        where: d.workspace_id == ^ws_id and d.project_id == ^project_id
+      ),
+      :count
+    )
+  end
+
+  # The raw token the setup conn carries (to mint additional memberships).
+  defp session_raw(conn), do: Plug.Conn.get_session(conn, "api_token")
+
   # First index of the Workspace label — tolerates either the <select> chrome
   # or the single-option static-label rendering.
   defp ws_label_pos(html), do: label_pos(html, "Workspace")
