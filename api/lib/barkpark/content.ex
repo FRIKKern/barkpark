@@ -1552,17 +1552,40 @@ defmodule Barkpark.Content do
   # STRING, which conflates same-name datasets within a workspace (barkpark-y9ee).
   @doc false
   def resolve_read_dataset_id(dataset, opts) when is_binary(dataset) do
-    project_id = Keyword.get(opts, :project_id) || read_default_project_id()
+    # Project resolution — only fall back to the seeded Default project when
+    # the caller passed NO scope at all (flat back-compat read). When the
+    # caller pinned a workspace but no project, falling back to Default's
+    # project crosses tenants: get_dataset(default_proj, dataset) can match a
+    # same-named dataset row under Default and the resolver returns Default's
+    # dataset_id, which scope_to_dataset then applies as a strict
+    # `dataset_id == default_ds_id` filter that excludes the workspace's own
+    # rows (barkpark-sknf, surfaced when 5znv memo no longer hides it). With
+    # `workspace_id` present and `project_id` absent the resolver returns nil
+    # → scope_to_dataset uses the legacy STRING path, and the subsequent
+    # `scope_to_workspace_or_global` filter keeps the read tenant-correct.
+    project_id =
+      cond do
+        pid = Keyword.get(opts, :project_id) -> pid
+        Keyword.has_key?(opts, :workspace_id) -> nil
+        true -> read_default_project_id(opts)
+      end
 
-    # Per-request memoization (barkpark-5znv): a single public read fans this
-    # resolve across schema_public? + list_documents + schema_hash_for_dataset
-    # (~9 calls), all for the immutable {project_id, dataset} pair. The result
-    # (id OR nil) is keyed in the Process dictionary — a Phoenix request is one
-    # process, so the memo is naturally per-request and dies with the process.
-    # No :persistent_term/:ets global cache: those go stale across test DBs /
-    # ecto.reset and would need invalidation. The resolved id is identical to
-    # the uncached path — only the redundant get_dataset roundtrips are skipped.
-    memoize({:resolve_read_dataset_id, project_id, dataset}, fn ->
+    # Per-request memoization (barkpark-5znv, gated barkpark-sknf): a single
+    # public HTTP read fans this resolve across schema_public? + list_documents
+    # + schema_hash_for_dataset (~9 calls), all for the immutable {project_id,
+    # dataset} pair. The result (id OR nil) is keyed in the Process dictionary.
+    #
+    # The memo is GATED on an explicit `memoize: true` opt that ONLY HTTP
+    # request controllers set via `ScopeHelpers.scope_opts(conn)`. LiveView
+    # callers, Oban workers, mix tasks, and search retrievers DON'T pass the
+    # opt → no memo → no staleness. The original 5znv goal (collapse the 9
+    # redundant get_dataset reads on a single HTTP request) is preserved; the
+    # staleness foot-gun in long-lived processes (LV session lifetime, reused
+    # Oban worker pids, sandbox-reused test pids) is closed.
+    #
+    # The resolved id is identical to the uncached path — only the redundant
+    # get_dataset roundtrips are skipped on the request path.
+    memoize?(opts, {:resolve_read_dataset_id, project_id, dataset}, fn ->
       case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
         %Barkpark.Tenancy.Dataset{id: id} -> id
         _ -> nil
@@ -1576,8 +1599,12 @@ defmodule Barkpark.Content do
   # no-`:project_id` (flat/back-compat) route resolves get_default_project once
   # — collapsing get_default_workspace + get_default_project (2 reads) that
   # otherwise repeated on every resolve call within the same request.
-  defp read_default_project_id do
-    memoize(:read_default_project_id, fn ->
+  #
+  # Same gating as resolve_read_dataset_id (barkpark-sknf): memoization only
+  # fires when the caller opted in via `memoize: true`. LV/worker callers see
+  # the fresh-every-call path.
+  defp read_default_project_id(opts \\ []) do
+    memoize?(opts, :read_default_project_id, fn ->
       case Barkpark.Tenancy.get_default_project() do
         %{id: id} -> id
         _ -> nil
@@ -1585,19 +1612,27 @@ defmodule Barkpark.Content do
     end)
   end
 
-  # Per-request memo helper. Stores the (possibly nil) result under `key` in the
-  # Process dictionary, distinguishing "cached nil" from "not yet computed" via
-  # a private sentinel so a legitimately-nil resolution is not recomputed.
+  # Per-request memo helper, gated on an explicit `memoize: true` opt
+  # (barkpark-sknf). When the opt is absent the fun is invoked fresh and
+  # nothing is written to the Process dictionary — long-lived LV/Oban/test
+  # processes never accumulate stale memos. When the opt is present the
+  # result is cached under `key` in the Process dictionary, distinguishing
+  # "cached nil" from "not yet computed" via a private sentinel so a
+  # legitimately-nil resolution is not recomputed.
   @memo_miss :"$barkpark_memo_miss"
-  defp memoize(key, fun) do
-    case Process.get({:barkpark_request_memo, key}, @memo_miss) do
-      @memo_miss ->
-        value = fun.()
-        Process.put({:barkpark_request_memo, key}, value)
-        value
+  defp memoize?(opts, key, fun) do
+    if Keyword.get(opts, :memoize, false) do
+      case Process.get({:barkpark_request_memo, key}, @memo_miss) do
+        @memo_miss ->
+          value = fun.()
+          Process.put({:barkpark_request_memo, key}, value)
+          value
 
-      value ->
-        value
+        value ->
+          value
+      end
+    else
+      fun.()
     end
   end
 
