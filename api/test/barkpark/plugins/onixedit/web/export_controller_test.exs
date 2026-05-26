@@ -14,7 +14,10 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.{Auth, Content}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @admin_token "barkpark-test-admin-token"
   @junior_token "barkpark-test-junior-token"
@@ -95,11 +98,15 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       assert resp.status == 404
     end
 
-    test "400 when the document is not a book", %{conn: conn} do
+    test "404 when the id resolves to a non-book document", %{conn: conn} do
+      # The scoped lookup now goes through `Content.get_document(_, "book", _, _)`,
+      # which filters `type == "book"` at the query. A non-book id therefore
+      # resolves to no row → 404 (previously a post-load type check returned 400;
+      # the book endpoint no longer confirms the existence of non-book docs).
       resp = admin_get(conn, "/v1/plugins/onixedit/export/#{@dataset}/#{@post_id}.onix")
-      assert resp.status == 400
+      assert resp.status == 404
       payload = Jason.decode!(resp.resp_body)
-      assert get_in(payload, ["error", "type"]) == "bad_request"
+      assert get_in(payload, ["error", "type"]) == "not_found"
     end
   end
 
@@ -146,6 +153,122 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       resp_bare = admin_get(conn, "/v1/plugins/onixedit/export/#{@dataset}/#{@book_id}.onix")
       assert resp_bare.status == 200
       assert resp_bare.resp_body =~ ~s|<ONIXMessage|
+    end
+  end
+
+  describe "cross-workspace isolation (barkpark-8ovd — P0 catalog leak)" do
+    # Stand up two distinct workspaces, A and B, each with a project. The
+    # admin token is a member of BOTH so the `:scoped_api` ResolveWorkspace
+    # membership gate (a separate, routing-layer defense) does NOT 403 the
+    # request to B — we want the request to REACH the controller so we exercise
+    # the CONTROLLER's scope filter, which is the layer this fix hardens.
+    #
+    # A `book` is created STAMPED into workspace A / project A (dataset_id
+    # populated via the project scope), so this fix stands alone without the
+    # separate yx7f NULL-tolerant dataset_id work.
+    setup do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      isolation_ds = "isolation_ds"
+
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{"name" => "book", "title" => "Book", "visibility" => "private", "fields" => []},
+          isolation_ds,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        )
+
+      fixture =
+        Path.join([File.cwd!(), "test", "fixtures", "onix", "minimal-book.json"])
+        |> File.read!()
+        |> Jason.decode!()
+
+      book_a_id = "leak-book-a"
+
+      {:ok, _book_a} =
+        Content.create_document(
+          "book",
+          %{"doc_id" => book_a_id, "title" => "Workspace A Book", "content" => fixture},
+          isolation_ds,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        )
+
+      # An admin token bound to A, then ALSO made a member of B so the routing
+      # membership gate lets requests to /w/B/... through to the controller.
+      raw = "isolation-admin-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "isolation admin", isolation_ds, ["read", "write", "admin"], ws_a.id)
+      {:ok, _} = TenancyAuth.create_membership(ws_b.id, token.id, "admin")
+
+      {:ok,
+       ws_a: ws_a,
+       proj_a: proj_a,
+       ws_b: ws_b,
+       proj_b: proj_b,
+       dataset: isolation_ds,
+       book_id: book_a_id,
+       raw_token: raw}
+    end
+
+    defp scoped_path(ws, proj, dataset, id),
+      do: "/w/#{ws.slug}/p/#{proj.slug}/v1/plugins/onixedit/export/#{dataset}/#{id}.onix"
+
+    test "LEGIT: scoped export resolved to workspace A returns A's book (200)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      dataset: dataset,
+      book_id: book_id,
+      raw_token: raw
+    } do
+      if System.find_executable("xmllint") do
+        resp =
+          conn
+          |> put_req_header("authorization", "Bearer " <> raw)
+          |> get(scoped_path(ws_a, proj_a, dataset, book_id))
+
+        assert resp.status == 200
+        assert resp.resp_body =~ ~s|<ONIXMessage|
+        assert resp.assigns.current_workspace.id == ws_a.id
+      else
+        # Without xmllint the XSD render is skipped; we still prove the scoped
+        # lookup FINDS the book under A (a 500 xsd_invalid means the doc was
+        # found and scope passed — NOT a 404).
+        resp =
+          conn
+          |> put_req_header("authorization", "Bearer " <> raw)
+          |> get(scoped_path(ws_a, proj_a, dataset, book_id))
+
+        assert resp.status in [200, 500],
+               "expected the in-scope lookup to FIND A's book (200 or xsd 500), got #{resp.status}"
+      end
+    end
+
+    test "LEAK GATE: scoped export resolved to workspace B does NOT return A's book (404)", %{
+      conn: conn,
+      ws_b: ws_b,
+      proj_b: proj_b,
+      dataset: dataset,
+      book_id: book_id,
+      raw_token: raw
+    } do
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer " <> raw)
+        |> get(scoped_path(ws_b, proj_b, dataset, book_id))
+
+      # The request reached the controller (membership gate passed for B), and
+      # the controller's scope_opts(conn) carried B's workspace — A's book must
+      # NOT resolve. Anything but 404 (especially a 200 with A's XML) is the leak.
+      assert resp.status == 404,
+             "CROSS-WORKSPACE LEAK: workspace B exported workspace A's book — got #{resp.status}"
+
+      refute resp.resp_body =~ ~s|<ONIXMessage|
+      assert resp.assigns.current_workspace.id == ws_b.id
     end
   end
 end
