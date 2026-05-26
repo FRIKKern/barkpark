@@ -443,6 +443,17 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_workspace.slug == "brand-new-co"
       assert assigns.current_project.id == project.id
       assert assigns.dataset == "production"
+
+      # No optimistic divergence (barkpark-6z0e): current_project is re-derived
+      # via the DB-backed initial_project/1, NOT the transaction's partial
+      # %Project{}. It must match the membership-joined switcher list entry
+      # (Tenancy.list_projects/1 by id+slug) and its datasets must be resolvable
+      # so the assign matches what the switcher renders this same render cycle.
+      listed = Tenancy.list_projects(assigns.current_workspace.id)
+      assert Enum.any?(listed, &(&1.id == assigns.current_project.id))
+      assert assigns.current_project.slug == project.slug
+      assert Enum.any?(Tenancy.list_datasets(assigns.current_project), &(&1.slug == "production")),
+             "current_project must resolve its datasets (DB-backed, not transaction-partial)"
     end
 
     test "create-project in the current workspace creates project + dataset and switches to it",
@@ -468,6 +479,17 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_workspace.slug == acme_ws.slug
       assert assigns.current_project.slug == "fresh-project"
       assert assigns.dataset == "production"
+
+      # No optimistic divergence (barkpark-6z0e): current_project is re-fetched
+      # by id from the DB, NOT the transaction's partial %Project{}. It is the
+      # JUST-CREATED project (not the workspace default), it appears in the
+      # membership-joined switcher list (Tenancy.list_projects/1), and its
+      # datasets resolve — so the optimistic assign matches the rendered list.
+      assert assigns.current_project.id == project.id
+      listed = Tenancy.list_projects(assigns.current_workspace.id)
+      assert Enum.any?(listed, &(&1.id == assigns.current_project.id))
+      assert Enum.any?(Tenancy.list_datasets(assigns.current_project), &(&1.slug == "production")),
+             "current_project must resolve its datasets (DB-backed, not transaction-partial)"
     end
 
     test "blank workspace name flashes an error and creates nothing", %{conn: conn} do

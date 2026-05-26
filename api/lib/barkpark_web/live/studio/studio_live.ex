@@ -601,7 +601,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
       %Barkpark.Auth.ApiToken{} = token ->
         case Tenancy.create_workspace_with_owner(%{name: name}, token) do
           {:ok, workspace} ->
-            project = List.first(workspace.projects) || initial_project(workspace)
+            # Re-derive the project from the DB (default-first resolver) instead
+            # of trusting `workspace.projects` — the transaction returns a
+            # %Project{} with NO :datasets assoc loaded, so the optimistic
+            # `current_project` assign could diverge from the membership-joined
+            # switcher list (`Tenancy.list_projects/1`) for one render cycle
+            # (cosmetic, self-corrects on the next handle_params). `initial_project/1`
+            # is the same DB-backed resolver mount + switch-workspace already use,
+            # so the assign matches the rendered list immediately (barkpark-6z0e).
+            project = initial_project(workspace)
 
             {:noreply,
              socket
@@ -636,7 +644,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
       true ->
         case Tenancy.create_project_with_dataset(ws, %{name: name}) do
-          {:ok, project} ->
+          {:ok, created} ->
+            # Re-fetch the just-created project from the DB rather than trusting
+            # the transaction's %Project{} (no :datasets assoc loaded) — same
+            # divergence as create-workspace (barkpark-6z0e). Unlike a workspace
+            # create, the target is the NEW project (not the workspace default),
+            # so re-derive by id, not via initial_project/1. The DB-backed struct
+            # matches the membership-joined switcher list, so the optimistic
+            # current_project assign can't diverge for a render cycle.
+            project = Tenancy.get_project_by_id(created.id) || created
+
             {:noreply,
              socket
              |> assign(create_open: nil, current_project: project)
