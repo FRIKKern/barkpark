@@ -92,7 +92,7 @@ defmodule BarkparkWeb.QueryController do
 
   defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset) do
     if Map.get(conn.assigns, :barkpark_filterresponse, true) do
-      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, dataset))
+      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, dataset, scope_opts(conn)))
     else
       json(conn, inner)
     end
@@ -106,13 +106,13 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  defp envelope(result, sync_tags, etag, ms, dataset) do
+  defp envelope(result, sync_tags, etag, ms, dataset, scope) do
     %{
       result: result,
       syncTags: sync_tags,
       ms: ms,
       etag: etag,
-      schemaHash: Content.schema_hash_for_dataset(dataset)
+      schemaHash: Content.schema_hash_for_dataset(dataset, scope)
     }
   end
 

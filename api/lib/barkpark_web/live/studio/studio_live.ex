@@ -1253,7 +1253,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
           stream(
             socket,
             :paper_blocks,
-            paper_stream_items(paper_top_level_blocks(socket), socket.assigns.dataset),
+            paper_stream_items(
+              paper_top_level_blocks(socket),
+              socket.assigns.dataset,
+              ScopeHelpers.scope_opts(socket)
+            ),
             reset: true
           )
         end
@@ -2968,7 +2972,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
         # Opening (or jumping to) a paper always lands in read-only View mode.
         paper_edit_mode: false
       )
-      |> stream(:paper_blocks, paper_stream_items(blocks, socket.assigns.dataset), reset: true)
+      |> stream(
+        :paper_blocks,
+        paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)),
+        reset: true
+      )
     else
       socket
       |> assign(
@@ -3021,8 +3029,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Each stream item carries a stable id (the block id) and its rendered
   # fragment. Top-level blocks stream individually; a `section` renders as one
   # fragment (its children live inside it). Mirrors PaperLive.to_stream_items/1.
-  defp paper_stream_items(blocks, dataset) do
-    resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset) end
+  defp paper_stream_items(blocks, dataset, scope) do
+    resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset, scope) end
 
     codelist_resolver = fn plugin, codelist_id, code ->
       Content.codelist_label(plugin, codelist_id, code)
@@ -3113,7 +3121,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
         case Map.get(content, "blocks") do
           blocks when is_list(blocks) ->
             socket
-            |> stream(:paper_blocks, paper_stream_items(blocks, dataset), reset: true)
+            |> stream(
+              :paper_blocks,
+              paper_stream_items(blocks, dataset, ScopeHelpers.scope_opts(socket)),
+              reset: true
+            )
             |> assign(:paper_doc, paper)
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
             |> assign(:paper_block_mode, true)

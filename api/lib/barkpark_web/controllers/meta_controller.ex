@@ -10,13 +10,15 @@ defmodule BarkparkWeb.MetaController do
 
   alias Barkpark.Content
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   @min_api_version "2026-04-01"
   @max_api_version "2026-04-17"
 
   def index(conn, params) do
     hash =
       case Map.get(params, "dataset") do
-        ds when is_binary(ds) -> Content.schema_hash_for_dataset(ds)
+        ds when is_binary(ds) -> Content.schema_hash_for_dataset(ds, scope_opts(conn))
         _ -> Content.schema_hash_for_all_datasets()
       end
 

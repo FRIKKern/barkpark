@@ -163,41 +163,67 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
 
   defp strip_trailing_slash(other), do: other
 
-  defp allowed_origins({:dataset, ds}) when is_binary(ds) and ds != "" do
-    @always_allowed_origins ++ Content.allowed_origins_for_dataset(ds)
+  defp allowed_origins({:dataset, ds, tenancy}) when is_binary(ds) and ds != "" do
+    # Datasets are PROJECT-owned, so the same `dataset` STRING (e.g. "production")
+    # names DIFFERENT datasets across projects. Resolve the project from the
+    # request's `/w/:ws/p/:project` prefix (when present) so the cors_origins
+    # union is read from the CALLER's dataset, not conflated across every project
+    # sharing that slug. Flat routes (no prefix) resolve via the seeded Default
+    # project inside allowed_origins_for_dataset/2.
+    @always_allowed_origins ++ Content.allowed_origins_for_dataset(ds, cors_scope(tenancy))
   end
 
   defp allowed_origins(_) do
     @always_allowed_origins ++ Application.get_env(:barkpark, :default_cors_origins, [])
   end
 
+  # Resolve a `[project_id: ...]` scope from the stripped tenancy slugs. Returns
+  # `[]` (Default-project fallback) when the route is flat or the slugs don't
+  # resolve to a real project — preserves the prior flat-route behaviour.
+  defp cors_scope({ws_slug, project_slug})
+       when is_binary(ws_slug) and is_binary(project_slug) do
+    case Barkpark.Tenancy.get_project(ws_slug, project_slug) do
+      %{id: id} -> [project_id: id]
+      _ -> []
+    end
+  end
+
+  defp cors_scope(_), do: []
+
   # Path-based tenancy (Wave 1) prefixes content routes with
   # `/w/:workspace_slug/p/:project_slug`, shifting every positional index. We
-  # strip that prefix first, then match the SAME shapes against the remainder —
+  # take that prefix off first, then match the SAME shapes against the remainder —
   # so both the flat (`/v1/data/...`) and the prefixed
   # (`/w/_/p/_/v1/data/...`) forms resolve the dataset identically. The
-  # workspace/project slugs do not affect CORS (cors_origins is per-dataset in
-  # Wave 1); they are discarded by the strip. Flat-path behavior is unchanged —
-  # `strip_tenancy_prefix/1` is the identity for any path lacking the prefix.
+  # workspace/project slugs are now RETAINED (not discarded): the cors_origins
+  # union is per-DATASET, and datasets are project-owned, so the slugs pick the
+  # owning project. Flat-path behavior is unchanged — `take_tenancy_prefix/1`
+  # returns `{nil, path_info}` for any path lacking the prefix (Default project).
   defp dataset_from_conn(conn) do
-    case strip_tenancy_prefix(conn.path_info) do
+    # Keep the tenancy slugs (when the route carries the `/w/:ws/p/:project`
+    # prefix) so allowed_origins/1 can resolve the project that OWNS the dataset
+    # — the `dataset` STRING is unique only within a project. `tenancy` is nil on
+    # flat routes, which fall back to the Default project downstream.
+    {tenancy, rest} = take_tenancy_prefix(conn.path_info)
+
+    case rest do
       ["v1", "data", _, ds | _] ->
-        {{:dataset, ds}, conn}
+        {{:dataset, ds, tenancy}, conn}
 
       ["v1", "preview", _, ds | _] ->
-        {{:dataset, ds}, conn}
+        {{:dataset, ds, tenancy}, conn}
 
       ["v1", "schemas", ds | _] ->
-        {{:dataset, ds}, conn}
+        {{:dataset, ds, tenancy}, conn}
 
       ["v1", "webhooks", ds | _] ->
-        {{:dataset, ds}, conn}
+        {{:dataset, ds, tenancy}, conn}
 
       ["media" | _] ->
         conn = fetch_query_params(conn)
 
         case conn.query_params["dataset"] do
-          ds when is_binary(ds) and ds != "" -> {{:dataset, ds}, conn}
+          ds when is_binary(ds) and ds != "" -> {{:dataset, ds, tenancy}, conn}
           _ -> {:no_dataset, conn}
         end
 
@@ -206,9 +232,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     end
   end
 
-  # Drop a leading ["w", workspace_slug, "p", project_slug] tenancy prefix when
-  # present; otherwise return the path_info unchanged (identity → flat paths
-  # keep their exact prior resolution).
-  defp strip_tenancy_prefix(["w", _ws, "p", _proj | rest]), do: rest
-  defp strip_tenancy_prefix(path_info), do: path_info
+  # Split off a leading ["w", workspace_slug, "p", project_slug] tenancy prefix
+  # when present, returning `{{ws_slug, project_slug}, rest}`; otherwise
+  # `{nil, path_info}` (identity → flat paths keep their exact prior resolution).
+  defp take_tenancy_prefix(["w", ws, "p", proj | rest]), do: {{ws, proj}, rest}
+  defp take_tenancy_prefix(path_info), do: {nil, path_info}
 end

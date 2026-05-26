@@ -31,6 +31,7 @@ defmodule Barkpark.Content.Revision do
       :doc_id,
       :type,
       :dataset,
+      :dataset_id,
       :title,
       :status,
       :content,

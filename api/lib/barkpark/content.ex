@@ -332,7 +332,7 @@ defmodule Barkpark.Content do
 
     query =
       Document
-      |> where([d], d.dataset == ^dataset)
+      |> scope_to_dataset(dataset, opts)
       |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
       # Scope the reference resolution to the caller's tenant when supplied so a
       # reference value never resolves a same-id doc in another workspace
@@ -1591,19 +1591,47 @@ defmodule Barkpark.Content do
   def default_dataset, do: "production"
 
   @doc """
-  Return all datasets known to the system, sorted alphabetically.
-  Always includes `"production"` so a brand-new DB still has something to show.
+  Return the dataset slugs OWNED by a project, sorted alphabetically.
+  Always includes `"production"` so a brand-new project still has something to
+  show.
+
+  Datasets are project-owned (the `dataset` STRING is unique only *within* a
+  project), so this scopes to a project rather than listing globally. The arity
+  resolves to:
+
+    * `list_datasets(project_id)` — the slugs of that project's datasets.
+    * `list_datasets/0` — defaults to the seeded Default project (the legacy
+      flat-route landing where no workspace/project is in scope). Degrades to a
+      bare `"production"` when no Default project exists (fresh sandbox).
+
+  Reads the `dataset` STRING mirror (filtered by `project_id`) rather than the
+  Tenancy `datasets` table so pre-`get_or_create_dataset` fixtures still list.
   """
-  def list_datasets do
+  def list_datasets(project_id \\ :default)
+
+  def list_datasets(:default), do: list_datasets(read_default_project_id())
+
+  def list_datasets(nil), do: ["production"]
+
+  def list_datasets(project_id) when is_binary(project_id) do
     from_schemas =
-      from(s in SchemaDefinition, select: s.dataset, distinct: true)
+      from(s in SchemaDefinition,
+        where: s.project_id == ^project_id,
+        select: s.dataset,
+        distinct: true
+      )
       |> Repo.all()
 
     from_docs =
-      from(d in Document, select: d.dataset, distinct: true)
+      from(d in Document,
+        where: d.project_id == ^project_id,
+        select: d.dataset,
+        distinct: true
+      )
       |> Repo.all()
 
     (from_schemas ++ from_docs ++ ["production"])
+    |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
     |> Enum.sort()
   end
@@ -1701,21 +1729,20 @@ defmodule Barkpark.Content do
   A list containing `"*"` means "public, any origin".
   Otherwise the list is an explicit allow-list of origin strings.
   """
-  @spec allowed_origins_for_dataset(String.t()) :: [String.t()]
-  def allowed_origins_for_dataset(dataset) when is_binary(dataset) do
+  @spec allowed_origins_for_dataset(String.t(), keyword()) :: [String.t()]
+  def allowed_origins_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
     SchemaDefinition
-    |> where([s], s.dataset == ^dataset)
+    |> scope_to_dataset(dataset, opts)
     |> select([s], s.cors_origins)
     |> Repo.all()
     |> List.flatten()
     |> Enum.uniq()
   end
 
-  def schema_hash_for_dataset(dataset) when is_binary(dataset) do
-    from(s in SchemaDefinition,
-      where: s.dataset == ^dataset,
-      select: {count(s.id), max(s.updated_at)}
-    )
+  def schema_hash_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
+    SchemaDefinition
+    |> scope_to_dataset(dataset, opts)
+    |> select([s], {count(s.id), max(s.updated_at)})
     |> Repo.one()
     |> hash_schema_tuple()
   end
@@ -1865,7 +1892,7 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     Document
-    |> where([d], d.dataset == ^dataset)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> group_by([d], d.type)
     |> select([d], %{
@@ -1884,7 +1911,7 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     Document
-    |> where([d], d.dataset == ^dataset)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> select([d], count(d.id))
     |> Repo.one()
@@ -1897,7 +1924,7 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     MutationEvent
-    |> where([e], e.dataset == ^dataset)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> order_by([e], desc: e.inserted_at)
     |> limit(^limit)
@@ -2058,8 +2085,12 @@ defmodule Barkpark.Content do
       document: Envelope.render(doc),
       # Stamp the tenancy scope from the source document so workspace-scoped
       # analytics (recent_activity) only surface a workspace's own events.
+      # `dataset_id` is the authoritative dataset leaf (the `dataset` STRING is
+      # the mirror): without it, recent_activity's dataset_id-scoped read would
+      # miss this event and same-named datasets across projects would conflate.
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
+      dataset_id: doc.dataset_id,
       inserted_at: DateTime.utc_now()
     })
     |> Repo.insert!()
@@ -2071,12 +2102,16 @@ defmodule Barkpark.Content do
       doc_id: published_id(doc.doc_id),
       type: type,
       dataset: dataset,
+      dataset_id: doc.dataset_id,
       title: doc.title,
       status: doc.status,
       content: doc.content,
       action: action,
       # Stamp the tenancy scope from the source document so workspace-scoped
-      # history reads only surface a workspace's own revisions.
+      # history reads only surface a workspace's own revisions. `dataset_id` is
+      # the authoritative dataset leaf (the `dataset` STRING is the mirror) so a
+      # dataset_id-scoped list_revisions read finds it and same-named datasets
+      # across projects no longer conflate.
       workspace_id: doc.workspace_id,
       project_id: doc.project_id
     })
@@ -2108,7 +2143,7 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     Document
-    |> where([d], d.dataset == ^dataset)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
@@ -2127,7 +2162,8 @@ defmodule Barkpark.Content do
     project_id = Keyword.get(opts, :project_id)
 
     Revision
-    |> where([r], r.doc_id == ^published_id(doc_id) and r.type == ^type and r.dataset == ^dataset)
+    |> where([r], r.doc_id == ^published_id(doc_id) and r.type == ^type)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> order_by([r], desc: r.inserted_at)
     |> limit(^limit)
