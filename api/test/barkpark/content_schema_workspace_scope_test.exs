@@ -120,4 +120,78 @@ defmodule Barkpark.ContentSchemaWorkspaceScopeTest do
     assert {:ok, %{name: "a_only"}} = Content.get_schema("a_only", @ds, scope_a)
     assert "a_only" in (Content.list_schemas_for_sdk(@ds, scope_a).schemas |> Enum.map(& &1.name))
   end
+
+  # barkpark-su54: schema_public?/3 is the PUBLIC-READ GATE consulted before the
+  # row read (query_controller: list_documents / get_document). It MUST resolve
+  # the schema's `visibility` in the SAME tenant the row read resolves to. The
+  # pre-fix 2-arity form passed NO opts to get_schema → workspace_id=nil and
+  # `resolve_read_dataset_id` fell back to `read_default_project_id()`, so the
+  # gate read visibility from the DEFAULT project — a DIFFERENT tenant than the
+  # (correctly-scoped) row read.
+  #
+  # The split-brain, made deterministic: the SAME schema name "shared" exists in
+  # workspace A (`private`) and in the seeded DEFAULT project (`public`), sharing
+  # the dataset STRING. A read SCOPED to A must see A's `private` → gate CLOSED.
+  # The pre-fix no-opts read resolves the dataset_id via the Default project and
+  # surfaces Default's `public` row → gate OPEN against A's data: a latent
+  # cross-tenant auth bypass.
+  defp a_private_default_public do
+    {_def_ws, def_proj} = ensure_default_scope!()
+
+    ws_a = create_workspace!()
+    proj_a = create_project!(ws_a)
+
+    scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
+    scope_default = [workspace_id: def_proj.workspace_id, project_id: def_proj.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "shared", "title" => "Shared", "visibility" => "private", "fields" => []},
+        @ds,
+        scope_a
+      )
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "shared", "title" => "Shared", "visibility" => "public", "fields" => []},
+        @ds,
+        scope_default
+      )
+
+    {scope_a, scope_default}
+  end
+
+  test "schema_public? scoped to A reflects A's visibility (private → false), not Default's public" do
+    {scope_a, scope_default} = a_private_default_public()
+
+    # The fix: the gate resolves "shared" in the SAME tenant as the row read.
+    # A owns the PRIVATE "shared" → gate CLOSED for an A-scoped public read.
+    refute Content.schema_public?("shared", @ds, scope_a),
+           "split-brain: A's gate read PUBLIC visibility — it must read A's own " <>
+             "PRIVATE \"shared\", not the Default project's row"
+
+    # Mirror (never-worse): Default owns the PUBLIC "shared" → gate OPEN there.
+    assert Content.schema_public?("shared", @ds, scope_default),
+           "Default's own public schema must still open the gate under its scope"
+  end
+
+  test "schema_public? WITHOUT scope reads the DEFAULT tenant's visibility (proves split-brain)" do
+    {scope_a, _scope_default} = a_private_default_public()
+
+    # A's own scoped gate is correctly CLOSED (A's "shared" is private).
+    refute Content.schema_public?("shared", @ds, scope_a)
+
+    # The pre-fix call shape — no opts. `resolve_read_dataset_id` falls back to
+    # the Default project, so the gate surfaces Default's PUBLIC "shared" and
+    # returns TRUE. That is the split-brain: this gate (Default) DISAGREES with
+    # the A-scoped row read (private) — a public-read would be admitted against
+    # A's tenant. Post-fix, every gate call site threads scope, so the gate
+    # resolves in the caller's workspace and this disagreement is unreachable.
+    assert Content.schema_public?("shared", @ds),
+           "expected the no-opts gate to read the DEFAULT project's PUBLIC \"shared\""
+
+    refute Content.schema_public?("shared", @ds, scope_a),
+           "the A-scoped gate must DISAGREE with the no-opts/Default gate — that " <>
+             "disagreement is the latent cross-tenant auth bypass su54 closes"
+  end
 end

@@ -1799,8 +1799,18 @@ defmodule Barkpark.Content do
     end
   end
 
-  def schema_public?(type, dataset) do
-    case get_schema(type, dataset) do
+  @doc """
+  Whether the schema's public-read gate is open for `type` in `dataset`.
+
+  Threads the caller's tenancy `opts` (`[workspace_id:, project_id:]`) into
+  `get_schema/3` so the visibility flag is read from the SAME tenant the row
+  read resolves to — never the Default project. Without `opts` (the flat /
+  legacy plug caller) it resolves against the Default scope, preserving prior
+  behavior. See barkpark-su54: closing the latent split-brain where the gate
+  and the row-read could read visibility from two different tenants.
+  """
+  def schema_public?(type, dataset, opts \\ []) do
+    case get_schema(type, dataset, opts) do
       {:ok, %{visibility: "public"}} -> true
       _ -> false
     end
