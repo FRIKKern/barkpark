@@ -139,9 +139,13 @@ defmodule BarkparkWeb.ListenController do
   # Workspace ownership gate for a live event. nil scope → forward everything
   # (back-compat / unscoped listener). With a workspace, forward only when the
   # event's document belongs to it; an orphaned/cross-workspace doc is dropped.
-  defp forward_event?(_dataset, _doc_id, nil), do: true
+  #
+  # Public (`@doc false`) so the cross-tenant isolation contract can assert the
+  # drop directly — same testing seam as `replay_since/3` and `format_event/2`.
+  @doc false
+  def forward_event?(_dataset, _doc_id, nil), do: true
 
-  defp forward_event?(dataset, doc_id, workspace_id) when is_binary(workspace_id) do
+  def forward_event?(dataset, doc_id, workspace_id) when is_binary(workspace_id) do
     Repo.exists?(
       from(d in Document,
         where:
