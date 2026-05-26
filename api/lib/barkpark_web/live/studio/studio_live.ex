@@ -2205,12 +2205,32 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # When the project has NO dataset rows (string-seam-only / not yet seeded) we
   # keep the current `dataset` string and just rebuild_panes so the scope still
   # reloads — the `dataset` string stays authoritative per Content.Scope.
+  #
+  # Stale-scope guard (barkpark-nce1 / barkpark-5svq / barkpark-zok1): when a doc
+  # is open, `nav_path` holds the OLD project's doc ids. Carrying it across a
+  # switch makes `PaneBuilder.walk_path` resolve those ids against the NEW
+  # project's structure — the editor pane then shows a stale/empty doc, and the
+  # open `editor_doc` belongs to the old project. A subsequent autosave/publish
+  # would `upsert_draft` the old doc_id under the new project's dataset (wrong
+  # scope, possible duplicate row). So BEFORE rebuilding we reset the open-doc
+  # nav_path to the root and clear the open-doc/autosave state via
+  # `reset_nav_for_switch/1` — synchronously, so no save can fire against the
+  # stale doc in the window before handle_params runs. (A purely structural
+  # nav_path with no doc open is kept — see reset_nav_for_switch.)
   defp rescope_dataset_for_project(socket, %{} = project) do
+    socket = reset_nav_for_switch(socket)
+
     case default_dataset_for_project(project) do
       %{slug: slug} when is_binary(slug) and slug != "" ->
         if slug == socket.assigns[:dataset] do
+          # Same dataset slug as the old project — handle_params won't fire (no
+          # URL change), so the reset above is what rebuilds from the new scope.
           rebuild_panes(socket)
         else
+          # Different slug — push_patch runs handle_params, re-asserting nav_path
+          # from the new URL. The synchronous clear above still matters: it nils
+          # editor_doc before the round-trip so an in-flight save can't target the
+          # old project's doc.
           push_patch(socket, to: studio_path([], slug))
         end
 
@@ -2219,7 +2239,44 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  defp rescope_dataset_for_project(socket, _), do: rebuild_panes(socket)
+  defp rescope_dataset_for_project(socket, _),
+    do: socket |> reset_nav_for_switch() |> rebuild_panes()
+
+  # Reset navigation + open-document state for a workspace/project switch.
+  #
+  # The stale-scope vector is the open DOCUMENT: nav_path's trailing doc-id
+  # segments pin a doc from the OLD project that `PaneBuilder.walk_path` then
+  # mis-resolves against the NEW project's structure (stale/empty editor +
+  # wrong-scope save). So when an editor doc is open we drop nav_path to the
+  # root — panes rebuild from the new project's root rather than the old doc
+  # ids. When NO doc is open the nav_path is purely structural (schema type /
+  # desk segments, which are project-agnostic), so we leave it intact and let
+  # rebuild_panes reload that list under the new scope — preserving a desk drill
+  # across the switch (StudioLiveDeskScopeLeakTest).
+  #
+  # Either way we nil every assign that pins an open document
+  # (editor_doc/type/schema/form/blocks/mode) plus the diff/preview flags derived
+  # from it — clearing them here closes the window where a queued autosave could
+  # still see the old doc. Clearing when nothing is open is a harmless no-op.
+  defp reset_nav_for_switch(socket) do
+    nav_path = if socket.assigns[:editor_doc], do: [], else: socket.assigns[:nav_path] || []
+
+    assign(socket,
+      nav_path: nav_path,
+      editor_doc: nil,
+      editor_type: nil,
+      editor_schema: nil,
+      editor_view: :form,
+      editor_form: %{},
+      editor_blocks: [],
+      editor_blocks_synth?: false,
+      editor_mode: :classic,
+      editor_is_draft: false,
+      editor_has_published: false,
+      published_doc: nil,
+      diff_visible: false
+    )
+  end
 
   # The project's default dataset row: prefer the canonical "production" slug,
   # else the first (slug-ordered) dataset. nil when the project has none.
