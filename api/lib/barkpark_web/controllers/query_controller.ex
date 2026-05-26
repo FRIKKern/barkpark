@@ -32,7 +32,9 @@ defmodule BarkparkWeb.QueryController do
           ] ++ scope_opts(conn)
         )
 
-      rendered = Envelope.render_many(docs) |> Expand.expand(expand_spec, dataset)
+      rendered =
+        Envelope.render_many(docs)
+        |> Expand.expand(expand_spec, dataset, scope_opts(conn))
 
       inner = %{
         perspective: to_string(perspective),
@@ -57,7 +59,7 @@ defmodule BarkparkWeb.QueryController do
       with {:ok, doc} <- Content.get_document(doc_id, type, dataset, scope_opts(conn)) do
         rendered =
           [Envelope.render(doc)]
-          |> Expand.expand(expand_spec, dataset)
+          |> Expand.expand(expand_spec, dataset, scope_opts(conn))
           |> hd()
 
         etag = doc_etag(doc)
