@@ -87,13 +87,15 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
       <%= if length(@workspaces) <= 1 do %>
         <span class="workspace-switcher-static"><%= current_label(@current_workspace, @workspaces) %></span>
       <% else %>
-        <select class="workspace-switcher-select" phx-change="switch-workspace" name="workspace">
-          <%= for ws <- @workspaces do %>
-            <option value={ws.slug} selected={selected?(@current_workspace, ws)}>
-              <%= ws.name %>
-            </option>
-          <% end %>
-        </select>
+        <form class="workspace-switcher-form" phx-change="switch-workspace">
+          <select class="workspace-switcher-select" name="workspace">
+            <%= for ws <- @workspaces do %>
+              <option value={ws.slug} selected={selected?(@current_workspace, ws)}>
+                <%= ws.name %>
+              </option>
+            <% end %>
+          </select>
+        </form>
       <% end %>
       <%= if @can_create do %>
         <button
@@ -124,13 +126,15 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
       <%= if length(@projects) <= 1 do %>
         <span class="workspace-switcher-static"><%= current_label(@current_project, @projects) %></span>
       <% else %>
-        <select class="workspace-switcher-select" phx-change="switch-project" name="project">
-          <%= for p <- @projects do %>
-            <option value={p.slug} selected={selected?(@current_project, p)}>
-              <%= p.name %>
-            </option>
-          <% end %>
-        </select>
+        <form class="workspace-switcher-form" phx-change="switch-project">
+          <select class="workspace-switcher-select" name="project">
+            <%= for p <- @projects do %>
+              <option value={p.slug} selected={selected?(@current_project, p)}>
+                <%= p.name %>
+              </option>
+            <% end %>
+          </select>
+        </form>
       <% end %>
       <%= if @can_create and @current_workspace != nil do %>
         <button
@@ -161,13 +165,15 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
       <%= if length(@datasets) <= 1 do %>
         <span class="dataset-switcher-static"><%= dataset_label(@current_dataset, @datasets) %></span>
       <% else %>
-        <select class="dataset-switcher-select" phx-change="switch-dataset" name="dataset">
-          <%= for ds <- @datasets do %>
-            <option value={ds.slug} selected={ds.slug == @current_dataset}>
-              <%= ds.name %>
-            </option>
-          <% end %>
-        </select>
+        <form class="dataset-switcher-form" phx-change="switch-dataset">
+          <select class="dataset-switcher-select" name="dataset">
+            <%= for ds <- @datasets do %>
+              <option value={ds.slug} selected={ds.slug == @current_dataset}>
+                <%= ds.name %>
+              </option>
+            <% end %>
+          </select>
+        </form>
       <% end %>
     </label>
     """

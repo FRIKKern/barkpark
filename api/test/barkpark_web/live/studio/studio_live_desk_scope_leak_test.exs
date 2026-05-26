@@ -98,13 +98,13 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
     # Switch the socket scope to workspace A (mirrors the s5 switcher click).
-    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
 
     # Drill into the `post` desk so a :document_type_list pane is built.
     {:ok, view, html} = live(conn, "/studio/#{@dataset}/post")
     # The fresh mount defaults to Default scope; re-switch then re-navigate so
     # the desk rebuild runs under workspace A's scope.
-    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
 
     # Inspect the rebuilt pane assigns directly — the authoritative check.
     assigns = :sys.get_state(view.pid).socket.assigns
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     proj_a: proj_a
   } do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
-    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
 
     socket = :sys.get_state(view.pid).socket
     opts = BarkparkWeb.ScopeHelpers.scope_opts(socket)
@@ -153,12 +153,12 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     ws_a: ws_a
   } do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
-    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
 
     # Open the secondary-doc picker after navigating into an editor so
     # `editor_type` is set; navigate to A's doc, then open the picker.
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/post-a")
-    render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => ws_a.slug})
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
 
     render_click(view, "open-secondary-picker", %{})
 
