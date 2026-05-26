@@ -16,9 +16,9 @@ defmodule BarkparkWeb.HistoryController do
     json(conn, %{revisions: revisions, count: length(revisions)})
   end
 
-  def show(conn, %{"dataset" => _dataset, "id" => id}) do
+  def show(conn, %{"dataset" => dataset, "id" => id}) do
     with :ok <- validate_uuid(id),
-         {:ok, rev} <- Content.get_revision(id, scope_opts(conn)) do
+         {:ok, rev} <- Content.get_revision(id, dataset, scope_opts(conn)) do
       json(conn, %{revision: render_revision_full(rev)})
     else
       {:error, :invalid_uuid} -> not_found(conn, "revision not found")
