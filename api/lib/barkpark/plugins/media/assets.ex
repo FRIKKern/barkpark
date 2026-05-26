@@ -7,6 +7,7 @@ defmodule Barkpark.Plugins.Media.Assets do
   """
 
   import Ecto.Query
+  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -31,48 +32,114 @@ defmodule Barkpark.Plugins.Media.Assets do
 
   @doc """
   Deletes draft/published `mediaAsset` documents linked to a blob id.
+
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); when present
+  the lookup is scoped to that tenant so a delete in workspace B never resolves
+  workspace A's asset doc for the same `mediaFileId` (barkpark-5p3y). An absent
+  workspace_id is the deliberate global / legacy single-tenant path.
   """
-  @spec delete_for_blob(String.t(), String.t()) :: :ok
-  def delete_for_blob(media_file_id, dataset)
-      when is_binary(media_file_id) and is_binary(dataset) do
+  @spec delete_for_blob(String.t(), String.t(), keyword()) :: :ok
+  def delete_for_blob(media_file_id, dataset, opts \\ [])
+      when is_binary(media_file_id) and is_binary(dataset) and is_list(opts) do
     Document
-    |> where([d], d.type == ^@asset_type and d.dataset == ^dataset)
-    |> where(
-      [d],
-      fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id)
-    )
+    |> asset_doc_scope(media_file_id, dataset, opts)
     |> Repo.all()
     |> Enum.each(fn doc ->
-      _ = Content.delete_document(doc.doc_id, @asset_type, dataset)
+      _ = Content.delete_document(doc.doc_id, @asset_type, dataset, opts)
     end)
 
     :ok
   end
 
-  @spec find_by_media_file_id(String.t(), String.t()) :: Document.t() | nil
-  def find_by_media_file_id(media_file_id, dataset)
-      when is_binary(media_file_id) and is_binary(dataset) do
+  @doc """
+  Linked `mediaAsset` document for a blob id, if any.
+
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); see
+  `delete_for_blob/3`.
+  """
+  @spec find_by_media_file_id(String.t(), String.t(), keyword()) :: Document.t() | nil
+  def find_by_media_file_id(media_file_id, dataset, opts \\ [])
+      when is_binary(media_file_id) and is_binary(dataset) and is_list(opts) do
     Document
-    |> where([d], d.type == ^@asset_type and d.dataset == ^dataset)
-    |> where(
-      [d],
-      fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id)
-    )
+    |> asset_doc_scope(media_file_id, dataset, opts)
     |> order_by([d], desc: d.updated_at)
     |> limit(1)
     |> Repo.one()
   end
 
-  @doc "Batch lookup of asset documents by blob id."
-  @spec find_by_media_file_ids([String.t()], String.t()) :: %{String.t() => Document.t()}
-  def find_by_media_file_ids([], _dataset), do: %{}
+  @doc """
+  Batch lookup of asset documents by blob id.
 
-  def find_by_media_file_ids(ids, dataset) when is_list(ids) and is_binary(dataset) do
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); see
+  `delete_for_blob/3`.
+  """
+  @spec find_by_media_file_ids([String.t()], String.t(), keyword()) :: %{
+          String.t() => Document.t()
+        }
+  def find_by_media_file_ids(ids, dataset, opts \\ [])
+
+  def find_by_media_file_ids([], _dataset, _opts), do: %{}
+
+  def find_by_media_file_ids(ids, dataset, opts)
+      when is_list(ids) and is_binary(dataset) and is_list(opts) do
     Document
-    |> where([d], d.type == ^@asset_type and d.dataset == ^dataset)
+    |> where([d], d.type == ^@asset_type)
+    |> scope_asset_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
     |> where([d], fragment("?->>? ", d.content, "mediaFileId") in ^ids)
     |> Repo.all()
     |> Map.new(fn doc -> {Map.get(doc.content, "mediaFileId"), doc} end)
+  end
+
+  # Shared scope for a single-blob asset-doc lookup: type + tenant-resolved
+  # dataset (dataset_id authoritative, dataset STRING fallback) + the
+  # workspace/project envelope + the mediaFileId match. The workspace envelope
+  # is what closes the cross-tenant leak — two workspaces sharing the dataset
+  # STRING no longer resolve each other's asset doc for the same mediaFileId.
+  defp asset_doc_scope(query, media_file_id, dataset, opts) do
+    query
+    |> where([d], d.type == ^@asset_type)
+    |> scope_asset_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
+    |> where([d], fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id))
+  end
+
+  # Resolve the dataset STRING → dataset_id within the read's project scope
+  # (opts :project_id, else the seeded Default project) and filter by
+  # d.dataset_id — NULL-tolerant: also matches legacy asset docs that media.ex
+  # wrote WITHOUT scope (dataset_id NULL, dataset STRING stamped), so the
+  # default/untenanted read+delete path still resolves them (never-worse).
+  # The dataset STRING ↔ dataset_id is 1:1 within a project, so the OR never
+  # crosses datasets. Falls back to the legacy d.dataset STRING filter when no
+  # dataset row resolves (back-compat / pre-tenancy fixtures). Mirrors
+  # Barkpark.Content scope_schema_to_dataset/3.
+  defp scope_asset_dataset(query, dataset, opts) do
+    case resolve_dataset_id(dataset, opts) do
+      id when is_binary(id) ->
+        where(query, [d], d.dataset_id == ^id or (is_nil(d.dataset_id) and d.dataset == ^dataset))
+
+      _ ->
+        where(query, [d], d.dataset == ^dataset)
+    end
+  end
+
+  # Read-only dataset-string → dataset_id resolution. Never creates a dataset on
+  # a read/delete path. Returns nil when unresolvable so the caller keeps the
+  # legacy STRING filter.
+  defp resolve_dataset_id(dataset, opts) when is_binary(dataset) do
+    project_id = Keyword.get(opts, :project_id) || default_project_id()
+
+    case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
+      %Barkpark.Tenancy.Dataset{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp default_project_id do
+    case Barkpark.Tenancy.get_default_project() do
+      %{id: id} -> id
+      _ -> nil
+    end
   end
 
   @spec public_url(%MediaFile{}) :: String.t()
