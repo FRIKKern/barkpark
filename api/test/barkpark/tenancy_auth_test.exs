@@ -144,6 +144,63 @@ defmodule Barkpark.TenancyAuthTest do
     end
   end
 
+  # The per-membership authz model (barkpark-23yi). create_membership defaults
+  # to `member` — adding a token to a workspace does NOT inherit its global
+  # perms as a workspace role. The role-reading helpers (membership_role/2,
+  # workspace_admin?/2) gate scoped admin off the GRANT, not the perms[].
+  describe "per-membership role (23yi)" do
+    test "create_membership defaults to `member` even for a global-admin token" do
+      ws = workspace("ws-default-role")
+      # Token with the FULL global perm set — the cross-tenant bypass vector.
+      token = raw_token(["read", "write", "admin"])
+
+      # No explicit role → default. This is the core anti-bypass behaviour.
+      {:ok, m} = Auth.create_membership(ws.id, token.id)
+
+      assert m.role == "member"
+      refute Auth.workspace_admin?(token, ws.id)
+    end
+
+    test "create_membership honours an explicit role (owner/admin)" do
+      ws = workspace("ws-explicit-role")
+      token = raw_token(["read"])
+
+      {:ok, m} = Auth.create_membership(ws.id, token.id, "owner")
+      assert m.role == "owner"
+      assert Auth.workspace_admin?(token, ws.id)
+    end
+
+    test "membership_role/2 reads the GRANT; nil for a non-member" do
+      ws = workspace("ws-role-read")
+      token = raw_token(["admin"])
+      {:ok, _} = Auth.create_membership(ws.id, token.id, "member")
+
+      # role is `member` despite the token's global `admin` perm.
+      assert Auth.membership_role(token, ws.id) == "member"
+
+      other = raw_token(["admin"])
+      assert Auth.membership_role(other, ws.id) == nil
+    end
+
+    test "workspace_admin?/2 — owner/admin true; member/non-member false" do
+      ws = workspace("ws-admin-check")
+      owner = raw_token(["read"])
+      admin = raw_token(["read"])
+      member = raw_token(["read", "write", "admin"])
+      nonmember = raw_token(["admin"])
+
+      {:ok, _} = Auth.create_membership(ws.id, owner.id, "owner")
+      {:ok, _} = Auth.create_membership(ws.id, admin.id, "admin")
+      {:ok, _} = Auth.create_membership(ws.id, member.id, "member")
+
+      assert Auth.workspace_admin?(owner, ws.id)
+      assert Auth.workspace_admin?(admin, ws.id)
+      # A `member` holding GLOBAL admin perms is NOT a workspace admin.
+      refute Auth.workspace_admin?(member, ws.id)
+      refute Auth.workspace_admin?(nonmember, ws.id)
+    end
+  end
+
   describe "token-membership backfill idempotency (data-level)" do
     # Re-run the migration's exact guarded INSERT twice against a token row
     # and assert exactly one membership lands — proving NOT EXISTS guards it.

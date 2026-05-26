@@ -35,16 +35,30 @@ defmodule Barkpark.Tenancy.Auth do
   @write_perms ~w(write admin)
   @admin_perms ~w(admin)
 
+  # Default role for a NEW membership when no explicit role is passed. A token
+  # ADDED to a workspace it did not create is a `member` — write content, but
+  # NOT admin — REGARDLESS of the token's global permissions[]. The role is the
+  # GRANT, not a reflection of the token's global perms. The two legitimate
+  # exceptions pass an explicit role: the workspace CREATOR ("owner", via
+  # `Tenancy.create_workspace_with_owner/2`) and a token's OWN home-workspace
+  # binding at mint-time (the perms-derived role, via `Auth.create_token/5`).
+  @default_role "member"
+
   @doc """
   Insert a Membership binding a principal (API token) to a workspace.
 
   `principal_id` is the token id (a binary_id). `role` must be one of
-  `Barkpark.Tenancy.Membership.roles/0`. Returns the inserted membership or a
-  changeset error (e.g. the principal is already a member of the workspace).
+  `Barkpark.Tenancy.Membership.roles/0`. When omitted it DEFAULTS to
+  `"member"` — the core of the per-membership authz model (barkpark-23yi): a
+  token added to a workspace gets `member` (write content only), independent of
+  its global permissions. Callers that legitimately grant a higher role (the
+  workspace creator → `owner`; a token's home-workspace mint binding → its
+  perms-derived role) pass `role` EXPLICITLY. Returns the inserted membership
+  or a changeset error (e.g. the principal is already a member of the workspace).
   """
   @spec create_membership(binary(), binary(), String.t(), String.t()) ::
           {:ok, Membership.t()} | {:error, Ecto.Changeset.t()}
-  def create_membership(workspace_id, principal_id, role, principal_type \\ "api_token")
+  def create_membership(workspace_id, principal_id, role \\ @default_role, principal_type \\ "api_token")
       when is_binary(workspace_id) and is_binary(principal_id) and is_binary(role) do
     %Membership{}
     |> Membership.changeset(%{
@@ -115,11 +129,45 @@ defmodule Barkpark.Tenancy.Auth do
 
   @doc """
   Derive the workspace role from a permissions array: `"admin"` when the
-  permissions include "admin", otherwise `"member"`. Used when binding a
-  freshly-minted token to its workspace.
+  permissions include "admin", otherwise `"member"`.
+
+  SCOPE: this is the role for a token's OWN home workspace ONLY — the workspace
+  the token is minted into (`Auth.create_token/5`). It is a legitimate
+  perms-derived role because the token's home workspace is its own. It is NOT
+  used when ADDING a token to ANOTHER workspace — that path defaults to
+  `member` (see `create_membership/4`). This is the fix for the cross-tenant
+  admin bypass (barkpark-23yi / barkpark-fsko): a global-admin token added to
+  workspace B must NOT become admin of B.
   """
   @spec role_for_permissions([String.t()]) :: String.t()
   def role_for_permissions(permissions) when is_list(permissions) do
     if "admin" in permissions, do: "admin", else: "member"
+  end
+
+  # Roles that confer workspace-admin authority on a scoped surface.
+  @admin_roles ~w(owner admin)
+
+  @doc """
+  The token's MEMBERSHIP ROLE in `workspace_id`, or nil when it is not a member.
+  This reads the GRANT (the `workspace_memberships.role` column), NOT the
+  token's global permissions[]. Accepts a token struct or a raw principal id.
+  """
+  @spec membership_role(principal(), binary()) :: String.t() | nil
+  def membership_role(token_or_principal_id, workspace_id) do
+    case membership(token_or_principal_id, workspace_id) do
+      %Membership{role: role} -> role
+      nil -> nil
+    end
+  end
+
+  @doc """
+  True when the token's membership ROLE in `workspace_id` confers admin
+  authority (`owner` or `admin`). This is the per-membership admin gate: a
+  `member` of B — even one holding global `admin` perms — is NOT a workspace
+  admin of B. A non-member is never an admin.
+  """
+  @spec workspace_admin?(principal(), binary()) :: boolean()
+  def workspace_admin?(token_or_principal_id, workspace_id) do
+    membership_role(token_or_principal_id, workspace_id) in @admin_roles
   end
 end
