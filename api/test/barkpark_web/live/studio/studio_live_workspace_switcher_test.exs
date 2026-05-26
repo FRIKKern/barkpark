@@ -119,6 +119,38 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert ws_select =~ default_ws.name
     end
 
+    # ── Task barkpark-gtmi: each switcher select must live inside a <form> ──────
+    #
+    # LiveView's phx-change on an input REQUIRES an enclosing <form>; a bare
+    # <select phx-change> logs "form events require the input to be inside a
+    # form" (×N across render/patch cycles) and the change payload is
+    # unreliable. The fix moves the binding onto a wrapping <form phx-change>
+    # and drops phx-change from the <select> (the select keeps its name= so the
+    # param key is unchanged). This proves the structural fix: every switch
+    # binding is on a <form>, and no select/input carries a bare phx-change.
+    test "each switcher select is wrapped in a <form phx-change>, no bare phx-change on an input",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+
+      # The binding lives on a <form> for all three switch events — these are the
+      # selectors the switch tests drive through, so render_change resolves them.
+      for event <- ~w(switch-workspace switch-project switch-dataset) do
+        assert view |> element(~s(form[phx-change="#{event}"])) |> has_element?(),
+               "switch event #{event} must be bound on a <form>, not a bare <select>"
+      end
+
+      # And the binding must NOT remain on any select/input — that is the exact
+      # shape that triggers the "form events require the input to be inside a
+      # form" console error.
+      refute view |> element(~s(select[phx-change])) |> has_element?(),
+             "no <select> may carry a bare phx-change — the binding belongs on the <form>"
+
+      # The selects still carry their name= attributes so the handler param keys
+      # (workspace / project / dataset) are unchanged.
+      assert view |> element(~s(form[phx-change="switch-workspace"] select[name="workspace"])) |> has_element?()
+      assert view |> element(~s(form[phx-change="switch-dataset"] select[name="dataset"])) |> has_element?()
+    end
+
     test "the workspace select lists ONLY member workspaces — no foreign tenant", %{
       conn: conn,
       foreign_ws: foreign_ws
@@ -144,7 +176,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     } do
       {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => acme_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => acme_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -165,7 +197,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # Forge a switch to the foreign workspace's slug (the option isn't even
       # rendered, but a crafted phx-change must still be refused server-side).
-      render_change(element(view, ~s(select[name="workspace"])), %{
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
         "workspace" => foreign_ws.slug
       })
 
@@ -185,9 +217,9 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
       # Switch into Default (a member workspace), then change project within it.
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => default_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
 
-      render_change(element(view, ~s(select[name="project"])), %{
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
         "project" => second_project.slug
       })
 
@@ -202,7 +234,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     } do
       {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => "does-not-exist"})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => "does-not-exist"})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -291,9 +323,9 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # Move into Default (a member workspace) — its first project may differ;
       # then switch explicitly to `secondary`, whose datasets we control.
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => default_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
 
-      render_change(element(view, ~s(select[name="project"])), %{
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
         "project" => second_project.slug
       })
 
@@ -319,8 +351,8 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => default_ws.slug})
-      render_change(element(view, ~s(select[name="project"])), %{"project" => solo_project.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{"project" => solo_project.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_project.slug == solo_project.slug
@@ -333,7 +365,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       assert :sys.get_state(view.pid).socket.assigns.dataset == "production"
 
-      render_change(element(view, ~s(select[name="dataset"])), %{"dataset" => "staging"})
+      render_change(element(view, ~s(form[phx-change="switch-dataset"])), %{"dataset" => "staging"})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.dataset == "staging",
@@ -345,7 +377,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       before = :sys.get_state(view.pid).socket.assigns.dataset
 
-      render_change(element(view, ~s(select[name="dataset"])), %{
+      render_change(element(view, ~s(form[phx-change="switch-dataset"])), %{
         "dataset" => "not-a-real-dataset"
       })
 
@@ -505,7 +537,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       before_ws = :sys.get_state(view.pid).socket.assigns.current_workspace.slug
 
       html =
-        render_change(element(view, ~s(select[name="workspace"])), %{
+        render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
           "workspace" => empty_ws.slug
         })
 
@@ -537,7 +569,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
       # Attempt the bad switch (refused), then fire a real scoped write.
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => empty_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => empty_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       # Scope stayed on the prior (acme) workspace — NOT the empty one, NOT Default.
@@ -565,8 +597,8 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # Move to Default first, then switch to acme so the handler runs for a
       # workspace with projects (initial_project must be non-nil + chosen).
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => default_ws.slug})
-      render_change(element(view, ~s(select[name="workspace"])), %{"workspace" => acme_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => acme_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug

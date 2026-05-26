@@ -101,7 +101,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
   defp open_doc_under_a(conn, project_a) do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
 
-    render_change(element(view, ~s(select[name="project"])), %{"project" => project_a.slug})
+    render_change(element(view, ~s(form[phx-change="switch-project"])), %{"project" => project_a.slug})
 
     # Navigate into the doc WITHOUT remounting — keeps current_project == A.
     render_patch(view, "/studio/#{@dataset}/post/post-in-a")
@@ -127,7 +127,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
       # NOW switch to Project B. Its default dataset slug is also "production", so
       # rescope_dataset_for_project hits the `slug == dataset` branch — the bug
       # path that used to rebuild with the stale nav_path.
-      render_change(element(view, ~s(select[name="project"])), %{"project" => project_b.slug})
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{"project" => project_b.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -157,7 +157,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
       a_before = doc_count(default_ws.id, project_a.id)
       b_before = doc_count(default_ws.id, project_b.id)
 
-      render_change(element(view, ~s(select[name="project"])), %{"project" => project_b.slug})
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{"project" => project_b.slug})
 
       # Fire a save with edited params. With the stale editor_doc the pre-fix code
       # would upsert_draft(doc_a, ...) under Project B's scope — writing the old
@@ -185,7 +185,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
          %{conn: conn, default_ws: default_ws, project_a: project_a, project_b: project_b} do
       view = open_doc_under_a(conn, project_a)
 
-      render_change(element(view, ~s(select[name="project"])), %{"project" => project_b.slug})
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{"project" => project_b.slug})
 
       a_before = doc_count(default_ws.id, project_a.id)
       b_before = doc_count(default_ws.id, project_b.id)
