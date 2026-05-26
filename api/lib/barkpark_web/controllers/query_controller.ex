@@ -10,7 +10,7 @@ defmodule BarkparkWeb.QueryController do
   action_fallback BarkparkWeb.FallbackController
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
-    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset) do
+    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
       t0 = System.monotonic_time(:microsecond)
       perspective = resolve_perspective(conn, params)
       limit = parse_int(params["limit"], 100)
@@ -50,7 +50,7 @@ defmodule BarkparkWeb.QueryController do
   end
 
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset) do
+    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
       t0 = System.monotonic_time(:microsecond)
       expand_spec = parse_expand(params["expand"])
 
