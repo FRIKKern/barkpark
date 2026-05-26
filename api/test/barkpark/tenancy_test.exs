@@ -85,6 +85,31 @@ defmodule Barkpark.TenancyTest do
     end
   end
 
+  describe "list_projects/1 ordering" do
+    test "puts the default-slug project FIRST, then the rest alphabetically" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "ord-ws", name: "Ord"})
+      # Insert out of order to prove the query — not insertion — drives ordering.
+      {:ok, _} = Tenancy.create_project(ws, %{slug: "zebra", name: "Zebra"})
+      {:ok, _} = Tenancy.create_project(ws, %{slug: "default", name: "Default"})
+      {:ok, _} = Tenancy.create_project(ws, %{slug: "analytics", name: "Analytics"})
+
+      slugs = Enum.map(Tenancy.list_projects(ws), & &1.slug)
+      assert slugs == ["default", "analytics", "zebra"]
+      # The canonical consumer contract: first project == the default.
+      assert List.first(Tenancy.list_projects(ws)).slug == "default"
+    end
+
+    test "with no default-slug project, ordering stays pure alphabetical" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "ord-ws-no-def", name: "NoDef"})
+      {:ok, _} = Tenancy.create_project(ws, %{slug: "zebra", name: "Zebra"})
+      {:ok, _} = Tenancy.create_project(ws, %{slug: "analytics", name: "Analytics"})
+      {:ok, _} = Tenancy.create_project(ws, %{slug: "mango", name: "Mango"})
+
+      slugs = Enum.map(Tenancy.list_projects(ws), & &1.slug)
+      assert slugs == ["analytics", "mango", "zebra"]
+    end
+  end
+
   describe "Membership changeset (table only)" do
     test "requires a valid role and binds to a workspace" do
       {:ok, ws} = Tenancy.create_workspace(%{slug: "mem-ws", name: "Mem"})

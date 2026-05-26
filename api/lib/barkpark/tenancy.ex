@@ -124,7 +124,16 @@ defmodule Barkpark.Tenancy do
   def list_projects(%Workspace{id: ws_id}), do: list_projects(ws_id)
 
   def list_projects(ws_id) when is_binary(ws_id) do
-    Repo.all(from p in Project, where: p.workspace_id == ^ws_id, order_by: p.slug)
+    # Order the canonical `default`-slug project FIRST, then the rest
+    # alphabetically. This makes every consumer that takes the first project
+    # (web's `projects[0]` from `listProjects`, the switcher, studio mount via
+    # `initial_project/1`) resolve the same canonical default. The boolean
+    # `slug = 'default'` sorts DESC (true before false), then `slug` ASC.
+    Repo.all(
+      from p in Project,
+        where: p.workspace_id == ^ws_id,
+        order_by: [desc: fragment("? = 'default'", p.slug), asc: p.slug]
+    )
   end
 
   @doc "Create a Workspace from attrs."
