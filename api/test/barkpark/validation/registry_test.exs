@@ -5,6 +5,41 @@ defmodule Barkpark.Validation.RegistryTest do
 
   alias Barkpark.Validation.Registry
 
+  # ── Global-state teardown ─────────────────────────────────────────────────
+  #
+  # Two leak channels make this file order-dependent without cleanup:
+  #
+  #   1. The validation checker ETS table (`:barkpark_validation_checkers`) is
+  #      a process-global, :public, named table. `register/2` and
+  #      `reload_plugin_checkers/0` only ever INSERT — there is no production
+  #      `unregister/1` or `reset/0`. So `fake-N` and `plugin:fakeplug:magic`
+  #      entries written below leak into every sibling test and run.
+  #   2. The plugin-namespace test also registers `FakePluginMod` into the
+  #      sibling `Barkpark.Plugins.Registry` (a separate singleton), which is
+  #      cleaned via its documented `reset/0` hook.
+  #
+  # `setup` snapshots the checker-table keys present at baseline, and `on_exit`
+  # deletes any key this test added (and resets the plugin Registry). The
+  # table returns to its pre-test state regardless of run order. The ETS table
+  # is :public, so the test process can delete directly — no lib change needed.
+  @checker_table :barkpark_validation_checkers
+
+  setup do
+    baseline = Registry.all() |> Enum.map(& &1.name) |> MapSet.new()
+
+    on_exit(fn ->
+      # Drop any checker key registered during the test, restoring baseline.
+      for %{name: name} <- Registry.all(), not MapSet.member?(baseline, name) do
+        :ets.delete(@checker_table, name)
+      end
+
+      # The plugin-namespace test leaks into the sibling plugin Registry too.
+      Barkpark.Plugins.Registry.reset()
+    end)
+
+    :ok
+  end
+
   describe "lifecycle" do
     test "is alive after application boot" do
       assert is_pid(GenServer.whereis(Registry))
