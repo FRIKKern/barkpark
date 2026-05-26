@@ -30,10 +30,13 @@ interface WorkspaceProjectSwitcherProps {
  * Header control that shows the active `w/<workspace> · p/<project>` scope and,
  * when given `options`, lets the user switch to another workspace/project.
  *
- * Selection navigates to `/w/<workspace>/p/<project>/` via the Next.js router —
- * the same route tree the scoped layout/pages render under. With no `options`
- * (the current reality: no list endpoint), it degrades to a static scope label
- * rather than fabricating a list.
+ * Changing the *project* navigates straight to `/w/<workspace>/p/<project>/`.
+ * Changing the *workspace* navigates to `/w/<workspace>` (the workspace landing
+ * route), which resolves that workspace's default project server-side and
+ * redirects — the switcher can't know another workspace's projects, since the
+ * scoped layout only fetches the current one's. With no `options` (the current
+ * reality: no list endpoint), it degrades to a static scope label rather than
+ * fabricating a list.
  */
 export function WorkspaceProjectSwitcher({
   workspace,
@@ -67,16 +70,13 @@ export function WorkspaceProjectSwitcher({
 
   function onWorkspaceChange(nextWs: string) {
     setWs(nextWs);
-    const nextProjects =
-      options?.find((o) => o.slug === nextWs)?.projects ?? [];
-    // Keep the current project if it exists under the new workspace, else
-    // fall back to that workspace's first project.
-    const nextProject = nextProjects.includes(project)
-      ? project
-      : nextProjects[0];
-    if (nextProject) {
-      goTo(nextWs, nextProject);
-    }
+    if (!nextWs || nextWs === workspace) return;
+    // We can't pick a project for *another* workspace here: the scoped layout
+    // only fetches the current workspace's projects, so every other entry in
+    // `options` has `projects: []`. Navigate to the workspace landing route
+    // (`/w/<ws>`), which resolves that workspace's default project
+    // server-side and redirects to `/w/<ws>/p/<project>`.
+    router.push(`/w/${nextWs}`);
   }
 
   const selectClass =
