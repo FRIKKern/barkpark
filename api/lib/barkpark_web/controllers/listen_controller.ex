@@ -18,7 +18,14 @@ defmodule BarkparkWeb.ListenController do
     # AssignDefaultScope). nil → unfiltered stream (pre-tenancy back-compat).
     workspace_id = scope_workspace_id(conn)
 
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
+    # Subscribe to the workspace-scoped topic when we have a resolved
+    # workspace, so this stream no longer receives (and discards via
+    # forward_event?/3) every co-dataset tenant's events — the bare
+    # `documents:#{dataset}` topic fans out to ALL tenants (barkpark-fe2k).
+    # content.ex's tap_broadcast/5 fires BOTH the bare topic AND
+    # `documents:ws:#{ws}:#{dataset}` for scoped writes, so self-delivery is
+    # intact; the nil/Default (flat back-compat) path keeps the bare topic.
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, list_topic(dataset, workspace_id))
 
     conn =
       conn
@@ -161,6 +168,14 @@ defmodule BarkparkWeb.ListenController do
       _ -> nil
     end
   end
+
+  # Resolve the PubSub topic for the document-list stream. With a workspace,
+  # use the additive workspace-scoped topic broadcast by content.ex; without
+  # one, fall back to the bare global topic (flat/Default back-compat).
+  defp list_topic(dataset, workspace_id) when is_binary(workspace_id),
+    do: "documents:ws:#{workspace_id}:#{dataset}"
+
+  defp list_topic(dataset, _workspace_id), do: "documents:#{dataset}"
 
   defp parse_int(nil), do: nil
 

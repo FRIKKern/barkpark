@@ -97,6 +97,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # the editor header only surfaces when both sides exist.
        diff_visible: false,
        published_doc: nil,
+       # Subscribed document-list PubSub topic (barkpark-fe2k). Tracked so the
+       # unsubscribe on a dataset switch matches the exact topic we subscribed
+       # — workspace-scoped (`documents:ws:#{ws}:#{dataset}`) when a workspace
+       # is resolved, bare (`documents:#{dataset}`) otherwise.
+       list_topic: nil,
        # ── In-Studio live paper view (convergence/papers-in-studio) ─────
        # A paper opens LIVE inside the editor pane (read-only block stream),
        # NOT the field form. `editor_view` is `:paper` while a paper is open,
@@ -163,13 +168,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket = ensure_tenancy_scope(socket)
 
-    if connected?(socket) and socket.assigns[:dataset] != dataset do
-      if old = socket.assigns[:dataset] do
-        Phoenix.PubSub.unsubscribe(Barkpark.PubSub, "documents:#{old}")
-      end
-
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
-    end
+    socket = ensure_list_subscription(socket, dataset)
 
     current_path =
       case uri do
@@ -308,6 +307,40 @@ defmodule BarkparkWeb.Studio.StudioLive do
     send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
     {:noreply, socket}
   end
+
+  # Keep the document-list PubSub subscription pointed at the CURRENT scope's
+  # topic (barkpark-fe2k). Idempotent: re-subscribes only when the resolved
+  # topic differs from the tracked `list_topic` assign — so it fires on a
+  # dataset switch (handle_params) AND a same-slug workspace switch (where
+  # the dataset is unchanged but the owning workspace flipped). The bare
+  # `documents:#{dataset}` topic fans out to ALL co-dataset tenants; the
+  # ws-scoped `documents:ws:#{ws}:#{dataset}` topic (broadcast additively by
+  # content.ex's tap_broadcast/5 for scoped writes) carries only this tenant's
+  # events. nil current_workspace → bare topic (flat/Default back-compat).
+  defp ensure_list_subscription(socket, dataset) do
+    if connected?(socket) do
+      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+      new_topic = list_topic(dataset, ws_id)
+      old_topic = socket.assigns[:list_topic]
+
+      if new_topic == old_topic do
+        socket
+      else
+        if old_topic, do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, old_topic)
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, new_topic)
+        assign(socket, list_topic: new_topic)
+      end
+    else
+      socket
+    end
+  end
+
+  # Resolve the document-list PubSub topic (barkpark-fe2k). Workspace-scoped
+  # when a workspace is resolved, bare global otherwise (flat/Default).
+  defp list_topic(dataset, ws_id) when is_binary(ws_id),
+    do: "documents:ws:#{ws_id}:#{dataset}"
+
+  defp list_topic(dataset, _ws_id), do: "documents:#{dataset}"
 
   # Subscribe to the specific doc being edited
   defp subscribe_to_doc(socket) do
@@ -2225,7 +2258,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
         if slug == socket.assigns[:dataset] do
           # Same dataset slug as the old project — handle_params won't fire (no
           # URL change), so the reset above is what rebuilds from the new scope.
-          rebuild_panes(socket)
+          # The owning workspace may have flipped though, so re-point the
+          # list subscription at the new scope's topic (barkpark-fe2k) before
+          # rebuilding — otherwise live updates would still arrive on the OLD
+          # workspace's topic (or not at all).
+          socket
+          |> ensure_list_subscription(slug)
+          |> rebuild_panes()
         else
           # Different slug — push_patch runs handle_params, re-asserting nav_path
           # from the new URL. The synchronous clear above still matters: it nils
@@ -2235,12 +2274,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
         end
 
       _ ->
-        rebuild_panes(socket)
+        # Project has no dataset rows — the current slug stays authoritative,
+        # but the workspace may have flipped, so re-point the list subscription
+        # at the new scope's topic before rebuilding (barkpark-fe2k).
+        socket
+        |> ensure_list_subscription(socket.assigns[:dataset])
+        |> rebuild_panes()
     end
   end
 
   defp rescope_dataset_for_project(socket, _),
-    do: socket |> reset_nav_for_switch() |> rebuild_panes()
+    do:
+      socket
+      |> reset_nav_for_switch()
+      |> ensure_list_subscription(socket.assigns[:dataset])
+      |> rebuild_panes()
 
   # Reset navigation + open-document state for a workspace/project switch.
   #

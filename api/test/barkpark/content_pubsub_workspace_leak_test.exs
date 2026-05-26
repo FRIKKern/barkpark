@@ -220,6 +220,87 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
     end
   end
 
+  describe "FAN-OUT GATE — document-list topic (barkpark-fe2k)" do
+    # The SSE listen stream + StudioLive list view used to subscribe the BARE
+    # `documents:#{dataset}` topic, which every co-dataset tenant broadcasts to
+    # — so A's stream received (then discarded via forward_event?/3 /
+    # rebuild_panes scope_opts) every B mutation. The fix subscribes the
+    # workspace-scoped `documents:ws:#{ws}:#{dataset}` topic instead. These
+    # tests prove, at the TOPIC level: (1) A still gets its OWN events
+    # (self-delivery intact), (2) A no longer gets B's events (fan-out gone),
+    # and (3) the old bare topic WOULD have fanned B's event out (the regression
+    # we removed).
+    @list_dataset "shared-list"
+
+    setup do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Posts", "visibility" => "public", "fields" => []},
+          @list_dataset
+        )
+
+      :ok
+    end
+
+    test "A's ws-scoped list subscriber gets A's OWN event but NOT B's", %{
+      ws_a: ws_a,
+      ws_b: ws_b
+    } do
+      # Subscribe exactly as the fixed SSE controller / StudioLive list view do
+      # when a workspace is resolved.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{ws_a.id}:#{@list_dataset}")
+
+      # B writes a co-dataset doc → A's ws-scoped subscriber hears NOTHING
+      # (the bare-topic fan-out is gone; B never broadcasts to A's topic).
+      {:ok, _doc_b} =
+        Content.create_document("post", %{"_id" => "b-doc", "title" => "B"}, @list_dataset,
+          workspace_id: ws_b.id
+        )
+
+      refute_receive {:document_changed, _}, 300
+
+      # A writes its OWN doc → A's ws-scoped subscriber DOES hear it
+      # (self-delivery on the additive ws-scoped topic is intact).
+      {:ok, _doc_a} =
+        Content.create_document("post", %{"_id" => "a-doc", "title" => "A"}, @list_dataset,
+          workspace_id: ws_a.id
+        )
+
+      assert_receive {:document_changed, %{workspace_id: wid, doc_id: "drafts.a-doc"}}, 1_000
+      assert wid == ws_a.id
+    end
+
+    test "PROOF the old bare topic WOULD have fanned B's event out to A", %{ws_b: ws_b} do
+      # Reconstruct the pre-fix subscribe: the bare `documents:#{dataset}` topic
+      # with NO workspace component. content.ex still broadcasts here additively,
+      # so a bare subscriber receives EVERY co-dataset tenant's event — the
+      # wasteful fan-out the fix removes.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@list_dataset}")
+
+      {:ok, _doc_b} =
+        Content.create_document("post", %{"_id" => "bare-b", "title" => "B"}, @list_dataset,
+          workspace_id: ws_b.id
+        )
+
+      # The bare topic receives B's event — proving the fan-out is real and the
+      # ws-scoped gate above is meaningful.
+      assert_receive {:document_changed, %{doc_id: "drafts.bare-b", workspace_id: wid}}, 1_000
+      assert wid == ws_b.id
+    end
+
+    test "nil-workspace (Default/flat) write still lands on the bare topic" do
+      # The back-compat path: a write without an explicit workspace (Default
+      # fallback) — the nil-scope listener keeps the bare subscribe, and
+      # content.ex always fires the bare topic, so self-delivery holds there too.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@list_dataset}")
+
+      {:ok, _doc} =
+        Content.create_document("post", %{"_id" => "default-doc", "title" => "D"}, @list_dataset)
+
+      assert_receive {:document_changed, %{doc_id: "drafts.default-doc"}}, 1_000
+    end
+  end
+
   describe "NULL-workspace (legacy) normalization agrees on both sides" do
     test "a Default/legacy paper's update reaches its public viewer" do
       # The public viewer (PaperLive) resolves the paper through
