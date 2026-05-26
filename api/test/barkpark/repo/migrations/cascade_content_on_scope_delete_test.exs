@@ -26,6 +26,17 @@ defmodule Barkpark.Repo.Migrations.CascadeContentOnScopeDeleteTest do
   `apply_up/0` against the test's own sandbox connection (mirrors the
   20260527143000 rescope test), then restores up so it leaves the schema in the
   migrated state for sibling tests.
+
+  ## How this relates to `Barkpark.Tenancy.delete_workspace/1` (obhg-P0 + 0f7g-P1)
+
+  This test asserts the LOW-LEVEL SQL CASCADE contract — what happens when a
+  bare `DELETE FROM workspaces WHERE id = …` runs. That cascade is now the
+  belt-and-suspenders BACKSTOP under `Tenancy.delete_workspace/1`: the context
+  function walks media_files via `Media.delete_file/2` first (so File.rm +
+  Cdn.invalidate + plugin hooks fire), then `Repo.delete(workspace)` rides the
+  same cascade chain this test pins. Both layers stay green — the SQL chain
+  remains correct, the app-level pass adds the side-effect cleanup.
+  `test/barkpark/tenancy_delete_workspace_test.exs` is the HIGH-LEVEL gate.
   """
   use Barkpark.DataCase, async: false
 
