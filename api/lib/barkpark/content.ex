@@ -1252,13 +1252,21 @@ defmodule Barkpark.Content do
           field["type"] == "reference",
           do: {schema.name, field["name"]}
 
-    # Search each type for docs that reference this ID
+    # Search each type for docs that reference this ID. The predicate
+    # (`content->>field == pub_id`) is pushed into SQL via the `:filter_map`
+    # eq op so the DB returns ONLY the referencing rows — was a full
+    # load-all-of-type per reference field followed by an in-memory
+    # Enum.filter (barkpark-sji2). Scope opts (workspace/project/dataset) stay
+    # threaded as before. limit: 1000 so a high fan-in reference is not
+    # truncated by the default 100-row cap.
     Enum.flat_map(ref_fields, fn {type_name, field_name} ->
-      list_documents(type_name, dataset, [perspective: :raw] ++ opts)
-      |> Enum.filter(fn doc ->
-        val = get_in(doc.content || %{}, [field_name])
-        val == pub_id
-      end)
+      ref_opts =
+        opts
+        |> Keyword.put(:perspective, :raw)
+        |> Keyword.put(:filter_map, %{field_name => pub_id})
+        |> Keyword.put_new(:limit, 1000)
+
+      list_documents(type_name, dataset, ref_opts)
       |> Enum.map(fn doc ->
         %{doc_id: doc.doc_id, type: type_name, title: doc.title, field: field_name}
       end)
