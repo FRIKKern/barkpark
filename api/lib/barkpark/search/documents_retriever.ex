@@ -23,7 +23,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     else
       base =
         Document
-        |> where([d], d.dataset == ^scope)
+        |> scope_to_dataset(scope, project_id)
         |> scope_to_workspace_or_global(workspace_id, project_id)
         |> where_match(parsed, terms, config, relaxed)
 
@@ -39,6 +39,20 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
       count = base |> select([d], count(d.id)) |> Repo.one() || 0
       {docs, count}
+    end
+  end
+
+  # Mirror of Content.scope_to_dataset for the search read path (barkpark-y9ee).
+  # Resolve the dataset STRING → its dataset_id within the read's project scope
+  # and filter authoritatively by `dataset_id`; same-name datasets across
+  # projects (and within a workspace) no longer conflate. Fall back to the
+  # legacy `dataset` STRING filter only when the dataset can't be resolved
+  # (no project scope / dataset row predates the W2 dual-write), which keeps the
+  # leaf discriminator working for back-compat reads.
+  defp scope_to_dataset(query, scope, project_id) do
+    case Barkpark.Content.resolve_read_dataset_id(scope, project_id: project_id) do
+      id when is_binary(id) -> where(query, [d], d.dataset_id == ^id)
+      _ -> where(query, [d], d.dataset == ^scope)
     end
   end
 

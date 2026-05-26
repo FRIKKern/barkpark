@@ -1354,8 +1354,13 @@ defmodule Barkpark.Content do
 
     ctx = build_ctx(opts)
 
+    # Scope the prev-doc lookup to the writer's workspace/project (mirror of
+    # create_document:654). An UNSCOPED lookup here would resolve (and then
+    # UPDATE/overwrite) another workspace's row sharing the (doc_id, type,
+    # dataset) leaf — the write-path scoping gap. Scoped, a same-id write from
+    # a different workspace sees no prev_doc and inserts its own row.
     prev_doc =
-      case doc_id && get_document(doc_id, type, dataset) do
+      case doc_id && get_document(doc_id, type, dataset, opts) do
         {:ok, d} -> d
         _ -> nil
       end
@@ -1501,7 +1506,12 @@ defmodule Barkpark.Content do
   # which case the caller keeps the legacy `dataset` STRING filter (back-compat:
   # a read against a never-written dataset string returns no rows either way).
   # Read-only (Repo.get_by) — never creates a dataset on a read path.
-  defp resolve_read_dataset_id(dataset, opts) when is_binary(dataset) do
+  #
+  # Public so search read paths (DocumentsRetriever) can resolve the same
+  # dataset_id and filter authoritatively instead of on the bare `dataset`
+  # STRING, which conflates same-name datasets within a workspace (barkpark-y9ee).
+  @doc false
+  def resolve_read_dataset_id(dataset, opts) when is_binary(dataset) do
     project_id = Keyword.get(opts, :project_id) || read_default_project_id()
 
     case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
@@ -1510,7 +1520,7 @@ defmodule Barkpark.Content do
     end
   end
 
-  defp resolve_read_dataset_id(_dataset, _opts), do: nil
+  def resolve_read_dataset_id(_dataset, _opts), do: nil
 
   defp read_default_project_id do
     case Barkpark.Tenancy.get_default_project() do
