@@ -121,6 +121,70 @@ defmodule Barkpark.ContentDatasetIdAuthoritativeTest do
     end
   end
 
+  describe "NULL-tolerant read scope recovers unstamped legacy/asset rows (barkpark-yx7f)" do
+    # The strict `x.dataset_id == ^id` filter DROPPED rows whose dataset_id is
+    # NULL but whose `dataset` STRING matches — legacy/asset rows the W2 dual-
+    # write + the 132000 backfill never stamped. scope_to_dataset/3 now mirrors
+    # scope_schema_to_dataset/3 (id-match OR (NULL dataset_id AND string match)),
+    # so those rows are findable again. Never-worse: a stamped row still matches
+    # strictly by dataset_id.
+    #
+    # The fixture forces the STRICT branch: the project HAS a resolvable
+    # "production" dataset row, so resolve_read_dataset_id/2 returns an id — and
+    # under the OLD code that branch filtered ONLY on dataset_id and dropped the
+    # NULL row. We insert the NULL-dataset_id row directly through the changeset
+    # (Content.create_document would have stamped a dataset_id) to reproduce the
+    # unstamped legacy shape.
+    setup do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      # Resolvable "production" dataset under THIS project => the strict branch
+      # fires on read (resolve_read_dataset_id returns a non-nil id).
+      {:ok, _ds} = Tenancy.get_or_create_dataset(proj, "production")
+
+      # The legacy/unstamped row: dataset STRING = "production", dataset_id NULL.
+      {:ok, null_doc} =
+        %Document{}
+        |> Document.changeset(%{
+          "doc_id" => "drafts.legacy-null",
+          "type" => "post",
+          "dataset" => "production",
+          "title" => "unstamped legacy row",
+          "rev" => "legacy-rev",
+          "workspace_id" => ws.id,
+          "project_id" => proj.id
+          # dataset_id intentionally omitted => NULL
+        })
+        |> Repo.insert()
+
+      assert is_nil(null_doc.dataset_id),
+             "fixture must leave dataset_id NULL to reproduce the dropped-row shape"
+
+      assert is_binary(Content.resolve_read_dataset_id("production", scope)),
+             "the production dataset must resolve to an id so the STRICT branch fires"
+
+      {:ok, scope: scope, null_doc: null_doc}
+    end
+
+    test "get_document finds the NULL-dataset_id row", %{scope: scope} do
+      assert {:ok, fetched} =
+               Content.get_document("drafts.legacy-null", "post", "production", scope)
+
+      assert fetched.doc_id == "drafts.legacy-null"
+      assert is_nil(fetched.dataset_id)
+    end
+
+    test "list_documents (scoped read) returns the NULL-dataset_id row", %{scope: scope} do
+      doc_ids =
+        Content.list_documents("post", "production", [perspective: :raw] ++ scope)
+        |> Enum.map(& &1.doc_id)
+
+      assert "drafts.legacy-null" in doc_ids
+    end
+  end
+
   describe "the dataset STRING mirror stays consistent with dataset_id on writes" do
     test "create stamps a dataset_id whose dataset row's slug equals the dataset STRING" do
       ws = create_workspace!()

@@ -1530,13 +1530,23 @@ defmodule Barkpark.Content do
   end
 
   # Apply the W2 dataset scope to a read query. When the dataset string resolves
-  # to a `dataset_id`, filter authoritatively by `x.dataset_id`. Otherwise fall
-  # back to the legacy `x.dataset` STRING filter (the mirror still works for
-  # datasets that predate a row or live outside the resolved project).
+  # to a `dataset_id`, filter authoritatively by `x.dataset_id` BUT also match
+  # rows whose `dataset_id` is NULL and whose `dataset` STRING equals the
+  # requested one — legacy/unstamped rows the strict filter would drop (asset
+  # docs, non-Default-project rows the 132000 backfill skipped, workspace-only
+  # writes). This mirrors scope_schema_to_dataset/3. The dataset STRING and
+  # dataset_id are 1:1 within a project, so the OR never crosses datasets.
+  # Never-worse: stamped rows still match strictly by dataset_id; NULL rows
+  # recover the legacy string match. Otherwise fall back to the legacy
+  # `x.dataset` STRING filter (the mirror still works for datasets that predate
+  # a row or live outside the resolved project).
   defp scope_to_dataset(query, dataset, opts) do
     case resolve_read_dataset_id(dataset, opts) do
-      id when is_binary(id) -> where(query, [x], x.dataset_id == ^id)
-      _ -> where(query, [x], x.dataset == ^dataset)
+      id when is_binary(id) ->
+        where(query, [x], x.dataset_id == ^id or (is_nil(x.dataset_id) and x.dataset == ^dataset))
+
+      _ ->
+        where(query, [x], x.dataset == ^dataset)
     end
   end
 
