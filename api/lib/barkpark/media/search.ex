@@ -116,11 +116,9 @@ defmodule Barkpark.Media.Search do
 
     MediaFile
     |> from(as: :media)
-    |> join(:left, [m], d in Document,
+    |> join(:left, [m], d in ^asset_doc_join_query(dataset, dataset_id, workspace_id, project_id),
       as: :asset,
-      on:
-        d.type == ^@asset_type and d.dataset == ^dataset and
-          fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
+      on: fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
     )
     |> scope_media_to_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
@@ -139,6 +137,53 @@ defmodule Barkpark.Media.Search do
     |> maybe_filter_tags(selections["tags"])
     |> maybe_filter_visibility(Keyword.get(opts, :visibility))
     |> maybe_filter_visibility(selections["visibility"])
+  end
+
+  # Pre-scoped Document subquery the search LEFT-JOINs against. Without scope on
+  # the joined doc, a blob in workspace B (correctly scoped on the `media` side)
+  # would join to workspace A's asset Document sharing the dataset STRING +
+  # mediaFileId — feeding A's title/tags into B's text matching + facets
+  # (the cross-workspace metadata leak, barkpark-vmv1). Scoping the joined doc
+  # by type + dataset + a NULL-tolerant workspace envelope closes that.
+  #
+  #   * type: only mediaAsset docs.
+  #   * dataset: dataset_id authoritative when resolved, NULL-tolerant string
+  #     fallback for legacy/unstamped docs (mirror of scope_asset_dataset);
+  #     bare string filter when no dataset_id resolves.
+  #   * workspace: NULL-tolerant — newly-scoped docs are isolated to their
+  #     workspace WHILE legacy NULL-workspace docs stay joinable in their own
+  #     tenant (never-worse). A nil workspace_id (unscoped path) leaves the
+  #     workspace filter off entirely (deliberate global read).
+  defp asset_doc_join_query(dataset, dataset_id, workspace_id, project_id) do
+    Document
+    |> where([d], d.type == ^@asset_type)
+    |> join_scope_dataset(dataset, dataset_id)
+    |> join_scope_workspace(workspace_id, project_id)
+  end
+
+  defp join_scope_dataset(query, dataset, dataset_id) when is_binary(dataset_id) do
+    where(query, [d], d.dataset_id == ^dataset_id or (is_nil(d.dataset_id) and d.dataset == ^dataset))
+  end
+
+  defp join_scope_dataset(query, dataset, _dataset_id) do
+    where(query, [d], d.dataset == ^dataset)
+  end
+
+  defp join_scope_workspace(query, nil, _project_id), do: query
+
+  defp join_scope_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
+    where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))
+  end
+
+  defp join_scope_workspace(query, workspace_id, project_id)
+       when is_binary(workspace_id) and is_binary(project_id) do
+    where(
+      query,
+      [d],
+      is_nil(d.workspace_id) or
+        (d.workspace_id == ^workspace_id and
+           (is_nil(d.project_id) or d.project_id == ^project_id))
+    )
   end
 
   # W2 read-scope. Resolve the dataset STRING → dataset_id within the read's
@@ -570,9 +615,20 @@ defmodule Barkpark.Media.Search do
     config = Keyword.get(opts, :pipeline_config, SurfaceConfigs.get("media", dataset))
     relaxed = Keyword.get(opts, :relaxed, false)
 
+    # Thread the tenancy scope into the text-match retriever. Its inner
+    # `m.id IN (SELECT …)` subquery builds its OWN LEFT JOIN to the asset
+    # Document for `ilike(d.title, …)` / tag matching; without scope that join
+    # matches another workspace's asset doc by bare dataset STRING + mediaFileId
+    # — the search arm of the cross-workspace metadata leak (barkpark-vmv1).
+    retriever_opts = [
+      relaxed: relaxed,
+      workspace_id: Keyword.get(opts, :workspace_id),
+      project_id: Keyword.get(opts, :project_id)
+    ]
+
     cond do
       is_map(parsed) and map_size(parsed) > 0 ->
-        MediaRetriever.apply_to_query(query, dataset, parsed, config, relaxed: relaxed)
+        MediaRetriever.apply_to_query(query, dataset, parsed, config, retriever_opts)
 
       true ->
         q = Keyword.get(opts, :q)
@@ -581,7 +637,7 @@ defmodule Barkpark.Media.Search do
           query
         else
           parsed = QueryParser.parse(q)
-          MediaRetriever.apply_to_query(query, dataset, parsed, config, relaxed: relaxed)
+          MediaRetriever.apply_to_query(query, dataset, parsed, config, retriever_opts)
         end
     end
   end
