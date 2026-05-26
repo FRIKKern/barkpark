@@ -10,6 +10,10 @@ defmodule Barkpark.Tenancy do
 
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content
+  alias Barkpark.Content.Document
+  alias Barkpark.Media
+  alias Barkpark.Media.MediaFile
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -385,4 +389,142 @@ defmodule Barkpark.Tenancy do
   end
 
   def default_project_dataset_id(_), do: nil
+
+  # --- Workspace delete (obhg P0 + 0f7g P1) --------------------------------
+  #
+  # Deleting a workspace touches THREE classes of state:
+  #
+  #   1. Rows with side-effect cleanup (media_files → disk blob + CDN edge
+  #      cache + Renditions + after_media_delete plugin hooks; documents →
+  #      :after_delete plugin hooks). These MUST be deleted through the
+  #      context functions so the hooks fire — a raw `Repo.delete(workspace)`
+  #      that lets SQL CASCADE remove the row would leak blobs on disk/S3
+  #      and miss plugin notifications.
+  #
+  #   2. Rows that are just rows (revisions, schema_definitions, webhooks,
+  #      mutation_events, search_intel_events, search_intel_crystals,
+  #      search_intel_merge_patterns, search_synonyms, paper_events). These
+  #      can ride SQL CASCADE — there is nothing to clean up.
+  #
+  #   3. The workspace's own children (projects, datasets, memberships,
+  #      api_tokens.workspace_id). Existing FKs already cascade or nilify
+  #      these correctly.
+  #
+  # delete_workspace/1 walks class (1) explicitly, then `Repo.delete(workspace)`
+  # cascades classes (2) and (3) in a single transaction.
+
+  @doc """
+  Delete a workspace AND every piece of state it owns, atomically.
+
+  Ordered cleanup in a single `Repo.transaction`:
+
+    1. For every media_file scoped to the workspace, call
+       `Barkpark.Media.delete_file/2` so the disk blob is removed
+       (`File.rm`), CDN edge cache is invalidated (`Cdn.invalidate`),
+       renditions are deleted (`Renditions.delete_for_file`), and the
+       `after_media_delete` plugin hook fires.
+    2. For every document scoped to the workspace, call
+       `Barkpark.Content.delete_document/4` so the `:after_delete`
+       lifecycle hook fires for every doc.
+    3. `Repo.delete(workspace)` — the workspace row leaves. The SQL
+       cascade chain (workspace → projects → datasets, and the scope-FK
+       cascades on documents/revisions/media_files/schema_definitions/
+       webhooks/mutation_events/search_intel_events/
+       search_intel_crystals/search_intel_merge_patterns/search_synonyms/
+       paper_events) sweeps any rows that survived the app-level pass
+       (idempotent) and removes the supporting rows that have no
+       side-effect cleanup.
+
+  The whole sequence runs inside a single `Repo.transaction`. If ANY step
+  fails — a hook returns an error, a Repo write blows up, the workspace
+  delete races — the transaction rolls back and nothing partial-deletes.
+  Side-effects that already ran outside the transaction (a `File.rm` on
+  disk, an HTTP CDN purge) cannot be un-done; those run on rows that the
+  rollback will leave alive, so the next retry re-fires them. This is the
+  same trade-off `Media.delete_file/2` makes on its own.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Returns
+  `{:ok, workspace}` on success or `{:error, term}` on rollback.
+  Looking up an unknown id returns `{:error, :not_found}` without opening
+  a transaction.
+  """
+  @spec delete_workspace(Workspace.t() | binary()) ::
+          {:ok, Workspace.t()} | {:error, :not_found | term()}
+  def delete_workspace(%Workspace{} = workspace) do
+    Repo.transaction(fn ->
+      case do_delete_workspace(workspace) do
+        {:ok, ws} -> ws
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  def delete_workspace(id) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> delete_workspace(workspace)
+    end
+  end
+
+  # Ordered cleanup inside the transaction. Each step short-circuits on
+  # error so the transaction rolls back via Repo.rollback in the wrapper.
+  defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do
+    with :ok <- delete_workspace_media(ws_id),
+         :ok <- delete_workspace_documents(ws_id),
+         {:ok, _} <- Repo.delete(workspace) do
+      {:ok, workspace}
+    else
+      {:error, _} = err -> err
+    end
+  end
+
+  # Walk every media_file scoped to the workspace and route it through
+  # `Media.delete_file/2` so File.rm + Cdn.invalidate + Renditions.delete_for_file
+  # + Plugins.Registry.run_after_media_delete + Events.dispatch all fire. Without
+  # this the SQL CASCADE on media_files (migration 20260527160000) would silently
+  # remove the row and leak the blob on disk and at the CDN edge.
+  defp delete_workspace_media(ws_id) do
+    MediaFile
+    |> where([m], m.workspace_id == ^ws_id)
+    |> Repo.all()
+    |> Enum.reduce_while(:ok, fn %MediaFile{} = file, :ok ->
+      case Media.delete_file(file.id, workspace_id: ws_id) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, :not_found} -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  # Walk every document scoped to the workspace (BOTH drafts and published
+  # rows — list_documents would skip drafts on its default perspective, so
+  # we drive a raw query that picks every row up). Each unique `doc_id` is
+  # routed through `Content.delete_document/4`, which deletes BOTH variants
+  # and fires `:before_delete` / `:after_delete` plugin hooks.
+  defp delete_workspace_documents(ws_id) do
+    docs =
+      Document
+      |> where([d], d.workspace_id == ^ws_id)
+      |> select([d], {d.doc_id, d.type, d.dataset})
+      |> Repo.all()
+      |> Enum.map(fn {doc_id, type, dataset} ->
+        # `delete_document/4` strips the drafts prefix internally; normalising
+        # here lets us dedupe a doc that exists as BOTH a draft and published row.
+        {Content.published_id(doc_id), type, dataset}
+      end)
+      |> Enum.uniq()
+
+    Enum.reduce_while(docs, :ok, fn {base_id, type, dataset}, :ok ->
+      case Content.delete_document(base_id, type, dataset, workspace_id: ws_id) do
+        {:ok, _} -> {:cont, :ok}
+        # `delete_document` returns :not_found when both variants are
+        # already gone — a benign race or duplicate `doc_id` row that an
+        # earlier iteration handled. Move on.
+        {:error, :not_found} -> {:cont, :ok}
+        # Halted plugin hook bubbles up so the surrounding transaction
+        # rolls back rather than partial-deleting.
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
 end
