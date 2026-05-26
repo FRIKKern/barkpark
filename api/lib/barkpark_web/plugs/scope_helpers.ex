@@ -25,9 +25,20 @@ defmodule BarkparkWeb.ScopeHelpers do
 
   Two arities cover the two assign carriers:
 
-    * `scope_opts(%Plug.Conn{})` — reads `conn.assigns`.
+    * `scope_opts(%Plug.Conn{})` — reads `conn.assigns`. ALSO adds
+      `memoize: true` to the opts: a Phoenix request is one process, so the
+      per-request memoization in `Barkpark.Content.resolve_read_dataset_id`
+      (barkpark-5znv) is safe — the Process dictionary dies with the request.
     * `scope_opts(%Phoenix.LiveView.Socket{})` — reads `socket.assigns`
-      (the Studio desk twin).
+      (the Studio desk twin). Does NOT set `memoize: true`: a LV process
+      lives for the entire session, so a memoized `dataset_id` could outlive
+      the underlying dataset row (e.g. workspace cascade-delete) and pin
+      reads to a now-deleted id (barkpark-sknf). The fresh-every-call path
+      is cheap and stays correct.
+
+  The same logic applies to Oban workers and mix tasks: they don't go through
+  this helper, never opt in, and therefore stay on the fresh path. Only the
+  HTTP request controllers that import `scope_opts: 1` flip the memo on.
   """
 
   alias Phoenix.LiveView.Socket
@@ -37,9 +48,12 @@ defmodule BarkparkWeb.ScopeHelpers do
   Build the tenancy `[workspace_id: ..., project_id: ...]` opts from a conn or
   a LiveView socket. Nil-safe: an absent assign drops the key entirely (never
   emits a `nil` value), so an unscoped caller yields `[]`.
+
+  Conns ALSO get `memoize: true` so the per-request dataset_id resolver can
+  collapse its 9-call fan-out; sockets do NOT (see module doc, barkpark-sknf).
   """
   @spec scope_opts(Conn.t() | Socket.t()) :: keyword()
-  def scope_opts(%Conn{assigns: assigns}), do: from_assigns(assigns)
+  def scope_opts(%Conn{assigns: assigns}), do: [memoize: true] ++ from_assigns(assigns)
   def scope_opts(%Socket{assigns: assigns}), do: from_assigns(assigns)
 
   defp from_assigns(assigns) do
