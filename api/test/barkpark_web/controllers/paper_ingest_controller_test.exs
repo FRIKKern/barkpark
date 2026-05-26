@@ -58,7 +58,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
     test "upserts the paper and broadcasts on the per-doc topic", %{conn: conn} do
       slug = "ingest-ok-paper"
       # Subscribe BEFORE the request so we observe the broadcast.
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug, nil))
 
       conn =
         conn
@@ -161,7 +161,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
 
     test "valid op + bearer applies, bumps rev, broadcasts a delta, returns the fragment",
          %{conn: conn, slug: slug, rev0: rev0} do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug, nil))
 
       conn = auth_post(conn, slug, append_op("b-new", "Streamed in."))
 

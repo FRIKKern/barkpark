@@ -54,7 +54,21 @@ defmodule BarkparkWeb.PaperLive do
     paper = Content.get_public_paper(slug)
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug))
+      # Workspace-scope the subscription (barkpark-n56v, P0). The topic now
+      # carries the owning workspace, so we MUST subscribe with the SAME
+      # workspace the broadcaster stamps — else a write in another tenant's
+      # same-slug paper would (pre-fix) have leaked its rendered body here.
+      #
+      # `get_public_paper/2` resolves the slug ONLY within the seeded Default
+      # (public) workspace, so a found paper's `workspace_id` IS the Default ws
+      # — exactly what `broadcast_paper_*` stamps for a Default-scoped paper.
+      # When the paper isn't found yet (or is a legacy NULL-workspace row),
+      # `paper_topic/3` normalizes nil to the same Default ws, so a later
+      # publish into the Default workspace still reaches this viewer.
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Content.paper_topic(slug, paper && paper.workspace_id)
+      )
     end
 
     rail_events = load_rail_events(paper)

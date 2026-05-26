@@ -1998,7 +1998,15 @@ defmodule Barkpark.Content do
         }
 
         global_topic = "documents:#{dataset}"
-        doc_topic = "doc:#{dataset}:#{type}:#{published_id(doc.doc_id)}"
+
+        # Workspace-scope the per-doc topic (barkpark-rwva, P1 sibling of
+        # barkpark-n56v). doc_ids/pubids are per-workspace, so the old
+        # workspace-less `doc:<dataset>:<type>:<pubid>` topic collapsed two
+        # tenants' colliding-id docs onto ONE topic — an editor in A could
+        # receive B's `{:doc_updated,…}`. Stamping the doc's workspace_id keeps
+        # them distinct; StudioLive subscribes with current_workspace.id and
+        # both sides normalize nil identically (see doc_topic/3).
+        doc_topic = doc_topic(published_id(doc.doc_id), type, doc.workspace_id, dataset)
 
         maybe_broadcast(global_topic, {:document_changed, msg})
         maybe_broadcast(doc_topic, {:doc_updated, msg})
@@ -2247,12 +2255,63 @@ defmodule Barkpark.Content do
   def paper_type, do: @paper_type
 
   @doc """
-  Per-doc PubSub topic for a paper. Same shape as the documents spine:
-  `doc:<dataset>:paper:<slug>`. PaperLive subscribes to this; writes broadcast
-  to it.
+  Per-doc PubSub topic for a paper, SCOPED to the owning workspace:
+  `doc:ws:<workspace_id>:<dataset>:paper:<slug>`.
+
+  WORKSPACE SCOPE (barkpark-n56v, P0): paper slugs are PER-WORKSPACE (the
+  Wave-2 uniqueness flip), so workspace A's `intro` and B's `intro` are
+  DISTINCT papers. The old topic `doc:<dataset>:paper:<slug>` had NO workspace
+  component, so both papers collapsed onto ONE topic — a write in B leaked its
+  rendered body to A's public viewer. The `ws:<workspace_id>` segment keeps the
+  topics distinct so a broadcast only reaches subscribers of the SAME workspace.
+
+  Broadcaster and subscriber MUST agree on `workspace_id` for the legitimate
+  same-tenant case, or live updates silently stop. Both sides resolve the id
+  through `normalize_topic_ws/1`: a present id passes through; a `nil` (legacy
+  NULL-workspace row) normalizes to the seeded Default workspace id — the same
+  tenant `get_public_paper/2` resolves a public paper into — so the public
+  viewer and the broadcaster land on the identical topic. With no seeded
+  Default, both sides fall back to the literal `"global"` token, so they still
+  agree.
+
+  PaperLive subscribes to this; writes broadcast to it.
   """
-  def paper_topic(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
-    "doc:#{dataset}:#{@paper_type}:#{slug}"
+  def paper_topic(slug, workspace_id, dataset \\ @paper_default_dataset)
+      when is_binary(slug) do
+    "doc:ws:#{normalize_topic_ws(workspace_id)}:#{dataset}:#{@paper_type}:#{slug}"
+  end
+
+  # Normalize a (possibly nil) workspace_id into the deterministic token both
+  # the broadcast side and the subscribe side use to build a PubSub topic. A
+  # present id passes through verbatim. A `nil` id (a legacy NULL-workspace
+  # row) maps to the seeded Default workspace id — the public read path
+  # (`get_public_paper/2`) resolves into exactly that workspace, so the two
+  # sides agree. When NO Default is seeded (fresh sandbox) we fall back to a
+  # literal `"global"` token so both sides STILL agree on a non-empty value.
+  defp normalize_topic_ws(ws) when is_binary(ws) and ws != "", do: ws
+
+  defp normalize_topic_ws(_nil_or_blank) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} when is_binary(ws_id) -> ws_id
+      _ -> "global"
+    end
+  end
+
+  @doc """
+  Per-doc PubSub topic for an ordinary document, SCOPED to the owning
+  workspace: `doc:ws:<workspace_id>:<dataset>:<type>:<pubid>`.
+
+  WORKSPACE SCOPE (barkpark-rwva, P1): the old workspace-less
+  `doc:<dataset>:<type>:<pubid>` topic collapsed two tenants' colliding
+  `(type, pubid)` docs onto one topic, leaking `{:doc_updated,…}` across
+  workspaces. The `ws:<workspace_id>` segment keeps them distinct. `pubid` is
+  the PUBLISHED id (the caller applies `published_id/1`). Broadcaster
+  (`tap_broadcast`) and subscriber (StudioLive `subscribe_to_doc`) MUST agree
+  on `workspace_id`; both resolve a nil id through `normalize_topic_ws/1`.
+  """
+  def doc_topic(pubid, type, workspace_id, dataset)
+      when is_binary(pubid) and is_binary(type) do
+    "doc:ws:#{normalize_topic_ws(workspace_id)}:#{dataset}:#{type}:#{pubid}"
   end
 
   @doc """
@@ -2770,7 +2829,7 @@ defmodule Barkpark.Content do
             rev: rev
           }
 
-          broadcast_paper_block(slug, dataset, frame)
+          broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
 
           {:ok,
            %{
@@ -2947,13 +3006,21 @@ defmodule Barkpark.Content do
          event_type: Map.get(content, "event_type")
        }}
 
-    Phoenix.PubSub.broadcast(Barkpark.PubSub, paper_topic(doc.doc_id, doc.dataset), msg)
-  end
-
-  defp broadcast_paper_block(slug, dataset, frame) do
+    # Workspace-scope the topic (barkpark-n56v): stamp the doc's own
+    # workspace_id so the frame only reaches subscribers of THIS tenant. nil
+    # (legacy) normalizes to the Default ws inside paper_topic, matching the
+    # public viewer's resolved workspace.
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
-      paper_topic(slug, dataset),
+      paper_topic(doc.doc_id, doc.workspace_id, doc.dataset),
+      msg
+    )
+  end
+
+  defp broadcast_paper_block(slug, workspace_id, dataset, frame) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      paper_topic(slug, workspace_id, dataset),
       {:paper_block, frame}
     )
   end
