@@ -118,10 +118,40 @@ defmodule BarkparkWeb.Integration.MediaTest do
       rm_uploaded(body)
     end
 
-    test "with session cookie (no Bearer header) → 201", %{conn: conn} do
+    # CSRF (Task barkpark-yjcg): a cookie-only POST with no `x-requested-with`
+    # header is a forge-able cross-site surface and is now rejected at 403.
+    test "with session cookie but no x-requested-with header → 403 CSRF", %{conn: conn} do
       resp =
         conn
         |> Plug.Test.init_test_session(%{"api_token" => "barkpark-dev-token"})
+        |> post(~p"/media/upload", %{"file" => png_upload()})
+
+      assert resp.status == 403
+      body = json_response(resp, 403)
+      assert body["error"]["code"] == "csrf_required"
+    end
+
+    # Same-origin first-party JS (the Studio uploaders) sends the header, so
+    # the cookie branch still works when the CSRF header is present.
+    test "with session cookie + x-requested-with header → 201", %{conn: conn} do
+      resp =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => "barkpark-dev-token"})
+        |> put_req_header("x-requested-with", "XMLHttpRequest")
+        |> post(~p"/media/upload", %{"file" => png_upload()})
+
+      assert resp.status == 201
+      body = json_response(resp, 201)
+      assert is_binary(body["id"])
+      rm_uploaded(body)
+    end
+
+    # Bearer callers (API/external) are unaffected — no cookie, no CSRF check.
+    test "with Bearer header and no x-requested-with → 201 (bearer unaffected)",
+         %{conn: conn} do
+      resp =
+        conn
+        |> authed()
         |> post(~p"/media/upload", %{"file" => png_upload()})
 
       assert resp.status == 201
