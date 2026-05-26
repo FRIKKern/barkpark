@@ -19,6 +19,24 @@ interface ListProjectsEnvelope {
     workspace: Workspace;
     projects: Project[];
 }
+/** Attributes accepted by POST /api/workspaces. */
+interface CreateWorkspaceInput {
+    name: string;
+    slug?: string;
+}
+/** Attributes accepted by POST /api/workspaces/:slug/projects. */
+interface CreateProjectInput {
+    name: string;
+    slug?: string;
+}
+/** Envelope returned by POST /api/workspaces. */
+interface CreateWorkspaceEnvelope {
+    workspace: Workspace;
+}
+/** Envelope returned by POST /api/workspaces/:slug/projects. */
+interface CreateProjectEnvelope {
+    project: Project;
+}
 /**
  * List the workspaces the configured token can reach.
  *
@@ -37,6 +55,24 @@ declare function listWorkspaces(config: BarkparkClientConfig): Promise<Workspace
  * Prefer `client.listProjects(workspaceSlug)`.
  */
 declare function listProjects(config: BarkparkClientConfig, workspaceSlug: string): Promise<Project[]>;
+/**
+ * Create a workspace.
+ *
+ * Calls `POST /api/workspaces` with `{ name, slug? }` — a top-level tenancy
+ * endpoint, so the path is neither dataset-scoped nor `scopePrefix`-prefixed.
+ * Returns the created `Workspace` unwrapped from the `{ workspace }` envelope.
+ * Token-authed via the shared Bearer plumbing. Prefer `client.createWorkspace(attrs)`.
+ */
+declare function createWorkspace(config: BarkparkClientConfig, attrs: CreateWorkspaceInput): Promise<Workspace>;
+/**
+ * Create a project under a workspace.
+ *
+ * Calls `POST /api/workspaces/:workspace_slug/projects` with `{ name, slug? }` —
+ * top-level tenancy endpoint (not dataset-scoped, not `scopePrefix`-prefixed).
+ * Returns the created `Project` unwrapped from the `{ project }` envelope.
+ * Token-authed via the shared Bearer plumbing. Prefer `client.createProject(workspaceSlug, attrs)`.
+ */
+declare function createProject(config: BarkparkClientConfig, workspaceSlug: string, attrs: CreateProjectInput): Promise<Project>;
 
 /**
  * Public type surface for @barkpark/core v0.1.
@@ -256,6 +292,16 @@ interface BarkparkClient {
      * Top-level tenancy endpoint — independent of the client's workspace/project scope.
      */
     listProjects(workspaceSlug: string): Promise<Project[]>;
+    /**
+     * Create a workspace via `POST /api/workspaces` with `{ name, slug? }`. Returns the
+     * created workspace. Top-level tenancy endpoint — token-authed, not dataset-scoped.
+     */
+    createWorkspace(attrs: CreateWorkspaceInput): Promise<Workspace>;
+    /**
+     * Create a project under a workspace via `POST /api/workspaces/:slug/projects` with
+     * `{ name, slug? }`. Returns the created project. Top-level tenancy endpoint — token-authed.
+     */
+    createProject(workspaceSlug: string, attrs: CreateProjectInput): Promise<Project>;
 }
 
 interface HandshakeCache {
@@ -603,4 +649,4 @@ declare function typedClient<C>(client: C): C;
  */
 declare function defineActions<C>(client: C): C;
 
-export { type ApiVersion, BarkparkAPIError, BarkparkAuthError, type BarkparkClient, type BarkparkClientConfig, BarkparkConflictError, type BarkparkDocument, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, type BarkparkHooks, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, type BuilderState, type CommitOptions, type DocsBuilder, type FilterExpression, type FilterOp, type FilterValue, type ListProjectsEnvelope, type ListWorkspacesEnvelope, type ListenEvent, type ListenHandle, type MetaResponse, type MutateEnvelope, type MutateResult, type OrderDirection, type OrderField, type OrderSpec, type PatchBuilder, type Perspective, type Project, type QueryOptions, type ReadEnvelope, type RequestContext, type ResponseContext, type TransactionBuilder, type Workspace, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createTransaction, defineActions, fetchRawDoc, getDoc, listProjects, listWorkspaces, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };
+export { type ApiVersion, BarkparkAPIError, BarkparkAuthError, type BarkparkClient, type BarkparkClientConfig, BarkparkConflictError, type BarkparkDocument, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, type BarkparkHooks, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, type BuilderState, type CommitOptions, type CreateProjectEnvelope, type CreateProjectInput, type CreateWorkspaceEnvelope, type CreateWorkspaceInput, type DocsBuilder, type FilterExpression, type FilterOp, type FilterValue, type ListProjectsEnvelope, type ListWorkspacesEnvelope, type ListenEvent, type ListenHandle, type MetaResponse, type MutateEnvelope, type MutateResult, type OrderDirection, type OrderField, type OrderSpec, type PatchBuilder, type Perspective, type Project, type QueryOptions, type ReadEnvelope, type RequestContext, type ResponseContext, type TransactionBuilder, type Workspace, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createProject, createTransaction, createWorkspace, defineActions, fetchRawDoc, getDoc, listProjects, listWorkspaces, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };

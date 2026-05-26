@@ -41,6 +41,28 @@ export interface ListProjectsEnvelope {
   projects: Project[]
 }
 
+/** Attributes accepted by POST /api/workspaces. */
+export interface CreateWorkspaceInput {
+  name: string
+  slug?: string
+}
+
+/** Attributes accepted by POST /api/workspaces/:slug/projects. */
+export interface CreateProjectInput {
+  name: string
+  slug?: string
+}
+
+/** Envelope returned by POST /api/workspaces. */
+export interface CreateWorkspaceEnvelope {
+  workspace: Workspace
+}
+
+/** Envelope returned by POST /api/workspaces/:slug/projects. */
+export interface CreateProjectEnvelope {
+  project: Project
+}
+
 /**
  * List the workspaces the configured token can reach.
  *
@@ -79,4 +101,50 @@ export async function listProjects(
     { kind: 'read' },
   )
   return data?.projects ?? []
+}
+
+/**
+ * Create a workspace.
+ *
+ * Calls `POST /api/workspaces` with `{ name, slug? }` — a top-level tenancy
+ * endpoint, so the path is neither dataset-scoped nor `scopePrefix`-prefixed.
+ * Returns the created `Workspace` unwrapped from the `{ workspace }` envelope.
+ * Token-authed via the shared Bearer plumbing. Prefer `client.createWorkspace(attrs)`.
+ */
+export async function createWorkspace(
+  config: BarkparkClientConfig,
+  attrs: CreateWorkspaceInput,
+): Promise<Workspace> {
+  const { data } = await request<CreateWorkspaceEnvelope>(config, '/api/workspaces', {
+    kind: 'write',
+    method: 'POST',
+    body: attrs,
+  })
+  return data.workspace
+}
+
+/**
+ * Create a project under a workspace.
+ *
+ * Calls `POST /api/workspaces/:workspace_slug/projects` with `{ name, slug? }` —
+ * top-level tenancy endpoint (not dataset-scoped, not `scopePrefix`-prefixed).
+ * Returns the created `Project` unwrapped from the `{ project }` envelope.
+ * Token-authed via the shared Bearer plumbing. Prefer `client.createProject(workspaceSlug, attrs)`.
+ */
+export async function createProject(
+  config: BarkparkClientConfig,
+  workspaceSlug: string,
+  attrs: CreateProjectInput,
+): Promise<Project> {
+  if (typeof workspaceSlug !== 'string' || workspaceSlug.length === 0) {
+    throw new BarkparkValidationError('createProject requires a workspace slug', {
+      field: 'workspaceSlug',
+    })
+  }
+  const { data } = await request<CreateProjectEnvelope>(
+    config,
+    `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
+    { kind: 'write', method: 'POST', body: attrs },
+  )
+  return data.project
 }

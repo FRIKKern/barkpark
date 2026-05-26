@@ -22,7 +22,16 @@ import { createTransaction } from './transaction'
 import { publishDoc, unpublishDoc } from './publish'
 import { createListenHandle } from './listen'
 import { fetchRawDoc } from './fetchRaw'
-import { listWorkspaces, listProjects, type Project, type Workspace } from './tenancy'
+import {
+  listWorkspaces,
+  listProjects,
+  createWorkspace,
+  createProject,
+  type CreateProjectInput,
+  type CreateWorkspaceInput,
+  type Project,
+  type Workspace,
+} from './tenancy'
 import { createHandshakeCache, type HandshakeCache } from './handshake'
 
 const API_VERSION_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -208,6 +217,12 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     async listProjects(workspaceSlug: string): Promise<Project[]> {
       return listProjects(frozen, workspaceSlug)
+    },
+    async createWorkspace(attrs: CreateWorkspaceInput): Promise<Workspace> {
+      return createWorkspace(frozen, attrs)
+    },
+    async createProject(workspaceSlug: string, attrs: CreateProjectInput): Promise<Project> {
+      return createProject(frozen, workspaceSlug, attrs)
     },
     handshake(): Promise<MetaResponse> {
       return handshakeCache.get(frozen)

@@ -4,7 +4,7 @@
  * changes without an ADR amendment.
  */
 
-import type { Project, Workspace } from './tenancy'
+import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace } from './tenancy'
 
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 export type ApiVersion = `${number}-${number}-${number}`
@@ -242,4 +242,14 @@ export interface BarkparkClient {
    * Top-level tenancy endpoint — independent of the client's workspace/project scope.
    */
   listProjects(workspaceSlug: string): Promise<Project[]>
+  /**
+   * Create a workspace via `POST /api/workspaces` with `{ name, slug? }`. Returns the
+   * created workspace. Top-level tenancy endpoint — token-authed, not dataset-scoped.
+   */
+  createWorkspace(attrs: CreateWorkspaceInput): Promise<Workspace>
+  /**
+   * Create a project under a workspace via `POST /api/workspaces/:slug/projects` with
+   * `{ name, slug? }`. Returns the created project. Top-level tenancy endpoint — token-authed.
+   */
+  createProject(workspaceSlug: string, attrs: CreateProjectInput): Promise<Project>
 }

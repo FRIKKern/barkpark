@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
-import { listWorkspaces, listProjects } from '../src/tenancy'
+import { listWorkspaces, listProjects, createWorkspace, createProject } from '../src/tenancy'
 import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
@@ -129,5 +129,89 @@ describe('listProjects', () => {
       ),
     )
     expect(await listProjects(baseConfig, 'acme')).toEqual([])
+  })
+})
+
+describe('createWorkspace', () => {
+  it('POSTs /api/workspaces with the body and unwraps { workspace }', async () => {
+    let seenPath = ''
+    let seenMethod = ''
+    let seenAuth: string | null = null
+    let seenBody: unknown = undefined
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces`, async ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        seenMethod = request.method
+        seenAuth = request.headers.get('authorization')
+        seenBody = await request.json()
+        return HttpResponse.json(
+          { workspace: { id: 'w9', slug: 'acme', name: 'Acme' } },
+          { status: 201, headers: { 'x-request-id': 'req_ws_create_1' } },
+        )
+      }),
+    )
+    const out = await createWorkspace(baseConfig, { name: 'Acme', slug: 'acme' })
+    expect(seenPath).toBe('/api/workspaces')
+    expect(seenMethod).toBe('POST')
+    expect(seenAuth).toBe('Bearer test-token')
+    expect(seenBody).toEqual({ name: 'Acme', slug: 'acme' })
+    expect(out).toEqual({ id: 'w9', slug: 'acme', name: 'Acme' })
+  })
+
+  it('stays at /api/workspaces even when workspace + project are configured', async () => {
+    let seenPath = ''
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({ workspace: { id: 'w9', slug: 'new', name: 'New' } }, { status: 201 })
+      }),
+    )
+    await createWorkspace(scopedConfig, { name: 'New' })
+    expect(seenPath).toBe('/api/workspaces')
+  })
+})
+
+describe('createProject', () => {
+  it('POSTs /api/workspaces/:slug/projects with the body and unwraps { project }', async () => {
+    let seenPath = ''
+    let seenMethod = ''
+    let seenAuth: string | null = null
+    let seenBody: unknown = undefined
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces/:slug/projects`, async ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        seenMethod = request.method
+        seenAuth = request.headers.get('authorization')
+        seenBody = await request.json()
+        return HttpResponse.json(
+          { project: { id: 'p9', slug: 'blog', name: 'Blog' } },
+          { status: 201, headers: { 'x-request-id': 'req_proj_create_1' } },
+        )
+      }),
+    )
+    const out = await createProject(baseConfig, 'acme', { name: 'Blog', slug: 'blog' })
+    expect(seenPath).toBe('/api/workspaces/acme/projects')
+    expect(seenMethod).toBe('POST')
+    expect(seenAuth).toBe('Bearer test-token')
+    expect(seenBody).toEqual({ name: 'Blog', slug: 'blog' })
+    expect(out).toEqual({ id: 'p9', slug: 'blog', name: 'Blog' })
+  })
+
+  it('encodes the workspace slug into the path', async () => {
+    let seenPath = ''
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces/:slug/projects`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({ project: { id: 'p9', slug: 'docs', name: 'Docs' } }, { status: 201 })
+      }),
+    )
+    await createProject(scopedConfig, 'glo bex', { name: 'Docs' })
+    expect(seenPath).toBe('/api/workspaces/glo%20bex/projects')
+  })
+
+  it('throws BarkparkValidationError on an empty workspace slug', async () => {
+    await expect(createProject(baseConfig, '', { name: 'X' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
   })
 })

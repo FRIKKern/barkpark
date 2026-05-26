@@ -1126,6 +1126,27 @@ async function listProjects(config, workspaceSlug) {
   );
   return data?.projects ?? [];
 }
+async function createWorkspace(config, attrs) {
+  const { data } = await request(config, "/api/workspaces", {
+    kind: "write",
+    method: "POST",
+    body: attrs
+  });
+  return data.workspace;
+}
+async function createProject(config, workspaceSlug, attrs) {
+  if (typeof workspaceSlug !== "string" || workspaceSlug.length === 0) {
+    throw new BarkparkValidationError("createProject requires a workspace slug", {
+      field: "workspaceSlug"
+    });
+  }
+  const { data } = await request(
+    config,
+    `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
+    { kind: "write", method: "POST", body: attrs }
+  );
+  return data.project;
+}
 
 // src/handshake.ts
 function cacheKey(config) {
@@ -1294,6 +1315,12 @@ function createClient(config) {
     async listProjects(workspaceSlug) {
       return listProjects(frozen, workspaceSlug);
     },
+    async createWorkspace(attrs) {
+      return createWorkspace(frozen, attrs);
+    },
+    async createProject(workspaceSlug, attrs) {
+      return createProject(frozen, workspaceSlug, attrs);
+    },
     handshake() {
       return handshakeCache.get(frozen);
     },
@@ -1329,7 +1356,9 @@ exports.createDocsOperation = createDocsOperation;
 exports.createHandshakeCache = createHandshakeCache;
 exports.createListenHandle = createListenHandle;
 exports.createPatch = createPatch;
+exports.createProject = createProject;
 exports.createTransaction = createTransaction;
+exports.createWorkspace = createWorkspace;
 exports.defineActions = defineActions;
 exports.fetchRawDoc = fetchRawDoc;
 exports.getDoc = getDoc;
