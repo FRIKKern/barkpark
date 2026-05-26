@@ -1290,13 +1290,16 @@ defmodule BarkparkWeb.StudioComponents do
   attr :presences, :list, default: []
   attr :editor_doc, :map, default: nil
   attr :dataset, :string, required: true
+  attr :current_workspace, :map, default: nil
+  attr :current_project, :map, default: nil
 
   def presence_nav(assigns) do
     ~H"""
     <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
+      <% scope_opts = build_scope_opts(@current_workspace, @current_project) %>
       <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
       <%= for p <- others do %>
-        <% p_doc_title = resolve_presence_doc_title(p, @dataset) %>
+        <% p_doc_title = resolve_presence_doc_title(p, @dataset, scope_opts) %>
         <%= if p.doc_id && p.type do %>
           <div class="presence-user-wrap"
                phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
@@ -1338,17 +1341,31 @@ defmodule BarkparkWeb.StudioComponents do
   defp truncate_text(text, max) when byte_size(text) <= max, do: text
   defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
 
-  defp resolve_presence_doc_title(presence, dataset) do
+  # Build scope opts from the workspace/project assigns the parent LV holds.
+  # Mirrors `BarkparkWeb.ScopeHelpers.scope_opts(%Socket{})` for the Socket
+  # variant — no `memoize: true` (LV processes are long-lived; see sknf).
+  # Nil-safe: an absent workspace or project drops its key entirely.
+  defp build_scope_opts(workspace, project) do
+    []
+    |> put_scope_key(:workspace_id, workspace)
+    |> put_scope_key(:project_id, project)
+  end
+
+  defp put_scope_key(opts, _key, nil), do: opts
+  defp put_scope_key(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
+  defp put_scope_key(opts, _key, _other), do: opts
+
+  defp resolve_presence_doc_title(presence, dataset, scope_opts) do
     type = presence.type
     doc_id = presence.doc_id
 
     if type && doc_id do
-      case Barkpark.Content.get_document(doc_id, type, dataset) do
+      case Barkpark.Content.get_document(doc_id, type, dataset, scope_opts) do
         {:ok, doc} ->
           doc.title || doc_id
 
         _ ->
-          case Barkpark.Content.get_document("drafts.#{doc_id}", type, dataset) do
+          case Barkpark.Content.get_document("drafts.#{doc_id}", type, dataset, scope_opts) do
             {:ok, doc} -> doc.title || doc_id
             _ -> doc_id
           end

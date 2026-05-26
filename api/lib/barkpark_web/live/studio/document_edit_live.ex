@@ -2,6 +2,7 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
+  alias BarkparkWeb.ScopeHelpers
 
   @impl true
   def mount(%{"type" => type, "doc_id" => doc_id, "dataset" => dataset}, _session, socket) do
@@ -125,9 +126,10 @@ defmodule BarkparkWeb.Studio.DocumentEditLive do
     dataset = socket.assigns.dataset
     draft_id = Content.draft_id(doc_id)
     pub_id = Content.published_id(doc_id)
+    scope_opts = ScopeHelpers.scope_opts(socket)
 
-    draft_result = Content.get_document(draft_id, type, dataset)
-    pub_result = Content.get_document(pub_id, type, dataset)
+    draft_result = Content.get_document(draft_id, type, dataset, scope_opts)
+    pub_result = Content.get_document(pub_id, type, dataset, scope_opts)
 
     {doc, is_draft} =
       case draft_result do
