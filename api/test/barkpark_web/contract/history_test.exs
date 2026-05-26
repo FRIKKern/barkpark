@@ -123,4 +123,53 @@ defmodule BarkparkWeb.Contract.HistoryTest do
     resp = get(conn, "/v1/data/history/test/post/h1")
     assert resp.status == 401
   end
+
+  # barkpark-vdmk: a revision created in dataset "other" must NOT be readable or
+  # restorable through a URL that names dataset "test", even for the same token.
+  describe "cross-dataset revision IDOR (vdmk)" do
+    setup do
+      {:ok, _} =
+        Content.create_document("post", %{"doc_id" => "drafts.other1", "title" => "OTHER-V1"}, "other")
+
+      Content.publish_document("other1", "post", "other")
+
+      [other_rev | _] = Content.list_revisions("other1", "post", "other")
+      {:ok, other_rev_id: other_rev.id}
+    end
+
+    test "GET a revision via the wrong dataset → 404", %{conn: conn, other_rev_id: other_rev_id} do
+      # Sanity: the revision IS reachable under its OWN dataset.
+      ok =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/other/#{other_rev_id}")
+
+      assert ok.status == 200
+
+      # The IDOR: same token, but the URL names "test" instead of "other".
+      # Pre-fix this leaked the "other" revision; post-fix → 404.
+      leak =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/test/#{other_rev_id}")
+
+      assert leak.status == 404,
+             "CROSS-DATASET LEAK (revision get): read 'other' revision via 'test' URL"
+    end
+
+    test "RESTORE a revision via the wrong dataset → 404, no write into B",
+         %{conn: conn, other_rev_id: other_rev_id} do
+      resp =
+        conn
+        |> authed()
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/data/revision/test/#{other_rev_id}/restore", Jason.encode!(%{type: "post"}))
+
+      assert resp.status == 404,
+             "CROSS-DATASET RESTORE: restored 'other' revision into 'test' (status #{resp.status})"
+
+      # And the "other" revision's doc was never re-upserted into "test".
+      assert Content.list_revisions("other1", "post", "test") == []
+    end
+  end
 end

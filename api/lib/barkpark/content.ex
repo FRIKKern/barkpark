@@ -2199,17 +2199,22 @@ defmodule Barkpark.Content do
   end
 
   @doc """
-  Get a single revision by ID, optionally workspace/project scoped.
+  Get a single revision by ID, scoped to a dataset and (optionally)
+  workspace/project.
 
-  Scoping prevents a member of one workspace from reading (or restoring) a
-  revision that belongs to another workspace's document via a guessed/leaked id.
+  Dataset scoping closes an intra-workspace IDOR: without it a member can read
+  ANY revision in their workspace by UUID regardless of the dataset named in the
+  URL. Workspace/project scoping additionally prevents cross-workspace reads of
+  a guessed/leaked id. `scope_to_dataset` is NULL-tolerant (matches rows whose
+  `dataset_id` is NULL but whose `dataset` STRING equals the requested one).
   """
-  def get_revision(id, opts \\ []) do
+  def get_revision(id, dataset, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
     Revision
     |> where([r], r.id == ^id)
+    |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> Repo.one()
     |> case do
@@ -2225,7 +2230,8 @@ defmodule Barkpark.Content do
   lifecycle-hook context (`:source`, `:user_id`).
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
-    with {:ok, rev} <- get_revision(revision_id, opts) do
+    with {:ok, rev} <- get_revision(revision_id, dataset, opts),
+         :ok <- assert_revision_dataset(rev, dataset) do
       attrs = %{
         "doc_id" => draft_id(rev.doc_id),
         "title" => rev.title,
@@ -2236,6 +2242,15 @@ defmodule Barkpark.Content do
       upsert_document(type, attrs, dataset, opts)
     end
   end
+
+  # Defence-in-depth on top of get_revision's dataset scoping: refuse to restore
+  # a revision whose own `dataset` does not match the requested one, so a rev
+  # from dataset A can never be re-upserted into dataset B within a workspace.
+  defp assert_revision_dataset(%Revision{dataset: rev_dataset}, dataset)
+       when rev_dataset == dataset,
+       do: :ok
+
+  defp assert_revision_dataset(_rev, _dataset), do: {:error, :not_found}
 
   # ── Papers — context functions ─────────────────────────────────────────────
   #
