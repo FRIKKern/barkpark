@@ -77,7 +77,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     ttl = parse_int(params["ttl"], 60 * 60 * 24 * 7)
 
     with :ok <- require_write(conn),
-         {:ok, share} <- Share.create(id, dataset, ttl: ttl) do
+         {:ok, share} <- Share.create(id, dataset, [ttl: ttl] ++ scope_opts(conn)) do
       json(conn, %{
         result: share,
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}"]
@@ -87,7 +87,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   def revoke_share(conn, %{"dataset" => dataset, "id" => id}) do
     with :ok <- require_write(conn),
-         {:ok, _} <- Share.revoke(id, dataset) do
+         {:ok, _} <- Share.revoke(id, dataset, scope_opts(conn)) do
       json(conn, %{
         result: %{revoked: id},
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}"]

@@ -12,14 +12,22 @@ defmodule Barkpark.Media.Share do
   @collection_type "mediaCollection"
   @default_ttl 60 * 60 * 24 * 7
 
-  @doc "Enable or rotate a collection share link."
+  @doc """
+  Enable or rotate a collection share link.
+
+  `opts` carries the caller's tenancy scope (`[workspace_id: ..., project_id:
+  ...]`) plus `:ttl`. The scope is threaded into `Collections.get/3` so the
+  collection is resolved within the caller's workspace — without it a
+  workspace-B writer could mint/rotate the share token on workspace-A's
+  collection sharing the same dataset string + collection id (barkpark-ukzs).
+  """
   @spec create(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def create(collection_id, dataset, opts \\ []) do
     ttl = Keyword.get(opts, :ttl, @default_ttl)
     expires_at = DateTime.utc_now() |> DateTime.add(ttl, :second) |> DateTime.to_iso8601()
     token = generate_token()
 
-    with {:ok, doc} <- Collections.get(collection_id, dataset) do
+    with {:ok, doc} <- Collections.get(collection_id, dataset, opts) do
       content = doc.content || %{}
 
       share_link = %{
@@ -35,7 +43,7 @@ defmodule Barkpark.Media.Share do
         "content" => Map.put(content, "shareLink", share_link)
       }
 
-      case Content.upsert_document(@collection_type, attrs, dataset, source: :api) do
+      case Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts)) do
         {:ok, _updated} ->
           {:ok,
            %{
@@ -50,10 +58,16 @@ defmodule Barkpark.Media.Share do
     end
   end
 
-  @doc "Disable a collection share link."
-  @spec revoke(String.t(), String.t()) :: {:ok, Document.t()} | {:error, term()}
-  def revoke(collection_id, dataset) do
-    with {:ok, doc} <- Collections.get(collection_id, dataset) do
+  @doc """
+  Disable a collection share link.
+
+  `opts` carries the caller's tenancy scope (`[workspace_id: ..., project_id:
+  ...]`), threaded into `Collections.get/3` so the collection is resolved
+  within the caller's workspace (barkpark-ukzs).
+  """
+  @spec revoke(String.t(), String.t(), keyword()) :: {:ok, Document.t()} | {:error, term()}
+  def revoke(collection_id, dataset, opts \\ []) do
+    with {:ok, doc} <- Collections.get(collection_id, dataset, opts) do
       content = doc.content || %{}
       share_link = Map.get(content, "shareLink", %{})
 
@@ -65,7 +79,7 @@ defmodule Barkpark.Media.Share do
           Map.put(content, "shareLink", Map.merge(share_link, %{"enabled" => false}))
       }
 
-      Content.upsert_document(@collection_type, attrs, dataset, source: :api)
+      Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts))
     end
   end
 
@@ -109,6 +123,20 @@ defmodule Barkpark.Media.Share do
   end
 
   defp share_active?(_), do: false
+
+  # Carry the caller's tenancy scope into the follow-on `upsert_document` write
+  # so the share-link mutation lands on the SAME row the scoped
+  # `Collections.get/3` read resolved — never a Default-scoped duplicate
+  # (barkpark-ukzs). Without the scope keys the write would resolve to the
+  # seeded Default workspace and either overwrite the wrong tenant's row or
+  # insert a fresh one, leaving the resolved collection's shareLink untouched.
+  # `:ttl` (create's own opt) is dropped — only the tenancy keys + `source`
+  # belong on the write.
+  defp write_opts(opts) do
+    opts
+    |> Keyword.take([:workspace_id, :project_id])
+    |> Keyword.put(:source, :api)
+  end
 
   defp generate_token do
     :crypto.strong_rand_bytes(18) |> Base.url_encode64(padding: false)
