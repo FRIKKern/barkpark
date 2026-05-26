@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -333,20 +334,22 @@ func (ds *DataStore) listenSSE(token string) error {
 
 func (ds *DataStore) pollOnce() {
 	// Scoped change-detection fallback when the SSE listener drops. The legacy
-	// flat document list has no scoped equivalent; the export endpoint dumps
-	// the dataset, which hashes equivalently for change detection.
+	// flat document list has no scoped equivalent; the export endpoint streams
+	// the dataset as NDJSON (one document envelope per line).
+	//
+	// Change detection hashes the DOCUMENT SET — the sorted set of
+	// "_id:_rev" pairs — not the raw response body. The envelope's _rev bumps
+	// on every mutation, so this hash changes iff a document is added, removed,
+	// or revised. It deliberately ignores volatile / non-identity envelope
+	// content and is order-independent, so a re-poll over the same docs (in any
+	// order) yields the same hash and fires no spurious refresh.
 	resp, err := ds.authGet(ds.scopedURL("/v1/data/export/" + ds.Dataset))
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
-
-	hash := fmt.Sprintf("%x", sha256.Sum256(body))
+	hash := ds.exportDocSetHash(resp.Body)
 
 	ds.mu.Lock()
 	changed := hash != ds.lastHash
@@ -356,6 +359,38 @@ func (ds *DataStore) pollOnce() {
 	if changed && ds.program != nil {
 		ds.program.Send(DataStoreRefreshMsg{})
 	}
+}
+
+// exportDocSetHash reads the NDJSON export stream and returns a stable hash of
+// the document set: each line's "_id:_rev" pair, sorted and concatenated, then
+// SHA-256'd. Unparseable lines are skipped so a single malformed record cannot
+// poison the whole signature. The hash is identity-derived — independent of
+// stream order and of any non-identity envelope fields.
+func (ds *DataStore) exportDocSetHash(r io.Reader) string {
+	type docIdentity struct {
+		ID  string `json:"_id"`
+		Rev string `json:"_rev"`
+	}
+
+	pairs := make([]string, 0)
+	scanner := bufio.NewScanner(r)
+	// Export documents can be large; raise the line cap above bufio's 64KB
+	// default so a big content blob doesn't truncate the _id/_rev decode.
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var d docIdentity
+		if err := json.Unmarshal(line, &d); err != nil || d.ID == "" {
+			continue
+		}
+		pairs = append(pairs, d.ID+":"+d.Rev)
+	}
+
+	sort.Strings(pairs)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(pairs, "\n"))))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
