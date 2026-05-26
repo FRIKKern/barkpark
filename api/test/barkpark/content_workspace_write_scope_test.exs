@@ -173,4 +173,112 @@ defmodule Barkpark.ContentWorkspaceWriteScopeTest do
       assert doc.project_id == project.id
     end
   end
+
+  describe "workspace-only write resolves the workspace's default project + dataset_id (wykb)" do
+    # The NULL-dataset_id gap: a write scoped with workspace_id but NO project_id
+    # (the scope_to_workspace(q, ws, nil) contract) used to leave project_id nil,
+    # so resolve_dataset_id_for_write short-circuited and stamped dataset_id=NULL.
+    # The fix resolves the workspace's OWN default project, which lets dataset_id
+    # resolve. This row is then visible to a strict dataset_id reader in its own
+    # scope.
+
+    test "stamps the dataset_id resolved via the workspace's default-slug project (NOT NULL)" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "wo-default", name: "wo-default"})
+      # The workspace's OWN default project — the resolver must prefer the
+      # "default"-slug project.
+      {:ok, proj} = Tenancy.create_project(ws, %{slug: "default", name: "default"})
+
+      result =
+        mutate(%{"_id" => "wo-doc", "_type" => @type_name, "title" => "WS-only"},
+          source: :api,
+          workspace_id: ws.id
+          # NO project_id — workspace-only scope.
+        )
+
+      {:ok, doc} =
+        Content.get_document(result.id, @type_name, @shared_dataset, workspace_id: ws.id)
+
+      assert doc.workspace_id == ws.id
+      # The fix: project resolved from the workspace's default project...
+      assert doc.project_id == proj.id
+      # ...and dataset_id is NOT NULL — it points at the `@shared_dataset` dataset
+      # row under THAT project (the workspace's default-project production-style
+      # dataset for the written dataset string).
+      assert is_binary(doc.dataset_id)
+      ds = Tenancy.get_dataset_by_id(doc.dataset_id)
+      assert ds.project_id == proj.id
+      assert ds.slug == @shared_dataset
+    end
+
+    test "prefers the \"default\"-slug project over a non-default project" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "wo-prefer", name: "wo-prefer"})
+      # A non-default project (slug-orders BEFORE "default": "aaa" < "default")
+      # to prove the resolver picks "default" by slug, not by ordering.
+      {:ok, _other} = Tenancy.create_project(ws, %{slug: "aaa", name: "aaa"})
+      {:ok, default_proj} = Tenancy.create_project(ws, %{slug: "default", name: "default"})
+
+      result =
+        mutate(%{"_id" => "wo-prefer-doc", "_type" => @type_name, "title" => "prefer"},
+          source: :api,
+          workspace_id: ws.id
+        )
+
+      {:ok, doc} =
+        Content.get_document(result.id, @type_name, @shared_dataset, workspace_id: ws.id)
+
+      assert doc.project_id == default_proj.id
+    end
+
+    test "NEVER-WORSE: a workspace with NO projects writes dataset_id=NULL without crashing, still readable" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "wo-empty", name: "wo-empty"})
+      # No projects created under this workspace — nothing to resolve.
+
+      result =
+        mutate(%{"_id" => "wo-null", "_type" => @type_name, "title" => "no-proj"},
+          source: :api,
+          workspace_id: ws.id
+        )
+
+      # The write did NOT crash and stamped the workspace.
+      {:ok, doc} =
+        Content.get_document(result.id, @type_name, @shared_dataset, workspace_id: ws.id)
+
+      assert doc.workspace_id == ws.id
+      # No project resolved => project_id + dataset_id stay nil (never-worse).
+      assert is_nil(doc.project_id)
+      assert is_nil(doc.dataset_id)
+
+      # And the row is STILL readable in its own scope via the yx7f NULL-tolerant
+      # read — a workspace-only list surfaces it.
+      ids =
+        Content.list_documents(@type_name, @shared_dataset, perspective: :raw, workspace_id: ws.id)
+        |> doc_ids()
+
+      assert result.id in ids
+    end
+
+    test "explicit project_id is UNCHANGED — the resolver does not override it" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "wo-explicit", name: "wo-explicit"})
+      {:ok, _default_proj} = Tenancy.create_project(ws, %{slug: "default", name: "default"})
+      # An explicit, NON-default project the caller named directly.
+      {:ok, explicit_proj} = Tenancy.create_project(ws, %{slug: "chosen", name: "chosen"})
+
+      result =
+        mutate(%{"_id" => "wo-explicit-doc", "_type" => @type_name, "title" => "explicit"},
+          source: :api,
+          workspace_id: ws.id,
+          project_id: explicit_proj.id
+        )
+
+      {:ok, doc} =
+        Content.get_document(result.id, @type_name, @shared_dataset, workspace_id: ws.id)
+
+      # The explicit project wins — NOT the "default"-slug project the resolver
+      # would have picked for a workspace-only write.
+      assert doc.project_id == explicit_proj.id
+      assert is_binary(doc.dataset_id)
+      ds = Tenancy.get_dataset_by_id(doc.dataset_id)
+      assert ds.project_id == explicit_proj.id
+    end
+  end
 end

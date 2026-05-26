@@ -1478,11 +1478,25 @@ defmodule Barkpark.Content do
   # Default Project so unscoped (nil) fixtures land in Default and stay visible
   # to Default-scoped flat-route reads. Degrades to nil when the backfill hasn't
   # run yet (fresh test sandbox before seed) — never crashes.
+  #
+  # Workspace-only scope (barkpark-wykb): the `scope_to_workspace(q, ws, nil)`
+  # contract lets a caller pass workspace_id WITHOUT a project_id. Without
+  # resolution that write got workspace_id stamped but dataset_id=NULL (the
+  # dataset_id resolver below short-circuits on a nil project) — invisible to a
+  # strict dataset_id reader in its own scope. So when we hold a workspace but
+  # no project, resolve the WORKSPACE'S OWN default project (prefer the
+  # "default"-slug project, else the first project of that workspace) and stamp
+  # it, which lets the dataset_id resolve too. NEVER-WORSE: if the workspace has
+  # no projects, project_id stays nil (and dataset_id stays NULL) — the
+  # yx7f NULL-tolerant read still finds the row.
   defp resolve_write_scope(attrs, opts) do
     opt_ws = Keyword.get(opts, :workspace_id)
     opt_proj = Keyword.get(opts, :project_id)
 
     cond do
+      not is_nil(opt_ws) and is_nil(opt_proj) ->
+        {opt_ws, default_project_id_for_workspace(opt_ws)}
+
       not is_nil(opt_ws) ->
         {opt_ws, opt_proj}
 
@@ -1495,6 +1509,24 @@ defmodule Barkpark.Content do
         {ws && ws.id, proj && proj.id}
     end
   end
+
+  # Resolve a workspace's OWN default project id for a workspace-only write.
+  # Prefers the project whose slug is "default", else the first project (the
+  # list is slug-ordered). Returns nil when the workspace has no projects —
+  # the caller then keeps the nil project_id (and the dataset_id resolver
+  # keeps dataset_id NULL), never crashing.
+  defp default_project_id_for_workspace(ws_id) when is_binary(ws_id) do
+    case Barkpark.Tenancy.list_projects(ws_id) do
+      [] ->
+        nil
+
+      projects ->
+        project = Enum.find(projects, &(&1.slug == "default")) || hd(projects)
+        project.id
+    end
+  end
+
+  defp default_project_id_for_workspace(_), do: nil
 
   defp scope_key_present?(attrs) do
     Map.has_key?(attrs, "workspace_id") or Map.has_key?(attrs, :workspace_id)
