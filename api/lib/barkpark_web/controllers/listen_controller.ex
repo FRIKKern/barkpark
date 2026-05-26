@@ -59,9 +59,13 @@ defmodule BarkparkWeb.ListenController do
   real-time changes, mirroring the query-layer WHERE workspace_id filter.
 
   The filter joins on the owning `documents` row (by `doc_id` + `dataset`)
-  rather than `mutation_events.workspace_id`, because the event row's own scope
-  column is not populated by the current write path; the document's scope is
-  the authoritative source. nil `workspace_id` → unfiltered (back-compat).
+  rather than reading `mutation_events.workspace_id` directly. The event row's
+  own `workspace_id` column *is* populated — `save_event/5` in `Barkpark.Content`
+  stamps it from `doc.workspace_id` on every write — but the document's scope
+  remains the authoritative tenant boundary: it's the single source of truth a
+  document can be moved/reconciled against, so joining on it is correct
+  regardless of the denormalised event column. nil `workspace_id` → unfiltered
+  (back-compat).
   """
   def replay_since(dataset, since, workspace_id \\ nil)
 
