@@ -1514,18 +1514,50 @@ defmodule Barkpark.Content do
   def resolve_read_dataset_id(dataset, opts) when is_binary(dataset) do
     project_id = Keyword.get(opts, :project_id) || read_default_project_id()
 
-    case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
-      %Barkpark.Tenancy.Dataset{id: id} -> id
-      _ -> nil
-    end
+    # Per-request memoization (barkpark-5znv): a single public read fans this
+    # resolve across schema_public? + list_documents + schema_hash_for_dataset
+    # (~9 calls), all for the immutable {project_id, dataset} pair. The result
+    # (id OR nil) is keyed in the Process dictionary — a Phoenix request is one
+    # process, so the memo is naturally per-request and dies with the process.
+    # No :persistent_term/:ets global cache: those go stale across test DBs /
+    # ecto.reset and would need invalidation. The resolved id is identical to
+    # the uncached path — only the redundant get_dataset roundtrips are skipped.
+    memoize({:resolve_read_dataset_id, project_id, dataset}, fn ->
+      case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
+        %Barkpark.Tenancy.Dataset{id: id} -> id
+        _ -> nil
+      end
+    end)
   end
 
   def resolve_read_dataset_id(_dataset, _opts), do: nil
 
+  # The Default project id is immutable within a request; memoize it so the
+  # no-`:project_id` (flat/back-compat) route resolves get_default_project once
+  # — collapsing get_default_workspace + get_default_project (2 reads) that
+  # otherwise repeated on every resolve call within the same request.
   defp read_default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
-      _ -> nil
+    memoize(:read_default_project_id, fn ->
+      case Barkpark.Tenancy.get_default_project() do
+        %{id: id} -> id
+        _ -> nil
+      end
+    end)
+  end
+
+  # Per-request memo helper. Stores the (possibly nil) result under `key` in the
+  # Process dictionary, distinguishing "cached nil" from "not yet computed" via
+  # a private sentinel so a legitimately-nil resolution is not recomputed.
+  @memo_miss :"$barkpark_memo_miss"
+  defp memoize(key, fun) do
+    case Process.get({:barkpark_request_memo, key}, @memo_miss) do
+      @memo_miss ->
+        value = fun.()
+        Process.put({:barkpark_request_memo, key}, value)
+        value
+
+      value ->
+        value
     end
   end
 
