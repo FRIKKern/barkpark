@@ -68,7 +68,15 @@ defmodule Barkpark.Plugins.OnixEdit.Lifecycle do
 
   defp enqueue(doc, dataset) do
     id = doc_id(doc)
-    args = %{"document_id" => id, "type" => "book", "dataset" => dataset}
+
+    # barkpark-zdvi — capture the published doc's tenancy scope into the job
+    # args so the worker re-reads THIS tenant's book (not a same-dataset book
+    # in another workspace). The `after_publish` payload hands us the
+    # `%Document{}`, which carries workspace_id/project_id. Nil-safe: a doc
+    # without scope (pre-tenancy / shapeless map) adds nothing.
+    args =
+      %{"document_id" => id, "type" => "book", "dataset" => dataset}
+      |> PublishWorker.put_scope_args(scope_of(doc))
 
     case args |> PublishWorker.new() |> Oban.insert() do
       {:ok, job} ->
@@ -104,4 +112,19 @@ defmodule Barkpark.Plugins.OnixEdit.Lifecycle do
   defp doc_id(%{"id" => id}) when is_binary(id), do: id
   defp doc_id(%{id: id}) when is_binary(id), do: id
   defp doc_id(_), do: nil
+
+  # Pull the tenancy scope off the published `%Document{}` (atom keys). The
+  # `after_publish` payload always hands a struct, but we read defensively so
+  # a string-keyed map / scope-less doc yields `[]` (no scope, Default
+  # resolution — the pre-fix behaviour).
+  defp scope_of(%{workspace_id: ws, project_id: proj}) do
+    []
+    |> maybe_scope(:workspace_id, ws)
+    |> maybe_scope(:project_id, proj)
+  end
+
+  defp scope_of(_), do: []
+
+  defp maybe_scope(opts, _key, nil), do: opts
+  defp maybe_scope(opts, key, value), do: Keyword.put(opts, key, value)
 end

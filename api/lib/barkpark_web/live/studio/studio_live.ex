@@ -2702,7 +2702,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
       dataset: dataset,
       doc_id: doc_id,
       doc_type: socket.assigns[:editor_type],
-      doc: socket.assigns[:editor_doc]
+      doc: socket.assigns[:editor_doc],
+      # barkpark-zdvi — the tenancy scope of the dispatching Studio session.
+      # Resolver plugins (OnixEdit) close over this so a scope-aware action
+      # (publish/dry-run) reads only THIS workspace/project's document and
+      # threads the same scope into any Oban job it enqueues. Empty when the
+      # socket carries no workspace/project assign (back-compat → Default
+      # resolution).
+      scope: ScopeHelpers.scope_opts(socket)
     }
   end
 

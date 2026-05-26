@@ -106,8 +106,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
     type = args["type"] || "book"
     dataset = args["dataset"] || "production"
     client_opts = client_opts(args)
+    scope = scope_opts_from_args(args)
 
-    case Content.get_document(doc_id, type, dataset) do
+    case Content.get_document(doc_id, type, dataset, scope) do
       {:error, :not_found} ->
         Logger.warning(
           "PublishWorker: document not found doc_id=#{inspect(doc_id)} type=#{type} dataset=#{dataset}"
@@ -393,7 +394,14 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   @spec cancel(String.t(), String.t(), String.t(), keyword()) ::
           :ok | {:error, :no_submission | :cannot_cancel | :not_found | term()}
   def cancel(document_id, type, dataset, opts \\ []) do
-    case Content.get_document(document_id, type, dataset) do
+    # `opts` may carry both `Client.cancel` opts AND the tenancy scope
+    # (`:workspace_id` / `:project_id`). The read is scoped to the same
+    # tenant the caller resolved; `Client.cancel` reads only its own keys,
+    # so the two co-exist in one keyword list. Nil/absent scope keys fall
+    # back to Default resolution (back-compat).
+    scope = scope_opts_from_keyword(opts)
+
+    case Content.get_document(document_id, type, dataset, scope) do
       {:error, :not_found} ->
         {:error, :not_found}
 
@@ -541,6 +549,62 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
       _ -> []
     end)
   end
+
+  # ---------------------------------------------------------------------------
+  # Tenancy scope (barkpark-zdvi) — canonical write/read of workspace_id /
+  # project_id into & out of the Oban job args.
+  #
+  # The worker re-reads the document it was enqueued for, so the ENQUEUE
+  # must capture the dispatching scope into the string-keyed args and the
+  # worker must read it back as `Content.get_document/4` opts. Without this
+  # the read is global + Default-project — two workspaces sharing the
+  # "production" dataset string could act on the WRONG tenant's book.
+  #
+  # `put_scope_args/2` is the single write seam shared by every enqueue site
+  # (Actions.enqueue_publish, Lifecycle.enqueue, BokbasenLive retry). It is
+  # nil-safe: an empty scope (or nil-valued keys) adds nothing, so a caller
+  # that lacks scope simply enqueues the legacy arg shape.
+  #
+  # Back-compat: old jobs already in the queue lack these keys, so
+  # `scope_opts_from_args/1` yields `[]` → nil workspace → Default
+  # resolution (the pre-fix behaviour), never a crash.
+  # ---------------------------------------------------------------------------
+
+  @doc false
+  @spec put_scope_args(map(), keyword()) :: map()
+  def put_scope_args(args, scope) when is_map(args) and is_list(scope) do
+    args
+    |> maybe_put_arg("workspace_id", Keyword.get(scope, :workspace_id))
+    |> maybe_put_arg("project_id", Keyword.get(scope, :project_id))
+  end
+
+  def put_scope_args(args, _scope) when is_map(args), do: args
+
+  defp maybe_put_arg(args, _key, nil), do: args
+  defp maybe_put_arg(args, key, value), do: Map.put(args, key, value)
+
+  # Read the scope back out of the string-keyed Oban args into the keyword
+  # opts `Content.get_document/4` expects. Absent keys drop entirely.
+  defp scope_opts_from_args(args) when is_map(args) do
+    []
+    |> maybe_put_scope(:project_id, args["project_id"])
+    |> maybe_put_scope(:workspace_id, args["workspace_id"])
+  end
+
+  defp scope_opts_from_args(_), do: []
+
+  # Pull only the scope keys out of a mixed keyword (client opts + scope),
+  # as passed to `cancel/4`.
+  defp scope_opts_from_keyword(opts) when is_list(opts) do
+    []
+    |> maybe_put_scope(:project_id, Keyword.get(opts, :project_id))
+    |> maybe_put_scope(:workspace_id, Keyword.get(opts, :workspace_id))
+  end
+
+  defp scope_opts_from_keyword(_), do: []
+
+  defp maybe_put_scope(opts, _key, nil), do: opts
+  defp maybe_put_scope(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp safe_truncate(body) when is_binary(body), do: String.slice(body, 0, 500)
   defp safe_truncate(body), do: inspect(body, limit: 200)
