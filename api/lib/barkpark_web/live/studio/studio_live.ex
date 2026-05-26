@@ -168,6 +168,35 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket = ensure_tenancy_scope(socket)
 
+    # Defense-in-depth (Task barkpark-o7fu): validate the URL dataset leaf
+    # against the RESOLVED project before trusting it — mirroring how the
+    # `switch-dataset` handler gates a slug via `project_has_dataset?/2`.
+    # A direct navigation to `/studio/<arbitrary-dataset>` otherwise takes the
+    # leaf verbatim into rebuild_panes/subscribe with no membership/ownership
+    # check. This is NOT a cross-tenant leak — content reads are already bounded
+    # by `scope_opts` (Content.Scope filters workspace_id/project_id), so a
+    # foreign slug yields the member's own (likely empty) data — but it lets the
+    # URL claim a dataset the project doesn't own, leaving inconsistent state on
+    # the lone scope WHERE-clause. When the leaf isn't one of the project's
+    # datasets we push_patch to the project's default dataset instead.
+    #
+    # The redirect ONLY fires when the project actually has a non-leaf default to
+    # fall back to (`default_dataset_for_project/1` is a struct). For a project
+    # with NO dataset rows (string-seam-only / not-yet-seeded) `project_has_dataset?`
+    # is false for EVERY slug, but there is nothing to redirect TO — the `dataset`
+    # string stays authoritative there (same invariant rescope_dataset_for_project
+    # holds). The chosen default always satisfies `project_has_dataset?`, so the
+    # patched navigation never loops.
+    case redirect_dataset_leaf(socket, dataset) do
+      {:redirect, slug} ->
+        {:noreply, push_patch(socket, to: studio_path(path, slug, desk: desk))}
+
+      :ok ->
+        finish_handle_params(socket, dataset, path, desk, uri)
+    end
+  end
+
+  defp finish_handle_params(socket, dataset, path, desk, uri) do
     socket = ensure_list_subscription(socket, dataset)
 
     current_path =
@@ -2364,6 +2393,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp project_has_dataset?(_, _), do: false
+
+  # Defense-in-depth gate for the `/studio/:dataset` URL leaf (Task barkpark-o7fu).
+  # Returns `{:redirect, default_slug}` when the resolved current project does NOT
+  # own the requested `dataset` AND has a default dataset to fall back to; `:ok`
+  # otherwise (leaf is valid, OR the project has no dataset rows to redirect to,
+  # OR no project is resolved — in those cases the `dataset` string stays
+  # authoritative, matching rescope_dataset_for_project's string-seam invariant).
+  defp redirect_dataset_leaf(socket, dataset) do
+    project = socket.assigns[:current_project]
+
+    cond do
+      project_has_dataset?(project, dataset) ->
+        :ok
+
+      true ->
+        case default_dataset_for_project(project) do
+          %{slug: slug} when is_binary(slug) and slug != "" and slug != dataset ->
+            {:redirect, slug}
+
+          _ ->
+            :ok
+        end
+    end
+  end
 
   # Mount-scope derivation (Task barkpark-g4a7). With an authenticated
   # principal, the initial workspace is the FIRST workspace it is a member of
