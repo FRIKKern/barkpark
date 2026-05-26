@@ -2,38 +2,39 @@ defmodule Barkpark.Repo.Migrations.RepairCollapsedPaperflowPaperSchema do
   use Ecto.Migration
 
   @moduledoc """
-  Wave-2 REPAIR: restore the per-dataset `paper` schema row that the collapse
-  migration (20260527133000) wrongly deleted.
+  Wave-2 REPAIR (now a guarded no-op): compensate the EARLIER collapse DESIGN
+  that grouped `schema_definitions` by `(name, project_id)` and would have
+  DELETED the paperflow `paper` row.
 
-  ## The data-loss bug
+  ## Why this is a no-op against the SHIPPED collapse
 
-  `20260527133000_collapse_duplicate_schema_definitions` grouped
-  `schema_definitions` by `(name, project_id)` and treated `dataset` /
-  `dataset_id` as NON-substantive. Two byte-identical `paper` rows existed —
-  one in the `production` dataset (seeded by `20260524120000`), one in the
-  `paperflow` dataset (seeded by `20260524131000`) — both stamped with the same
-  Default `project_id`. The collapse saw a `(paper, Default)` group of >1,
-  judged the rows byte-identical (they differ ONLY in `dataset`/`dataset_id`),
-  and DELETED the `paperflow` row, keeping the `production` survivor.
+  This migration was written against an earlier `20260527133000` design that
+  grouped by `(name, project_id)`. Under that design two `paper` rows — one
+  `production` (seeded by `20260524120000`), one `paperflow` (seeded by
+  `20260524131000`), both stamped with the same Default `project_id` — fell
+  into one `(paper, Default)` group, and the collapse deleted the paperflow row,
+  leaving only the production survivor. After `20260527134000` flipped schema
+  uniqueness to `(name, dataset_id)`, the paperflow `paper` schema would then be
+  permanently unresolvable. This migration re-created it.
 
-  But `20260527134000_flip_uniqueness_to_dataset_id` then flipped schema
-  uniqueness to `(name, dataset_id)` — schemas are DATASET-scoped, a project
-  legitimately holds the same NAME in distinct datasets. After the flip,
-  `Content.get_schema("paper", "paperflow")` resolves the paperflow dataset's
-  `dataset_id` and filters
-  `dataset_id == <paperflow_id> OR (dataset_id IS NULL AND dataset = "paperflow")`.
-  The lone survivor carries `dataset_id = <production_id>` / `dataset =
-  "production"`, so it matches NEITHER branch — the paperflow `paper` schema
-  is permanently unresolvable and nothing recreates it.
+  But the SHIPPED `20260527133000_collapse_duplicate_schema_definitions` groups
+  by `(name, dataset_id)` — the SAME key the `20260527134000` flip uses — NOT
+  by `(name, project_id)`. The two `paper` rows carry DISTINCT `dataset_id`s
+  (production -> production dataset, paperflow -> paperflow dataset), so they
+  fall into SEPARATE single-row groups, no collapse is attempted, and BOTH
+  survive (the shipped 133000's own docstring spells this out). The paperflow
+  row is therefore never deleted, and this repair finds it already present.
 
   ## What this does (idempotent + guarded)
 
   Re-insert the `paper` schema row scoped to the `paperflow` dataset, cloning
-  the surviving `production` paper row's definition and re-scoping only the
-  `dataset` STRING + `dataset_id` FK to paperflow. We INSERT only when the
-  `(name = "paper", dataset_id = <paperflow_id>)` row is MISSING, so this
-  compensates BOTH a fresh `ecto.reset` (collapse ran, this re-adds) AND an
-  already-migrated DB (this runs on the next migrate). A re-run is a no-op.
+  the `production` paper row's definition and re-scoping only the `dataset`
+  STRING + `dataset_id` FK to paperflow. We INSERT only when the
+  `(name = "paper", dataset_id = <paperflow_id>)` row is MISSING. Against the
+  shipped 133000 the paperflow row is always present, so the NOT EXISTS guard
+  matches nothing and this is a no-op. It is RETAINED for any DB that was
+  migrated against the pre-fix `(name, project_id)` 133000, where the paperflow
+  row WAS deleted — there this migration restores it on the next migrate.
 
   Raw SQL — clone via `INSERT ... SELECT` so every column (including ones added
   by later migrations: layout/prefill/workspace_id/project_id/cors_origins/…)
@@ -46,7 +47,11 @@ defmodule Barkpark.Repo.Migrations.RepairCollapsedPaperflowPaperSchema do
 
   `down/0` deletes the paperflow `paper` row this migration created — but ONLY
   the one whose `dataset_id` matches the paperflow dataset. This is the precise
-  inverse of `up/0`. It does not touch the production survivor. (Re-running the
+  inverse of `up/0`. It does not touch the production survivor. (Against the
+  shipped 133000, `up/0` created nothing, so `down/0` deleting the paperflow row
+  it didn't create would be over-broad — but the paperflow row's `dataset_id`
+  is the paperflow dataset, and the production survivor's is the production
+  dataset, so down only ever removes the paperflow-scoped row. Re-running the
   collapse `down` is the separate path that restores its own backup; this
   migration owns only the paperflow re-creation.)
   """
@@ -85,10 +90,15 @@ defmodule Barkpark.Repo.Migrations.RepairCollapsedPaperflowPaperSchema do
 
   # Clone the surviving production `paper` row, re-scoped to paperflow. Guarded
   # by NOT EXISTS on (name, dataset_id) so it is a no-op once the paperflow row
-  # is present (idempotent + re-run safe). gen_random_uuid() gives the clone a
-  # fresh id; `dataset`/`dataset_id` are overridden to paperflow; timestamps are
-  # refreshed. Every OTHER column is copied verbatim from the survivor, so the
-  # paperflow schema is a faithful mirror of the production one.
+  # is present (idempotent + re-run safe; against the shipped 133000 the
+  # paperflow row is always present, so this never inserts). gen_random_uuid()
+  # gives the clone a fresh id; `dataset`/`dataset_id` are overridden to
+  # paperflow; timestamps are refreshed. Every OTHER column is copied verbatim
+  # from the survivor. The production survivor is matched by name + dataset
+  # string only — NOT requiring dataset_id non-null — so a production row stamped
+  # with a NULL dataset_id (e.g. seeded before the 132000 backfill on a
+  # standalone `mix run seeds.exs`) is still a valid clone source. The ORDER BY
+  # prefers a non-null, lexically-first dataset_id for determinism.
   defp restore_paperflow_paper_schema(project_id, paperflow_id) do
     repo().query!(
       """
@@ -111,8 +121,7 @@ defmodule Barkpark.Repo.Migrations.RepairCollapsedPaperflowPaperSchema do
         WHERE s.name = 'paper'
           AND s.dataset = 'production'
           AND s.project_id = $1
-          AND s.dataset_id IS NOT NULL
-        ORDER BY s.id ASC
+        ORDER BY (s.dataset_id IS NOT NULL) DESC, s.dataset_id ASC, s.id ASC
         LIMIT 1
       ) src
       WHERE NOT EXISTS (
