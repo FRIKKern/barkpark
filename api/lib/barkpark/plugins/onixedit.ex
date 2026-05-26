@@ -74,6 +74,42 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @doc """
+  Resolver form of `action_handlers/0` (barkpark-zdvi).
+
+  The plugin `action_handler` contract is fixed arity-3
+  `(doc_id, dataset, mode)`, so the dispatching StudioLive can't pass the
+  tenancy scope as a 4th positional arg. Instead the resolver reads
+  `ctx.scope` (the dispatching session's
+  `[workspace_id: ..., project_id: ...]`, set by
+  `ScopeHelpers.scope_opts/1`) and CLOSES OVER it in an arity-3 wrapper —
+  preserving the contract while routing the book read through
+  `Actions.publish_to_bokbasen/4`. The captured scope is also threaded into
+  the enqueued `PublishWorker` job args for the `:real` path.
+
+  Falls back to the bare arity-3 handler (Default resolution) when no scope
+  is present in ctx — keeping the legacy (and test/cached-snapshot) behaviour
+  for callers that don't supply a scope.
+  """
+  @impl Barkpark.Plugin
+  def resolve_action_handlers(prev, ctx) do
+    scope = scope_from_ctx(ctx)
+
+    handler =
+      if scope == [] do
+        &Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3
+      else
+        fn doc_id, dataset, mode ->
+          Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode, scope)
+        end
+      end
+
+    Map.put(prev, "publish_to_bokbasen", handler)
+  end
+
+  defp scope_from_ctx(%{scope: scope}) when is_list(scope), do: scope
+  defp scope_from_ctx(_), do: []
+
+  @doc """
   Test the live Bokbasen OAuth connection (Goal `barkpark-G3`, task s1).
 
   Called by `Plugins.Registry.collect_test_connection/2` from the admin

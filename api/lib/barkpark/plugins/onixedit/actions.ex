@@ -76,21 +76,41 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
     * `{:error, {:xsd_invalid, reasons}}` — dry-run only; the rendered
       ONIX failed XSD validation.
     * `{:error, reason}` — Oban insert error or upstream Content error.
+
+  ## Tenancy scope (barkpark-zdvi)
+
+  The book read goes through `Content.get_document/4`, which applies the
+  workspace/project envelope IN ADDITION TO the dataset-string filter.
+  `publish_to_bokbasen/4` accepts a `scope` keyword
+  (`[workspace_id: ..., project_id: ...]`) sourced from the dispatching
+  StudioLive's `ScopeHelpers.scope_opts/1`. Without it, two workspaces
+  that share the same `"production"` dataset string could resolve to each
+  other's book (global resolution falls back to the Default project's
+  dataset). The scope is also threaded into the enqueued `PublishWorker`
+  job args so the worker re-reads the SAME tenant's doc.
+
+  The arity-3 form is kept for back-compat (legacy callers / the
+  arity-3 plugin `action_handler` contract) — it delegates with an empty
+  scope, preserving the prior unscoped (Default-resolution) behaviour.
   """
   @spec publish_to_bokbasen(String.t(), String.t(), mode()) ::
           {:ok, dryrun_result()} | {:ok, real_result()} | {:error, term()}
-  def publish_to_bokbasen(doc_id, dataset, :dryrun)
-      when is_binary(doc_id) and is_binary(dataset) do
-    case load_book(doc_id, dataset) do
+  def publish_to_bokbasen(doc_id, dataset, mode), do: publish_to_bokbasen(doc_id, dataset, mode, [])
+
+  @spec publish_to_bokbasen(String.t(), String.t(), mode(), keyword()) ::
+          {:ok, dryrun_result()} | {:ok, real_result()} | {:error, term()}
+  def publish_to_bokbasen(doc_id, dataset, :dryrun, scope)
+      when is_binary(doc_id) and is_binary(dataset) and is_list(scope) do
+    case load_book(doc_id, dataset, scope) do
       {:ok, doc} -> build_preview(doc)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def publish_to_bokbasen(doc_id, dataset, :real)
-      when is_binary(doc_id) and is_binary(dataset) do
-    case load_book(doc_id, dataset) do
-      {:ok, doc} -> enqueue_publish(doc, dataset)
+  def publish_to_bokbasen(doc_id, dataset, :real, scope)
+      when is_binary(doc_id) and is_binary(dataset) and is_list(scope) do
+    case load_book(doc_id, dataset, scope) do
+      {:ok, doc} -> enqueue_publish(doc, dataset, scope)
       {:error, reason} -> {:error, reason}
     end
   end
@@ -103,16 +123,16 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
   # removal). Both branches return `_type == "book"`
   # by virtue of the document carrying its own type; callers may still
   # surface a non-book error if they want stricter contracts.
-  defp load_book(doc_id, dataset) do
+  defp load_book(doc_id, dataset, scope) do
     draft_id = Content.draft_id(doc_id)
     pub_id = Content.published_id(doc_id)
 
-    case Content.get_document(draft_id, "book", dataset) do
+    case Content.get_document(draft_id, "book", dataset, scope) do
       {:ok, doc} ->
         {:ok, doc}
 
       _ ->
-        case Content.get_document(pub_id, "book", dataset) do
+        case Content.get_document(pub_id, "book", dataset, scope) do
           {:ok, doc} -> {:ok, doc}
           _ -> {:error, :no_doc}
         end
@@ -188,8 +208,10 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
 
   # ── real publish (Oban enqueue + pending marker) ──────────────────────────
 
-  defp enqueue_publish(doc, dataset) do
-    args = %{"document_id" => doc.doc_id, "type" => doc.type, "dataset" => dataset}
+  defp enqueue_publish(doc, dataset, scope) do
+    args =
+      %{"document_id" => doc.doc_id, "type" => doc.type, "dataset" => dataset}
+      |> put_scope_args(scope)
 
     case Oban.insert(PublishWorker.new(args)) do
       {:ok, job} ->
@@ -204,4 +226,10 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
         {:error, reason}
     end
   end
+
+  # Fold the tenancy scope into the Oban job args so PublishWorker re-reads
+  # the SAME tenant's document. Nil-safe: an empty / nil-valued scope adds
+  # nothing (old jobs without these keys fall back to Default resolution in
+  # the worker — see PublishWorker.scope_opts_from_args/1).
+  defp put_scope_args(args, scope), do: PublishWorker.put_scope_args(args, scope)
 end

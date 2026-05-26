@@ -126,11 +126,23 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
 
       sub ->
         if sub.state in @retryable_states do
-          args = %{
-            "document_id" => sub.doc_id,
-            "type" => sub.type,
-            "dataset" => sub.dataset
-          }
+          # barkpark-zdvi — carry the row's tenancy scope into the retry job
+          # so the worker re-reads THIS tenant's book. The admin console lists
+          # globally (dataset == "production" across workspaces), so a bare
+          # retry without scope could let the worker resolve another
+          # workspace's same-id book. `workspace_id`/`project_id` are captured
+          # off the loaded Document in `document_to_row/1`; nil-safe via
+          # `put_scope_args/2` for legacy rows missing scope.
+          args =
+            %{
+              "document_id" => sub.doc_id,
+              "type" => sub.type,
+              "dataset" => sub.dataset
+            }
+            |> PublishWorker.put_scope_args(
+              workspace_id: sub.workspace_id,
+              project_id: sub.project_id
+            )
 
           case args |> PublishWorker.new() |> Oban.insert() do
             {:ok, _job} ->
@@ -309,6 +321,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
       doc_id: doc.doc_id,
       type: doc.type,
       dataset: doc.dataset,
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id,
       title: doc.title,
       state: Map.get(status, "state"),
       submission_id: submission_id_of(status),
