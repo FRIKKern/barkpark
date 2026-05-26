@@ -8,32 +8,46 @@ defmodule Barkpark.Media.Relations do
   alias Barkpark.Content.Document
   alias Barkpark.Media
   alias Barkpark.Media.{AssetResponse, MediaFile}
+  alias Barkpark.Plugins.Media.Assets
   alias Barkpark.Repo
 
   @asset_type "mediaAsset"
 
-  @doc "Relation graph for a blob id."
+  @doc """
+  Relation graph for a blob id.
+
+  `opts` carries the render keys (`:conn`, `:sign_urls`, `:dataset`) AND the
+  tenancy scope (`:workspace_id` / `:project_id`). The scope is what closes the
+  cross-workspace relations leak (barkpark-m21z): every back-link query and
+  every related-asset/file resolution is bounded to the caller's tenant, so the
+  graph resolved to workspace B never surfaces workspace A's related asset docs,
+  titles, or signed URLs even when both share the `dataset` STRING. Scope keys
+  are threaded into the reads but stripped from the render opts so AssetResponse
+  is unaffected. NULL-tolerant — legacy NULL-workspace asset docs still resolve
+  in their own tenant's graph (never-worse).
+  """
   @spec graph(struct(), String.t(), keyword()) :: map()
   def graph(%MediaFile{} = file, dataset, opts \\ []) do
-    doc = Media.asset_doc_for_file(file, dataset)
+    scope_opts = Keyword.take(opts, [:workspace_id, :project_id])
     render_opts = Keyword.take(opts, [:conn, :sign_urls, :dataset])
+    doc = Media.asset_doc_for_file(file, dataset, scope_opts)
 
     %{
-      outbound: outbound(doc, dataset, render_opts),
-      inbound: inbound(doc, dataset, render_opts)
+      outbound: outbound(doc, dataset, render_opts, scope_opts),
+      inbound: inbound(doc, dataset, render_opts, scope_opts)
     }
   end
 
-  defp outbound(nil, _dataset, _opts), do: []
+  defp outbound(nil, _dataset, _render_opts, _scope_opts), do: []
 
-  defp outbound(%Document{content: content}, dataset, render_opts) do
+  defp outbound(%Document{content: content}, dataset, render_opts, scope_opts) do
     content
     |> Map.get("relatedAssets", [])
     |> List.wrap()
     |> Enum.map(&normalize_edge/1)
     |> Enum.reject(&is_nil(&1.target))
     |> Enum.map(fn edge ->
-      case resolve_target(edge.target, dataset) do
+      case resolve_target(edge.target, dataset, scope_opts) do
         {file, target_doc} ->
           %{
             relation: edge.relation,
@@ -47,11 +61,22 @@ defmodule Barkpark.Media.Relations do
     end)
   end
 
-  defp inbound(nil, _dataset, _opts), do: []
+  defp inbound(nil, _dataset, _render_opts, _scope_opts), do: []
 
-  defp inbound(%Document{doc_id: doc_id}, dataset, render_opts) do
+  defp inbound(%Document{doc_id: doc_id}, dataset, render_opts, scope_opts) do
+    workspace_id = Keyword.get(scope_opts, :workspace_id)
+    project_id = Keyword.get(scope_opts, :project_id)
+
     Document
-    |> where([d], d.type == ^@asset_type and d.dataset == ^dataset)
+    |> where([d], d.type == ^@asset_type)
+    # Mirror the asset-doc read envelope exactly (NULL-tolerant dataset_id +
+    # workspace) so a back-link query resolved to workspace B never picks up
+    # workspace A's source asset doc that targets this blob's doc, even though
+    # both share the `dataset` STRING (barkpark-m21z). The bare
+    # `d.dataset == ^dataset` filter had no workspace/dataset_id envelope, so
+    # any tenant sharing the dataset string leaked into the inbound list.
+    |> Assets.scope_asset_dataset(dataset, scope_opts)
+    |> Assets.scope_asset_workspace(workspace_id, project_id)
     |> where(
       [d],
       fragment(
@@ -69,7 +94,7 @@ defmodule Barkpark.Media.Relations do
         normalize_edge(edge).target == doc_id
       end)
       |> Enum.map(fn edge ->
-        file = file_for_doc(source_doc, dataset)
+        file = file_for_doc(source_doc, dataset, scope_opts)
 
         %{
           relation: normalize_edge(edge).relation,
@@ -83,10 +108,10 @@ defmodule Barkpark.Media.Relations do
     end)
   end
 
-  defp resolve_target(asset_doc_id, dataset) do
-    case Content.get_document(asset_doc_id, @asset_type, dataset) do
+  defp resolve_target(asset_doc_id, dataset, scope_opts) do
+    case Content.get_document(asset_doc_id, @asset_type, dataset, scope_opts) do
       {:ok, doc} ->
-        case file_for_doc(doc, dataset) do
+        case file_for_doc(doc, dataset, scope_opts) do
           nil -> nil
           file -> {file, doc}
         end
@@ -96,10 +121,10 @@ defmodule Barkpark.Media.Relations do
     end
   end
 
-  defp file_for_doc(%Document{content: content}, dataset) do
+  defp file_for_doc(%Document{content: content}, dataset, scope_opts) do
     case Map.get(content || %{}, "mediaFileId") do
       id when is_binary(id) ->
-        case Media.get_file(id) do
+        case Media.get_file(id, scope_opts) do
           {:ok, file} when file.dataset == dataset -> file
           _ -> nil
         end

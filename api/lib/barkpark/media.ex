@@ -149,10 +149,18 @@ defmodule Barkpark.Media do
     Assets.find_by_media_file_ids(ids, dataset, opts)
   end
 
-  @doc "Linked `mediaAsset` document for a blob row, if any."
-  @spec asset_doc_for_file(MediaFile.t(), String.t()) :: struct() | nil
-  def asset_doc_for_file(%MediaFile{} = file, dataset) do
-    Assets.find_by_media_file_id(file.id, dataset)
+  @doc """
+  Linked `mediaAsset` document for a blob row, if any.
+
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); threaded
+  into `Assets.find_by_media_file_id/3` so a relation-graph read scoped to
+  workspace B never resolves workspace A's asset doc for the same blob id
+  (barkpark-m21z). An absent workspace_id is the deliberate global / legacy
+  single-tenant path — the 2-arity callers stay unchanged via the default.
+  """
+  @spec asset_doc_for_file(MediaFile.t(), String.t(), keyword()) :: struct() | nil
+  def asset_doc_for_file(%MediaFile{} = file, dataset, opts \\ []) do
+    Assets.find_by_media_file_id(file.id, dataset, opts)
   end
 
   @doc """

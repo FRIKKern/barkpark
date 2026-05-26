@@ -103,28 +103,37 @@ defmodule Barkpark.Plugins.Media.Assets do
     |> where([d], fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id))
   end
 
-  # NULL-tolerant workspace envelope for the asset-doc metadata read.
-  #
-  # `Content.Scope.scope_to_workspace_or_global/3` is STRICT on a non-nil
-  # workspace_id (`d.workspace_id == ^id`, no is_nil fallback). Asset docs
-  # written before the write-scope fix (barkpark-x56q) carry workspace_id=NULL,
-  # so a strict envelope scoped to a real workspace would make EVERY legacy
-  # asset doc vanish from its own tenant's media listing (never-worse
-  # violation). This envelope keeps legacy NULL-workspace docs visible
-  # (`is_nil(d.workspace_id)`) WHILE isolating newly-scoped docs: a doc stamped
-  # to workspace A (workspace_id=A) is excluded from a read scoped to B because
-  # A != B and A is not NULL. The dataset envelope (scope_asset_dataset) already
-  # bounds the result to one dataset, so the NULL-tolerant OR cannot widen
-  # across datasets. A nil workspace_id (unscoped / legacy single-tenant path)
-  # leaves the query untouched — the deliberate global read (barkpark-vmv1).
-  defp scope_asset_workspace(query, nil, _project_id), do: query
+  @doc """
+  NULL-tolerant workspace envelope for an asset-doc read, binding against the
+  FIRST named binding (`[d]`) so it composes with any `Document` query.
 
-  defp scope_asset_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
+  Public so the relation graph (`Barkpark.Media.Relations`) reuses the EXACT
+  same envelope on its back-link query instead of hand-rolling (and silently
+  diverging from) the scope clause that closes the cross-tenant leak.
+
+  `Content.Scope.scope_to_workspace_or_global/3` is STRICT on a non-nil
+  workspace_id (`d.workspace_id == ^id`, no is_nil fallback). Asset docs
+  written before the write-scope fix (barkpark-x56q) carry workspace_id=NULL,
+  so a strict envelope scoped to a real workspace would make EVERY legacy
+  asset doc vanish from its own tenant's media listing (never-worse
+  violation). This envelope keeps legacy NULL-workspace docs visible
+  (`is_nil(d.workspace_id)`) WHILE isolating newly-scoped docs: a doc stamped
+  to workspace A (workspace_id=A) is excluded from a read scoped to B because
+  A != B and A is not NULL. The dataset envelope (scope_asset_dataset) already
+  bounds the result to one dataset, so the NULL-tolerant OR cannot widen
+  across datasets. A nil workspace_id (unscoped / legacy single-tenant path)
+  leaves the query untouched — the deliberate global read (barkpark-vmv1).
+  """
+  @spec scope_asset_workspace(Ecto.Queryable.t(), binary() | nil, binary() | nil) ::
+          Ecto.Queryable.t()
+  def scope_asset_workspace(query, nil, _project_id), do: query
+
+  def scope_asset_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
     where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))
   end
 
-  defp scope_asset_workspace(query, workspace_id, project_id)
-       when is_binary(workspace_id) and is_binary(project_id) do
+  def scope_asset_workspace(query, workspace_id, project_id)
+      when is_binary(workspace_id) and is_binary(project_id) do
     where(
       query,
       [d],
@@ -134,16 +143,23 @@ defmodule Barkpark.Plugins.Media.Assets do
     )
   end
 
-  # Resolve the dataset STRING → dataset_id within the read's project scope
-  # (opts :project_id, else the seeded Default project) and filter by
-  # d.dataset_id — NULL-tolerant: also matches legacy asset docs that media.ex
-  # wrote WITHOUT scope (dataset_id NULL, dataset STRING stamped), so the
-  # default/untenanted read+delete path still resolves them (never-worse).
-  # The dataset STRING ↔ dataset_id is 1:1 within a project, so the OR never
-  # crosses datasets. Falls back to the legacy d.dataset STRING filter when no
-  # dataset row resolves (back-compat / pre-tenancy fixtures). Mirrors
-  # Barkpark.Content scope_schema_to_dataset/3.
-  defp scope_asset_dataset(query, dataset, opts) do
+  @doc """
+  NULL-tolerant dataset envelope for an asset-doc read, binding against the
+  FIRST named binding (`[d]`). Public for the same reason as
+  `scope_asset_workspace/3` — `Barkpark.Media.Relations` reuses it verbatim.
+
+  Resolves the dataset STRING → dataset_id within the read's project scope
+  (opts :project_id, else the seeded Default project) and filters by
+  d.dataset_id — NULL-tolerant: also matches legacy asset docs that media.ex
+  wrote WITHOUT scope (dataset_id NULL, dataset STRING stamped), so the
+  default/untenanted read+delete path still resolves them (never-worse).
+  The dataset STRING ↔ dataset_id is 1:1 within a project, so the OR never
+  crosses datasets. Falls back to the legacy d.dataset STRING filter when no
+  dataset row resolves (back-compat / pre-tenancy fixtures). Mirrors
+  Barkpark.Content scope_schema_to_dataset/3.
+  """
+  @spec scope_asset_dataset(Ecto.Queryable.t(), binary(), keyword()) :: Ecto.Queryable.t()
+  def scope_asset_dataset(query, dataset, opts) do
     case resolve_dataset_id(dataset, opts) do
       id when is_binary(id) ->
         where(query, [d], d.dataset_id == ^id or (is_nil(d.dataset_id) and d.dataset == ^dataset))
