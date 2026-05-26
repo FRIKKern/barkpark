@@ -22,12 +22,12 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   """
 
   use BarkparkWeb, :controller
-  import Ecto.Query
+
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.OnixEdit.Export
-  alias Barkpark.Repo
 
   @content_type "application/onix+xml"
 
@@ -35,12 +35,9 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
     pub_id = raw_id |> strip_onix_suffix() |> Content.published_id()
     draft_id = Content.draft_id(pub_id)
 
-    case load_doc(dataset, pub_id, draft_id) do
+    case load_doc(conn, dataset, pub_id, draft_id) do
       nil ->
         send_404(conn)
-
-      %Document{type: type} = _doc when type != "book" ->
-        send_400(conn, "expected _type=book, got _type=#{inspect(type)}")
 
       %Document{} = doc ->
         render_onix(conn, doc, pub_id)
@@ -62,14 +59,26 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
     end
   end
 
-  defp load_doc(dataset, pub_id, draft_id) do
-    Document
-    |> where([d], d.dataset == ^dataset and d.doc_id in ^[draft_id, pub_id])
-    |> order_by([d],
-      desc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
-    )
-    |> limit(1)
-    |> Repo.one()
+  # Scoped lookup via the standard `Content.get_document` seam, which applies
+  # both the dataset filter AND the workspace/project envelope from
+  # `scope_opts(conn)` — the Default scope on the flat `:api` route (via
+  # `AssignDefaultScope`) or the resolved tenant on the `/w/:ws/p/:project`
+  # mirror (via `ResolveWorkspace`/`ResolveProject`). Replaces the previous
+  # bare `dataset == ^dataset` query that ignored the tenant boundary and let
+  # any admin token export another workspace's catalog by URL.
+  #
+  # The draft-preferred-over-published precedence is preserved by probing the
+  # draft id first; each probe is independently scoped, so a cross-workspace
+  # book never resolves on either id.
+  defp load_doc(conn, dataset, pub_id, draft_id) do
+    scope = scope_opts(conn)
+
+    with {:error, :not_found} <- Content.get_document(draft_id, "book", dataset, scope),
+         {:error, :not_found} <- Content.get_document(pub_id, "book", dataset, scope) do
+      nil
+    else
+      {:ok, %Document{} = doc} -> doc
+    end
   end
 
   defp book_doc_from(%Document{} = doc, pub_id) do
@@ -90,11 +99,5 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
     conn
     |> put_status(404)
     |> json(%{error: %{type: "not_found", message: "document not found"}})
-  end
-
-  defp send_400(conn, message) do
-    conn
-    |> put_status(400)
-    |> json(%{error: %{type: "bad_request", message: message}})
   end
 end
