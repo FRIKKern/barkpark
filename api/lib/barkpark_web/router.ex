@@ -111,6 +111,19 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.RequireAdmin
   end
 
+  # Scoped admin gate (barkpark-23yi / barkpark-fsko P0 fix). For the
+  # /w/:ws/p/:project admin routes: require a token AND a membership ROLE of
+  # owner/admin in the resolved `current_workspace`. RequireToken sets
+  # :api_token; ResolveWorkspace (in :scoped_api) sets :current_workspace and
+  # already gates :read membership; RequireWorkspaceRole reads the per-grant
+  # role — so a `member` of B with global admin perms is 403'd on admin ops.
+  # The FLAT admin routes keep :require_admin (global-perm gate) — the Default
+  # workspace + the dev token's owner/admin Default membership keep them green.
+  pipeline :scoped_admin do
+    plug BarkparkWeb.Plugs.RequireToken
+    plug BarkparkWeb.Plugs.RequireWorkspaceRole
+  end
+
   pipeline :idempotent do
     plug BarkparkWeb.Plugs.Idempotency
   end
@@ -341,7 +354,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1/plugins" do
-    pipe_through [:scoped_api, :require_admin]
+    pipe_through [:scoped_api, :scoped_admin]
 
     plugin_routes(scope: :api)
   end
@@ -597,7 +610,7 @@ defmodule BarkparkWeb.Router do
 
   # Scoped admin reads (search insights/synonyms).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :require_admin]
+    pipe_through [:scoped_api, :scoped_admin]
 
     get "/v1/data/search/:dataset/insights", SearchController, :search_insights
     get "/v1/data/search/:dataset/synonyms", SearchController, :search_synonyms
@@ -607,7 +620,7 @@ defmodule BarkparkWeb.Router do
 
   # Scoped schema management (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :require_admin]
+    pipe_through [:scoped_api, :scoped_admin]
 
     get "/v1/schemas/:dataset", SchemaController, :index
     get "/v1/schemas/:dataset/:name", SchemaController, :show
@@ -617,7 +630,7 @@ defmodule BarkparkWeb.Router do
 
   # Scoped webhooks (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :require_admin]
+    pipe_through [:scoped_api, :scoped_admin]
 
     get "/v1/webhooks/:dataset", WebhookController, :index
     get "/v1/webhooks/:dataset/:id", WebhookController, :show
@@ -628,7 +641,7 @@ defmodule BarkparkWeb.Router do
 
   # Scoped v1 media — admin search ops.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :require_admin]
+    pipe_through [:scoped_api, :scoped_admin]
 
     get "/v1/media/:dataset/search/insights", V1.MediaController, :search_insights
     get "/v1/media/:dataset/search/synonyms", V1.MediaController, :search_synonyms
