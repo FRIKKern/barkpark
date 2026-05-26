@@ -169,6 +169,24 @@ describe('createWorkspace', () => {
     await createWorkspace(scopedConfig, { name: 'New' })
     expect(seenPath).toBe('/api/workspaces')
   })
+
+  it('throws a typed BarkparkValidationError (not a raw TypeError) on an empty 2xx body', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces`, () => new HttpResponse(null, { status: 204 })),
+    )
+    await expect(createWorkspace(baseConfig, { name: 'Acme' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+  })
+
+  it('throws a typed BarkparkValidationError on a 2xx body that omits the workspace envelope', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces`, () => HttpResponse.json({}, { status: 201 })),
+    )
+    await expect(createWorkspace(baseConfig, { name: 'Acme' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+  })
 })
 
 describe('createProject', () => {
@@ -211,6 +229,29 @@ describe('createProject', () => {
 
   it('throws BarkparkValidationError on an empty workspace slug', async () => {
     await expect(createProject(baseConfig, '', { name: 'X' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+  })
+
+  it('throws a typed BarkparkValidationError (not a raw TypeError) on an empty 2xx body', async () => {
+    server.use(
+      http.post(
+        `${TEST_BASE_URL}/api/workspaces/:slug/projects`,
+        () => new HttpResponse(null, { status: 204 }),
+      ),
+    )
+    await expect(createProject(baseConfig, 'acme', { name: 'Blog' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+  })
+
+  it('throws a typed BarkparkValidationError on a 2xx body that omits the project envelope', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces/:slug/projects`, () =>
+        HttpResponse.json({}, { status: 201 }),
+      ),
+    )
+    await expect(createProject(baseConfig, 'acme', { name: 'Blog' })).rejects.toBeInstanceOf(
       BarkparkValidationError,
     )
   })
