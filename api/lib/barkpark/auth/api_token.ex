@@ -9,6 +9,8 @@ defmodule Barkpark.Auth.ApiToken do
     field :label, :string
     field :dataset, :string, default: "production"
     field :permissions, {:array, :string}, default: ["read"]
+    field :revoked_at, :utc_datetime
+    field :expires_at, :utc_datetime
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
 
@@ -24,7 +26,7 @@ defmodule Barkpark.Auth.ApiToken do
 
   def changeset(token, attrs) do
     token
-    |> cast(attrs, [:token_hash, :label, :dataset, :permissions, :workspace_id])
+    |> cast(attrs, [:token_hash, :label, :dataset, :permissions, :workspace_id, :revoked_at, :expires_at])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)
   end

@@ -9,13 +9,40 @@ defmodule Barkpark.Auth do
 
   def verify_token(raw_token) do
     hash = ApiToken.hash_token(raw_token)
+    now = DateTime.utc_now()
 
+    # Revocation + expiry are enforced in the WHERE clause, not post-filter:
+    # a revoked or expired token must look identical to a missing one
+    # (`{:error, :unauthorized}`), with no opportunity to leak its existence.
     ApiToken
     |> where([t], t.token_hash == ^hash)
+    |> where([t], is_nil(t.revoked_at))
+    |> where([t], is_nil(t.expires_at) or t.expires_at > ^now)
     |> Repo.one()
     |> case do
       nil -> {:error, :unauthorized}
       token -> {:ok, token}
+    end
+  end
+
+  @doc """
+  Revoke an API token — sets `revoked_at` to now so `verify_token/1` rejects
+  it without a DB delete. Accepts an `ApiToken` struct or a token id. Idempotent
+  on an already-revoked token (re-stamps `revoked_at`). The revocation primitive
+  — no HTTP route is wired yet.
+  """
+  @spec revoke_token(ApiToken.t() | binary()) ::
+          {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def revoke_token(%ApiToken{} = token) do
+    token
+    |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
+    |> Repo.update()
+  end
+
+  def revoke_token(token_id) when is_binary(token_id) do
+    case Repo.get(ApiToken, token_id) do
+      nil -> {:error, :not_found}
+      token -> revoke_token(token)
     end
   end
 
