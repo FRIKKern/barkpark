@@ -1132,6 +1132,11 @@ async function createWorkspace(config, attrs) {
     method: "POST",
     body: attrs
   });
+  if (!data?.workspace) {
+    throw new BarkparkValidationError("createWorkspace: server returned no workspace", {
+      field: "workspace"
+    });
+  }
   return data.workspace;
 }
 async function createProject(config, workspaceSlug, attrs) {
@@ -1145,6 +1150,11 @@ async function createProject(config, workspaceSlug, attrs) {
     `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
     { kind: "write", method: "POST", body: attrs }
   );
+  if (!data?.project) {
+    throw new BarkparkValidationError("createProject: server returned no project", {
+      field: "project"
+    });
+  }
   return data.project;
 }
 
