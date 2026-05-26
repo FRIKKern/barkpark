@@ -29,6 +29,13 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :forbidden_origin}),
     do: %{code: "cors_forbidden", message: "origin not allowed for dataset", status: 403}
 
+  defp build({:error, :csrf_required}),
+    do: %{
+      code: "csrf_required",
+      message: "cookie-authenticated mutation requires the x-requested-with header",
+      status: 403
+    }
+
   defp build({:error, :schema_unknown}),
     do: %{code: "schema_unknown", message: "no schema for type", status: 404}
 
