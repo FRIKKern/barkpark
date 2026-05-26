@@ -48,7 +48,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
       opts = MediaSearchParams.parse(params) ++ scope_opts(conn)
 
       {files, total, facets} = Collections.assets(id, dataset, opts)
-      docs = Media.asset_docs_for_files(files, dataset)
+      docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
       render_opts = render_opts(conn, params, dataset)
 
       hits =
@@ -105,7 +105,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
         |> Keyword.put(:limit, parse_int(params["limit"], @default_limit) |> min(@max_limit))
 
       {files, total, _facets} = Collections.assets(collection.doc_id, dataset, opts)
-      docs = Media.asset_docs_for_files(files, dataset)
+      docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
       render_opts = render_opts(conn, params, dataset, sign_urls: true)
 
       hits =

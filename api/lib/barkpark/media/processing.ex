@@ -59,7 +59,12 @@ defmodule Barkpark.Media.Processing do
       "content" => content
     }
 
-    case Content.upsert_document(@asset_type, attrs, file.dataset, source: :worker) do
+    case Content.upsert_document(
+           @asset_type,
+           attrs,
+           file.dataset,
+           [source: :worker] ++ Assets.file_scope_opts(file)
+         ) do
       {:ok, updated} ->
         updated
 
@@ -79,7 +84,12 @@ defmodule Barkpark.Media.Processing do
       "content" => content
     }
 
-    case Content.upsert_document(@asset_type, attrs, file.dataset, source: :worker) do
+    case Content.upsert_document(
+           @asset_type,
+           attrs,
+           file.dataset,
+           [source: :worker] ++ Assets.file_scope_opts(file)
+         ) do
       {:ok, updated} ->
         updated
 

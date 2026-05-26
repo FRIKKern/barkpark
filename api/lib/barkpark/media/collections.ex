@@ -165,7 +165,12 @@ defmodule Barkpark.Media.Collections do
         |> Map.put("mediaFileId", file.id)
     }
 
-    Content.upsert_document(@asset_type, attrs, dataset, source: :api)
+    Content.upsert_document(
+      @asset_type,
+      attrs,
+      dataset,
+      [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+    )
   end
 
   defp patch_membership(doc, file, dataset, collection_id, :remove) do
@@ -190,7 +195,12 @@ defmodule Barkpark.Media.Collections do
         |> Map.put("mediaFileId", file.id)
     }
 
-    Content.upsert_document(@asset_type, attrs, dataset, source: :api)
+    Content.upsert_document(
+      @asset_type,
+      attrs,
+      dataset,
+      [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+    )
   end
 
   defp normalize_ref_list(list) when is_list(list) do

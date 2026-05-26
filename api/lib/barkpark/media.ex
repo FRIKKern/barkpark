@@ -130,11 +130,23 @@ defmodule Barkpark.Media do
     Barkpark.Media.Search.search(dataset, opts)
   end
 
-  @doc "Batch-load linked `mediaAsset` documents keyed by blob id."
-  @spec asset_docs_for_files([MediaFile.t()], String.t()) :: %{String.t() => struct()}
-  def asset_docs_for_files(files, dataset) when is_list(files) and is_binary(dataset) do
+  @doc """
+  Batch-load linked `mediaAsset` documents keyed by blob id.
+
+  `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); it is
+  threaded into `Assets.find_by_media_file_ids/3` so a listing resolved to
+  workspace B never resolves workspace A's asset metadata (title/tags/rights)
+  for a blob that shares the dataset STRING — the cross-workspace metadata leak
+  (barkpark-vmv1). The asset-doc envelope is NULL-tolerant so legacy
+  NULL-workspace docs stay visible in their own tenant.
+  """
+  @spec asset_docs_for_files([MediaFile.t()], String.t(), keyword()) :: %{
+          String.t() => struct()
+        }
+  def asset_docs_for_files(files, dataset, opts \\ [])
+      when is_list(files) and is_binary(dataset) and is_list(opts) do
     ids = Enum.map(files, & &1.id)
-    Assets.find_by_media_file_ids(ids, dataset)
+    Assets.find_by_media_file_ids(ids, dataset, opts)
   end
 
   @doc "Linked `mediaAsset` document for a blob row, if any."
@@ -168,7 +180,12 @@ defmodule Barkpark.Media do
         "content" => content
       }
 
-      case Content.upsert_document(@asset_type, attrs, dataset, source: :api) do
+      case Content.upsert_document(
+             @asset_type,
+             attrs,
+             dataset,
+             [source: :api] ++ Assets.file_scope_opts(file)
+           ) do
         {:ok, updated} -> {:ok, updated}
         error -> error
       end

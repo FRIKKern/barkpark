@@ -7,7 +7,6 @@ defmodule Barkpark.Plugins.Media.Assets do
   """
 
   import Ecto.Query
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -85,7 +84,7 @@ defmodule Barkpark.Plugins.Media.Assets do
     Document
     |> where([d], d.type == ^@asset_type)
     |> scope_asset_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
+    |> scope_asset_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
     |> where([d], fragment("?->>? ", d.content, "mediaFileId") in ^ids)
     |> Repo.all()
     |> Map.new(fn doc -> {Map.get(doc.content, "mediaFileId"), doc} end)
@@ -100,8 +99,39 @@ defmodule Barkpark.Plugins.Media.Assets do
     query
     |> where([d], d.type == ^@asset_type)
     |> scope_asset_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
+    |> scope_asset_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
     |> where([d], fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id))
+  end
+
+  # NULL-tolerant workspace envelope for the asset-doc metadata read.
+  #
+  # `Content.Scope.scope_to_workspace_or_global/3` is STRICT on a non-nil
+  # workspace_id (`d.workspace_id == ^id`, no is_nil fallback). Asset docs
+  # written before the write-scope fix (barkpark-x56q) carry workspace_id=NULL,
+  # so a strict envelope scoped to a real workspace would make EVERY legacy
+  # asset doc vanish from its own tenant's media listing (never-worse
+  # violation). This envelope keeps legacy NULL-workspace docs visible
+  # (`is_nil(d.workspace_id)`) WHILE isolating newly-scoped docs: a doc stamped
+  # to workspace A (workspace_id=A) is excluded from a read scoped to B because
+  # A != B and A is not NULL. The dataset envelope (scope_asset_dataset) already
+  # bounds the result to one dataset, so the NULL-tolerant OR cannot widen
+  # across datasets. A nil workspace_id (unscoped / legacy single-tenant path)
+  # leaves the query untouched — the deliberate global read (barkpark-vmv1).
+  defp scope_asset_workspace(query, nil, _project_id), do: query
+
+  defp scope_asset_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
+    where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))
+  end
+
+  defp scope_asset_workspace(query, workspace_id, project_id)
+       when is_binary(workspace_id) and is_binary(project_id) do
+    where(
+      query,
+      [d],
+      is_nil(d.workspace_id) or
+        (d.workspace_id == ^workspace_id and
+           (is_nil(d.project_id) or d.project_id == ^project_id))
+    )
   end
 
   # Resolve the dataset STRING → dataset_id within the read's project scope
@@ -201,8 +231,31 @@ defmodule Barkpark.Plugins.Media.Assets do
       }
     }
 
-    Content.create_document(@asset_type, attrs, file.dataset, source: :worker)
+    Content.create_document(
+      @asset_type,
+      attrs,
+      file.dataset,
+      [source: :worker] ++ file_scope_opts(file)
+    )
   end
+
+  # Derive the {workspace_id, project_id} write scope from the blob the asset
+  # doc belongs to. The %MediaFile{} carries the scope resolved at upload
+  # (put_scope_attrs on the blob), so stamping the companion asset DOCUMENT
+  # from it keeps the two in the same tenant — closing the gap where the doc
+  # landed NULL-workspace while the blob was scoped (barkpark-x56q). Only
+  # non-nil scope keys are emitted, so a pre-tenancy blob (nil workspace_id)
+  # writes nothing and Content.put_scope_attrs falls back to its Default-scope
+  # behaviour — never-worse for legacy uploads.
+  @spec file_scope_opts(%MediaFile{}) :: keyword()
+  def file_scope_opts(%MediaFile{workspace_id: ws_id, project_id: project_id}) do
+    []
+    |> maybe_put_scope(:workspace_id, ws_id)
+    |> maybe_put_scope(:project_id, project_id)
+  end
+
+  defp maybe_put_scope(opts, _key, nil), do: opts
+  defp maybe_put_scope(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp asset_kind(nil), do: "other"
 

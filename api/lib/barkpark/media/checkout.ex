@@ -67,7 +67,12 @@ defmodule Barkpark.Media.Checkout do
       "content" => content
     }
 
-    case Content.upsert_document(@asset_type, attrs, dataset, source: :api) do
+    case Content.upsert_document(
+           @asset_type,
+           attrs,
+           dataset,
+           [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+         ) do
       {:ok, updated} ->
         if actor == nil, do: Barkpark.Media.Renditions.delete_for_file(file.id)
         {:ok, updated}

@@ -24,7 +24,7 @@ defmodule BarkparkWeb.V1.MediaController do
     t0 = System.monotonic_time(:microsecond)
     opts = MediaSearchParams.parse(params) ++ scope_opts(conn)
     {files, total, facets, meta} = Media.search_files(dataset, opts)
-    docs = Media.asset_docs_for_files(files, dataset)
+    docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
     render_opts = render_opts(conn, params)
 
     hits =
@@ -201,7 +201,7 @@ defmodule BarkparkWeb.V1.MediaController do
       ] ++ scope_opts(conn)
 
     {files, total} = Media.query_files(dataset, opts)
-    docs = Media.asset_docs_for_files(files, dataset)
+    docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
     render_opts = render_opts(conn, params)
 
     assets =
