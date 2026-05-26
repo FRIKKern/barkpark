@@ -121,10 +121,20 @@ defmodule Barkpark.Tenancy.Auth do
   True when the token's permissions satisfy `action`, ignoring membership.
   Exposed so the write-gate plug can check permission without a workspace.
   """
+  # The `when is_list(perms)` guard keeps these clauses total: a token whose
+  # `permissions` is nil (e.g. a NULL DB column) falls THROUGH to the catch-all
+  # and is denied, rather than raising `ArgumentError` on `&1 in nil`. nil
+  # permissions → deny (false), never raise.
   @spec permits?(ApiToken.t(), action()) :: boolean()
-  def permits?(%ApiToken{permissions: perms}, :read), do: Enum.any?(@read_perms, &(&1 in perms))
-  def permits?(%ApiToken{permissions: perms}, :write), do: Enum.any?(@write_perms, &(&1 in perms))
-  def permits?(%ApiToken{permissions: perms}, :admin), do: Enum.any?(@admin_perms, &(&1 in perms))
+  def permits?(%ApiToken{permissions: perms}, :read) when is_list(perms),
+    do: Enum.any?(@read_perms, &(&1 in perms))
+
+  def permits?(%ApiToken{permissions: perms}, :write) when is_list(perms),
+    do: Enum.any?(@write_perms, &(&1 in perms))
+
+  def permits?(%ApiToken{permissions: perms}, :admin) when is_list(perms),
+    do: Enum.any?(@admin_perms, &(&1 in perms))
+
   def permits?(_token, _action), do: false
 
   @doc """

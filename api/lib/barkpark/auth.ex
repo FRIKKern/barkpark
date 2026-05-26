@@ -104,7 +104,10 @@ defmodule Barkpark.Auth do
     |> Repo.all()
   end
 
+  # `token.permissions || []` keeps this total: a nil permissions array (e.g. a
+  # NULL DB column) denies (false) instead of raising `ArgumentError` on
+  # `permission in nil`. nil permissions → deny, never raise.
   def has_permission?(token, permission) do
-    permission in token.permissions
+    permission in (token.permissions || [])
   end
 end
