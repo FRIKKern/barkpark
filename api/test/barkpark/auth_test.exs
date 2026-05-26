@@ -107,6 +107,35 @@ defmodule Barkpark.AuthTest do
     end
   end
 
+  # nil-permissions guard (omhr). has_permission?/2 evaluated `permission in
+  # token.permissions`; a token with nil permissions raised ArgumentError
+  # instead of denying. Reachable from RequireAdmin + media-access checks.
+  describe "has_permission?/2 — nil permissions deny (not raise)" do
+    test "a token with nil permissions returns false (was: raised)" do
+      token = %ApiToken{permissions: nil}
+
+      refute Auth.has_permission?(token, "admin")
+      refute Auth.has_permission?(token, "write")
+      refute Auth.has_permission?(token, "read")
+    end
+
+    test "the unguarded `permission in nil` form would have raised pre-fix" do
+      # `permission in token.permissions` with nil permissions raises (the
+      # pre-fix form); the `|| []` coercion makes the call total. The raise is a
+      # Protocol.UndefinedError from Enumerable on this Elixir — the class is
+      # incidental, the RAISE is the hazard the guard closes.
+      assert_raise Protocol.UndefinedError, fn -> "admin" in nil end
+    end
+
+    test "REGRESSION: a normal token still reports its permissions" do
+      token = %ApiToken{permissions: ["read", "write"]}
+
+      assert Auth.has_permission?(token, "read")
+      assert Auth.has_permission?(token, "write")
+      refute Auth.has_permission?(token, "admin")
+    end
+  end
+
   describe "deleted-workspace orphan (cascade)" do
     test "deleting a token's home workspace deletes the token (no orphan auth)" do
       ws = workspace("ws-cascade")

@@ -94,6 +94,38 @@ defmodule Barkpark.TenancyAuthTest do
     end
   end
 
+  # nil-permissions guard (omhr). A token row with permissions == nil (NULL DB
+  # column) must DENY (false), never raise ArgumentError on `&1 in nil`. The
+  # pre-fix struct clauses matched then crashed, so the catch-all never ran —
+  # turning a clean 403 into a 500. Reachable from RequireWritePermission +
+  # authorize/3 on every mutation / scoped read.
+  describe "permits?/2 — nil permissions deny (not raise)" do
+    test "a token with nil permissions returns false for every action" do
+      token = %ApiToken{permissions: nil}
+
+      refute Auth.permits?(token, :read)
+      refute Auth.permits?(token, :write)
+      refute Auth.permits?(token, :admin)
+    end
+
+    test "the unguarded `&1 in nil` form would have raised pre-fix" do
+      # Prove the hazard the guard closes: `action in nil` raises (the pre-fix
+      # struct clauses evaluated exactly this for a nil-perms token, crashing
+      # before the catch-all could deny). On this Elixir the raise is a
+      # Protocol.UndefinedError from Enumerable; the point is it RAISES, not
+      # which class — the guard makes the call total instead.
+      assert_raise Protocol.UndefinedError, fn -> "write" in nil end
+    end
+
+    test "REGRESSION: a normal token still permits/denies correctly" do
+      token = %ApiToken{permissions: ["read", "write"]}
+
+      assert Auth.permits?(token, :read)
+      assert Auth.permits?(token, :write)
+      refute Auth.permits?(token, :admin)
+    end
+  end
+
   describe "member?/2 and membership/2" do
     test "membership/2 accepts a token struct or a raw principal id" do
       ws = workspace("ws-mem")
