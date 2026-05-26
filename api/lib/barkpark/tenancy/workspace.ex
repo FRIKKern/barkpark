@@ -2,6 +2,27 @@ defmodule Barkpark.Tenancy.Workspace do
   @moduledoc """
   A Workspace is the hard tenant boundary. It owns Projects and Memberships.
   Slug is unique across all workspaces and appears in the routing path.
+
+  ## Deletion — DO NOT call `Repo.delete/1` directly on a Workspace
+
+  Use `Barkpark.Tenancy.delete_workspace/1`. It is the canonical
+  workspace-delete path and is the ONLY safe entry point:
+
+    * walks every `media_files` row and fires `Media.delete_file/1`
+      (blob removal from object storage + CDN purge + `:after_media_delete`
+      plugin hook) BEFORE the workspace row is deleted;
+    * walks every `documents` row and fires `Content.delete_document/1`
+      (`:before_document_delete` / `:after_document_delete` plugin hooks);
+    * THEN `Repo.delete(workspace)`, letting Postgres CASCADE prune the
+      remaining child tables (projects, datasets, memberships, webhooks,
+      search_*, mutation_events, paper_events, …).
+
+  Calling `Repo.delete(workspace)` directly skips the cleanup pass and
+  reintroduces the orphan-blob / orphan-CDN-cache / missed-hook leak
+  documented in `test/barkpark/tenancy_delete_workspace_test.exs`
+  ("control: raw Repo.delete(workspace) bypasses cleanup"). The control
+  test deliberately uses the raw form to PROVE the leak — production
+  callers must not.
   """
   use Ecto.Schema
   import Ecto.Changeset
