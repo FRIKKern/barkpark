@@ -66,9 +66,18 @@ defmodule Barkpark.Tasks do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.Content.{Document, Scope, SchemaDefinition}
+  alias Barkpark.Content.{Document, MutationEvent, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
+
+  # W7-04 mutation_events kinds. Routed into the existing `mutation` text column
+  # so the spine, webhooks, and listen endpoint surface task ops alongside
+  # document ops without a schema change.
+  @event_task_claimed "task.claimed"
+  @event_task_closed "task.closed"
+  @event_task_mutated "task.mutated"
+
+  @closed_lifecycle_statuses ~w(done cancelled blocked)
 
   @lifecycle_statuses ~w(open in_progress blocked done cancelled)
   @kinds ~w(goal phase task event)
@@ -599,63 +608,342 @@ defmodule Barkpark.Tasks do
   end
 
   @doc """
-  Claim ONE ready task atomically.
+  Claim ONE ready task atomically — W7-04 full primitives.
 
-  This is the **skeleton** that proves `FOR UPDATE SKIP LOCKED` works on
-  the document substrate (Gate-A foundation). It is NOT the full claim
-  semantics — expected-`rev` CAS, lease tokens, epoch bumps, fencing
-  metadata, advisory locks, and the `mutation_events` op-log entry are
-  all deferred to W7-04. What this function DOES guarantee today:
+  Four guarantees, all tested in `tasks_claim_test.exs`:
 
-    * runs inside a `Repo.transaction/1`;
-    * `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1` over the ready query
-      (the row is locked for the duration of the transaction; concurrent
-      callers skip it and pick the next one);
-    * flips `content.lifecycle_status` from `"open"` (or `"blocked"`) to
-      `"in_progress"` and stamps `content.assignee = worker_id`;
-    * returns `{:ok, %Document{}}` on success or `{:ok, nil}` when
-      nothing is ready (NOT `{:error, ...}` — `nil` is the documented
-      "the queue was empty" return so the build skill can loop without
-      a try/catch).
+    1. **Expected-version CAS** via `documents.rev`. The UPDATE WHERE clause
+       carries `rev = <observed_rev>`; if Postgres reports 0 rows affected,
+       another caller won and we return `{:error, :stale_claim}`. `rev` is
+       the existing opaque-string mutation-spine identifier; every write in
+       this module bumps it via `generate_rev/0`, matching the rest of the
+       `Content` module's CAS surface (`ensure_rev/2`). A separate integer
+       version column would mean a schema migration and a second source of
+       truth — the existing `rev` already increments on every upsert per the
+       W2 work and is the contract `Tasks.close/3` enforces.
 
-  ## Why this proves the concurrency primitive
+    2. **Fencing epoch** bumped on EVERY claim and stored at
+       `content.claim.epoch` (per the W7-01 field contract). The previous
+       claim's epoch (if any) +1 becomes the new epoch; a brand-new claim
+       starts at 1. Returned in `content.claim.epoch` so callers can pass it
+       back to `close/3` / mutation paths; mismatch → `{:error, :fenced_off}`.
+       This is the only protection against a stale-but-not-crashed worker
+       writing after the TTL sweep (W7-05) takes its claim away.
 
-  Two concurrent BEGIN/SELECT FOR UPDATE SKIP LOCKED/UPDATE/COMMIT
-  blocks against the same ready-queue cannot grab the same row —
-  Postgres' SKIP LOCKED guarantees A's row is invisible to B until A
-  commits. After A commits, A's row's `lifecycle_status` is
-  `"in_progress"`, so the ready query no longer matches it. The
-  concurrency test in `tasks_ready_test.exs` runs this 20× with
-  `Task.async_stream` to pin the behaviour.
+    3. **Durable-then-ack** — a `mutation_events` row of kind `"task.claimed"`
+       is INSERTED in the SAME transaction as the claim UPDATE, BEFORE the
+       function returns. If the caller crashes between getting the doc and
+       starting work, the claim is still durable + observable in the goal-
+       path rail (W7c) + sweepable by TTL (W7-05).
+
+    4. **Concurrency** — `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1` (the W7-03
+       skeleton) still drives row selection; the new CAS guards against the
+       reread-after-row-unlock race that SKIP LOCKED alone cannot prevent
+       (a caller that picked a row before another caller's commit landed).
+
+  ## Returns
+    * `{:ok, %Document{}}` — claimed; `content.claim` carries `worker`,
+      `ts_iso`, `epoch` (and the row's new `rev`).
+    * `{:ok, nil}` — the ready queue was empty.
+    * `{:error, :stale_claim}` — the row we picked was updated by another
+      caller between our SELECT and our UPDATE (CAS failed).
 
   ## Arguments
     * `worker_id` — string identifier for the claimer (agent / worker
-      label). Stamped into `content.assignee`.
-    * `opts` — same as `ready/1`. `:phase_id` is recommended (a phase-
-      agnostic claim works but is rarely what an orchestrator wants).
+      label). Stamped into `content.claim.worker` and `content.assignee`.
+    * `opts` — same as `ready/1`. `:phase_id` is recommended.
   """
-  @spec claim(String.t(), keyword()) :: {:ok, Document.t() | nil} | {:error, term()}
+  @spec claim(String.t(), keyword()) ::
+          {:ok, Document.t() | nil} | {:error, :stale_claim}
   def claim(worker_id, opts \\ []) when is_binary(worker_id) do
-    # ONE transaction: row-lock pick + status flip + return.
-    Repo.transaction(fn ->
-      case opts
-           |> ready_query()
-           |> from(limit: 1, lock: "FOR UPDATE SKIP LOCKED")
-           |> Repo.one() do
-        nil ->
-          nil
+    result =
+      Repo.transaction(fn ->
+        case opts
+             |> ready_query()
+             |> from(limit: 1, lock: "FOR UPDATE SKIP LOCKED")
+             |> Repo.one() do
+          nil ->
+            {:ok, nil}
 
-        %Document{} = doc ->
-          new_content =
-            doc.content
-            |> Map.put("lifecycle_status", "in_progress")
-            |> Map.put("assignee", worker_id)
+          %Document{} = doc ->
+            do_claim(doc, worker_id)
+        end
+      end)
 
-          doc
-          |> Ecto.Changeset.change(content: new_content)
-          |> Repo.update!()
+    case result do
+      {:ok, {:ok, value}} -> {:ok, value}
+      {:ok, {:error, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp do_claim(%Document{} = doc, worker_id) do
+    observed_rev = doc.rev
+    new_rev = generate_rev()
+    next_epoch = current_epoch(doc) + 1
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    new_claim = %{
+      "worker" => worker_id,
+      "ts_iso" => ts_iso,
+      "epoch" => next_epoch
+    }
+
+    new_content =
+      doc.content
+      |> Map.put("lifecycle_status", "in_progress")
+      |> Map.put("assignee", worker_id)
+      |> Map.put("claim", new_claim)
+
+    # Expected-version CAS: WHERE id = ? AND rev = <observed_rev>.
+    # update_all returns {rows_affected, _}. 0 → another caller won.
+    {rows, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+      |> Repo.update_all(set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()])
+
+    case rows do
+      1 ->
+        updated = %{doc | content: new_content, rev: new_rev}
+        _ = insert_mutation_event!(updated, @event_task_claimed, observed_rev)
+        {:ok, updated}
+
+      0 ->
+        {:error, :stale_claim}
+    end
+  end
+
+  @doc """
+  Close (terminate) a claimed task — W7-04 full primitives.
+
+  Five things, in one Postgres transaction:
+
+    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext('task:' || doc_id))`
+       serializes ALL concurrent close attempts on the same task; one wins,
+       the rest queue inside the lock and then fail CAS (because the winner
+       already bumped `rev`). Per-task scope — closes on DIFFERENT tasks do
+       NOT block each other.
+
+    2. **Fencing check** — the caller must pass its observed epoch; mismatch
+       (or no claim record) → `{:error, :fenced_off}` so the dead worker's
+       late writes are rejected after a TTL sweep / re-claim.
+
+    3. **Expected-version CAS** — `rev = <observed_rev>` guard, same as
+       `claim/2`. 0 rows affected → `{:error, :stale_claim}`.
+
+    4. **Cascading unblock** — every dependent (inbound `blocks` edge) whose
+       full blocker set is now `done` flips its `lifecycle_status` from
+       `"blocked"` to `"open"` in the same transaction. The advisory lock
+       guarantees we are the only writer flipping the parent on this txn, so
+       the recomputation we do for each dependent is consistent.
+
+    5. **Durable-then-ack** — one `mutation_events` row of kind `"task.closed"`
+       for the task itself, plus one `"task.mutated"` row per dependent
+       whose `lifecycle_status` changed. All committed before the function
+       returns.
+
+  ## Arguments
+    * `task_id` — `documents.id` (uuid) of the task being closed.
+    * `worker_id` — string. Stamped on the event row.
+    * `opts`
+      * `:observed_epoch` (required integer) — the epoch the worker saw on
+        claim. Must match the row's current `content.claim.epoch`.
+      * `:observed_rev` (optional string) — when given, also CAS-guards on
+        `documents.rev`. Defaults to the row's rev as read inside the txn
+        AFTER the advisory lock (which is the natural CAS point under the
+        per-task serialization).
+      * `:lifecycle_status` (default `"done"`) — one of `done`/`cancelled`/
+        `blocked`.
+
+  ## Returns
+    * `{:ok, %Document{}}` — closed successfully; the returned doc carries
+      the new `content.lifecycle_status` and bumped `rev`.
+    * `{:error, :not_found}` — no such task.
+    * `{:error, :fenced_off}` — observed epoch ≠ row epoch.
+    * `{:error, :stale_claim}` — CAS failed (extremely rare under the
+      advisory lock, but covered for defense in depth).
+    * `{:error, {:invalid_lifecycle, status}}` — disallowed terminal status.
+  """
+  @spec close(binary(), String.t(), keyword()) ::
+          {:ok, Document.t()}
+          | {:error, :not_found | :fenced_off | :stale_claim | {:invalid_lifecycle, term()}}
+  def close(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
+    observed_epoch = Keyword.fetch!(opts, :observed_epoch)
+    new_status = Keyword.get(opts, :lifecycle_status, "done")
+    observed_rev_opt = Keyword.get(opts, :observed_rev)
+
+    cond do
+      new_status not in @closed_lifecycle_statuses ->
+        {:error, {:invalid_lifecycle, new_status}}
+
+      true ->
+        do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status)
+    end
+  end
+
+  defp do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status) do
+    result =
+      Repo.transaction(fn ->
+        # 1. Advisory lock — per-task. hashtext('task:' || doc_id) gives a
+        #    deterministic int4 key; pg_advisory_xact_lock takes an int4 or
+        #    bigint and auto-releases at COMMIT/ROLLBACK.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+
+        case Repo.get(Document, task_id) do
+          nil ->
+            {:error, :not_found}
+
+          %Document{} = doc ->
+            observed_rev = observed_rev_opt || doc.rev
+
+            # Already-terminal guard. Under the advisory lock, a serialized
+            # 2nd+ caller reads the row AFTER the winner committed → sees
+            # `lifecycle_status` already in a terminal state. Without this
+            # the default-observed-rev path would let every caller "succeed"
+            # in turn (CAS passes against the just-read rev). Treat the
+            # already-terminal row as a lost race; the explicit-rev CAS
+            # path below still wins/loses on rev when callers pass their
+            # own observation.
+            cond do
+              observed_rev_opt == nil and
+                  Map.get(doc.content, "lifecycle_status") in @closed_lifecycle_statuses ->
+                {:error, :stale_claim}
+
+              true ->
+                with :ok <- check_fencing(doc, observed_epoch),
+                     {:ok, updated} <-
+                       apply_close_update(doc, worker_id, observed_rev, new_status) do
+                  _ = insert_mutation_event!(updated, @event_task_closed, observed_rev)
+                  _ = cascade_unblock_dependents!(updated)
+                  {:ok, updated}
+                end
+            end
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, doc}} -> {:ok, doc}
+      {:ok, {:error, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp check_fencing(%Document{content: content}, observed_epoch) do
+    case content do
+      %{"claim" => %{"epoch" => row_epoch}} when row_epoch == observed_epoch -> :ok
+      %{"claim" => %{"epoch" => _}} -> {:error, :fenced_off}
+      _ -> {:error, :fenced_off}
+    end
+  end
+
+  defp apply_close_update(%Document{} = doc, worker_id, observed_rev, new_status) do
+    new_rev = generate_rev()
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    new_content =
+      doc.content
+      |> Map.put("lifecycle_status", new_status)
+      |> Map.update("claim", %{}, fn claim ->
+        claim
+        |> Map.put("closed_by", worker_id)
+        |> Map.put("closed_at", ts_iso)
+      end)
+
+    {rows, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+      |> Repo.update_all(set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()])
+
+    case rows do
+      1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
+      0 -> {:error, :stale_claim}
+    end
+  end
+
+  # After a task flips to `done`, walk every inbound `blocks` edge and flip
+  # the dependent's `lifecycle_status` from "blocked"→"open" IFF every one of
+  # ITS blockers is now `done`. We do this in the same advisory-lock-guarded
+  # transaction so two concurrent closes that both unblock the same
+  # dependent can't double-flip it.
+  defp cascade_unblock_dependents!(%Document{content: %{"lifecycle_status" => "done"}} = parent) do
+    parent
+    |> Map.fetch!(:id)
+    |> dependents(kind: :blocks)
+    |> Enum.each(fn %Document{} = dep ->
+      if all_blockers_done?(dep) and Map.get(dep.content, "lifecycle_status") == "blocked" do
+        new_rev = generate_rev()
+        new_content = Map.put(dep.content, "lifecycle_status", "open")
+
+        {1, _} =
+          from(d in Document, where: d.id == ^dep.id and d.rev == ^dep.rev)
+          |> Repo.update_all(
+            set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+          )
+
+        unblocked = %{dep | content: new_content, rev: new_rev}
+        _ = insert_mutation_event!(unblocked, @event_task_mutated, dep.rev)
       end
     end)
+
+    :ok
+  end
+
+  defp cascade_unblock_dependents!(_non_done_parent), do: :ok
+
+  defp all_blockers_done?(%Document{} = dep) do
+    dep.id
+    |> dependencies(kind: :blocks)
+    |> Enum.all?(fn %Document{content: c} ->
+      Map.get(c, "lifecycle_status") == "done"
+    end)
+  end
+
+  defp current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
+  defp current_epoch(_), do: 0
+
+  # Mutation-events insert. The existing `mutation_events` schema (used by
+  # the document spine) is reused verbatim — the `mutation` text column
+  # carries our `task.claimed` / `task.closed` / `task.mutated` kinds, the
+  # `document` map carries an Envelope-shaped view of the post-update row.
+  # Tenancy stamps mirror `Content.save_event/5` so workspace-scoped
+  # `recent_activity` reads surface task ops.
+  defp insert_mutation_event!(%Document{} = doc, kind, previous_rev) do
+    %MutationEvent{}
+    |> Ecto.Changeset.change(%{
+      dataset: doc.dataset,
+      type: doc.type,
+      doc_id: doc.doc_id,
+      mutation: kind,
+      rev: doc.rev,
+      previous_rev: previous_rev,
+      document: %{
+        "doc_id" => doc.doc_id,
+        "type" => doc.type,
+        "title" => doc.title,
+        "status" => doc.status,
+        "content" => doc.content,
+        "rev" => doc.rev
+      },
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id,
+      dataset_id: doc.dataset_id,
+      inserted_at: DateTime.utc_now()
+    })
+    |> Repo.insert!()
+  end
+
+  # New rev token, same shape as `Content.generate_rev/0`. Kept private here
+  # so `Tasks` does not depend on a private function in another module.
+  defp generate_rev do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  @doc "The three mutation_events kinds emitted by this module."
+  @spec event_kinds() :: %{claimed: String.t(), closed: String.t(), mutated: String.t()}
+  def event_kinds do
+    %{
+      claimed: @event_task_claimed,
+      closed: @event_task_closed,
+      mutated: @event_task_mutated
+    }
   end
 
   # The shared query the read-only `ready/1` and the row-locked `claim/2`
