@@ -112,6 +112,15 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert first["kind"] == "task"
       assert first["lifecycle_status"] == "open"
       assert first["type"] == "task"
+
+      # w7-08c (paperflow-y1c): edge-count fields present on the ready shape
+      # (the bd-shim's list/ready renderers carry them into the consumer JSON).
+      assert Map.has_key?(first, "dependency_count")
+      assert Map.has_key?(first, "dependent_count")
+      assert Map.has_key?(first, "comment_count")
+      assert first["dependency_count"] == 0
+      assert first["dependent_count"] == 0
+      assert first["comment_count"] == 0
     end
   end
 
@@ -238,6 +247,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["doc"]["kind"] == "task"
       assert payload["doc"]["lifecycle_status"] == "open"
       assert payload["doc"]["type"] == "task"
+
+      # w7-08c: edge counts ride on the single-doc show response too.
+      assert payload["doc"]["dependency_count"] == 0
+      assert payload["doc"]["dependent_count"] == 0
+      assert payload["doc"]["comment_count"] == 0
     end
 
     test "error path: 404 when doc_id unknown", %{conn: conn} do
@@ -363,6 +377,100 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
       assert payload["edge"]["kind"] == "blocks"
+    end
+  end
+
+  # ─── w7-08c (paperflow-y1c): list-all endpoint ─────────────────────────
+
+  describe "GET /v1/tasks" do
+    test "basic list: returns every task/goal/phase in the tenant",
+         %{conn: conn, scope: scope} do
+      # Three documents of three different types in the same tenant.
+      goal = mk_doc!("goal", uniq("idx-goal"), scope, %{"goal_slug" => "idx"})
+
+      _phase =
+        mk_doc!("phase", uniq("idx-phase"), scope, %{
+          "phase_name" => "build",
+          "parent" => goal.doc_id,
+          "lifecycle_status" => "open"
+        })
+
+      _task = mk_task!(uniq("idx-task"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert is_list(payload["docs"])
+      types = payload["docs"] |> Enum.map(& &1["type"]) |> MapSet.new()
+      # All three substrate types should be present.
+      assert MapSet.subset?(MapSet.new(["goal", "phase", "task"]), types)
+
+      # Count fields ride on the list shape too.
+      first = hd(payload["docs"])
+      assert Map.has_key?(first, "dependency_count")
+      assert Map.has_key?(first, "dependent_count")
+      assert Map.has_key?(first, "comment_count")
+    end
+
+    test "filter by kind: type=goal narrows to goal rows only",
+         %{conn: conn, scope: scope} do
+      _g1 = mk_doc!("goal", uniq("kind-g1"), scope, %{"goal_slug" => "kg1"})
+      _g2 = mk_doc!("goal", uniq("kind-g2"), scope, %{"goal_slug" => "kg2"})
+      _task = mk_task!(uniq("kind-task"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks?type=goal")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      types = payload["docs"] |> Enum.map(& &1["type"]) |> Enum.uniq()
+      assert types == ["goal"]
+      assert length(payload["docs"]) >= 2
+    end
+
+    test "filter by lifecycle_status: open narrows to open rows",
+         %{conn: conn, scope: scope} do
+      open_phase = uniq("ls-phase-open")
+      done_phase = uniq("ls-phase-done")
+
+      _open_task = mk_task!(uniq("ls-open"), scope, %{"parent_id" => open_phase})
+
+      _done_task =
+        mk_task!(uniq("ls-done"), scope, %{
+          "parent_id" => done_phase,
+          "lifecycle_status" => "done"
+        })
+
+      resp = conn |> authed() |> get("/v1/tasks?type=task&lifecycle_status=done")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      statuses =
+        payload["docs"]
+        |> Enum.map(& &1["lifecycle_status"])
+        |> Enum.uniq()
+
+      assert statuses == ["done"]
+    end
+
+    test "filter by phase_id: narrows to children of that phase",
+         %{conn: conn, scope: scope} do
+      phase_id = uniq("idx-phase-filter")
+      _t1 = mk_task!(uniq("pf-task-a"), scope, %{"parent_id" => phase_id})
+      _t2 = mk_task!(uniq("pf-task-b"), scope, %{"parent_id" => phase_id})
+      _other = mk_task!(uniq("pf-other"), scope, %{"parent_id" => "different-phase"})
+
+      resp = conn |> authed() |> get("/v1/tasks?phase_id=#{phase_id}")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      parents =
+        payload["docs"]
+        |> Enum.map(& &1["parent_id"])
+        |> Enum.uniq()
+
+      assert parents == [phase_id]
+      assert length(payload["docs"]) == 2
     end
   end
 end

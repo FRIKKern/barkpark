@@ -460,6 +460,11 @@ defmodule BarkparkWeb.Router do
   scope "/v1/tasks", BarkparkWeb do
     pipe_through [:api, :require_token]
 
+    # w7-08c: list-all (the natural `GET /v1/tasks` root). Declared BEFORE
+    # the `/:doc_id` catchall so an empty path doesn't get matched as
+    # `:doc_id = ""` (Phoenix would actually 404 on that, but the order is
+    # the documented Phoenix idiom for static/dynamic disambiguation).
+    get "/", TasksController, :index
     get "/ready", TasksController, :ready
     # w7-08: epic aggregator — declared BEFORE the `/:doc_id` catchall so
     # "/epic/close-eligible" doesn't get matched as `:doc_id = "epic"`.
