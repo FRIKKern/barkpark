@@ -67,17 +67,39 @@ config :barkpark, :search_query_exclude_patterns, [
   ~r/^(test|asdf|qwerty|foo|bar)$/i
 ]
 
+# W7-05: the `tasks_ttl` queue is concurrency=1 per node — only one TTL
+# sweep runs at a time on a given node, defense in depth against double-
+# sweeping the same expired claim (the per-task advisory lock inside the
+# worker is the authoritative serializer; queue=1 keeps the noise floor
+# low on small clusters and avoids ten redundant SELECT scans every
+# `task_lease_sweep_interval_seconds`).
 config :barkpark, Oban,
   repo: Barkpark.Repo,
-  queues: [default: 10, bokbasen: 4, plugins: 6],
+  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
        {"30 3 * * *", Barkpark.Search.Workers.Crystallize},
-       {"0 4 * * *", Barkpark.Search.Workers.Prune}
+       {"0 4 * * *", Barkpark.Search.Workers.Prune},
+       # W7-05 TTL sweep — runs every minute (the finest Oban.Cron
+       # granularity). Sub-minute cadence is intentionally NOT
+       # supported; see :task_lease_ttl_seconds comment below.
+       {"* * * * *", Barkpark.Tasks.TtlSweeper}
      ]}
   ]
+
+# W7-05 — TTL sweep tuning. Tests override `:task_lease_ttl_seconds`
+# (e.g. to 0 / 1) to make sweep-or-not deterministic. The default
+# 5-minute lease is the contract: any worker that hasn't refreshed
+# its claim.ts_iso in 300 s is considered crashed. Sweep cadence is
+# fixed by the Oban.Cron entry above — once per minute. Sub-minute
+# cadence is intentionally NOT supported: paperflow's recovery SLO
+# is "minutes, not seconds," and the per-minute cron + per-task
+# advisory lock + fencing epoch already cover the crash path
+# without driving Oban poll pressure higher than the rest of the
+# fleet (Search.Crystallize / Prune are daily).
+config :barkpark, :task_lease_ttl_seconds, 300
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
