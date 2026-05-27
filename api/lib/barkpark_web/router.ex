@@ -451,6 +451,22 @@ defmodule BarkparkWeb.Router do
     post "/mutate/:dataset", MutateController, :mutate
   end
 
+  # ── Tasks API — paperflow bd-shim surface (W7b step 1 / paperflow-rx0) ──
+  # Five endpoints the `bin/bd-shim` translator hits to wrap `Tasks.*`. Auth
+  # is bearer-only (the shim runs out-of-band as a CLI helper, never a
+  # browser session). No `:require_write` gate — claim/close are workflow
+  # ops, not document mutations; their atomicity lives in `Tasks.claim/2` +
+  # `Tasks.close/3` (advisory lock + CAS + fencing epoch).
+  scope "/v1/tasks", BarkparkWeb do
+    pipe_through [:api, :require_token]
+
+    get "/ready", TasksController, :ready
+    post "/claim", TasksController, :claim
+    post "/edges", TasksController, :add_edge
+    get "/:doc_id/edges", TasksController, :edges
+    post "/:doc_id/close", TasksController, :close
+  end
+
   scope "/v1/data", BarkparkWeb do
     pipe_through [:api, :require_admin]
 
