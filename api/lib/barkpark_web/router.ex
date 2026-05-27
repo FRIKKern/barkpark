@@ -490,6 +490,20 @@ defmodule BarkparkWeb.Router do
     delete "/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym
   end
 
+  # ── Goal-path rail — W7c step 3 (w7-11 / paperflow-158) ─────────────────
+  # Three read endpoints powering the paperflow daemon's rail proxy.
+  # Bearer-only via :api + :require_token — same surface contract as
+  # /v1/tasks (rail is a sibling read of the task substrate, both consumed
+  # by paperflow when PAPERFLOW_MIRROR_GOALS=1). See RailController moduledoc
+  # for the mutation_events-vs-event-doc data-source decision.
+  scope "/v1/rail", BarkparkWeb do
+    pipe_through [:api, :require_token]
+
+    get "/goal-path", RailController, :goal_path
+    get "/diff", RailController, :diff
+    get "/event/:event_id", RailController, :event
+  end
+
   # ── Schema management — requires admin token ────────────────────────────
   scope "/v1/schemas", BarkparkWeb do
     pipe_through [:api, :require_admin]
