@@ -51,7 +51,91 @@ defmodule BarkparkWeb.TasksController do
       |> Keyword.merge(scope_opts(conn))
 
     docs = Tasks.ready(opts)
-    json(conn, %{ok: true, docs: Enum.map(docs, &render_doc/1)})
+    counts = batch_edge_counts(docs)
+    json(conn, %{ok: true, docs: Enum.map(docs, &render_doc_with_counts(&1, counts))})
+  end
+
+  # ─── GET /v1/tasks ──────────────────────────────────────────────────────
+  # w7-08c (paperflow-y1c): list-all endpoint. Returns every task-substrate
+  # doc (type ∈ goal/phase/task/event) in the caller's tenant, optionally
+  # narrowed by `type`, `kind`, `lifecycle_status`, or `phase_id` (parent
+  # match). Used by the bd-shim's `bd list --json` family — replaces the
+  # previous "ready --limit 1000 then client-side filter" path (which lost
+  # in-progress + closed rows and never surfaced phases/goals).
+  #
+  # Why server-side filtering: the shim used to fetch ready and filter
+  # client-side, which (a) only saw the ready slice (no in_progress / done /
+  # phases / goals) and (b) wasted bandwidth. Server-side filter is the
+  # honest implementation and matches what real `bd list` queries against
+  # the SQLite store.
+
+  def index(conn, params) do
+    scope = scope_opts(conn)
+    workspace_id = Keyword.get(scope, :workspace_id)
+    project_id = Keyword.get(scope, :project_id)
+    limit = parse_int(params["limit"], 1000)
+
+    base =
+      from(d in Document,
+        where: d.type in ["task", "goal", "phase", "event"],
+        order_by: [desc: d.updated_at],
+        limit: ^limit
+      )
+
+    query =
+      base
+      |> maybe_filter_workspace(workspace_id)
+      |> maybe_filter_project(project_id)
+      |> maybe_filter_type(params["type"])
+      |> maybe_filter_kind(params["kind"])
+      |> maybe_filter_lifecycle(params["lifecycle_status"])
+      |> maybe_filter_parent(params["phase_id"])
+
+    docs = Repo.all(query)
+    counts = batch_edge_counts(docs)
+    json(conn, %{ok: true, docs: Enum.map(docs, &render_doc_with_counts(&1, counts))})
+  end
+
+  defp maybe_filter_type(query, nil), do: query
+
+  # bd-shape "epic" is our type "goal" — translate at the boundary so
+  # `bd list --type epic` finds the goal rows.
+  defp maybe_filter_type(query, "epic"),
+    do: from(d in query, where: d.type == "goal")
+
+  defp maybe_filter_type(query, t) when is_binary(t),
+    do: from(d in query, where: d.type == ^t)
+
+  defp maybe_filter_kind(query, nil), do: query
+
+  defp maybe_filter_kind(query, k) when is_binary(k),
+    do: from(d in query, where: fragment("?->>'kind'", d.content) == ^k)
+
+  defp maybe_filter_lifecycle(query, nil), do: query
+
+  # Missing content.lifecycle_status defaults to "open" — matches the shim's
+  # render fallback. Otherwise a goal POSTed without an explicit
+  # `lifecycle_status` (the common case) would be invisible to
+  # `bd list --status open`.
+  defp maybe_filter_lifecycle(query, "open") do
+    from(d in query,
+      where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) == "open"
+    )
+  end
+
+  defp maybe_filter_lifecycle(query, s) when is_binary(s),
+    do: from(d in query, where: fragment("?->>'lifecycle_status'", d.content) == ^s)
+
+  defp maybe_filter_parent(query, nil), do: query
+
+  # phase_id matches `content.parent_id` (work-tasks → phase) OR
+  # `content.parent` (phases → goal). Both schemas are in play.
+  defp maybe_filter_parent(query, p) when is_binary(p) do
+    from(d in query,
+      where:
+        fragment("?->>'parent_id'", d.content) == ^p or
+          fragment("?->>'parent'", d.content) == ^p
+    )
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────
@@ -93,7 +177,10 @@ defmodule BarkparkWeb.TasksController do
   def show(conn, %{"doc_id" => doc_id}) do
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, doc} ->
-        json(conn, %{ok: true, doc: render_doc(doc)})
+        # w7-08c: count edges on the single-doc path too. batch_edge_counts/1
+        # accepts a 1-element list and runs the same two grouped queries.
+        counts = batch_edge_counts([doc])
+        json(conn, %{ok: true, doc: render_doc_with_counts(doc, counts)})
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
@@ -329,11 +416,65 @@ defmodule BarkparkWeb.TasksController do
       priority: Map.get(content, "priority"),
       assignee: Map.get(content, "assignee"),
       parent_id: Map.get(content, "parent_id"),
+      parent: Map.get(content, "parent"),
       claim: Map.get(content, "claim"),
       content: content,
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
     }
+  end
+
+  # w7-08c (paperflow-y1c): batch edge-count maps so a list response
+  # (ready/index) doesn't N+1 the task_edges table.
+  #
+  # Returns %{doc_id => {dependency_count, dependent_count}}. Single query
+  # per side (outbound / inbound) joined on the candidate ids — preserves
+  # the controller's tenancy contract by deriving ids from the already-
+  # tenancy-scoped `docs` list.
+  defp batch_edge_counts([]), do: %{}
+
+  defp batch_edge_counts(docs) do
+    ids = Enum.map(docs, & &1.id)
+
+    # Outbound edges: from_id ∈ ids → this row depends on N blockers
+    # (its dependency_count). Use a single grouped query.
+    out_counts =
+      from(e in Edge,
+        where: e.from_id in ^ids,
+        group_by: e.from_id,
+        select: {e.from_id, count(e.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    # Inbound edges: to_id ∈ ids → N rows depend on this one
+    # (its dependent_count).
+    in_counts =
+      from(e in Edge,
+        where: e.to_id in ^ids,
+        group_by: e.to_id,
+        select: {e.to_id, count(e.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    Map.new(docs, fn d ->
+      {d.id, {Map.get(out_counts, d.id, 0), Map.get(in_counts, d.id, 0)}}
+    end)
+  end
+
+  # Augment the base render_doc map with the three count fields the
+  # bd-shim's list/ready shapes carry (dependency_count + dependent_count
+  # from batch_edge_counts; comment_count fixed at 0 until the comment
+  # substrate ships — TODO: wire when comment substrate exists).
+  defp render_doc_with_counts(%Document{} = doc, counts) do
+    {dep_count, dependent_count} = Map.get(counts, doc.id, {0, 0})
+
+    doc
+    |> render_doc()
+    |> Map.put(:dependency_count, dep_count)
+    |> Map.put(:dependent_count, dependent_count)
+    |> Map.put(:comment_count, 0)
   end
 
   defp put_opt(opts, _key, nil), do: opts
