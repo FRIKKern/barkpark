@@ -482,6 +482,113 @@ defmodule Barkpark.TasksClaimTest do
     end
   end
 
+  # ─── (4b) w7-08: Tasks.claim_by_id/3 — targeted claim primitive ───────────
+
+  describe "claim_by_id/3 — targeted (w7-08)" do
+    test "happy path: targets a specific row, advances lifecycle, bumps epoch",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-cbi-ok")
+      a = mk_task!(uniq("cbi-a"), scope, %{"parent_id" => phase_id})
+      _b = mk_task!(uniq("cbi-b"), scope, %{"parent_id" => phase_id})
+
+      # Even though `b` is also ready, claim_by_id MUST pick `a`.
+      assert {:ok, claimed} = Tasks.claim_by_id(a.doc_id, "w-targeted", scope)
+
+      assert claimed.id == a.id
+      assert claimed.doc_id == a.doc_id
+      assert claimed.content["lifecycle_status"] == "in_progress"
+      assert claimed.content["claim"]["worker"] == "w-targeted"
+      assert claimed.content["claim"]["epoch"] == 1
+
+      # Durable event landed for THIS doc_id only.
+      events = events_for(a.doc_id, Tasks.event_kinds().claimed)
+      assert length(events) == 1
+    end
+
+    test "not-ready: target is already in_progress → {:error, :not_ready}",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-cbi-nr")
+      task = mk_task!(uniq("cbi-nr"), scope, %{"parent_id" => phase_id})
+
+      # First claim wins, status → in_progress
+      {:ok, _} = Tasks.claim_by_id(task.doc_id, "first", scope)
+
+      # Second claim sees lifecycle_status=in_progress → :not_ready
+      assert {:error, :not_ready} = Tasks.claim_by_id(task.doc_id, "second", scope)
+    end
+
+    test "blocked-by-deps: outbound blocks edge with non-done target → :blocked_by_unsatisfied_deps",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-cbi-bd")
+      blocker = mk_task!(uniq("cbi-blk"), scope, %{"parent_id" => phase_id})
+      blocked = mk_task!(uniq("cbi-bkd"), scope, %{"parent_id" => phase_id})
+
+      {:ok, _} = Tasks.add_dep(blocked.id, blocker.id, :blocks)
+
+      assert {:error, :blocked_by_unsatisfied_deps} =
+               Tasks.claim_by_id(blocked.doc_id, "w", scope)
+
+      # Once blocker closes (so its lifecycle_status=done), claim_by_id succeeds.
+      {:ok, claimed_blocker} =
+        Tasks.claim_by_id(blocker.doc_id, "w", scope)
+
+      {:ok, _closed} =
+        Tasks.close(blocker.id, "w",
+          observed_epoch: claimed_blocker.content["claim"]["epoch"],
+          lifecycle_status: "done"
+        )
+
+      assert {:ok, claimed_blocked} =
+               Tasks.claim_by_id(blocked.doc_id, "w", scope)
+
+      assert claimed_blocked.content["lifecycle_status"] == "in_progress"
+    end
+
+    test "not-found: unknown doc_id → :not_found", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      assert {:error, :not_found} =
+               Tasks.claim_by_id("no-such-doc-id-#{System.unique_integer([:positive])}",
+                 "w",
+                 scope
+               )
+    end
+
+    test "concurrent targeted claims on SAME doc: exactly one wins under advisory lock",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-cbi-conc")
+      task = mk_task!(uniq("cbi-conc"), scope, %{"parent_id" => phase_id})
+
+      results =
+        1..8
+        |> Task.async_stream(
+          fn i -> Tasks.claim_by_id(task.doc_id, "w-#{i}", scope) end,
+          max_concurrency: 8,
+          ordered: false,
+          timeout: 10_000
+        )
+        |> Enum.map(fn {:ok, v} -> v end)
+
+      oks = Enum.count(results, &match?({:ok, _}, &1))
+      not_ready = Enum.count(results, &match?({:error, :not_ready}, &1))
+      stale = Enum.count(results, &match?({:error, :stale_claim}, &1))
+
+      assert oks == 1,
+             "exactly ONE targeted claim should succeed; got #{oks} (#{inspect(results)})"
+
+      # The other 7 are serialized behind the advisory lock — once the winner
+      # commits (lifecycle→in_progress), each subsequent caller fetches the
+      # row INSIDE the lock and sees not_ready (correct). stale_claim is
+      # tolerated if a CAS-race interleaves under load.
+      assert oks + not_ready + stale == 8,
+             "all 8 results must be {:ok,_}|{:error,:not_ready}|{:error,:stale_claim}; got #{inspect(results)}"
+    end
+  end
+
   # ─── (5) Regression — W7-03 burst test still drains correctly ─────────────
 
   describe "regression — full primitives do not break W7-03 burst" do

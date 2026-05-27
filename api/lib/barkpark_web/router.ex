@@ -461,9 +461,14 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_token]
 
     get "/ready", TasksController, :ready
+    # w7-08: epic aggregator — declared BEFORE the `/:doc_id` catchall so
+    # "/epic/close-eligible" doesn't get matched as `:doc_id = "epic"`.
+    get "/epic/close-eligible", TasksController, :epic_close_eligible
     post "/claim", TasksController, :claim
     post "/edges", TasksController, :add_edge
+    get "/:doc_id", TasksController, :show
     get "/:doc_id/edges", TasksController, :edges
+    post "/:doc_id/claim", TasksController, :claim_by_id
     post "/:doc_id/close", TasksController, :close
   end
 

@@ -63,6 +63,24 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # Generic doc maker for goal / phase / event — uses the per-kind validator
+  # (goal needs `goal_slug`, phase needs `phase_name`, event needs `event_kind`).
+  # Pass `lifecycle_status` in content_extra for phases that should count as
+  # already-done (for the epic close-eligible aggregator tests).
+  defp mk_doc!(type, doc_id, scope, content) do
+    content = Map.put(content, "kind", type)
+
+    {:ok, doc} =
+      Content.create_document(
+        type,
+        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
   defp authed(conn) do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
@@ -202,6 +220,131 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert parent_payload["dependencies"] == []
       assert length(parent_payload["dependents"]) == 1
       assert hd(parent_payload["dependents"])["doc_id"] == child_doc_id
+    end
+  end
+
+  # ─── w7-08: new endpoints ──────────────────────────────────────────────
+
+  describe "GET /v1/tasks/:doc_id" do
+    test "happy path: returns the doc as render_doc shape", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("show-a"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["doc_id"] == task.doc_id
+      assert payload["doc"]["kind"] == "task"
+      assert payload["doc"]["lifecycle_status"] == "open"
+      assert payload["doc"]["type"] == "task"
+    end
+
+    test "error path: 404 when doc_id unknown", %{conn: conn} do
+      resp = conn |> authed() |> get("/v1/tasks/no-such-#{System.unique_integer([:positive])}")
+      assert resp.status == 404
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "not_found"
+    end
+  end
+
+  describe "POST /v1/tasks/:doc_id/claim — targeted (w7-08)" do
+    test "happy path: targets the specific row, flips to in_progress, epoch=1",
+         %{conn: conn, scope: scope} do
+      target = mk_task!(uniq("tclaim-a"), scope)
+      _other = mk_task!(uniq("tclaim-b"), scope)
+
+      body = Jason.encode!(%{worker_id: "targeted-w"})
+      resp = conn |> authed() |> post("/v1/tasks/#{target.doc_id}/claim", body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["doc_id"] == target.doc_id
+      assert payload["doc"]["lifecycle_status"] == "in_progress"
+      assert payload["doc"]["claim"]["worker"] == "targeted-w"
+      assert payload["doc"]["claim"]["epoch"] == 1
+    end
+
+    test "error path: 409 reason=not_ready when already claimed", %{conn: conn, scope: scope} do
+      target = mk_task!(uniq("tclaim-nr"), scope)
+
+      body = Jason.encode!(%{worker_id: "w1"})
+      _ = conn |> authed() |> post("/v1/tasks/#{target.doc_id}/claim", body)
+
+      # Second targeted claim — row is now in_progress, expect 409 not_ready.
+      body2 = Jason.encode!(%{worker_id: "w2"})
+      resp = conn |> authed() |> post("/v1/tasks/#{target.doc_id}/claim", body2)
+      assert resp.status == 409
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "not_ready"
+    end
+  end
+
+  describe "GET /v1/tasks/epic/close-eligible" do
+    test "happy path: returns goal whose entire subtree is closed", %{conn: conn, scope: scope} do
+      goal_id = uniq("goal-elig")
+      phase_id = uniq("phase-elig")
+      work_id = uniq("work-elig")
+
+      goal = mk_doc!("goal", goal_id, scope, %{"goal_slug" => "elig"})
+
+      _phase =
+        mk_doc!("phase", phase_id, scope, %{
+          "phase_name" => "build",
+          "parent" => goal.doc_id,
+          "lifecycle_status" => "done"
+        })
+
+      # `mk_task!` doesn't return the prefixed doc_id directly — get it via
+      # `Content.create_document` flow. For the work-task, its parent_id must
+      # point at the persisted phase doc_id.
+      phase_persisted = phase_id |> then(fn _ -> "drafts.#{phase_id}" end)
+
+      _work =
+        mk_task!(work_id, scope, %{
+          "parent_id" => phase_persisted,
+          "lifecycle_status" => "done"
+        })
+
+      resp = conn |> authed() |> get("/v1/tasks/epic/close-eligible")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert is_list(payload["doc_ids"])
+      assert goal.doc_id in payload["doc_ids"]
+    end
+
+    test "error path: goal with an open work-task is NOT eligible", %{conn: conn, scope: scope} do
+      goal_id = uniq("goal-inelig")
+      phase_id = uniq("phase-inelig")
+      open_work = uniq("work-still-open")
+
+      goal = mk_doc!("goal", goal_id, scope, %{"goal_slug" => "inelig"})
+
+      phase =
+        mk_doc!("phase", phase_id, scope, %{
+          "phase_name" => "build",
+          "parent" => goal.doc_id,
+          "lifecycle_status" => "done"
+        })
+
+      _open =
+        mk_task!(open_work, scope, %{
+          "parent_id" => phase.doc_id,
+          "lifecycle_status" => "open"
+        })
+
+      resp = conn |> authed() |> get("/v1/tasks/epic/close-eligible")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      refute goal.doc_id in payload["doc_ids"]
     end
   end
 
