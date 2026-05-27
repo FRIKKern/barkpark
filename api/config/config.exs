@@ -75,7 +75,7 @@ config :barkpark, :search_query_exclude_patterns, [
 # `task_lease_sweep_interval_seconds`).
 config :barkpark, Oban,
   repo: Barkpark.Repo,
-  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1],
+  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1, tasks_compact: 1],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
@@ -85,7 +85,12 @@ config :barkpark, Oban,
        # W7-05 TTL sweep — runs every minute (the finest Oban.Cron
        # granularity). Sub-minute cadence is intentionally NOT
        # supported; see :task_lease_ttl_seconds comment below.
-       {"* * * * *", Barkpark.Tasks.TtlSweeper}
+       {"* * * * *", Barkpark.Tasks.TtlSweeper},
+       # W7-06 task-document compaction — every 6 hours. Coarser than
+       # TTL sweep because compaction is batch storage maintenance, not
+       # real-time crash recovery. The per-task advisory lock (same key
+       # as TtlSweeper / Tasks.close) serializes with claim/close/sweep.
+       {"0 */6 * * *", Barkpark.Tasks.Compactor}
      ]}
   ]
 
