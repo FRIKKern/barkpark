@@ -610,6 +610,30 @@ defmodule Barkpark.Content do
     end
   end
 
+  # W7a step 1 — task/goal/phase/event documents carry a tight `content`
+  # field contract (`Barkpark.Tasks.validate_kind_content/2`) on top of the
+  # generic schema-field validation. Enforced here at the write boundary so
+  # neither `create_document/4` nor `upsert_document/4` can land a malformed
+  # task/goal/phase/event row. Defense-in-depth: migration
+  # `20260528100000_w7a_task_schema` adds a DB CHECK constraint that catches
+  # raw-Repo writes that bypass this hook.
+  #
+  # Returns `:ok` for non-task-kind types so the existing post/page/paper
+  # write path is unaffected.
+  defp validate_task_kind(type, attrs) when type in ["task", "goal", "phase", "event"] do
+    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
+
+    case Barkpark.Tasks.validate_kind_content(type, content) do
+      :ok ->
+        :ok
+
+      {:error, errors} ->
+        {:error, {:invalid_task_content, errors}}
+    end
+  end
+
+  defp validate_task_kind(_type, _attrs), do: :ok
+
   @doc "Validate document content against its schema. Returns {:ok, content} or {:error, errors_map}."
   def validate_document(type, title, content, dataset) do
     case get_schema(type, dataset) do
@@ -643,6 +667,12 @@ defmodule Barkpark.Content do
       |> Map.put("rev", generate_rev())
       |> put_scope_attrs(opts)
 
+    with :ok <- validate_task_kind(type, attrs) do
+      do_create_document(type, attrs, dataset, doc_id, opts)
+    end
+  end
+
+  defp do_create_document(type, attrs, dataset, doc_id, opts) do
     ctx = build_ctx(opts)
 
     # Scope the prev-doc lookup to the writer's workspace/project. An UNSCOPED
@@ -1360,6 +1390,12 @@ defmodule Barkpark.Content do
       # (legacy field-map save) skips it untouched.
       |> maybe_project_document_content(dataset)
 
+    with :ok <- validate_task_kind(type, attrs) do
+      do_upsert_document(type, attrs, dataset, doc_id, opts)
+    end
+  end
+
+  defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
     ctx = build_ctx(opts)
 
     # Scope the prev-doc lookup to the writer's workspace/project (mirror of

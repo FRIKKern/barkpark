@@ -258,6 +258,36 @@ paper_dataset = "production"
 
 IO.puts("Seeded paper schema (dataset=#{paper_dataset})")
 
+# ── W7a task/goal/phase/event schemas (W7 retire-beads substrate) ────────────
+#
+# Wave 7 step 1: tasks/goals/phases/events are first-class document types
+# living beside papers in the same workspace/project/dataset hierarchy. Register
+# the four schemas the same way `paper` is seeded above so they appear in the
+# Studio desk + `Content.get_schema/2` + `Content.list_schemas/2` immediately
+# after `mix ecto.reset`. The shape contracts (`content.kind`,
+# `content.lifecycle_status`, etc.) are enforced at the write boundary by
+# `Barkpark.Tasks.validate_kind_content/2` (wired into `Content.create_document/4`
+# + `Content.upsert_document/4`); the schema rows here are the "first-class
+# document type" half (so Studio renders them) — the validation is the
+# field-shape half. See `lib/barkpark/tasks.ex` moduledoc for the full
+# rationale + status-axis choice (b).
+
+tasks_dataset = "production"
+
+for schema_def <- Barkpark.Tasks.schema_definitions(tasks_dataset) do
+  attrs =
+    schema_def
+    |> Map.from_struct()
+    |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+
+  %SchemaDefinition{}
+  |> SchemaDefinition.changeset(attrs)
+  |> stamp_schema_scope.()
+  |> Repo.insert!(on_conflict: :nothing)
+end
+
+IO.puts("Seeded W7a task/goal/phase/event schemas (dataset=#{tasks_dataset})")
+
 # ── Documents ────────────────────────────────────────────────────────────────
 
 now = DateTime.utc_now()
