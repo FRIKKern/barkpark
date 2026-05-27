@@ -3,11 +3,14 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paperflow-rx0 / w7-07a) — HTTP surface for paperflow's
   bd-compatible shim (`bin/bd-shim`, paperflow side).
 
-  Five endpoints, all bearer-token gated via the existing `:api` +
+  Eight endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
-    * `POST   /v1/tasks/claim`              — `Tasks.claim/2`
+    * `GET    /v1/tasks/epic/close-eligible` — child-tree aggregator
+    * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
+    * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
+    * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
     * `POST   /v1/tasks/:doc_id/close`      — `Tasks.close/3`
     * `GET    /v1/tasks/:doc_id/edges`      — `Tasks.dependencies/2` + `dependents/2`
     * `POST   /v1/tasks/edges`              — `Tasks.add_dep/3`
@@ -79,6 +82,100 @@ defmodule BarkparkWeb.TasksController do
       _ ->
         bad_request(conn, "worker_id is required")
     end
+  end
+
+  # ─── GET /v1/tasks/:doc_id ──────────────────────────────────────────────
+  # w7-08: dedicated single-task fetch, replacing the bd-shim's listAll() walk.
+  # Uses the SAME direct scoped query as `find_task_by_doc_id/2` — DO NOT
+  # route through `Content.get_document/4` (dataset_id coalescence bug noted
+  # in w7-07's report).
+
+  def show(conn, %{"doc_id" => doc_id}) do
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, doc} ->
+        json(conn, %{ok: true, doc: render_doc(doc)})
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/claim ───────────────────────────────────────
+  # w7-08: targeted claim (caller names the row). Calls Tasks.claim_by_id/3
+  # which has the same advisory-lock + CAS + epoch-bump + durable-event
+  # pattern as Tasks.claim/2 but for a specific doc.
+
+  def claim_by_id(conn, %{"doc_id" => doc_id} = params) do
+    case params["worker_id"] do
+      worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
+        opts = Keyword.merge([], scope_opts(conn))
+
+        case Tasks.claim_by_id(doc_id, worker_id, opts) do
+          {:ok, %Document{} = doc} ->
+            json(conn, %{ok: true, doc: render_doc(doc)})
+
+          {:error, :not_found} ->
+            not_found(conn, "task not found")
+
+          {:error, reason} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: reason_to_string(reason)})
+        end
+
+      _ ->
+        bad_request(conn, "worker_id is required")
+    end
+  end
+
+  # ─── GET /v1/tasks/epic/close-eligible ──────────────────────────────────
+  # w7-08: aggregator returning [doc_id, …] for kind=goal tasks whose full
+  # child-subtree (phases + work-tasks) is closed. Tenancy-scoped on
+  # workspace + project. Returns BOTH open and closed goals that qualify —
+  # the caller decides what to do (close them, just report, etc.).
+
+  def epic_close_eligible(conn, _params) do
+    scope = scope_opts(conn)
+    workspace_id = Keyword.get(scope, :workspace_id)
+    project_id = Keyword.get(scope, :project_id)
+
+    # Tenant boundary is workspace + project (the hard tenancy contract).
+    # `dataset_id` is intentionally NOT in the WHERE clause — the bd-shim
+    # surface is dataset-agnostic and goals can live anywhere within the
+    # workspace's datasets. Each document's `type` is goal/phase/task — those
+    # are the four kinds registered via `Tasks.schema_definitions/1`; the
+    # `content.kind` field is a discriminator for the JSON validator only.
+    sql = """
+    SELECT g.doc_id FROM documents g
+    WHERE g.type = 'goal'
+      AND ($1::uuid IS NULL OR g.workspace_id = $1::uuid)
+      AND ($2::uuid IS NULL OR g.project_id = $2::uuid)
+      AND NOT EXISTS (
+        SELECT 1 FROM documents c
+        WHERE c.type = 'phase'
+          AND c.content->>'parent' = g.doc_id
+          AND ($1::uuid IS NULL OR c.workspace_id = $1::uuid)
+          AND ($2::uuid IS NULL OR c.project_id = $2::uuid)
+          AND (
+            COALESCE(c.content->>'lifecycle_status', '') NOT IN ('done','cancelled')
+            OR EXISTS (
+              SELECT 1 FROM documents w
+              WHERE w.type = 'task'
+                AND w.content->>'parent_id' = c.doc_id
+                AND ($1::uuid IS NULL OR w.workspace_id = $1::uuid)
+                AND ($2::uuid IS NULL OR w.project_id = $2::uuid)
+                AND COALESCE(w.content->>'lifecycle_status', '') NOT IN ('done','cancelled')
+            )
+          )
+      )
+    ORDER BY g.doc_id
+    """
+
+    %{rows: rows} =
+      Repo.query!(sql, [dump_uuid(workspace_id), dump_uuid(project_id)])
+
+    doc_ids = Enum.map(rows, fn [doc_id] -> doc_id end)
+    json(conn, %{ok: true, doc_ids: doc_ids})
   end
 
   # ─── POST /v1/tasks/:doc_id/close ───────────────────────────────────────
@@ -182,9 +279,13 @@ defmodule BarkparkWeb.TasksController do
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
+    # w7-08: widen from `type == "task"` to the four W7 substrate types
+    # (goal/phase/task/event). The bd-shim's `bd show <id>` is generic —
+    # consumers pass a doc_id without knowing the kind. The tenancy
+    # filters below remain the hard boundary.
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task"
+        where: d.doc_id == ^doc_id and d.type in ["task", "goal", "phase", "event"]
       )
 
     query =
@@ -237,6 +338,18 @@ defmodule BarkparkWeb.TasksController do
 
   defp put_opt(opts, _key, nil), do: opts
   defp put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # Repo.query! takes RAW Postgrex params — uuids must be 16-byte binaries,
+  # not the human "73ad…" strings Ecto.UUID hands back from the scope helpers.
+  # Dump nil → nil so the SQL's `$1::uuid IS NULL` branch fires.
+  defp dump_uuid(nil), do: nil
+
+  defp dump_uuid(uuid) when is_binary(uuid) do
+    case Ecto.UUID.dump(uuid) do
+      {:ok, raw} -> raw
+      :error -> uuid
+    end
+  end
 
   defp fetch_string(params, key) do
     case Map.get(params, key) do

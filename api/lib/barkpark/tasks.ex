@@ -677,6 +677,107 @@ defmodule Barkpark.Tasks do
     end
   end
 
+  @doc """
+  Claim a SPECIFIC task by `doc_id` — targeted claim, the W7b counterpart to
+  the queue-based `claim/2`.
+
+  Why a separate primitive: `claim/2` picks the next ready row (queue semantics
+  — caller doesn't name a row). `bd`'s `bd update <id> --claim` is targeted —
+  caller DOES name a row. The bd-shim cannot translate one to the other
+  without a wasted listAll() roundtrip plus losing semantics (the row the
+  shim picks might not be the row the bd caller named). w7-08 wires this
+  primitive so the shim's `bd update <id> --claim` semantics are preserved.
+
+  Same advisory-lock + CAS-on-rev + epoch bump + durable mutation_event
+  pattern as `claim/2`'s `do_claim`, but for ONE specific doc — and with
+  explicit pre-flight checks for the four error modes:
+
+    * `:not_found` — no doc with this `doc_id` under the caller's tenancy
+    * `:not_ready` — lifecycle_status not in [`open`, `blocked`]
+    * `:blocked_by_unsatisfied_deps` — has outbound `blocks` edges whose
+      target's lifecycle_status is not `done`
+    * `:stale_claim` — CAS lost (extremely rare under the advisory lock)
+
+  ## Arguments
+    * `doc_id`     — string doc_id of the target (e.g. `"paperflow-5wk"`).
+    * `worker_id`  — string identifier for the claimer.
+    * `opts`
+      * `:workspace_id` (required for tenant scoping)
+      * `:project_id`   (optional further narrowing)
+
+  Returns `{:ok, %Document{}}` on success or `{:error, atom}`.
+  """
+  @spec claim_by_id(String.t(), String.t(), keyword()) ::
+          {:ok, Document.t()}
+          | {:error,
+             :not_found | :not_ready | :blocked_by_unsatisfied_deps | :stale_claim}
+  def claim_by_id(doc_id, worker_id, opts \\ [])
+      when is_binary(doc_id) and is_binary(worker_id) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    result =
+      Repo.transaction(fn ->
+        # 1. Advisory lock (per-doc_id) — serializes concurrent targeted
+        #    claims for the same row. Matches the close-side lock key shape:
+        #    `"task:" <> task_id`. We don't yet know the row's uuid so the
+        #    key is keyed off doc_id, which is unique within tenancy.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
+
+        with {:ok, doc} <- fetch_task_by_doc_id(doc_id, workspace_id, project_id),
+             :ok <- check_ready_for_targeted_claim(doc),
+             :ok <- check_deps_satisfied(doc) do
+          do_claim(doc, worker_id)
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, doc}} -> {:ok, doc}
+      {:ok, {:error, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+    base =
+      from(d in Document,
+        where: d.doc_id == ^doc_id and d.type == "task",
+        lock: "FOR UPDATE"
+      )
+
+    query =
+      base
+      |> then(fn q ->
+        if is_nil(workspace_id), do: q, else: from(d in q, where: d.workspace_id == ^workspace_id)
+      end)
+      |> then(fn q ->
+        if is_nil(project_id), do: q, else: from(d in q, where: d.project_id == ^project_id)
+      end)
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      %Document{} = doc -> {:ok, doc}
+    end
+  end
+
+  defp check_ready_for_targeted_claim(%Document{content: content}) do
+    case Map.get(content || %{}, "lifecycle_status") do
+      s when s in @ready_lifecycle_statuses -> :ok
+      _ -> {:error, :not_ready}
+    end
+  end
+
+  defp check_deps_satisfied(%Document{} = doc) do
+    deps = dependencies(doc.id, kind: :blocks)
+
+    all_done? =
+      Enum.all?(deps, fn %Document{content: c} ->
+        Map.get(c || %{}, "lifecycle_status") == "done"
+      end)
+
+    if all_done?, do: :ok, else: {:error, :blocked_by_unsatisfied_deps}
+  end
+
   defp do_claim(%Document{} = doc, worker_id) do
     observed_rev = doc.rev
     new_rev = generate_rev()
