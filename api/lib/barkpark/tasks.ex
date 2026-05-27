@@ -66,7 +66,7 @@ defmodule Barkpark.Tasks do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.Content.{Document, SchemaDefinition}
+  alias Barkpark.Content.{Document, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
 
@@ -536,5 +536,180 @@ defmodule Barkpark.Tasks do
       from e in Edge,
         where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
     )
+  end
+
+  # ─── W7a step 3: dependency-aware, phase-scoped ready-queue + claim ───────
+
+  @ready_default_limit 50
+  @ready_lifecycle_statuses ~w(open blocked)
+
+  @doc """
+  The ready-queue: task documents that are `claim/2`-eligible right now.
+
+  A task is **ready** when ALL of these hold:
+
+    * `type = "task"` AND `content->>'kind' = "task"` (defense in depth — the
+      W7-01 validator already enforces it but the read path doesn't trust
+      the application boundary);
+    * `content->>'lifecycle_status'` ∈ `{"open", "blocked"}` (not
+      `in_progress` / `done` / `cancelled`);
+    * the task is in the **active phase** (when `:phase_id` is given,
+      `content->>'parent_id' = <phase_doc_id>`; without the opt the
+      result is phase-agnostic — handy for testing and for the dock's
+      "everything ready in this workspace" feed);
+    * **every outbound `blocks` edge points at a `done` document** —
+      authoritative dep graph from `task_edges`; per W7-02 the FKs are
+      on `documents.id` (uuid) NOT `documents.doc_id` (string), so the
+      join is `e.to_id = b.id` (NOT `e.to_doc = b.doc_id` as the plan's
+      illustrative SQL suggested);
+    * the row is scoped to the caller's workspace/project (per the W2
+      hard tenant boundary — `nil` workspace fails CLOSED via
+      `Scope.scope_to_workspace_or_global/3`).
+
+  The query is ordered by `content.priority` ASC (NULLS LAST) then
+  `inserted_at` ASC — deterministic, lowest priority number first
+  (mirroring `bd ready`'s priority semantics where 0 is highest).
+
+  ## Options
+    * `:workspace_id` — binary uuid. Required for tenant-scoped reads.
+      A nil/missing value fails CLOSED (returns `[]`) per the W2 contract.
+    * `:project_id`   — binary uuid. Narrows further within the workspace.
+    * `:dataset`      — string dataset name. When omitted, no dataset
+      filter is applied (matches `Content.list_documents/3`'s default).
+    * `:phase_id`     — string doc_id of the parent phase document. When
+      omitted, returns ready tasks across all phases in scope.
+    * `:limit`        — integer max rows. Default
+      #{@ready_default_limit}.
+
+  Returns a list of `%Document{}` structs.
+
+  ## Why string `phase_id` and not the uuid
+
+  The W7-01 contract pins `content.parent_id` as the parent's `doc_id`
+  string (e.g. `"phase-build-a1b2"`), mirroring `bd`'s `--parent <slug>`
+  shape. The orchestrator surfaces the active phase as a slug from
+  `<repo>/.paperflow/active-phase`; reading the row's `documents.id`
+  uuid every time the statusline composes would be wasted DB chatter.
+  """
+  @spec ready(keyword()) :: [Document.t()]
+  def ready(opts \\ []) do
+    opts
+    |> ready_query()
+    |> Repo.all()
+  end
+
+  @doc """
+  Claim ONE ready task atomically.
+
+  This is the **skeleton** that proves `FOR UPDATE SKIP LOCKED` works on
+  the document substrate (Gate-A foundation). It is NOT the full claim
+  semantics — expected-`rev` CAS, lease tokens, epoch bumps, fencing
+  metadata, advisory locks, and the `mutation_events` op-log entry are
+  all deferred to W7-04. What this function DOES guarantee today:
+
+    * runs inside a `Repo.transaction/1`;
+    * `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1` over the ready query
+      (the row is locked for the duration of the transaction; concurrent
+      callers skip it and pick the next one);
+    * flips `content.lifecycle_status` from `"open"` (or `"blocked"`) to
+      `"in_progress"` and stamps `content.assignee = worker_id`;
+    * returns `{:ok, %Document{}}` on success or `{:ok, nil}` when
+      nothing is ready (NOT `{:error, ...}` — `nil` is the documented
+      "the queue was empty" return so the build skill can loop without
+      a try/catch).
+
+  ## Why this proves the concurrency primitive
+
+  Two concurrent BEGIN/SELECT FOR UPDATE SKIP LOCKED/UPDATE/COMMIT
+  blocks against the same ready-queue cannot grab the same row —
+  Postgres' SKIP LOCKED guarantees A's row is invisible to B until A
+  commits. After A commits, A's row's `lifecycle_status` is
+  `"in_progress"`, so the ready query no longer matches it. The
+  concurrency test in `tasks_ready_test.exs` runs this 20× with
+  `Task.async_stream` to pin the behaviour.
+
+  ## Arguments
+    * `worker_id` — string identifier for the claimer (agent / worker
+      label). Stamped into `content.assignee`.
+    * `opts` — same as `ready/1`. `:phase_id` is recommended (a phase-
+      agnostic claim works but is rarely what an orchestrator wants).
+  """
+  @spec claim(String.t(), keyword()) :: {:ok, Document.t() | nil} | {:error, term()}
+  def claim(worker_id, opts \\ []) when is_binary(worker_id) do
+    # ONE transaction: row-lock pick + status flip + return.
+    Repo.transaction(fn ->
+      case opts
+           |> ready_query()
+           |> from(limit: 1, lock: "FOR UPDATE SKIP LOCKED")
+           |> Repo.one() do
+        nil ->
+          nil
+
+        %Document{} = doc ->
+          new_content =
+            doc.content
+            |> Map.put("lifecycle_status", "in_progress")
+            |> Map.put("assignee", worker_id)
+
+          doc
+          |> Ecto.Changeset.change(content: new_content)
+          |> Repo.update!()
+      end
+    end)
+  end
+
+  # The shared query the read-only `ready/1` and the row-locked `claim/2`
+  # both ride on. Keeping ONE definition is what makes the
+  # "claim returns exactly what ready would have picked" contract a
+  # property of the code, not a documentation promise.
+  defp ready_query(opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    dataset = Keyword.get(opts, :dataset)
+    phase_id = Keyword.get(opts, :phase_id)
+    limit = Keyword.get(opts, :limit, @ready_default_limit)
+
+    base =
+      from(d in Document,
+        as: :doc,
+        where: d.type == "task",
+        where: fragment("?->>'kind'", d.content) == "task",
+        where:
+          fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
+        where:
+          not exists(
+            from e in Edge,
+              join: b in Document,
+              on: b.id == e.to_id,
+              where:
+                e.from_id == parent_as(:doc).id and
+                  e.kind == "blocks" and
+                  fragment("COALESCE(?->>'lifecycle_status', '')", b.content) != "done",
+              select: 1
+          ),
+        order_by: [
+          asc_nulls_last: fragment("(?->>'priority')::int", d.content),
+          asc: d.inserted_at
+        ],
+        limit: ^limit
+      )
+
+    base
+    |> maybe_filter_dataset(dataset)
+    |> maybe_filter_phase(phase_id)
+    |> Scope.scope_to_workspace_or_global(workspace_id, project_id)
+  end
+
+  defp maybe_filter_dataset(query, nil), do: query
+
+  defp maybe_filter_dataset(query, dataset) when is_binary(dataset) do
+    from [doc: d] in query, where: d.dataset == ^dataset
+  end
+
+  defp maybe_filter_phase(query, nil), do: query
+
+  defp maybe_filter_phase(query, phase_id) when is_binary(phase_id) do
+    from [doc: d] in query,
+      where: fragment("?->>'parent_id'", d.content) == ^phase_id
   end
 end
