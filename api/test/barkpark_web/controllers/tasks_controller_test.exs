@@ -473,4 +473,128 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert length(payload["docs"]) == 2
     end
   end
+
+  # ─── tt5: GET /v1/tasks?label= generic exact-string filter ─────────────
+  # Backs the bd-shim's `bd list --label file-claim:<path>` (and any
+  # arbitrary label) → find every task holding a given claim.
+
+  describe "GET /v1/tasks?label=" do
+    test "hit: returns the task whose content.labels contains the exact label",
+         %{conn: conn, scope: scope} do
+      label = "file-claim:/tmp/tt5-#{System.unique_integer([:positive])}.ex"
+      claimed = mk_task!(uniq("lbl-hit"), scope, %{"labels" => [label]})
+      _other = mk_task!(uniq("lbl-other"), scope, %{"labels" => ["file-claim:/elsewhere"]})
+
+      resp = conn |> authed() |> get("/v1/tasks?label=#{URI.encode_www_form(label)}")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+
+      ids = payload["docs"] |> Enum.map(& &1["doc_id"])
+      assert claimed.doc_id in ids
+      # The matched row surfaces its labels at the top level (tt5 render_doc).
+      hit = Enum.find(payload["docs"], &(&1["doc_id"] == claimed.doc_id))
+      assert label in hit["labels"]
+    end
+
+    test "miss: a label nobody holds returns zero docs", %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("lbl-miss"), scope, %{"labels" => ["file-claim:/held"]})
+
+      resp =
+        conn
+        |> authed()
+        |> get("/v1/tasks?label=#{URI.encode_www_form("file-claim:/nobody-holds-this")}")
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["docs"] == []
+    end
+
+    test "multiple tasks, one shared label: both surface", %{conn: conn, scope: scope} do
+      label = "file-claim:/tmp/tt5-shared-#{System.unique_integer([:positive])}.ex"
+      a = mk_task!(uniq("lbl-multi-a"), scope, %{"labels" => [label, "phase-build"]})
+      b = mk_task!(uniq("lbl-multi-b"), scope, %{"labels" => ["kind:task", label]})
+
+      resp = conn |> authed() |> get("/v1/tasks?label=#{URI.encode_www_form(label)}")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+
+      ids = payload["docs"] |> Enum.map(& &1["doc_id"]) |> MapSet.new()
+      assert MapSet.subset?(MapSet.new([a.doc_id, b.doc_id]), ids)
+    end
+  end
+
+  # ─── tt5: POST /v1/tasks/:doc_id/labels add/remove mutation ────────────
+  # Backs the bd-shim's `bd update <id> --add-label/--remove-label`.
+
+  describe "POST /v1/tasks/:doc_id/labels" do
+    test "add: union-adds a label, emits task.relabeled", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("relabel-add"), scope)
+      label = "file-claim:/tmp/tt5-add.ex"
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/labels", Jason.encode!(%{add: [label]}))
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert label in payload["doc"]["labels"]
+
+      # A task.relabeled mutation_event was emitted for this doc.
+      assert relabel_event?(task.doc_id)
+    end
+
+    test "remove: drops a held label, leaves the rest", %{conn: conn, scope: scope} do
+      keep = "file-claim:/tmp/tt5-keep.ex"
+      drop = "file-claim:/tmp/tt5-drop.ex"
+      task = mk_task!(uniq("relabel-rm"), scope, %{"labels" => [keep, drop]})
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/labels", Jason.encode!(%{remove: [drop]}))
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      labels = payload["doc"]["labels"]
+      assert keep in labels
+      refute drop in labels
+    end
+
+    test "add+remove idempotent: re-adding an existing + removing an absent is a no-op set",
+         %{conn: conn, scope: scope} do
+      existing = "file-claim:/tmp/tt5-existing.ex"
+      task = mk_task!(uniq("relabel-idem"), scope, %{"labels" => [existing]})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/labels",
+          Jason.encode!(%{add: [existing], remove: ["file-claim:/never-held"]})
+        )
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      # No duplicate of the existing label; the never-held remove is a no-op.
+      assert payload["doc"]["labels"] == [existing]
+    end
+  end
+
+  # A `task.relabeled` mutation_event exists for `doc_id` in this tenant.
+  defp relabel_event?(doc_id) do
+    import Ecto.Query, only: [from: 2]
+
+    Barkpark.Repo.exists?(
+      from(e in Barkpark.Content.MutationEvent,
+        where: e.doc_id == ^doc_id and e.mutation == "task.relabeled"
+      )
+    )
+  end
 end

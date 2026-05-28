@@ -76,6 +76,9 @@ defmodule Barkpark.Tasks do
   @event_task_claimed "task.claimed"
   @event_task_closed "task.closed"
   @event_task_mutated "task.mutated"
+  # tt5: file-claim label support. Emitted when content.labels changes via
+  # relabel_by_id/3 (the bd-shim's `update --add-label/--remove-label` path).
+  @event_task_relabeled "task.relabeled"
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
 
@@ -928,6 +931,78 @@ defmodule Barkpark.Tasks do
     end
   end
 
+  @doc """
+  tt5: add/remove `content.labels` entries on a single task, advisory-lock +
+  CAS-on-rev guarded, emitting a `task.relabeled` mutation_event. Powers the
+  bd-shim's `bd update <id> --add-label/--remove-label` translation (which in
+  turn backs paperflow-claim-files' `file-claim:<path>` ownership labels).
+
+  `add` and `remove` are lists of exact label strings. The result is a union
+  add (dedup-preserving) minus the remove set. Idempotent: re-adding an
+  existing label or removing an absent one is a no-op on that label.
+
+  Returns `{:ok, doc}` (always re-reads + persists, even on a no-op set —
+  the rev bump + event keep the relabel observable), or `{:error, :not_found}`
+  / `{:error, :stale_claim}`.
+  """
+  @spec relabel_by_id(binary(), [binary()], [binary()]) ::
+          {:ok, Document.t()} | {:error, term()}
+  def relabel_by_id(task_id, add, remove)
+      when is_binary(task_id) and is_list(add) and is_list(remove) do
+    result =
+      Repo.transaction(fn ->
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+
+        case Repo.get(Document, task_id) do
+          nil ->
+            {:error, :not_found}
+
+          %Document{} = doc ->
+            observed_rev = doc.rev
+            current = labels_of(doc.content)
+            add = Enum.filter(add, &is_binary/1)
+            remove = MapSet.new(Enum.filter(remove, &is_binary/1))
+
+            # Union add (append new, preserve order), then drop the remove set.
+            next =
+              (current ++ add)
+              |> Enum.uniq()
+              |> Enum.reject(&MapSet.member?(remove, &1))
+
+            new_content = Map.put(doc.content, "labels", next)
+            new_rev = generate_rev()
+
+            {rows, _} =
+              from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+              |> Repo.update_all(
+                set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+              )
+
+            case rows do
+              1 ->
+                updated = %{doc | content: new_content, rev: new_rev}
+                _ = insert_mutation_event!(updated, @event_task_relabeled, observed_rev)
+                {:ok, updated}
+
+              0 ->
+                {:error, :stale_claim}
+            end
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, doc}} -> {:ok, doc}
+      {:ok, {:error, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # content.labels is a free-form JSON array (the W7 mirror writes goals/phases
+  # with [kind, goal] etc.; tasks may have none). Defensive: coerce non-list /
+  # missing to [].
+  defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
+  defp labels_of(_), do: []
+
   defp check_fencing(%Document{content: content}, observed_epoch) do
     case content do
       %{"claim" => %{"epoch" => row_epoch}} when row_epoch == observed_epoch -> :ok
@@ -1037,13 +1112,19 @@ defmodule Barkpark.Tasks do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
 
-  @doc "The three mutation_events kinds emitted by this module."
-  @spec event_kinds() :: %{claimed: String.t(), closed: String.t(), mutated: String.t()}
+  @doc "The mutation_events kinds emitted by this module."
+  @spec event_kinds() :: %{
+          claimed: String.t(),
+          closed: String.t(),
+          mutated: String.t(),
+          relabeled: String.t()
+        }
   def event_kinds do
     %{
       claimed: @event_task_claimed,
       closed: @event_task_closed,
-      mutated: @event_task_mutated
+      mutated: @event_task_mutated,
+      relabeled: @event_task_relabeled
     }
   end
 

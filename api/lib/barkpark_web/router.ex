@@ -475,6 +475,8 @@ defmodule BarkparkWeb.Router do
     get "/:doc_id/edges", TasksController, :edges
     post "/:doc_id/claim", TasksController, :claim_by_id
     post "/:doc_id/close", TasksController, :close
+    # tt5: add/remove content.labels (file-claim:* support for the bd-shim).
+    post "/:doc_id/labels", TasksController, :relabel
   end
 
   scope "/v1/data", BarkparkWeb do
