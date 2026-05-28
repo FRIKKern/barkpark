@@ -352,16 +352,42 @@ Operations runbook (Bypass-mocked e2e suite, sandbox creds, retry/cancel, status
 
 ## Make targets
 
+### Local (safe on macOS)
+
 | Target | Purpose |
 |---|---|
-| `make dev` / `make api` / `make tui` / `make run` | Local dev |
-| `make build` / `make web` / `make web-build` | Build TUI binary / Next.js demo |
-| `make rebuild` / `make restart` / `make stop` / `make status` / `make logs` | Service lifecycle (server) |
-| `make seed` / `make migrate` / `make reset-db` | Database |
-| `make deploy` | git pull + clean + compile + restart |
+| `make dev` / `make api` / `make tui` / `make run` | Local dev (tmux session / Phoenix / Go TUI / Phoenix+TUI) |
+| `make build` / `make web` / `make web-build` | Build TUI binary / run + build the Next.js demo |
+| `make format` / `make format-check` | Run / check `mix format` on `api/` |
 | `make precheck` | Pre-merge gate (mirrors CI prod-compile + warnings-as-errors) |
-| `make format` / `make format-check` / `make hooks` | Format gate |
+| `make hooks` | Install repo git hooks (pre-commit format check) |
+| `make clean` | Remove build artifacts (`bin/`, `tmp/`, `api/_build/`) |
+
+> Database setup locally is **not** `make seed/migrate/reset-db` — those go through `start.sh` and are prod-only (see below). On your Mac use `mix` directly:
+>
+> ```bash
+> cd api && mix ecto.setup      # create + migrate + seed
+> cd api && mix ecto.reset      # drop + recreate + migrate + seed
+> cd api && mix ecto.migrate    # migrations only
+> ```
+
+### PROD server only (systemd + `MIX_ENV=prod`)
+
+These target the Hetzner systemd unit — not your Mac. `seed`/`migrate`/`reset-db` run through `start.sh` (hardcodes `/root/.asdf` + `MIX_ENV=prod`); `restart`/`stop`/`status`/`logs` shell out to `sudo systemctl` / `journalctl` against the box.
+
+| Target | Purpose |
+|---|---|
+| `make rebuild` | Nuke `_build/prod`, recompile deps+app, restart service |
+| `make deploy` | git pull + clean + compile + restart (one command) |
+| `make restart` / `make stop` / `make status` / `make logs` | Service lifecycle (`systemctl` / `journalctl`) |
+| `make seed` / `make migrate` / `make reset-db` | Database (via `start.sh`, `MIX_ENV=prod`) |
 | `make domain-cutover DOMAIN=…` | Update `PHX_HOST`/`PHX_SCHEME` on prod, restart, verify |
+| `make setup` | First-time fresh-server pointer (run `deploy.sh` instead) |
+
+### Docker (alternative to native)
+
+| Target | Purpose |
+|---|---|
 | `make docker-build` / `make docker-up` / `make docker-down` / `make docker-logs` | Docker alternative |
 
 ## Tech stack

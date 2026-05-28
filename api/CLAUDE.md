@@ -62,9 +62,12 @@ Tokens are SHA256 hashed in the DB. See `ApiToken.hash_token/1`.
 
 ## Adding a new document type
 
-1. POST to `/v1/schemas/production` with auth
-2. The Go TUI will pick it up on next restart (schemas loaded at startup)
-3. To make it appear in the TUI navigation, add it to `structure.go` in sanity-tui
+Schemas are now **tenant-scoped** — every schema row is stamped with `workspace_id`/`project_id` (and documents additionally carry `dataset_id`). Scoped reads filter `WHERE dataset_id = <id>` with NO NULL-fallback, so a schema or doc inserted without a tenant lands invisible to scoped reads (the NULL-`dataset_id` trap). Pick the path that fits the type:
+
+1. **Plugin-declared type (preferred).** Add the type to a plugin's `register_schemas/1` callback. It auto-registers on every server boot via `Barkpark.Plugins.Bootstrap.register_all_schemas/0` (also called by `seeds.exs`), correctly scoped, idempotent on `(name, dataset)`. No manual POST needed. See `docs/plugins/INSTALL.md`.
+2. **Ad-hoc type (fallback).** POST to `/v1/schemas/production` with admin auth. The endpoint stamps the tenant from the request scope — do not hand-insert rows with NULL scope, or the type is invisible to scoped reads. Seeded schemas go through `stamp_schema_scope` in `seeds.exs`.
+3. The Go TUI picks up new schemas on next restart (schemas loaded at startup).
+4. To make it appear in the TUI navigation, add it to `structure.go` in sanity-tui.
 
 ## PubSub
 
