@@ -78,8 +78,8 @@ defmodule BarkparkWeb.RailController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   @event_kinds_default ~w(
-    task.claimed task.closed task.mutated task.lease_expired
-    task.compacted task.restored
+    task.claimed task.closed task.mutated task.relabeled task.lease_expired
+    task.compacted task.compaction_restored
   )
 
   # ─── GET /v1/rail/goal-path?goal=<doc_id> ──────────────────────────────

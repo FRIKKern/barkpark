@@ -146,7 +146,7 @@ The Phase 0 plugin foundation introduces four nested field types beyond the v1 p
 - `codelist` — registry-backed enum pinned to an `issue` version (e.g. ONIX issue 73)
 - `localizedText` — multi-language string with `languages`, `format`, and `fallbackChain`
 
-**The Go TUI is read-only for plugin schemas in v1** (decision 12 in `.doey/plans/masterplan-20260425-085425.md`). Documents whose schema declares any of the four v2 types render as **JSON dumps** in the TUI; edits go through the LiveView Studio at `/studio`. The TUI editor menus skip composite / array / codelist / localizedText fields entirely — there is no inline form for them.
+**The Go TUI is read-only for plugin schemas in v1.** Documents whose schema declares any of the four v2 types render as **JSON dumps** in the TUI; edits go through the LiveView Studio at `/studio`. The TUI editor menus skip composite / array / codelist / localizedText fields entirely — there is no inline form for them. (The original masterplan that recorded this as "decision 12" is no longer in the tree; the surviving design notes live under `.doey/plans/research/`.)
 
 This is a declared v1 constraint, NOT a missing feature. v2 may add TUI editing for these types once a publisher actually demands it; until then, Studio is the editing surface.
 

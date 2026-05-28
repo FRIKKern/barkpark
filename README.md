@@ -13,7 +13,7 @@ A headless CMS with a Sanity-style desk structure, a draft/published model, and 
 | Plugin system | `Barkpark.Plugin` behaviour — 14 callbacks, resolver chain, lifecycle hooks |
 | Reference plugin | OnixEdit — ONIX 3.0 book metadata + Bokbasen integration |
 | Tests | 1324 mix tests, 47 HTTP integration tests, full ONIX export round-trip |
-| Stack | Elixir 1.19 / Phoenix LiveView 1.1 / PostgreSQL / Oban / Go 1.21+ |
+| Stack | Elixir 1.15+ (tested 1.19) / Phoenix LiveView 1.1 / PostgreSQL / Oban / Go 1.24+ |
 
 ## Interfaces
 
@@ -209,11 +209,13 @@ Open `http://localhost:4000/studio`.
 
 ### Deploy to a VPS
 
-One command on any Ubuntu 22.04+ box (ARM64 or x86_64):
+One command on any Ubuntu 22.04+ box (ARM64 or x86_64). `deploy.sh` **requires** a `DOMAIN` env var — the public DNS hostname your users will visit (it pins Phoenix's `check_origin` whitelist; baking an IP while the public URL is `https://<dns>` causes a 403 on `/live/websocket` and a click-dead Studio). Pass it on the remote side so the script sees it:
 
 ```bash
-ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
+DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy.sh
 ```
+
+For an IP-only dev box, set `DOMAIN=<ip> PHX_SCHEME=http` explicitly instead.
 
 Installs PostgreSQL, Erlang/Elixir (via ASDF — Erlang Solutions has no ARM packages), Go, Caddy, and a systemd unit. First run on ARM is 10–15 min (Erlang compiles from source).
 
@@ -366,14 +368,14 @@ Operations runbook (Bypass-mocked e2e suite, sandbox creds, retry/cancel, status
 
 | Layer | Tech |
 |---|---|
-| API | Elixir 1.19, Phoenix LiveView 1.1 |
+| API | Elixir 1.15+ (tested 1.19), Phoenix LiveView 1.1 |
 | Persistence | PostgreSQL (JSONB), Ecto |
 | Background jobs | Oban |
 | HTTP client | Req |
 | Encryption | Cloak (plugin settings at rest) |
 | Real-time | Phoenix.PubSub, Phoenix LiveView, SSE |
 | Auth | Bearer tokens (SHA256 hashed) |
-| TUI | Go 1.21+, Bubble Tea, Lip Gloss |
+| TUI | Go 1.24+, Bubble Tea, Lip Gloss |
 | Reverse proxy | Caddy |
 
 ## License

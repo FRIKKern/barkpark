@@ -147,6 +147,47 @@ defmodule BarkparkWeb.RailControllerTest do
       assert body["ok"] == false
       assert body["reason"] == "bad_request"
     end
+
+    test "compaction-restore events surface in the rail (regression: task.restored→task.compaction_restored)",
+         %{conn: conn, scope: scope} do
+      # The Compactor emits `task.compaction_restored` (see
+      # Barkpark.Tasks.Compactor.event_kinds().restored), NOT `task.restored`.
+      # A stale kind in @event_kinds_default silently dropped these events
+      # from the goal-path rail. Assert the real kind is included.
+      assert Barkpark.Tasks.Compactor.event_kinds().restored == "task.compaction_restored"
+
+      goal = mk_doc!("goal", uniq("goal-restore"), scope, %{"goal_slug" => "restore-test"})
+
+      phase =
+        mk_doc!("phase", uniq("phase-restore"), scope, %{
+          "phase_name" => "build",
+          "parent" => goal.doc_id
+        })
+
+      task =
+        mk_doc!("task", uniq("task-restore"), scope, %{
+          "parent_id" => phase.doc_id,
+          "lifecycle_status" => "done"
+        })
+
+      restored_kind = Barkpark.Tasks.Compactor.event_kinds().restored
+      _ = insert_event!(task, "task.compacted", "<p>compacted</p>")
+      restored = insert_event!(task, restored_kind, "<p>restored</p>")
+
+      resp = conn |> authed() |> get("/v1/rail/goal-path?goal=#{goal.doc_id}")
+      assert resp.status == 200
+
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+
+      kinds = Enum.map(body["events"], & &1["kind"])
+      assert restored_kind in kinds, "compaction-restore event must surface in the rail"
+      assert "task.compacted" in kinds
+
+      first = hd(body["events"])
+      assert first["event_id"] == restored.id
+      assert first["kind"] == restored_kind
+    end
   end
 
   # ─── GET /v1/rail/event/:event_id ─────────────────────────────────────
