@@ -3250,9 +3250,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     opts = %{ref_resolver: resolver, codelist_resolver: codelist_resolver}
 
-    Enum.map(blocks, fn block ->
-      %{id: Map.get(block, "id"), html: Render.render_block(block, opts)}
+    # R2 fix (Option B): id-less blocks need a UNIQUE positional stream id, else
+    # they collapse to the constant `paper_blocks-` DOM id and the stream
+    # dedupes all but the last. Mirrors PaperLive.stream_block_id/2.
+    blocks
+    |> Enum.with_index()
+    |> Enum.map(fn {block, index} ->
+      %{id: paper_stream_block_id(block, index), html: Render.render_block(block, opts)}
     end)
+  end
+
+  defp paper_stream_block_id(block, index) do
+    case Map.get(block, "id") do
+      id when is_binary(id) and id != "" -> id
+      _ -> "block-#{index}"
+    end
   end
 
   # Stream dom ids are namespaced by the stream name (`:paper_blocks` →

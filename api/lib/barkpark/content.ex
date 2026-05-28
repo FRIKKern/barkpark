@@ -2800,7 +2800,19 @@ defmodule Barkpark.Content do
     # would update.
     existing = slug && get_existing_paper_for_write(slug, dataset, attrs)
 
-    blocks = attrs["blocks"]
+    # R2 fix (Option A): assign a stable per-block id at INGEST so every block
+    # has a UNIQUE "id" before storage/render. Id-less blocks otherwise all
+    # collapse to the same LiveView stream/DOM id (`blocks-`), so Phoenix's
+    # stream dedupes them and only the LAST block renders in the live <article>.
+    # `ensure_block_ids/1` ONLY fills a missing/blank id (positional `block-N`,
+    # recursing into sections) — it NEVER overwrites an author/op-supplied id, so
+    # DocPatchOp block-addressing (ops target blocks by id) stays stable across
+    # ops and re-ingests of the same structure.
+    blocks =
+      case attrs["blocks"] do
+        list when is_list(list) -> ensure_block_ids(list)
+        other -> other
+      end
 
     # Per-doc article marker. An ingest/POST may set `style: "article"` in
     # attrs; otherwise it sticks at whatever the existing doc already carries
@@ -3135,6 +3147,38 @@ defmodule Barkpark.Content do
       end
     end)
   end
+
+  # R2 fix (Option A). Walk a block list and fill a stable positional id
+  # (`block-<index>`, sections recurse with a `<parent>.<index>` prefix) for
+  # any block that lacks one. A block already carrying a non-blank "id" is left
+  # untouched, so author/op-supplied ids — which DocPatchOps address blocks by —
+  # survive byte-identical and stay resolvable. Sections recurse so a nested
+  # id-less child also gets a unique id (the stream only keys on top-level ids,
+  # but `apply_paper_block_op` addresses children too).
+  defp ensure_block_ids(blocks) when is_list(blocks), do: ensure_block_ids(blocks, "block")
+
+  defp ensure_block_ids(blocks, prefix) when is_list(blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.map(fn {block, index} -> ensure_block_id(block, prefix, index) end)
+  end
+
+  defp ensure_block_id(block, prefix, index) when is_map(block) do
+    id =
+      case Map.get(block, "id") do
+        existing when is_binary(existing) and existing != "" -> existing
+        _ -> "#{prefix}-#{index}"
+      end
+
+    block = Map.put(block, "id", id)
+
+    case Map.get(block, "blocks") do
+      children when is_list(children) -> Map.put(block, "blocks", ensure_block_ids(children, id))
+      _ -> block
+    end
+  end
+
+  defp ensure_block_id(block, _prefix, _index), do: block
 
   # `documents.title` is derived, in priority order, from:
   #   1. the PROJECTED bound title field (`content["title"]`) — Exp-P2: a bound

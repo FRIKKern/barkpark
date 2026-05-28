@@ -500,9 +500,25 @@ defmodule BarkparkWeb.PaperLive do
   defp to_stream_items(blocks, article?) do
     opts = render_opts(article?)
 
-    Enum.map(blocks, fn block ->
-      %{id: Map.get(block, "id"), html: Render.render_block(block, opts)}
+    # R2 fix: id-less blocks must each get a UNIQUE stream/DOM id, else
+    # Phoenix's stream dedupes them on the constant `blocks-` id and only the
+    # last block survives in the live <article>. Fall back to a positional id
+    # when a block carries none. (Option A assigns ids at ingest so this path
+    # only catches legacy id-less papers already on disk.)
+    blocks
+    |> Enum.with_index()
+    |> Enum.map(fn {block, index} ->
+      %{id: stream_block_id(block, index), html: Render.render_block(block, opts)}
     end)
+  end
+
+  # A stable per-block stream id: the block's own id when present, else a
+  # positional fallback so every block streams under a distinct DOM id.
+  defp stream_block_id(block, index) do
+    case Map.get(block, "id") do
+      id when is_binary(id) and id != "" -> id
+      _ -> "block-#{index}"
+    end
   end
 
   # ── delta frame (Wave 4) ──────────────────────────────────────────────────
