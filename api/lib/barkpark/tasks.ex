@@ -741,10 +741,15 @@ defmodule Barkpark.Tasks do
     end
   end
 
+  # #6: widen from `type == "task"` to the four W7 substrate types
+  # (goal/phase/task/event) so the TARGETED `claim_by_id`/close paths can
+  # operate on a goal or phase doc — `bd epic close <goal-id>` needs to fetch a
+  # goal here. The READY-QUEUE claim (`claim/2` → `ready_query/1`) keeps its
+  # own `type == "task"` filter, so you still never claim a goal off the queue.
   defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task",
+        where: d.doc_id == ^doc_id and d.type in ["task", "goal", "phase", "event"],
         lock: "FOR UPDATE"
       )
 
@@ -1003,10 +1008,27 @@ defmodule Barkpark.Tasks do
   defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
   defp labels_of(_), do: []
 
-  defp check_fencing(%Document{content: content}, observed_epoch) do
+  # Fencing applies only to docs that carry a claim lease. Work-tasks are
+  # claimed before close, so they have `content.claim.epoch` and the observed
+  # epoch must match (the dead-worker guard).
+  #
+  # #6: goals and phases are never claimed (you don't `bd update --claim` an
+  # epic) — they have NO claim record, so there is no lease to fence against.
+  # For `type ∈ {goal, phase}` a missing claim closes gracefully (return :ok),
+  # which is what lets `bd epic close <goal-id>` terminate a goal/phase via
+  # this same path.
+  #
+  # For a TASK, a missing claim still → `:fenced_off` (defense-in-depth: a
+  # never-claimed task should not be closeable; closing implies you held a
+  # lease). A doc WITH a claim ALWAYS requires the epoch to match, regardless
+  # of type — the fencing guarantee for real claimed work is unchanged.
+  defp check_fencing(%Document{content: content} = doc, observed_epoch) do
     case content do
       %{"claim" => %{"epoch" => row_epoch}} when row_epoch == observed_epoch -> :ok
       %{"claim" => %{"epoch" => _}} -> {:error, :fenced_off}
+      # No claim lease: graceful for unclaimable doc types (goal/phase),
+      # but a never-claimed task is still fenced off.
+      _ when doc.type in ["goal", "phase"] -> :ok
       _ -> {:error, :fenced_off}
     end
   end
@@ -1015,14 +1037,26 @@ defmodule Barkpark.Tasks do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
+    # Stamp close metadata into the claim lease when one exists (work-tasks).
+    # Goals/phases have no claim (#6) — close them without inventing one; we
+    # only flip lifecycle_status. `Map.update/4`'s default is used verbatim
+    # (NOT run through the fun), so a no-claim doc would otherwise get a bare
+    # `claim => %{}`; the explicit branch keeps the doc shape honest.
     new_content =
-      doc.content
-      |> Map.put("lifecycle_status", new_status)
-      |> Map.update("claim", %{}, fn claim ->
-        claim
-        |> Map.put("closed_by", worker_id)
-        |> Map.put("closed_at", ts_iso)
-      end)
+      case doc.content do
+        %{"claim" => claim} when is_map(claim) ->
+          updated_claim =
+            claim
+            |> Map.put("closed_by", worker_id)
+            |> Map.put("closed_at", ts_iso)
+
+          doc.content
+          |> Map.put("lifecycle_status", new_status)
+          |> Map.put("claim", updated_claim)
+
+        _ ->
+          Map.put(doc.content, "lifecycle_status", new_status)
+      end
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)

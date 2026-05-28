@@ -188,6 +188,55 @@ defmodule BarkparkWeb.RailControllerTest do
       assert first["event_id"] == restored.id
       assert first["kind"] == restored_kind
     end
+
+    test "#7: events surface when parent_id is stored BARE but doc_id is drafts-prefixed",
+         %{conn: conn, scope: scope} do
+      # The live e2e bug (#7): a phase's `content.parent` is the BARE goal id
+      # (`goal-258703`) while the goal's persisted doc_id carries the draft
+      # prefix (`drafts.goal-258703`) — and a task's `content.parent_id` is the
+      # bare phase id while the phase doc_id is drafts-prefixed. The old `=`
+      # join found zero descendants → goal-path returned {events:[]}. The
+      # prefix-agnostic join (strip `drafts.` on both sides) must find them.
+      goal = mk_doc!("goal", uniq("goal-bare"), scope, %{"goal_slug" => "bare-test"})
+
+      # Bare ids = the persisted doc_ids with the `drafts.` prefix stripped.
+      bare_goal = String.replace_prefix(goal.doc_id, "drafts.", "")
+
+      phase =
+        mk_doc!("phase", uniq("phase-bare"), scope, %{
+          "phase_name" => "build",
+          # parent stored BARE — the #7 mismatch.
+          "parent" => bare_goal
+        })
+
+      bare_phase = String.replace_prefix(phase.doc_id, "drafts.", "")
+
+      task =
+        mk_doc!("task", uniq("task-bare"), scope, %{
+          # parent_id stored BARE — the #7 mismatch.
+          "parent_id" => bare_phase,
+          "lifecycle_status" => "done"
+        })
+
+      _ = insert_event!(task, "task.claimed", "<p>claimed</p>")
+      closed = insert_event!(task, "task.closed", "<p>closed</p>")
+
+      resp = conn |> authed() |> get("/v1/rail/goal-path?goal=#{goal.doc_id}")
+      assert resp.status == 200
+
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+
+      # Before the fix this was []; now the descendant task's events surface.
+      assert length(body["events"]) == 2
+      kinds = Enum.map(body["events"], & &1["kind"])
+      assert "task.claimed" in kinds
+      assert "task.closed" in kinds
+
+      first = hd(body["events"])
+      assert first["event_id"] == closed.id
+      assert first["doc_id"] == task.doc_id
+    end
   end
 
   # ─── GET /v1/rail/event/:event_id ─────────────────────────────────────

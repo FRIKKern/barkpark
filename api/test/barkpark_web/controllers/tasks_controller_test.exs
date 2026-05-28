@@ -198,6 +198,47 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["ok"] == false
       assert payload["reason"] == "fenced_off"
     end
+
+    test "#6: closes a goal (type=goal, NO claim) without fenced_off — backs `bd epic close`",
+         %{conn: conn, scope: scope} do
+      # Goals/phases are never claimed (no `content.claim` lease), so the old
+      # fencing check rejected the close with `fenced_off`, and `bd epic close`
+      # could never terminate a goal. A no-claim doc must close gracefully.
+      goal = mk_doc!("goal", uniq("goal-close6"), scope, %{"goal_slug" => "c6"})
+      refute Map.has_key?(goal.content, "claim")
+
+      # The shim sends observed_epoch: (claim.epoch || 1) — i.e. 1 for a doc
+      # with no claim. The close must succeed regardless of that value.
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{goal.doc_id}/close", close_body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["type"] == "goal"
+      assert payload["doc"]["lifecycle_status"] == "done"
+      refute payload["reason"] == "fenced_off"
+    end
+
+    test "#6: closes a phase (type=phase, NO claim) gracefully",
+         %{conn: conn, scope: scope} do
+      goal = mk_doc!("goal", uniq("goal-ph6"), scope, %{"goal_slug" => "ph6"})
+
+      phase =
+        mk_doc!("phase", uniq("phase-close6"), scope, %{
+          "phase_name" => "build",
+          "parent" => goal.doc_id
+        })
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{phase.doc_id}/close", close_body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["type"] == "phase"
+      assert payload["doc"]["lifecycle_status"] == "done"
+    end
   end
 
   describe "GET /v1/tasks/:doc_id/edges" do
@@ -358,6 +399,41 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert resp.status == 200
 
       payload = Jason.decode!(resp.resp_body)
+      refute goal.doc_id in payload["doc_ids"]
+    end
+
+    test "#7: rollup counts children across the BARE-parent / drafts-doc_id mismatch (not vacuously eligible)",
+         %{conn: conn, scope: scope} do
+      # Live e2e #7: phase.parent is the BARE goal id while goal.doc_id is
+      # drafts-prefixed (and task.parent_id bare vs phase.doc_id drafts). The
+      # old `=` join found 0 children → `NOT EXISTS` was vacuously true →
+      # the goal was flagged close-eligible despite a real OPEN work-task.
+      # Prefix-agnostic join must see the open child and EXCLUDE the goal.
+      goal = mk_doc!("goal", uniq("goal-7elig"), scope, %{"goal_slug" => "p7"})
+      bare_goal = String.replace_prefix(goal.doc_id, "drafts.", "")
+
+      phase =
+        mk_doc!("phase", uniq("phase-7elig"), scope, %{
+          "phase_name" => "build",
+          # BARE parent — the #7 mismatch.
+          "parent" => bare_goal,
+          "lifecycle_status" => "done"
+        })
+
+      bare_phase = String.replace_prefix(phase.doc_id, "drafts.", "")
+
+      _open =
+        mk_task!(uniq("work-7open"), scope, %{
+          # BARE parent_id — the #7 mismatch.
+          "parent_id" => bare_phase,
+          "lifecycle_status" => "open"
+        })
+
+      resp = conn |> authed() |> get("/v1/tasks/epic/close-eligible")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      # The open child is found across the prefix mismatch → goal NOT eligible.
       refute goal.doc_id in payload["doc_ids"]
     end
   end

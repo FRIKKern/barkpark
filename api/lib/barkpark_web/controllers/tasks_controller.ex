@@ -131,11 +131,19 @@ defmodule BarkparkWeb.TasksController do
 
   # phase_id matches `content.parent_id` (work-tasks → phase) OR
   # `content.parent` (phases → goal). Both schemas are in play.
+  #
+  # Prefix-agnostic parent↔doc_id matching (#7): the stored parent may be bare
+  # (`phase-448247`) while the caller passes the draft id (`drafts.phase-448247`)
+  # — or vice-versa. Strip a leading `drafts.` from BOTH the stored value and
+  # the param before comparing, so `bd ready --label phase-<n>` finds its
+  # children regardless of which side carries the prefix.
   defp maybe_filter_parent(query, p) when is_binary(p) do
     from(d in query,
       where:
-        fragment("?->>'parent_id'", d.content) == ^p or
-          fragment("?->>'parent'", d.content) == ^p
+        fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
+          fragment("regexp_replace(?, '^drafts\\.', '')", ^p) or
+          fragment("regexp_replace(?->>'parent', '^drafts\\.', '')", d.content) ==
+            fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
     )
   end
 
@@ -255,6 +263,15 @@ defmodule BarkparkWeb.TasksController do
     # workspace's datasets. Each document's `type` is goal/phase/task — those
     # are the four kinds registered via `Tasks.schema_definitions/1`; the
     # `content.kind` field is a discriminator for the JSON validator only.
+    # Prefix-agnostic parent↔doc_id matching (#7): a phase's `content.parent`
+    # may be stored bare (`goal-258703`) while the goal's `doc_id` carries the
+    # draft prefix (`drafts.goal-258703`) — or vice-versa. A naive `=` join
+    # then finds zero children, and the `NOT EXISTS` becomes vacuously true,
+    # flagging a goal with real open work as close-eligible (the e2e #7 bug:
+    # `0/0 children`, closed===total when both 0). We strip a leading `drafts.`
+    # from BOTH sides of every parent↔doc_id comparison via
+    # `regexp_replace(…, '^drafts\\.', '')`, so the rollup counts children
+    # robustly regardless of which writer's prefix convention is in play.
     sql = """
     SELECT g.doc_id FROM documents g
     WHERE g.type = 'goal'
@@ -263,7 +280,7 @@ defmodule BarkparkWeb.TasksController do
       AND NOT EXISTS (
         SELECT 1 FROM documents c
         WHERE c.type = 'phase'
-          AND c.content->>'parent' = g.doc_id
+          AND regexp_replace(c.content->>'parent', '^drafts\\.', '') = regexp_replace(g.doc_id, '^drafts\\.', '')
           AND ($1::uuid IS NULL OR c.workspace_id = $1::uuid)
           AND ($2::uuid IS NULL OR c.project_id = $2::uuid)
           AND (
@@ -271,7 +288,7 @@ defmodule BarkparkWeb.TasksController do
             OR EXISTS (
               SELECT 1 FROM documents w
               WHERE w.type = 'task'
-                AND w.content->>'parent_id' = c.doc_id
+                AND regexp_replace(w.content->>'parent_id', '^drafts\\.', '') = regexp_replace(c.doc_id, '^drafts\\.', '')
                 AND ($1::uuid IS NULL OR w.workspace_id = $1::uuid)
                 AND ($2::uuid IS NULL OR w.project_id = $2::uuid)
                 AND COALESCE(w.content->>'lifecycle_status', '') NOT IN ('done','cancelled')

@@ -163,28 +163,39 @@ defmodule BarkparkWeb.RailController do
   # The 2-level goal→descendants set, materialized as a list of doc_ids.
   # Single SQL: union of {goal.doc_id} ∪ {phases under goal} ∪ {tasks under
   # phases under goal}. Tenancy filters carried through every leg.
+  #
+  # Prefix-agnostic parent↔doc_id matching (#7): barkpark stores unpublished
+  # task docs as `drafts.<id>`, but a child's `parent`/`parent_id` is sometimes
+  # stored bare (`goal-258703`) while the parent's `doc_id` carries the prefix
+  # (`drafts.goal-258703`) — or vice-versa. A naive `=` join then finds zero
+  # children and the rail goes empty despite real events existing. We strip a
+  # leading `drafts.` from BOTH sides of every parent↔doc_id comparison
+  # (`regexp_replace(…, '^drafts\\.', '')`) so the join is robust to either
+  # writer's prefix convention. The goal_doc_id bind ($1) is normalized once,
+  # up front, so the goal-leg `doc_id` match and the phase-leg `parent` match
+  # both compare normalized-to-normalized.
   defp load_descendant_doc_ids(goal_doc_id, workspace_id, project_id) do
     sql = """
     SELECT doc_id FROM documents
-    WHERE doc_id = $1
+    WHERE regexp_replace(doc_id, '^drafts\\.', '') = regexp_replace($1, '^drafts\\.', '')
       AND type = 'goal'
       AND ($2::uuid IS NULL OR workspace_id = $2::uuid)
       AND ($3::uuid IS NULL OR project_id = $3::uuid)
     UNION
     SELECT doc_id FROM documents p
     WHERE p.type = 'phase'
-      AND p.content->>'parent' = $1
+      AND regexp_replace(p.content->>'parent', '^drafts\\.', '') = regexp_replace($1, '^drafts\\.', '')
       AND ($2::uuid IS NULL OR p.workspace_id = $2::uuid)
       AND ($3::uuid IS NULL OR p.project_id = $3::uuid)
     UNION
     SELECT t.doc_id FROM documents t
     JOIN documents p
       ON p.type = 'phase'
-     AND p.doc_id = t.content->>'parent_id'
+     AND regexp_replace(p.doc_id, '^drafts\\.', '') = regexp_replace(t.content->>'parent_id', '^drafts\\.', '')
      AND ($2::uuid IS NULL OR p.workspace_id = $2::uuid)
      AND ($3::uuid IS NULL OR p.project_id = $3::uuid)
     WHERE t.type = 'task'
-      AND p.content->>'parent' = $1
+      AND regexp_replace(p.content->>'parent', '^drafts\\.', '') = regexp_replace($1, '^drafts\\.', '')
       AND ($2::uuid IS NULL OR t.workspace_id = $2::uuid)
       AND ($3::uuid IS NULL OR t.project_id = $3::uuid)
     """
@@ -222,10 +233,20 @@ defmodule BarkparkWeb.RailController do
   end
 
   # Find a doc by (doc_id, type) inside tenancy. nil → not found.
+  #
+  # Prefix-agnostic (#7): the goal existence gate must match whether the caller
+  # passes the bare id (`goal-258703`) or the stored draft id
+  # (`drafts.goal-258703`). Strip a leading `drafts.` from both the stored
+  # `doc_id` and the requested id before comparing, mirroring the descendant
+  # join. `limit: 1` guards the (degenerate) case where both a published and a
+  # draft copy of the same id coexist — we only need the existence/tenancy gate.
   defp find_doc_by_id(doc_id, type, workspace_id, project_id) do
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == ^type
+        where:
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) ==
+            fragment("regexp_replace(?, '^drafts\\.', '')", ^doc_id) and d.type == ^type,
+        limit: 1
       )
 
     base
