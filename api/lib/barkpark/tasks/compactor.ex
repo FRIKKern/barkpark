@@ -1,18 +1,32 @@
 defmodule Barkpark.Tasks.Compactor do
   @moduledoc """
-  W7a step 6 — Oban worker that bounds per-task storage growth by
-  compacting the `content.history` event log on terminal-state task
-  documents.
+  W7a step 6 — Oban worker that bounds per-task storage growth on
+  terminal-state task documents.
 
   ## The storage-bound guarantee
 
-  bd ships a compact binary representation of its mutation log; W7a's
-  task substrate stores tasks as `documents` rows whose `content` JSON
-  grows monotonically with every claim/close/heartbeat/comment. Without
-  a compactor, a long-lived `done` task carries an unbounded history
-  array that bloats every dataset read and every revision write. This
-  worker enforces the contract: **live `content` stays small; full
-  history is durably preserved (reversibly) in the `revisions` table.**
+  W7a's task substrate stores tasks as `documents` rows whose `content`
+  JSON can grow over a task's lifetime. Without a compactor, a long-lived
+  `done` task can carry a large `content` payload that bloats every
+  dataset read and every revision write. This worker enforces the
+  contract: **live `content` stays small; the full pre-compaction payload
+  is durably preserved (reversibly) in the `revisions` table.**
+
+  ## A note on `content.history` — forward-looking, NOT yet wired
+
+  This worker was designed against an envisioned `content.history` event
+  log appended on every claim/close/heartbeat/comment. **That writer does
+  not exist in the shipped code.** The canonical task mutation log lives
+  in the separate `mutation_events` table — `Tasks.claim/2`, `close/3`,
+  `relabel_by_id/3`, and `TtlSweeper` all emit there, NOT to
+  `content.history` (grep `history` in `tasks.ex` = 0 hits). Consequently
+  the history-length eligibility branch in `eligible_query/1`
+  (the `jsonb_array_length(...->'history') > N` arm) is **latent**: on
+  real rows `content.history` is absent, so that arm never fires and is
+  exercised only by `CompactorTest`, which fabricates a `content.history`
+  array. The **active** eligibility path in production is the byte-size
+  arm (`pg_column_size(content) > S`). The history-length arm is kept as
+  the wiring point for if/when a lifecycle history writer lands.
 
   ## Three phases, one Oban job per cycle
 

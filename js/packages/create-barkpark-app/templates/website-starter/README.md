@@ -24,7 +24,7 @@ docker compose up -d
 This launches:
 
 - **Phoenix API** on `http://localhost:4000`
-- **PostgreSQL 16** on `localhost:5432`
+- **PostgreSQL 14+ (tested 17)** on `localhost:5432`
 
 > To run the API from a local checkout of the barkpark repo instead of the
 > published image, copy `docker-compose.override.yml.example` to
