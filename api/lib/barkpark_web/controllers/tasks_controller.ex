@@ -90,6 +90,7 @@ defmodule BarkparkWeb.TasksController do
       |> maybe_filter_kind(params["kind"])
       |> maybe_filter_lifecycle(params["lifecycle_status"])
       |> maybe_filter_parent(params["phase_id"])
+      |> maybe_filter_label(params["label"])
 
     docs = Repo.all(query)
     counts = batch_edge_counts(docs)
@@ -135,6 +136,28 @@ defmodule BarkparkWeb.TasksController do
       where:
         fragment("?->>'parent_id'", d.content) == ^p or
           fragment("?->>'parent'", d.content) == ^p
+    )
+  end
+
+  # tt5: `label=<exact>` — keep only docs whose `content.labels` JSON array
+  # CONTAINS the exact label string. Backs the bd-shim's `bd list --label
+  # file-claim:<path>` (and any arbitrary label) → find every task holding a
+  # given claim. Tenancy-scoped via the same workspace/project filters as the
+  # rest of the pipeline.
+  #
+  # Containment uses the scalar-membership form `labels @> to_jsonb(<text>)`,
+  # NOT array-vs-array `labels @> '["x"]'::jsonb`. The stored jsonb arrays
+  # (written by the W7 mirror) don't match a freshly-parsed array literal under
+  # `@>` array containment, but scalar membership — the canonical "is this
+  # element in the array" test — matches reliably (verified against the live
+  # store). `to_jsonb(text)` builds the scalar jsonb operand inside Postgres,
+  # so no client-side JSON encoding of the needle is needed.
+  defp maybe_filter_label(query, nil), do: query
+  defp maybe_filter_label(query, ""), do: query
+
+  defp maybe_filter_label(query, label) when is_binary(label) do
+    from(d in query,
+      where: fragment("?->'labels' @> to_jsonb(?::text)", d.content, ^label)
     )
   end
 
@@ -350,7 +373,50 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # ─── POST /v1/tasks/:doc_id/labels ──────────────────────────────────────
+  # tt5: add/remove `content.labels` entries on a single task. Body shape:
+  #   { "add": ["file-claim:/x"], "remove": ["file-claim:/y"] }
+  # Both keys optional (default []). Reads the doc workspace+project scoped
+  # (same direct query as find_task_by_doc_id — NOT Content.get_document),
+  # then delegates to Tasks.relabel_by_id/3 (advisory-lock + CAS-on-rev +
+  # task.relabeled mutation_event). Returns { ok, doc }.
+  #
+  # Backs the bd-shim's `bd update <id> --add-label/--remove-label`, which in
+  # turn backs paperflow-claim-files' `file-claim:<path>` ownership labels.
+
+  def relabel(conn, %{"doc_id" => doc_id} = params) do
+    add = string_list(params["add"])
+    remove = string_list(params["remove"])
+
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, task} ->
+        case Tasks.relabel_by_id(task.id, add, remove) do
+          {:ok, %Document{} = doc} ->
+            json(conn, %{ok: true, doc: render_doc(doc)})
+
+          {:error, reason} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: reason_to_string(reason)})
+        end
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # Coerce a body field into a list of strings. Accepts a list (filtering
+  # non-strings), a bare string (wrapped), or nil/anything-else (→ []).
+  defp string_list(v) when is_list(v), do: Enum.filter(v, &is_binary/1)
+  defp string_list(v) when is_binary(v), do: [v]
+  defp string_list(_), do: []
+
   # ─── Helpers ────────────────────────────────────────────────────────────
+
+  # content.labels is a free-form JSON array; coerce missing / non-list to [].
+  defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
+  defp labels_of(_), do: []
+
 
   # Look up a task by its `doc_id` string. We DO NOT route through
   # `Content.get_document/4` here on purpose — the dataset-string filter in
@@ -418,6 +484,10 @@ defmodule BarkparkWeb.TasksController do
       parent_id: Map.get(content, "parent_id"),
       parent: Map.get(content, "parent"),
       claim: Map.get(content, "claim"),
+      # tt5: surface content.labels at the top level so the bd-shim's
+      # `.labels[]` (used by `bd show .labels[]` + `bd list --label`) works
+      # end-to-end. The shim reads `doc.labels`; without this it always saw [].
+      labels: labels_of(content),
       content: content,
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
