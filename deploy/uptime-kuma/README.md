@@ -34,12 +34,16 @@ All three use the default **60 s interval**. Replace `$ADMIN_TOKEN` with
 the value from `/opt/barkpark/.env` — never paste it into the URL, use
 Kuma's **HTTP — Headers** field.
 
-### 1. Liveness — `/healthz`
+### 1. Liveness — `/api/schemas`
+
+There is no dedicated `/healthz` route. The public, unauthenticated
+`/api/schemas` endpoint is the always-200 liveness check — it returns
+JSON without a token.
 
 | Field                 | Value                                  |
 |-----------------------|----------------------------------------|
 | Monitor Type          | HTTP(s)                                |
-| URL                   | `http://127.0.0.1:4000/healthz`        |
+| URL                   | `http://127.0.0.1:4000/api/schemas`    |
 | Interval              | 60 s                                   |
 | Accepted status codes | `200-299`                              |
 
@@ -47,25 +51,23 @@ Equivalent curl:
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  http://127.0.0.1:4000/healthz
+  http://127.0.0.1:4000/api/schemas
 # expect: 200
 ```
 
 ### 2. Schema endpoint — `/api/schemas`
 
-Covers auth + DB + schema compilation. Requires an admin token header.
+Covers DB + schema compilation. This route is public — no token header.
 
 | Field                 | Value                                                  |
 |-----------------------|--------------------------------------------------------|
 | Monitor Type          | HTTP(s)                                                |
 | URL                   | `http://127.0.0.1:4000/api/schemas`                    |
 | Interval              | 60 s                                                   |
-| Headers               | `Authorization: Bearer $ADMIN_TOKEN`                   |
 | Accepted status codes | `200-299`                                              |
 
 ```bash
-curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
-  http://127.0.0.1:4000/api/schemas | head -c 200
+curl -sS http://127.0.0.1:4000/api/schemas | head -c 200
 # expect: JSON payload starting with [{"name":...
 ```
 

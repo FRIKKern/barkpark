@@ -1,6 +1,6 @@
 # docs-site/
 
-Placeholder directory that Track A's Fumadocs app (`apps/docs/`) will
+Placeholder directory that Track A's Fumadocs app (`js/docs/`) will
 read at build time.
 
 Contents, all owned by Track C (this track):

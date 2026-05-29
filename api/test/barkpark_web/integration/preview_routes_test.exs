@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.Integration.PreviewRoutesTest do
   @moduledoc """
   Integration probe for the preview API routes (Goal `barkpark-b1m`, Task
-  `barkpark-upn`, gap #4 from `tmp/api-gap-analysis.md`).
+  `barkpark-upn`, gap #4).
 
   Pre-s7 coverage: zero for the full HTTP route. `PreviewToken` is
   plug-unit-tested in `test/barkpark/preview_token_test.exs` and

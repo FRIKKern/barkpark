@@ -1,8 +1,7 @@
 defmodule BarkparkWeb.Integration.SchemaAdminTest do
   @moduledoc """
   Integration probe for the admin-only schema CRUD surface (Goal
-  `barkpark-b1m`, Task `barkpark-upn`, gap #3 from
-  `tmp/api-gap-analysis.md`).
+  `barkpark-b1m`, Task `barkpark-upn`, gap #3).
 
   Pre-s7 coverage: zero. `schema_test.exs` (38 LOC) and
   `schema_envelope_test.exs` covered only the GET side. Neither POST upsert

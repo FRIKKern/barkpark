@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.Integration.MediaTest do
   @moduledoc """
   Integration probe for the `/media/*` surface (Goal `barkpark-b1m`,
-  Task `barkpark-upn`, gap #1 from `tmp/api-gap-analysis.md`).
+  Task `barkpark-upn`, gap #1).
 
   Pre-s7 coverage: none. `MediaController` was referenced only in
   `field_inputs_test.exs` (HEEx markup) and the route inventory.

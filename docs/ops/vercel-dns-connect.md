@@ -3,7 +3,7 @@
 **Status:** Runbook. Boss-executed via Vercel dashboard + registrar.
 **Owner:** Boss. Platform worker supports.
 **Resolves blockers:** §13.C B2 (Vercel Pro tier), B3 (DNS TTL propagation window).
-**Target project:** `apps/demo` in the `barkpark-org` Vercel team.
+**Target project:** `demo` (builds from `web/`) in the `guerrilla` Vercel team.
 **Apex:** `barkpark.cloud` (production). **Subdomain:** `www.barkpark.cloud` (redirect to apex).
 
 Out of scope: API subdomain TLS (see `docs/ops/caddy-api-tls.md`), Phoenix-side CORS, deployment pipeline changes.
@@ -17,12 +17,12 @@ All must be `yes` before starting. Any `no` = stop and resolve first.
 | Check | How | Expected | Blocker ref |
 |---|---|---|---|
 | Vercel team plan | Vercel dashboard → team → Settings → Billing | **Pro** (~$20/seat/mo). Hobby tier will refuse `vercel domains add` for production. | B2 |
-| `apps/demo` project exists and is the Production deployment | Vercel dashboard → project list → `apps/demo` | Project shows a Production deployment on branch `main` (or whatever Phase 7D wired) | — |
+| `demo` project exists and is the Production deployment | Vercel dashboard → project list → `demo` | Project shows a Production deployment on branch `main`, building from `web/` | — |
 | Registrar access | Boss has login to the current `barkpark.cloud` registrar | Can create/edit A, CNAME, TXT records | — |
 | Domain `barkpark.cloud` is registered and under our control | `whois barkpark.cloud` from any shell | Registrant matches Boss (or org registration) | — |
 | Current TTL on existing `barkpark.cloud` records | `dig barkpark.cloud +short` then check authoritative via `dig +nssearch barkpark.cloud` or registrar UI | TTL ≤ 3600 (1h). If higher, lower NOW and wait for old TTL to expire before cutover. | B3 |
 | No conflicting root-level services | `dig barkpark.cloud A` and `dig barkpark.cloud MX` | A records can be replaced; if MX exists (email), do not remove — preserve alongside the new A record. | — |
-| `apps/demo` has `NEXT_PUBLIC_API_URL` env var slot | Vercel project → Settings → Environment Variables | Variable exists (may need renaming from any Phase 7D placeholder) | — |
+| `demo` has `NEXT_PUBLIC_API_URL` env var slot | Vercel project → Settings → Environment Variables | Variable exists (may need renaming from any Phase 7D placeholder) | — |
 | SSL/TLS compliance posture agreed | n/a | Vercel auto-provisions Let's Encrypt; no action. | — |
 
 ### TTL lowering (do this 48h before cutover)
@@ -42,15 +42,15 @@ These are the click paths as of 2026-04. Vercel UI changes periodically; if navi
 
 ### 1. Upgrade team to Pro (if not already)
 
-- Vercel dashboard → upper-left team switcher → **`barkpark-org`** → **Settings** → **Billing**.
+- Vercel dashboard → upper-left team switcher → **`guerrilla`** → **Settings** → **Billing**.
 - If plan reads "Hobby", click **Upgrade to Pro**. Confirm billing email. Accept ~$20/user/mo charge.
 - If the team has multiple members, decide who needs Pro seats now (Boss alone is enough for launch).
 
 **Fallback if Pro blocked by budget** (see §13.C B2 Fallback A): skip the dashboard steps below, use `barkpark.cloud.vercel.app` as the live URL, and set a Cloudflare worker 301 redirect from `barkpark.cloud` → `barkpark.cloud.vercel.app`. Requires registering `barkpark.cloud` with Cloudflare's free tier.
 
-### 2. Attach `barkpark.cloud` to the `apps/demo` project
+### 2. Attach `barkpark.cloud` to the `demo` project
 
-- Dashboard → **`apps/demo`** project → **Settings** → **Domains** (left-nav).
+- Dashboard → **`demo`** project → **Settings** → **Domains** (left-nav).
 - Text input **"Add Domain"** → enter `barkpark.cloud` → click **Add**.
 - Vercel prompts: choose redirect posture.
   - **Primary domain:** `barkpark.cloud` (apex).
@@ -71,7 +71,7 @@ These are the click paths as of 2026-04. Vercel UI changes periodically; if navi
   | `BARKPARK_DATASET` | `production` | Dataset scoping for queries. |
   | `NEXT_PUBLIC_SITE_URL` | `https://barkpark.cloud` | Used by sitemap, canonical tags, og:url. |
 
-- Optional feature flags (if referenced by `apps/demo`):
+- Optional feature flags (if referenced by the `web/` app):
   - `BARKPARK_PREVIEW_TTL_SECONDS` — cap preview-mode cookies per slice 8.6 R-S5a. Default 14400 (4h).
   - `NEXT_TELEMETRY_DISABLED=1` — cosmetic, opt out of Next.js anonymized telemetry on build.
 
@@ -123,7 +123,8 @@ echo | openssl s_client -connect barkpark.cloud:443 -servername barkpark.cloud 2
 
 # The site actually talks to Phoenix
 curl -sS https://barkpark.cloud/api/barkpark/schemas | head -c 200
-# (path depends on apps/demo proxy; use whatever Phase 7D shipped)
+# (path depends on the web/ app's proxy route, if any; otherwise the app
+#  fetches https://api.barkpark.cloud directly per NEXT_PUBLIC_API_URL)
 # Expected: JSON response from Phoenix
 
 # Multi-geo DNS check — confirm propagation reached major resolvers
@@ -160,7 +161,6 @@ Only if the Vercel project itself is corrupted (bad deployment loop, state poiso
 After 7 days of stable operation:
 
 - Remove the transitional `http://89.167.28.206` block from Caddy (see `caddy-api-tls.md` §Caddyfile diff).
-- Delete `apps/demo/app/api/barkpark/*` proxy shim (once direct `https://api.barkpark.cloud` is load-bearing).
 - Raise DNS TTL back to 3600 for routine operations.
 - Add `barkpark.cloud` + `api.barkpark.cloud` to Uptime Kuma (per slice 8.0 preflight item, not this doc).
 

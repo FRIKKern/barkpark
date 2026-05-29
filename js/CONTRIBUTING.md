@@ -36,7 +36,7 @@ pnpm test                              # all projects
 pnpm test --project=core               # single package
 pnpm test --project=core-workerd       # workerd parity
 pnpm test --project=react-browser      # DOM tests
-pnpm --filter @barkpark/core test:contract   # against ephemeral Phoenix
+pnpm --filter @barkpark/core test:all   # core: node + workerd + browser
 ```
 
 ## Bundle budgets

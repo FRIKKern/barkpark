@@ -130,7 +130,7 @@ Across the top of the editor pane (and folded into a ••• menu when the vie
 
 | Button | What |
 |---|---|
-| **History** | View past revisions; restore is not yet wired |
+| **History** | View past revisions; restore is available (at least via the API: `POST /v1/data/revision/:dataset/:id/restore`) |
 | **Delete** | Remove the document (asks for confirmation; checks for references) |
 | **Publish / Unpublish** | Standard draft → published flow |
 | **Hide XML / Show XML** | Toggle the right-hand ONIX 3.0 preview pane (book only) |

@@ -73,8 +73,8 @@ plugin_settings row, so this is also useful for one-off overrides
 ```bash
 cd /opt/barkpark/api
 mix run -e '
-  alias Barkpark.Plugins.OnixEdit.Bokbasen.Client
-  case Client.fetch_token() do
+  alias Barkpark.Plugins.OnixEdit.Bokbasen.Auth
+  case Auth.fetch_token() do
     {:ok, token} -> IO.puts "TOKEN OK: #{String.slice(token, 0, 20)}..."
     {:error, e}  -> IO.puts "TOKEN FAILED: #{inspect(e)}"
   end
@@ -130,7 +130,7 @@ psql "$PG_URL" -c "SELECT id, state, attempt, last_error FROM oban_jobs WHERE wo
 
 ## Step 6 — admin staleness dashboard
 
-`http://89.167.28.206/studio/production/onixedit/staleness` shows every book's Bokbasen status with last-success timestamps. Useful for spotting books that synced once and then quietly stopped (e.g. retries exhausted, schema changes invalidated the ONIX).
+`http://89.167.28.206/admin/onixedit/staleness` shows every book's Bokbasen status with last-success timestamps. Useful for spotting books that synced once and then quietly stopped (e.g. retries exhausted, schema changes invalidated the ONIX).
 
 ## Rolling back a stuck book
 

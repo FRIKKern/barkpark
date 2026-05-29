@@ -113,21 +113,13 @@ make rebuild
 ## Step 7 — Smoke test
 
 ```bash
-curl -I https://your-domain.example/healthz                 # expect 200
+curl -I https://your-domain.example/api/schemas             # expect 200 (public)
 curl -sL "https://your-domain.example/v1/data/query/production/post?perspective=published" | head -50
-```
-
-Also check from the demo app:
-
-```bash
-curl -I "https://<vercel-deployment>/api/barkpark/query/post"  # expect 200
 ```
 
 ## Related
 
-- `apps/demo/README.md` — mixed-content caveat that disappears once this is
-  done.
-- `.doey/plans/research/w4-phase7-hosted-demo.md` §5 — design rationale for
-  the Caddy TLS path.
-- `/home/doey/GitHub/barkpark/CLAUDE.md` — the golden rule about never
-  enabling `force_ssl` without verified `X-Forwarded-Proto` trust.
+- `web/README.md` — the Vercel demo (replaces the retired `apps/demo/`);
+  the mixed-content caveat disappears once this TLS work is done.
+- `CLAUDE.md` — the golden rule about never enabling `force_ssl` without
+  verified `X-Forwarded-Proto` trust.

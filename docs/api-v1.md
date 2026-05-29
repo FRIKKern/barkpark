@@ -459,12 +459,14 @@ All errors return `{"error": {"code": "...", "message": "..."}}` (plus `details`
 The following legacy routes are deprecated and will be removed after 2026-12-31:
 
 ```
-GET  /api/documents/:type
-GET  /api/documents/:type/:id
-POST /api/documents/:type
-DELETE /api/documents/:type/:id
-GET  /api/schemas
+GET  /api/documents/:type        [token]
+GET  /api/documents/:type/:id    [token]
+POST /api/documents/:type        [token]
+DELETE /api/documents/:type/:id  [token]
+GET  /api/schemas                [public]
 ```
+
+The `/api/documents/*` routes now require a valid token (`:require_token`). Only `/api/schemas` remains public (unauthenticated) read.
 
 Responses from these routes include:
 

@@ -16,8 +16,8 @@ critical issues. Coordinated disclosure window is 90 days from acknowledgment.
 | @next    | yes (best effort)    |
 | @preview | no (testing only)    |
 
-See ADR-012 for the release-channel policy.
+See `api/docs/adr/` for architectural decision records.
 
 ## Bug Bounty
 
-Not currently funded. Public acknowledgment in CHANGELOG + SECURITY-HALL-OF-FAME.md.
+Not currently funded. Reporters are acknowledged in the CHANGELOG.

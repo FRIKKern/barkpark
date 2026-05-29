@@ -1384,8 +1384,7 @@ defmodule BarkparkWeb.StudioComponents do
 
   The TODO at studio_live.ex:1099-1103 (hand-rolled editor column)
   is preserved verbatim — WI2 does NOT absorb that debt; it requires a
-  `<.pane_column>` API change tracked in
-  `docs/superpowers/plans/2026-04-14-unified-pane-components.md`.
+  `<.pane_column>` API change (design plan archived).
 
   Historical note: the plugin BookView / BookEditor LVs (removed in
   Goal `barkpark-zdy`) deliberately did NOT consume this component —

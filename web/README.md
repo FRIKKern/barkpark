@@ -1,6 +1,6 @@
 # `web/` — Barkpark Vercel demo
 
-Next.js (App Router) demo deployed to Vercel at the apex `https://barkpark.cloud`. Read-only consumer of the Phoenix API at `https://api.barkpark.cloud`. Lists published posts from the `production` dataset.
+Next.js (App Router) demo deployed to Vercel at the apex `https://barkpark.cloud`. Read-only consumer of the Phoenix API at `https://api.barkpark.cloud`. Renders published posts from the `production` dataset across tenancy-scoped `/w/:workspace/p/:project` routes plus a flat top-level list.
 
 This replaces the prior `apps/demo/` Next.js project (retired in the same PR — see Task #27 plan §Phase 1).
 
@@ -25,14 +25,27 @@ Copy `.env.example` → `.env.local` to pin local values; `.env.local` is gitign
 
 ## SDK
 
-This project uses two pinned `@barkpark/*` packages — both at exact `1.0.0-preview.3` (no caret, no tilde) so the demo is locked off a moving preview API surface:
+This project uses two `@barkpark/*` packages:
 
-| Package | Used for |
-|---------|----------|
-| `@barkpark/core` | Runtime-agnostic HTTP client (`createClient`, `client.docs(type).find()`). Phase 1 demo uses this directly for public reads of `perspective=published`. |
-| `@barkpark/nextjs` | App Router integration — `createBarkparkServer`, `BarkparkLive`, draft-mode routes, webhook handler. **Installed and ready** for Phase 5+ wiring of preview / live updates. The Phase 1 demo does NOT call into it yet. |
+| Package | Spec (`web/package.json`) | Used for |
+|---------|---------------------------|----------|
+| `@barkpark/core` | `file:../js/packages/core` — a local workspace link, not a pinned release | Runtime-agnostic HTTP client (`createClient`). Used directly for reads. |
+| `@barkpark/nextjs` | pinned exact `1.0.0-preview.3` | App Router integration — `createBarkparkServer`, `BarkparkLive`, draft-mode routes, webhook handler. **Installed and ready** for later wiring of preview / live updates; not called into yet. |
 
-`lib/barkpark-client.ts` constructs the shared `@barkpark/core` client from `NEXT_PUBLIC_API_URL`, `dataset: "production"`, `perspective: "published"`.
+`lib/barkpark-client.ts` builds the `@barkpark/core` client from `NEXT_PUBLIC_API_URL` with `dataset: "production"`, `perspective: "published"`. It is `import "server-only"` and reads a server-side `BARKPARK_READ_TOKEN` (never `NEXT_PUBLIC_*`) sent as `Authorization: Bearer` so SSR fetches authenticate — required for the scoped `/w/:ws/p/:project` routes (anonymous → 403) and the switcher's tenancy fetches. The `createClient(scope)` factory scopes each request to `/w/<workspace>/p/<project>` when both slugs are passed; the default `client` export uses the flat `/v1/...` back-compat path.
+
+## Routes
+
+The app is tenancy-scoped, not a single flat posts page:
+
+| Route | What |
+|-------|------|
+| `app/page.tsx` | Top-level (flat-scope) published-posts list |
+| `app/w/[workspace]/page.tsx` | Workspace landing |
+| `app/w/[workspace]/p/[project]/page.tsx` | Project-scoped posts list (uses `createClient({workspace, project})`) |
+| `app/w/[workspace]/p/[project]/posts/[slug]/page.tsx` | Single post by slug |
+
+`components/workspace-project-switcher.tsx` lets the user switch workspace/project. `lib/posts.ts` exposes `fetchPosts`, `fetchPostBySlug`, and `postSlug` over a `PostDocument` type.
 
 ### Rolling back to a vendored thin client
 
@@ -56,14 +69,16 @@ Phase 2 of Task #27 must add `https://barkpark.cloud` (and the Vercel preview wi
 
 ## Files
 
-- `app/page.tsx` — Server Component, fetches published posts and renders `title + slug` list.
-- `lib/barkpark-client.ts` — `@barkpark/core` client bound to `production` / `published` from `NEXT_PUBLIC_API_URL`.
+- `app/page.tsx` — flat-scope Server Component, published-posts list.
+- `app/w/[workspace]/...` — tenancy-scoped route tree (workspace landing, project posts list, single post).
+- `components/workspace-project-switcher.tsx` — workspace/project switcher.
+- `components/posts-list.tsx` — shared posts-list rendering.
+- `lib/barkpark-client.ts` — server-only `@barkpark/core` client factory (scoped + flat), reads `BARKPARK_READ_TOKEN`.
+- `lib/posts.ts` — `fetchPosts`, `fetchPostBySlug`, `postSlug`, `PostDocument`.
 - `.env.example` — copy to `.env.local` for local dev.
 
 ## Cross-links
 
-- Plan: `/.doey/plans/1.md` (5-phase bringup).
-- Phase 0 discovery + DNS state: `/docs/ops/web-vercel-bringup-discovery.md`.
 - Apex DNS / Vercel attachment runbook: `/docs/ops/vercel-dns-connect.md`.
-- Phoenix CORS plug: `/api/lib/barkpark_web/plugs/dataset_cors.ex` (touched in Phase 2, NOT this PR).
+- Phoenix CORS plug: `/api/lib/barkpark_web/plugs/dataset_cors.ex`.
 - 2026-04-19 PHX_HOST/check_origin outage post-mortem: `/docs/ops/studio-nav-bug-2026-04-19.md`.

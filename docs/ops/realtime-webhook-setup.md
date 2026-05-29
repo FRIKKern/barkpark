@@ -5,6 +5,15 @@ mutation triggers a signed POST from the Phoenix `Webhooks.Dispatcher` to
 a Next.js route that calls `revalidateTag` for the canonical SDK cache
 tags. The next `barkparkFetch` misses cache and re-fetches fresh data.
 
+> **⚠️ KNOWN ISSUE — dispatcher/handler header mismatch (open as of 2026-05-29).**
+> The live Phoenix dispatcher (`api/lib/barkpark/webhooks/dispatcher.ex:149-157`) sends
+> **split** headers — `x-barkpark-signature: v1=<hex>`, `x-barkpark-timestamp`, and
+> `x-barkpark-event-id`. The SDK `createWebhookHandler` expects a **single combined**
+> `x-barkpark-signature: t=<unix>,v1=<hex>` header (plus `x-barkpark-delivery-id` for dedup).
+> As shipped these are **wire-incompatible** — a real Phoenix→Next.js delivery fails with
+> `401 bad_signature`. The header/payload shapes below describe the **SDK handler's contract**
+> (the target); the dispatcher must be reconciled to it before this path works end-to-end.
+
 Background and the alternatives weighed (browser SSE, polling, etc.) are
 captured in [`docs/ops/research/realtime-gap-analysis.md`](./research/realtime-gap-analysis.md).
 

@@ -1,26 +1,34 @@
-# Bring-Your-Own EDItEUR Codelists
+# EDItEUR Codelists — bundled default + Bring-Your-Own
 
 Barkpark's OnixEdit plugin (Phase 4) consumes the EDItEUR ONIX codelist
 catalogue at runtime — Contributor Role (list 17), Product Form (list 7),
 Notification Type (list 1), Thema subject codes (list 93), and a few
 hundred others depending on which book fields a publisher wires up.
 
-**Barkpark ships the parser. Publishers ship the data.** This page
-explains why and how.
+**Barkpark ships a bundled default codelist snapshot and the parser.**
+The repo vendors a real EDItEUR **Issue 73** snapshot at
+`api/priv/codelists/onix-issue-73.xml` (~1.4 MB, unmodified — see
+`api/priv/codelists/README.md`), which `Barkpark.Codelists.EDItEUR.seed_bundled/0`
+loads on every boot (wired via OnixEdit's `codelist_seeders/0` in
+`api/lib/barkpark/plugins/onixedit.ex`). Out of the box, a fresh install
+has Issue 73 codes available with no publisher action. This page explains
+the bundled default and how to bring your own for a different issue or
+publisher.
 
-## Why BYO
+## Why bring your own
 
-The EDItEUR codelist XML is licensed by EDItEUR Limited; the redistribution
-terms vary by jurisdiction and by which subset of the lists you use. The
-masterplan's risk review (D21, `masterplan-20260425-085425.md`) closed the
-license blocker by deciding that Barkpark itself never bundles a real
-EDItEUR snapshot. A publisher who has accepted EDItEUR's terms downloads
-their own copy and points Barkpark at it.
+The EDItEUR codelist XML is © EDItEUR Limited, distributed under the
+license at https://doi.org/10.4400/nwgj. Barkpark vendors the Issue 73
+snapshot **for internal use** inside Barkpark installations — the same
+posture as the ONIX XSDs already vendored at `api/priv/onix/onix-3.0/`
+(see the README's License section). Downstream redistribution as a
+derivative work would require notifying EDItEUR per their terms.
 
-The repository ships exactly one XML file —
-`api/test/fixtures/codelists/synthetic.xml` — covering a tiny synthetic
-slice of lists 1, 7, 17, and 64. It is not a real EDItEUR snapshot; do
-not derive production codes from it.
+Bring-your-own is the path when you need a **different issue** (e.g. a
+newer Issue 74) or codelists from **another publisher** that Barkpark
+does not bundle. A publisher who has accepted EDItEUR's terms downloads
+their own copy and points Barkpark at it via the precedence below; the
+seeded issue coexists alongside the bundled Issue 73 in the registry.
 
 ## Getting an EDItEUR snapshot
 
@@ -148,11 +156,15 @@ see `doey task get --id 8`.)
 
 ## Tests
 
-The synthetic fixture is exercised by `Barkpark.Codelists.EDItEURTest`:
+The synthetic fixture at `api/test/fixtures/codelists/synthetic.xml`
+(a tiny synthetic slice of lists 1, 7, 17, and 64 — not a real EDItEUR
+snapshot, do not derive production codes from it) is exercised by
+`Barkpark.Codelists.EDItEURTest`:
 
     cd api
     mix test test/barkpark/codelists/editeur_test.exs
 
-This is the only XML the repository carries. CI runs the parser end-to-end
-against the synthetic fixture and asserts post-import row counts; it does
-**not** run against a real EDItEUR snapshot.
+CI runs the parser end-to-end against the synthetic fixture and asserts
+post-import row counts. The vendored Issue 73 snapshot
+(`api/priv/codelists/onix-issue-73.xml`) is the real-data snapshot the
+repository carries and is what `seed_bundled/0` loads at boot.

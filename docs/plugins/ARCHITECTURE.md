@@ -541,9 +541,10 @@ flamegraph, this is the obvious cache target.
 When a plugin owns codelist data (controlled vocabularies, taxonomies):
 
 1. **Ship the data** as a static JSON/XML file under
-   `api/priv/codelists/<plugin>/`. Per the bring-your-own-snapshot
-   convention (Decision 21), plugins do **not** bundle EDItEUR-licensed data
-   — the publisher provides their licensed snapshot at install time.
+   `api/priv/codelists/<plugin>/`. Per Decision 21, the repo now vendors
+   `onix-issue-73.xml` for internal use (a real EDItEUR Issue 73 snapshot,
+   see `api/priv/codelists/README.md`); bring-your-own remains the path for
+   a different issue or other publishers' lists.
 
 2. **Declare seeders via the `codelist_seeders/0` callback.** The post-
    boot Task in `Barkpark.Application.start/2` calls

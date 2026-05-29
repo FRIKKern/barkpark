@@ -642,6 +642,8 @@ api/
     lifecycle.ex
     export.ex
     schemas.ex
+    ping_live.ex                         # Barkpark.Plugins.OnixEdit.PingLive
+                                         #   (NOT under web/)
     bokbasen/                            # sub-namespaces
       auth.ex
       publish_worker.ex
@@ -649,7 +651,6 @@ api/
       bokbasen_live.ex
       staleness_live.ex
       export_controller.ex
-      ping_live.ex
 
   test/barkpark/plugins/<slug>/          # tests mirror lib/
     web/

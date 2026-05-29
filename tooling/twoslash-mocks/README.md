@@ -43,13 +43,23 @@ and couples docs CI to Next runtime versions.
 The mocks are small (~200 lines), standalone, and compile with zero
 dependencies.
 
-## How Track A's docs site consumes this
+## Current consumption status
 
-Fumadocs reads the file at config time and passes it to twoslash via
-`extraFiles`:
+These stubs and the standalone `tsc` check (see "Adding a new stub" below)
+are wired and pass. **No docs app consumes them yet.** The Fumadocs docs app
+lives at `js/docs/` and has no twoslash / `extraFiles` / `next-stubs` wiring
+(grep `js/docs` for any of those returns nothing). The `apps/docs/` path that
+earlier drafts assumed does not exist.
+
+The CI gate `.github/workflows/twoslash.yml` is therefore **dormant** — it
+detects whether `apps/docs/` is present and self-skips when it is absent
+(which is the current state), so it runs nothing on PRs today.
+
+When a docs app is scaffolded that wants twoslash on its code fences, it would
+read this file and pass it to twoslash via `extraFiles`, e.g.:
 
 ```ts
-// apps/docs/source.config.ts — owned by Track A
+// source.config.ts in the future docs app
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "fumadocs-mdx/config";
@@ -88,9 +98,8 @@ export default defineConfig({
    npx tsc --noEmit --strict tooling/twoslash-mocks/next-stubs.d.ts
    ```
 
-5. Re-run the docs app type-check (`pnpm --filter docs build` once Track A
-   has scaffolded `apps/docs`) — CI's `twoslash.yml` workflow gates this on
-   every PR.
+5. Re-run the docs app type-check once a docs app actually consumes these
+   stubs — CI's `twoslash.yml` workflow stays dormant (self-skips) until then.
 
 ## Not a runtime package
 

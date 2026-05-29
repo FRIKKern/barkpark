@@ -10,9 +10,9 @@ This document is for **plugin authors** writing new schema types and **future Ta
 Read this when you are about to:
 
 - Author a new plugin schema that declares a `composite`, `arrayOf`, `codelist`, or `localizedText` field
-- Reserve a top-level cross-field rule slot for the Phase 3 evaluator
-- Attach `onix:` mapping metadata to a field for the Phase 6 export adapter
-- Register a codelist in the Phase 0 registry (`Barkpark.Content.Codelists`)
+- Declare a top-level cross-field rule for the live evaluator (`Barkpark.Content.Validation.Rules`)
+- Attach `onix:` mapping metadata to a field for the ONIX export adapter (`Barkpark.Plugins.OnixEdit.Export`)
+- Register a codelist in the registry (`Barkpark.Content.Codelists`)
 - Wire fallback-chain language resolution at the rendering layer
 
 ## What v2 is
@@ -74,7 +74,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 }
 ```
 
-`codelistId` follows the `<plugin>:<name>` convention (Decision 20). The registry is `Barkpark.Content.Codelists` (Phase 0 ships the tables + module; **the core ships zero codelists** — Phase 4 OnixEdit is the first consumer).
+`codelistId` follows the `<plugin>:<name>` convention (Decision 20). The registry is `Barkpark.Content.Codelists`. The core now **seeds bundled codelists on database setup** — `Barkpark.Codelists.EDItEUR.seed_bundled/0` loads the EDItEUR ONIX snapshot and `seed_thema/0` loads Thema (`api/priv/repo/seeds.exs:661-694`).
 
 `version` is the codelist issue. ONIX integers like `73` are typical; the column is `:string` so semantic versions like `"2024-q1"` or publisher-specific tags also work.
 
@@ -109,7 +109,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 }
 ```
 
-The slot is **reserved but inert** in Phase 0. The parser preserves it on the `%Parsed{validations: ...}` field; the validator threads it but does not evaluate it. The interpreted-AST evaluator ships in Phase 3 (`Barkpark.Content.Validation.Rules`). Plugin authors can author rules now — they will start firing once Phase 3 lands. **No `Code.eval`** at any point — Decision 7.
+The cross-field rule evaluator is **live**. The parser preserves the slot on the `%Parsed{validations: ...}` field, and the interpreted-AST evaluator `Barkpark.Content.Validation.Rules` (`Rules.compile/1`, `api/lib/barkpark/content/validation/rules.ex`) compiles these rules and interprets them at runtime — rules authored here fire today. **No `Code.eval`** at any point — rule values are inert data the evaluator interprets at run time (Decision 7).
 
 ### Per-field `onix:` metadata pass-through
 
@@ -125,7 +125,7 @@ The slot is **reserved but inert** in Phase 0. The parser preserves it on the `%
 }
 ```
 
-The parser preserves the `onix:` map verbatim on `%Field{onix: ...}`. **Emission ships in Phase 6** (`Barkpark.Plugins.OnixEdit.Export` walks book → ONIX 3.0 reference-tag XML using `xml_builder`). Until then, the metadata is stored data only.
+The parser preserves the `onix:` map verbatim on `%Field{onix: ...}`. **Emission has shipped** — `Barkpark.Plugins.OnixEdit.Export` (`api/lib/barkpark/plugins/onixedit/export.ex`) walks book → ONIX 3.0 reference-tag XML using `xml_builder`.
 
 ## The `bp_*` prefix decision
 
@@ -214,7 +214,7 @@ Hierarchical lists (Thema, codelist 93, ~3000 nodes) use a `parent_id` self-refe
 | `tree/2` | Nested tree map for hierarchical lists |
 | `list/1` | Index of registered lists for a plugin |
 
-**Core ships zero codelists.** The registry tables exist, the module exists, the parser will exist in Phase 4 (OnixEdit) — but the host app is not opinionated about which codelists are loaded. Norwegian publishers bring their own EDItEUR-licensed snapshot per the Phase 4 bring-your-own-snapshot model (Decision 21).
+**Core seeds bundled codelists.** The registry tables + module exist, and `api/priv/repo/seeds.exs:661-694` now seeds the bundled EDItEUR ONIX snapshot (`Barkpark.Codelists.EDItEUR.seed_bundled/0`) and Thema (`seed_thema/0`) on database setup. Publishers can still bring their own EDItEUR-licensed snapshot per the bring-your-own-snapshot model (Decision 21).
 
 ## Phase 0 vs Phase 1+ boundary
 
@@ -229,35 +229,24 @@ What Phase 0 ships (this slice):
 - The `bp_*` prefix lock and the `plugin:<name>:<field>` reserved namespace
 - This document, plus the CLAUDE.md "Plugin schemas" section
 
-What Phase 0 explicitly does NOT ship:
+Already shipped beyond the original Phase 0 slice:
 
-- **Oban + cloak_ecto wiring** — the deps are declared, the supervisor + plugin_settings + plugin_doc_state tables + encryption are Phase 1.
-- **Cross-field rule DSL evaluator** — the top-level `validations: [...]` slot is reserved and inert; the interpreted-AST evaluator + severity gates + perf bench are Phase 3.
-- **Error envelope v2** — the v1 envelope is still default. Header opt-in via `Accept-Version: 2` lands in Phase 3.
-- **Any core codelists** — registry is empty until Phase 4 (OnixEdit) seeds the first one.
-- **Thema tree picker** — flat `<select>` with breadcrumb labels is the Phase 0 UX; the modal browser ships in Phase 5.
-- **Simplified / Advanced toggle** — Phase 5.
-- **Plugin contract** (`Barkpark.Plugin` behaviour, manifest format, hook pipeline, scaffolder) — Phase 2.
-- **OnixEdit plugin** — Phases 4–5.
-- **ONIX 3.0 export** — Phase 6.
-- **Bokbasen integration** — Phase 7.
-- **Acknowledgement loop** — Phase 8.
+- **Cross-field rule evaluator** — `Barkpark.Content.Validation.Rules` (`api/lib/barkpark/content/validation/rules.ex`) compiles and interprets the top-level `validations: [...]` slot at runtime.
+- **Bundled core codelists** — `seeds.exs:661-694` seeds the EDItEUR ONIX snapshot + Thema via `Barkpark.Codelists.EDItEUR`.
+- **OnixEdit plugin + ONIX 3.0 export + Bokbasen** — live under `api/lib/barkpark/plugins/onixedit/**` (`export.ex`, `bokbasen/`, `lifecycle.ex`, `importer.ex`).
+
+Still forward work:
+
+- **Oban + cloak_ecto wiring** — deps declared; the supervisor + plugin_settings + plugin_doc_state tables + encryption are later work.
+- **Error envelope v2** — the v1 envelope is still default. Header opt-in via `Accept-Version: 2` is later work.
+- **Thema tree picker** — flat `<select>` with breadcrumb labels is today's UX; the modal browser is later work.
+- **Simplified / Advanced toggle** — later work.
 
 ## Verification status
 
-This Phase 0 slice was authored on a development machine **without a local Elixir/mix toolchain**. The following commands were NOT run during Phase 0 authoring:
+The canonical verification gate is the **production rebuild** (server `89.167.28.206` has Erlang/Elixir via ASDF — see CLAUDE.md "Production Server"). The deploy-side rebuild runs the test suite, migrates the codelist registry tables, and confirms the API still responds (`curl -s http://89.167.28.206/api/schemas | head -20`). Pre-merge CI is the second verification path. Both routes run identical commands.
 
-- `mix deps.get`
-- `mix compile --warnings-as-errors`
-- `mix test`
-- `mix ecto.migrate`
-- `make rebuild`
-
-The canonical Phase 0 verification gate is the **production rebuild** (server `89.167.28.206` has Erlang/Elixir via ASDF — see CLAUDE.md "Production Server"). PRs land code-only; the deploy-side rebuild runs the test suite, migrates the codelist registry tables, and confirms the API still responds (`curl -s http://89.167.28.206/api/schemas | head -20`).
-
-Pre-merge CI (when wired) will be the second verification path. Both routes run identical commands.
-
-When you deploy Phase 0 changes via `make deploy` or the post-merge git hook, **always remember the golden rules from CLAUDE.md**:
+When you deploy schema-v2 changes via `make deploy` or the post-merge git hook, **always remember the golden rules from CLAUDE.md**:
 
 1. NEVER compile without cleaning first — `make rebuild` removes `api/_build/prod` before `mix compile`.
 2. NEVER skip `systemctl restart barkpark` after compiling — the old BEAM process stays in memory otherwise.

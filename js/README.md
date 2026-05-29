@@ -10,6 +10,7 @@ TypeScript packages for Barkpark clients and integrations.
 - `@barkpark/react` — framework-free renderers (PortableText, Image, Reference)
 - `@barkpark/groq` — **1.1 roadmap** — reserved npm name (ADR-000)
 - `@barkpark/nextjs-query` — **1.1 roadmap** — reserved npm name (ADR-012)
+- `create-barkpark-app` — project scaffolder
 
 ## Setup
 
@@ -19,4 +20,4 @@ cd js && pnpm install
 
 ## ADRs
 
-See `.doey/plans/adrs/` for architectural decisions driving this layout.
+See `api/docs/adr/` for architectural decisions driving this layout.

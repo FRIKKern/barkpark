@@ -1,6 +1,6 @@
 # Search Intelligence — Phases 6–10 (Relevance & Maturity Plan)
 
-> **Status:** Draft plan (May 2026). Phases 0–5 are shipped to production.  
+> **Status:** Phases 0–8 are shipped to production; Phases 9–10 remain forward plan (May 2026).  
 > **North star:** Postgres remembers and explains; retrieval gets better every week without an external search SaaS.  
 > **Benchmarks:** Algolia (analytics loop), Sanity (`score` + perspectives), WoodWing (faceted DAM), Meilisearch/Typesense (API ergonomics), Doug Turnbull (evaluation + hybrid retrieval).
 
@@ -318,31 +318,31 @@ flowchart LR
 
 ## Work packages (implementer checklist)
 
-### Phase 6
+### Phase 6 — Done ✓
 
-- [ ] Migration `search_surface_config`
-- [ ] `Barkpark.Search.QueryPipeline`
-- [ ] `Barkpark.Search.QueryParser` (phrases, exclude, prefix)
-- [ ] `Barkpark.Search.Highlighter`
-- [ ] Refactor `Content.search_documents` → pipeline
-- [ ] Refactor `Media.Search` text match → pipeline
-- [ ] Extend `search_vector` for slug (migration)
-- [ ] Admin settings routes + tests
-- [ ] Update `INTELLIGENCE.md`
+- [x] Migration `search_surface_config`
+- [x] `Barkpark.Search.QueryPipeline` (`api/lib/barkpark/search/query_pipeline.ex`)
+- [x] `Barkpark.Search.QueryParser` (phrases, exclude, prefix)
+- [x] `Barkpark.Search.Highlighter`
+- [x] Refactor `Content.search_documents` → pipeline
+- [x] Refactor `Media.Search` text match → pipeline
+- [x] Extend `search_vector` for slug (migration)
+- [x] Admin settings routes + tests (router ~:486–487)
+- [x] Update `INTELLIGENCE.md`
 
-### Phase 7
+### Phase 7 — Done ✓
 
-- [ ] Golden JSONL fixtures + `mix search.eval`
-- [ ] CI job on ranking changes
-- [ ] Richer `synonymCandidates` evidence
-- [ ] `POST …/synonyms/promote` + preview
-- [ ] Insights: `zeroHitRate`, `recoveryRate`
+- [x] Golden JSONL fixtures + `mix search.eval` (`api/lib/mix/tasks/search.eval.ex`)
+- [x] CI job on ranking changes
+- [x] Richer `synonymCandidates` evidence
+- [x] `POST …/synonyms/promote` + preview (router ~:489–491)
+- [x] Insights: `zeroHitRate`, `recoveryRate`
 
-### Phase 8
+### Phase 8 — Done ✓
 
-- [ ] `FederatedSearchController`
+- [x] `FederatedSearchController` (`api/lib/barkpark_web/controllers/federated_search_controller.ex`, router ~:625)
 - [ ] Media cursor pagination
-- [ ] `bp-search-intel.js` + picker migration
+- [x] `bp-search-intel.js` + picker migration (`api/priv/static/assets/bp-search-intel.js`)
 - [ ] Studio ⌘K spike (optional)
 
 ### Phase 9

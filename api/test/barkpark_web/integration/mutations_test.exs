@@ -2,7 +2,7 @@ defmodule BarkparkWeb.Integration.MutationsTest do
   @moduledoc """
   Integration probe for the publish / unpublish / delete success paths on
   `POST /v1/data/mutate/:dataset` (Goal `barkpark-b1m`, Task `barkpark-upn`,
-  gap #2 from `tmp/api-gap-analysis.md`).
+  gap #2).
 
   Existing coverage handled the failure side:
 

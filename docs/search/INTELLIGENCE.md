@@ -128,7 +128,7 @@ config :barkpark, :search_query_blocklist, ["custom", "blocked", "terms"]
 
 ## Roadmap
 
-Phases 0–5 shipped. Phases 6–8: QueryPipeline, surface settings, golden eval (`mix search.eval`), federated `GET /w/:workspace_slug/p/:project_slug/v1/search/:dataset` (flat alias `GET /v1/search/:dataset` → `Default` workspace + project), shared `bp-search-intel.js`. See [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
+Phases 0–8 shipped. Phases 6–8 have largely landed: `QueryPipeline`, surface settings, golden eval (`mix search.eval`), federated `GET /w/:workspace_slug/p/:project_slug/v1/search/:dataset` (flat alias `GET /v1/search/:dataset` → `Default` workspace + project), and the shared `bp-search-intel.js` are all in tree. Phases 9–10 (scale + optional external retriever) remain forward work. See [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
 
 ## Phase 7 admin runbook (synonym promotion)
 

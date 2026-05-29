@@ -10,21 +10,32 @@ A PR targeting `main` must clear:
 1. **Static audit** — Reviewer reads the diff for logic, security, and
    architectural fit. Catches most defects but not all (see lessons-learned
    below).
-2. **`mix-test` CI job** — `.github/workflows/elixir.yml`, runs:
-   `mix format --check-formatted`, `mix compile --warnings-as-errors`,
-   `mix test` in the `:dev` environment.
+2. **`format` CI job** — `.github/workflows/elixir.yml`, runs
+   `mix format --check-formatted`. **Blocking.** Its own dedicated, fast job
+   (~30s, no DB, no full compile) so an unformatted PR short-circuits before
+   the heavier jobs. Split out of `mix-test` because that job is advisory.
 3. **`mix-prod-compile` CI job** — same workflow, depends on `mix-test`.
    Cleans `api/_build/prod`, force-recompiles deps, then runs
    `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the gate.**
-4. **`plugin-node` CI job** — `.github/workflows/plugin-node.yml`. Discovers
+4. **`validation-perf` CI job** — same workflow, independent of `mix-test`.
+   Runs the synthetic 200-field / 100-rule bench, takes the median of 5 timed
+   runs, fails if the median exceeds 100ms. **Blocking** — a perf regression
+   blocks merge even while the test suite is advisory.
+5. **`plugin-node` CI job** — `.github/workflows/plugin-node.yml`. Discovers
    plugins under `api/priv/plugins/` whose `plugin.json` declares a top-level
    `"node"` object and runs `npm ci` + lint + typecheck per plugin. Emits a
    no-op success when no plugin declares Node, so the workflow is always
    present in the required-status list.
 
-The branch protection on `main` requires `mix-test` and `mix-prod-compile`
-to be green. `plugin-node` is required only when the PR touches
-`api/priv/plugins/**`.
+The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
+`mix compile --warnings-as-errors` + `mix test` against Postgres — is
+**advisory** (`continue-on-error: true`) while pre-existing test-infra drift
+is remediated. It cannot block merge in its current state; once the fix
+groups land, drop `continue-on-error` to make it blocking again.
+
+The branch protection on `main` requires the `format` and `mix-prod-compile`
+gates (plus `validation-perf`) to be green. `mix-test` is advisory.
+`plugin-node` is required only when the PR touches `api/priv/plugins/**`.
 
 ## Local pre-merge check
 

@@ -1,8 +1,7 @@
 defmodule BarkparkWeb.Integration.LegacyCrudTest do
   @moduledoc """
   Integration probe for the `/api/documents/*` legacy CRUD surface (Goal
-  `barkpark-b1m`, Task `barkpark-upn`, gap #5 from
-  `tmp/api-gap-analysis.md`).
+  `barkpark-b1m`, Task `barkpark-upn`, gap #5).
 
   Pre-s7 coverage: zero for the CRUD endpoints. The only legacy test —
   `legacy_headers_test.exs` (10 LOC) — smokes the Deprecation header on
@@ -119,7 +118,7 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
     end
 
     test "unknown type — documents actual behaviour (200 + empty list, authed)", %{conn: conn} do
-      # Per `tmp/api-gap-analysis.md` finding 1, the surface answers 200+empty
+      # Known/deliberate behaviour: the surface answers 200+empty
       # rather than 404 for unknown types. Pinning the observed value here makes
       # any drift loud. Now requires auth (w1.5-E) — anonymous would 401.
       resp = conn |> authed() |> get(~p"/api/documents/nosuchtype")

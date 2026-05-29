@@ -1,5 +1,11 @@
 # Realtime Gap Analysis — Studio edit → Next.js auto-refresh
 
+> ⚠️ **SUPERSEDED by ADR-0003** (`api/docs/adr/ADR-0003-canonical-sync-tag-convention.md`).
+> All four break points described below are now closed in code — the
+> revalidate prefix is fixed (`js/packages/nextjs/src/revalidate/index.ts`)
+> and the dispatcher emits `sync_tags` (`api/lib/barkpark/webhooks/dispatcher.ex:87-93`).
+> This document is kept as historical context only.
+
 - **Task:** #16 / Subtask 1
 - **Date:** 2026-04-19
 - **Author:** Worker 4.1 (team `barkpark-realtime`)

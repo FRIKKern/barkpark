@@ -2,19 +2,19 @@
 
 **Status:** Runbook. Boss-executed. No agent ever ssh's the prod box.
 **Owner:** Boss (manual prod-side execution).
-**Resolves blocker:** §13.C B5 — Vercel HTTPS → Phoenix HTTP mixed-content. After this cutover `barkpark.cloud` can fetch `https://api.barkpark.cloud/*` directly from the browser, and the Next.js API-proxy shim at `apps/demo/app/api/barkpark/*` becomes optional (we keep it in place during the transition as a safety net).
+**Resolves blocker:** §13.C B5 — Vercel HTTPS → Phoenix HTTP mixed-content. After this cutover `barkpark.cloud` can fetch `https://api.barkpark.cloud/*` directly from the browser. The Next.js demo now lives under `web/` (it replaced the retired `apps/demo/`, see `web/README.md`); any transitional API-proxy shim under `web/app/api/barkpark/*` becomes optional and is removed once direct TLS is load-bearing.
 **Supersedes:** the production hostname `http://89.167.28.206:4000` stays reachable during transition but is marked deprecated.
 
 ---
 
 ## Why
 
-Right now Phoenix listens on port 4000 over plain HTTP behind Caddy (Caddy reverse-proxies port 80 → `localhost:4000`). `CLAUDE.md` notes `force_ssl` is disabled in `prod.exs` because prior attempts caused 301 redirect loops when no cert was present. The 1.0 launch moves `apps/demo` to `https://barkpark.cloud` on Vercel, and modern browsers block mixed-content fetches from HTTPS origins to HTTP backends. Two workable fixes exist:
+Right now Phoenix listens on port 4000 over plain HTTP behind Caddy (Caddy reverse-proxies port 80 → `localhost:4000`). `CLAUDE.md` notes `force_ssl` is disabled in `prod.exs` because prior attempts caused 301 redirect loops when no cert was present. The 1.0 launch moves the Next.js demo (under `web/`) to `https://barkpark.cloud` on Vercel, and modern browsers block mixed-content fetches from HTTPS origins to HTTP backends. Two workable fixes exist:
 
-1. **Vercel-side proxy** — already shipped in Phase 7D as `apps/demo/app/api/barkpark/[...path]/route.ts`. Extra hop; works today; keeps the backend on plain HTTP.
+1. **Vercel-side proxy** — a Next.js route under `web/app/api/barkpark/[...path]/route.ts`. Extra hop; works today; keeps the backend on plain HTTP.
 2. **Terminate HTTPS at Caddy for `api.barkpark.cloud`** (this doc). Removes the proxy hop, makes direct browser fetches from `barkpark.cloud` legal, enables SDK consumers in the wild to point at `https://api.barkpark.cloud` without a proxy.
 
-We do **both**: TLS termination here becomes canonical; the Next.js proxy stays as a fallback for any route that breaks post-cutover. The Vercel-side proxy is deleted in a follow-up PR (not in this slice).
+We do **both**: TLS termination here becomes canonical; the Next.js proxy (under `web/`) stays as a fallback for any route that breaks post-cutover. The Vercel-side proxy is deleted in a follow-up PR (not in this slice).
 
 ## Preconditions
 
@@ -188,14 +188,14 @@ sudo systemctl start caddy
 sudo systemctl status caddy --no-pager | head -30
 ```
 
-During Tier 1 or Tier 2 rollback, the Vercel-side proxy (`apps/demo/app/api/barkpark/*`) continues to work because it talks to Phoenix over the private loopback via the Hetzner IP. Site stays up.
+During Tier 1 or Tier 2 rollback, the Vercel-side proxy (`web/app/api/barkpark/*`) continues to work because it talks to Phoenix over the private loopback via the Hetzner IP. Site stays up.
 
 ## Known pitfalls
 
 - **Certificate issuance rate limit.** Let's Encrypt caps 5 duplicate certs per 7 days. If you thrash the cutover more than 5 times, Caddy will fail to issue — either wait out the window or use the staging ACME CA (`acme_ca https://acme-staging-v02.api.letsencrypt.org/directory`) for practice runs.
 - **Phoenix `check_origin`.** If Phoenix rejects WebSocket upgrades because the origin is now `https://barkpark.cloud` instead of the old IP, `api/config/prod.exs` must be updated. Out of scope for this slice; file a 1.0.1 ticket if it bites.
 - **Caddy auto-HTTPS needs port 80 for HTTP-01 challenge.** Do not remove the transitional `http://89.167.28.206` block until cert renewal has completed at least once (typically 30–60 days in). Renewal also uses port 80.
-- **Mixed content from other origins.** If `apps/demo` hardcodes `http://89.167.28.206` anywhere (env-var leak, hardcoded string, doc snippet), it will still break under HTTPS. Grep `apps/demo/` for the old IP before declaring done.
+- **Mixed content from other origins.** If `web/` hardcodes `http://89.167.28.206` anywhere (env-var leak, hardcoded string, doc snippet), it will still break under HTTPS. Grep `web/` for the old IP before declaring done.
 - **Grace window for clients on the old URL.** The transitional `http://89.167.28.206` block stays for **7 days minimum** after cutover so any SDK pointed at the old origin keeps working. Remove in a follow-up commit once telemetry confirms zero traffic on the bare-IP route.
 
 ## Out of scope
@@ -203,4 +203,4 @@ During Tier 1 or Tier 2 rollback, the Vercel-side proxy (`apps/demo/app/api/bark
 - Phoenix-native TLS (via `Plug.SSL` + cowboy). We terminate at Caddy; Phoenix keeps serving HTTP on loopback.
 - Re-enabling `force_ssl` in `prod.exs`. Follow-up PR once `X-Forwarded-Proto` is confirmed flowing.
 - Domain-wide HTTPS for `barkpark.cloud` apex — that is owned by Vercel and lives in `docs/ops/vercel-dns-connect.md`.
-- Removing the Next.js proxy at `apps/demo/app/api/barkpark/*`. Keep as safety net; drop in a follow-up PR.
+- Removing the Next.js proxy at `web/app/api/barkpark/*`. Keep as safety net; drop in a follow-up PR.

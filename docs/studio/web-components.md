@@ -1,10 +1,11 @@
 # Studio Web Components — integration recipe
 
-> Status: v1 prototype. The first widget shipped under this contract is
-> `bp-rich-text-editor` (Task #11 WI4). The pattern is designed so the next
-> four widgets — `bp-media-picker`, `bp-reference-picker`,
-> `bp-document-preview`, `bp-json-inspector` — can be added with no
-> changes to the bridge or the server.
+> Status: v1 prototype. The first widget shipped under this contract was
+> `bp-rich-text-editor` (Task #11 WI4). Three of the next four have since
+> shipped under the same contract — `bp-media-picker`, `bp-reference-picker`,
+> and `bp-document-preview` all live in `api/priv/static/assets/`. Only
+> `bp-json-inspector` remains to be added — the pattern is designed so it
+> can land with no changes to the bridge or the server.
 
 ## Pattern
 

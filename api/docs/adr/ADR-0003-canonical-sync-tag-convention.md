@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-04-19
 **Deciders:** Barkpark core team
-**Related:** Task #17 (realtime gap remediation); docs/adr/0001-sdk-envelope-contract.md; docs/ops/realtime-webhook-setup.md; docs/ops/research/realtime-gap-analysis.md
+**Related:** Task #17 (realtime gap remediation); `docs/adr/0001-sdk-envelope-contract.md` (repo root); `docs/ops/realtime-webhook-setup.md` (repo root); `docs/ops/research/realtime-gap-analysis.md` (repo root)
 
 ## Context
 
@@ -53,6 +53,27 @@ sync_tags: [
   "bp:ds:#{dataset}:type:#{type}"
 ]
 ```
+
+> **Amendment (2026-05-29) — workspace/project scoping.** The original
+> 2-entry, dataset-only `sync_tags` shape above predates tenancy scoping.
+> The dispatcher now emits a **4-entry** list, leading with the
+> workspace/project-**scoped** tags and retaining the two legacy
+> dataset-only tags for back-compat
+> (`api/lib/barkpark/webhooks/dispatcher.ex:87-93`):
+>
+> ```elixir
+> scoped = "bp:ws:#{ws_slug}:p:#{project_slug}:ds:#{dataset}"
+> sync_tags: [
+>   "#{scoped}:doc:#{doc_id}",
+>   "#{scoped}:type:#{type}",
+>   # Legacy dataset-only tags retained for back-compat.
+>   "bp:ds:#{dataset}:doc:#{doc_id}",
+>   "bp:ds:#{dataset}:type:#{type}"
+> ]
+> ```
+>
+> The canonical convention and the `revalidateBarkpark` precedence rule
+> below are unchanged; the scoped tags are additive.
 
 `revalidateBarkpark` prefers `payload.sync_tags` verbatim when present, and
 falls back to constructing canonical tags from `{dataset, doc_id, type}` (or

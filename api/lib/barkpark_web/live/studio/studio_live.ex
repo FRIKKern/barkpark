@@ -4248,8 +4248,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
       <!-- TODO: editor column is hand-rolled because its header merges
            pane-header with editor-header and has presence dots + publish
            buttons. Migrating cleanly requires a custom-header slot on
-           pane_column that fully replaces the default title row. See
-           docs/superpowers/plans/2026-04-14-unified-pane-components.md. -->
+           pane_column that fully replaces the default title row.
+           (Design plan archived.) -->
       <!-- Editor — a paper opens as a LIVE read-only block view in this same
            pane (convergence/papers-in-studio); every other doc type opens the
            field form via studio_editor_shell. The left structure pane + the

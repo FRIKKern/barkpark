@@ -8,7 +8,7 @@ Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and rel
 
 ---
 
-## Shipped (Phases 0–5 ✓)
+## Shipped (Phases 0–8 ✓)
 
 | Phase | Summary | Commit / prod |
 |-------|---------|---------------|
@@ -18,6 +18,9 @@ Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and rel
 | **3** | Tags, test exclusion, 4-char suggest gate, exclude patterns, debounced record, telemetry | `69ce1bb` |
 | **4** | `search_synonyms`, admin CRUD, auto candidates, apply in search, `searchCountDelta` | `cdf6597` |
 | **5** | Document `search_vector` FTS + trgm hybrid; media synonym expansion | `cdf6597` |
+| **6** | Relevance: `QueryPipeline`, `QueryParser`, `Highlighter`, field weights, `SurfaceConfig`, zero-hit recovery | shipped |
+| **7** | Intelligence product: `mix search.eval` golden harness, synonym evidence, promote/preview | shipped |
+| **8** | Unified discovery: `FederatedSearchController`, shared `bp-search-intel.js` | shipped |
 
 | Layer | Status |
 |-------|--------|
@@ -32,13 +35,10 @@ Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and rel
 
 ---
 
-## Up next (Phases 6–10)
+## Up next (Phases 9–10)
 
 | Phase | Focus | Effort | Doc |
 |-------|-------|--------|-----|
-| **6** | Relevance: `QueryPipeline`, field weights, query parse, zero-hit recovery, highlights | ~2 wk | [PLAN §6](PLAN-PHASES-6-10.md#phase-6--relevance-engineering-p1-2-weeks) |
-| **7** | Intelligence product: golden eval harness, synonym evidence, promote/preview, richer insights | ~2 wk | [PLAN §7](PLAN-PHASES-6-10.md#phase-7--intelligence-productization-p1-2-weeks) |
-| **8** | Unified discovery: federated search, cursor pagination, `bp-search-intel.js`, ⌘K | ~1.5 wk | [PLAN §8](PLAN-PHASES-6-10.md#phase-8--unified-discovery-p2-15-weeks) |
 | **9** | Scale: async record, partitions, SQL crystallize | trigger-based | [PLAN §9](PLAN-PHASES-6-10.md#phase-9--scale--ops-p2-trigger-based) |
 | **10** | Optional Typesense retriever (intelligence stays Postgres) | pain-gated | [PLAN §10](PLAN-PHASES-6-10.md#phase-10--optional-external-retriever-p3-pain-gated) |
 
@@ -99,8 +99,7 @@ Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and rel
 
 ```
 [SHIPPED] Phase 0 ──► 1 ──► 2 ──► 3 ──► 4 ──► 5
-
-[NEXT]    Phase 6 (QueryPipeline) ──► 7 (eval + promote) ──► 8 (federated + JS)
+          Phase 6 (QueryPipeline) ──► 7 (eval + promote) ──► 8 (federated + JS)
 
 [LATER]   Phase 9 when events > 5M or prune > 30s
           Phase 10 only on search latency pain

@@ -202,8 +202,7 @@ barkpark/
 - **JS dependencies loaded via CDN** (no asset pipeline, no Node.js):
   - Phoenix JS: `cdn.jsdelivr.net/npm/phoenix@1.8.5`
   - LiveView JS: `cdn.jsdelivr.net/npm/phoenix_live_view@1.1.28`
-  - Lucide icons: `unpkg.com/lucide@0.460.0` (async, bottom of body)
-- **MutationObserver** auto-renders Lucide icons on LiveView DOM updates
+- **Lucide icons are inline SVG** served from `BarkparkWeb.Icons` (`api/lib/barkpark_web/components/icons.ex`, copied from Lucide v0.460) — no Lucide CDN, no MutationObserver, zero JS dependency.
 - **PubSub** updates panes in real-time when documents change
 
 ## Database
