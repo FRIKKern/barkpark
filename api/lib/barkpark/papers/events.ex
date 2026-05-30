@@ -91,17 +91,25 @@ defmodule Barkpark.Papers.Events do
   already-processed row.
 
   Returns `{:ok, %Event{}}` on success, `{:error, :not_found}` when no event
-  has the given id.
+  has the given id (including ids that aren't a valid UUID — paperflow-intents
+  ships opaque `evt_…` strings on bad input, and Ecto would otherwise raise
+  `Ecto.Query.CastError` trying to bind them to the `:binary_id` primary key).
   """
   def mark_processed(id) when is_binary(id) do
-    case Repo.get(Event, id) do
-      nil ->
+    case Ecto.UUID.cast(id) do
+      :error ->
         {:error, :not_found}
 
-      %Event{} = event ->
-        event
-        |> Ecto.Changeset.change(processed_at: DateTime.utc_now())
-        |> Repo.update()
+      {:ok, uuid} ->
+        case Repo.get(Event, uuid) do
+          nil ->
+            {:error, :not_found}
+
+          %Event{} = event ->
+            event
+            |> Ecto.Changeset.change(processed_at: DateTime.utc_now())
+            |> Repo.update()
+        end
     end
   end
 

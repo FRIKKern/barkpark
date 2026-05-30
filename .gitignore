@@ -38,6 +38,7 @@ api/deps/
 # JS monorepo
 node_modules/
 packages/**/dist/
+.artifacts/visual/**/node_modules/
 *.log
 
 # IDE

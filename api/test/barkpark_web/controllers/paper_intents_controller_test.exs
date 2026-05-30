@@ -109,6 +109,14 @@ defmodule BarkparkWeb.PaperIntentsControllerTest do
       assert resp["error"] == "not_found"
     end
 
+    test "non-UUID id → 404 not_found (no Ecto.Query.CastError)", %{conn: conn} do
+      conn = authed(conn) |> post("/v1/paperflow/intents/evt_does_not_exist_12345/processed")
+      resp = json_response(conn, 404)
+      assert resp["ok"] == false
+      assert resp["error"] == "not_found"
+      assert resp["id"] == "evt_does_not_exist_12345"
+    end
+
     test "rejects a mark without a token", %{conn: conn} do
       {:ok, intent} =
         Events.create_event(%{"goal_id" => "bd-noauth", "event_type" => "action:build"})

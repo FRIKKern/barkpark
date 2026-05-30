@@ -52,7 +52,7 @@ defmodule BarkparkWeb.PaperIntentsController do
       {:error, :not_found} ->
         conn
         |> put_status(:not_found)
-        |> json(%{ok: false, error: "not_found"})
+        |> json(%{ok: false, error: "not_found", id: id})
     end
   end
 
