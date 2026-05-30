@@ -2839,6 +2839,26 @@
           this.pushEvent("paper-slash-insert", e.detail);
         };
         this.el.addEventListener("bp-slash-insert", this._onSlash);
+
+        // Inbound bridge: external broadcasts → in-place editor re-mount.
+        // The wrapper carries `phx-update="ignore"` (caret preservation), so
+        // a delta from another agent / the ingest endpoint never patches the
+        // editor on its own. StudioLive's handle_info({:paper_block,…}) pushes
+        // `bp:block-update` {block_id, block} via push_event/3; this listener
+        // filters by element id ("paper-ed-<block_id>") and calls the WC's
+        // `block` property setter, which calls `editor.commands.setContent(...)`
+        // to swap the TipTap document in place. The cursor is preserved across
+        // OTHER blocks' updates because we only touch the WC whose id matches.
+        // A self-originating echo lands here with the same content the WC just
+        // emitted, so setContent is a visual no-op.
+        this._onBlockUpdate = (payload) => {
+          if (!payload || !payload.block_id) return;
+          if (this.el.id !== `paper-ed-${payload.block_id}`) return; // not my block
+          const wc = this.el.querySelector("bp-paper-editor");
+          if (!wc) return;
+          wc.block = payload.block;
+        };
+        this.handleEvent("bp:block-update", this._onBlockUpdate);
       },
       destroyed() {
         this.el.removeEventListener("bp-op", this._onOp);

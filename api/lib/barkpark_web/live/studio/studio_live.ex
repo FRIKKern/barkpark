@@ -273,11 +273,51 @@ defmodule BarkparkWeb.Studio.StudioLive do
         # from another source (a remote viewer / the ingest endpoint), proving
         # edits-are-ops both ways.
         socket =
-          if socket.assigns[:paper_edit_mode], do: sync_paper_edit_doc(socket), else: socket
+          if socket.assigns[:paper_edit_mode] do
+            socket
+            |> sync_paper_edit_doc()
+            # Rich-text editor blocks (paragraph/heading/list) live inside a
+            # `phx-update="ignore"` wrapper so LiveView won't clobber the
+            # user's caret. That also means the wrapper's data-block attribute
+            # never repatches — so a delta from another agent / the ingest
+            # endpoint would silently miss the editor until the next remount.
+            # Push the fresh block as a `bp:block-update` event; the
+            # `BarkparkPaperEditor` hook filters by element id and calls the
+            # `<bp-paper-editor>` WC's `block` property setter, which re-mounts
+            # its TipTap content in place (the WC already exposes the setter).
+            |> push_block_to_wc(frame.block_id)
+          else
+            socket
+          end
 
         {:noreply, socket}
     end
   end
+
+  # See the handle_info above for why this exists: bridge the LV server-side
+  # delta into the `<bp-paper-editor>` WC sitting inside a `phx-update="ignore"`
+  # wrapper. Looks up the freshly-synced block by id in `paper_doc.content`,
+  # pushes `bp:block-update` with `{block_id, block}` so the per-block hook
+  # can call `wc.block = block`. No-op for unknown block ids (the patch may
+  # have removed it; the stream side already handled that).
+  defp push_block_to_wc(socket, block_id) when is_binary(block_id) do
+    paper = socket.assigns[:paper_doc]
+    blocks =
+      case paper && Map.get(paper, :content) do
+        %{"blocks" => blocks} when is_list(blocks) -> blocks
+        _ -> []
+      end
+
+    case Enum.find(blocks, fn b -> Map.get(b, "id") == block_id end) do
+      nil ->
+        socket
+
+      block ->
+        push_event(socket, "bp:block-update", %{block_id: block_id, block: block})
+    end
+  end
+
+  defp push_block_to_wc(socket, _), do: socket
 
   def handle_info({:paper_updated, %{html: html} = msg}, socket) do
     if socket.assigns[:editor_view] == :paper do
