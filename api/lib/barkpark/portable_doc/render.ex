@@ -1076,6 +1076,12 @@ defmodule Barkpark.PortableDoc.Render do
     raise ArgumentError, "compose_inline: unhandled inline type #{type}"
   end
 
+  # Tolerate scalar inline nodes — upstream converters (and the list-block
+  # `items: [["a"]]` shape in the public ingest contract) flatten text-only
+  # inlines to bare strings/numbers. Mirrors `compose_inline_children/1`.
+  defp compose_inline(s, _inside_link) when is_binary(s), do: s
+  defp compose_inline(n, _inside_link) when is_number(n), do: to_string(n)
+
   # Link children are PdText | string only.
   defp compose_inline_for_link_children(node, inside_link) do
     case compose_inline(node, inside_link) do
