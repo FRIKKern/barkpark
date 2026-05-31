@@ -3288,7 +3288,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
       Content.codelist_label(plugin, codelist_id, code)
     end
 
-    opts = %{ref_resolver: resolver, codelist_resolver: codelist_resolver}
+    # Render in article style so headings become real `<h1>`/`<h2>` (not the
+    # email-mode `<span style="font-weight:bold">` default). The Edit pane's
+    # `.bp-paper-surface h1, h2, h3` CSS rules (root.html.heex ~:2064) only
+    # match real heading elements; with email-style spans the styles never
+    # applied and the View pane in the desk read as a flat bold list instead
+    # of typeset prose. Mirrors PaperLive.render_opts(true) at paper_live.ex
+    # ~:476 — same surface contract on both LiveViews.
+    opts = %{ref_resolver: resolver, codelist_resolver: codelist_resolver, style: :article}
 
     # R2 fix (Option B): id-less blocks need a UNIQUE positional stream id, else
     # they collapse to the constant `paper_blocks-` DOM id and the stream
