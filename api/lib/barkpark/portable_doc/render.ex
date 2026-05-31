@@ -294,6 +294,28 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
+  # Article mode emits semantic `<ul>` / `<ol>` via PdList / PdListItem so
+  # browsers / readers get real list semantics (a11y, copy-paste, default
+  # spacing). Email / default mode keeps the flex-row PdBox scaffold below
+  # with literal "• " / "1. " prefix spans — Outlook strips `<ul>` padding,
+  # so the prefix-as-text scaffold is the byte-stable email target.
+  def compose_block(%{"type" => "list"} = b, :article) do
+    ordered = Map.get(b, "ordered") == true
+
+    items =
+      Map.get(b, "items", [])
+      |> Enum.map(fn item ->
+        %{
+          "kind" => "PdListItem",
+          "children" => [
+            %{"kind" => "PdText", "children" => compose_inline_children(item)}
+          ]
+        }
+      end)
+
+    %{"kind" => "PdList", "ordered" => ordered, "children" => items}
+  end
+
   def compose_block(%{"type" => "list"} = b, _style) do
     ordered = Map.get(b, "ordered") == true
 
@@ -319,7 +341,8 @@ defmodule Barkpark.PortableDoc.Render do
   def compose_block(%{"type" => "callout"} = b, _style) do
     body = %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
 
-    base = %{"kind" => "PdCallout", "tone" => Map.get(b, "tone"), "children" => [body]}
+    tone = Map.get(b, "tone") || "info"
+    base = %{"kind" => "PdCallout", "tone" => tone, "children" => [body]}
     maybe_put(base, "title", Map.get(b, "title"))
   end
 
@@ -417,15 +440,24 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   def compose_block(%{"type" => "table"} = b, _style) do
+    compose_cell = fn cell ->
+      cell |> compose_inline_children() |> Enum.map(&to_pd_node_from_inline_child/1)
+    end
+
+    compose_row = fn row -> row |> List.wrap() |> Enum.map(compose_cell) end
+
     rows =
       Map.get(b, "rows", [])
-      |> Enum.map(fn row ->
-        Enum.map(row, fn cell ->
-          cell |> compose_inline_children() |> Enum.map(&to_pd_node_from_inline_child/1)
-        end)
-      end)
+      |> List.wrap()
+      |> Enum.map(compose_row)
 
-    %{"kind" => "PdTable", "rows" => rows}
+    pd = %{"kind" => "PdTable", "rows" => rows}
+
+    case Map.get(b, "head") do
+      nil -> pd
+      [] -> pd
+      head_row -> Map.put(pd, "head", compose_row.(head_row))
+    end
   end
 
   # ── field-* LEAF blocks (P2.1) ─────────────────────────────────────────────
@@ -990,9 +1022,24 @@ defmodule Barkpark.PortableDoc.Render do
     Enum.map(nodes, &compose_inline(&1, false))
   end
 
+  # Tolerate scalar cells (a plain string where a list of inline nodes was
+  # expected — common in tables emitted by upstream converters that flatten
+  # text-only cells). Treat the scalar as a single text node so the cell
+  # renders as its string value instead of vanishing.
+  defp compose_inline_children(s) when is_binary(s), do: [s]
+  defp compose_inline_children(n) when is_number(n), do: [to_string(n)]
   defp compose_inline_children(_), do: []
 
-  defp compose_inline(%{"type" => "text"} = n, _inside_link), do: Map.get(n, "value", "")
+  defp compose_inline(%{"type" => "text"} = n, inside_link) do
+    value = Map.get(n, "value", "")
+
+    case Map.get(n, "marks") do
+      nil -> value
+      [] -> value
+      marks when is_list(marks) -> apply_marks(value, marks, inside_link)
+      _ -> value
+    end
+  end
 
   defp compose_inline(%{"type" => "strong"} = n, inside_link) do
     %{
@@ -1039,6 +1086,64 @@ defmodule Barkpark.PortableDoc.Render do
     end
   end
 
+  # Fold a ProseMirror-style mark list right-to-left around a text leaf,
+  # so the first mark in the list ends up as the OUTERMOST wrapper (matches
+  # ProseMirror's serializer order). `code` is leaf-only — it produces a
+  # PdInlineCode and any remaining marks wrap that node via PdText.
+  defp apply_marks(value, marks, inside_link) do
+    marks
+    |> Enum.reverse()
+    |> Enum.reduce(value, fn mark, acc -> apply_mark(mark, acc, inside_link) end)
+  end
+
+  defp apply_mark(%{"type" => t}, acc, _il) when t in ["bold", "strong"] do
+    %{"kind" => "PdText", "weight" => "bold", "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => t}, acc, _il) when t in ["italic", "em"] do
+    %{"kind" => "PdText", "italic" => true, "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => "underline"}, acc, _il) do
+    %{"kind" => "PdText", "underline" => true, "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => t}, acc, _il) when t in ["strike", "s", "strikethrough"] do
+    %{"kind" => "PdText", "strike" => true, "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => "code"}, acc, _il) when is_binary(acc) do
+    %{"kind" => "PdInlineCode", "value" => acc}
+  end
+
+  defp apply_mark(%{"type" => "code"}, acc, _il) do
+    # Already wrapped by an outer mark; keep the wrapper and don't fight it.
+    acc
+  end
+
+  defp apply_mark(%{"type" => "link"} = mark, acc, inside_link) do
+    href = get_in(mark, ["attrs", "href"]) || Map.get(mark, "href", "")
+    children = wrap_children(acc) |> Enum.map(&link_child(&1, true))
+
+    if inside_link do
+      # Mirror the nested-link clause in compose_inline/2 — flatten to PdText.
+      %{"kind" => "PdText", "children" => children}
+    else
+      %{"kind" => "PdLink", "href" => href, "children" => children}
+    end
+  end
+
+  # Unknown marks pass through (no wrapper).
+  defp apply_mark(_unknown, acc, _il), do: acc
+
+  defp wrap_children(acc) when is_binary(acc), do: [acc]
+  defp wrap_children(acc) when is_list(acc), do: acc
+  defp wrap_children(acc), do: [acc]
+
+  defp link_child(s, _il) when is_binary(s), do: s
+  defp link_child(%{"kind" => "PdText"} = t, _il), do: t
+  defp link_child(other, _il), do: %{"kind" => "PdText", "children" => [other]}
+
   # Coerce an inline child into a Pd-node for table cells.
   defp to_pd_node_from_inline_child(child) when is_binary(child) do
     %{"kind" => "PdText", "children" => [child]}
@@ -1075,6 +1180,8 @@ defmodule Barkpark.PortableDoc.Render do
   defp walk(%{"kind" => "PdImage"} = n, _width, _pal), do: image(n)
   defp walk(%{"kind" => "PdTable"} = n, width, pal), do: table(n, width, pal)
   defp walk(%{"kind" => "PdCallout"} = n, width, pal), do: callout(n, width, pal)
+  defp walk(%{"kind" => "PdList"} = n, width, pal), do: list(n, width, pal)
+  defp walk(%{"kind" => "PdListItem"} = n, width, pal), do: list_item(n, width, pal)
 
   # `_raw` is a pre-rendered HTML escape hatch. The diagram / figure compose
   # clauses emit it because their `<figure>` / `<pre class="mermaid">` markup
@@ -1420,11 +1527,16 @@ defmodule Barkpark.PortableDoc.Render do
   # the body cells. Email/default mode keeps the flat `<td>`-only table,
   # byte-identical to before.
   defp table(n, width, %{style: :article} = pal) do
-    [head | body] =
-      case Map.get(n, "rows", []) do
-        [] -> [[]]
-        rows -> rows
-      end
+    # The header row is OPT-IN via an explicit `head` field on the PdTable.
+    # Earlier behaviour silently promoted `rows[0]` to a <thead>, which broke
+    # any data table that didn't carry a header (every body row shifted up by
+    # one, and 1-row tables lost their only row to the header band). Upstream
+    # converters that don't distinguish `<th>` from `<td>` (e.g. the
+    # paperflow_to_blocks.py table walker) now get a header-less table
+    # rendered the way they meant it; producers that DO want a header band
+    # set `head` explicitly.
+    head = Map.get(n, "head", []) |> List.wrap()
+    body = Map.get(n, "rows", []) |> List.wrap()
 
     thead =
       if head == [] do
@@ -1497,6 +1609,22 @@ defmodule Barkpark.PortableDoc.Render do
     ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{title_html}#{inner}</div>)
   end
 
+  # Semantic `<ul>` / `<ol>` for article mode. Email mode never reaches these
+  # renderers — its list compose clause still emits the flex-row PdBox scaffold
+  # with literal "• " / "1. " prefix spans (byte-stable Outlook target).
+  defp list(n, width, pal) do
+    tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
+    inner = render_children(Map.get(n, "children", []), width, pal)
+
+    ~s(<#{tag} style="margin:1rem 0;padding-left:1.6rem;font-family:#{pal.font_body};color:#{pal.text};line-height:1.6">) <>
+      inner <> "</#{tag}>"
+  end
+
+  defp list_item(n, width, pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    ~s(<li style="margin:0.2rem 0">) <> inner <> "</li>"
+  end
+
   # ── shared helpers ──────────────────────────────────────────────────────────
 
   defp render_children(children, width, pal) do
@@ -1551,4 +1679,5 @@ defmodule Barkpark.PortableDoc.Render do
   def tone_palette("danger"), do: %{bg: "#fef2f2", fg: "#b91c1c"}
   def tone_palette("info"), do: %{bg: "#eff6ff", fg: "#1d4ed8"}
   def tone_palette("neutral"), do: %{bg: "#f3f4f6", fg: "#374151"}
+  def tone_palette(_), do: %{bg: "#eff6ff", fg: "#1d4ed8"}
 end

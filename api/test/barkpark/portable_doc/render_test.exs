@@ -247,6 +247,81 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_blocks(blocks) ==
                ~s(<span style="font-weight:bold">A</span><span>B</span>)
     end
+
+    # Flat-dialect ProseMirror text nodes carry a `marks` array (e.g.
+    # `{"type":"text","value":"x","marks":[{"type":"bold"}]}`). The previous
+    # text clause was a one-liner that dropped marks silently — these tests
+    # pin the wrap order and tag mapping.
+    test "text with a bold mark renders inside a font-weight:bold span" do
+      block = %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "hi", "marks" => [%{"type" => "bold"}]}]
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<span><span style="font-weight:bold">hi</span></span>)
+    end
+
+    test "stacked bold + italic marks nest outer→inner in list order" do
+      block = %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "text", "value" => "x",
+            "marks" => [%{"type" => "bold"}, %{"type" => "italic"}]}
+        ]
+      }
+
+      # First mark is the outermost wrapper.
+      assert Render.render_block(block) ==
+               ~s(<span><span style="font-weight:bold"><span style="font-style:italic">x</span></span></span>)
+    end
+
+    test "code mark wraps the value as PdInlineCode" do
+      block = %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "a&b", "marks" => [%{"type" => "code"}]}]
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<span><code style="background:#f3f4f6;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">a&amp;b</code></span>)
+    end
+
+    test "link mark reads href from attrs and emits a PdLink" do
+      block = %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "text", "value" => "click",
+            "marks" => [%{"type" => "link", "attrs" => %{"href" => "https://x.test"}}]}
+        ]
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<span><a href="https://x.test" style="color:#1d4ed8;text-decoration:underline">click</a></span>)
+    end
+
+    test "unknown marks pass through with no wrapper" do
+      block = %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "x", "marks" => [%{"type" => "wat"}]}]
+      }
+
+      assert Render.render_block(block) == "<span>x</span>"
+    end
+
+    test "empty marks list parity with no-marks (no wrapping)" do
+      block = %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "x", "marks" => []}]
+      }
+
+      assert Render.render_block(block) == "<span>x</span>"
+    end
   end
 
   # field-reference View resolves the referenced doc's TITLE via the caller's
@@ -576,6 +651,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
   end
 
   describe "article fidelity — table header styling" do
+    # Header-less table (the default emitted by upstream converters that
+    # don't distinguish <th> from <td>). All rows are body rows; nothing is
+    # auto-promoted to <thead>.
     @table %{
       "id" => "t1",
       "type" => "table",
@@ -585,8 +663,40 @@ defmodule Barkpark.PortableDoc.RenderTest do
       ]
     }
 
-    test "article mode emits a <thead>/<th> header band with the warm rule" do
+    # Opt-in header — the producer supplies an explicit `head` row separate
+    # from `rows`; the article walker then emits a <thead>/<th> band and
+    # keeps EVERY entry in `rows` as a body row.
+    @table_with_head %{
+      "id" => "t2",
+      "type" => "table",
+      "head" => [
+        [%{"type" => "text", "value" => "Name"}],
+        [%{"type" => "text", "value" => "Role"}]
+      ],
+      "rows" => [
+        [[%{"type" => "text", "value" => "Pelle"}], [%{"type" => "text", "value" => "Author"}]]
+      ]
+    }
+
+    test "article mode renders all rows as body when no head is supplied" do
       html = Render.render_block(@table, %{style: :article})
+
+      # No header band — every supplied row becomes a body <tr>.
+      refute html =~ "<thead>"
+      refute html =~ "<th "
+      # Both rows survive (regression — the old auto-promote dropped row 0
+      # into <thead> which broke any data table without an explicit header).
+      assert html =~ "Name"
+      assert html =~ "Role"
+      assert html =~ "Pelle"
+      assert html =~ "Author"
+      # Body cells use the warm rule colour.
+      assert html =~ "border-bottom:1px solid #e6e2d8"
+      refute html =~ "#e5e7eb"
+    end
+
+    test "article mode emits a <thead>/<th> band when an explicit head row is supplied" do
+      html = Render.render_block(@table_with_head, %{style: :article})
 
       assert html =~ "<thead>"
       assert html =~ "<th "
@@ -594,12 +704,25 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "text-transform:uppercase"
       assert html =~ "border-bottom:2px solid #e6e2d8"
       assert html =~ "color:#6a6a6a"
-      # Warm rule colour on body cells, never gray.
+      # Body still renders.
       assert html =~ "border-bottom:1px solid #e6e2d8"
-      refute html =~ "#e5e7eb"
-      # Header text in the th, body text in the tbody.
       assert html =~ "Name"
       assert html =~ "Pelle"
+    end
+
+    test "article mode tolerates scalar (plain-string) cells" do
+      block = %{
+        "id" => "t3",
+        "type" => "table",
+        "rows" => [["plain", "string"]]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "plain"
+      assert html =~ "string"
+      # And the cells render as <td>, not as empty cells.
+      assert html =~ ~s(<td)
     end
 
     test "email mode keeps the flat <td>-only gray table (regression)" do
@@ -878,6 +1001,93 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "allows same-origin root-relative paths" do
       assert Render.safe_url("/media/files/2026/05/hero.jpg") ==
                "/media/files/2026/05/hero.jpg"
+    end
+  end
+
+  # Article mode emits semantic <ul>/<ol>/<li> via PdList/PdListItem so the
+  # rendered paper is real HTML lists (a11y, copy-paste, native indentation).
+  # Email mode keeps the byte-stable flex-row scaffold with literal "• " /
+  # "1. " prefix spans — Outlook strips <ul> padding, and that scaffold is
+  # the historical Outlook-safe target.
+  describe "render_block/2 — list" do
+    @list_items [
+      [%{"type" => "text", "value" => "a"}],
+      [%{"type" => "text", "value" => "b"}],
+      [%{"type" => "text", "value" => "c"}]
+    ]
+
+    test "unordered article emits <ul>/<li>, no flex scaffold, no bullet prefix" do
+      block = %{"id" => "L", "type" => "list", "items" => @list_items}
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<ul"
+      # All three items make it through as semantic <li>.
+      assert html |> String.split("<li") |> length() == 4
+      assert html =~ "<span>a</span>"
+      assert html =~ "<span>b</span>"
+      assert html =~ "<span>c</span>"
+      # No prefix-as-text scaffold leaks into the article output.
+      refute html =~ "• "
+      refute html =~ "flex-direction"
+    end
+
+    test "ordered article emits <ol> with no numeric prefix literal" do
+      block = %{
+        "id" => "L",
+        "type" => "list",
+        "ordered" => true,
+        "items" => @list_items
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<ol"
+      assert html |> String.split("<li") |> length() == 4
+      # The browser draws the marker — we must NOT also stamp "1. ".
+      refute html =~ "1. "
+      refute html =~ "2. "
+      refute html =~ "flex-direction"
+    end
+
+    test "email/default mode is byte-unchanged (frozen prefix scaffold)" do
+      block = %{"id" => "L", "type" => "list", "items" => @list_items}
+
+      expected =
+        ~s(<div style="display:flex;flex-direction:column">) <>
+          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>a</span></div>) <>
+          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>b</span></div>) <>
+          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>c</span></div>) <>
+          ~s(</div>)
+
+      assert Render.render_block(block) == expected
+      assert Render.render_block(block, %{style: :email}) == expected
+    end
+
+    test "empty items: <ul></ul> in article, empty flex-column div in email" do
+      empty = %{"id" => "L", "type" => "list", "items" => []}
+
+      article = Render.render_block(empty, %{style: :article})
+      assert article =~ "<ul"
+      assert String.ends_with?(article, "></ul>")
+      refute article =~ "<li"
+
+      assert Render.render_block(empty) ==
+               ~s(<div style="display:flex;flex-direction:column"></div>)
+    end
+
+    test "inline marks (bold) inside an item survive inside <li> in article mode" do
+      block = %{
+        "id" => "L",
+        "type" => "list",
+        "items" => [
+          [%{"type" => "text", "value" => "loud", "marks" => [%{"type" => "bold"}]}]
+        ]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<li"
+      assert html =~ ~s(<span style="font-weight:bold">loud</span>)
     end
   end
 end
