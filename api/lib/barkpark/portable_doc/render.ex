@@ -1444,29 +1444,23 @@ defmodule Barkpark.PortableDoc.Render do
 
   # Heading declarations by clamped level (article palette).
   #
-  # Two values were aligned to the Edit pane's `.bp-paper-surface h1, h2, h3`
-  # rules (root.html.heex ~:2064-2068) because those are the load-bearing
-  # visible-mismatch axes when a user toggles View ↔ Edit:
+  # Three values align to the Edit pane's `.bp-paper-surface h1, h2, h3`
+  # rules (root.html.heex ~:2067-2069) so View ↔ Edit stays byte-aligned:
   #   • font-family: serif (set in article_palette/0; was sans-serif system-ui)
   #   • font-weight: 600 across all levels (was 700/700/600)
-  #
-  # Everything else (line-height, letter-spacing, margins) is kept on the
-  # ORIGINAL rem-based scale that was load-tested across the email backend
-  # and the standalone /papers/<slug> export. Switching margins to absolute
-  # `pt` units (a previous attempt) is a footgun: pt-spaced headings render
-  # cramped in email clients, ugly at viewport edges in standalone files, and
-  # change the visual rhythm of every doc that was tuned to the old margins.
-  # The editor's CSS rule does its own pt-based spacing INSIDE the desk view,
-  # and the inline rem-based margin here doesn't fight it visibly enough to
-  # warrant the cross-surface risk. Pick: cross-surface safety > one-surface
-  # pixel match on margins.
+  #   • margin: 0 — the user controls vertical rhythm via block-level
+  #     spacing, not via heading-internal margin. Baking margin into the
+  #     heading itself made the end result hard to author (the desk editor
+  #     rule swallowed user-set gaps). Cross-surface implication: standalone
+  #     /papers/<slug> and the email backend lose the heading shoulders too,
+  #     which is what we want for a uniform block-driven look.
   defp heading_style(1, pal) do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
       "letter-spacing:-0.02em",
       "line-height:1.1",
-      "margin:1.6rem 0 0.8rem",
+      "margin:0",
       "font-weight:600",
       "font-size:32px"
     ]
@@ -1477,7 +1471,7 @@ defmodule Barkpark.PortableDoc.Render do
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
       "line-height:1.2",
-      "margin:1.4rem 0 0.6rem",
+      "margin:0",
       "font-weight:600",
       "font-size:24px"
     ]
@@ -1488,7 +1482,7 @@ defmodule Barkpark.PortableDoc.Render do
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
       "line-height:1.25",
-      "margin:1.2rem 0 0.5rem",
+      "margin:0",
       "font-weight:600",
       "font-size:20px"
     ]

@@ -2064,9 +2064,16 @@
       font-family: var(--paper-font-serif);
       line-height: 1.3; font-weight: 600; color: var(--paper-ink);
     }
-    .bp-paper-surface h1 { font-size: 32px; letter-spacing: -0.01em; margin: 24pt 0 6pt; }
-    .bp-paper-surface h2 { font-size: 24px; margin: 18pt 0 4pt; }
-    .bp-paper-surface h3 { font-size: 20px; margin: 12pt 0 2pt; }
+    /* Heading margins are intentionally ZERO. The user controls vertical
+       rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
+       margin into the heading itself fights the block model and makes the
+       end result hard to author. Keep size/weight/line-height/letter-spacing;
+       drop the spacer. Same rule applies to `.bp-paper-editor-body h1/h2/h3`
+       below and to render.ex `heading_style/2` (inline) so View and Edit stay
+       byte-aligned. */
+    .bp-paper-surface h1 { font-size: 32px; letter-spacing: -0.01em; margin: 0; }
+    .bp-paper-surface h2 { font-size: 24px; margin: 0; }
+    .bp-paper-surface h3 { font-size: 20px; margin: 0; }
     .bp-paper-surface p  { margin: 12pt 0 0; hyphens: auto; }
     .bp-paper-surface a  {
       color: var(--paper-accent); text-decoration: none;
@@ -2390,9 +2397,11 @@
     .bp-paper-surface .ProseMirror:focus,
     .bp-paper-surface .ProseMirror-focused { outline: none; }
     .bp-paper-editor > .bp-paper-edit-block:first-child .bp-paper-editor-body > :first-child { margin-top: 0; }
-    .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; margin: 24pt 0 6pt; }
-    .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 18pt 0 4pt; }
-    .bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.3; margin: 12pt 0 2pt; }
+    /* Heading margins ZERO inside the editable body too — block-level spacing
+       carries the rhythm. See the matching `.bp-paper-surface` block above. */
+    .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; margin: 0; }
+    .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 0; }
+    .bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.3; margin: 0; }
     .bp-paper-editor-body p  { margin: 12pt 0 0; }
     .bp-paper-editor-body li { margin: 4pt 0 0; }
     .bp-paper-editor-body ul,
