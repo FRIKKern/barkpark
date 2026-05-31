@@ -65,7 +65,15 @@ defmodule Barkpark.PortableDoc.Render do
       style: :article,
       font_body:
         "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
-      font_heading: "system-ui,-apple-system,'SF Pro Text',sans-serif",
+      # Headings use the SAME serif family as the body so the View pane reads
+      # identically to the Edit pane (where `.bp-paper-surface h1, h2, h3`
+      # resolves to `var(--paper-font-serif)` — root.html.heex ~:2064).
+      # Sans-serif headings on a serif body produce a jarring read; aligning
+      # the family here plus the weight/margin/line-height nudges in
+      # heading_style/2 below makes a paper render visually the same way
+      # in View and in Edit, which is what users see when they toggle.
+      font_heading:
+        "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
       width: 680,
       bg: "#fbfaf6",
       paper: "#ffffff",
@@ -1249,16 +1257,21 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp apply_text_role(out, inner, _n, _pal), do: {out, inner}
 
-  # Heading declarations by clamped level (article palette). Sizes descend
-  # h1 > h2 > h3; h1/h2 use weight 700, h3 weight 600. Sans heading font.
+  # Heading declarations by clamped level (article palette). Mirror the Edit
+  # pane's `.bp-paper-surface h1, h2, h3 { ... }` block in root.html.heex
+  # (~:2064-2068): same serif family (set in article_palette/0), the same
+  # font-weight:600, the same line-height 1.3, and tighter h1 letter-spacing.
+  # Margins use pt to match the editor's 24pt/6pt, 18pt/4pt, 12pt/2pt rhythm.
+  # Sizes (32/24/20px) already matched; the rest follows so a paper renders
+  # identically in View and Edit modes — the user-facing dogfood test.
   defp heading_style(1, pal) do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "letter-spacing:-0.02em",
-      "line-height:1.1",
-      "margin:1.6rem 0 0.8rem",
-      "font-weight:700",
+      "letter-spacing:-0.01em",
+      "line-height:1.3",
+      "margin:24pt 0 6pt",
+      "font-weight:600",
       "font-size:32px"
     ]
   end
@@ -1267,9 +1280,9 @@ defmodule Barkpark.PortableDoc.Render do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "line-height:1.2",
-      "margin:1.4rem 0 0.6rem",
-      "font-weight:700",
+      "line-height:1.3",
+      "margin:18pt 0 4pt",
+      "font-weight:600",
       "font-size:24px"
     ]
   end
@@ -1278,8 +1291,8 @@ defmodule Barkpark.PortableDoc.Render do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "line-height:1.25",
-      "margin:1.2rem 0 0.5rem",
+      "line-height:1.3",
+      "margin:12pt 0 2pt",
       "font-weight:600",
       "font-size:20px"
     ]

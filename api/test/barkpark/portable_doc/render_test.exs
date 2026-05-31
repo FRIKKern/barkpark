@@ -358,9 +358,15 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Distinct from one another.
       refute h.(1) =~ "font-size:24px"
       refute h.(2) =~ "font-size:32px"
-      # h1/h2 weight 700, h3 weight 600.
-      assert h.(1) =~ "font-weight:700"
+      # All heading levels now use weight 600 — matches the Edit pane's
+      # `.bp-paper-surface h1, h2, h3 { font-weight: 600 }` (root.html.heex
+      # ~:2065), so a paper renders identically in View and Edit modes.
+      assert h.(1) =~ "font-weight:600"
+      assert h.(2) =~ "font-weight:600"
       assert h.(3) =~ "font-weight:600"
+      # And the family is now serif throughout (was sans-serif system-ui).
+      assert h.(1) =~ "font-family:'Iowan Old Style'"
+      assert h.(2) =~ "font-family:'Iowan Old Style'"
     end
 
     test "eyebrow renders an uppercase accent kicker in article mode" do
