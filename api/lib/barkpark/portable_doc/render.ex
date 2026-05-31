@@ -61,6 +61,16 @@ defmodule Barkpark.PortableDoc.Render do
 
   @doc false
   def article_palette do
+    # All colour fields embed `var(--paper-*, <hex>)` rather than a bare hex.
+    # When the rendered HTML lives inside `.bp-paper-surface` (Studio + the
+    # editor panes — see root.html.heex ~:1973/:1989), the CSS variables
+    # resolve to themed values (light → warm parchment + dark ink; dark →
+    # warm-dark + light ink) so the inline styles flip with the host theme.
+    # When the same HTML is rendered standalone — paper.html.heex (`/papers/:slug`)
+    # or an email backend with no `--paper-*` context — the bare-hex fallback
+    # paints exactly the same colour the palette used to emit before this
+    # change. Net result: dark-mode Studio finally shows readable headings +
+    # text without breaking the standalone parchment look.
     %{
       style: :article,
       font_body:
@@ -75,14 +85,14 @@ defmodule Barkpark.PortableDoc.Render do
       font_heading:
         "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
       width: 680,
-      bg: "#fbfaf6",
-      paper: "#ffffff",
-      text: "#1a1a1a",
-      muted: "#6a6a6a",
-      rule: "#e6e2d8",
-      accent: "#a23925",
-      link_color: "#a23925",
-      code_bg: "#f1ede2"
+      bg: "var(--paper-bg-deep, #fbfaf6)",
+      paper: "var(--paper-bg, #ffffff)",
+      text: "var(--paper-ink, #1a1a1a)",
+      muted: "var(--paper-ink-soft, #6a6a6a)",
+      rule: "var(--paper-rule, #e6e2d8)",
+      accent: "var(--paper-accent, #a23925)",
+      link_color: "var(--paper-accent, #a23925)",
+      code_bg: "var(--paper-bg-deep, #f1ede2)"
     }
   end
 
@@ -791,18 +801,18 @@ defmodule Barkpark.PortableDoc.Render do
   # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
   # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
   defp code_block_html(value) do
-    ~s(<pre style="background:#f1ede2;border-left:3px solid #a23925;padding:0.9rem 1.1rem;) <>
-      ~s(margin:1.2rem 0;font-family:#{@font_mono};font-size:0.9rem;line-height:1.5;) <>
-      ~s(overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>)
+    ~s|<pre style="background:var(--paper-bg-deep, #f1ede2);border-left:3px solid var(--paper-accent, #a23925);color:var(--paper-ink, #1a1a1a);padding:0.9rem 1.1rem;| <>
+      ~s|margin:1.2rem 0;font-family:#{@font_mono};font-size:0.9rem;line-height:1.5;| <>
+      ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end
 
   # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
   # rule. The glyph sits in an inline-block box with the parchment page colour
   # as its background, masking the rule that runs behind it across the column.
   defp section_divider_html do
-    ~s(<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid #e6e2d8">) <>
-      ~s(<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;) <>
-      ~s(background:#fbfaf6;color:#6a6a6a;font-size:1.1rem">§</span></div>)
+    ~s|<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e6e2d8)">| <>
+      ~s|<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
+      ~s|background:var(--paper-bg-deep, #fbfaf6);color:var(--paper-ink-soft, #6a6a6a);font-size:1.1rem">§</span></div>|
   end
 
   # ── diagram / figure HTML emission ─────────────────────────────────────────
@@ -846,10 +856,10 @@ defmodule Barkpark.PortableDoc.Render do
       if caption == "" do
         ""
       else
-        ~s(<figcaption style="margin-top:0.8rem;color:#6a6a6a;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #6a6a6a);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s(<figure style="margin:1.6rem 0;padding:1.2rem;background:#fbfaf6;border:1px solid #e6e2d8;border-radius:4px">) <>
+    ~s|<figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #fbfaf6);border:1px solid var(--paper-rule, #e6e2d8);border-radius:4px">| <>
       ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
       cap <>
       "</figure>"
@@ -887,7 +897,7 @@ defmodule Barkpark.PortableDoc.Render do
             if caption == "",
               do: "",
               else:
-                ~s(<figcaption style="margin-top:0.8rem;color:#6a6a6a;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+                ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #6a6a6a);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>|
 
           {~s(<figure style="margin:1.6rem 0">), c}
 

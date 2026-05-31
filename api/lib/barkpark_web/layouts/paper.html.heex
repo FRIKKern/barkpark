@@ -16,11 +16,35 @@
        `.bp-paper-article` class on its <main>). Warm parchment page, a
        centered ~720px reading column (incl. padding), serif base — so the
        inline-styled article blocks sit on a proper page, not bare white
-       full-width. Non-article papers keep the dark chrome above, untouched. */
+       full-width. Non-article papers keep the dark chrome above, untouched.
+
+       The `--paper-*` tokens mirror root.html.heex's Studio palette: light
+       defaults match the historical parchment look; the
+       `prefers-color-scheme: dark` block flips them to warm-dark with light
+       ink so the inline-styled `var(--paper-*, hex)` block HTML emitted by
+       render.ex stays readable in dark mode. Without these tokens the inline
+       hex fallback would paint dark ink on whatever the host browser's dark
+       theme picked — the visibility bug. */
     body:has(.bp-paper-article) {
-      background: #fbfaf6;
-      color: #1a1a1a;
+      --paper-bg:         #fefdf9;
+      --paper-bg-deep:    #f5f2e9;
+      --paper-ink:        #1a1a1a;
+      --paper-ink-soft:   #6a6a6a;
+      --paper-rule:       #e6e2d8;
+      --paper-accent:     #a23925;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink);
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      body:has(.bp-paper-article) {
+        --paper-bg:         #1b1815;
+        --paper-bg-deep:    #221e1a;
+        --paper-ink:        #ece6dc;
+        --paper-ink-soft:   #b8ad9e;
+        --paper-rule:       rgba(236, 230, 220, 0.14);
+        --paper-accent:     #d97a5f;
+      }
     }
     .bp-paper-shell.bp-paper-article {
       max-width: 720px;

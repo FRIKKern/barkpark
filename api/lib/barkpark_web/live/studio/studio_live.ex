@@ -294,31 +294,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
-  # See the handle_info above for why this exists: bridge the LV server-side
-  # delta into the `<bp-paper-editor>` WC sitting inside a `phx-update="ignore"`
-  # wrapper. Looks up the freshly-synced block by id in `paper_doc.content`,
-  # pushes `bp:block-update` with `{block_id, block}` so the per-block hook
-  # can call `wc.block = block`. No-op for unknown block ids (the patch may
-  # have removed it; the stream side already handled that).
-  defp push_block_to_wc(socket, block_id) when is_binary(block_id) do
-    paper = socket.assigns[:paper_doc]
-    blocks =
-      case paper && Map.get(paper, :content) do
-        %{"blocks" => blocks} when is_list(blocks) -> blocks
-        _ -> []
-      end
-
-    case Enum.find(blocks, fn b -> Map.get(b, "id") == block_id end) do
-      nil ->
-        socket
-
-      block ->
-        push_event(socket, "bp:block-update", %{block_id: block_id, block: block})
-    end
-  end
-
-  defp push_block_to_wc(socket, _), do: socket
-
   def handle_info({:paper_updated, %{html: html} = msg}, socket) do
     if socket.assigns[:editor_view] == :paper do
       {:noreply,
@@ -376,6 +351,32 @@ defmodule BarkparkWeb.Studio.StudioLive do
     send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
     {:noreply, socket}
   end
+
+  # Bridge the LV server-side paper-block delta into the `<bp-paper-editor>` WC
+  # sitting inside a `phx-update="ignore"` wrapper. Called from the
+  # `{:paper_block, frame}` handle_info above (and is sole reason it's near the
+  # handle_info group). Looks up the freshly-synced block by id in
+  # `paper_doc.content`, pushes `bp:block-update` with `{block_id, block}` so
+  # the per-block hook can call `wc.block = block`. No-op for unknown block ids
+  # (the patch may have removed it; the stream side already handled that).
+  defp push_block_to_wc(socket, block_id) when is_binary(block_id) do
+    paper = socket.assigns[:paper_doc]
+    blocks =
+      case paper && Map.get(paper, :content) do
+        %{"blocks" => blocks} when is_list(blocks) -> blocks
+        _ -> []
+      end
+
+    case Enum.find(blocks, fn b -> Map.get(b, "id") == block_id end) do
+      nil ->
+        socket
+
+      block ->
+        push_event(socket, "bp:block-update", %{block_id: block_id, block: block})
+    end
+  end
+
+  defp push_block_to_wc(socket, _), do: socket
 
   # Keep the document-list PubSub subscription pointed at the CURRENT scope's
   # topic (barkpark-fe2k). Idempotent: re-subscribes only when the resolved

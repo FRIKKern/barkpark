@@ -403,14 +403,18 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_html(tree, %{style: :article})
 
-      # Accent terracotta is unreachable in the email palette.
+      # Accent terracotta is unreachable in the email palette. Article palette
+      # now emits it via `var(--paper-accent, #a23925)` so the theme tokens
+      # (root.html.heex `.bp-paper-surface`) can flip it for dark mode while
+      # the fallback hex stays byte-identical for non-themed surfaces.
       assert html =~ "#a23925"
       # Serif body stack on the article container.
       assert html =~ "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
       # Default article width budget (clamped maxWidth defaults to palette width).
       assert html =~ "max-width:680px"
-      # Parchment page background on the doctype body.
-      assert html =~ ~s(<body style="background:#fbfaf6;)
+      # Parchment page background on the doctype body — same hex, now wrapped
+      # in `var(--paper-bg-deep, …)` so themed hosts can override.
+      assert html =~ ~s|<body style="background:var(--paper-bg-deep, #fbfaf6);|
     end
 
     test "email/default mode output is unchanged for an existing block" do
@@ -451,7 +455,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "Field notes"
       assert html =~ "text-transform:uppercase"
       assert html =~ "letter-spacing:0.08em"
-      assert html =~ "color:#a23925"
+      assert html =~ "color:var(--paper-accent, #a23925)"
     end
 
     test "byline joins items with a separator and carries a bottom rule (article)" do
@@ -459,8 +463,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(block, %{style: :article})
 
       assert html =~ "Pelle Jarl · May 2026"
-      assert html =~ "border-bottom:1px solid #e6e2d8"
-      assert html =~ "color:#6a6a6a"
+      assert html =~ "border-bottom:1px solid var(--paper-rule, #e6e2d8)"
+      assert html =~ "color:var(--paper-ink-soft, #6a6a6a)"
     end
 
     test "byline accepts a plain text fallback" do
@@ -523,7 +527,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "The control flow."
       # Article figure chrome: parchment card.
       assert html =~ "<figure"
-      assert html =~ "background:#fbfaf6"
+      assert html =~ "background:var(--paper-bg-deep, #fbfaf6)"
     end
 
     test "email/default mode degrades — no pre.mermaid, source as a code block" do
@@ -633,9 +637,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@code, %{style: :article})
 
       assert html =~ "<pre"
-      # Parchment background, terracotta left-border, horizontal scroll.
-      assert html =~ "background:#f1ede2"
-      assert html =~ "border-left:3px solid #a23925"
+      # Parchment background, terracotta left-border, horizontal scroll —
+      # now emitted through `var(--paper-*, hex)` for dark-mode theming.
+      assert html =~ "background:var(--paper-bg-deep, #f1ede2)"
+      assert html =~ "border-left:3px solid var(--paper-accent, #a23925)"
       assert html =~ "overflow-x:auto"
       # The value is escaped inside the single <pre> (no per-line <code> chips).
       assert html =~ "if x &lt; 2 &amp; y &gt; 0:"
@@ -690,8 +695,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "Role"
       assert html =~ "Pelle"
       assert html =~ "Author"
-      # Body cells use the warm rule colour.
-      assert html =~ "border-bottom:1px solid #e6e2d8"
+      # Body cells use the warm rule colour (var-wrapped for dark-mode flip).
+      assert html =~ "border-bottom:1px solid var(--paper-rule, #e6e2d8)"
       refute html =~ "#e5e7eb"
     end
 
@@ -702,10 +707,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "<th "
       # Uppercase, muted, 2px bottom rule under the header.
       assert html =~ "text-transform:uppercase"
-      assert html =~ "border-bottom:2px solid #e6e2d8"
-      assert html =~ "color:#6a6a6a"
+      assert html =~ "border-bottom:2px solid var(--paper-rule, #e6e2d8)"
+      assert html =~ "color:var(--paper-ink-soft, #6a6a6a)"
       # Body still renders.
-      assert html =~ "border-bottom:1px solid #e6e2d8"
+      assert html =~ "border-bottom:1px solid var(--paper-rule, #e6e2d8)"
       assert html =~ "Name"
       assert html =~ "Pelle"
     end
@@ -745,8 +750,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       assert html =~ "The medium is the message."
       assert html =~ "font-style:italic"
-      assert html =~ "border-left:3px solid #a23925"
-      assert html =~ "color:#6a6a6a"
+      assert html =~ "border-left:3px solid var(--paper-accent, #a23925)"
+      assert html =~ "color:var(--paper-ink-soft, #6a6a6a)"
       assert html =~ "font-size:1.2rem"
     end
 
@@ -764,7 +769,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "article mode renders the § glyph straddling a hairline rule" do
       html = Render.render_block(@divider, %{style: :article})
       assert html =~ "§"
-      assert html =~ "border-top:1px solid #e6e2d8"
+      assert html =~ "border-top:1px solid var(--paper-rule, #e6e2d8)"
       refute html =~ "<hr"
     end
 
