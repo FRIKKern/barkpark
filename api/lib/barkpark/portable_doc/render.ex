@@ -240,29 +240,45 @@ defmodule Barkpark.PortableDoc.Render do
     }
   end
 
-  def compose_block(%{"type" => "byline"} = b, _style) do
+  def compose_block(%{"type" => "byline"} = b, style) do
     # `items` (list) joined by " · ", else a plain `text`. Muted sans line with
-    # a bottom rule in article mode.
+    # a bottom rule in article mode. Article mode emits a real `<p>` so the
+    # byline's bottom-rule + bottom-margin land as block-level rhythm (was a
+    # span before — visually correct because of inline-style overrides, but
+    # not semantically a block).
     text =
       case Map.get(b, "items") do
         items when is_list(items) -> items |> Enum.map(&to_string/1) |> Enum.join(" · ")
         _ -> to_string(Map.get(b, "text", ""))
       end
 
-    %{"kind" => "PdText", "_role" => "byline", "children" => [text]}
+    kind = if style == :article, do: "PdParagraph", else: "PdText"
+    %{"kind" => kind, "_role" => "byline", "children" => [text]}
   end
 
-  def compose_block(%{"type" => "ingress"} = b, _style) do
+  def compose_block(%{"type" => "ingress"} = b, style) do
     # Lead paragraph — heavier weight + larger size in article mode.
+    # Article mode: real `<p>` carrying the ingress role's inline style so
+    # the editor's block-level paragraph rules also apply (margin rhythm,
+    # hyphens). Email/default mode keeps the byte-stable `<span>` form.
+    kind = if style == :article, do: "PdParagraph", else: "PdText"
+
     %{
-      "kind" => "PdText",
+      "kind" => kind,
       "_role" => "ingress",
       "children" => compose_inline_children(Map.get(b, "content", []))
     }
   end
 
-  def compose_block(%{"type" => "paragraph"} = b, _style) do
-    %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
+  def compose_block(%{"type" => "paragraph"} = b, style) do
+    # Article mode emits a real `<p>` (PdParagraph) so the editor's
+    # `.bp-paper-surface p { margin: 12pt 0 0; hyphens: auto }` CSS rule
+    # (root.html.heex ~:2068) matches in the desk View pane — paragraphs
+    # used to collapse against each other because they rendered as bare
+    # spans with no block-level margins. Email/default mode keeps PdText
+    # (`<span>`) so the email backend's byte-stable export is untouched.
+    kind = if style == :article, do: "PdParagraph", else: "PdText"
+    %{"kind" => kind, "children" => compose_inline_children(Map.get(b, "content", []))}
   end
 
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
@@ -1045,6 +1061,7 @@ defmodule Barkpark.PortableDoc.Render do
   defp walk(%{"kind" => "PdContainer"} = n, width, pal), do: container(n, width, pal)
   defp walk(%{"kind" => "PdBox"} = n, width, pal), do: box(n, width, pal)
   defp walk(%{"kind" => "PdHeading"} = n, width, pal), do: heading(n, width, pal)
+  defp walk(%{"kind" => "PdParagraph"} = n, width, pal), do: paragraph(n, width, pal)
   defp walk(%{"kind" => "PdText"} = n, width, pal), do: text(n, width, pal)
   defp walk(%{"kind" => "PdLink"} = n, width, pal), do: link(n, width, pal)
 
@@ -1177,6 +1194,51 @@ defmodule Barkpark.PortableDoc.Render do
     end
   end
 
+  # Article-mode paragraph — same role-aware styling as PdText, but emits a
+  # semantic `<p>` instead of `<span>`. The editor's
+  # `.bp-paper-surface p { margin: 12pt 0 0; hyphens: auto }` rule
+  # (root.html.heex ~:2068) only matches real `<p>` elements; the previous
+  # `<span>`-wrapped paragraphs collapsed against each other in the desk View
+  # pane because there were no `<p>` margins to space them. compose_block
+  # paragraph/ingress/byline emit PdParagraph in article mode so the editor's
+  # body typography (font-size 18px, line-height 1.70, margin rhythm)
+  # actually applies. Email/default mode keeps PdText (`<span>`) for
+  # byte-stable export.
+  defp paragraph(n, width, pal) do
+    inner =
+      Map.get(n, "children", [])
+      |> Enum.map(fn
+        k when is_binary(k) -> escape_html(k)
+        k -> walk(k, width, pal)
+      end)
+      |> Enum.join("")
+
+    out = []
+    out = if Map.get(n, "weight") == "bold", do: ["font-weight:bold" | out], else: out
+    out = if Map.get(n, "italic"), do: ["font-style:italic" | out], else: out
+
+    deco = []
+    deco = if Map.get(n, "underline"), do: ["underline" | deco], else: deco
+    deco = if Map.get(n, "strike"), do: ["line-through" | deco], else: deco
+
+    out =
+      if deco != [] do
+        ["text-decoration:#{deco |> Enum.reverse() |> Enum.join(" ")}" | out]
+      else
+        out
+      end
+
+    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    {out, inner} = apply_text_role(out, inner, n, pal)
+    out = Enum.reverse(out)
+
+    if out == [] do
+      "<p>#{inner}</p>"
+    else
+      ~s(<p style="#{Enum.join(out, ";")}">#{inner}</p>)
+    end
+  end
+
   # Real semantic heading (article mode only — the compose clause emits this
   # kind exclusively under `:article`). Renders `<h1>` / `<h2>` / `<h3>` by
   # clamped level with the level-sized article rule inline. Children mix raw
@@ -1257,20 +1319,31 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp apply_text_role(out, inner, _n, _pal), do: {out, inner}
 
-  # Heading declarations by clamped level (article palette). Mirror the Edit
-  # pane's `.bp-paper-surface h1, h2, h3 { ... }` block in root.html.heex
-  # (~:2064-2068): same serif family (set in article_palette/0), the same
-  # font-weight:600, the same line-height 1.3, and tighter h1 letter-spacing.
-  # Margins use pt to match the editor's 24pt/6pt, 18pt/4pt, 12pt/2pt rhythm.
-  # Sizes (32/24/20px) already matched; the rest follows so a paper renders
-  # identically in View and Edit modes — the user-facing dogfood test.
+  # Heading declarations by clamped level (article palette).
+  #
+  # Two values were aligned to the Edit pane's `.bp-paper-surface h1, h2, h3`
+  # rules (root.html.heex ~:2064-2068) because those are the load-bearing
+  # visible-mismatch axes when a user toggles View ↔ Edit:
+  #   • font-family: serif (set in article_palette/0; was sans-serif system-ui)
+  #   • font-weight: 600 across all levels (was 700/700/600)
+  #
+  # Everything else (line-height, letter-spacing, margins) is kept on the
+  # ORIGINAL rem-based scale that was load-tested across the email backend
+  # and the standalone /papers/<slug> export. Switching margins to absolute
+  # `pt` units (a previous attempt) is a footgun: pt-spaced headings render
+  # cramped in email clients, ugly at viewport edges in standalone files, and
+  # change the visual rhythm of every doc that was tuned to the old margins.
+  # The editor's CSS rule does its own pt-based spacing INSIDE the desk view,
+  # and the inline rem-based margin here doesn't fight it visibly enough to
+  # warrant the cross-surface risk. Pick: cross-surface safety > one-surface
+  # pixel match on margins.
   defp heading_style(1, pal) do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "letter-spacing:-0.01em",
-      "line-height:1.3",
-      "margin:24pt 0 6pt",
+      "letter-spacing:-0.02em",
+      "line-height:1.1",
+      "margin:1.6rem 0 0.8rem",
       "font-weight:600",
       "font-size:32px"
     ]
@@ -1280,8 +1353,8 @@ defmodule Barkpark.PortableDoc.Render do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "line-height:1.3",
-      "margin:18pt 0 4pt",
+      "line-height:1.2",
+      "margin:1.4rem 0 0.6rem",
       "font-weight:600",
       "font-size:24px"
     ]
@@ -1291,8 +1364,8 @@ defmodule Barkpark.PortableDoc.Render do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "line-height:1.3",
-      "margin:12pt 0 2pt",
+      "line-height:1.25",
+      "margin:1.2rem 0 0.5rem",
       "font-weight:600",
       "font-size:20px"
     ]
