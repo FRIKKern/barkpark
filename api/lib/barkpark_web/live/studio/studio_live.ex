@@ -3682,6 +3682,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         :for={{block, index} <- Enum.with_index(@blocks)}
         class="bp-paper-edit-block"
         data-edit-block-id={Map.get(block, "id")}
+        data-block-type={Map.get(block, "type")}
       >
         <div class="bp-paper-edit-toolbar">
           <span

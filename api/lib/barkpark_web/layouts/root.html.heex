@@ -2062,18 +2062,21 @@
     .bp-paper-surface h1, .bp-paper-surface h2, .bp-paper-surface h3,
     .bp-paper-surface h4, .bp-paper-surface h5, .bp-paper-surface h6 {
       font-family: var(--paper-font-serif);
-      line-height: 1.3; font-weight: 600; color: var(--paper-ink);
+      font-weight: 600; color: var(--paper-ink);
     }
     /* Heading margins are intentionally ZERO. The user controls vertical
        rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
        margin into the heading itself fights the block model and makes the
-       end result hard to author. Keep size/weight/line-height/letter-spacing;
-       drop the spacer. Same rule applies to `.bp-paper-editor-body h1/h2/h3`
-       below and to render.ex `heading_style/2` (inline) so View and Edit stay
-       byte-aligned. */
-    .bp-paper-surface h1 { font-size: 32px; letter-spacing: -0.01em; margin: 0; }
-    .bp-paper-surface h2 { font-size: 24px; margin: 0; }
-    .bp-paper-surface h3 { font-size: 20px; margin: 0; }
+       end result hard to author.
+
+       line-height + letter-spacing values match render.ex `heading_style/2`
+       INLINE values (level1: 1.1 / -0.02em, level2: 1.2, level3: 1.25). The
+       inline wins on the View pane, so the Edit pane CSS must mirror it to
+       keep View ↔ Edit byte-aligned. (Parity audit caught the previous
+       1.3 / -0.01em CSS as visible drift against the inline.) */
+    .bp-paper-surface h1 { font-size: 32px; line-height: 1.1;  letter-spacing: -0.02em; margin: 0; }
+    .bp-paper-surface h2 { font-size: 24px; line-height: 1.2;  margin: 0; }
+    .bp-paper-surface h3 { font-size: 20px; line-height: 1.25; margin: 0; }
     .bp-paper-surface p  { margin: 12pt 0 0; hyphens: auto; }
     .bp-paper-surface a  {
       color: var(--paper-accent); text-decoration: none;
@@ -2253,6 +2256,123 @@
     .bp-paper-edit-ordered { font-size: 14px; color: var(--paper-ink-faint); display: inline-flex; align-items: center; gap: 4px; flex: 1 1 100%; }
     .bp-paper-edit-readonly { color: var(--paper-ink-faint); font-style: italic; font-size: 14px; }
 
+    /* ── View ↔ Edit parity per block type ──────────────────────────────────
+       Edit-side rules that mirror the View pane's inline styling for blocks
+       that aren't rich-text (byline / callout / eyebrow / ingress / pullquote
+       / code / diagram / divider / section). Targets the per-type wrapper
+       attribute `data-block-type=<type>` added in studio_live.ex so blocks
+       become CSS-addressable. Each block matches the inline style emitted
+       by render.ex (with style: :article) byte-for-byte where possible,
+       degrading gracefully where the Edit pane uses different controls
+       (e.g. select + input + textarea triple in callout vs single <div>
+       wrapper on the View). */
+
+    /* byline — 0.9rem muted serif with hairline bottom rule */
+    .bp-paper-edit-block[data-block-type="byline"] input.bp-paper-edit-text,
+    .bp-paper-edit-block[data-block-type="byline"] textarea {
+      font-size: 0.9rem;
+      color: var(--paper-ink-soft);
+    }
+
+    /* eyebrow — small uppercase accent kicker */
+    .bp-paper-edit-block[data-block-type="eyebrow"] input.bp-paper-edit-text {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--paper-accent);
+    }
+
+    /* ingress — larger, slightly heavier lead-in paragraph */
+    .bp-paper-edit-block[data-block-type="ingress"] textarea.bp-paper-edit-textarea {
+      font-size: 1.28rem;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    /* pullquote — italic, larger, muted, with terracotta left rule */
+    .bp-paper-edit-block[data-block-type="pullquote"] textarea.bp-paper-edit-textarea {
+      font-style: italic;
+      font-size: 1.2rem;
+      color: var(--paper-ink-soft);
+      border-left: 3px solid var(--paper-accent);
+      border-bottom: 0;
+      padding-left: 1.2rem;
+      line-height: 1.5;
+    }
+
+    /* callout — neutral accent card wrapping the form chrome. The tone
+       <select> can change at runtime; CSS can't read its value, so the
+       Edit-side card uses the default (info) accent stripe. The actual
+       tone-specific colour only shows after save in the View pane. */
+    .bp-paper-edit-block[data-block-type="callout"] .bp-paper-edit-form {
+      border-left: 4px solid var(--paper-accent);
+      background: var(--paper-accent-soft);
+      padding: 12px 16px;
+      border-radius: 0;
+    }
+    .bp-paper-edit-block[data-block-type="callout"] textarea.bp-paper-edit-textarea {
+      color: var(--paper-ink);
+      border-bottom: 0;
+    }
+
+    /* code — parchment ground, terracotta left rule, monospace surface.
+       Overrides the generic `.bp-paper-edit-code` border so it matches the
+       View's `<pre>` rather than the full-border code box look. */
+    .bp-paper-edit-block[data-block-type="code"] textarea.bp-paper-edit-code {
+      border: 0;
+      border-left: 3px solid var(--paper-accent);
+      border-radius: 0;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    /* diagram — figure card chrome (warm bg + thin rule + corner radius).
+       Source textarea sits inside as a transparent monospace surface. */
+    .bp-paper-edit-block[data-block-type="diagram"] .bp-paper-edit-form {
+      background: var(--paper-bg-deep);
+      border: 1px solid var(--paper-rule);
+      border-radius: 4px;
+      padding: 1.2rem;
+    }
+    .bp-paper-edit-block[data-block-type="diagram"] textarea.bp-paper-edit-code {
+      border: 0;
+      background: transparent;
+      border-radius: 0;
+      padding: 0;
+    }
+
+    /* section — centered bold title (sits between the View's two PdHr rules
+       in the rendered output; the rules themselves are drawn purely on View). */
+    .bp-paper-edit-block[data-block-type="section"] input.bp-paper-edit-text {
+      font-weight: 600;
+      text-align: center;
+    }
+
+    /* divider — replace the "— divider —" placeholder with the real § glyph
+       straddling a hairline, mirroring section_divider_html/0 on View. */
+    .bp-paper-edit-block[data-block-type="divider"] .bp-paper-edit-readonly {
+      position: relative;
+      text-align: center;
+      margin: 2.4rem 0;
+      border-top: 1px solid var(--paper-rule);
+      font-size: 0;       /* hide the placeholder text */
+      font-style: normal; /* clear the base italic */
+      height: 1px;
+    }
+    .bp-paper-edit-block[data-block-type="divider"] .bp-paper-edit-readonly::before {
+      content: "§";
+      position: absolute;
+      top: -0.7rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: inline-block;
+      padding: 0 0.8rem;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink-soft);
+      font-size: 1.1rem;
+    }
+
     /* Bound field blocks render cleanly + minimally. */
     .bp-paper-edit-field { display: flex; flex-direction: column; gap: 2px; }
     .bp-paper-edit-fieldlabel {
@@ -2397,11 +2517,11 @@
     .bp-paper-surface .ProseMirror:focus,
     .bp-paper-surface .ProseMirror-focused { outline: none; }
     .bp-paper-editor > .bp-paper-edit-block:first-child .bp-paper-editor-body > :first-child { margin-top: 0; }
-    /* Heading margins ZERO inside the editable body too — block-level spacing
-       carries the rhythm. See the matching `.bp-paper-surface` block above. */
-    .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; margin: 0; }
-    .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 0; }
-    .bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.3; margin: 0; }
+    /* Heading margins ZERO + line-height/letter-spacing mirror render.ex
+       inline values (see the matching .bp-paper-surface block above). */
+    .bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.1;  letter-spacing: -0.02em; margin: 0; }
+    .bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.2;  margin: 0; }
+    .bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.25; margin: 0; }
     .bp-paper-editor-body p  { margin: 12pt 0 0; }
     .bp-paper-editor-body li { margin: 4pt 0 0; }
     .bp-paper-editor-body ul,
