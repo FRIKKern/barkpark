@@ -44,6 +44,14 @@
 #
 #     mix test --only plugin_routes test/barkpark_web/plugin_routes_test.exs
 #
+# Indx plugin — the LIVE end-to-end test (`indx/integration_test.exs`) drives
+# a REAL local Indx engine over HTTP (login, index, search). Tagged
+# `:indx_live` and excluded by default so the standard `mix test` run never
+# reaches a network. Launch a dedicated single-tenant Indx at
+# http://127.0.0.1:5001 (seeds admin@indx.co), then run explicitly:
+#
+#     mix test --only indx_live test/barkpark/plugins/indx/integration_test.exs
+#
 ExUnit.start(
   exclude: [
     :bokbasen_integration,
@@ -52,7 +60,8 @@ ExUnit.start(
     :requires_wi4,
     :flaky,
     :boot_test,
-    :plugin_routes
+    :plugin_routes,
+    :indx_live
   ]
 )
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

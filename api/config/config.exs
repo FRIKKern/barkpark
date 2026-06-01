@@ -67,6 +67,15 @@ config :barkpark, :search_query_exclude_patterns, [
   ~r/^(test|asdf|qwerty|foo|bar)$/i
 ]
 
+# Indx search-engine plugin (CORE). Registers the "indx" engine in the
+# document-search SEAM so a surface whose config sets engine="indx" routes
+# through `Barkpark.Plugins.Indx.Retriever` instead of Postgres. This static
+# entry is INERT until a surface opts in — no surface uses "indx" by default,
+# so with no Indx running and no surface configured, search stays on Postgres
+# unchanged (the additive / fresh-install invariant). The plugin's
+# `register_workers/1` re-asserts the same mapping at boot.
+config :barkpark, :search_retrievers, %{"indx" => Barkpark.Plugins.Indx.Retriever}
+
 # W7-05: the `tasks_ttl` queue is concurrency=1 per node — only one TTL
 # sweep runs at a time on a given node, defense in depth against double-
 # sweeping the same expired claim (the per-task advisory lock inside the
@@ -75,7 +84,7 @@ config :barkpark, :search_query_exclude_patterns, [
 # `task_lease_sweep_interval_seconds`).
 config :barkpark, Oban,
   repo: Barkpark.Repo,
-  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1, tasks_compact: 1],
+  queues: [default: 10, bokbasen: 4, plugins: 6, indx: 4, tasks_ttl: 1, tasks_compact: 1],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,

@@ -76,6 +76,25 @@ if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
 end
 
+# Indx search-engine plugin (CORE). Read from OS env in every environment so
+# dev can `source secrets/indx.env` and prod can rely on systemd's
+# EnvironmentFile=. Missing values fall back to the encrypted plugin_settings
+# row (or the module defaults) at lookup time — see
+# `Barkpark.Plugins.Indx.Settings`. Env wins per-field.
+indx_env_keys = [
+  api_base: System.get_env("INDX_API_BASE"),
+  user_email: System.get_env("INDX_USER_EMAIL"),
+  user_password: System.get_env("INDX_USER_PASSWORD")
+]
+
+indx_env =
+  indx_env_keys
+  |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+if indx_env != [] do
+  config :barkpark, Barkpark.Plugins.Indx, indx_env
+end
+
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
     val when is_binary(val) and val != "" ->
