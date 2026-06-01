@@ -30,6 +30,9 @@ defmodule Barkpark.Plugins.Indx.RetrieverTest do
 
   defp parsed(terms), do: %{terms: terms, phrases: [], prefixes: [], excludes: []}
 
+  defp parsed(terms, excludes),
+    do: %{terms: terms, phrases: [], prefixes: [], excludes: excludes}
+
   setup do
     scope = "production"
     # Point the live pointer at a dataset so the retriever proceeds past the
@@ -74,6 +77,41 @@ defmodule Barkpark.Plugins.Indx.RetrieverTest do
     assert total == 1
     assert [%Document{doc_id: hit_id}] = hits
     assert hit_id == doc.doc_id
+  end
+
+  test "honors parsed :excludes — drops resolved hits matching an excluded term" do
+    {:ok, %Document{} = keep} =
+      Content.create_document("post", %{"doc_id" => "ix_keep", "title" => "Phoenix Rising"}, @ds)
+
+    {:ok, %Document{} = drop} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "ix_drop", "title" => "Phoenix Wright Ace Attorney"},
+        @ds
+      )
+
+    # Indx (no native negation here) returns BOTH docs for the positive query
+    # "phoenix"; the retriever must post-filter the "wright" doc out.
+    FakeClient.put(
+      [%{"documentKey" => 1, "score" => 300}, %{"documentKey" => 2, "score" => 220}],
+      [
+        %{"_id" => keep.doc_id, "_type" => "post"},
+        %{"_id" => drop.doc_id, "_type" => "post"}
+      ]
+    )
+
+    {hits, total} =
+      Retriever.search(
+        @ds,
+        parsed(["phoenix"], ["wright"]),
+        %{"engine" => "indx"},
+        client: FakeClient
+      )
+
+    assert total == 1
+    assert [%Document{doc_id: hit_id}] = hits
+    assert hit_id == keep.doc_id
+    refute Enum.any?(hits, &(&1.doc_id == drop.doc_id))
   end
 
   test "returns {[], 0} for an empty query without calling Indx" do

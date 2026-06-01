@@ -46,7 +46,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
   @impl Barkpark.Search.Retriever
   @spec search(String.t(), map(), map(), keyword()) :: {[struct()], non_neg_integer()}
-  def search(scope, parsed, _config, opts) when is_binary(scope) do
+  def search(scope, parsed, config, opts) when is_binary(scope) do
     text = query_text(parsed)
     dataset = Indexer.current_dataset(scope)
 
@@ -58,11 +58,11 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         {[], 0}
 
       true ->
-        do_search(scope, dataset, text, opts)
+        do_search(scope, dataset, text, parsed, config, opts)
     end
   end
 
-  defp do_search(scope, dataset, text, opts) do
+  defp do_search(scope, dataset, text, parsed, config, opts) do
     client = Keyword.get(opts, :client, Client)
     limit = Keyword.get(opts, :limit, 50) |> min(200)
     client_opts = client_opts(opts)
@@ -74,6 +74,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         docs
         |> Enum.map(&load_document(&1, scope, opts))
         |> Enum.reject(&is_nil/1)
+        |> apply_excludes(parsed, config)
 
       {hits, length(hits)}
     else
@@ -82,6 +83,68 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         {[], 0}
     end
   end
+
+  # Indx has no native negation in this path: query_text/1 builds only the
+  # POSITIVE query for the engine. The parsed `:excludes` are honored here as a
+  # post-filter on the resolved Barkpark Documents, mirroring
+  # DocumentsRetriever's exclude semantics — a hit is dropped when an excluded
+  # term appears (case-insensitive substring, like Postgres' `ilike '%t%'`) in
+  # any of the surface's searchable fields (title + content.slug by default).
+  defp apply_excludes(hits, parsed, config) do
+    excludes =
+      Map.get(parsed, :excludes, [])
+      |> Enum.map(&String.downcase(to_string(&1)))
+      |> Enum.reject(&(&1 == ""))
+
+    case excludes do
+      [] ->
+        hits
+
+      _ ->
+        fields = searchable_paths(config)
+        Enum.reject(hits, &excluded?(&1, excludes, fields))
+    end
+  end
+
+  defp searchable_paths(config) do
+    config
+    |> Map.get("searchable_fields", [])
+    |> Enum.map(fn
+      %{"path" => p} -> p
+      %{path: p} -> p
+      p when is_binary(p) -> p
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> ["title", "content.slug"]
+      paths -> paths
+    end
+  end
+
+  defp excluded?(doc, excludes, fields) do
+    haystack =
+      fields
+      |> Enum.map(&field_text(doc, &1))
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.join(" ")
+      |> String.downcase()
+
+    haystack != "" and Enum.any?(excludes, &String.contains?(haystack, &1))
+  end
+
+  # Path resolution mirrors Search.Highlighter.document_field_text/2 so the
+  # exclude filter reads the same fields the surface searches/highlights.
+  defp field_text(doc, "title"), do: doc.title
+
+  defp field_text(doc, "content.slug") do
+    case doc.content do
+      %{"slug" => slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
+
+  defp field_text(_doc, _field), do: nil
 
   defp hydrate(_client, _dataset, [], _opts), do: {:ok, []}
   defp hydrate(client, dataset, keys, opts), do: client.get_json(dataset, keys, opts)
