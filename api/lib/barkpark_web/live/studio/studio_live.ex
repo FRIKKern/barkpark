@@ -361,6 +361,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # (the patch may have removed it; the stream side already handled that).
   defp push_block_to_wc(socket, block_id) when is_binary(block_id) do
     paper = socket.assigns[:paper_doc]
+
     blocks =
       case paper && Map.get(paper, :content) do
         %{"blocks" => blocks} when is_list(blocks) -> blocks
@@ -1621,7 +1622,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     dataset = socket.assigns.dataset
 
     with %{doc_id: doc_id} <- doc,
-         {:ok, fresh} <- Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
+         {:ok, fresh} <-
+           Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
       {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
 
       assign(socket,
@@ -2016,7 +2018,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # field-reference's refType is empty by default; the picker still browses all
   # types when ref-type is "". field-image's value is an empty image URL.
   defp default_block("field-reference", id),
-    do: %{"id" => id, "type" => "field-reference", "label" => "Reference", "refType" => "", "value" => ""}
+    do: %{
+      "id" => id,
+      "type" => "field-reference",
+      "label" => "Reference",
+      "refType" => "",
+      "value" => ""
+    }
 
   defp default_block("field-image", id),
     do: %{"id" => id, "type" => "field-image", "label" => "Image", "value" => ""}
