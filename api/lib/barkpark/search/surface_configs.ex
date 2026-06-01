@@ -76,8 +76,11 @@ defmodule Barkpark.Search.SurfaceConfigs do
     defaults = default_for(surface)
 
     merged = %{
-      searchable_fields: Map.get(attrs, "searchableFields") || Map.get(attrs, :searchable_fields) || defaults["searchable_fields"],
-      typo_policy: Map.get(attrs, "typoPolicy") || Map.get(attrs, :typo_policy) || defaults["typo_policy"],
+      searchable_fields:
+        Map.get(attrs, "searchableFields") || Map.get(attrs, :searchable_fields) ||
+          defaults["searchable_fields"],
+      typo_policy:
+        Map.get(attrs, "typoPolicy") || Map.get(attrs, :typo_policy) || defaults["typo_policy"],
       zero_hit_strategy:
         Map.get(attrs, "zeroHitStrategy") || Map.get(attrs, :zero_hit_strategy) ||
           defaults["zero_hit_strategy"],

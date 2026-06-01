@@ -119,7 +119,12 @@ defmodule Barkpark.Search.QueryPipeline do
     if length(terms) <= 1 do
       nil
     else
-      dropped = %{parsed | terms: Enum.drop(parsed.terms, -1), phrases: Enum.drop(parsed.phrases, -1)}
+      dropped = %{
+        parsed
+        | terms: Enum.drop(parsed.terms, -1),
+          phrases: Enum.drop(parsed.phrases, -1)
+      }
+
       {hits, total} = retriever.search(scope, dropped, config, opts)
 
       if total > 0 do
@@ -159,7 +164,9 @@ defmodule Barkpark.Search.QueryPipeline do
         strategy = Map.get(config, "zero_hit_strategy", "drop_tokens")
 
         case try_drop_tokens_media(parsed, search_fn, strategy) do
-          {h, t, r} -> {h, t, r}
+          {h, t, r} ->
+            {h, t, r}
+
           nil ->
             case try_typo_widen_media(parsed, search_fn, strategy) do
               {h, t, r} -> {h, t, r}
@@ -173,7 +180,12 @@ defmodule Barkpark.Search.QueryPipeline do
     if length(parsed.terms ++ parsed.phrases) <= 1 do
       nil
     else
-      dropped = %{parsed | terms: Enum.drop(parsed.terms, -1), phrases: Enum.drop(parsed.phrases, -1)}
+      dropped = %{
+        parsed
+        | terms: Enum.drop(parsed.terms, -1),
+          phrases: Enum.drop(parsed.phrases, -1)
+      }
+
       {hits, total} = search_fn.(dropped, false)
 
       if total > 0 do
