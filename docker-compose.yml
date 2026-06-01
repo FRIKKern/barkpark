@@ -1,3 +1,11 @@
+# Secrets are read from a .env file in this directory — Docker Compose
+# auto-loads it for ${VAR} interpolation (it does NOT run command substitution).
+# Generate each value with: cd api && mix phx.gen.secret
+#   (use 'mix phx.gen.secret 32' for BARKPARK_CLOAK_KEY).
+# .env must define: SECRET_KEY_BASE, PREVIEW_JWT_SECRET, BARKPARK_CLOAK_KEY.
+#
+# platform: host-arch default is correct for same-box self-host. Only set an
+# explicit platform: pin when cross-building (e.g. amd64 host → arm64 target).
 services:
   db:
     image: postgres:17-alpine
@@ -20,8 +28,11 @@ services:
       - "${PORT:-4000}:4000"
     environment:
       DATABASE_URL: ecto://postgres:postgres@db/barkpark_prod
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-$(openssl rand -base64 48)}
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?set SECRET_KEY_BASE in .env — generate with: cd api && mix phx.gen.secret}"
+      PREVIEW_JWT_SECRET: "${PREVIEW_JWT_SECRET:?set in .env — mix phx.gen.secret}"
+      BARKPARK_CLOAK_KEY: "${BARKPARK_CLOAK_KEY:?set in .env — mix phx.gen.secret 32}"
       PHX_HOST: ${PHX_HOST:-localhost}
+      PHX_SCHEME: ${PHX_SCHEME:-http}
       PORT: "4000"
     volumes:
       - uploads:/app/uploads
@@ -29,6 +40,12 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/schemas >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
 
 volumes:
   pgdata:

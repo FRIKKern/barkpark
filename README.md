@@ -217,7 +217,7 @@ DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy
 
 For an IP-only dev box, set `DOMAIN=<ip> PHX_SCHEME=http` explicitly instead.
 
-Installs PostgreSQL, Erlang/Elixir (via ASDF — Erlang Solutions has no ARM packages), Go, Caddy, and a systemd unit. First run on ARM is 10–15 min (Erlang compiles from source).
+Installs PostgreSQL, Erlang/Elixir (via ASDF — Erlang Solutions has no ARM packages), Go, and a systemd unit. Caddy / TLS is configured separately — see docs/ops/caddy-api-tls.md. First run on ARM is 10–15 min (Erlang compiles from source).
 
 Updates afterwards:
 
