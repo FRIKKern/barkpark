@@ -11,11 +11,16 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     1. Pick a FRESH dataset name `<prefix>_<scope>_v<n>` (n = the next
        version after the current live one).
     2. `create_or_open` the fresh dataset.
-    3. `set_searchable_fields` with the configured weights.
-    4. `load_string` the FULL corpus as one JSON array (text/plain body).
-    5. `index_dataset`, then poll `get_status` until ready.
-    6. Verify `get_number_of_json_records` equals the corpus size.
-    7. Return `{new_dataset, old_dataset}` so the caller can atomically
+    3. `analyze_string` the FULL corpus (text/plain body) to populate the
+       dataset's `DocumentFields` — this MUST precede step 4. Without it
+       `set_searchable_fields` 400s ("SetSearchableFields invalid status")
+       because `DocumentFields == null`. `LoadString` does NOT populate
+       `DocumentFields`; only `AnalyzeString` does.
+    4. `set_searchable_fields` with the configured weights.
+    5. `load_string` the FULL corpus as one JSON array (text/plain body).
+    6. `index_dataset`, then poll `get_status` until ready.
+    7. Verify `get_number_of_json_records` equals the corpus size.
+    8. Return `{new_dataset, old_dataset}` so the caller can atomically
        swap the query path (`swap/2`) and then `delete_dataset` the old one.
 
   The fresh dataset name guarantees step 4 never touches a live dataset.
@@ -96,6 +101,7 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     client_opts = client_opts(opts)
 
     with :ok <- client.create_or_open(new_dataset, client_opts),
+         :ok <- client.analyze_string(new_dataset, records, client_opts),
          :ok <- client.set_searchable_fields(new_dataset, weights, client_opts),
          :ok <- client.load_string(new_dataset, records, client_opts),
          :ok <- client.index_dataset(new_dataset, client_opts),

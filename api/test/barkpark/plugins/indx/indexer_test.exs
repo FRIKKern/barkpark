@@ -34,6 +34,7 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
     defp record(call), do: Agent.update(agent(), &%{&1 | calls: [call | &1.calls]})
 
     def create_or_open(ds, _opts), do: record({:create_or_open, ds}) && :ok
+    def analyze_string(ds, records, _opts), do: record({:analyze, ds, records}) && :ok
     def set_searchable_fields(ds, fields, _opts), do: record({:set_fields, ds, fields}) && :ok
 
     def load_string(ds, records, _opts) do
@@ -80,13 +81,19 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
     calls = FakeClient.calls(pid)
     new = result.new_dataset
 
-    # Order: create_or_open → set_fields → load_string → index → status → count.
+    # Order: create_or_open → analyze → set_fields → load_string → index →
+    # status → count. AnalyzeString MUST precede SetSearchableFields — it is
+    # what populates DocumentFields; SetSearchableFields 400s without it.
     assert [
              {:create_or_open, ^new},
+             {:analyze, ^new, analyzed},
              {:set_fields, ^new, _},
              {:load_string, ^new, records},
              {:index, ^new} | _rest
            ] = calls
+
+    # Analyze receives the SAME rendered corpus that load_string does.
+    assert analyzed == records
 
     # The loaded corpus carries the embedded numeric "id" AND the "_id".
     assert [

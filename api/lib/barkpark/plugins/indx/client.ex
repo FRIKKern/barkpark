@@ -12,6 +12,7 @@ defmodule Barkpark.Plugins.Indx.Client do
 
       login/1                          (delegates to Auth.token/0)
       create_or_open/2                 PUT  /api/CreateOrOpen/{ds}
+      analyze_string/2                 POST /api/AnalyzeString/{ds} (text/plain!)
       set_searchable_fields/3          PUT  /api/SetSearchableFields/{ds}
       load_string/3                    PUT  /api/LoadString/{ds}     (text/plain!)
       index_dataset/2                  GET  /api/IndexDataSet/{ds}
@@ -36,10 +37,23 @@ defmodule Barkpark.Plugins.Indx.Client do
   IndexOutOfRange on the engine. Callers pass `{field, weight}` tuples;
   `Settings` already clamps the weight defaults to the valid band.
 
-  ## LoadString is text/plain
+  ## AnalyzeString + LoadString are text/plain
 
-  `load_string/3` sends the JSON corpus as a `text/plain` body, NOT
-  `application/json`. The spike confirmed `application/json` is rejected.
+  `analyze_string/2` and `load_string/3` send the JSON corpus as a
+  `text/plain` body, NOT `application/json` — the controller types both
+  `[FromBody] string jsonData` and relies on the `TextPlainInputFormatter`
+  to read the raw JSON-string body. The spike confirmed `application/json`
+  is rejected on these two. Every OTHER `application/json` POST/PUT
+  (`set_searchable_fields`, `search`, `get_json`) MUST carry a
+  `content-type: application/json` header or Indx answers 415.
+
+  ## AnalyzeString MUST precede SetSearchableFields
+
+  `SetSearchableFields` 400s with "SetSearchableFields invalid status"
+  while `DocumentFields == null`, and `DocumentFields` is populated by
+  `AnalyzeString` (`DocumentFields.Analyze` → `SetDocumentFieldsInternal`),
+  NOT by `LoadString`. The indexer therefore calls `analyze_string` before
+  `set_searchable_fields` — see `Barkpark.Plugins.Indx.Indexer`.
 
   ## NEVER re-load a live dataset
 
@@ -87,10 +101,39 @@ defmodule Barkpark.Plugins.Indx.Client do
   end
 
   @doc """
+  Analyze the corpus to populate the dataset's `DocumentFields`.
+  `POST /api/AnalyzeString/{ds}`.
+
+  CRITICAL ordering: this MUST run BEFORE `set_searchable_fields/3`.
+  `SetSearchableFields` 400s ("SetSearchableFields invalid status") while
+  `DocumentFields == null`, and `DocumentFields` is populated by
+  `AnalyzeString` (`DocumentFields.Analyze` on the engine), NOT by
+  `LoadString`.
+
+  CRITICAL body: like `load_string/3`, the controller types the body
+  `[FromBody] string jsonData` and reads it via the `TextPlainInputFormatter`,
+  so the corpus JSON is sent as a `text/plain` body — NOT `application/json`.
+  `corpus` may be a pre-encoded JSON string or a list/term that gets
+  `Jason.encode!`'d.
+  """
+  @spec analyze_string(String.t(), iodata() | list() | map(), keyword()) ::
+          :ok | {:error, struct()}
+  def analyze_string(dataset, corpus, opts \\ []) when is_binary(dataset) do
+    body = if is_binary(corpus), do: corpus, else: Jason.encode!(corpus)
+
+    case index_request(:post, path("AnalyzeString", dataset, opts), body, opts,
+           content_type: "text/plain"
+         ) do
+      {:ok, _resp} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Declare searchable fields with weights.
   `PUT /api/SetSearchableFields/{ds}` body = camelCase ValueTuple array
   `[{"item1": field, "item2": weight}]` (weight 0..2). Accepts a list of
-  `{field, weight}` tuples.
+  `{field, weight}` tuples. Sent as `application/json`.
   """
   @spec set_searchable_fields(String.t(), [{String.t(), 0..2}], keyword()) ::
           :ok | {:error, struct()}
@@ -193,21 +236,27 @@ defmodule Barkpark.Plugins.Indx.Client do
     max = Keyword.get(opts, :max, 30)
     body = Jason.encode!(%{"text" => text, "maxNumberOfRecordsToReturn" => max})
 
-    case search_request(:post, path("Search", dataset, opts), body, opts) do
+    case search_request(:post, path("Search", dataset, opts), body, opts,
+           content_type: "application/json"
+         ) do
       {:ok, resp} -> {:ok, extract_records(resp.body)}
       {:error, _} = err -> err
     end
   end
 
   @doc """
-  Hydrate full JSON docs by key. `POST /api/GetJson/{ds}` body `long[]` →
-  JSON docs. Returns `{:ok, [doc_map, ...]}`.
+  Hydrate full JSON docs by key. `POST /api/GetJson/{ds}` body `long[]`
+  (sent as `application/json`) → a `string[]` where each element is a
+  document serialized as a JSON STRING. Returns `{:ok, [doc_map, ...]}` —
+  each element is `Jason.decode/1`'d back into a map.
   """
   @spec get_json(String.t(), [integer()], keyword()) :: {:ok, [map()]} | {:error, struct()}
   def get_json(dataset, keys, opts \\ []) when is_binary(dataset) and is_list(keys) do
     body = Jason.encode!(keys)
 
-    case search_request(:post, path("GetJson", dataset, opts), body, opts) do
+    case search_request(:post, path("GetJson", dataset, opts), body, opts,
+           content_type: "application/json"
+         ) do
       {:ok, resp} -> {:ok, extract_docs(resp.body)}
       {:error, _} = err -> err
     end
@@ -222,8 +271,9 @@ defmodule Barkpark.Plugins.Indx.Client do
     do_request(method, url, body, opts, req_opts, 0, &index_error/3)
   end
 
-  # Query-path ops map non-2xx → %SearchError{}.
-  defp search_request(method, url, body, opts, req_opts \\ []) do
+  # Query-path ops map non-2xx → %SearchError{}. Both callers (search,
+  # get_json) always send `application/json` — no default req_opts.
+  defp search_request(method, url, body, opts, req_opts) do
     do_request(method, url, body, opts, req_opts, 0, &search_error/3)
   end
 
@@ -328,13 +378,29 @@ defmodule Barkpark.Plugins.Indx.Client do
     end
   end
 
+  # GetJson returns a `string[]` where each element is a document serialized
+  # as a JSON STRING. The outer decode yields a list of strings; each must be
+  # decoded a second time into a map. Already-decoded maps (lenient engines /
+  # tests) and a lone map are tolerated. Elements that fail to decode to a
+  # map are dropped so a single malformed hit never poisons the batch.
   defp extract_docs(body) do
     case decode_json(body) do
-      docs when is_list(docs) -> docs
+      docs when is_list(docs) -> docs |> Enum.map(&decode_doc_element/1) |> Enum.reject(&is_nil/1)
       %{} = doc -> [doc]
       _ -> []
     end
   end
+
+  defp decode_doc_element(%{} = doc) when not is_struct(doc), do: doc
+
+  defp decode_doc_element(elem) when is_binary(elem) do
+    case Jason.decode(elem) do
+      {:ok, %{} = doc} -> doc
+      _ -> nil
+    end
+  end
+
+  defp decode_doc_element(_), do: nil
 
   defp parse_count(body) do
     case decode_json(body) do

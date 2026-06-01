@@ -65,10 +65,30 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
     assert :ok = Client.create_or_open(@ds, base_url: base)
   end
 
-  test "set_searchable_fields sends camelCase ValueTuple array", %{bypass: bypass, base: base} do
+  test "analyze_string POSTs the corpus as text/plain", %{bypass: bypass, base: base} do
+    stub_login(bypass)
+
+    Bypass.expect_once(bypass, "POST", "/api/AnalyzeString/#{@ds}", fn conn ->
+      assert ["Bearer " <> @jwt] = Plug.Conn.get_req_header(conn, "authorization")
+      # Like LoadString, the corpus JSON is sent as a text/plain body —
+      # NOT application/json (the controller types it [FromBody] string).
+      assert ["text/plain"] = Plug.Conn.get_req_header(conn, "content-type")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert [%{"id" => 1, "_id" => "p1"}] = Jason.decode!(body)
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    assert :ok = Client.analyze_string(@ds, [%{"id" => 1, "_id" => "p1"}], base_url: base)
+  end
+
+  test "set_searchable_fields sends camelCase ValueTuple array as application/json", %{
+    bypass: bypass,
+    base: base
+  } do
     stub_login(bypass)
 
     Bypass.expect_once(bypass, "PUT", "/api/SetSearchableFields/#{@ds}", fn conn ->
+      assert ["application/json"] = Plug.Conn.get_req_header(conn, "content-type")
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       assert [%{"item1" => "title", "item2" => 0}, %{"item1" => "_id", "item2" => 2}] =
                Jason.decode!(body)
@@ -127,6 +147,7 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
     stub_login(bypass)
 
     Bypass.expect_once(bypass, "POST", "/api/Search/#{@ds}", fn conn ->
+      assert ["application/json"] = Plug.Conn.get_req_header(conn, "content-type")
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       decoded = Jason.decode!(body)
       assert decoded["text"] == "elixir phoenix"
@@ -140,17 +161,32 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
              Client.search(@ds, "elixir phoenix", base_url: base)
   end
 
-  test "get_json posts the key array and returns docs", %{bypass: bypass, base: base} do
+  test "get_json posts the key array (application/json) and decodes the string[] of JSON-string docs",
+       %{bypass: bypass, base: base} do
     stub_login(bypass)
 
     Bypass.expect_once(bypass, "POST", "/api/GetJson/#{@ds}", fn conn ->
+      assert ["application/json"] = Plug.Conn.get_req_header(conn, "content-type")
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       assert [7, 9] = Jason.decode!(body)
-      Plug.Conn.resp(conn, 200, Jason.encode!([%{"_id" => "p1", "_type" => "post"}]))
+
+      # Real engine contract: GetJson returns a `string[]` where EACH element
+      # is a document serialized as its own JSON STRING (double-encoded).
+      payload =
+        Jason.encode!([
+          Jason.encode!(%{"_id" => "p1", "_type" => "post"}),
+          Jason.encode!(%{"_id" => "p2", "_type" => "post"})
+        ])
+
+      Plug.Conn.resp(conn, 200, payload)
     end)
 
-    assert {:ok, [%{"_id" => "p1", "_type" => "post"}]} =
-             Client.get_json(@ds, [7, 9], base_url: base)
+    # The client must Jason.decode each element back into a map.
+    assert {:ok,
+            [
+              %{"_id" => "p1", "_type" => "post"},
+              %{"_id" => "p2", "_type" => "post"}
+            ]} = Client.get_json(@ds, [7, 9], base_url: base)
   end
 
   test "delete_dataset hits DELETE /api/DeleteDataSet/{ds}", %{bypass: bypass, base: base} do
