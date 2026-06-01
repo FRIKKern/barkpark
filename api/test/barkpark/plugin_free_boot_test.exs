@@ -156,6 +156,30 @@ defmodule Barkpark.PluginFreeBootTest do
   defp reseed_host_schemas do
     dataset = "production"
 
+    # Tenant scope, mirroring `priv/repo/seeds.exs`. The 8 host schemas MUST be
+    # stamped with the Default Workspace / Project / Dataset, because `/api/schemas`
+    # (LegacyController.schemas → Content.list_schemas) runs the `:api` pipeline's
+    # `AssignDefaultScope`, which resolves the seeded Default workspace and scopes
+    # the read `WHERE workspace_id = <default> AND project_id = <default>`. The
+    # Default Workspace is committed by migration 20260527110200 and therefore
+    # survives the sandbox, so a schema inserted with a NULL workspace_id lands
+    # invisible to that scoped read — the NULL-workspace_id trap (api/CLAUDE.md
+    # "Adding a new document type"). Stamp the scope here so the assertion checks
+    # the REAL fresh-install behaviour: a plugin-free instance exposes exactly the
+    # 8 core schemas under the Default tenant.
+    default_workspace = Barkpark.Tenancy.get_default_workspace()
+    default_project = Barkpark.Tenancy.get_default_project()
+
+    {:ok, %Barkpark.Tenancy.Dataset{id: default_dataset_id}} =
+      Barkpark.Tenancy.get_or_create_dataset(default_project.id, dataset)
+
+    stamp_scope = fn attrs ->
+      attrs
+      |> Map.put(:workspace_id, default_workspace.id)
+      |> Map.put(:project_id, default_project.id)
+      |> Map.put(:dataset_id, default_dataset_id)
+    end
+
     host_specs = [
       %{
         name: "post",
@@ -293,9 +317,11 @@ defmodule Barkpark.PluginFreeBootTest do
     # `"dataset"` key into the (atom-keyed) attrs, which produces a
     # mixed-key map and Ecto.CastError. The on_conflict: :nothing keeps
     # this idempotent even if a row already exists from a prior reseed.
+    # Each spec is scope-stamped first (see `stamp_scope` above) so the
+    # rows land under the Default tenant the request-time scope resolves to.
     Enum.each(host_specs, fn attrs ->
       %Barkpark.Content.SchemaDefinition{}
-      |> Barkpark.Content.SchemaDefinition.changeset(attrs)
+      |> Barkpark.Content.SchemaDefinition.changeset(stamp_scope.(attrs))
       |> Barkpark.Repo.insert!(on_conflict: :nothing)
     end)
   end
