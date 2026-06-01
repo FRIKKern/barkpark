@@ -1,0 +1,7 @@
+{
+  "plugin_name": "indx",
+  "version": "0.1.0",
+  "description": "Indx full-text search engine plugin. Registers a Barkpark.Search.Retriever-backed engine (\"indx\") and a blue/green corpus indexer. Surfaces whose config sets engine=\"indx\" route their searches through a dedicated single-tenant Indx instance instead of Postgres.",
+  "capabilities": ["settings", "workers"],
+  "module": "Barkpark.Plugins.Indx"
+}

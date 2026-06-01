@@ -67,9 +67,18 @@ config :barkpark, :search_query_exclude_patterns, [
   ~r/^(test|asdf|qwerty|foo|bar)$/i
 ]
 
+# Indx search-engine plugin (CORE). Registers the "indx" engine in the
+# document-search SEAM so a surface whose config sets engine="indx" routes
+# through `Barkpark.Plugins.Indx.Retriever` instead of Postgres. This static
+# entry is INERT until a surface opts in — no surface uses "indx" by default,
+# so with no Indx running and no surface configured, search stays on Postgres
+# unchanged (the additive / fresh-install invariant). The plugin's
+# `register_workers/1` re-asserts the same mapping at boot.
+config :barkpark, :search_retrievers, %{"indx" => Barkpark.Plugins.Indx.Retriever}
+
 config :barkpark, Oban,
   repo: Barkpark.Repo,
-  queues: [default: 10, bokbasen: 4, plugins: 6],
+  queues: [default: 10, bokbasen: 4, plugins: 6, indx: 4],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,

@@ -132,9 +132,13 @@ git config core.hooksPath .githooks
 if [ ! -f "$APP_DIR/.env" ]; then
   echo ">> Generating .env..."
   SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
+  PREVIEW_JWT=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
+  CLOAK_KEY=$(mix phx.gen.secret 32 2>/dev/null || openssl rand -base64 32)
   cat > "$APP_DIR/.env" << ENVEOF
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
 SECRET_KEY_BASE=$SECRET
+PREVIEW_JWT_SECRET=$PREVIEW_JWT
+BARKPARK_CLOAK_KEY=$CLOAK_KEY
 PHX_HOST=$DOMAIN
 PHX_SCHEME=$PHX_SCHEME
 PORT=4000
@@ -145,6 +149,8 @@ else
   # Update DB password for existing installs
   sudo -u postgres psql -c "ALTER USER $DB_USER WITH PASSWORD '$DB_PASS';" 2>/dev/null || true
   sed -i "s|DATABASE_URL=.*|DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME|" "$APP_DIR/.env"
+  grep -q '^PREVIEW_JWT_SECRET=' "$APP_DIR/.env" || echo "PREVIEW_JWT_SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)" >> "$APP_DIR/.env"
+  grep -q '^BARKPARK_CLOAK_KEY=' "$APP_DIR/.env" || echo "BARKPARK_CLOAK_KEY=$(mix phx.gen.secret 32 2>/dev/null || openssl rand -base64 32)" >> "$APP_DIR/.env"
 fi
 
 set -a; source "$APP_DIR/.env"; set +a

@@ -1796,8 +1796,55 @@ defmodule Barkpark.Content do
 
   # ── Search ──────────────────────────────────────────────────────────────
 
-  @doc "Search documents by title using ILIKE. Returns published docs by default."
+  @doc """
+  Search documents by title/FTS. Returns published docs by default.
+
+  Engine-neutral SEAM entry point. Resolves the retriever backing the
+  search surface (default `"postgres"`) and dispatches. For the Postgres
+  default — the only engine any surface uses today — this calls
+  `search_documents_postgres/3`, which is the unchanged search
+  implementation (synonyms + document FTS + trigram similarity +
+  perspective + rank). The indirection is PURELY ADDITIVE: with no surface
+  opting into another engine, behaviour is byte-identical to before the
+  seam was introduced.
+
+  Opt a surface onto a plugin engine by passing `engine: "<name>"` (resolved
+  via `Barkpark.Search.Retrievers`); an unknown engine falls back to
+  Postgres so a misconfiguration never takes search dark.
+  """
   def search_documents(query, dataset, opts \\ []) do
+    config = %{"engine" => Keyword.get(opts, :engine, "postgres")}
+    retriever = Barkpark.Search.Retrievers.resolve(config)
+
+    case retriever do
+      Barkpark.Search.DocumentsRetriever ->
+        # Default Postgres path — call PROD's search directly so the
+        # search-intelligence behaviour is provably unchanged (no extra map
+        # round-trip, no risk of drift).
+        search_documents_postgres(query, dataset, opts)
+
+      other ->
+        # Plugin engine (e.g. Indx). Build the engine-neutral parsed/config
+        # maps the `Barkpark.Search.Retriever` contract expects.
+        parsed = %{
+          query: to_string(query),
+          terms: [String.trim(to_string(query))],
+          phrases: [],
+          prefixes: [],
+          excludes: []
+        }
+
+        other.search(dataset, parsed, config, opts)
+    end
+  end
+
+  @doc """
+  PROD's Postgres document search — synonym expansion, document FTS
+  (`search_vector`), trigram similarity, perspective filtering, rank
+  ordering. This is the `"postgres"` engine of the search SEAM, the default
+  for every surface. Body is the exact pre-seam `search_documents/3`.
+  """
+  def search_documents_postgres(query, dataset, opts \\ []) do
     alias Barkpark.Search.Synonyms
 
     type = Keyword.get(opts, :type)
@@ -1838,7 +1885,8 @@ defmodule Barkpark.Content do
       pattern = search_like_pattern(term)
 
       clause =
-        dynamic([d],
+        dynamic(
+          [d],
           fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
             ilike(d.title, ^pattern) or
             fragment("similarity(?, ?) > 0.25", d.title, ^term)
@@ -2069,10 +2117,14 @@ defmodule Barkpark.Content do
           required(:layout) => [map()],
           optional(:prefill) => map()
         }) :: [map()]
-  @spec available_expected_fields([map()], %{
-          required(:layout) => [map()],
-          optional(:prefill) => map()
-        }, SchemaDefinition.t() | map() | nil) :: [map()]
+  @spec available_expected_fields(
+          [map()],
+          %{
+            required(:layout) => [map()],
+            optional(:prefill) => map()
+          },
+          SchemaDefinition.t() | map() | nil
+        ) :: [map()]
   def available_expected_fields(blocks, expectation, schema \\ nil)
 
   def available_expected_fields(blocks, %{layout: layout}, schema)
@@ -2241,7 +2293,7 @@ defmodule Barkpark.Content do
     next_rev = paper_next_rev(existing)
 
     content =
-      (existing && existing.content || %{})
+      ((existing && existing.content) || %{})
       |> Map.put("body_html", body_html)
       |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
       |> maybe_put_paper("style", style)
@@ -2488,8 +2540,7 @@ defmodule Barkpark.Content do
   # Resolve which block an op affected (post-apply) plus its top-level position.
   # Identical to the former Barkpark.Papers.locate_affected/2.
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
-    {:ok,
-     %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
+    {:ok, %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
   end
 
   defp locate_paper_affected(%{"op" => "insert-after", "block" => block}, new_blocks) do
