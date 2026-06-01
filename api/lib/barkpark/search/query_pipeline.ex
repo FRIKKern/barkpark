@@ -4,9 +4,9 @@ defmodule Barkpark.Search.QueryPipeline do
   """
 
   alias Barkpark.Search.{
-    DocumentsRetriever,
     Highlighter,
     QueryParser,
+    Retrievers,
     SurfaceConfigs,
     Synonyms
   }
@@ -83,14 +83,20 @@ defmodule Barkpark.Search.QueryPipeline do
         project_id: Keyword.get(opts, :project_id)
       ]
 
-    {hits, total} = DocumentsRetriever.search(scope, parsed, config, retriever_opts)
+    # Engine-neutral SEAM: pick the retriever backing this surface ONCE.
+    # Defaults to Postgres (DocumentsRetriever) — byte-identical to the prior
+    # direct call. A surface whose config sets engine: "indx" (or any plugin
+    # engine) routes through the registered module instead.
+    retriever = Retrievers.resolve(config)
+
+    {hits, total} = retriever.search(scope, parsed, config, retriever_opts)
 
     case {total, Map.get(config, "zero_hit_strategy", "drop_tokens")} do
       {0, "none"} ->
         {hits, total, nil}
 
       {0, strategy} ->
-        case recover_documents(scope, parsed, config, retriever_opts, strategy) do
+        case recover_documents(retriever, scope, parsed, config, retriever_opts, strategy) do
           {rh, rt, recovery} -> {rh, rt, recovery}
           nil -> {hits, total, nil}
         end
@@ -100,43 +106,43 @@ defmodule Barkpark.Search.QueryPipeline do
     end
   end
 
-  defp recover_documents(scope, parsed, config, opts, strategy) do
-    with nil <- try_drop_tokens(scope, parsed, config, opts, strategy),
-         nil <- try_typo_widen(scope, parsed, config, opts, strategy) do
+  defp recover_documents(retriever, scope, parsed, config, opts, strategy) do
+    with nil <- try_drop_tokens(retriever, scope, parsed, config, opts, strategy),
+         nil <- try_typo_widen(retriever, scope, parsed, config, opts, strategy) do
       nil
     end
   end
 
-  defp try_drop_tokens(scope, parsed, config, opts, "drop_tokens") do
+  defp try_drop_tokens(retriever, scope, parsed, config, opts, "drop_tokens") do
     terms = parsed.terms ++ parsed.phrases
 
     if length(terms) <= 1 do
       nil
     else
       dropped = %{parsed | terms: Enum.drop(parsed.terms, -1), phrases: Enum.drop(parsed.phrases, -1)}
-      {hits, total} = DocumentsRetriever.search(scope, dropped, config, opts)
+      {hits, total} = retriever.search(scope, dropped, config, opts)
 
       if total > 0 do
         {hits, total, "drop_tokens"}
       else
-        try_drop_tokens(scope, dropped, config, opts, "drop_tokens")
+        try_drop_tokens(retriever, scope, dropped, config, opts, "drop_tokens")
       end
     end
   end
 
-  defp try_drop_tokens(_scope, _parsed, _config, _opts, _strategy), do: nil
+  defp try_drop_tokens(_retriever, _scope, _parsed, _config, _opts, _strategy), do: nil
 
-  defp try_typo_widen(scope, parsed, config, opts, strategy)
+  defp try_typo_widen(retriever, scope, parsed, config, opts, strategy)
        when strategy in ["drop_tokens", "typo_widen"] do
     relaxed_opts = Keyword.put(opts, :relaxed, true)
-    {hits, total} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
+    {hits, total} = retriever.search(scope, parsed, config, relaxed_opts)
 
     if total > 0 do
       {hits, total, "typo_widen"}
     end
   end
 
-  defp try_typo_widen(_scope, _parsed, _config, _opts, _strategy), do: nil
+  defp try_typo_widen(_retriever, _scope, _parsed, _config, _opts, _strategy), do: nil
 
   defp search_media(_scope, _parsed, _config, _context, _opts) do
     # Media search runs through Media.Search.search/2 with pipeline opts; hits filled by caller.

@@ -22,7 +22,8 @@ defmodule Barkpark.Search.SurfaceConfigs do
       "similarity_threshold_relaxed" => 0.15
     },
     "zero_hit_strategy" => "drop_tokens",
-    "highlight_fields" => ["title"]
+    "highlight_fields" => ["title"],
+    "engine" => "postgres"
   }
 
   @default_media %{
@@ -40,7 +41,8 @@ defmodule Barkpark.Search.SurfaceConfigs do
       "similarity_threshold_relaxed" => 0.15
     },
     "zero_hit_strategy" => "drop_tokens",
-    "highlight_fields" => ["title", "original_name", "filename"]
+    "highlight_fields" => ["title", "original_name", "filename"],
+    "engine" => "postgres"
   }
 
   @spec get(String.t(), String.t()) :: map()
@@ -81,7 +83,10 @@ defmodule Barkpark.Search.SurfaceConfigs do
           defaults["zero_hit_strategy"],
       highlight_fields:
         Map.get(attrs, "highlightFields") || Map.get(attrs, :highlight_fields) ||
-          defaults["highlight_fields"]
+          defaults["highlight_fields"],
+      engine:
+        Map.get(attrs, "engine") || Map.get(attrs, :engine) ||
+          defaults["engine"] || "postgres"
     }
 
     case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do
@@ -119,7 +124,8 @@ defmodule Barkpark.Search.SurfaceConfigs do
             searchable_fields: defaults["searchable_fields"],
             typo_policy: defaults["typo_policy"],
             zero_hit_strategy: defaults["zero_hit_strategy"],
-            highlight_fields: defaults["highlight_fields"]
+            highlight_fields: defaults["highlight_fields"],
+            engine: defaults["engine"] || "postgres"
           })
           |> Repo.insert!()
 
@@ -150,7 +156,8 @@ defmodule Barkpark.Search.SurfaceConfigs do
       "searchable_fields" => normalize_fields(row.searchable_fields),
       "typo_policy" => row.typo_policy || %{},
       "zero_hit_strategy" => row.zero_hit_strategy || "drop_tokens",
-      "highlight_fields" => row.highlight_fields || []
+      "highlight_fields" => row.highlight_fields || [],
+      "engine" => row.engine || "postgres"
     }
   end
 

@@ -11,6 +11,7 @@ defmodule Barkpark.Search.SurfaceConfig do
     field :typo_policy, :map, default: %{}
     field :zero_hit_strategy, :string, default: "drop_tokens"
     field :highlight_fields, {:array, :string}, default: []
+    field :engine, :string, default: "postgres"
 
     timestamps(type: :utc_datetime_usec)
   end

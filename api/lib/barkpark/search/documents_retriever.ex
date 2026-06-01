@@ -1,11 +1,14 @@
 defmodule Barkpark.Search.DocumentsRetriever do
   @moduledoc false
 
+  @behaviour Barkpark.Search.Retriever
+
   import Ecto.Query
   import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
+  @impl Barkpark.Search.Retriever
   @spec search(String.t(), map(), map(), keyword()) ::
           {[struct()], non_neg_integer()}
   def search(scope, parsed, config, opts) when is_binary(scope) do
