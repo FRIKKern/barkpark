@@ -17,11 +17,16 @@ defmodule BarkparkWeb.SearchController do
       query ->
         t0 = System.monotonic_time(:microsecond)
 
+        # Engine opt-in: default "postgres" (prod behaviour unchanged). An
+        # explicit ?engine=<name> routes to a registered retriever (e.g.
+        # "indx"); an unknown engine falls back to Postgres in the resolver,
+        # so a bad value never takes search dark.
         opts = [
           type: params["type"],
           perspective: parse_perspective(params["perspective"]),
           limit: parse_int(params["limit"], 50),
-          offset: parse_int(params["offset"], 0)
+          offset: parse_int(params["offset"], 0),
+          engine: params["engine"] || "postgres"
         ]
 
         {docs, count} = Content.search_documents(query, dataset, opts)
