@@ -77,6 +77,21 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
     {:ok, pid: pid, scope: scope}
   end
 
+  # Flip the live pointer for `scope` to `dataset` carrying a hand-built
+  # key_map — lets a test stage a PROBE-DISPLACED or pathological map shape
+  # without synthesizing a real SHA-256 collision. swap/2 reads :new_dataset
+  # and :key_map, the same fields rebuild/3 returns.
+  defp swap_with_key_map(scope, dataset, key_map) do
+    Indexer.swap(scope, %{new_dataset: dataset, key_map: key_map})
+  end
+
+  # The key the stored map currently holds for `id` in `scope`.
+  defp map_key_for(scope, id) do
+    scope
+    |> Indexer.key_map()
+    |> Enum.find_value(fn {key, mapped} -> if mapped == id, do: key end)
+  end
+
   test "rebuild creates a fresh v1 dataset and loads the full corpus", %{pid: pid, scope: scope} do
     docs = [%{"_id" => "p1", "title" => "Alpha"}, %{"_id" => "p2", "title" => "Beta"}]
 
@@ -254,17 +269,20 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
       Map.put(ctx, :dataset, r.new_dataset)
     end
 
-    test "happy path: DELETEs the stable key from the live dataset, no reindex", %{
+    test "happy path: DELETEs the natural key (the one the map holds), no reindex", %{
       pid: pid,
       scope: scope,
       dataset: dataset
     } do
       FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
 
+      # In a collision-free corpus the stored key_map's key for "p1" IS the
+      # natural key_for_id("p1") — resolving from the map and recomputing
+      # the bare hash agree.
       assert :ok = Indexer.delete_record(scope, "p1", client: FakeClient)
 
-      # The delete targeted the LIVE dataset and the stable key for "p1".
       expected_key = Indexer.key_for_id("p1")
+      assert expected_key == map_key_for(scope, "p1")
 
       assert {:delete_json, ^dataset, ^expected_key} =
                FakeClient.calls(pid)
@@ -272,6 +290,79 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
 
       # delete_record must NOT swap the pointer — the dataset is unchanged.
       assert Indexer.current_dataset(scope) == dataset
+    end
+
+    test "PROBE-DISPLACED _id: deletes the stored (probed) key, NOT key_for_id/1", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+
+      # Simulate an in-corpus collision outcome: "p1" was displaced by the
+      # probe, so its stored key is key_for_id("p1") + 1, NOT the bare hash.
+      base = Indexer.key_for_id("p1")
+      probed = base + 1
+      swap_with_key_map(scope, dataset, %{probed => "p1"})
+
+      assert :ok = Indexer.delete_record(scope, "p1", client: FakeClient)
+
+      deleted_keys =
+        FakeClient.calls(pid)
+        |> Enum.filter(&match?({:delete_json, ^dataset, _}, &1))
+        |> Enum.map(fn {:delete_json, _ds, key} -> key end)
+
+      # The probed key was deleted; the bare key_for_id (the WRONG target for
+      # a displaced _id) was NOT.
+      assert deleted_keys == [probed]
+      refute base in deleted_keys
+    end
+
+    test "_id ABSENT from the stored map falls back to key_for_id/1", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+
+      # Stored map knows only "p2"; deleting "p1" must fall back to the bare
+      # key_for_id("p1") because it is not in the map.
+      swap_with_key_map(scope, dataset, %{Indexer.key_for_id("p2") => "p2"})
+
+      assert :ok = Indexer.delete_record(scope, "p1", client: FakeClient)
+
+      expected = Indexer.key_for_id("p1")
+
+      deleted_keys =
+        FakeClient.calls(pid)
+        |> Enum.filter(&match?({:delete_json, ^dataset, _}, &1))
+        |> Enum.map(fn {:delete_json, _ds, key} -> key end)
+
+      assert deleted_keys == [expected]
+    end
+
+    test "multiple keys mapping to one _id (pathological) → all deleted", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+
+      base = Indexer.key_for_id("p1")
+      k_a = base
+      k_b = base + 1
+      k_c = base + 2
+      swap_with_key_map(scope, dataset, %{k_a => "p1", k_b => "p1", k_c => "p1"})
+
+      assert :ok = Indexer.delete_record(scope, "p1", client: FakeClient)
+
+      deleted_keys =
+        FakeClient.calls(pid)
+        |> Enum.filter(&match?({:delete_json, ^dataset, _}, &1))
+        |> Enum.map(fn {:delete_json, _ds, key} -> key end)
+        |> Enum.sort()
+
+      assert deleted_keys == Enum.sort([k_a, k_b, k_c])
     end
 
     test "reindex-required: returns {:reindex_required, status}", %{scope: scope} do

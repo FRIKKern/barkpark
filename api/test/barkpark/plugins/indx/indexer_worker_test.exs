@@ -95,12 +95,66 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
                run(%{"op" => "delete", "scope" => "production", "_id" => "p1"})
     end
 
-    test "a delete client error surfaces as {:error, _}" do
+    test "a transient 5xx delete error surfaces as {:error, _} (Oban backoff)" do
       alias Barkpark.Plugins.Indx.Errors.IndexError
       FakeIndexer.set_delete({:error, %IndexError{status: 500, endpoint: "x"}})
 
       assert {:error, %IndexError{status: 500}} =
                run(%{"op" => "delete", "scope" => "production", "_id" => "p1"})
+    end
+
+    test "no-live-dataset is PERMANENT → {:cancel, :no_live_dataset}, no rebuild", %{pid: pid} do
+      alias Barkpark.Plugins.Indx.Errors.IndexError
+
+      # The exact error shape delete_record/3 returns when the scope has no
+      # live pointer (matched by the "no live dataset" message substring).
+      FakeIndexer.set_delete(
+        {:error,
+         %IndexError{
+           status: 0,
+           endpoint: nil,
+           message: "Indx.Indexer: no live dataset for scope production — nothing to delete"
+         }}
+      )
+
+      result =
+        run(%{"op" => "delete", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+
+      # PERMANENT: cancelled, NOT {:error} (which would burn Oban attempts).
+      assert {:cancel, :no_live_dataset} = result
+
+      calls = FakeIndexer.calls(pid)
+      assert {:delete_record, "production", "p1"} in calls
+      # A future rebuild establishes the index minus the deleted doc — this
+      # job must NOT enqueue/run a rebuild itself.
+      refute Enum.any?(calls, &match?({:rebuild, _, _}, &1))
+    end
+
+    test "404 from the delete endpoint is PERMANENT → {:cancel, :delete_endpoint_unavailable}",
+         %{pid: pid} do
+      alias Barkpark.Plugins.Indx.Errors.IndexError
+
+      # The C# DeleteJsonRecord action is not deployed yet → 404.
+      FakeIndexer.set_delete(
+        {:error, %IndexError{status: 404, endpoint: "/api/DeleteJsonRecord/ds/123"}}
+      )
+
+      result =
+        run(%{"op" => "delete", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+
+      assert {:cancel, :delete_endpoint_unavailable} = result
+      # Retrying a missing endpoint is pointless — no rebuild fallback either.
+      refute Enum.any?(FakeIndexer.calls(pid), &match?({:rebuild, _, _}, &1))
+    end
+
+    test "NetworkError (Indx unreachable) is TRANSIENT → {:snooze, _}" do
+      alias Barkpark.Plugins.Indx.Errors.NetworkError
+      FakeIndexer.set_delete({:error, %NetworkError{reason: :econnrefused, endpoint: "x"}})
+
+      assert {:snooze, n} =
+               run(%{"op" => "delete", "scope" => "production", "_id" => "p1"})
+
+      assert is_integer(n) and n > 0
     end
 
     test "missing _id cancels" do

@@ -30,9 +30,12 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   Indx's document key field defaults to `"id"` (numeric / long), while
   Barkpark `_id`s are strings (`"drafts.p1"`). The numeric key is derived
   DETERMINISTICALLY from the `_id` via `key_for_id/1`, so the same `_id`
-  maps to the same `long` on every rebuild AND can be recomputed for a
-  targeted per-document delete — there is NO per-rebuild position
-  dependency anymore.
+  maps to the same `long` on every rebuild — there is NO per-rebuild
+  position dependency anymore. The render path layers per-corpus collision
+  probing on top, and `swap/2` records the resulting key→`_id` map on the
+  live pointer; `delete_record/3` reads THAT map to find the key a record
+  was actually indexed under (the map is genuinely load-bearing for
+  delete, not merely diagnostic).
 
   ### Why deterministic, not positional
 
@@ -40,8 +43,9 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   so the same `_id` got a different key after any insert/delete shifted
   positions. That made the key useless as a delete target (the C#
   `DeleteJsonRecord(long id)` needs a STABLE id). `key_for_id/1` removes
-  the position dependency: `delete_record/3` recomputes the exact key the
-  last rebuild embedded, with no need to consult the stored map.
+  the position dependency: the bare hash is reproducible from the `_id`
+  alone, and for the common collision-free case it equals the key the
+  rebuild embedded.
 
   ### Algorithm
 
@@ -58,22 +62,30 @@ defmodule Barkpark.Plugins.Indx.Indexer do
        found, in a stable iteration order (corpus list order). This keeps
        the per-corpus key set INJECTIVE (one `_id` ⇒ one key, no two
        `_id`s share a key) so `documentKey → _id` is unambiguous on the
-       read path and `key_for_id/1` is the delete target for the common
-       (collision-free) case.
+       read path.
 
-  Both the render path and the delete path call `key_for_id/1`; render
-  additionally runs the collision probe, so on the rare collision the
-  rebuilt key for the *second* colliding `_id` differs from its bare
-  `key_for_id/1`. That edge is handled by `delete_record/3` falling back
-  to a full rebuild via the worker (see `delete_record/3`), so a probed
-  key never leaves a stale record behind.
+  ### How delete finds the right key
+
+  Render runs the collision probe, so on a collision the rebuilt key for
+  the *displaced* `_id` differs from its bare `key_for_id/1` (it is
+  `key_for_id/1 + k` for some probe distance `k`). The bare hash would
+  therefore be the WRONG delete target for a displaced `_id`. So
+  `delete_record/3` does NOT use the bare hash by default: it
+  reverse-looks-up the stored `key_map/1` (`%{key => _id}`, recorded by
+  `swap/2`) for EVERY key whose value is the target `_id`, and deletes
+  each — which deletes the exact probed key. The bare `key_for_id/1` is
+  used ONLY as a best-effort fallback when the `_id` is absent from the
+  stored map (no map yet, or a doc that predates map tracking). That
+  fallback can mis-target only under a true cross-`_id` SHA-256 collision
+  WITH the map absent (~2^-63 per colliding pair, AND no map) — with the
+  map present (the normal case) delete is exact. See `delete_record/3`.
 
   Each rendered document embeds BOTH the numeric `"id"` and the original
   `"_id"`. The retriever maps an Indx `documentKey` back to `_id` by
   reading the embedded `_id` off the hydrated `GetJson` doc — so it does
   not need the stored map on the read path. The key→`_id` map IS retained
-  on the live pointer (now load-bearing for delete diagnostics, not just
-  informational).
+  on the live pointer specifically so the delete path can resolve the
+  exact probed key.
 
   ## Live pointer
 
@@ -221,16 +233,36 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   Delete a single document from the CURRENT live dataset by its `_id`,
   without a full rebuild.
 
-  Computes the stable numeric key via `key_for_id/1`, calls
-  `client.delete_json_record/3` against `current_dataset(scope)`, then
-  reads `get_status/2` and inspects the engine's `ReIndexRequired` flag:
+  Resolves the numeric delete target from the stored `key_map/1` for the
+  scope — the SAME map `swap/2` recorded after the last rebuild, which
+  reflects any in-corpus collision probing (`render_corpus/1`). Every key
+  whose value equals `id` is deleted via `client.delete_json_record/3`
+  (normally exactly one; more only under a pathological multi-key map).
+  Reading from the stored map is what makes a PROBE-DISPLACED `_id` (one
+  whose final key is `key_for_id(_id) + k`, not the bare hash) delete the
+  CORRECT key. When `id` is ABSENT from the stored map (no map yet, or a
+  doc indexed before the map was tracked) it falls back to the single bare
+  `key_for_id(id)` — best-effort. After the delete(s) it reads
+  `get_status/2` and inspects the engine's `ReIndexRequired` flag:
 
-    * `:ok` — the record was deleted and no reindex is needed.
-    * `{:reindex_required, status}` — the delete landed but the engine
-      reports it must reindex before the change is query-visible; the
+    * `:ok` — the record(s) were deleted and no reindex is needed.
+    * `{:reindex_required, status}` — a delete landed but the engine
+      reports it must reindex before the change is query-visible (if more
+      than one key was deleted, this trips when ANY of them does); the
       worker falls back to a full blue/green rebuild.
-    * `{:error, struct()}` — the client call failed, OR there is no
-      current live dataset for `scope` (nothing to delete from).
+    * `{:error, struct()}` — a client call failed (the FIRST hard error is
+      surfaced), OR there is no current live dataset for `scope` (nothing
+      to delete from).
+
+  ## Fallback caveat (honest)
+
+  The no-map fallback deletes `key_for_id(id)` directly. If the live
+  corpus had a true cross-`_id` SHA-256 collision AND the stored map is
+  absent, the bare key could belong to the OTHER colliding `_id` (the one
+  that won the natural slot) — so the fallback could mis-target. That is
+  the only mis-target path and it requires both a 63-bit hash collision
+  (~2^-63 per pair) AND a missing map; with the map present (the normal
+  case) the resolution is exact.
 
   Does NOT swap the live pointer — a delete mutates the live dataset in
   place (the one exception to "never touch a live dataset"; this is a
@@ -257,21 +289,46 @@ defmodule Barkpark.Plugins.Indx.Indexer do
          }}
 
       true ->
-        do_delete_record(client, dataset, id, client_opts)
+        keys = delete_target_keys(scope, id)
+        do_delete_record(client, dataset, keys, client_opts)
     end
   end
 
-  defp do_delete_record(client, dataset, id, client_opts) do
-    key = key_for_id(id)
+  # Resolve the numeric key(s) the `_id` was ACTUALLY indexed under by
+  # reverse-looking-up the stored key_map (key => _id). Returns every key
+  # mapping to `id` (normally one). When `id` is absent from the map, fall
+  # back to the bare `key_for_id(id)` (best-effort single delete — see the
+  # `delete_record/3` fallback caveat).
+  defp delete_target_keys(scope, id) do
+    mapped =
+      scope
+      |> key_map()
+      |> Enum.filter(fn {_key, mapped_id} -> mapped_id == id end)
+      |> Enum.map(fn {key, _id} -> key end)
 
-    with :ok <- client.delete_json_record(dataset, key, client_opts),
-         {:ok, status} <- client.get_status(dataset, client_opts) do
-      if reindex_required?(status) do
-        {:reindex_required, status}
-      else
-        :ok
-      end
+    case mapped do
+      [] -> [key_for_id(id)]
+      keys -> keys
     end
+  end
+
+  # Delete each resolved key, reading status after each. Aggregates:
+  #   * first client {:error, _} wins (returned immediately),
+  #   * {:reindex_required, status} if ANY delete trips the engine flag,
+  #   * :ok only when every delete landed cleanly with no reindex.
+  defp do_delete_record(client, dataset, keys, client_opts) do
+    Enum.reduce_while(keys, :ok, fn key, acc ->
+      with :ok <- client.delete_json_record(dataset, key, client_opts),
+           {:ok, status} <- client.get_status(dataset, client_opts) do
+        if reindex_required?(status) do
+          {:cont, {:reindex_required, status}}
+        else
+          {:cont, acc}
+        end
+      else
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
   end
 
   @doc """

@@ -34,12 +34,21 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
   ## perform/1 — delete op
 
-    1. `Indexer.delete_record/3` computes the stable key for `"_id"` and
+    1. `Indexer.delete_record/3` resolves the stored key for `"_id"` and
        DELETEs it from the live dataset.
     2. `:ok` → done. `{:reindex_required, _}` → fall back to a FULL
        rebuild (enqueue + await a rebuild-op job for the same scope) so
-       the change becomes query-visible. `{:error, _}` → normal Oban
-       error/backoff (NetworkError still snoozes).
+       the change becomes query-visible. `{:error, _}` → classified by
+       `classify_delete_error/1`:
+         * no live dataset → `{:cancel, :no_live_dataset}` (PERMANENT —
+           nothing to delete from; a future rebuild lands the index minus
+           the deleted doc),
+         * 404 from the delete endpoint → `{:cancel, :delete_endpoint_unavailable}`
+           (PERMANENT — the C# `DeleteJsonRecord` action is not deployed;
+           retrying a missing endpoint is pointless, the [error] log makes
+           the misconfig obvious),
+         * `NetworkError` (Indx unreachable) → `{:snooze, N}` (TRANSIENT),
+         * other non-2xx (5xx) → `{:error, _}` (Oban backoff).
 
   ## Job args (string-keyed, Oban-serialised)
 
@@ -61,10 +70,13 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   ## Indx-down tolerance
 
   A `NetworkError` from the client (Indx unreachable) → `{:snooze, N}` so
-  the rebuild retries later without burning an Oban attempt. Other Indx
-  errors (`IndexError` / `SearchError` / `AuthError`) → `{:error, reason}`
-  so Oban applies its normal backoff. A missing/empty `types` list →
-  `{:cancel, reason}` (nothing to index, not a transient failure).
+  the work retries later without burning an Oban attempt. PERMANENT delete
+  failures (no live dataset, or a 404 from the not-yet-deployed delete
+  endpoint) → `{:cancel, reason}` — retrying them never succeeds. Other
+  Indx errors (`IndexError` 5xx / `SearchError` / `AuthError`) →
+  `{:error, reason}` so Oban applies its normal backoff. A missing/empty
+  `types` list → `{:cancel, reason}` (nothing to index, not a transient
+  failure).
   """
 
   # Uniqueness keyed on `(op, scope, _id)`:
@@ -85,7 +97,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Plugins.Indx.Errors.NetworkError
+  alias Barkpark.Plugins.Indx.Errors.{IndexError, NetworkError}
   alias Barkpark.Plugins.Indx.Indexer
 
   @debounce_seconds 5
@@ -170,7 +182,10 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
   # Per-document incremental delete. Reindex-required → fall back to a full
   # rebuild for the scope (await it inline so this job's success reflects a
-  # query-visible result). NetworkError snoozes; other errors backoff.
+  # query-visible result). PERMANENT failures (no live dataset, missing
+  # delete endpoint) → {:cancel, _} — retrying them is pointless. TRANSIENT
+  # failures (Indx unreachable) → {:snooze, _}; other non-2xx → {:error, _}
+  # so Oban applies normal backoff. See classify_delete_error/1.
   defp run_delete(scope, args) do
     id = Map.get(args, "_id")
 
@@ -190,22 +205,69 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
           rebuild_fallback(scope, args)
 
-        {:error, %NetworkError{} = err} ->
-          Logger.warning(
-            "Indx.IndexerWorker: Indx unreachable on delete scope=#{scope}, snoozing: #{inspect(err)}"
-          )
-
-          {:snooze, @snooze_seconds}
-
         {:error, err} ->
-          Logger.error(
-            "Indx.IndexerWorker: delete of _id=#{id} failed for scope=#{scope}: #{inspect(err)}"
-          )
-
-          {:error, err}
+          handle_delete_error(classify_delete_error(err), err, scope, id)
       end
     end
   end
+
+  # Map a classified delete failure to the right Oban outcome + log level.
+  #   * {:cancel, reason}  — PERMANENT: nothing to retry. [error] log so the
+  #     misconfig (missing endpoint) or expected no-op (no live dataset) is
+  #     visible; no rebuild is enqueued.
+  #   * :snooze            — TRANSIENT: Indx unreachable; retry later off the
+  #     attempt budget.
+  #   * :backoff           — other non-2xx (5xx): let Oban back off.
+  defp handle_delete_error({:cancel, reason}, err, scope, id) do
+    Logger.error(
+      "Indx.IndexerWorker: delete of _id=#{id} on scope=#{scope} cancelled (#{reason}): " <>
+        "#{inspect(err)}"
+    )
+
+    {:cancel, reason}
+  end
+
+  defp handle_delete_error(:snooze, err, scope, _id) do
+    Logger.warning(
+      "Indx.IndexerWorker: Indx unreachable on delete scope=#{scope}, snoozing: #{inspect(err)}"
+    )
+
+    {:snooze, @snooze_seconds}
+  end
+
+  defp handle_delete_error(:backoff, err, scope, id) do
+    Logger.error(
+      "Indx.IndexerWorker: delete of _id=#{id} failed for scope=#{scope}: #{inspect(err)}"
+    )
+
+    {:error, err}
+  end
+
+  # Classify a delete-path client error into permanent / transient / backoff.
+  #
+  #   * No live dataset (the IndexError raised by delete_record/3 when the
+  #     scope has no live pointer) → PERMANENT cancel :no_live_dataset.
+  #     Nothing to delete from; a future rebuild establishes the index
+  #     already minus the now-deleted doc.
+  #   * 404 from the delete endpoint (the C# DeleteJsonRecord action not
+  #     deployed yet) → PERMANENT cancel :delete_endpoint_unavailable.
+  #     Retrying a missing endpoint never succeeds.
+  #   * NetworkError (Indx unreachable) → TRANSIENT snooze.
+  #   * anything else (5xx, etc.) → backoff via Oban.
+  defp classify_delete_error(%NetworkError{}), do: :snooze
+
+  defp classify_delete_error(%IndexError{status: 404}),
+    do: {:cancel, :delete_endpoint_unavailable}
+
+  defp classify_delete_error(%IndexError{message: msg}) when is_binary(msg) do
+    if String.contains?(msg, "no live dataset") do
+      {:cancel, :no_live_dataset}
+    else
+      :backoff
+    end
+  end
+
+  defp classify_delete_error(_other), do: :backoff
 
   # Reindex-required fallback: run the SAME blue/green rebuild the rebuild
   # op runs, inline, for the affected scope. Needs the doc types — the
