@@ -1,0 +1,73 @@
+{
+  "name": "upgradeCard",
+  "title": "Upgrade Card",
+  "icon": "🃏",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Card title",
+      "description": "Card face name shown in the 3-card level-up draw."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Card id",
+      "description": "Unique card id (stat id or SPECIAL_CARDS id, e.g. \"damage\" or \"doomblaster\")."
+    },
+    {
+      "name": "description",
+      "type": "text",
+      "title": "Description",
+      "description": "Card body text describing what the pick grants (e.g. \"+200% damage & explosive shots (slower fire)\")."
+    },
+    {
+      "name": "rarity",
+      "type": "select",
+      "title": "Rarity",
+      "description": "Draw-weight tier. The four SPECIAL power cards are always epic; stat cards read STAT_RARITY. Source player_stats.gd card_rarity().",
+      "options": ["common", "rare", "epic"]
+    },
+    {
+      "name": "weight",
+      "type": "string",
+      "title": "Roll weight",
+      "description": "How many copies of this card go into the weighted draw pool. Source player_stats.gd RARITY_WEIGHT: common 4 / rare 2 / epic 1.",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    },
+    {
+      "name": "grants",
+      "type": "arrayOf",
+      "ordered": false,
+      "title": "Grants",
+      "description": "What picking this card awards — one or more stat-point allocations and/or rune-stack grants. A plain stat card has one stat grant; El Granados grants a Damage AND a Magnetic stat point.",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "select",
+            "title": "Grant kind",
+            "description": "Whether this grant allocates a player stat point or stacks a combat-side rune/perk.",
+            "options": ["stat", "rune"]
+          },
+          {
+            "name": "stat",
+            "type": "reference",
+            "title": "Stat granted",
+            "description": "The player stat this grant allocates a point into (when kind = stat).",
+            "refType": "playerStat"
+          },
+          {
+            "name": "rune",
+            "type": "reference",
+            "title": "Rune granted",
+            "description": "The rune/perk this grant stacks (when kind = rune).",
+            "refType": "rune"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "name": "waveTemplate",
+  "title": "Wave Template",
+  "icon": "🌊",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable name for this wave template (e.g. 'Floor 1 — Runner Storm')."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "URL-safe identifier for this wave template."
+    },
+    {
+      "name": "role",
+      "type": "select",
+      "title": "Role",
+      "description": "Whether this is a normal swarm wave or a boss wave. Source WaveManager boss-wave detection.",
+      "options": ["normal", "boss"]
+    },
+    {
+      "name": "enemyMix",
+      "type": "arrayOf",
+      "ordered": false,
+      "title": "Enemy mix",
+      "description": "The enemy types this wave spawns and how many of each. Source WaveManager._spawn_wave_enemies weighted rolls + per-wave count.",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "enemyType",
+            "type": "reference",
+            "title": "Enemy type",
+            "description": "The enemy spawned for this slot. References the enemyType schema.",
+            "refType": "enemyType"
+          },
+          {
+            "name": "count",
+            "type": "string",
+            "title": "Count",
+            "description": "How many of this enemy type to spawn in the wave.",
+            "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "spawnRing",
+      "type": "composite",
+      "title": "Spawn ring (m)",
+      "description": "Annulus around the player where wave enemies spawn. Min/max radii in metres.",
+      "fields": [
+        {
+          "name": "min",
+          "type": "string",
+          "title": "Min radius (m)",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "max",
+          "type": "string",
+          "title": "Max radius (m)",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    }
+  ],
+  "initial_values": {
+    "role": "normal",
+    "spawnRing": { "min": "60", "max": "110" }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "scalingCurve",
+  "title": "Scaling Curve",
+  "icon": "📈",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable name for this curve (e.g. 'HP per floor')."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "URL-safe identifier for this scaling curve."
+    },
+    {
+      "name": "kind",
+      "type": "select",
+      "title": "Kind",
+      "description": "How the curve grows. 'geometric' = base * factor^(step-1); 'linear' = base + factor*(step-1).",
+      "options": ["geometric", "linear"]
+    },
+    {
+      "name": "base",
+      "type": "string",
+      "title": "Base",
+      "description": "Starting value at step 1.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "factor",
+      "type": "string",
+      "title": "Factor",
+      "description": "Per-step growth factor (geometric multiplier or linear increment). Source getFloorScaling HP 1.3 / count 1.2.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    }
+  ],
+  "initial_values": {
+    "kind": "geometric"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "spreeTier",
+  "title": "Spree Tier",
+  "icon": "🔥",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "The milestone name shown when the kill spree crosses this tier (e.g. 'RAMPAGE')."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "URL-safe identifier for this spree tier."
+    },
+    {
+      "name": "threshold",
+      "type": "string",
+      "title": "Kill threshold",
+      "description": "Consecutive-kill count required to reach this tier. Source BonusManager spree ladder.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "label",
+      "type": "string",
+      "title": "Label",
+      "description": "The on-screen milestone text for this tier."
+    },
+    {
+      "name": "xpMult",
+      "type": "string",
+      "title": "XP multiplier",
+      "description": "XP multiplier applied to each kill while at this tier. Source BonusManager.SPREE_MULTIPLIERS.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "title": "Color",
+      "description": "Accent colour for the spree-tier banner."
+    }
+  ],
+  "initial_values": {}
+}

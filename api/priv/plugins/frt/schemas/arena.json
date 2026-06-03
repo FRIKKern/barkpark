@@ -1,0 +1,103 @@
+{
+  "name": "arena",
+  "title": "Arena",
+  "icon": "🏟️",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name for the arena singleton — the one walkable world the run plays out on. Source world/nagrand_arena.gd (NagrandArena)."
+    },
+    {
+      "name": "radius",
+      "type": "string",
+      "title": "Arena radius (m)",
+      "description": "Walkable / collision radius of the near-black platform disc in metres. The disc and its collision cylinder share this edge, so spawns land on the platform. Source nagrand_arena.gd ARENA_RADIUS / PLATFORM_RADIUS (175.0).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "spawnRing",
+      "type": "composite",
+      "title": "Swarm spawn ring (m)",
+      "description": "Annular band of radii (from origin) the swarm spawns into each wave — far enough from the player's y=2 centre spawn to give reaction time, inside the rim so enemies stay on the disc. Source nagrand_arena.gd docstring 'swarm rings at ~60-100 around origin'.",
+      "fields": [
+        {
+          "name": "min",
+          "type": "string",
+          "title": "Inner radius (m)",
+          "description": "Nearest spawn radius — no enemy spawns closer than this to the arena centre.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "max",
+          "type": "string",
+          "title": "Outer radius (m)",
+          "description": "Farthest spawn radius — the outer edge of the swarm spawn band.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    },
+    {
+      "name": "rimRings",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Rim rings",
+      "description": "The three raised obsidian rim rings ringing the platform — climbable TorusMeshes whose tops form a height ladder for a sightline over the swarm. Ordered inner-to-outer / low-to-high. Each carries the ring node's world-y. Source nagrand_arena.gd RimRings (Ring0/1/2 node transforms in nagrand_arena.tscn).",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "y",
+            "type": "string",
+            "title": "Ring y (m)",
+            "description": "World-y position of this rim ring's node. Source nagrand_arena.tscn RimRings/Ring* transforms (-1.25 / 4.75 / 13.45).",
+            "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "pillars",
+      "type": "string",
+      "title": "Pillar count",
+      "description": "Number of emissive corner pillars (the Algiz-rune monolith companions) placed for scale. Source nagrand_arena.gd Pillars (Pillar0..Pillar3, four corners at ±30 XZ).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "lighting",
+      "type": "composite",
+      "title": "Lighting",
+      "description": "The single shadowed DirectionalLight3D 'Sun' that lights the disc (Mobile-renderer budget: one shadow caster). Fill / ambient / fog / bloom live in the Environment resource, not here. Source nagrand_arena.gd Sun (nagrand_arena.tscn).",
+      "fields": [
+        {
+          "name": "sunAngle",
+          "type": "string",
+          "title": "Sun angle (deg)",
+          "description": "Dusk sun yaw the Sun DirectionalLight3D points from — a near-horizontal dusk rake (the shipped game pins dayTime ~0.95 in the Dusk->Night band). Derived from the Sun basis in nagrand_arena.tscn (~-51.4 deg).",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "energy",
+          "type": "string",
+          "title": "Sun energy",
+          "description": "light_energy of the Sun DirectionalLight3D — dim because dusk. Source nagrand_arena.tscn Sun.light_energy (0.5).",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    }
+  ],
+  "initial_values": {
+    "title": "Nagrand Arena",
+    "radius": "175",
+    "spawnRing": { "min": "60", "max": "110" },
+    "rimRings": [
+      { "y": "-1.25" },
+      { "y": "4.75" },
+      { "y": "13.45" }
+    ],
+    "pillars": "4",
+    "lighting": { "sunAngle": "-51.4", "energy": "0.5" }
+  }
+}

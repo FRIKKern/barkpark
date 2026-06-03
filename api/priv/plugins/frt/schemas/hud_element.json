@@ -1,0 +1,41 @@
+{
+  "name": "hudElement",
+  "title": "HUD Element",
+  "icon": "📊",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name for this on-screen HUD element, e.g. 'Health bar', 'XP bar', 'Chain-tier banner', 'Wave counter'."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable identifier for the element, usually matching its node / method in ui/hud.gd (e.g. 'health_bar', 'xp_bar', 'chain_banner')."
+    },
+    {
+      "name": "kind",
+      "type": "string",
+      "title": "Kind",
+      "description": "Control kind: 'bar' (a fill / progress meter), 'counter' (a numeric readout), 'banner' (a transient toast / announcement), 'pip' (a discrete stamina / charge pip), 'icon' (a status glyph)."
+    },
+    {
+      "name": "bindTo",
+      "type": "string",
+      "title": "Bind to",
+      "description": "The game state or signal this element reads, e.g. 'PlayerStats.health', 'PlayerStats.xp', 'Coordinator chain tier', 'player.stamina', 'wave_manager.current_wave'."
+    },
+    {
+      "name": "style",
+      "type": "string",
+      "title": "Style",
+      "description": "AAA-minimal styling note per the port UI philosophy — hierarchy + restraint + one accent, not flat all-cyan. E.g. 'cyan accent fill on near-black plate', 'hairline rule, no glow'."
+    }
+  ],
+  "initial_values": {
+    "kind": "bar"
+  }
+}

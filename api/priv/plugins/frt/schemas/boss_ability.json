@@ -1,0 +1,63 @@
+{
+  "name": "bossAbility",
+  "title": "Boss Ability",
+  "icon": "💥",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable ability name (Missile Barrage, Laser Burst, Summon Reinforcements, Devour)."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable machine id (missileBarrage / laserBurst / summonReinforcements / devour) — the key the arbiter signal layer uses."
+    },
+    {
+      "name": "kind",
+      "type": "select",
+      "title": "Kind",
+      "description": "Which arbiter ability family this is. missileBarrage and laserBurst are the cooldown-priority ranged pair; summonReinforcements spawns adds; devour is the slow apocalyptic finisher every royal gets.",
+      "options": ["missileBarrage", "laserBurst", "summonReinforcements", "devour"]
+    },
+    {
+      "name": "cooldown",
+      "type": "string",
+      "title": "Cooldown (s)",
+      "description": "Seconds between fires (or re-cooldown after a barrage). Missiles re-cooldown prince 2.7 / queen 2.0 / king 1.7 (boss.gd); summon interval prince 24 / queen 18 / king 24; devour fuse 60.0.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "count",
+      "type": "string",
+      "title": "Count",
+      "description": "Projectiles / bodies the ability emits per fire. Missiles per barrage prince 4 / queen 5 / king 8 (ProjectileTypes.MISSILE_COUNT_*); reinforcements per summon prince 30 / queen 50 / king 80 (BossTypes.SUMMON_COUNT).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "cadence",
+      "type": "string",
+      "title": "Cadence (s)",
+      "description": "In-window rhythm. Laser ability window is 4.0s (boss.gd LASER_ABILITY_DURATION) with bursts ramping toward the machine-gun cap; missile ability window 1.5s. Devour warning lead 10.0s before the sweep.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "projectile",
+      "type": "reference",
+      "title": "Projectile",
+      "refType": "projectileType",
+      "description": "The projectile type this ability spawns (missiles / laser beam). Null for non-projectile abilities (summonReinforcements, devour)."
+    }
+  ],
+  "initial_values": {
+    "title": "Missile Barrage",
+    "slug": "missile-barrage",
+    "kind": "missileBarrage",
+    "cooldown": "2.7",
+    "count": "4",
+    "cadence": "1.5"
+  }
+}

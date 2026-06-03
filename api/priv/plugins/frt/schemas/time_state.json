@@ -1,0 +1,79 @@
+{
+  "name": "timeState",
+  "title": "Time State",
+  "icon": "⌛",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name of this temporal state (NORMAL, SLOW_MO, FROZEN, HIT_STOP, DEATH, FOCUS_DASH, CELEBRATION_SLOW_MO). Exactly one TimeState is active at a time, set via GameClock.set_time_state; each maps to a slow-mo target scale + a freeze decision applied every tick."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "URL-safe identifier for this state."
+    },
+    {
+      "name": "playerScale",
+      "type": "string",
+      "title": "Player scale",
+      "description": "The eased slow-motion factor (slow_motion_target) this state drives. 1.0 = real time, 0.25 = bullet-time. player_dt = real_dt * this * (0.01 if is_dead).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "physicsScale",
+      "type": "string",
+      "title": "Physics scale",
+      "description": "Effective world-speed multiplier on real_dt for this state, i.e. playerScale * game_speed (1.2). Documents what physics_dt resolves to relative to wall-clock under this state.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "enemyScale",
+      "type": "string",
+      "title": "Enemy scale",
+      "description": "Effective swarm-speed multiplier on real_dt for this state. Equals physicsScale unless freezeEnemies is true, in which case enemy_dt is 0.0 and the swarm halts.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "freezeEnemies",
+      "type": "boolean",
+      "title": "Freeze enemies",
+      "description": "When true, enemies_frozen is set and enemy_dt returns 0.0 — the swarm hangs in place while the player and other channels keep ticking."
+    },
+    {
+      "name": "duration",
+      "type": "string",
+      "title": "Duration (real seconds)",
+      "description": "How long a TIMED state holds before auto-restoring to NORMAL (counted down on real dt in tick). 0 means hold until explicitly changed (NORMAL / FROZEN are held, not timed).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "easeIn",
+      "type": "string",
+      "title": "Ease-in rate",
+      "description": "Exponential ease rate (per real second) driving slow_motion_scale toward the target on entry. SLOW_LERP_RATE is 8.0 for normal eases; HIT_STOP SNAPS instead (no ease) because its ~60 ms window is far shorter than the ~1/8 s ease time-constant.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "easeOut",
+      "type": "string",
+      "title": "Ease-out rate",
+      "description": "Exponential ease rate (per real second) ramping slow_motion_scale back toward 1.0 when the state releases. SLOW_LERP_RATE is 8.0 — the ease runs on real dt so the transition can never slow itself.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    }
+  ],
+  "initial_values": {
+    "title": "NORMAL",
+    "slug": "normal",
+    "playerScale": "1.0",
+    "physicsScale": "1.2",
+    "enemyScale": "1.2",
+    "freezeEnemies": false,
+    "duration": "0",
+    "easeIn": "8.0",
+    "easeOut": "8.0"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "gameClock",
+  "title": "Game Clock (time channels + tuning)",
+  "icon": "⏱️",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Identifier for the clock document. There is one GameClock autoload — the single source of truth for time. It hands out four dt channels and never touches Engine.time_scale (which is too blunt: it would slow UI + camera + enemies uniformly)."
+    },
+    {
+      "name": "channels",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Time channels",
+      "description": "The four dt channels GameClock exposes. Each consumer pulls the channel matching its semantics. Channels derive from one clamped real delta fed in once per frame at the top of Coordinator.step().",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "name",
+            "type": "select",
+            "title": "Channel",
+            "description": "The accessor name on GameClock.",
+            "options": ["real_dt", "player_dt", "physics_dt", "enemy_dt"]
+          },
+          {
+            "name": "scaledBy",
+            "type": "string",
+            "title": "Scaled by",
+            "description": "The math this channel applies on top of the raw clamped delta."
+          },
+          {
+            "name": "note",
+            "type": "text",
+            "title": "Note",
+            "description": "What reads this channel and why it must use it."
+          }
+        ]
+      }
+    },
+    {
+      "name": "gameSpeed",
+      "type": "string",
+      "title": "Game speed (flat physics speed-up)",
+      "description": "Flat world speed-up reproduced from the source game (~20% faster world than wall-clock). Applies to everything downstream of player_dt (the world + the enemy swarm) but never to real_dt or the slow-mo easing.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "slowMoScale",
+      "type": "string",
+      "title": "Slow-mo scale (bullet-time)",
+      "description": "SLOW_MO_SCALE — the world/swarm run at this fraction of speed when bullet-time engages. Source: src/core/Game.ts:417 slowMotionTarget = 0.25.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    }
+  ],
+  "initial_values": {
+    "title": "GameClock",
+    "gameSpeed": "1.2",
+    "slowMoScale": "0.25",
+    "channels": [
+      {
+        "name": "real_dt",
+        "scaledBy": "none — raw clamped wall-clock delta (minf(real_delta, MAX_DELTA))",
+        "note": "Raw clamped wall-clock delta. Camera, UI, and the slow-mo ease itself consume this — they must NOT slow down when gameplay does. _clamped is also accumulated into elapsed_real_seconds() as the deterministic monotonic stopwatch."
+      },
+      {
+        "name": "player_dt",
+        "scaledBy": "real_dt * slow_motion_scale * (0.01 if is_dead else 1.0)",
+        "note": "Player-simulation delta: real time scaled by the eased slow-motion factor and the death crawl (1% speed via DEATH_SLOW_SCALE when is_dead). The player's own update runs on this so it reacts to bullet-time but stays decoupled from the world speed-up."
+      },
+      {
+        "name": "physics_dt",
+        "scaledBy": "player_dt * game_speed (1.2)",
+        "note": "World / physics delta: player_dt times the flat game_speed speed-up. The world, projectiles, and collision integration step on this."
+      },
+      {
+        "name": "enemy_dt",
+        "scaledBy": "physics_dt, hard-gated to 0.0 when enemies_frozen",
+        "note": "Enemy-swarm delta: identical to physics_dt except hard-gated to 0.0 when enemies_frozen — the swarm halts in place while every other channel keeps advancing. This is exactly what Engine.time_scale cannot express."
+      }
+    ]
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "name": "player",
+  "title": "Player",
+  "icon": "🏃",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable name for this player config (singleton — there is one Player)."
+    },
+    {
+      "name": "walkSpeed",
+      "type": "string",
+      "title": "Walk speed (u/s)",
+      "description": "Base forward ground speed in units/s. Source player.gd SPEED_FORWARD. Backpedal/strafe are slower (3.25 / 5.2) and derive from this.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "turboMult",
+      "type": "string",
+      "title": "Turbo multiplier",
+      "description": "Sustained-speed multiplier while the dash key (Shift) is held with forward input on the ground. Source player.gd TURBO_MULT (×2.0).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "jumpImpulse",
+      "type": "string",
+      "title": "Jump impulse (u/s)",
+      "description": "Vertical launch velocity of a normal grounded jump. Source player.gd JUMP_FORCE (5.0). Super-jumps use MUTANT_JUMP_FORCE (4.0) instead.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "stamina",
+      "type": "composite",
+      "title": "Stamina (energy bar)",
+      "description": "The energy economy. Abilities (dash/slowmo/kick/slide) spend stamina; it regens slowly and is topped up by XP crystals.",
+      "fields": [
+        {
+          "name": "max",
+          "type": "string",
+          "title": "Max stamina (bars)",
+          "description": "Base maximum stamina bars before level/stat bonuses. Source player_stats.gd BASE_MAX_STAMINA (4).",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "costPerDash",
+          "type": "string",
+          "title": "Cost per dash (bars)",
+          "description": "Stamina spent by a focus-dash. Source player.gd DASH_STAMINA_COST (1.0).",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "regenPerSec",
+          "type": "string",
+          "title": "Regen per second (bars/s)",
+          "description": "Base passive stamina regen. Source player.gd STAMINA_REGEN_PER_SEC = 1/19 ≈ 0.05263 (web 19s per bar). Speed-scaled up to 5× while sprinting.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    }
+  ],
+  "initial_values": {
+    "title": "Player",
+    "walkSpeed": "6.5",
+    "turboMult": "2.0",
+    "jumpImpulse": "5.0",
+    "stamina": {
+      "max": "4",
+      "costPerDash": "1.0",
+      "regenPerSec": "0.05263"
+    }
+  }
+}

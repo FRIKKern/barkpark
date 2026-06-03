@@ -1,0 +1,101 @@
+{
+  "name": "weapon",
+  "title": "Weapon",
+  "icon": "🔫",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Identifier for this weapon config (the port ships ONE: the machine gun, infinite ammo)."
+    },
+    {
+      "name": "fireMode",
+      "type": "select",
+      "title": "Fire mode",
+      "description": "hitscan = instant ray (the player machine gun); projectile = a spawned travelling round. The player gun is hitscan.",
+      "options": ["hitscan", "projectile"]
+    },
+    {
+      "name": "baseFireRate",
+      "type": "string",
+      "title": "Base fire rate (s)",
+      "description": "Seconds between shots before attack-speed multipliers. combat.gd BASE_FIRE_RATE 0.089 (~11.2 rounds/sec at 1.0x).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "baseDamage",
+      "type": "string",
+      "title": "Base damage (per-shot roll midpoint)",
+      "description": "Per-shot base damage rolled randf_range(DAMAGE_MIN 3.0, DAMAGE_MAX 5.0) before any multiplier; midpoint 4.0. combat.gd DAMAGE_MIN/DAMAGE_MAX.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "maxRange",
+      "type": "string",
+      "title": "Max range (m)",
+      "description": "Furthest distance the hitscan ray reaches. combat.gd MAX_RANGE 100.0.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "headshotMult",
+      "type": "string",
+      "title": "Headshot multiplier",
+      "description": "A head shot quadruples the rolled damage. combat.gd HEADSHOT_MULTIPLIER 4.0 (the live player-path value).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "critMult",
+      "type": "string",
+      "title": "Crit multiplier",
+      "description": "A crit doubles the rolled damage. combat.gd CRIT_MULTIPLIER 2.0 (mirrors PlayerStats.crit_multiplier / BASE_CRIT_MULTIPLIER).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "critChance",
+      "type": "string",
+      "title": "Base crit chance (0..1)",
+      "description": "Probability a shot crits before Crit-stat points. PlayerStats.BASE_CRIT_CHANCE 0.25 (+0.20 per Crit point, clamped 1.0).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "damageChain",
+      "type": "arrayOf",
+      "title": "Damage chain (teaching field)",
+      "description": "The ordered multiplicative stack the per-shot damage passes through in combat.gd before round() is applied EXACTLY ONCE. All entries are identity (x1.0) when their condition is unmet, so a grounded still point-blank body shot is unchanged.",
+      "ordered": true,
+      "of": {
+        "name": "multiplier",
+        "type": "string",
+        "title": "Multiplier name"
+      }
+    },
+    {
+      "name": "projectile",
+      "type": "reference",
+      "title": "Projectile type",
+      "description": "When fireMode is projectile, the projectileType this weapon spawns. Null/unset for the hitscan machine gun.",
+      "refType": "projectileType"
+    }
+  ],
+  "initial_values": {
+    "title": "Machine Gun",
+    "fireMode": "hitscan",
+    "baseFireRate": "0.089",
+    "baseDamage": "4.0",
+    "maxRange": "100.0",
+    "headshotMult": "4.0",
+    "critMult": "2.0",
+    "critChance": "0.25",
+    "damageChain": [
+      "stat_dmg",
+      "floor_dmg",
+      "doomblaster",
+      "slide",
+      "dash",
+      "headshot",
+      "crit"
+    ]
+  }
+}

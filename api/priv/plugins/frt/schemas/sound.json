@@ -1,0 +1,69 @@
+{
+  "name": "sound",
+  "title": "Sound (SFX)",
+  "icon": "🔊",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name for this procedural sound effect, e.g. 'Machine-gun fire' or 'Level-up fanfare'."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable identifier, usually matching the play_<name> entry point in autoload/sfx.gd (e.g. 'fire', 'impact', 'fanfare')."
+    },
+    {
+      "name": "synthParams",
+      "type": "composite",
+      "title": "Synthesis parameters",
+      "description": "The game ships NO sound assets — every clip is synthesised at boot into in-memory AudioStreamWAV buffers. These describe the procedural bake shape.",
+      "fields": [
+        {
+          "name": "wave",
+          "type": "string",
+          "title": "Waveform",
+          "description": "Primary oscillator shape used by the bake (sine, triangle, square, saw, noise) or a mix. Free-text — the bakes layer several partials."
+        },
+        {
+          "name": "freq",
+          "type": "string",
+          "title": "Base frequency (Hz)",
+          "description": "Fundamental frequency the clip is baked at, in Hz. Pitch-shifted at play time for tiered clips (kill thump, chime, chain-tier).",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "decay",
+          "type": "string",
+          "title": "Decay / duration (s)",
+          "description": "Approximate clip length / decay time in seconds, e.g. 0.025 footstep, 0.15 ding, 0.52 fanfare, 1.2 dashboard-arrival chord.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    },
+    {
+      "name": "voiceLane",
+      "type": "select",
+      "title": "Voice lane",
+      "description": "Which priority pool lane the clip plays on. PROTECTED (2 voices) for long narrative clips that must not be cut mid-clip (fanfare, death stinger, boss-approach stings, Dead-Eye arm). COMBAT (6 voices) for short throughput clips (fire, impact, ding, footstep, etc.). Total 8 voices.",
+      "options": ["protected", "combat"]
+    },
+    {
+      "name": "triggerSignal",
+      "type": "string",
+      "title": "Trigger signal",
+      "description": "The existing Godot signal Sfx lazily connects to (sfx never edits the emitter), e.g. 'combat.fired', 'combat.enemy_hit', 'swarm.enemy_killed', 'PlayerStats.level_up', 'player.damaged', 'crystal_collected'. Contract-only clips have no signal yet and are fired by a manual play_<name>() call."
+    }
+  ],
+  "initial_values": {
+    "voiceLane": "combat",
+    "synthParams": {
+      "wave": "noise",
+      "freq": "220.0",
+      "decay": "0.1"
+    }
+  }
+}

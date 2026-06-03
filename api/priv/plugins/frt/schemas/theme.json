@@ -1,0 +1,82 @@
+{
+  "name": "theme",
+  "title": "Theme",
+  "icon": "🎨",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name for the theme singleton — the one palette + type system the whole game wears. AAA-minimal: hierarchy and restraint over a flat all-cyan data dump."
+    },
+    {
+      "name": "accent",
+      "type": "color",
+      "title": "Accent",
+      "description": "The ONE accent colour — used sparingly for emphasis, never as a wash. Cyan, the game's signature neon (floor grid + RimLight). Source nagrand_arena.tscn RimLight.light_color (0, 1, 1)."
+    },
+    {
+      "name": "palette",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Palette",
+      "description": "Named supporting colours pulled from the live arena — the neon/cyber set the world is actually lit and tinted with. Source nagrand_arena.gd (sky presets, beacon palette, floor accent, mote tints, mountain silhouette).",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string",
+            "title": "Name",
+            "description": "Role of this colour, e.g. 'dusk-sky', 'floor-accent', 'beacon-gold', 'beacon-red', 'mote-cyan', 'mote-purple', 'silhouette'."
+          },
+          {
+            "name": "color",
+            "type": "color",
+            "title": "Color",
+            "description": "The colour value for this role."
+          }
+        ]
+      }
+    },
+    {
+      "name": "fonts",
+      "type": "composite",
+      "title": "Fonts",
+      "description": "Type system — sans for headings, the same sans for body (the port's HUD/menus stay sans-only; serif body is the doc-system convention, not the in-game UI).",
+      "fields": [
+        {
+          "name": "heading",
+          "type": "string",
+          "title": "Heading font",
+          "description": "Display / heading typeface for menu titles and HUD labels."
+        },
+        {
+          "name": "body",
+          "type": "string",
+          "title": "Body font",
+          "description": "Body / data typeface for HUD readouts and menu copy."
+        }
+      ]
+    }
+  ],
+  "initial_values": {
+    "title": "FRT Neon",
+    "accent": "#00ffff",
+    "palette": [
+      { "name": "dusk-sky", "color": "#101830" },
+      { "name": "floor-accent", "color": "#2143a3" },
+      { "name": "beacon-gold", "color": "#ffd666" },
+      { "name": "beacon-red", "color": "#ff1100" },
+      { "name": "mote-gold", "color": "#ffd973" },
+      { "name": "mote-cyan", "color": "#4dd9ff" },
+      { "name": "mote-purple", "color": "#b366f2" },
+      { "name": "silhouette", "color": "#1a1a28" }
+    ],
+    "fonts": {
+      "heading": "Rajdhani",
+      "body": "Inter"
+    }
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "name": "enemyType",
+  "title": "Enemy Type",
+  "icon": "👾",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable name of this enemy (e.g. GRUNT, RUNNER). Matches EnemyTypes.NAME in the Godot port."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable machine id for this enemy type. Mirror of the EnemyTypes integer id contract (grunt/runner/elite/tnt/divebomber)."
+    },
+    {
+      "name": "family",
+      "type": "select",
+      "title": "Family",
+      "description": "Archetype the enemy reads as. grunt/elite map to source ENEMY_STATS; bomber is the suicidal TNT lineage; flyer is the port-local DIVEBOMBER; technobot is the reserved robot lineage.",
+      "options": ["grunt", "elite", "bomber", "flyer", "technobot"]
+    },
+    {
+      "name": "statBlock",
+      "type": "composite",
+      "title": "Stat block",
+      "description": "Core combat stats, copied 1:1 from EnemyTypes parallel const arrays (HP / DMG / SPEED).",
+      "fields": [
+        {
+          "name": "baseHp",
+          "type": "string",
+          "title": "Base HP",
+          "description": "Spawn / max hit points. EnemyTypes.HP[type].",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "baseDamage",
+          "type": "string",
+          "title": "Base damage",
+          "description": "Contact damage dealt to the player. EnemyTypes.DMG[type]. For the bomber/flyer families this is the detonation payload.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "moveSpeed",
+          "type": "string",
+          "title": "Move speed (units/s)",
+          "description": "Chase / movement speed in world units per second. EnemyTypes.SPEED[type].",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    },
+    {
+      "name": "behavior",
+      "type": "select",
+      "title": "Behavior",
+      "description": "How the enemy closes on the player. swoop = chase then dive (all source flyers can swoop); contact = melee/proximity rush; air-swoop = the hovering bomber's dive-to-detonate.",
+      "options": ["swoop", "contact", "air-swoop"]
+    },
+    {
+      "name": "contactBand",
+      "type": "composite",
+      "title": "Contact band",
+      "description": "Horizontal (XZ) distance band within which contact / attack proximity is judged. Web pursuit zeroes the Y component, so a hovering enemy still reaches a ground player.",
+      "fields": [
+        {
+          "name": "min",
+          "type": "string",
+          "title": "Min (m)",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "max",
+          "type": "string",
+          "title": "Max (m)",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    },
+    {
+      "name": "dropTable",
+      "type": "arrayOf",
+      "title": "Drop table",
+      "ordered": false,
+      "description": "Weighted pickups this enemy can drop on death. Empty for most swarm types in the source port; modeled here for future loot tuning.",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "pickup",
+            "type": "reference",
+            "title": "Pickup",
+            "refType": "pickup",
+            "description": "Which pickup this drop rolls."
+          },
+          {
+            "name": "weight",
+            "type": "string",
+            "title": "Weight",
+            "description": "Relative likelihood of this pickup within the drop table.",
+            "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "scaling",
+      "type": "reference",
+      "title": "Scaling curve",
+      "refType": "scalingCurve",
+      "description": "Per-floor HP/damage scaling curve applied to this enemy. The Godot port composes wave/floor scaling on top of the base stat block."
+    }
+  ],
+  "initial_values": {
+    "title": "GRUNT",
+    "slug": "grunt",
+    "family": "grunt",
+    "statBlock": {
+      "baseHp": "120",
+      "baseDamage": "15",
+      "moveSpeed": "5.5"
+    },
+    "behavior": "swoop"
+  }
+}

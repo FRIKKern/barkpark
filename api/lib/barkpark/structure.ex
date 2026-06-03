@@ -295,11 +295,18 @@ defmodule Barkpark.Structure do
   defp build_settings_group(schemas) do
     # Plugin-owned schemas surfaced in their own nav group are excluded here
     # so they don't render twice (book lives in build_books_group/1).
+    #
+    # frt plugin: all 25 frt schemas are visibility:"private" but are rendered
+    # via the plugin's own desk_items/1 groups (Frt.desk_items/1). Exclude them
+    # by name so they don't ALSO appear under Settings (double-listing).
+    frt_owned = frt_schema_names()
+
     private =
       schemas
       |> Map.values()
       |> Enum.filter(&(&1.visibility == "private"))
       |> Enum.reject(&(&1.name in ["book", "mediaAsset", "mediaCollection"]))
+      |> Enum.reject(&(&1.name in frt_owned))
 
     if private == [] do
       []
@@ -384,6 +391,21 @@ defmodule Barkpark.Structure do
 
   defp divider do
     %Node{type: :divider, id: "div-#{System.unique_integer([:positive])}"}
+  end
+
+  # frt plugin: names of the schemas the frt plugin renders via its own
+  # desk_items/1 groups. Pulled from the plugin module (single source of
+  # truth) so adding/removing an frt type never needs a host edit here.
+  # Guarded with ensure_loaded? so the host stays decoupled when the plugin
+  # is absent (returns [] → no exclusion).
+  defp frt_schema_names do
+    mod = Barkpark.Plugins.Frt
+
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :schema_names, 0) do
+      mod.schema_names()
+    else
+      []
+    end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────

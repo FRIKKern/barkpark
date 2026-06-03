@@ -1,0 +1,87 @@
+{
+  "name": "runRuleset",
+  "title": "Run Ruleset",
+  "icon": "🎲",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Identifies this run-ruleset singleton (e.g. 'Default Run')."
+    },
+    {
+      "name": "wavesPerFloor",
+      "type": "string",
+      "title": "Waves per floor",
+      "description": "How many waves make up one floor. Source WaveManager.WAVES_PER_FLOOR (every 10 waves = 1 floor).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "autoWaveInterval",
+      "type": "string",
+      "title": "Auto-wave interval (s)",
+      "description": "Seconds between auto-spawned waves; paused during boss waves. Source WaveManager.AUTO_WAVE_INTERVAL.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "earlyClearDelay",
+      "type": "string",
+      "title": "Early-clear delay (s)",
+      "description": "Short delay before the next wave when the current non-boss wave is cleared before the auto-timer fires. Source WaveManager.EARLY_CLEAR_DELAY.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "floorIntroDelay",
+      "type": "string",
+      "title": "Floor-intro delay (s)",
+      "description": "Wall-clock pause after a floor advance (King kill) before any new-floor wave logic ticks, so the celebration plays. Source WaveManager.FLOOR_INTRO_DELAY.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "bossWaves",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Boss-wave positions",
+      "description": "The wave-in-floor positions (1..wavesPerFloor) that are boss waves. Source WaveManager BOSS_WAVE_PRINCE/QUEEN/KING (4/7/10).",
+      "of": { "name": "bossWave", "type": "string", "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" } }
+    },
+    {
+      "name": "bossSequence",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Boss sequence",
+      "description": "The royals spawned at each boss wave, in order (Prince -> Queen -> King). References the bossType schema.",
+      "of": { "name": "boss", "type": "reference", "refType": "bossType" }
+    },
+    {
+      "name": "hpCurve",
+      "type": "reference",
+      "title": "HP scaling curve",
+      "description": "Per-floor enemy HP/damage scaling curve. Source getFloorScaling HP 1.3^(floor-1).",
+      "refType": "scalingCurve"
+    },
+    {
+      "name": "countCurve",
+      "type": "reference",
+      "title": "Count scaling curve",
+      "description": "Per-floor enemy count scaling curve. Source getFloorScaling count 1.2^(floor-1).",
+      "refType": "scalingCurve"
+    },
+    {
+      "name": "xpCurve",
+      "type": "reference",
+      "title": "XP scaling curve",
+      "description": "Per-level XP requirement scaling curve.",
+      "refType": "scalingCurve"
+    }
+  ],
+  "initial_values": {
+    "title": "Default Run",
+    "wavesPerFloor": "10",
+    "autoWaveInterval": "20",
+    "earlyClearDelay": "2",
+    "floorIntroDelay": "4",
+    "bossWaves": ["4", "7", "10"]
+  }
+}

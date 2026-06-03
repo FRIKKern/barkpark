@@ -1,0 +1,97 @@
+{
+  "name": "ability",
+  "title": "Ability",
+  "icon": "⚡",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable ability name (e.g. 'Focus Dash', 'Slide', 'Bullet Time')."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "URL-safe identifier for this ability."
+    },
+    {
+      "name": "inputAction",
+      "type": "string",
+      "title": "Input action",
+      "description": "The Godot InputMap action that triggers this ability (e.g. 'dash', 'slide', 'kick', 'jump', 'aim'). Read through player.gd's InputSource seam."
+    },
+    {
+      "name": "kind",
+      "type": "select",
+      "title": "Kind",
+      "description": "What family of ability this is — drives how the player code dispatches it.",
+      "options": ["movement", "combat", "timeControl", "utility"]
+    },
+    {
+      "name": "cost",
+      "type": "composite",
+      "title": "Cost",
+      "description": "What the ability spends. Most movement/time abilities are stamina-gated; the kick is also cooldown-gated; grenades are count-gated.",
+      "fields": [
+        {
+          "name": "stamina",
+          "type": "string",
+          "title": "Stamina cost (bars)",
+          "description": "Stamina bars spent per use. Source player.gd *_STAMINA_COST consts.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "cooldown",
+          "type": "string",
+          "title": "Cooldown (s)",
+          "description": "Seconds before the ability may fire again. 0 when stamina/count is the only gate. Source player.gd *_COOLDOWN consts.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "count",
+          "type": "string",
+          "title": "Count (uses)",
+          "description": "Finite charge stock when the use-count is the gate (e.g. grenades GRENADE_START). 0 when not count-gated.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    },
+    {
+      "name": "speedMult",
+      "type": "string",
+      "title": "Speed multiplier",
+      "description": "Movement-speed multiplier applied while the ability is active (e.g. focus-dash ×4, slide opens at SLIDE_SPEED 13). 1.0 = no change.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "fovDelta",
+      "type": "string",
+      "title": "FOV delta (deg)",
+      "description": "Additive camera FOV change while active (e.g. aim −10 from base 75 to 65, slide +15 to 90). Source camera_rig.gd FOV_* consts.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "damageBonus",
+      "type": "string",
+      "title": "Damage bonus (fraction)",
+      "description": "Fractional bonus to gun damage while the ability is active (e.g. slide +0.25, dash +0.40). 0 = no bonus.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "duration",
+      "type": "string",
+      "title": "Duration (s)",
+      "description": "How long the ability's effect lasts (e.g. focus-dash 0.5s, super-jump free slowmo 3.0s). 0 for instantaneous / held abilities.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "usesTimeState",
+      "type": "reference",
+      "title": "Uses time state",
+      "description": "The GameClock time state this ability drives, if any (e.g. focus-dash → FOCUS_DASH 0.25× scale, bullet-time → SLOW_MO). References the timeState schema.",
+      "refType": "timeState"
+    }
+  ]
+}

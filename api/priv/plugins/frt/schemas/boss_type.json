@@ -1,0 +1,130 @@
+{
+  "name": "bossType",
+  "title": "Boss Type",
+  "icon": "👑",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable royal name (Prince, Queen, King). Matches BossTypes.NAME in the Godot port."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable machine id (prince/queen/king) — the exact lowercase key the projectile layer's per-boss scalars expect."
+    },
+    {
+      "name": "rank",
+      "type": "select",
+      "title": "Rank",
+      "description": "Boss progression rank. 1 = Prince (floor 4), 2 = Queen (floor 7), 3 = King (floor 10, unlocks the next floor).",
+      "options": ["1", "2", "3"]
+    },
+    {
+      "name": "statBlock",
+      "type": "composite",
+      "title": "Stat block",
+      "description": "Base (pre-prestige, pre-floor) combat stats from BossTypes.HP / BossTypes.DMG. Effective stats compose prestige^killCount * 1.3^(floor-1).",
+      "fields": [
+        {
+          "name": "hp",
+          "type": "string",
+          "title": "Base HP",
+          "description": "Base max hit points. BossTypes.HP[type].",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "damage",
+          "type": "string",
+          "title": "Base damage",
+          "description": "Base contact/attack damage dealt to the player. BossTypes.DMG[type].",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        }
+      ]
+    },
+    {
+      "name": "prestigeValue",
+      "type": "string",
+      "title": "Prestige value",
+      "description": "Score / threat weight emitted on kill for the progression cluster. BossTypes.PRESTIGE[type].",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "spawnsOnWaves",
+      "type": "arrayOf",
+      "title": "Spawns on waves",
+      "ordered": true,
+      "description": "Wave-in-floor positions where a boss occupies the slot (4, 7, 10 in the Godot wave_manager). The boss-wave rows in the enemy personality matrix are inert filler — the boss takes over at these positions.",
+      "of": {
+        "type": "string",
+        "title": "Wave",
+        "validation": { "pattern": "^[0-9]+$" }
+      }
+    },
+    {
+      "name": "unlocksFloor",
+      "type": "boolean",
+      "title": "Unlocks floor",
+      "description": "True only for the King — killing it unlocks the next floor (BossTypes.unlocks_floor returns true for KING)."
+    },
+    {
+      "name": "telegraph",
+      "type": "composite",
+      "title": "Telegraph",
+      "description": "Wind-up tell shape the boss shares across abilities. The fair-tell band sits at 0.5-1.0s in the port; longer durations read as heavier commits.",
+      "fields": [
+        {
+          "name": "duration",
+          "type": "string",
+          "title": "Duration (s)",
+          "description": "Seconds the boss winds up before a telegraphed ability fires. boss.gd TELEGRAPH_DURATION baseline.",
+          "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+        },
+        {
+          "name": "glow",
+          "type": "boolean",
+          "title": "Glow",
+          "description": "Whether the body emits the ramping per-ability tint during the wind-up (orange missiles / red lasers / gold royal-decree)."
+        },
+        {
+          "name": "scaleSwell",
+          "type": "boolean",
+          "title": "Scale swell",
+          "description": "Whether the body swells in scale across the telegraph as part of the wind-up read."
+        }
+      ]
+    },
+    {
+      "name": "abilities",
+      "type": "arrayOf",
+      "title": "Abilities",
+      "ordered": true,
+      "description": "The abilities this royal's arbiter can fire. References into the bossAbility collection. Order is the arbiter priority hint (missiles > lasers in the source).",
+      "of": {
+        "type": "reference",
+        "title": "Ability",
+        "refType": "bossAbility"
+      }
+    }
+  ],
+  "initial_values": {
+    "title": "Prince",
+    "slug": "prince",
+    "rank": "1",
+    "statBlock": {
+      "hp": "4200",
+      "damage": "45"
+    },
+    "prestigeValue": "70",
+    "spawnsOnWaves": ["4", "7", "10"],
+    "unlocksFloor": false,
+    "telegraph": {
+      "duration": "0.5",
+      "glow": true,
+      "scaleSwell": false
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "name": "cameraPreset",
+  "title": "Camera Preset",
+  "icon": "🎥",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable camera preset name (e.g. 'Right shoulder', 'Left shoulder', 'Wide')."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "URL-safe identifier for this camera preset."
+    },
+    {
+      "name": "shoulderOffset",
+      "type": "string",
+      "title": "Shoulder offset (m)",
+      "description": "Lateral over-the-shoulder camera offset. Positive = right shoulder, negative = left. Source camera_rig.gd SHOULDER_OFFSET / FRAME_OFFSET_* (±0.6).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "distance",
+      "type": "string",
+      "title": "Chase distance (m)",
+      "description": "Base third-person chase distance (spring length). Source camera_rig.gd DISTANCE_THIRD_PERSON (3.0) / FRAME_DISTANCE_WIDE (4.5).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "fov",
+      "type": "string",
+      "title": "FOV (deg)",
+      "description": "Base hip/traversal field of view in degrees. Source camera_rig.gd FOV_BASE (75).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "sensitivityMult",
+      "type": "string",
+      "title": "Sensitivity multiplier",
+      "description": "User look-sensitivity multiplier applied to both mouse and stick deltas. Source camera_rig.gd _sens_scale default (1.0), clamped [0.25, 2.5].",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "stances",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Stances",
+      "description": "Framing stances this preset cycles through (the E-key over-shoulder framing cycle). Each carries an additive FOV delta and an override chase distance.",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "stance",
+            "type": "select",
+            "title": "Stance",
+            "description": "Which over-shoulder framing this stance represents. Source camera_rig.gd framing-cycle presets (all TPS chase, never first-person).",
+            "options": ["right", "left", "wide"]
+          },
+          {
+            "name": "fovDelta",
+            "type": "string",
+            "title": "FOV delta (deg)",
+            "description": "Additive FOV change for this stance vs the preset's base FOV.",
+            "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+          },
+          {
+            "name": "distance",
+            "type": "string",
+            "title": "Chase distance (m)",
+            "description": "Chase distance for this stance. RIGHT/LEFT 3.0, WIDE 4.5.",
+            "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+          }
+        ]
+      }
+    }
+  ],
+  "initial_values": {
+    "title": "Right shoulder",
+    "shoulderOffset": "0.6",
+    "distance": "3.0",
+    "fov": "75",
+    "sensitivityMult": "1.0",
+    "stances": [
+      { "stance": "right", "fovDelta": "0", "distance": "3.0" },
+      { "stance": "left", "fovDelta": "0", "distance": "3.0" },
+      { "stance": "wide", "fovDelta": "0", "distance": "4.5" }
+    ]
+  }
+}

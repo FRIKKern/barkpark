@@ -1,0 +1,75 @@
+{
+  "name": "rune",
+  "title": "Rune",
+  "icon": "🔮",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Rune name",
+      "description": "Build-defining power card name (Doomblaster / Slideshow / Super Dash / El Granados). Source player_stats.gd SPECIAL_CARDS / combat/bonus_manager.gd."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Rune id",
+      "description": "BonusManager stack key (e.g. \"doomblaster\", \"slideshow\", \"superDash\"). El Granados has no combat-side stack (it spends Damage + Magnetic stat points)."
+    },
+    {
+      "name": "family",
+      "type": "select",
+      "title": "Family",
+      "description": "Which playstyle axis the rune empowers. Source bonus_manager.gd / player_stats.gd SPECIAL_CARDS.",
+      "options": ["damage", "slide", "dash", "grenade"]
+    },
+    {
+      "name": "stackable",
+      "type": "boolean",
+      "title": "Stackable",
+      "description": "Whether the rune can be picked more than once to deepen its effect (all four currently stack)."
+    },
+    {
+      "name": "maxStacks",
+      "type": "string",
+      "title": "Max stacks",
+      "description": "Stack cap. Source player_stats.gd SPECIAL_CARDS: Doomblaster 5, El Granados 5, Slideshow 3, Super Dash 3.",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    },
+    {
+      "name": "dropRate",
+      "type": "string",
+      "title": "Drop rate",
+      "description": "Per-enemy-kill chance a rune pickup drops (~0.5%, an order rarer than the 5% heart). Source progression/rune_manager.gd doc.",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    },
+    {
+      "name": "damageProfile",
+      "type": "composite",
+      "title": "Damage profile",
+      "description": "The rune's headline damage term and a clarifying note. Source combat/bonus_manager.gd computed-effect getters.",
+      "fields": [
+        {
+          "name": "mult",
+          "type": "string",
+          "title": "Per-stack damage term",
+          "description": "Per-stack damage contribution (e.g. Doomblaster +2.0/stack, Slideshow/Super Dash +0.10/stack).",
+          "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+        },
+        {
+          "name": "note",
+          "type": "text",
+          "title": "Note",
+          "description": "Free-text clarification (e.g. \"slower fire rate trade-off\", \"scales with slide speed\", \"only while dashing\")."
+        }
+      ]
+    },
+    {
+      "name": "modifies",
+      "type": "reference",
+      "title": "Modifies weapon",
+      "description": "The weapon this rune's effect attaches to (the gun/kick the multiplier folds into).",
+      "refType": "weapon"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "name": "projectileType",
+  "title": "Projectile Type",
+  "icon": "🚀",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name of this projectile (e.g. Missile, Laser, Thrown Grenade)."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable id used to reference this projectile type."
+    },
+    {
+      "name": "kind",
+      "type": "select",
+      "title": "Kind",
+      "description": "homing = steers toward a target each tick (missile); straight = travels in a fixed line (laser); lobbed = arcs under gravity and bounces (thrown grenade).",
+      "options": ["homing", "straight", "lobbed"]
+    },
+    {
+      "name": "speed",
+      "type": "string",
+      "title": "Speed (units/s)",
+      "description": "Travel speed. projectile_types.gd MISSILE_BASE_SPEED 28.0 / LASER_SPEED 30.0. Empty for lobbed (uses throw strength + gravity).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "turnRate",
+      "type": "string",
+      "title": "Turn rate (rad/s)",
+      "description": "Max steering per second for homing kinds. projectile_types.gd MISSILE_BASE_TURN_RATE 1.4. 0 for straight/lobbed (no homing).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "lifetime",
+      "type": "string",
+      "title": "Lifetime (s)",
+      "description": "Seconds before the projectile auto-detonates/despawns. projectile_types.gd MISSILE_LIFETIME 7.0 / LASER_LIFETIME 5.0.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "hitRadius",
+      "type": "string",
+      "title": "Hit radius (units)",
+      "description": "Collision radius against the player. projectile_manager.gd PLAYER_HIT_RADIUS 1.5 (both missiles and lasers check distToPlayer < 1.5).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "damage",
+      "type": "string",
+      "title": "Damage to player",
+      "description": "Damage dealt to the player on hit/detonation. projectile_types.gd MISSILE_DAMAGE 80.0 / LASER_DAMAGE 80.0. Thrown grenade is player-side (GRENADE_DETONATE_DAMAGE 450.0 to enemies).",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "destroyable",
+      "type": "boolean",
+      "title": "Destroyable (shootable)",
+      "description": "True if the player can shoot the projectile down. Missiles carry MISSILE_BASE_HP (60) + a fat collision sphere; lasers cannot be destroyed."
+    },
+    {
+      "name": "vfx",
+      "type": "reference",
+      "title": "VFX",
+      "description": "The visual effect this projectile renders with (tint / trail / halo).",
+      "refType": "vfx"
+    }
+  ],
+  "initial_values": {
+    "kind": "homing"
+  }
+}

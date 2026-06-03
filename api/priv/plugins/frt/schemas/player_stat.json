@@ -1,0 +1,71 @@
+{
+  "name": "playerStat",
+  "title": "Player Stat",
+  "icon": "📊",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human-readable stat name as shown on a level-up card (e.g. \"Weapon Damage\")."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Stat id",
+      "description": "The stat id key used in PlayerStats.stats (one of the 12: damage, crit, attack_speed, lifesteal, explosion, multitarget, slowmo, max_hp, speed, blast_resist, stamina, magnetic)."
+    },
+    {
+      "name": "rarity",
+      "type": "select",
+      "title": "Card rarity",
+      "description": "Roll-draw rarity tier of this stat's level-up card. COMMON cards surface 4x as often as RARE (RARITY_WEIGHT common 4 / rare 2). Source player_stats.gd STAT_RARITY.",
+      "options": ["common", "rare", "epic"]
+    },
+    {
+      "name": "maxPoints",
+      "type": "string",
+      "title": "Max points per stat",
+      "description": "Hard cap on points allocatable into any single stat. Source player_stats.gd MAX_POINTS_PER_STAT = 5.",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    },
+    {
+      "name": "perPointEffect",
+      "type": "composite",
+      "title": "Per-point effect",
+      "description": "How one allocated point shifts the stat. The live getter is base + delta*points (additive) OR 1.0 + mult*points (a multiplier on the target axis). Pulled from the PlayerStats getter formulas.",
+      "fields": [
+        {
+          "name": "target",
+          "type": "string",
+          "title": "Target axis",
+          "description": "What the point modifies (e.g. \"damage_multiplier\", \"crit_chance\", \"max_stamina\")."
+        },
+        {
+          "name": "mult",
+          "type": "string",
+          "title": "Per-point multiplier term",
+          "description": "Added to a 1.0 base per point for multiplier-shaped stats (e.g. damage 0.20 -> 1.0 + 0.20*pts). Empty for purely additive stats.",
+          "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+        },
+        {
+          "name": "delta",
+          "type": "string",
+          "title": "Per-point additive delta",
+          "description": "Added to a base value per point for additive stats (e.g. stamina +1/pt, crit chance +0.20/pt over base 0.25). Empty for pure multiplier stats.",
+          "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+        }
+      ]
+    },
+    {
+      "name": "icon",
+      "type": "string",
+      "title": "Icon",
+      "description": "Emoji or short glyph the level-up card shows for this stat."
+    }
+  ],
+  "initial_values": {
+    "maxPoints": "5"
+  }
+}

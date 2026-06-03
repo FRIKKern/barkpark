@@ -1,0 +1,123 @@
+{
+  "name": "coordinatorLoop",
+  "title": "Coordinator Loop (per-frame tick order)",
+  "icon": "🔄",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Identifier for this loop document. There is one canonical loop — the order in which Coordinator.step() ticks every subsystem each frame."
+    },
+    {
+      "name": "steps",
+      "type": "arrayOf",
+      "ordered": true,
+      "title": "Tick steps",
+      "description": "The load-bearing per-frame update sequence from godot/core/coordinator.gd step(). Order matters: each system reads the just-settled state of the systems above it. The clock ticks first; every gameplay system then pulls the dt channel matching its semantics.",
+      "of": {
+        "type": "composite",
+        "fields": [
+          {
+            "name": "order",
+            "type": "string",
+            "title": "Order",
+            "description": "1-based position of this system in step().",
+            "validation": { "pattern": "^[0-9]+$" }
+          },
+          {
+            "name": "system",
+            "type": "string",
+            "title": "System",
+            "description": "The subsystem ticked at this step (the method called in step())."
+          },
+          {
+            "name": "tickChannel",
+            "type": "select",
+            "title": "Tick channel",
+            "description": "Which GameClock dt channel this system advances on. real_dt = unscaled wall clock (UI, camera, VFX). player_dt = real_dt scaled by slow-mo + death crawl. physics_dt = player_dt times the 1.2 game-speed (the world). enemy_dt = physics_dt hard-gated to 0 while the swarm is frozen.",
+            "options": ["real_dt", "player_dt", "physics_dt", "enemy_dt"]
+          },
+          {
+            "name": "note",
+            "type": "text",
+            "title": "Note",
+            "description": "Why this system ticks here, and why on this channel."
+          }
+        ]
+      }
+    }
+  ],
+  "initial_values": {
+    "title": "Coordinator per-frame loop",
+    "steps": [
+      {
+        "order": "1",
+        "system": "GameClock.tick",
+        "tickChannel": "real_dt",
+        "note": "Advance the clock FIRST. Everything downstream reads player_dt / real_dt / enemy_dt from the clock, so they must all see the same already-advanced frame. tick(delta) clamps the raw frame delta to MAX_DELTA and eases the slow-mo factor."
+      },
+      {
+        "order": "2",
+        "system": "world (_update_world)",
+        "tickChannel": "physics_dt",
+        "note": "World before actors: terrain / hazards / environmental forces establish this frame's collision + force field, so the player and enemies integrate against this frame's world state, not last frame's."
+      },
+      {
+        "order": "3",
+        "system": "player + camera + combat (_update_player)",
+        "tickChannel": "physics_dt",
+        "note": "Order INSIDE is load-bearing: player.tick -> camera_rig.tick_input/transform -> combat.tick. Combat reads the camera's fresh aim ray, so the camera tick is split (input + transform) to avoid a 1-frame stale-aim seam."
+      },
+      {
+        "order": "4",
+        "system": "camera post-combat flush (_update_camera)",
+        "tickChannel": "real_dt",
+        "note": "Re-applies the camera transform AFTER combat wrote per-shot recoil, so recoil lands on the visible Camera3D the same frame. Real dt because camera smoothing must keep running during freeze / hit-stop / slow-mo."
+      },
+      {
+        "order": "5",
+        "system": "waves + audio (_update_waves_audio)",
+        "tickChannel": "real_dt",
+        "note": "Waves + audio BEFORE enemies: cues audio and arms the next wave's spawn timers ahead of advancing the swarm, so a spawn/telegraph sound leads the on-screen motion. Run on real dt so timers do not stall during a sim freeze."
+      },
+      {
+        "order": "6",
+        "system": "swarm (swarm_manager.advance_and_upload)",
+        "tickChannel": "enemy_dt",
+        "note": "Swarm on enemy_dt: returns 0.0 while frozen, so the swarm holds position while player + missiles keep running. Also uploads instance transforms to the GPU, so it runs after wave logic spawned/removed this frame's enemies."
+      },
+      {
+        "order": "7",
+        "system": "missiles (_update_missiles)",
+        "tickChannel": "physics_dt",
+        "note": "Missiles AFTER the swarm: homing missiles read the swarm's just-updated positions to retarget, so the swarm must have moved first this frame."
+      },
+      {
+        "order": "8",
+        "system": "bosses (_update_bosses)",
+        "tickChannel": "physics_dt",
+        "note": "Bosses AFTER missiles: a boss can be hit by a missile resolved this frame and react (phase change, retaliation) within the same frame, so it updates after missile motion/impact resolution."
+      },
+      {
+        "order": "9",
+        "system": "crystals (_update_crystals)",
+        "tickChannel": "real_dt",
+        "note": "XP / score crystals shimmer and drift on visual timing, independent of sim speed — real dt keeps them lively during a freeze."
+      },
+      {
+        "order": "10",
+        "system": "effects (_update_effects) + explosions flush (_flush_batched_explosions)",
+        "tickChannel": "real_dt",
+        "note": "Pooled VFX lifetimes (shockwave / wind-slash) are pure visual and run on real dt. Explosions flush LAST, after every other subsystem mutated state — that ordering makes chain-explosion multipliers deterministic within the frame."
+      },
+      {
+        "order": "11",
+        "system": "hud (_update_hud)",
+        "tickChannel": "real_dt",
+        "note": "A pure display pass AFTER the sim resolved this frame: reads the just-settled player/stat/spree state, ages the feed + floating damage numbers on real dt (UI timing is wall-clock, not sim-scaled). Order-last so the HUD shows this frame's resolved state."
+      }
+    ]
+  }
+}

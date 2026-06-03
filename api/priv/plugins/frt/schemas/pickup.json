@@ -1,0 +1,48 @@
+{
+  "name": "pickup",
+  "title": "Pickup",
+  "icon": "💎",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Pickup name",
+      "description": "Human name of the dropped collectible (XP Crystal / Heart / Grenade / Rune)."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Pickup id",
+      "description": "Pickup id key (crystal / heart / grenade / runeDrop). Source progression/*.gd managers."
+    },
+    {
+      "name": "kind",
+      "type": "select",
+      "title": "Kind",
+      "description": "What the pickup grants on collect. Source progression managers.",
+      "options": ["xp", "heal", "ammo", "rune"]
+    },
+    {
+      "name": "dropRate",
+      "type": "string",
+      "title": "Drop rate",
+      "description": "Per-enemy-kill drop chance. Crystal drops on every kill (1.0). Heart ~5% (heart_manager.gd). Grenade 5% (grenade_pickup_manager.gd DROP_CHANCE 0.05). Rune ~0.5% (rune_manager.gd).",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    },
+    {
+      "name": "magnetRange",
+      "type": "string",
+      "title": "Magnet range",
+      "description": "Base magnet pull radius in world units before Magnetic / El-Granados multipliers. Crystal 12 (crystal_manager.gd MAGNET_RADIUS), Heart 20, Grenade 20, Rune 0 (deliberate fetch — no magnet).",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "title": "Value",
+      "description": "On-collect payload magnitude: crystal XP (tier base 10 .. max 200), heart heal 50 HP (heart_manager.gd HEAL_AMOUNT) + 10 XP, grenade +1 inventory, rune opens the rune-card pick (no numeric value).",
+      "validation": {"pattern": "^-?[0-9]+(\\.[0-9]+)?$"}
+    }
+  ]
+}

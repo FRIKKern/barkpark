@@ -1,0 +1,51 @@
+{
+  "name": "vfx",
+  "title": "VFX",
+  "icon": "✨",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name for this pooled visual effect, e.g. 'On-target explosion glow' or 'Bullet-impact spark'."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable identifier, usually matching the spawn_<name> / pool family in effects/effect_manager.gd (e.g. 'explosion_glow', 'impact_spark', 'ground_ring', 'smoke')."
+    },
+    {
+      "name": "family",
+      "type": "string",
+      "title": "Family",
+      "description": "Render family of the pooled node: 'billboard' (MeshInstance3D quad), 'gpu_particles' (GPUParticles3D burst), 'disc' (flat floor decal), 'omni_light' (OmniLight3D flash), 'mesh_arc' (expanding ring / crescent)."
+    },
+    {
+      "name": "poolSize",
+      "type": "string",
+      "title": "Pool size",
+      "description": "Number of pre-allocated emitters in the fixed pool (NEVER instantiated per spawn — recycled round-robin). E.g. explosion 16, impact 24, smoke 16, dust 8, tracer 16, muzzle 8, wave-telegraph 32.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "lifetime",
+      "type": "string",
+      "title": "Lifetime (s)",
+      "description": "Per-spawn visible duration in seconds, e.g. 0.4 explosion glow, 0.25 impact spark, 0.55 ground ring, 1.2 smoke, 0.1 flash light, 0.08 tracer.",
+      "validation": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
+    },
+    {
+      "name": "triggerSignal",
+      "type": "string",
+      "title": "Trigger / spawn call",
+      "description": "The Coordinator-flushed call or signal that spawns this VFX, e.g. 'spawn_explosion (enemy_killed flush)', 'on_player_fired (combat.fired)', 'crystal_collected', 'wave_manager telegraph'."
+    }
+  ],
+  "initial_values": {
+    "family": "gpu_particles",
+    "poolSize": "16",
+    "lifetime": "0.4"
+  }
+}

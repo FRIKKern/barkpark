@@ -1,0 +1,36 @@
+{
+  "name": "overlay",
+  "title": "Overlay",
+  "icon": "🖥️",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "title",
+      "type": "string",
+      "title": "Title",
+      "description": "Human name for this full-screen CanvasLayer overlay, e.g. 'Damage overlay', 'Slow-mo cue', 'Floor-clear celebration'."
+    },
+    {
+      "name": "slug",
+      "type": "slug",
+      "title": "Slug",
+      "description": "Stable identifier matching the overlay script in ui/ (e.g. 'damage', 'motionVignette', 'chainFlash', 'floorClear', 'slowmo')."
+    },
+    {
+      "name": "driver",
+      "type": "select",
+      "title": "Driver",
+      "description": "How the overlay is fed each frame. 'coordinator' — the Coordinator instances it at boot and drives it (off a signal or a per-frame poll). 'self' — it reads an autoload (GameClock) directly with ZERO Coordinator coupling and updates its own shader param in plain _process.",
+      "options": ["coordinator", "self"]
+    },
+    {
+      "name": "triggerSignal",
+      "type": "string",
+      "title": "Trigger / feed",
+      "description": "The signal or per-frame feed that drives the overlay, e.g. 'player.damaged + Coordinator HP poll' (damage), 'Coordinator speed-ratio set_intensity' (motionVignette), 'Coordinator tier-crossing flash' (chainFlash), 'Coordinator.celebrate (King death)' (floorClear), 'GameClock.slow_motion_scale' (slowmo)."
+    }
+  ],
+  "initial_values": {
+    "driver": "coordinator"
+  }
+}

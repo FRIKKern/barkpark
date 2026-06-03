@@ -1,0 +1,220 @@
+defmodule Barkpark.Plugins.Frt do
+  @moduledoc """
+  Frickin Real Time — an author-first content model whose document types
+  mirror the Godot game's structure.
+
+  The 25 schemas under `priv/plugins/frt/schemas/` describe the game's
+  building blocks (the frame/time loop, the player, combat, enemies, the
+  run, progression, game-feel, the world). The desk groups are ordered to
+  follow `coordinator.gd`'s tick loop, so browsing the Studio top-to-bottom
+  teaches how a frame of the game is assembled.
+
+  Like `Barkpark.Plugins.OnixEdit`, the manifest at
+  `priv/plugins/frt/plugin.json` is read and validated at compile time by
+  `Barkpark.Plugin.__using__/1` (decision D7 — no runtime eval). Each schema
+  JSON is loaded, parsed once for a loud failure on malformed shape, and
+  registered via `register_schemas/1`.
+
+  ## Desk structure (mirrors `coordinator.gd`)
+
+  Eight `:nested` groups, in tick order. Each group mixes `:link` rows for
+  **singletons** (one canonical document — the link opens it directly at
+  `/studio/<dataset>/<typeName>`) with `:document_list` rows for
+  **collections** (many documents of a type).
+
+    1. ① Frame & Time   — coordinatorLoop·, gameClock·, timeState
+    2. ② Player          — player·, ability, cameraPreset
+    3. ③ Combat          — weapon·, projectileType
+    4. ④ Enemies         — enemyType, bossType, bossAbility
+    5. ⑤ The Run         — runRuleset·, waveTemplate, spreeTier, scalingCurve
+    6. ⑥ Progression     — playerStat, upgradeCard, rune, pickup
+    7. ⑦ Game Feel       — sound, vfx, hudElement, overlay
+    8. ⑧ World           — arena·, theme·
+
+  (· marks a singleton.)
+
+  All 25 schemas are `visibility: "private"`. Because the host's
+  `Barkpark.Structure.build_settings_group/1` collects every private schema
+  into a "Settings" group, the frt types are excluded there by a small,
+  documented host edit — otherwise they would render twice (once in our 8
+  groups, once under Settings). See that function for the exclusion rule.
+  """
+
+  use Barkpark.Plugin,
+    manifest_path: "../../../priv/plugins/frt/plugin.json"
+
+  alias Barkpark.Content.SchemaDefinition
+
+  @plugin_name "frt"
+  @schemas_dir Path.expand("../../../priv/plugins/frt/schemas", __DIR__)
+
+  # Snake-cased file stem → registered schema `name`. Single source of truth
+  # for both `register_schemas/1` (which file to load) and the manifest. Kept
+  # in the same tick order the desk groups use so the two never drift.
+  @schema_files [
+    {"coordinator_loop", "coordinatorLoop"},
+    {"game_clock", "gameClock"},
+    {"time_state", "timeState"},
+    {"player", "player"},
+    {"ability", "ability"},
+    {"camera_preset", "cameraPreset"},
+    {"weapon", "weapon"},
+    {"projectile_type", "projectileType"},
+    {"enemy_type", "enemyType"},
+    {"boss_type", "bossType"},
+    {"boss_ability", "bossAbility"},
+    {"run_ruleset", "runRuleset"},
+    {"wave_template", "waveTemplate"},
+    {"spree_tier", "spreeTier"},
+    {"scaling_curve", "scalingCurve"},
+    {"player_stat", "playerStat"},
+    {"upgrade_card", "upgradeCard"},
+    {"rune", "rune"},
+    {"pickup", "pickup"},
+    {"sound", "sound"},
+    {"vfx", "vfx"},
+    {"hud_element", "hudElement"},
+    {"overlay", "overlay"},
+    {"arena", "arena"},
+    {"theme", "theme"}
+  ]
+
+  @doc """
+  Returns the plugin's discriminator name (D20).
+  """
+  @spec plugin_name() :: String.t()
+  def plugin_name, do: @plugin_name
+
+  @doc """
+  The set of schema `name`s this plugin owns. Exposed so the host's
+  `Barkpark.Structure.build_settings_group/1` can exclude frt-owned private
+  schemas from the "Settings" group (they render via `desk_items/1` instead).
+  """
+  @spec schema_names() :: [String.t()]
+  def schema_names, do: Enum.map(@schema_files, fn {_file, name} -> name end)
+
+  @impl Barkpark.Plugin
+  def register_schemas(_opts) do
+    Enum.map(@schema_files, fn {file, _name} ->
+      raw = load_schema!(file)
+
+      # Force a parse round-trip up front (with `plugin: "frt"` so any
+      # `plugin:frt:<field>` private fields are allowed). We discard the
+      # parsed value — we persist the raw, string-keyed map — but want the
+      # SAME loud failure as OnixEdit if a schema JSON is malformed.
+      _parsed = parse_schema!(raw, file)
+
+      %SchemaDefinition{
+        name: Map.get(raw, "name"),
+        title: Map.get(raw, "title"),
+        icon: Map.get(raw, "icon"),
+        visibility: Map.get(raw, "visibility", "private"),
+        fields: Map.get(raw, "fields", []),
+        groups: Map.get(raw, "groups", []),
+        desk_groups: Map.get(raw, "deskGroups", []),
+        initial_values: Map.get(raw, "initial_values", %{}),
+        cross_validations: Map.get(raw, "cross_validations", []),
+        dataset: "production"
+      }
+    end)
+  end
+
+  # Reads <stem>.json from the schemas dir and decodes it to a string-keyed
+  # map. Raises loudly (File.read! / Jason.decode!) if the file is missing or
+  # not valid JSON — we want that surfaced at first use, not at request time.
+  @spec load_schema!(String.t()) :: map()
+  defp load_schema!(file) do
+    @schemas_dir
+    |> Path.join(file <> ".json")
+    |> File.read!()
+    |> Jason.decode!()
+  end
+
+  @spec parse_schema!(map(), String.t()) :: SchemaDefinition.Parsed.t()
+  defp parse_schema!(raw, file) do
+    case SchemaDefinition.parse(raw, plugin: @plugin_name) do
+      {:ok, parsed} ->
+        parsed
+
+      {:error, reason} ->
+        raise "frt schema #{file}.json failed to parse: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+  Plugin-contributed desk items — eight `:nested` groups appended after the
+  host's auto-generated schema items in the root Structure pane. The order
+  mirrors `coordinator.gd`'s tick loop (see the module doc).
+
+  Singletons render as `:link` rows whose path opens the single canonical
+  document directly (`/studio/<dataset>/<typeName>`); collections render as
+  `:document_list` rows. The host PaneBuilder dispatches both shapes.
+  """
+  @impl Barkpark.Plugin
+  def desk_items(dataset) do
+    [
+      nested("① Frame & Time", [
+        singleton_link(dataset, "coordinatorLoop", "Coordinator Loop"),
+        singleton_link(dataset, "gameClock", "Game Clock"),
+        doc_list("timeState", "Time States")
+      ]),
+      nested("② Player", [
+        singleton_link(dataset, "player", "Player"),
+        doc_list("ability", "Abilities"),
+        doc_list("cameraPreset", "Camera Presets")
+      ]),
+      nested("③ Combat", [
+        singleton_link(dataset, "weapon", "Weapon"),
+        doc_list("projectileType", "Projectile Types")
+      ]),
+      nested("④ Enemies", [
+        doc_list("enemyType", "Enemy Types"),
+        doc_list("bossType", "Boss Types"),
+        doc_list("bossAbility", "Boss Abilities")
+      ]),
+      nested("⑤ The Run", [
+        singleton_link(dataset, "runRuleset", "Run Ruleset"),
+        doc_list("waveTemplate", "Wave Templates"),
+        doc_list("spreeTier", "Spree Tiers"),
+        doc_list("scalingCurve", "Scaling Curves")
+      ]),
+      nested("⑥ Progression", [
+        doc_list("playerStat", "Player Stats"),
+        doc_list("upgradeCard", "Upgrade Cards"),
+        doc_list("rune", "Runes"),
+        doc_list("pickup", "Pickups")
+      ]),
+      nested("⑦ Game Feel", [
+        doc_list("sound", "Sounds"),
+        doc_list("vfx", "VFX"),
+        doc_list("hudElement", "HUD Elements"),
+        doc_list("overlay", "Overlays")
+      ]),
+      nested("⑧ World", [
+        singleton_link(dataset, "arena", "Arena"),
+        singleton_link(dataset, "theme", "Theme")
+      ])
+    ]
+  end
+
+  # ── desk_item builders ───────────────────────────────────────────────────
+
+  defp nested(label, items) do
+    %{type: :nested, label: label, items: items}
+  end
+
+  # A collection: opens the host's regular doc-list pane for the type.
+  defp doc_list(type_name, label) do
+    %{type: :document_list, label: label, doc_type: type_name}
+  end
+
+  # A singleton: a link straight to the single canonical document. The host
+  # PaneBuilder opens `/studio/<dataset>/<typeName>` in the editor pane.
+  defp singleton_link(dataset, type_name, label) do
+    %{
+      type: :link,
+      label: label,
+      path: "/studio/" <> dataset <> "/" <> type_name
+    }
+  end
+end
