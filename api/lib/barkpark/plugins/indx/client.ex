@@ -21,6 +21,8 @@ defmodule Barkpark.Plugins.Indx.Client do
       search/3                         POST /api/Search/{ds}
       get_json/3                       POST /api/GetJson/{ds}
       delete_dataset/2                 DELETE /api/DeleteDataSet/{ds}
+      delete_json_record/3             DELETE /api/DeleteJsonRecord/{ds}/{id}
+      upsert_json_record/3             (STUB — not available until Indx v5)
 
   ## Base URL injection
 
@@ -217,6 +219,73 @@ defmodule Barkpark.Plugins.Indx.Client do
       {:ok, _resp} -> :ok
       {:error, _} = err -> err
     end
+  end
+
+  @doc """
+  Delete a SINGLE indexed JSON record from a LIVE dataset by its numeric
+  key. `DELETE /api/DeleteJsonRecord/{ds}/{id}`.
+
+  Maps non-2xx → `%IndexError{}` through the same `index_request/5`
+  pipeline as `delete_dataset/2` — same 401 invalidate-and-retry-once
+  auth handling, same error mapping.
+
+  Backed by the C# engine method `bool DeleteJsonRecord(long id)` (present
+  in IndxSearchLib 4.1.2). NOTE: the stock `IndxCloudApi` does NOT expose
+  this over HTTP — the additive controller action that does lives as a
+  prepared (NOT applied) patch at
+  `priv/plugins/indx/patches/SearchController.DeleteJsonRecord.cs.md`.
+  Until that patch is applied to the deployed engine this verb 404s; the
+  worker treats that as a delete failure and the per-doc-delete path stays
+  UNPROVEN against a live engine (see `Indexer.delete_record/3`).
+
+  `id` is the STABLE numeric key from `Indexer.key_for_id/1`.
+  """
+  @spec delete_json_record(String.t(), integer(), keyword()) :: :ok | {:error, struct()}
+  def delete_json_record(dataset, id, opts \\ [])
+      when is_binary(dataset) and is_integer(id) do
+    url = "#{api_base(opts)}/api/DeleteJsonRecord/#{dataset}/#{id}"
+
+    case index_request(:delete, url, nil, opts) do
+      {:ok, _resp} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  STUB — per-document upsert is NOT available on IndxSearchLib 4.1.2.
+
+  Indx's HTTP API has no per-document add/update/upsert at any confirmed
+  version. The only per-document write the C# engine exposes is
+  `DeleteJsonRecord(long id)`; there is no `AddJsonRecord` / `UpsertJson`
+  equivalent in the deployed `IndxCloudApi`. An "Indx v5" alpha may add
+  one, but its endpoint shape is undocumented and MUST NOT be assumed.
+
+  This stub exists as the clean extension point: it always returns an
+  `%IndexError{}` so callers (and tests) can branch on "upsert
+  unavailable" today, and a future v5 implementation drops in here without
+  touching the indexer/worker control flow.
+
+  ## TODO (Indx v5)
+
+  When the v5 per-doc upsert endpoint is CONFIRMED, replace the body below
+  with the real call, e.g. (shape UNVERIFIED — do not ship until proven):
+
+      # url = "\#{api_base(opts)}/api/<V5_UPSERT_VERB>/\#{dataset}"
+      # body = Jason.encode!(record)
+      # index_request(:put, url, body, opts, content_type: "application/json")
+
+  Fill `<V5_UPSERT_VERB>`, the HTTP method, and the body content-type from
+  the v5 contract once it is documented and spiked. Do NOT guess.
+  """
+  @spec upsert_json_record(String.t(), map(), keyword()) :: {:error, IndexError.t()}
+  def upsert_json_record(dataset, _record, _opts \\ []) when is_binary(dataset) do
+    {:error,
+     %IndexError{
+       status: 0,
+       endpoint: nil,
+       body: nil,
+       message: "upsert endpoint not available until Indx v5 is confirmed"
+     }}
   end
 
   # ---------------------------------------------------------------------------

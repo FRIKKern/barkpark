@@ -199,6 +199,39 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
     assert :ok = Client.delete_dataset(@ds, base_url: base)
   end
 
+  test "delete_json_record hits DELETE /api/DeleteJsonRecord/{ds}/{id} with the numeric id", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
+
+    Bypass.expect_once(bypass, "DELETE", "/api/DeleteJsonRecord/#{@ds}/424242", fn conn ->
+      assert ["Bearer " <> @jwt] = Plug.Conn.get_req_header(conn, "authorization")
+      Plug.Conn.resp(conn, 200, Jason.encode!(%{"deleted" => true}))
+    end)
+
+    assert :ok = Client.delete_json_record(@ds, 424_242, base_url: base)
+  end
+
+  test "delete_json_record maps a 500 to IndexError", %{bypass: bypass, base: base} do
+    stub_login(bypass)
+
+    Bypass.expect(bypass, "DELETE", "/api/DeleteJsonRecord/#{@ds}/7", fn conn ->
+      Plug.Conn.resp(conn, 500, "boom")
+    end)
+
+    assert {:error, %IndexError{status: 500}} = Client.delete_json_record(@ds, 7, base_url: base)
+  end
+
+  test "upsert_json_record is a documented stub returning an IndexError (no HTTP)", %{base: base} do
+    # No Bypass expectation — the stub must NEVER hit the wire until Indx v5
+    # is confirmed.
+    assert {:error, %IndexError{message: msg}} =
+             Client.upsert_json_record(@ds, %{"_id" => "p1"}, base_url: base)
+
+    assert msg =~ "upsert endpoint not available until Indx v5"
+  end
+
   test "401 invalidates the token and retries once with a fresh login", %{
     bypass: bypass,
     base: base

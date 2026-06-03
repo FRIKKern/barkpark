@@ -25,16 +25,55 @@ defmodule Barkpark.Plugins.Indx.Indexer do
 
   The fresh dataset name guarantees step 4 never touches a live dataset.
 
-  ## _id ↔ numeric key map
+  ## _id ↔ numeric key map (STABLE — load-bearing for delete)
 
   Indx's document key field defaults to `"id"` (numeric / long), while
-  Barkpark `_id`s are strings (`"drafts.p1"`). We assign a stable numeric
-  key PER REBUILD by position in the corpus list (1-based), embed BOTH the
-  numeric `"id"` and the original `"_id"` into each rendered document, and
-  store the key→`_id` map in the live pointer. The retriever maps an Indx
-  `documentKey` back to `_id` by reading the embedded `_id` off the
-  hydrated `GetJson` doc — so it does not even need the stored map on the
-  read path. The map is retained on the pointer for diagnostics.
+  Barkpark `_id`s are strings (`"drafts.p1"`). The numeric key is derived
+  DETERMINISTICALLY from the `_id` via `key_for_id/1`, so the same `_id`
+  maps to the same `long` on every rebuild AND can be recomputed for a
+  targeted per-document delete — there is NO per-rebuild position
+  dependency anymore.
+
+  ### Why deterministic, not positional
+
+  The old scheme assigned the key by 1-based position in the corpus list,
+  so the same `_id` got a different key after any insert/delete shifted
+  positions. That made the key useless as a delete target (the C#
+  `DeleteJsonRecord(long id)` needs a STABLE id). `key_for_id/1` removes
+  the position dependency: `delete_record/3` recomputes the exact key the
+  last rebuild embedded, with no need to consult the stored map.
+
+  ### Algorithm
+
+    1. `:crypto.hash(:sha256, _id)` → take the first 8 bytes as a big
+       unsigned 64-bit integer, then mask to 63 bits (`&&& 0x7FFF...`) so
+       the value is always a POSITIVE signed int64 — safe for the C#
+       `long` key and never negative. SHA-256 (not `:erlang.phash2`,
+       which is only 32-bit / 2^32 and collides at corpus scale) gives a
+       collision probability that is negligible for realistic corpora
+       (~2^63 space).
+    2. Collisions WITHIN a single corpus are still detected at render
+       time and resolved by DETERMINISTIC linear probing: `key, key+1,
+       key+2, …` (wrapping inside the 63-bit band) until a free slot is
+       found, in a stable iteration order (corpus list order). This keeps
+       the per-corpus key set INJECTIVE (one `_id` ⇒ one key, no two
+       `_id`s share a key) so `documentKey → _id` is unambiguous on the
+       read path and `key_for_id/1` is the delete target for the common
+       (collision-free) case.
+
+  Both the render path and the delete path call `key_for_id/1`; render
+  additionally runs the collision probe, so on the rare collision the
+  rebuilt key for the *second* colliding `_id` differs from its bare
+  `key_for_id/1`. That edge is handled by `delete_record/3` falling back
+  to a full rebuild via the worker (see `delete_record/3`), so a probed
+  key never leaves a stale record behind.
+
+  Each rendered document embeds BOTH the numeric `"id"` and the original
+  `"_id"`. The retriever maps an Indx `documentKey` back to `_id` by
+  reading the embedded `_id` off the hydrated `GetJson` doc — so it does
+  not need the stored map on the read path. The key→`_id` map IS retained
+  on the live pointer (now load-bearing for delete diagnostics, not just
+  informational).
 
   ## Live pointer
 
@@ -52,12 +91,17 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   """
 
   require Logger
+  import Bitwise
 
   alias Barkpark.Plugins.Indx.{Client, Settings}
 
   @pointer_term {__MODULE__, :live_dataset}
   @default_poll_attempts 30
   @default_poll_interval_ms 500
+
+  # 63-bit positive band: the largest signed int64 keeps the key safe for
+  # the C# `long` document key and guarantees it is never negative.
+  @key_mask 0x7FFFFFFFFFFFFFFF
 
   @typedoc "Result of a successful blue/green rebuild."
   @type rebuild_result :: %{
@@ -173,22 +217,145 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     end
   end
 
+  @doc """
+  Delete a single document from the CURRENT live dataset by its `_id`,
+  without a full rebuild.
+
+  Computes the stable numeric key via `key_for_id/1`, calls
+  `client.delete_json_record/3` against `current_dataset(scope)`, then
+  reads `get_status/2` and inspects the engine's `ReIndexRequired` flag:
+
+    * `:ok` — the record was deleted and no reindex is needed.
+    * `{:reindex_required, status}` — the delete landed but the engine
+      reports it must reindex before the change is query-visible; the
+      worker falls back to a full blue/green rebuild.
+    * `{:error, struct()}` — the client call failed, OR there is no
+      current live dataset for `scope` (nothing to delete from).
+
+  Does NOT swap the live pointer — a delete mutates the live dataset in
+  place (the one exception to "never touch a live dataset"; this is a
+  TARGETED single-key DELETE, not a re-LOAD of an existing key, which is
+  the operation the 2026-06-01 spike proved wedges the engine).
+
+  Options mirror `rebuild/3`: `:client` (default `Client`), `:base_url`,
+  `:timeout`.
+  """
+  @spec delete_record(String.t(), String.t(), keyword()) ::
+          :ok | {:reindex_required, term()} | {:error, struct()}
+  def delete_record(scope, id, opts \\ []) when is_binary(scope) and is_binary(id) do
+    client = Keyword.get(opts, :client, Client)
+    dataset = current_dataset(scope)
+    client_opts = client_opts(opts)
+
+    cond do
+      is_nil(dataset) ->
+        {:error,
+         %Barkpark.Plugins.Indx.Errors.IndexError{
+           status: 0,
+           endpoint: nil,
+           message: "Indx.Indexer: no live dataset for scope #{scope} — nothing to delete"
+         }}
+
+      true ->
+        do_delete_record(client, dataset, id, client_opts)
+    end
+  end
+
+  defp do_delete_record(client, dataset, id, client_opts) do
+    key = key_for_id(id)
+
+    with :ok <- client.delete_json_record(dataset, key, client_opts),
+         {:ok, status} <- client.get_status(dataset, client_opts) do
+      if reindex_required?(status) do
+        {:reindex_required, status}
+      else
+        :ok
+      end
+    end
+  end
+
+  @doc """
+  Derive the STABLE numeric Indx key for a Barkpark `_id`.
+
+  Deterministic: the same `_id` always yields the same key, on every
+  rebuild and in the delete path. SHA-256 of the `_id`, first 8 bytes as
+  a big-endian unsigned integer, masked to a positive 63-bit signed
+  int64. Pure — no corpus context, no position. The render path layers
+  per-corpus collision probing on top (see `render_corpus/1`); this bare
+  function is the unprobed base key and the delete target for the common
+  collision-free case.
+  """
+  @spec key_for_id(String.t() | term()) :: pos_integer()
+  def key_for_id(id) do
+    <<n::unsigned-big-integer-size(64), _rest::binary>> =
+      :crypto.hash(:sha256, to_string(id))
+
+    # Mask to 63 bits → always a positive signed int64. Force away from 0
+    # so the key band starts at 1 (0 is reserved as "no key").
+    case n &&& @key_mask do
+      0 -> 1
+      k -> k
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Internals
   # ---------------------------------------------------------------------------
 
-  # Assign a stable numeric key per rebuild (1-based position), embed both
-  # the numeric "id" and the original "_id" into each record. Returns the
-  # records list AND the key→_id map.
+  # Assign a DETERMINISTIC stable key from each doc's `_id` via
+  # `key_for_id/1`, embedding both the numeric "id" and the original
+  # "_id" into each record. Detects collisions WITHIN this corpus and
+  # resolves them by deterministic linear probing (key, key+1, …, wrapped
+  # in the 63-bit band) in corpus order, so the key set is always
+  # injective. Returns the records list AND the key→_id map.
   defp render_corpus(docs) do
-    docs
-    |> Enum.with_index(1)
-    |> Enum.map_reduce(%{}, fn {doc, key}, acc ->
-      id = doc_id(doc)
-      record = render_record(doc, key, id)
-      {record, Map.put(acc, key, id)}
-    end)
+    {records, _used, key_map} =
+      Enum.reduce(docs, {[], MapSet.new(), %{}}, fn doc, {recs, used, kmap} ->
+        id = doc_id(doc)
+        key = assign_key(id, used)
+        record = render_record(doc, key, id)
+        {[record | recs], MapSet.put(used, key), Map.put(kmap, key, id)}
+      end)
+
+    {Enum.reverse(records), key_map}
   end
+
+  # Linear-probe within the 63-bit band until a free key is found. The
+  # iteration order (corpus list order, via render_corpus/1's reduce) is
+  # deterministic, so the resolved key set is reproducible across runs of
+  # the SAME corpus and injective (no two _ids collide on a final key).
+  defp assign_key(id, used) do
+    probe(key_for_id(id), used)
+  end
+
+  defp probe(key, used) do
+    if MapSet.member?(used, key) do
+      probe(next_key(key), used)
+    else
+      key
+    end
+  end
+
+  defp next_key(key) do
+    case key + 1 do
+      k when k > @key_mask -> 1
+      k -> k
+    end
+  end
+
+  # Engine status reports ReIndexRequired in one of a few casings/shapes.
+  defp reindex_required?(status) when is_map(status) do
+    val =
+      Map.get(status, "reIndexRequired") ||
+        Map.get(status, "ReIndexRequired") ||
+        Map.get(status, "reindexRequired") ||
+        get_in(status, ["systemStatus", "reIndexRequired"]) ||
+        get_in(status, ["SystemStatus", "ReIndexRequired"])
+
+    val == true
+  end
+
+  defp reindex_required?(_), do: false
 
   defp render_record(doc, key, id) do
     doc
