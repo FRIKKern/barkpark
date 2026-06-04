@@ -24,7 +24,8 @@ defmodule BarkparkWeb.SearchController do
             type: params["type"],
             perspective: parse_perspective(params["perspective"]),
             limit: parse_int(params["limit"], 50),
-            offset: parse_int(params["offset"], 0)
+            offset: parse_int(params["offset"], 0),
+            engine: params["engine"] || "postgres"
           ] ++ scope_opts(conn)
 
         {docs, count, meta} = Content.search_documents(query, dataset, opts)

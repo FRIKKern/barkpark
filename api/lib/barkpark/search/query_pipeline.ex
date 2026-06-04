@@ -7,6 +7,7 @@ defmodule Barkpark.Search.QueryPipeline do
     DocumentsRetriever,
     Highlighter,
     QueryParser,
+    Retrievers,
     SurfaceConfigs,
     Synonyms
   }
@@ -83,7 +84,20 @@ defmodule Barkpark.Search.QueryPipeline do
         project_id: Keyword.get(opts, :project_id)
       ]
 
-    {hits, total} = DocumentsRetriever.search(scope, parsed, config, retriever_opts)
+    # Engine dispatch lives here (not the controller) so highlights + recovery
+    # wrap EVERY engine. The D3-b gate: a non-postgres engine without a binary
+    # `:workspace_id` in opts cannot prove tenant scope, so it falls back to the
+    # scoped Postgres retriever rather than risk a cross-workspace bypass.
+    engine = Keyword.get(opts, :engine, "postgres")
+
+    retriever =
+      if engine != "postgres" and not is_binary(Keyword.get(opts, :workspace_id)) do
+        DocumentsRetriever
+      else
+        Retrievers.resolve(%{"engine" => engine})
+      end
+
+    {hits, total, _meta} = retriever.search(scope, parsed, config, retriever_opts)
 
     case {total, Map.get(config, "zero_hit_strategy", "drop_tokens")} do
       {0, "none"} ->
@@ -114,7 +128,7 @@ defmodule Barkpark.Search.QueryPipeline do
       nil
     else
       dropped = %{parsed | terms: Enum.drop(parsed.terms, -1), phrases: Enum.drop(parsed.phrases, -1)}
-      {hits, total} = DocumentsRetriever.search(scope, dropped, config, opts)
+      {hits, total, _meta} = DocumentsRetriever.search(scope, dropped, config, opts)
 
       if total > 0 do
         {hits, total, "drop_tokens"}
@@ -129,7 +143,7 @@ defmodule Barkpark.Search.QueryPipeline do
   defp try_typo_widen(scope, parsed, config, opts, strategy)
        when strategy in ["drop_tokens", "typo_widen"] do
     relaxed_opts = Keyword.put(opts, :relaxed, true)
-    {hits, total} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
+    {hits, total, _meta} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
 
     if total > 0 do
       {hits, total, "typo_widen"}

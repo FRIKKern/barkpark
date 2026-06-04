@@ -16,15 +16,20 @@ defmodule Barkpark.Search.Retriever do
   `Barkpark.Search.SurfaceConfigs`) to that name. `Barkpark.Search.Retrievers`
   resolves the engine to the module; an unknown engine falls back to the
   Postgres default, so a misconfiguration never takes a surface dark.
+
+  Tenant scope is threaded through `opts` (`:workspace_id` / `:project_id`);
+  every implementer MUST forward those opts into the authoritative Postgres
+  read so the seam cannot bypass `Barkpark.Content.Scope.scope_to_workspace_or_global/3`.
   """
 
   @doc """
-  Run a search for the given scope/query/config and return `{hits, total}`.
+  Run a search for the given scope/query/config and return `{hits, total, meta}`;
+  `meta` is engine diagnostics and defaults to `%{}`.
   """
   @callback search(
               scope :: String.t(),
               parsed :: map(),
               config :: map(),
               opts :: keyword()
-            ) :: {list(), non_neg_integer()}
+            ) :: {list(), non_neg_integer(), map()}
 end

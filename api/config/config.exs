@@ -67,6 +67,12 @@ config :barkpark, :search_query_exclude_patterns, [
   ~r/^(test|asdf|qwerty|foo|bar)$/i
 ]
 
+# Engine → retriever registry for the document search SEAM. The Indx plugin
+# backs the "indx" engine; "postgres" (the default) stays the built-in
+# DocumentsRetriever. Resolved by Barkpark.Search.Retrievers; an unknown
+# engine falls back to Postgres so a misconfig never takes a surface dark.
+config :barkpark, :search_retrievers, %{"indx" => Barkpark.Plugins.Indx.Retriever}
+
 # W7-05: the `tasks_ttl` queue is concurrency=1 per node — only one TTL
 # sweep runs at a time on a given node, defense in depth against double-
 # sweeping the same expired claim (the per-task advisory lock inside the

@@ -15,9 +15,10 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   ## Hit shape parity
 
   `Barkpark.Search.DocumentsRetriever.search/4` returns
-  `{[%Barkpark.Content.Document{}, ...], total}`. This retriever returns the
-  SAME shape: a list of `%Document{}` structs (hydrated from Postgres via
-  `Barkpark.Content.get_document/3`, tenant-scoped) and an integer total.
+  `{[%Barkpark.Content.Document{}, ...], total, meta}`. This retriever returns
+  the SAME shape: a list of `%Document{}` structs (hydrated from Postgres via
+  `Barkpark.Content.get_document/4`, tenant-scoped), an integer total, and an
+  engine-diagnostics `meta` map (defaults to `%{}`).
 
   ## Pipeline
 
@@ -33,7 +34,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
        authoritative — the index is a relevance oracle, Postgres is the
        source of truth.
 
-  Indx-down / empty corpus / unconfigured all degrade to `{[], 0}` — a
+  Indx-down / empty corpus / unconfigured all degrade to `{[], 0, %{}}` — a
   search never crashes the pipeline because the engine is unreachable.
   """
 
@@ -45,17 +46,17 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   alias Barkpark.Plugins.Indx.{Client, Indexer}
 
   @impl Barkpark.Search.Retriever
-  @spec search(String.t(), map(), map(), keyword()) :: {[struct()], non_neg_integer()}
+  @spec search(String.t(), map(), map(), keyword()) :: {[struct()], non_neg_integer(), map()}
   def search(scope, parsed, config, opts) when is_binary(scope) do
     text = query_text(parsed)
     dataset = Indexer.current_dataset(scope)
 
     cond do
       text == "" ->
-        {[], 0}
+        {[], 0, %{}}
 
       is_nil(dataset) ->
-        {[], 0}
+        {[], 0, %{}}
 
       true ->
         do_search(scope, dataset, text, parsed, config, opts)
@@ -76,11 +77,11 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         |> Enum.reject(&is_nil/1)
         |> apply_excludes(parsed, config)
 
-      {hits, length(hits)}
+      {hits, length(hits), %{}}
     else
       {:error, err} ->
         Logger.warning("Indx.Retriever: search failed for #{dataset}: #{inspect(err)}")
-        {[], 0}
+        {[], 0, %{}}
     end
   end
 
@@ -150,17 +151,19 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   defp hydrate(client, dataset, keys, opts), do: client.get_json(dataset, keys, opts)
 
   # Read the embedded Barkpark _id + _type off the Indx doc and re-read the
-  # authoritative row from Postgres, tenant-scoped by dataset. Drop docs we
-  # cannot map. `Content.get_document/3` is the dataset-scoped read on PROD's
-  # main (`(doc_id, type, dataset)`); the index is a relevance oracle, Postgres
-  # is the source of truth.
-  defp load_document(indx_doc, scope, _opts) when is_map(indx_doc) do
+  # authoritative row from Postgres, workspace+dataset-scoped via threaded opts.
+  # Drop docs we cannot map. `Content.get_document/4` is the scoped read on the
+  # integration base; passing the tenant `:workspace_id`/`:project_id` opts
+  # forwards them into `scope_to_workspace_or_global/3`, so the index can never
+  # surface another workspace's row even when two workspaces share a dataset
+  # STRING. The index is a relevance oracle, Postgres is the source of truth.
+  defp load_document(indx_doc, scope, opts) when is_map(indx_doc) do
     id = Map.get(indx_doc, "_id") || Map.get(indx_doc, "id")
     type = Map.get(indx_doc, "_type") || Map.get(indx_doc, "type")
 
     with id when is_binary(id) and id != "" <- to_string_or_nil(id),
          type when is_binary(type) and type != "" <- to_string_or_nil(type),
-         {:ok, doc} <- Content.get_document(id, type, scope) do
+         {:ok, doc} <- Content.get_document(id, type, scope, scope_opts(opts)) do
       doc
     else
       _ -> nil
@@ -168,6 +171,10 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   end
 
   defp load_document(_other, _scope, _opts), do: nil
+
+  # Forward only the tenant-scope opts into the authoritative Postgres read so
+  # the seam cannot bypass `scope_to_workspace_or_global/3` (the P0 leak guard).
+  defp scope_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
 
   defp to_string_or_nil(nil), do: nil
   defp to_string_or_nil(v) when is_binary(v), do: v

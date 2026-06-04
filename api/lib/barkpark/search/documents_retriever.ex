@@ -1,13 +1,16 @@
 defmodule Barkpark.Search.DocumentsRetriever do
   @moduledoc false
 
+  @behaviour Barkpark.Search.Retriever
+
   import Ecto.Query
   import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
+  @impl Barkpark.Search.Retriever
   @spec search(String.t(), map(), map(), keyword()) ::
-          {[struct()], non_neg_integer()}
+          {[struct()], non_neg_integer(), map()}
   def search(scope, parsed, config, opts) when is_binary(scope) do
     terms = search_terms(parsed)
     type = Keyword.get(opts, :type)
@@ -19,7 +22,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     project_id = Keyword.get(opts, :project_id)
 
     if terms == [] and Map.get(parsed, :phrases, []) == [] and Map.get(parsed, :prefixes, []) == [] do
-      {[], 0}
+      {[], 0, %{}}
     else
       base =
         Document
@@ -38,7 +41,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
         |> Repo.all()
 
       count = base |> select([d], count(d.id)) |> Repo.one() || 0
-      {docs, count}
+      {docs, count, %{}}
     end
   end
 
