@@ -9,7 +9,7 @@ defmodule Barkpark.Plugins.Frt do
   follow `coordinator.gd`'s tick loop, so browsing the Studio top-to-bottom
   teaches how a frame of the game is assembled.
 
-  Like `Barkpark.Plugins.OnixEdit`, the manifest at
+  Like the OnixEdit plugin, the manifest at
   `priv/plugins/frt/plugin.json` is read and validated at compile time by
   `Barkpark.Plugin.__using__/1` (decision D7 — no runtime eval). Each schema
   JSON is loaded, parsed once for a loud failure on malformed shape, and

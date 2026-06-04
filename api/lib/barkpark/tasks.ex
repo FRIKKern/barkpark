@@ -1201,7 +1201,7 @@ defmodule Barkpark.Tasks do
     base
     |> maybe_filter_dataset(dataset)
     |> maybe_filter_phase(phase_id)
-    |> Scope.scope_to_workspace_or_global(workspace_id, project_id)
+    |> Scope.scope_to_workspace(workspace_id, project_id)
   end
 
   defp maybe_filter_dataset(query, nil), do: query
