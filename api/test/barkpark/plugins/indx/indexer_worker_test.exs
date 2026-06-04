@@ -19,16 +19,22 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
   # Uses the process dictionary via a named Agent so the worker (same
   # process under perform_job/inline) sees the same knobs.
   defmodule FakeIndexer do
-    def start, do: Agent.start_link(fn -> %{calls: [], delete: :ok} end)
+    def start, do: Agent.start_link(fn -> %{calls: [], delete: :ok, upsert: :ok} end)
     def set_agent(pid), do: Process.put(:fake_indexer_agent, pid)
     defp agent, do: Process.get(:fake_indexer_agent)
     def calls(pid), do: Agent.get(pid, & &1.calls) |> Enum.reverse()
     def set_delete(r), do: Agent.update(agent(), &Map.put(&1, :delete, r))
+    def set_upsert(r), do: Agent.update(agent(), &Map.put(&1, :upsert, r))
     defp record(c), do: Agent.update(agent(), &%{&1 | calls: [c | &1.calls]})
 
     def delete_record(scope, id) do
       record({:delete_record, scope, id})
       Agent.get(agent(), & &1.delete)
+    end
+
+    def upsert_record(scope, doc) do
+      record({:upsert_record, scope, doc})
+      Agent.get(agent(), & &1.upsert)
     end
 
     def rebuild(scope, docs) do
@@ -47,6 +53,23 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
     end
   end
 
+  # Fake Content backed by the SAME agent the FakeIndexer uses, so the
+  # upsert branch's single-doc fetch is observable + controllable. The
+  # canned get_document result is keyed by the doc_id; default :not_found.
+  defmodule FakeContent do
+    defp agent, do: Process.get(:fake_indexer_agent)
+    def set_doc(id, result), do: Agent.update(agent(), &put_in(&1, [Access.key(:docs, %{}), id], result))
+
+    def get_document(doc_id, type, dataset) do
+      Agent.update(agent(), fn s ->
+        %{s | calls: [{:get_document, doc_id, type, dataset} | s.calls]}
+      end)
+
+      Agent.get(agent(), fn s -> get_in(s, [Access.key(:docs, %{}), doc_id]) end) ||
+        {:error, :not_found}
+    end
+  end
+
   setup do
     {:ok, pid} = FakeIndexer.start()
     FakeIndexer.set_agent(pid)
@@ -55,7 +78,10 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
 
   defp run(args) do
     IndexerWorker.perform(%Oban.Job{
-      args: Map.put(args, "indexer", "Barkpark.Plugins.Indx.IndexerWorkerTest.FakeIndexer")
+      args:
+        args
+        |> Map.put("indexer", "Barkpark.Plugins.Indx.IndexerWorkerTest.FakeIndexer")
+        |> Map.put("content", "Barkpark.Plugins.Indx.IndexerWorkerTest.FakeContent")
     })
   end
 
@@ -159,6 +185,81 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
 
     test "missing _id cancels" do
       assert {:cancel, :missing_id} = run(%{"op" => "delete", "scope" => "production"})
+    end
+  end
+
+  describe "upsert op" do
+    test "fetches the single doc by _id and delegates to Indexer.upsert_record", %{pid: pid} do
+      FakeContent.set_doc("p1", {:ok, %{"_id" => "p1", "_type" => "post", "title" => "Alpha"}})
+      FakeIndexer.set_upsert(:ok)
+
+      assert :ok =
+               run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+
+      calls = FakeIndexer.calls(pid)
+      # The single-doc fetch ran with (id, type, scope) — NOT a corpus list.
+      assert {:get_document, "p1", "post", "production"} in calls
+      assert Enum.any?(calls, &match?({:upsert_record, "production", %{"_id" => "p1"}}, &1))
+      # A plain :ok upsert must NOT trigger a rebuild.
+      refute Enum.any?(calls, &match?({:rebuild, _, _}, &1))
+    end
+
+    test "reindex_required falls back to a full rebuild", %{pid: pid} do
+      FakeContent.set_doc("p1", {:ok, %{"_id" => "p1", "_type" => "post"}})
+      FakeIndexer.set_upsert({:reindex_required, %{"reIndexRequired" => true}})
+
+      assert :ok =
+               run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+
+      calls = FakeIndexer.calls(pid)
+      assert Enum.any?(calls, &match?({:upsert_record, "production", _}, &1))
+      assert Enum.any?(calls, &match?({:rebuild, "production", _}, &1))
+      assert {:swap, "production"} in calls
+    end
+
+    test "a doc that no longer exists in Barkpark cancels (:doc_gone)", %{pid: pid} do
+      # No FakeContent.set_doc → get_document returns {:error, :not_found}.
+      assert {:cancel, :doc_gone} =
+               run(%{"op" => "upsert", "scope" => "production", "_id" => "gone", "types" => ["post"]})
+
+      # Never reached upsert_record / rebuild for a vanished doc.
+      refute Enum.any?(FakeIndexer.calls(pid), &match?({:upsert_record, _, _}, &1))
+      refute Enum.any?(FakeIndexer.calls(pid), &match?({:rebuild, _, _}, &1))
+    end
+
+    test "a transient 5xx upsert error surfaces as {:error, _} (Oban backoff)" do
+      alias Barkpark.Plugins.Indx.Errors.IndexError
+      FakeContent.set_doc("p1", {:ok, %{"_id" => "p1", "_type" => "post"}})
+      FakeIndexer.set_upsert({:error, %IndexError{status: 500, endpoint: "x"}})
+
+      assert {:error, %IndexError{status: 500}} =
+               run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+    end
+
+    test "no-live-dataset is PERMANENT → {:cancel, :no_live_dataset}" do
+      alias Barkpark.Plugins.Indx.Errors.IndexError
+      FakeContent.set_doc("p1", {:ok, %{"_id" => "p1", "_type" => "post"}})
+
+      FakeIndexer.set_upsert(
+        {:error,
+         %IndexError{
+           status: 0,
+           endpoint: nil,
+           message: "Indx.Indexer: no live dataset for scope production — nothing to upsert"
+         }}
+      )
+
+      assert {:cancel, :no_live_dataset} =
+               run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+    end
+
+    test "missing _id cancels" do
+      assert {:cancel, :missing_id} = run(%{"op" => "upsert", "scope" => "production"})
+    end
+
+    test "no resolvable type cancels (:no_type_for_upsert)" do
+      assert {:cancel, :no_type_for_upsert} =
+               run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => []})
     end
   end
 

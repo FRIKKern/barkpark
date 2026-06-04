@@ -62,10 +62,21 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
       Agent.get(agent(), fn s -> Map.get(s, :delete_result, :ok) end)
     end
 
-    # Test knobs: override the status get_status/2 returns, and the result
-    # delete_json_record/3 returns.
+    def insert_json_record(ds, key, rec, _opts) do
+      record({:insert_json, ds, key, rec})
+      Agent.get(agent(), fn s -> Map.get(s, :write_result, :ok) end)
+    end
+
+    def update_json_record(ds, key, rec, _opts) do
+      record({:update_json, ds, key, rec})
+      Agent.get(agent(), fn s -> Map.get(s, :write_result, :ok) end)
+    end
+
+    # Test knobs: override the status get_status/2 returns, the result
+    # delete_json_record/3 returns, and the result insert/update return.
     def set_status(status), do: Agent.update(agent(), &Map.put(&1, :status, status))
     def set_delete_result(r), do: Agent.update(agent(), &Map.put(&1, :delete_result, r))
+    def set_write_result(r), do: Agent.update(agent(), &Map.put(&1, :write_result, r))
   end
 
   setup do
@@ -387,6 +398,101 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
 
     assert {:error, %Barkpark.Plugins.Indx.Errors.IndexError{message: msg}} =
              Indexer.delete_record(scope, "p1", client: FakeClient)
+
+    assert msg =~ "no live dataset"
+  end
+
+  # ── Incremental per-document upsert ─────────────────────────────────────────
+
+  describe "upsert_record/3" do
+    setup %{scope: scope} = ctx do
+      # Establish a live dataset whose key_map holds "p1" only — so upserting
+      # "p1" takes the UPDATE branch and a NEW _id takes the INSERT branch.
+      {:ok, r} =
+        Indexer.rebuild(scope, [%{"_id" => "p1", "title" => "Alpha"}],
+          client: FakeClient,
+          poll_interval_ms: 0
+        )
+
+      Indexer.swap(scope, r)
+      Map.put(ctx, :dataset, r.new_dataset)
+    end
+
+    test "INSERT branch: _id ABSENT from the key_map calls insert_json_record", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+
+      # "p2" is NOT in the stored key_map (only "p1" is) → INSERT.
+      assert :ok =
+               Indexer.upsert_record(scope, %{"_id" => "p2", "title" => "Beta"},
+                 client: FakeClient
+               )
+
+      key = Indexer.key_for_id("p2")
+
+      assert {:insert_json, ^dataset, ^key, record} =
+               FakeClient.calls(pid) |> Enum.find(&match?({:insert_json, _, _, _}, &1))
+
+      # The rendered record embeds the numeric "id" = key AND the "_id".
+      assert %{"id" => ^key, "_id" => "p2", "title" => "Beta"} = record
+
+      # No UPDATE call for an insert.
+      refute Enum.any?(FakeClient.calls(pid), &match?({:update_json, _, _, _}, &1))
+
+      # The pointer's key_map now includes {key => "p2"} for a later delete.
+      assert map_key_for(scope, "p2") == key
+      # Upsert must NOT swap the live dataset.
+      assert Indexer.current_dataset(scope) == dataset
+    end
+
+    test "UPDATE branch: _id PRESENT in the key_map calls update_json_record", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+
+      # "p1" IS in the stored key_map → UPDATE (replace by key).
+      assert :ok =
+               Indexer.upsert_record(scope, %{"_id" => "p1", "title" => "Renamed"},
+                 client: FakeClient
+               )
+
+      key = Indexer.key_for_id("p1")
+
+      assert {:update_json, ^dataset, ^key, record} =
+               FakeClient.calls(pid) |> Enum.find(&match?({:update_json, _, _, _}, &1))
+
+      assert %{"id" => ^key, "_id" => "p1", "title" => "Renamed"} = record
+
+      refute Enum.any?(FakeClient.calls(pid), &match?({:insert_json, _, _, _}, &1))
+      assert Indexer.current_dataset(scope) == dataset
+    end
+
+    test "reindex-required: returns {:reindex_required, status}", %{scope: scope} do
+      FakeClient.set_status(%{"reIndexRequired" => true})
+
+      assert {:reindex_required, %{"reIndexRequired" => true}} =
+               Indexer.upsert_record(scope, %{"_id" => "p2", "title" => "Beta"}, client: FakeClient)
+    end
+
+    test "surfaces a client write error", %{scope: scope} do
+      alias Barkpark.Plugins.Indx.Errors.IndexError
+      FakeClient.set_write_result({:error, %IndexError{status: 500, endpoint: "x"}})
+
+      assert {:error, %IndexError{status: 500}} =
+               Indexer.upsert_record(scope, %{"_id" => "p2"}, client: FakeClient)
+    end
+  end
+
+  test "upsert_record with no live dataset returns an error (nothing to upsert)" do
+    scope = "neverbuilt_#{System.unique_integer([:positive])}"
+
+    assert {:error, %Barkpark.Plugins.Indx.Errors.IndexError{message: msg}} =
+             Indexer.upsert_record(scope, %{"_id" => "p1"}, client: FakeClient)
 
     assert msg =~ "no live dataset"
   end

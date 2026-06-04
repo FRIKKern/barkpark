@@ -93,7 +93,10 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   the dataset the query path should read. `swap/2` is the atomic flip;
   `current_dataset/1` is what the retriever reads. Because
   `:persistent_term.put/2` triggers a global GC, swaps happen at most once
-  per rebuild (not on the hot read path).
+  per rebuild (not on the hot read path). `upsert_record/3` and
+  `delete_record/3` keep the pointer's key_map current via small
+  read-modify-write merges (`merge_key_map/2`) WITHOUT changing the live
+  dataset name — they never swap.
 
   ## Purity
 
@@ -329,6 +332,134 @@ defmodule Barkpark.Plugins.Indx.Indexer do
         {:error, _} = err -> {:halt, err}
       end
     end)
+  end
+
+  @doc """
+  Insert-or-update a SINGLE document into the CURRENT live dataset by its
+  `_id`, without a full rebuild. The incremental ADD/UPDATE sibling of
+  `delete_record/3`.
+
+  Renders `doc` to one Indx record (embedding the numeric `"id"` =
+  `key_for_id(_id)` and the original `"_id"` — the SAME per-element shape
+  `render_corpus/1` produces) and writes it to `current_dataset(scope)`:
+
+    * INSERT when the `_id` is NOT already in the scope's stored `key_map/1`
+      (a doc the live index has never seen) → `client.insert_json_record/4`.
+    * UPDATE when the `_id` IS already in the stored `key_map/1` (the live
+      index already holds a record under its key) → `client.update_json_record/4`
+      ("replace by key").
+
+  The heuristic is the stored `key_map/1` membership: it is the SAME map
+  `swap/2` recorded after the last rebuild (key → _id), so "_id present in
+  the map" is exactly "the live dataset already indexed this _id". On a
+  fresh-after-rebuild doc this is reliable; for a doc that was upserted
+  earlier we keep the map current (see below) so a second upsert of the same
+  _id correctly takes the UPDATE branch.
+
+  Operates on `current_dataset(scope)`; with no live dataset it returns the
+  same "no live dataset" `%IndexError{}` as `delete_record/3` and NEVER
+  swaps the pointer (an upsert mutates the live dataset in place — the same
+  exception to "never touch a live dataset" that the targeted delete is;
+  this is a single-key write, NOT a re-LOAD of an existing key, which is
+  the operation the spike proved wedges the engine).
+
+  After a successful write it merges `{key => _id}` into the scope's stored
+  `key_map` (via `merge_key_map/2`, which does NOT change `swap/2`'s
+  rebuild semantics) so a LATER delete/update of the same `_id` targets the
+  right key. It then reads `get_status/2`:
+
+    * `:ok` — the write landed and no reindex is needed.
+    * `{:reindex_required, status}` — the write landed but the engine
+      reports it must reindex before the change is query-visible; the
+      worker falls back to a full blue/green rebuild.
+    * `{:error, struct()}` — the client write failed, OR there is no live
+      dataset for `scope`.
+
+  CAUTION: like `delete_record/3`, this mutates a LIVE dataset and is
+  UNPROVEN until spiked against a real v5 engine.
+
+  Options mirror `rebuild/3`: `:client` (default `Client`), `:base_url`,
+  `:timeout`.
+  """
+  @spec upsert_record(String.t(), map(), keyword()) ::
+          :ok | {:reindex_required, term()} | {:error, struct()}
+  def upsert_record(scope, doc, opts \\ []) when is_binary(scope) and is_map(doc) do
+    client = Keyword.get(opts, :client, Client)
+    dataset = current_dataset(scope)
+    client_opts = client_opts(opts)
+
+    cond do
+      is_nil(dataset) ->
+        {:error,
+         %Barkpark.Plugins.Indx.Errors.IndexError{
+           status: 0,
+           endpoint: nil,
+           message: "Indx.Indexer: no live dataset for scope #{scope} — nothing to upsert"
+         }}
+
+      true ->
+        id = doc_id(doc)
+        key = key_for_id(id)
+        record = render_record(doc, key, id)
+        existing? = id_in_key_map?(scope, id)
+        do_upsert_record(client, dataset, scope, key, id, record, existing?, client_opts)
+    end
+  end
+
+  # INSERT (new _id) vs UPDATE (_id already in the stored key_map). On a
+  # clean write, merge {key => _id} into the live pointer's key_map and read
+  # status: reindex-required surfaces, otherwise :ok. A client error is
+  # surfaced unchanged.
+  defp do_upsert_record(client, dataset, scope, key, id, record, existing?, client_opts) do
+    write =
+      if existing? do
+        client.update_json_record(dataset, key, record, client_opts)
+      else
+        client.insert_json_record(dataset, key, record, client_opts)
+      end
+
+    with :ok <- write,
+         _ <- merge_key_map(scope, key, id),
+         {:ok, status} <- client.get_status(dataset, client_opts) do
+      if reindex_required?(status) do
+        {:reindex_required, status}
+      else
+        :ok
+      end
+    else
+      {:error, _} = err -> err
+    end
+  end
+
+  # Is `id` already known to the scope's stored key_map (key => _id)? True ⇒
+  # the live dataset already holds a record under this _id ⇒ UPDATE branch.
+  defp id_in_key_map?(scope, id) do
+    scope
+    |> key_map()
+    |> Enum.any?(fn {_key, mapped_id} -> mapped_id == id end)
+  end
+
+  # Add ONE {key => _id} entry to the scope's stored key_map on the live
+  # pointer, leaving the live dataset name untouched. This is NOT a swap —
+  # it never rebuilds or repoints the dataset; it only keeps the
+  # delete/update target map current after an incremental upsert. A
+  # read-modify-write on the :persistent_term pointer (incremental upserts
+  # are debounced and rare, so the per-put global GC is acceptable, same as
+  # swap/2).
+  defp merge_key_map(scope, key, id) do
+    table = :persistent_term.get(@pointer_term, %{})
+
+    case Map.get(table, scope) do
+      %{} = entry ->
+        merged = Map.put(Map.get(entry, :key_map, %{}), key, id)
+        table = Map.put(table, scope, Map.put(entry, :key_map, merged))
+        :persistent_term.put(@pointer_term, table)
+
+      _ ->
+        # No live pointer entry — nothing to merge into. Upsert only runs
+        # with a live dataset, so this branch is unreachable in practice.
+        :ok
+    end
   end
 
   @doc """

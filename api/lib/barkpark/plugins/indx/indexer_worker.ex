@@ -13,15 +13,20 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   the index per-document (and it dovetails with the spike's serialise-loads
   rule).
 
-  ## Two ops
+  ## Three ops
 
   The job carries an `"op"` discriminator:
 
     * `"op" => "rebuild"` (default) — today's BLUE/GREEN full rebuild of
-      the whole scope corpus. Routed by `:after_save` / `:after_publish`.
+      the whole scope corpus. Routed by `:after_save` / `:after_publish`
+      when the `incremental_upsert` flag is OFF (the default).
+    * `"op" => "upsert"` — INCREMENTAL per-document insert/update of a
+      single `"_id"` into the CURRENT live dataset, no rebuild. Routed by
+      `:after_save` / `:after_publish` ONLY when the `incremental_upsert`
+      flag is ON. INERT by default.
     * `"op" => "delete"` — INCREMENTAL per-document delete of a single
       `"_id"` from the CURRENT live dataset, no rebuild. Routed by
-      `:after_delete` / `:after_unpublish`.
+      `:after_delete` / `:after_unpublish` (always incremental).
 
   ## perform/1 — rebuild op
 
@@ -31,6 +36,19 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
        fresh `<prefix>_<scope>_v<n>`, NEVER re-loads a live dataset).
     3. On success, `Indexer.swap/2` flips the live pointer, then
        `Indexer.delete_dataset/2` drops the old dataset.
+
+  ## perform/1 — upsert op
+
+    1. Fetch the SINGLE document by `"_id"` (+ its `"type"`) from Barkpark
+       via `Content.get_document/3` — NEVER re-list the whole corpus.
+    2. Hand it to `Indexer.upsert_record/3` (insert when the `_id` is new
+       to the live index, update when it already holds a record).
+    3. `:ok` → done. `{:reindex_required, _}` → fall back to a FULL
+       rebuild (same `run_rebuild/4` the rebuild op runs). `{:error, _}` →
+       classified by the SAME `classify_delete_error/1` as the delete op
+       (no-live-dataset/404 → cancel; NetworkError → snooze; else backoff).
+       A document that no longer exists in Barkpark → `{:cancel, :doc_gone}`
+       (a delete op will follow / a future rebuild drops it).
 
   ## perform/1 — delete op
 
@@ -53,14 +71,15 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   ## Job args (string-keyed, Oban-serialised)
 
       %{
-        "op"          => "rebuild" | "delete",  # default "rebuild"
+        "op"          => "rebuild" | "upsert" | "delete",  # default "rebuild"
         "scope"       => "production",          # dataset string (required)
         "types"       => ["post", "page"],      # doc types to index (rebuild)
         "perspective" => "published",           # default "published"
-        "_id"         => "drafts.p1",           # delete op only (required)
+        "_id"         => "drafts.p1",           # upsert/delete op only (required)
         "workspace_id"=> "...",                 # optional tenancy scope
         "project_id"  => "...",                  # optional tenancy scope
-        "indexer"     => "..."                   # TEST-ONLY indexer module override
+        "indexer"     => "...",                  # TEST-ONLY indexer module override
+        "content"     => "..."                   # TEST-ONLY content module override
       }
 
   The `"indexer"` arg is a test seam (a module name string) — never set by
@@ -82,9 +101,10 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   # Uniqueness keyed on `(op, scope, _id)`:
   #   * rebuild jobs carry NO `_id` → they dedup on `(rebuild, scope, nil)`,
   #     i.e. unique per scope (today's behaviour, preserved).
-  #   * delete jobs carry an `_id` → they dedup on `(delete, scope, _id)`,
-  #     i.e. unique per (scope, _id) — many distinct deletes in a burst all
-  #     enqueue, repeated deletes of the SAME doc collapse.
+  #   * upsert/delete jobs carry an `_id` → they dedup on
+  #     `(upsert|delete, scope, _id)`, i.e. unique per (op, scope, _id) —
+  #     many distinct upserts/deletes in a burst all enqueue, repeated
+  #     upserts/deletes of the SAME doc collapse.
   use Oban.Worker,
     queue: :indx,
     max_attempts: 5,
@@ -152,6 +172,32 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
     |> Oban.insert()
   end
 
+  @doc """
+  Build a debounced UPSERT job inserting/updating a single `id` into
+  `scope`'s live dataset. Routed by `:after_save` / `:after_publish` ONLY
+  when the `incremental_upsert` flag is ON (default OFF — see
+  `Lifecycle.enqueue_rebuild/1`). Unique per `(scope, id)` so repeated
+  saves of the same doc collapse while distinct saves in a burst all
+  enqueue. `opts` may carry `:types`, `:workspace_id`, `:project_id`
+  (forwarded to the reindex-fallback rebuild and the single-doc fetch).
+  """
+  @spec enqueue_upsert(String.t(), String.t(), keyword()) ::
+          {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue_upsert(scope, id, opts \\ []) when is_binary(scope) and is_binary(id) do
+    %{
+      "op" => "upsert",
+      "scope" => scope,
+      "_id" => id,
+      "types" => Keyword.get(opts, :types, []),
+      "perspective" => to_string(Keyword.get(opts, :perspective, "published")),
+      "workspace_id" => Keyword.get(opts, :workspace_id),
+      "project_id" => Keyword.get(opts, :project_id)
+    }
+    |> drop_nil()
+    |> new(schedule_in: @debounce_seconds)
+    |> Oban.insert()
+  end
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     scope = Map.get(args, "scope")
@@ -163,6 +209,9 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
       op == "delete" ->
         run_delete(scope, args)
+
+      op == "upsert" ->
+        run_upsert(scope, args)
 
       true ->
         run_rebuild_op(scope, args)
@@ -210,6 +259,59 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       end
     end
   end
+
+  # Per-document incremental upsert. Fetches the SINGLE doc by _id (+ type)
+  # from Barkpark — NEVER re-lists the whole corpus — and hands it to
+  # Indexer.upsert_record/3. Reindex-required → fall back to a full rebuild
+  # (await it inline). A doc that no longer exists in Barkpark →
+  # {:cancel, :doc_gone}. Client errors reuse the delete-path classification.
+  defp run_upsert(scope, args) do
+    id = Map.get(args, "_id")
+    type = args |> Map.get("types", []) |> first_type()
+
+    cond do
+      not is_binary(id) or id == "" ->
+        {:cancel, :missing_id}
+
+      is_nil(type) ->
+        {:cancel, :no_type_for_upsert}
+
+      true ->
+        case content_mod(args).get_document(id, type, scope) do
+          {:ok, doc} ->
+            upsert_doc(scope, id, doc, args)
+
+          {:error, :not_found} ->
+            Logger.info(
+              "Indx.IndexerWorker: upsert _id=#{id} type=#{type} scope=#{scope} — doc gone, cancelling"
+            )
+
+            {:cancel, :doc_gone}
+        end
+    end
+  end
+
+  defp upsert_doc(scope, id, doc, args) do
+    case indexer_mod(args).upsert_record(scope, doc) do
+      :ok ->
+        Logger.info("Indx.IndexerWorker: upserted _id=#{id} into scope=#{scope}")
+        :ok
+
+      {:reindex_required, _status} ->
+        Logger.info(
+          "Indx.IndexerWorker: upsert of _id=#{id} on scope=#{scope} requires reindex — " <>
+            "falling back to full rebuild"
+        )
+
+        rebuild_fallback(scope, args)
+
+      {:error, err} ->
+        handle_delete_error(classify_delete_error(err), err, scope, id)
+    end
+  end
+
+  defp first_type([t | _]) when is_binary(t) and t != "", do: t
+  defp first_type(_), do: nil
 
   # Map a classified delete failure to the right Oban outcome + log level.
   #   * {:cancel, reason}  — PERMANENT: nothing to retry. [error] log so the
@@ -332,6 +434,18 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       mod when is_binary(mod) -> String.to_existing_atom("Elixir." <> mod)
       mod when is_atom(mod) and not is_nil(mod) -> mod
       _ -> Indexer
+    end
+  end
+
+  # The content module is `Content` in production. The upsert op's
+  # single-doc fetch resolves through this seam so the worker's upsert
+  # branch can be exercised against a fake module without a DB. Never set
+  # by the lifecycle enqueue paths, so prod always uses the real Content.
+  defp content_mod(args) do
+    case Map.get(args, "content") do
+      mod when is_binary(mod) -> String.to_existing_atom("Elixir." <> mod)
+      mod when is_atom(mod) and not is_nil(mod) -> mod
+      _ -> Content
     end
   end
 

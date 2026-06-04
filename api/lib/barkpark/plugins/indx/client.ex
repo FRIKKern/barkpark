@@ -21,8 +21,10 @@ defmodule Barkpark.Plugins.Indx.Client do
       search/3                         POST /api/Search/{ds}
       get_json/3                       POST /api/GetJson/{ds}
       delete_dataset/2                 DELETE /api/DeleteDataSet/{ds}
-      delete_json_record/3             DELETE /api/DeleteJsonRecord/{ds}/{id}
-      upsert_json_record/3             (STUB — not available until Indx v5)
+      insert_json_record/4             POST   /api/{ds}/insert/{key} (text/plain!)
+      update_json_record/4             PUT    /api/{ds}/update/{key} (text/plain!)
+      update_field/5                   PUT    /api/{ds}/field/{key}  (application/json)
+      delete_json_record/3             DELETE /api/{ds}/{key}
 
   ## Base URL injection
 
@@ -39,14 +41,16 @@ defmodule Barkpark.Plugins.Indx.Client do
   IndexOutOfRange on the engine. Callers pass `{field, weight}` tuples;
   `Settings` already clamps the weight defaults to the valid band.
 
-  ## AnalyzeString + LoadString are text/plain
+  ## AnalyzeString + LoadString (+ v5 insert/update) are text/plain
 
-  `analyze_string/2` and `load_string/3` send the JSON corpus as a
-  `text/plain` body, NOT `application/json` — the controller types both
-  `[FromBody] string jsonData` and relies on the `TextPlainInputFormatter`
-  to read the raw JSON-string body. The spike confirmed `application/json`
-  is rejected on these two. Every OTHER `application/json` POST/PUT
-  (`set_searchable_fields`, `search`, `get_json`) MUST carry a
+  `analyze_string/2`, `load_string/3`, and the v5-alpha per-document
+  `insert_json_record/4` / `update_json_record/4` send the JSON document(s)
+  as a `text/plain` body, NOT `application/json` — the controller types all
+  of these `[FromBody] string jsonData` and relies on the
+  `TextPlainInputFormatter` to read the raw JSON-string body. The spike
+  confirmed `application/json` is rejected on this body shape. Every OTHER
+  `application/json` POST/PUT (`set_searchable_fields`, `search`,
+  `get_json`, `update_field/5`) MUST carry a
   `content-type: application/json` header or Indx answers 415.
 
   ## AnalyzeString MUST precede SetSearchableFields
@@ -223,27 +227,25 @@ defmodule Barkpark.Plugins.Indx.Client do
 
   @doc """
   Delete a SINGLE indexed JSON record from a LIVE dataset by its numeric
-  key. `DELETE /api/DeleteJsonRecord/{ds}/{id}`.
+  key. `DELETE /api/{ds}/{key}` (the v5-alpha native delete route).
 
   Maps non-2xx → `%IndexError{}` through the same `index_request/5`
   pipeline as `delete_dataset/2` — same 401 invalidate-and-retry-once
   auth handling, same error mapping.
 
-  Backed by the C# engine method `bool DeleteJsonRecord(long id)` (present
-  in IndxSearchLib 4.1.2). NOTE: the stock `IndxCloudApi` does NOT expose
-  this over HTTP — the additive controller action that does lives as a
-  prepared (NOT applied) patch at
-  `priv/plugins/indx/patches/SearchController.DeleteJsonRecord.cs.md`.
-  Until that patch is applied to the deployed engine this verb 404s; the
-  worker treats that as a delete failure and the per-doc-delete path stays
-  UNPROVEN against a live engine (see `Indexer.delete_record/3`).
+  Backed by the C# engine method `DeleteJsonRecord(key)`. The v5-alpha
+  `IndxCloudApi` (`[Route("api")]` `SearchController.cs`) exposes this
+  natively at `DELETE /api/{dataSetName}/{documentKey}` — the older custom
+  `/api/DeleteJsonRecord/{ds}/{id}` path is GONE. Until the v5-alpha engine
+  is actually deployed this verb's contract is UNPROVEN against a live
+  instance (see `Indexer.delete_record/3`).
 
-  `id` is the STABLE numeric key from `Indexer.key_for_id/1`.
+  `document_key` is the STABLE numeric key from `Indexer.key_for_id/1`.
   """
   @spec delete_json_record(String.t(), integer(), keyword()) :: :ok | {:error, struct()}
-  def delete_json_record(dataset, id, opts \\ [])
-      when is_binary(dataset) and is_integer(id) do
-    url = "#{api_base(opts)}/api/DeleteJsonRecord/#{dataset}/#{id}"
+  def delete_json_record(dataset, document_key, opts \\ [])
+      when is_binary(dataset) and is_integer(document_key) do
+    url = "#{api_base(opts)}/api/#{dataset}/#{document_key}"
 
     case index_request(:delete, url, nil, opts) do
       {:ok, _resp} -> :ok
@@ -252,40 +254,79 @@ defmodule Barkpark.Plugins.Indx.Client do
   end
 
   @doc """
-  STUB — per-document upsert is NOT available on IndxSearchLib 4.1.2.
+  Insert a SINGLE new JSON document into a LIVE dataset under
+  `document_key`. `POST /api/{ds}/insert/{key}`.
 
-  Indx's HTTP API has no per-document add/update/upsert at any confirmed
-  version. The only per-document write the C# engine exposes is
-  `DeleteJsonRecord(long id)`; there is no `AddJsonRecord` / `UpsertJson`
-  equivalent in the deployed `IndxCloudApi`. An "Indx v5" alpha may add
-  one, but its endpoint shape is undocumented and MUST NOT be assumed.
+  v5-alpha `SearchController` binds `[FromBody] string jsonData` via the
+  `TextPlainInputFormatter` (identical to `analyze_string/2` /
+  `load_string/3`), so the body is the document's JSON sent as a
+  `text/plain` body — NOT `application/json`. `json` may be a pre-encoded
+  JSON string or a list/term that gets `Jason.encode!`'d. Engine side:
+  `InsertJsonRecord(json, out err)`.
 
-  This stub exists as the clean extension point: it always returns an
-  `%IndexError{}` so callers (and tests) can branch on "upsert
-  unavailable" today, and a future v5 implementation drops in here without
-  touching the indexer/worker control flow.
-
-  ## TODO (Indx v5)
-
-  When the v5 per-doc upsert endpoint is CONFIRMED, replace the body below
-  with the real call, e.g. (shape UNVERIFIED — do not ship until proven):
-
-      # url = "\#{api_base(opts)}/api/<V5_UPSERT_VERB>/\#{dataset}"
-      # body = Jason.encode!(record)
-      # index_request(:put, url, body, opts, content_type: "application/json")
-
-  Fill `<V5_UPSERT_VERB>`, the HTTP method, and the body content-type from
-  the v5 contract once it is documented and spiked. Do NOT guess.
+  CAUTION: this WRITES to a LIVE dataset. The blue/green rule ("never
+  re-load an existing key onto a live indexed dataset") still bans a full
+  re-LOAD; a single-key insert is the v5 incremental path and is UNPROVEN
+  until spiked against a real v5 engine.
   """
-  @spec upsert_json_record(String.t(), map(), keyword()) :: {:error, IndexError.t()}
-  def upsert_json_record(dataset, _record, _opts \\ []) when is_binary(dataset) do
-    {:error,
-     %IndexError{
-       status: 0,
-       endpoint: nil,
-       body: nil,
-       message: "upsert endpoint not available until Indx v5 is confirmed"
-     }}
+  @spec insert_json_record(String.t(), integer(), iodata() | list() | map(), keyword()) ::
+          :ok | {:error, struct()}
+  def insert_json_record(dataset, document_key, json, opts \\ [])
+      when is_binary(dataset) and is_integer(document_key) do
+    body = if is_binary(json), do: json, else: Jason.encode!(json)
+    url = path_with_key("insert", dataset, document_key, opts)
+
+    case index_request(:post, url, body, opts, content_type: "text/plain") do
+      {:ok, _resp} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Replace a SINGLE JSON document on a LIVE dataset by key ("replace by
+  key"). `PUT /api/{ds}/update/{key}`.
+
+  Same `text/plain` body contract as `insert_json_record/4` — the
+  `[FromBody] string jsonData` binding reads the raw JSON string. `json`
+  may be a pre-encoded JSON string or a list/term that gets
+  `Jason.encode!`'d. Engine side: `UpdateJsonRecord(json, out err)`.
+
+  CAUTION: same live-dataset caveat as `insert_json_record/4`.
+  """
+  @spec update_json_record(String.t(), integer(), iodata() | list() | map(), keyword()) ::
+          :ok | {:error, struct()}
+  def update_json_record(dataset, document_key, json, opts \\ [])
+      when is_binary(dataset) and is_integer(document_key) do
+    body = if is_binary(json), do: json, else: Jason.encode!(json)
+    url = path_with_key("update", dataset, document_key, opts)
+
+    case index_request(:put, url, body, opts, content_type: "text/plain") do
+      {:ok, _resp} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Patch a SINGLE field of a document on a LIVE dataset by key.
+  `PUT /api/{ds}/field/{key}` body `{"fieldName": <field>, "value": <value>}`.
+
+  UNLIKE insert/update, the field-patch body is `application/json` (the
+  controller binds a typed DTO, not `[FromBody] string`). Engine side:
+  `UpdateField(key, field, value, out err)`.
+
+  CAUTION: same live-dataset caveat as `insert_json_record/4`.
+  """
+  @spec update_field(String.t(), integer(), String.t(), term(), keyword()) ::
+          :ok | {:error, struct()}
+  def update_field(dataset, document_key, field_name, value, opts \\ [])
+      when is_binary(dataset) and is_integer(document_key) and is_binary(field_name) do
+    body = Jason.encode!(%{"fieldName" => field_name, "value" => value})
+    url = path_with_key("field", dataset, document_key, opts)
+
+    case index_request(:put, url, body, opts, content_type: "application/json") do
+      {:ok, _resp} -> :ok
+      {:error, _} = err -> err
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -512,6 +553,14 @@ defmodule Barkpark.Plugins.Indx.Client do
 
   defp path(verb, dataset, opts) do
     "#{api_base(opts)}/api/#{verb}/#{dataset}"
+  end
+
+  # v5-alpha per-document routes put the DATASET first and carry a trailing
+  # `/{key}`: `POST /api/{ds}/insert/{key}`, `PUT /api/{ds}/update/{key}`,
+  # `PUT /api/{ds}/field/{key}`. Distinct from `path/3`'s legacy
+  # `/api/{verb}/{ds}` shape — do not collapse the two.
+  defp path_with_key(verb, dataset, key, opts) do
+    "#{api_base(opts)}/api/#{dataset}/#{verb}/#{key}"
   end
 
   defp api_base(opts) do

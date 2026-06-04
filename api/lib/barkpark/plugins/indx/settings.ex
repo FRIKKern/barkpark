@@ -22,6 +22,11 @@ defmodule Barkpark.Plugins.Indx.Settings do
     * `:weight_high` / `:weight_medium` / `:weight_low` — searchable-field
       weights. Indx requires 0..2 (0=High, 1=Med, 2=Low); a weight of 3
       yields a 500 IndexOutOfRange, so we pin defaults to the valid band.
+    * `:incremental_upsert` — feature flag (default `false`). OFF →
+      after_save/after_publish take the blue/green full rebuild (today's
+      behaviour, byte-identical). ON → they route to the per-document
+      incremental upsert op. Env override `INDX_INCREMENTAL_UPSERT`
+      (truthy: "1"/"true"/"yes"/"on", case-insensitive).
 
   Mirrors the OnixEdit/Bokbasen typed-settings-wrapper precedent.
   """
@@ -41,6 +46,7 @@ defmodule Barkpark.Plugins.Indx.Settings do
   @default_weight_high 0
   @default_weight_medium 1
   @default_weight_low 2
+  @default_incremental_upsert false
 
   @typedoc "Resolved Indx settings map."
   @type settings :: %{
@@ -50,7 +56,8 @@ defmodule Barkpark.Plugins.Indx.Settings do
           dataset_prefix: String.t(),
           weight_high: 0..2,
           weight_medium: 0..2,
-          weight_low: 0..2
+          weight_low: 0..2,
+          incremental_upsert: boolean()
         }
 
   @doc "The plugin row name used in `plugin_settings`."
@@ -79,7 +86,8 @@ defmodule Barkpark.Plugins.Indx.Settings do
       dataset_prefix: resolve_string(:dataset_prefix, env, db) || @default_dataset_prefix,
       weight_high: resolve_weight(:weight_high, env, db, @default_weight_high),
       weight_medium: resolve_weight(:weight_medium, env, db, @default_weight_medium),
-      weight_low: resolve_weight(:weight_low, env, db, @default_weight_low)
+      weight_low: resolve_weight(:weight_low, env, db, @default_weight_low),
+      incremental_upsert: resolve_incremental_upsert(env, db)
     }
   end
 
@@ -147,6 +155,29 @@ defmodule Barkpark.Plugins.Indx.Settings do
   end
 
   defp coerce_int(_v, default), do: default
+
+  # Resolve the incremental-upsert flag. Precedence: OS env
+  # INDX_INCREMENTAL_UPSERT > app env (config :barkpark, Indx,
+  # incremental_upsert:) > DB row > module default (false). Any
+  # source value is coerced to a boolean via coerce_bool/1 so a string
+  # "true"/"1" from env or DB reads as true.
+  defp resolve_incremental_upsert(env, db) do
+    cond do
+      v = System.get_env("INDX_INCREMENTAL_UPSERT") -> coerce_bool(v)
+      not is_nil(raw = env_value(env, :incremental_upsert)) -> coerce_bool(raw)
+      not is_nil(raw = Map.get(db, "incremental_upsert")) -> coerce_bool(raw)
+      not is_nil(raw = Map.get(db, :incremental_upsert)) -> coerce_bool(raw)
+      true -> @default_incremental_upsert
+    end
+  end
+
+  defp coerce_bool(v) when is_boolean(v), do: v
+
+  defp coerce_bool(v) when is_binary(v) do
+    String.downcase(String.trim(v)) in ["1", "true", "yes", "on"]
+  end
+
+  defp coerce_bool(_), do: false
 
   defp clamp_weight(n) when is_integer(n) and n < 0, do: 0
   defp clamp_weight(n) when is_integer(n) and n > 2, do: 2

@@ -199,13 +199,13 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
     assert :ok = Client.delete_dataset(@ds, base_url: base)
   end
 
-  test "delete_json_record hits DELETE /api/DeleteJsonRecord/{ds}/{id} with the numeric id", %{
+  test "delete_json_record hits the v5 DELETE /api/{ds}/{key} with the numeric key", %{
     bypass: bypass,
     base: base
   } do
     stub_login(bypass)
 
-    Bypass.expect_once(bypass, "DELETE", "/api/DeleteJsonRecord/#{@ds}/424242", fn conn ->
+    Bypass.expect_once(bypass, "DELETE", "/api/#{@ds}/424242", fn conn ->
       assert ["Bearer " <> @jwt] = Plug.Conn.get_req_header(conn, "authorization")
       Plug.Conn.resp(conn, 200, Jason.encode!(%{"deleted" => true}))
     end)
@@ -216,20 +216,105 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
   test "delete_json_record maps a 500 to IndexError", %{bypass: bypass, base: base} do
     stub_login(bypass)
 
-    Bypass.expect(bypass, "DELETE", "/api/DeleteJsonRecord/#{@ds}/7", fn conn ->
+    Bypass.expect(bypass, "DELETE", "/api/#{@ds}/7", fn conn ->
       Plug.Conn.resp(conn, 500, "boom")
     end)
 
     assert {:error, %IndexError{status: 500}} = Client.delete_json_record(@ds, 7, base_url: base)
   end
 
-  test "upsert_json_record is a documented stub returning an IndexError (no HTTP)", %{base: base} do
-    # No Bypass expectation — the stub must NEVER hit the wire until Indx v5
-    # is confirmed.
-    assert {:error, %IndexError{message: msg}} =
-             Client.upsert_json_record(@ds, %{"_id" => "p1"}, base_url: base)
+  test "insert_json_record POSTs /api/{ds}/insert/{key} with a text/plain JSON body", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
 
-    assert msg =~ "upsert endpoint not available until Indx v5"
+    Bypass.expect_once(bypass, "POST", "/api/#{@ds}/insert/777", fn conn ->
+      assert ["Bearer " <> @jwt] = Plug.Conn.get_req_header(conn, "authorization")
+      # Same body contract as load_string/analyze_string: text/plain, NOT
+      # application/json (the controller binds [FromBody] string jsonData).
+      assert ["text/plain"] = Plug.Conn.get_req_header(conn, "content-type")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      # The body is a SINGLE document JSON string.
+      assert %{"id" => 777, "_id" => "p1", "title" => "Alpha"} = Jason.decode!(body)
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    assert :ok =
+             Client.insert_json_record(
+               @ds,
+               777,
+               %{"id" => 777, "_id" => "p1", "title" => "Alpha"},
+               base_url: base
+             )
+  end
+
+  test "insert_json_record accepts a pre-encoded JSON string body verbatim", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
+
+    pre = Jason.encode!(%{"id" => 5, "_id" => "p9"})
+
+    Bypass.expect_once(bypass, "POST", "/api/#{@ds}/insert/5", fn conn ->
+      assert ["text/plain"] = Plug.Conn.get_req_header(conn, "content-type")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert body == pre
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    assert :ok = Client.insert_json_record(@ds, 5, pre, base_url: base)
+  end
+
+  test "update_json_record PUTs /api/{ds}/update/{key} with a text/plain JSON body", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
+
+    Bypass.expect_once(bypass, "PUT", "/api/#{@ds}/update/777", fn conn ->
+      assert ["text/plain"] = Plug.Conn.get_req_header(conn, "content-type")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert %{"id" => 777, "_id" => "p1", "title" => "Beta"} = Jason.decode!(body)
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    assert :ok =
+             Client.update_json_record(
+               @ds,
+               777,
+               %{"id" => 777, "_id" => "p1", "title" => "Beta"},
+               base_url: base
+             )
+  end
+
+  test "update_field PUTs /api/{ds}/field/{key} with an application/json fieldName/value body", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
+
+    Bypass.expect_once(bypass, "PUT", "/api/#{@ds}/field/777", fn conn ->
+      # UNLIKE insert/update, the field-patch body is application/json.
+      assert ["application/json"] = Plug.Conn.get_req_header(conn, "content-type")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert %{"fieldName" => "title", "value" => "Renamed"} = Jason.decode!(body)
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    assert :ok = Client.update_field(@ds, 777, "title", "Renamed", base_url: base)
+  end
+
+  test "insert_json_record maps a 500 to IndexError", %{bypass: bypass, base: base} do
+    stub_login(bypass)
+
+    Bypass.expect(bypass, "POST", "/api/#{@ds}/insert/9", fn conn ->
+      Plug.Conn.resp(conn, 500, "boom")
+    end)
+
+    assert {:error, %IndexError{status: 500}} =
+             Client.insert_json_record(@ds, 9, %{"_id" => "x"}, base_url: base)
   end
 
   test "401 invalidates the token and retries once with a fresh login", %{

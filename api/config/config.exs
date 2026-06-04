@@ -76,6 +76,16 @@ config :barkpark, :search_query_exclude_patterns, [
 # `register_workers/1` re-asserts the same mapping at boot.
 config :barkpark, :search_retrievers, %{"indx" => Barkpark.Plugins.Indx.Retriever}
 
+# Indx incremental-upsert feature flag (default OFF). When OFF (the
+# default) after_save/after_publish take TODAY's blue/green full-rebuild
+# path — prod behaviour is byte-identical. When ON, after_save/after_publish
+# route to the per-document incremental upsert op instead. delete/unpublish
+# stay on the incremental delete path regardless of this flag. Surfaced by
+# `Barkpark.Plugins.Indx.Settings` (env override INDX_INCREMENTAL_UPSERT).
+# The incremental upsert path, like the incremental delete, mutates a LIVE
+# dataset and is UNPROVEN until spiked against a real v5 Indx instance.
+config :barkpark, Barkpark.Plugins.Indx, incremental_upsert: false
+
 config :barkpark, Oban,
   repo: Barkpark.Repo,
   queues: [default: 10, bokbasen: 4, plugins: 6, indx: 4],

@@ -10,23 +10,36 @@ defmodule Barkpark.Plugins.Indx.Lifecycle do
   (dataset + type) and enqueues a DEBOUNCED `IndexerWorker` job for that
   scope. It never indexes inline — the actual index work happens in the
   Oban worker, off the request path. Four events bracket the four mutating
-  Content ops, and they split across TWO ops:
+  Content ops, routed by the `incremental_upsert` feature flag:
 
-    * `:after_save`      — a doc was created/updated → REBUILD op
-    * `:after_publish`   — a draft was published     → REBUILD op
+    * `:after_save`      — a doc was created/updated → REBUILD op (flag OFF,
+      default) | UPSERT op (flag ON)
+    * `:after_publish`   — a draft was published     → REBUILD op (flag OFF,
+      default) | UPSERT op (flag ON)
     * `:after_unpublish` — a published doc went back to draft → DELETE op
-    * `:after_delete`    — a doc was removed          → DELETE op
+      (always — delete is already incremental)
+    * `:after_delete`    — a doc was removed          → DELETE op (always)
 
-  ## Why the split
+  ## The feature flag (default OFF → prod byte-identical)
 
-  add/update need the doc's full content re-rendered into the corpus, so
-  they take the safe blue/green REBUILD path. delete/unpublish only need
-  the doc's row GONE from the live index — that is a targeted per-document
-  DELETE (`Indexer.delete_record/3`), no full rebuild. The delete op
-  carries the doc's `_id` (and its type, for the reindex-required
-  rebuild fallback). Unpublish is modelled as a delete because the
-  default `published` perspective should stop returning a doc the moment
-  it leaves published state; the next publish re-adds it via a rebuild.
+  `Settings.get().incremental_upsert` gates the add/update path ONLY:
+
+    * OFF (the DEFAULT) → add/update take the safe blue/green REBUILD path —
+      TODAY's behaviour exactly. With the flag off the entire incremental
+      add/update path is INERT; prod behaviour is unchanged.
+    * ON → add/update route to the per-document incremental UPSERT op
+      (`Indexer.upsert_record/3`), carrying the doc's `_id` + type. This
+      mutates a LIVE dataset and is UNPROVEN until spiked against a real v5
+      Indx instance.
+
+  delete/unpublish are ALWAYS incremental (no flag): they only need the
+  doc's row GONE from the live index — a targeted per-document DELETE
+  (`Indexer.delete_record/3`), no full rebuild. The delete op carries the
+  doc's `_id` (and its type, for the reindex-required rebuild fallback).
+  Unpublish is modelled as a delete because the default `published`
+  perspective should stop returning a doc the moment it leaves published
+  state; the next publish re-adds it (via rebuild when the flag is off, via
+  upsert when on).
 
   ## Recursion guard
 
@@ -40,6 +53,7 @@ defmodule Barkpark.Plugins.Indx.Lifecycle do
   require Logger
 
   alias Barkpark.Plugins.Indx.IndexerWorker
+  alias Barkpark.Plugins.Indx.Settings
 
   @after_events [:after_save, :after_publish, :after_unpublish, :after_delete]
   @rebuild_events [:after_save, :after_publish]
@@ -55,7 +69,9 @@ defmodule Barkpark.Plugins.Indx.Lifecycle do
     * a payload with no resolvable dataset
 
   Routes by event:
-    * `:after_save` / `:after_publish` → debounced REBUILD job
+    * `:after_save` / `:after_publish` → debounced REBUILD job (flag OFF,
+      default) or debounced UPSERT job carrying the doc `_id` (flag ON);
+      falls through to a rebuild when ON if the doc has no resolvable `_id`.
     * `:after_unpublish` / `:after_delete` → debounced DELETE job (carries
       the doc `_id`); falls through to a rebuild only if the doc has no
       resolvable `_id`.
@@ -74,7 +90,7 @@ defmodule Barkpark.Plugins.Indx.Lifecycle do
         do_enqueue_delete(doc, dataset)
 
       event in @rebuild_events ->
-        do_enqueue_rebuild(doc, dataset)
+        route_save(doc, dataset)
 
       true ->
         :ok
@@ -82,6 +98,37 @@ defmodule Barkpark.Plugins.Indx.Lifecycle do
   end
 
   def enqueue_rebuild(_other), do: :ok
+
+  # add/update routing gated by the incremental_upsert flag. OFF (default) →
+  # the blue/green REBUILD op (today's behaviour, byte-identical). ON → the
+  # per-document UPSERT op carrying the doc _id; with no resolvable _id we
+  # cannot target a key, so fall back to a rebuild (never leave the index
+  # stale).
+  defp route_save(doc, dataset) do
+    if incremental_upsert?() do
+      do_enqueue_upsert(doc, dataset)
+    else
+      do_enqueue_rebuild(doc, dataset)
+    end
+  end
+
+  defp incremental_upsert? do
+    Settings.get().incremental_upsert == true
+  rescue
+    # Settings.get/0 never raises by contract, but a misconfigured DB read
+    # must never crash a lifecycle hook — degrade to the safe rebuild path.
+    _ -> false
+  end
+
+  defp do_enqueue_upsert(doc, dataset) do
+    case doc_id(doc) do
+      id when is_binary(id) and id != "" ->
+        finish(IndexerWorker.enqueue_upsert(dataset, id, scope_opts(doc)), dataset, "upsert")
+
+      _ ->
+        do_enqueue_rebuild(doc, dataset)
+    end
+  end
 
   defp do_enqueue_rebuild(doc, dataset) do
     finish(IndexerWorker.enqueue(dataset, scope_opts(doc)), dataset, "rebuild")
