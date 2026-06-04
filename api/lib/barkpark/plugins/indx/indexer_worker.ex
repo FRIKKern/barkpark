@@ -45,10 +45,13 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
        to the live index, update when it already holds a record).
     3. `:ok` → done. `{:reindex_required, _}` → fall back to a FULL
        rebuild (same `run_rebuild/4` the rebuild op runs). `{:error, _}` →
-       classified by the SAME `classify_delete_error/1` as the delete op
-       (no-live-dataset/404 → cancel; NetworkError → snooze; else backoff).
-       A document that no longer exists in Barkpark → `{:cancel, :doc_gone}`
-       (a delete op will follow / a future rebuild drops it).
+       classified by `classify_upsert_error/1`, which DIVERGES from the
+       delete classification on ONE case: no-live-dataset → FULL REBUILD
+       (the post-restart self-heal — boot-recovery hadn't seated the pointer
+       yet, so the first edit rebuilds the scope, then subsequent edits go
+       incremental). All other cases mirror the delete op (404 → cancel;
+       NetworkError → snooze; else backoff). A document that no longer
+       exists in Barkpark → `{:cancel, :doc_gone}`.
 
   ## perform/1 — delete op
 
@@ -306,8 +309,43 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
         rebuild_fallback(scope, args)
 
       {:error, err} ->
-        handle_delete_error(classify_delete_error(err), err, scope, id)
+        handle_upsert_error(classify_upsert_error(err), err, scope, id, args)
     end
+  end
+
+  # Upsert error classification DIVERGES from delete on exactly one case:
+  # no-live-dataset. For a DELETE, no live dataset is a genuine no-op (cancel
+  # — nothing to delete from). For an UPSERT it is the post-restart hole this
+  # whole feature closes: boot-recovery hadn't seated the pointer (Indx was
+  # down at boot, or this is the first edit before recovery ran), so the
+  # FIRST edit after a restart must REBUILD the scope — which establishes the
+  # pointer + key_map + seeds the corpus — then subsequent edits go
+  # incremental. Every other case reuses the delete classification.
+  defp classify_upsert_error(%IndexError{message: msg} = err) when is_binary(msg) do
+    if String.contains?(msg, "no live dataset") do
+      :rebuild
+    else
+      classify_delete_error(err)
+    end
+  end
+
+  defp classify_upsert_error(err), do: classify_delete_error(err)
+
+  # :rebuild → the ultimate self-heal: full blue/green rebuild of the scope
+  # (the SAME rebuild-fallback the {:reindex_required, _} path uses), which
+  # establishes the pointer + key_map + seeds the corpus. All other outcomes
+  # mirror the delete-error handling (cancel / snooze / backoff).
+  defp handle_upsert_error(:rebuild, _err, scope, id, args) do
+    Logger.info(
+      "Indx.IndexerWorker: upsert of _id=#{id} on scope=#{scope} found no live dataset — " <>
+        "falling back to full rebuild (post-restart self-heal)"
+    )
+
+    rebuild_fallback(scope, args)
+  end
+
+  defp handle_upsert_error(outcome, err, scope, id, _args) do
+    handle_delete_error(outcome, err, scope, id)
   end
 
   defp first_type([t | _]) when is_binary(t) and t != "", do: t

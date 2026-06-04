@@ -74,11 +74,21 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
       Agent.get(agent(), fn s -> Map.get(s, :write_result, :ok) end)
     end
 
+    # Existence-probe verb used by upsert_record/3 when the _id is NOT in
+    # the stored key_map (the empty-key_map / post-restart path). Default
+    # {:ok, []} → "record absent" → INSERT. set_get_json/1 overrides it.
+    def get_json(ds, keys, _opts) do
+      record({:get_json, ds, keys})
+      Agent.get(agent(), fn s -> Map.get(s, :get_json_result, {:ok, []}) end)
+    end
+
     # Test knobs: override the status get_status/2 returns, the result
-    # delete_json_record/3 returns, and the result insert/update return.
+    # delete_json_record/3 returns, the result insert/update return, and the
+    # result the get_json existence probe returns.
     def set_status(status), do: Agent.update(agent(), &Map.put(&1, :status, status))
     def set_delete_result(r), do: Agent.update(agent(), &Map.put(&1, :delete_result, r))
     def set_write_result(r), do: Agent.update(agent(), &Map.put(&1, :write_result, r))
+    def set_get_json(r), do: Agent.update(agent(), &Map.put(&1, :get_json_result, r))
   end
 
   setup do
@@ -496,6 +506,128 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
 
       assert {:error, %IndexError{status: 500}} =
                Indexer.upsert_record(scope, %{"_id" => "p2"}, client: FakeClient)
+    end
+  end
+
+  # ── Upsert with an EMPTY key_map (post-restart / boot-recovery) ──────────────
+  #
+  # restore_pointer/2 seats the live pointer with an EMPTY key_map after a
+  # restart, so the insert-vs-update decision must NOT lean on the map alone.
+  # When the _id is not in the map, upsert_record/3 existence-PROBES the
+  # engine via get_json([key]): a doc with the same _id → UPDATE, empty → INSERT.
+  describe "upsert_record/3 with an empty key_map (existence probe)" do
+    setup %{scope: scope} = ctx do
+      # Restore the live pointer the way boot-recovery does: dataset set,
+      # key_map EMPTY — exactly the post-restart state.
+      dataset = "bp_#{scope}_v3"
+      :ok = Indexer.restore_pointer(scope, dataset)
+      Map.put(ctx, :dataset, dataset)
+    end
+
+    test "probe returns an existing doc with the SAME _id → UPDATE", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+      # The engine already holds a record under this key carrying _id "p1".
+      FakeClient.set_get_json({:ok, [%{"_id" => "p1", "title" => "Old"}]})
+
+      assert :ok =
+               Indexer.upsert_record(scope, %{"_id" => "p1", "title" => "New"}, client: FakeClient)
+
+      key = Indexer.key_for_id("p1")
+
+      # The probe ran with [key]...
+      assert {:get_json, ^dataset, [^key]} =
+               FakeClient.calls(pid) |> Enum.find(&match?({:get_json, _, _}, &1))
+
+      # ...and the write took the UPDATE branch, NOT insert.
+      assert {:update_json, ^dataset, ^key, _rec} =
+               FakeClient.calls(pid) |> Enum.find(&match?({:update_json, _, _, _}, &1))
+
+      refute Enum.any?(FakeClient.calls(pid), &match?({:insert_json, _, _, _}, &1))
+    end
+
+    test "probe returns empty → INSERT", %{pid: pid, scope: scope, dataset: dataset} do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+      FakeClient.set_get_json({:ok, []})
+
+      assert :ok =
+               Indexer.upsert_record(scope, %{"_id" => "p9", "title" => "Brand New"},
+                 client: FakeClient
+               )
+
+      key = Indexer.key_for_id("p9")
+
+      assert {:get_json, ^dataset, [^key]} =
+               FakeClient.calls(pid) |> Enum.find(&match?({:get_json, _, _}, &1))
+
+      assert {:insert_json, ^dataset, ^key, _rec} =
+               FakeClient.calls(pid) |> Enum.find(&match?({:insert_json, _, _, _}, &1))
+
+      refute Enum.any?(FakeClient.calls(pid), &match?({:update_json, _, _, _}, &1))
+
+      # After the insert the key_map now knows {key => "p9"} so a later
+      # upsert of "p9" takes the fast UPDATE path with no probe.
+      assert map_key_for(scope, "p9") == key
+    end
+
+    test "a probe client error is surfaced (worker classifies it)", %{scope: scope} do
+      alias Barkpark.Plugins.Indx.Errors.NetworkError
+      FakeClient.set_get_json({:error, %NetworkError{reason: :econnrefused, endpoint: "x"}})
+
+      assert {:error, %NetworkError{}} =
+               Indexer.upsert_record(scope, %{"_id" => "p1"}, client: FakeClient)
+    end
+
+    test "an _id ALREADY in the key_map skips the probe (fast UPDATE path)", %{
+      pid: pid,
+      scope: scope,
+      dataset: dataset
+    } do
+      FakeClient.set_status(%{"reIndexRequired" => false, "status" => "ready"})
+      # Seed the map for "p1" via a first insert (probe empty → insert).
+      FakeClient.set_get_json({:ok, []})
+      assert :ok = Indexer.upsert_record(scope, %{"_id" => "p1"}, client: FakeClient)
+
+      # A second upsert of "p1" must NOT probe again — it's in the map now.
+      key = Indexer.key_for_id("p1")
+      assert :ok = Indexer.upsert_record(scope, %{"_id" => "p1", "title" => "v2"}, client: FakeClient)
+
+      probes =
+        FakeClient.calls(pid) |> Enum.filter(&match?({:get_json, ^dataset, _}, &1))
+
+      # Exactly one probe — the first insert. The second upsert hit the fast path.
+      assert length(probes) == 1
+
+      updates =
+        FakeClient.calls(pid) |> Enum.filter(&match?({:update_json, ^dataset, ^key, _}, &1))
+
+      assert length(updates) == 1
+    end
+  end
+
+  describe "restore_pointer/2" do
+    test "seats the live pointer with an EMPTY key_map when none is set", %{scope: scope} do
+      assert Indexer.current_dataset(scope) == nil
+      assert :ok = Indexer.restore_pointer(scope, "bp_#{scope}_v7")
+      assert Indexer.current_dataset(scope) == "bp_#{scope}_v7"
+      assert Indexer.key_map(scope) == %{}
+    end
+
+    test "does NOT clobber a pointer already set by a rebuild (returns :noop)", %{
+      scope: scope
+    } do
+      {:ok, r} =
+        Indexer.rebuild(scope, [%{"_id" => "p1"}], client: FakeClient, poll_interval_ms: 0)
+
+      Indexer.swap(scope, r)
+      live = Indexer.current_dataset(scope)
+
+      assert :noop = Indexer.restore_pointer(scope, "bp_#{scope}_v99")
+      # The live rebuild pointer survives untouched.
+      assert Indexer.current_dataset(scope) == live
     end
   end
 

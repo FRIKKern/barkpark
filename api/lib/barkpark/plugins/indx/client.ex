@@ -11,6 +11,7 @@ defmodule Barkpark.Plugins.Indx.Client do
   ## Verbs
 
       login/1                          (delegates to Auth.token/0)
+      get_user_datasets/1              GET  /api/GetUserDatasets
       create_or_open/2                 PUT  /api/CreateOrOpen/{ds}
       analyze_string/2                 POST /api/AnalyzeString/{ds} (text/plain!)
       set_field_configuration/3        PUT  /api/SetFieldConfiguration/{ds}
@@ -115,6 +116,25 @@ defmodule Barkpark.Plugins.Indx.Client do
   """
   @spec login(keyword()) :: {:ok, String.t()} | {:error, AuthError.t()}
   def login(_opts \\ []), do: Auth.token()
+
+  @doc """
+  List the datasets the authenticated Indx user owns.
+  `GET /api/GetUserDatasets` → a JSON `string[]` of dataset names. Returns
+  `{:ok, [name]}`; an empty/non-list body decodes to `{:ok, []}`.
+
+  Maps non-2xx → `%IndexError{}` through the same `index_request/4`
+  pipeline (401 invalidate-and-retry-once auth handling included) as the
+  other GET lifecycle verbs. Used by `Indx.Recovery` at boot to rediscover
+  the live `<prefix>_<scope>_v<n>` dataset that the `:persistent_term`
+  pointer lost on restart.
+  """
+  @spec get_user_datasets(keyword()) :: {:ok, [String.t()]} | {:error, struct()}
+  def get_user_datasets(opts \\ []) do
+    case index_request(:get, "#{api_base(opts)}/api/GetUserDatasets", nil, opts) do
+      {:ok, resp} -> {:ok, extract_dataset_names(resp.body)}
+      {:error, _} = err -> err
+    end
+  end
 
   # ---------------------------------------------------------------------------
   # Dataset lifecycle
@@ -564,6 +584,16 @@ defmodule Barkpark.Plugins.Indx.Client do
   end
 
   defp decode_doc_element(_), do: nil
+
+  # GetUserDatasets returns a JSON `string[]` of dataset names. Keep only
+  # the binary elements (a lenient engine could wrap them); anything else
+  # decodes to an empty list.
+  defp extract_dataset_names(body) do
+    case decode_json(body) do
+      names when is_list(names) -> Enum.filter(names, &is_binary/1)
+      _ -> []
+    end
+  end
 
   defp parse_count(body) do
     case decode_json(body) do

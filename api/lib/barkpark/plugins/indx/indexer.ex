@@ -202,6 +202,36 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     old
   end
 
+  @doc """
+  Boot-recovery hook: point `scope`'s live query path at `dataset` with an
+  EMPTY key_map, but ONLY when `scope` currently has NO live dataset.
+
+  The `:persistent_term` pointer is wiped on every Barkpark restart, so
+  with `incremental_upsert` ON a restart leaves `current_dataset(scope) ==
+  nil` and upsert has nothing to write to. `Indx.Recovery` rediscovers the
+  live `<prefix>_<scope>_v<n>` dataset from `Client.get_user_datasets/1`
+  and calls this to re-seat the pointer. The key_map is left EMPTY — it is
+  rebuilt lazily on the upsert path (existence-probed via
+  `Client.get_json/3`) and on the next full rebuild.
+
+  Returns `:ok` after seating the pointer, or `:noop` when `scope` already
+  has a live dataset — so a rebuild that ran BEFORE recovery (the common
+  always-on race) is never clobbered.
+  """
+  @spec restore_pointer(String.t(), String.t()) :: :ok | :noop
+  def restore_pointer(scope, dataset) when is_binary(scope) and is_binary(dataset) do
+    case current_dataset(scope) do
+      nil ->
+        table = :persistent_term.get(@pointer_term, %{})
+        table = Map.put(table, scope, %{dataset: dataset, key_map: %{}})
+        :persistent_term.put(@pointer_term, table)
+        :ok
+
+      _live ->
+        :noop
+    end
+  end
+
   @doc "The dataset name the query path should read for `scope`, or nil if none."
   @spec current_dataset(String.t()) :: String.t() | nil
   def current_dataset(scope) when is_binary(scope) do
@@ -348,18 +378,21 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   `key_for_id(_id)` and the original `"_id"` — the SAME per-element shape
   `render_corpus/1` produces) and writes it to `current_dataset(scope)`:
 
-    * INSERT when the `_id` is NOT already in the scope's stored `key_map/1`
-      (a doc the live index has never seen) → `client.insert_json_record/4`.
-    * UPDATE when the `_id` IS already in the stored `key_map/1` (the live
-      index already holds a record under its key) → `client.update_json_record/4`
-      ("replace by key").
+    * UPDATE (fast path) when the `_id` IS already in the scope's stored
+      `key_map/1` (the live index already holds a record under its key) →
+      `client.update_json_record/4` ("replace by key"). No engine round-trip.
+    * Otherwise EXISTENCE-PROBE the engine: `client.get_json/3` for `[key]`
+      → if it returns a non-empty list whose doc carries the SAME `_id`, the
+      record already exists → UPDATE; if it comes back empty → INSERT via
+      `client.insert_json_record/4`.
 
-  The heuristic is the stored `key_map/1` membership: it is the SAME map
-  `swap/2` recorded after the last rebuild (key → _id), so "_id present in
-  the map" is exactly "the live dataset already indexed this _id". On a
-  fresh-after-rebuild doc this is reliable; for a doc that was upserted
-  earlier we keep the map current (see below) so a second upsert of the same
-  _id correctly takes the UPDATE branch.
+  The decision does NOT depend on the key_map being populated. Boot-recovery
+  (`Indx.Recovery` → `restore_pointer/2`) re-seats the live pointer after a
+  restart with an EMPTY key_map, so the map cannot be the sole source of
+  truth: the GetJson probe makes upsert correct even on the FIRST edit after
+  a restart, when `current_dataset(scope)` is set but the map is empty.
+  When the map already knows the `_id` (after a rebuild, or after an earlier
+  upsert kept it current) the probe is skipped.
 
   Operates on `current_dataset(scope)`; with no live dataset it returns the
   same "no live dataset" `%IndexError{}` as `delete_record/3` and NEVER
@@ -406,21 +439,56 @@ defmodule Barkpark.Plugins.Indx.Indexer do
         id = doc_id(doc)
         key = key_for_id(id)
         record = render_record(doc, key, id)
-        existing? = id_in_key_map?(scope, id)
-        do_upsert_record(client, dataset, scope, key, id, record, existing?, client_opts)
+
+        case decide_write(client, dataset, scope, id, key, client_opts) do
+          {:error, _} = err -> err
+          mode -> do_upsert_record(client, dataset, scope, key, id, record, mode, client_opts)
+        end
     end
   end
 
-  # INSERT (new _id) vs UPDATE (_id already in the stored key_map). On a
-  # clean write, merge {key => _id} into the live pointer's key_map and read
-  # status: reindex-required surfaces, otherwise :ok. A client error is
-  # surfaced unchanged.
-  defp do_upsert_record(client, dataset, scope, key, id, record, existing?, client_opts) do
+  # Decide INSERT vs UPDATE WITHOUT depending on the key_map being
+  # populated — boot-recovery seats the live pointer with an EMPTY key_map,
+  # so right after a restart the map can't be the sole source of truth.
+  #
+  #   * FAST PATH: `id` already in the stored key_map → :update (no probe).
+  #   * ELSE existence-PROBE the engine: GetJson([key]) → if it returns a
+  #     non-empty list whose doc carries the SAME `_id`, the record already
+  #     exists under this key → :update; otherwise → :insert.
+  #
+  # A probe client error is surfaced unchanged so the worker classifies it
+  # (snooze / backoff) rather than guessing a write mode.
+  defp decide_write(client, dataset, scope, id, key, client_opts) do
+    if id_in_key_map?(scope, id) do
+      :update
+    else
+      case client.get_json(dataset, [key], client_opts) do
+        {:ok, docs} -> if doc_with_id?(docs, id), do: :update, else: :insert
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  # True when the hydrated GetJson docs include one whose embedded `_id`
+  # equals the target — i.e. the live dataset already holds this record.
+  defp doc_with_id?(docs, id) when is_list(docs) do
+    Enum.any?(docs, fn
+      %{} = doc -> doc_id(doc) == id
+      _ -> false
+    end)
+  end
+
+  defp doc_with_id?(_docs, _id), do: false
+
+  # INSERT (new _id) vs UPDATE (record already present). On a clean write,
+  # merge {key => _id} into the live pointer's key_map and read status:
+  # reindex-required surfaces, otherwise :ok. A client error is surfaced
+  # unchanged.
+  defp do_upsert_record(client, dataset, scope, key, id, record, mode, client_opts) do
     write =
-      if existing? do
-        client.update_json_record(dataset, key, record, client_opts)
-      else
-        client.insert_json_record(dataset, key, record, client_opts)
+      case mode do
+        :update -> client.update_json_record(dataset, key, record, client_opts)
+        :insert -> client.insert_json_record(dataset, key, record, client_opts)
       end
 
     with :ok <- write,
@@ -437,7 +505,8 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   end
 
   # Is `id` already known to the scope's stored key_map (key => _id)? True ⇒
-  # the live dataset already holds a record under this _id ⇒ UPDATE branch.
+  # the live dataset already holds a record under this _id ⇒ UPDATE branch
+  # (the fast path that skips the GetJson existence probe).
   defp id_in_key_map?(scope, id) do
     scope
     |> key_map()

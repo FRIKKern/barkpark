@@ -236,10 +236,17 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
                run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => ["post"]})
     end
 
-    test "no-live-dataset is PERMANENT → {:cancel, :no_live_dataset}" do
+    test "no-live-dataset falls back to a full REBUILD (post-restart self-heal), not cancel", %{
+      pid: pid
+    } do
       alias Barkpark.Plugins.Indx.Errors.IndexError
       FakeContent.set_doc("p1", {:ok, %{"_id" => "p1", "_type" => "post"}})
 
+      # The exact error shape upsert_record/3 returns when boot-recovery
+      # hadn't seated the live pointer yet (Indx down at boot / first edit
+      # before recovery ran). For UPSERT — unlike DELETE — this must REBUILD
+      # the scope, establishing the pointer + key_map + corpus, so the index
+      # self-heals on the first edit after a restart.
       FakeIndexer.set_upsert(
         {:error,
          %IndexError{
@@ -249,8 +256,14 @@ defmodule Barkpark.Plugins.Indx.IndexerWorkerTest do
          }}
       )
 
-      assert {:cancel, :no_live_dataset} =
+      assert :ok =
                run(%{"op" => "upsert", "scope" => "production", "_id" => "p1", "types" => ["post"]})
+
+      calls = FakeIndexer.calls(pid)
+      assert Enum.any?(calls, &match?({:upsert_record, "production", _}, &1))
+      # The fallback ran the blue/green rebuild + swap for the scope — NOT a cancel.
+      assert Enum.any?(calls, &match?({:rebuild, "production", _}, &1))
+      assert {:swap, "production"} in calls
     end
 
     test "missing _id cancels" do

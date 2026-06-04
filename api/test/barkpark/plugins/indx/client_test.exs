@@ -54,6 +54,31 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
     end)
   end
 
+  test "get_user_datasets GETs /api/GetUserDatasets and returns the string array", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
+
+    Bypass.expect_once(bypass, "GET", "/api/GetUserDatasets", fn conn ->
+      assert ["Bearer " <> @jwt] = Plug.Conn.get_req_header(conn, "authorization")
+      Plug.Conn.resp(conn, 200, Jason.encode!(["bp_production_v1", "bp_production_v2"]))
+    end)
+
+    assert {:ok, ["bp_production_v1", "bp_production_v2"]} =
+             Client.get_user_datasets(base_url: base)
+  end
+
+  test "get_user_datasets maps a 500 to IndexError", %{bypass: bypass, base: base} do
+    stub_login(bypass)
+
+    Bypass.expect(bypass, "GET", "/api/GetUserDatasets", fn conn ->
+      Plug.Conn.resp(conn, 500, "boom")
+    end)
+
+    assert {:error, %IndexError{status: 500}} = Client.get_user_datasets(base_url: base)
+  end
+
   test "create_or_open hits PUT /api/CreateOrOpen/{ds} with bearer", %{bypass: bypass, base: base} do
     stub_login(bypass)
 

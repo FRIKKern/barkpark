@@ -56,9 +56,13 @@ defmodule Barkpark.Plugins.Indx do
   @doc """
   Plugin-contributed supervision children.
 
-  Returns the lazy JWT cache (`Indx.Auth`). Folded into the host
-  supervision tree by `Barkpark.Plugins.Registry.collect_workers/1` during
-  `Barkpark.Application.start/2`.
+  Returns the lazy JWT cache (`Indx.Auth`) and the boot-time live-pointer
+  recovery GenServer (`Indx.Recovery`). Folded into the host supervision
+  tree by `Barkpark.Plugins.Registry.collect_workers/1` during
+  `Barkpark.Application.start/2`. `Indx.Recovery` self-heals the per-scope
+  `:persistent_term` live pointer (wiped on every restart) so
+  `incremental_upsert` works always-on — it recovers asynchronously off the
+  boot path and never crashes the tree (see `Barkpark.Plugins.Indx.Recovery`).
 
   As a side effect this also (idempotently) registers the `"indx"` engine
   in `config :barkpark, :search_retrievers` so the seam resolves the
@@ -70,7 +74,7 @@ defmodule Barkpark.Plugins.Indx do
   @impl Barkpark.Plugin
   def register_workers(_ctx) do
     ensure_engine_registered()
-    [Barkpark.Plugins.Indx.Auth]
+    [Barkpark.Plugins.Indx.Auth, Barkpark.Plugins.Indx.Recovery]
   end
 
   @doc """

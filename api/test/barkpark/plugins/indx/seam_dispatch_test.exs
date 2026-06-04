@@ -39,6 +39,11 @@ defmodule Barkpark.Plugins.Indx.SeamDispatchTest do
     children = Barkpark.Plugins.Indx.register_workers(%{})
 
     assert Barkpark.Plugins.Indx.Auth in children
+    # The boot-time live-pointer recovery GenServer is contributed by the
+    # SAME register_workers/1 — so it only wires up when the plugin is
+    # enabled (the fresh-install invariant: with :plugins=[] nothing here
+    # registers, including Recovery).
+    assert Barkpark.Plugins.Indx.Recovery in children
     assert Retrievers.resolve(%{"engine" => "indx"}) == Barkpark.Plugins.Indx.Retriever
   end
 
