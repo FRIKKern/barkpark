@@ -13,10 +13,14 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     2. `create_or_open` the fresh dataset.
     3. `analyze_string` the FULL corpus (text/plain body) to populate the
        dataset's `DocumentFields` — this MUST precede step 4. Without it
-       `set_searchable_fields` 400s ("SetSearchableFields invalid status")
-       because `DocumentFields == null`. `LoadString` does NOT populate
-       `DocumentFields`; only `AnalyzeString` does.
-    4. `set_searchable_fields` with the configured weights.
+       `set_field_configuration` 400s ("non existing fieldname") because
+       the configured names do not exist yet. `LoadString` does NOT
+       populate `DocumentFields`; only `AnalyzeString` does.
+    4. `set_field_configuration` with the FieldProxy maps built from the
+       configured weights (`field_proxies/1`). NOTE: the deprecated
+       `set_searchable_fields` Set*Fields path leaves v5 storing EMPTY
+       documents (`LoadString` 200s but `GetJson` returns "") — the spike
+       2026-06-03 confirmed `SetFieldConfiguration` is the working v5 path.
     5. `load_string` the FULL corpus as one JSON array (text/plain body).
     6. `index_dataset`, then poll `get_status` until ready.
     7. Verify `get_number_of_json_records` equals the corpus size.
@@ -157,11 +161,12 @@ defmodule Barkpark.Plugins.Indx.Indexer do
 
     {records, key_map} = render_corpus(docs)
     weights = Keyword.get(opts, :weights, default_weights(settings))
+    field_proxies = field_proxies(weights)
     client_opts = client_opts(opts)
 
     with :ok <- client.create_or_open(new_dataset, client_opts),
          :ok <- client.analyze_string(new_dataset, records, client_opts),
-         :ok <- client.set_searchable_fields(new_dataset, weights, client_opts),
+         :ok <- client.set_field_configuration(new_dataset, field_proxies, client_opts),
          :ok <- client.load_string(new_dataset, records, client_opts),
          :ok <- client.index_dataset(new_dataset, client_opts),
          :ok <- poll_ready(client, new_dataset, client_opts, opts),
@@ -602,6 +607,31 @@ defmodule Barkpark.Plugins.Indx.Indexer do
       {"title", settings.weight_high},
       {"_id", settings.weight_low}
     ]
+  end
+
+  # Map the `[{field, weight}]` weights list to v5 FieldProxy maps for
+  # `set_field_configuration/3`. Each configured field is searchable with
+  # word-level indexing (`wordIndexing: true` is REQUIRED for word-level
+  # title search — confirmed by the 2026-06-03 spike) and carries the
+  # field's weight plus the engine's default BM25 knobs.
+  defp field_proxies(weights) do
+    Enum.map(weights, fn {field, weight} ->
+      %{
+        "fieldName" => to_string(field),
+        "fieldType" => "String",
+        "isArray" => false,
+        "searchable" => true,
+        "filterable" => false,
+        "facetable" => false,
+        "sortable" => false,
+        "wordIndexing" => true,
+        "embeddable" => false,
+        "preloadFilters" => false,
+        "weight" => weight,
+        "bM25b" => 0.75,
+        "bM25k1" => 1.2
+      }
+    end)
   end
 
   defp poll_ready(client, dataset, client_opts, opts) do

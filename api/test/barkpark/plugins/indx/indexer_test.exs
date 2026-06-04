@@ -35,7 +35,9 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
 
     def create_or_open(ds, _opts), do: record({:create_or_open, ds}) && :ok
     def analyze_string(ds, records, _opts), do: record({:analyze, ds, records}) && :ok
-    def set_searchable_fields(ds, fields, _opts), do: record({:set_fields, ds, fields}) && :ok
+
+    def set_field_configuration(ds, fields, _opts),
+      do: record({:set_field_config, ds, fields}) && :ok
 
     def load_string(ds, records, _opts) do
       record({:load_string, ds, records})
@@ -117,16 +119,25 @@ defmodule Barkpark.Plugins.Indx.IndexerTest do
     calls = FakeClient.calls(pid)
     new = result.new_dataset
 
-    # Order: create_or_open → analyze → set_fields → load_string → index →
-    # status → count. AnalyzeString MUST precede SetSearchableFields — it is
-    # what populates DocumentFields; SetSearchableFields 400s without it.
+    # Order: create_or_open → analyze → set_field_config → load_string →
+    # index → status → count. AnalyzeString MUST precede
+    # SetFieldConfiguration — it is what populates DocumentFields, and the
+    # v5 rebuild uses SetFieldConfiguration (the deprecated Set*Fields path
+    # stores EMPTY docs on v5).
     assert [
              {:create_or_open, ^new},
              {:analyze, ^new, analyzed},
-             {:set_fields, ^new, _},
+             {:set_field_config, ^new, field_proxies},
              {:load_string, ^new, records},
              {:index, ^new} | _rest
            ] = calls
+
+    # The "title" FieldProxy is searchable with word-level indexing at the
+    # configured HIGH weight (Settings default for title).
+    title_proxy = Enum.find(field_proxies, &(&1["fieldName"] == "title"))
+    assert title_proxy["searchable"] == true
+    assert title_proxy["wordIndexing"] == true
+    assert title_proxy["weight"] == Barkpark.Plugins.Indx.Settings.get().weight_high
 
     # Analyze receives the SAME rendered corpus that load_string does.
     assert analyzed == records

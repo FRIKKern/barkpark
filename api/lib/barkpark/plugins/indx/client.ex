@@ -13,7 +13,8 @@ defmodule Barkpark.Plugins.Indx.Client do
       login/1                          (delegates to Auth.token/0)
       create_or_open/2                 PUT  /api/CreateOrOpen/{ds}
       analyze_string/2                 POST /api/AnalyzeString/{ds} (text/plain!)
-      set_searchable_fields/3          PUT  /api/SetSearchableFields/{ds}
+      set_field_configuration/3        PUT  /api/SetFieldConfiguration/{ds}
+      set_searchable_fields/3          PUT  /api/SetSearchableFields/{ds} (v4, DEPRECATED)
       load_string/3                    PUT  /api/LoadString/{ds}     (text/plain!)
       index_dataset/2                  GET  /api/IndexDataSet/{ds}
       get_status/2                     GET  /api/GetStatus/{ds}
@@ -33,13 +34,33 @@ defmodule Barkpark.Plugins.Indx.Client do
   The `/api` path segment is appended by this module, NOT stored in the
   base URL.
 
-  ## SetSearchableFields weights
+  ## SetFieldConfiguration (v5) — the rebuild's field setup
+
+  v5 configures searchable fields via `PUT /api/SetFieldConfiguration/{ds}`
+  with an `application/json` body that is a JSON array of FieldProxy
+  objects (`%{"fieldName" => ..., "fieldType" => "String"|"Number",
+  "searchable" => bool, "wordIndexing" => bool, "weight" => 0..2, ...}`).
+  The caller builds the FieldProxy maps; this verb just `Jason.encode!`s
+  the list. Configured field names MUST exist post-`AnalyzeString` or the
+  engine 400s "non existing fieldname".
+
+  CRITICAL (spike 2026-06-03, live v5-alpha): on v5 the DEPRECATED
+  `SetSearchableFields` between `AnalyzeString` and `LoadString` leaves the
+  engine in a state where `LoadString` returns 200 but STORES EMPTY
+  DOCUMENTS (`GetJson` returns ""). `SetFieldConfiguration` is the fix —
+  with it, `GetJson` returns real content and title-word search matches.
+  The rebuild therefore calls `set_field_configuration/3`, NOT
+  `set_searchable_fields/3`.
+
+  ## SetSearchableFields weights (v4, DEPRECATED — no longer used by the rebuild)
 
   Body is a camelCase ValueTuple array
   `[{"item1": "<field>", "item2": <weight>}]` where weight is 0=High,
   1=Med, 2=Low. Weights MUST be 0..2 — a weight of 3 yields a 500
   IndexOutOfRange on the engine. Callers pass `{field, weight}` tuples;
-  `Settings` already clamps the weight defaults to the valid band.
+  `Settings` already clamps the weight defaults to the valid band. KEPT
+  for v4 compatibility but the v5 rebuild path uses
+  `set_field_configuration/3` instead (see above).
 
   ## AnalyzeString + LoadString (+ v5 insert/update) are text/plain
 
@@ -49,17 +70,19 @@ defmodule Barkpark.Plugins.Indx.Client do
   of these `[FromBody] string jsonData` and relies on the
   `TextPlainInputFormatter` to read the raw JSON-string body. The spike
   confirmed `application/json` is rejected on this body shape. Every OTHER
-  `application/json` POST/PUT (`set_searchable_fields`, `search`,
-  `get_json`, `update_field/5`) MUST carry a
-  `content-type: application/json` header or Indx answers 415.
+  `application/json` POST/PUT (`set_field_configuration`,
+  `set_searchable_fields`, `search`, `get_json`, `update_field/5`) MUST
+  carry a `content-type: application/json` header or Indx answers 415.
 
-  ## AnalyzeString MUST precede SetSearchableFields
+  ## AnalyzeString MUST precede SetFieldConfiguration
 
-  `SetSearchableFields` 400s with "SetSearchableFields invalid status"
-  while `DocumentFields == null`, and `DocumentFields` is populated by
-  `AnalyzeString` (`DocumentFields.Analyze` → `SetDocumentFieldsInternal`),
-  NOT by `LoadString`. The indexer therefore calls `analyze_string` before
-  `set_searchable_fields` — see `Barkpark.Plugins.Indx.Indexer`.
+  Field configuration needs the dataset's `DocumentFields` populated —
+  configured names that do not exist post-`AnalyzeString` 400 ("non
+  existing fieldname"). `DocumentFields` is populated by `AnalyzeString`
+  (`DocumentFields.Analyze` → `SetDocumentFieldsInternal`), NOT by
+  `LoadString`. The indexer therefore calls `analyze_string` before
+  `set_field_configuration` — see `Barkpark.Plugins.Indx.Indexer`. (The
+  deprecated `set_searchable_fields` had the same ordering requirement.)
 
   ## NEVER re-load a live dataset
 
@@ -136,7 +159,37 @@ defmodule Barkpark.Plugins.Indx.Client do
   end
 
   @doc """
-  Declare searchable fields with weights.
+  Configure dataset fields the v5 way.
+  `PUT /api/SetFieldConfiguration/{ds}` body = a JSON array of FieldProxy
+  objects, sent as `application/json`. `fields` is a list of maps ALREADY
+  in FieldProxy shape (the caller builds them — `Indexer.field_proxies/1`);
+  this verb just `Jason.encode!`s the list.
+
+  Each FieldProxy names a field (`"fieldName"`) that MUST exist after
+  `AnalyzeString` (else 400 "non existing fieldname") and carries
+  `"fieldType"`, `"searchable"`, `"wordIndexing"`, `"weight"` (0..2), and
+  the BM25 knobs. Use this — NOT `set_searchable_fields/3` — for the v5
+  rebuild: the deprecated path stores EMPTY documents on v5 (see moduledoc).
+  """
+  @spec set_field_configuration(String.t(), [map()], keyword()) ::
+          :ok | {:error, struct()}
+  def set_field_configuration(dataset, fields, opts \\ [])
+      when is_binary(dataset) and is_list(fields) do
+    json = Jason.encode!(fields)
+
+    case index_request(:put, path("SetFieldConfiguration", dataset, opts), json, opts,
+           content_type: "application/json"
+         ) do
+      {:ok, _resp} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Declare searchable fields with weights. DEPRECATED on v5 — calling this
+  between `AnalyzeString` and `LoadString` leaves the engine storing EMPTY
+  documents. Use `set_field_configuration/3` instead. Kept for v4.
+
   `PUT /api/SetSearchableFields/{ds}` body = camelCase ValueTuple array
   `[{"item1": field, "item2": weight}]` (weight 0..2). Accepts a list of
   `{field, weight}` tuples. Sent as `application/json`.

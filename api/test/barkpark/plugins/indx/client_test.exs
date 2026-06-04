@@ -81,6 +81,51 @@ defmodule Barkpark.Plugins.Indx.ClientTest do
     assert :ok = Client.analyze_string(@ds, [%{"id" => 1, "_id" => "p1"}], base_url: base)
   end
 
+  test "set_field_configuration PUTs a FieldProxy JSON array as application/json", %{
+    bypass: bypass,
+    base: base
+  } do
+    stub_login(bypass)
+
+    Bypass.expect_once(bypass, "PUT", "/api/SetFieldConfiguration/#{@ds}", fn conn ->
+      assert ["Bearer " <> @jwt] = Plug.Conn.get_req_header(conn, "authorization")
+      assert ["application/json"] = Plug.Conn.get_req_header(conn, "content-type")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert is_list(decoded)
+
+      title = Enum.find(decoded, &(&1["fieldName"] == "title"))
+      assert title["fieldType"] == "String"
+      assert title["searchable"] == true
+      assert title["wordIndexing"] == true
+      assert title["weight"] == 0
+      assert title["bM25b"] == 0.75
+      assert title["bM25k1"] == 1.2
+
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    proxies = [
+      %{
+        "fieldName" => "title",
+        "fieldType" => "String",
+        "isArray" => false,
+        "searchable" => true,
+        "filterable" => false,
+        "facetable" => false,
+        "sortable" => false,
+        "wordIndexing" => true,
+        "embeddable" => false,
+        "preloadFilters" => false,
+        "weight" => 0,
+        "bM25b" => 0.75,
+        "bM25k1" => 1.2
+      }
+    ]
+
+    assert :ok = Client.set_field_configuration(@ds, proxies, base_url: base)
+  end
+
   test "set_searchable_fields sends camelCase ValueTuple array as application/json", %{
     bypass: bypass,
     base: base
