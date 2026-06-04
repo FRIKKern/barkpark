@@ -1,7 +1,7 @@
 {
   "name": "theme",
   "title": "Theme",
-  "icon": "🎨",
+  "icon": "palette",
   "visibility": "private",
   "fields": [
     {

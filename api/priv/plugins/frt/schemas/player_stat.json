@@ -1,7 +1,7 @@
 {
   "name": "playerStat",
   "title": "Player Stat",
-  "icon": "📊",
+  "icon": "settings",
   "visibility": "private",
   "fields": [
     {

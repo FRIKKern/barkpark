@@ -1,7 +1,7 @@
 {
   "name": "runRuleset",
   "title": "Run Ruleset",
-  "icon": "🎲",
+  "icon": "compass",
   "visibility": "private",
   "fields": [
     {

@@ -1,7 +1,7 @@
 {
   "name": "upgradeCard",
   "title": "Upgrade Card",
-  "icon": "🃏",
+  "icon": "layout-list",
   "visibility": "private",
   "fields": [
     {

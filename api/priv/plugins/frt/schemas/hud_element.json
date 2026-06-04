@@ -1,7 +1,7 @@
 {
   "name": "hudElement",
   "title": "HUD Element",
-  "icon": "📊",
+  "icon": "panel-right-open",
   "visibility": "private",
   "fields": [
     {

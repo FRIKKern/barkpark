@@ -1,7 +1,7 @@
 {
   "name": "bossType",
   "title": "Boss Type",
-  "icon": "👑",
+  "icon": "user",
   "visibility": "private",
   "fields": [
     {

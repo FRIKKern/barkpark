@@ -1,7 +1,7 @@
 {
   "name": "pickup",
   "title": "Pickup",
-  "icon": "💎",
+  "icon": "download",
   "visibility": "private",
   "fields": [
     {

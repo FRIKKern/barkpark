@@ -1,7 +1,7 @@
 {
   "name": "spreeTier",
   "title": "Spree Tier",
-  "icon": "🔥",
+  "icon": "check-circle",
   "visibility": "private",
   "fields": [
     {

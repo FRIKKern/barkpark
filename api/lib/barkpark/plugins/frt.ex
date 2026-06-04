@@ -153,67 +153,68 @@ defmodule Barkpark.Plugins.Frt do
   @impl Barkpark.Plugin
   def desk_items(dataset) do
     [
-      nested("① Frame & Time", [
-        singleton_link(dataset, "coordinatorLoop", "Coordinator Loop"),
-        singleton_link(dataset, "gameClock", "Game Clock"),
-        doc_list("timeState", "Time States")
+      nested("① Frame & Time", "history", [
+        singleton_link(dataset, "coordinatorLoop", "Coordinator Loop", "refresh-cw"),
+        singleton_link(dataset, "gameClock", "Game Clock", "history"),
+        doc_list("timeState", "Time States", "moon")
       ]),
-      nested("② Player", [
-        singleton_link(dataset, "player", "Player"),
-        doc_list("ability", "Abilities"),
-        doc_list("cameraPreset", "Camera Presets")
+      nested("② Player", "user", [
+        singleton_link(dataset, "player", "Player", "user"),
+        doc_list("ability", "Abilities", "activity"),
+        doc_list("cameraPreset", "Camera Presets", "eye")
       ]),
-      nested("③ Combat", [
-        singleton_link(dataset, "weapon", "Weapon"),
-        doc_list("projectileType", "Projectile Types")
+      nested("③ Combat", "send", [
+        singleton_link(dataset, "weapon", "Weapon", "send"),
+        doc_list("projectileType", "Projectile Types", "send")
       ]),
-      nested("④ Enemies", [
-        doc_list("enemyType", "Enemy Types"),
-        doc_list("bossType", "Boss Types"),
-        doc_list("bossAbility", "Boss Abilities")
+      nested("④ Enemies", "users", [
+        doc_list("enemyType", "Enemy Types", "users"),
+        doc_list("bossType", "Boss Types", "user"),
+        doc_list("bossAbility", "Boss Abilities", "activity")
       ]),
-      nested("⑤ The Run", [
-        singleton_link(dataset, "runRuleset", "Run Ruleset"),
-        doc_list("waveTemplate", "Wave Templates"),
-        doc_list("spreeTier", "Spree Tiers"),
-        doc_list("scalingCurve", "Scaling Curves")
+      nested("⑤ The Run", "compass", [
+        singleton_link(dataset, "runRuleset", "Run Ruleset", "compass"),
+        doc_list("waveTemplate", "Wave Templates", "layout-list"),
+        doc_list("spreeTier", "Spree Tiers", "check-circle"),
+        doc_list("scalingCurve", "Scaling Curves", "git-compare")
       ]),
-      nested("⑥ Progression", [
-        doc_list("playerStat", "Player Stats"),
-        doc_list("upgradeCard", "Upgrade Cards"),
-        doc_list("rune", "Runes"),
-        doc_list("pickup", "Pickups")
+      nested("⑥ Progression", "activity", [
+        doc_list("playerStat", "Player Stats", "settings"),
+        doc_list("upgradeCard", "Upgrade Cards", "layout-list"),
+        doc_list("rune", "Runes", "package"),
+        doc_list("pickup", "Pickups", "download")
       ]),
-      nested("⑦ Game Feel", [
-        doc_list("sound", "Sounds"),
-        doc_list("vfx", "VFX"),
-        doc_list("hudElement", "HUD Elements"),
-        doc_list("overlay", "Overlays")
+      nested("⑦ Game Feel", "palette", [
+        doc_list("sound", "Sounds", "megaphone"),
+        doc_list("vfx", "VFX", "image"),
+        doc_list("hudElement", "HUD Elements", "panel-right-open"),
+        doc_list("overlay", "Overlays", "eye")
       ]),
-      nested("⑧ World", [
-        singleton_link(dataset, "arena", "Arena"),
-        singleton_link(dataset, "theme", "Theme")
+      nested("⑧ World", "home", [
+        singleton_link(dataset, "arena", "Arena", "home"),
+        singleton_link(dataset, "theme", "Theme", "palette")
       ])
     ]
   end
 
   # ── desk_item builders ───────────────────────────────────────────────────
 
-  defp nested(label, items) do
-    %{type: :nested, label: label, items: items}
+  defp nested(label, icon, items) do
+    %{type: :nested, label: label, icon: icon, items: items}
   end
 
   # A collection: opens the host's regular doc-list pane for the type.
-  defp doc_list(type_name, label) do
-    %{type: :document_list, label: label, doc_type: type_name}
+  defp doc_list(type_name, label, icon) do
+    %{type: :document_list, label: label, doc_type: type_name, icon: icon}
   end
 
   # A singleton: a link straight to the single canonical document. The host
   # PaneBuilder opens `/studio/<dataset>/<typeName>` in the editor pane.
-  defp singleton_link(dataset, type_name, label) do
+  defp singleton_link(dataset, type_name, label, icon) do
     %{
       type: :link,
       label: label,
+      icon: icon,
       path: "/studio/" <> dataset <> "/" <> type_name
     }
   end

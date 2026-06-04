@@ -1,7 +1,7 @@
 {
   "name": "enemyType",
   "title": "Enemy Type",
-  "icon": "👾",
+  "icon": "users",
   "visibility": "private",
   "fields": [
     {

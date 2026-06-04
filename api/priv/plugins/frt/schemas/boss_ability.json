@@ -1,7 +1,7 @@
 {
   "name": "bossAbility",
   "title": "Boss Ability",
-  "icon": "💥",
+  "icon": "activity",
   "visibility": "private",
   "fields": [
     {

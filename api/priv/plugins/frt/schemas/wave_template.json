@@ -1,7 +1,7 @@
 {
   "name": "waveTemplate",
   "title": "Wave Template",
-  "icon": "🌊",
+  "icon": "layout-list",
   "visibility": "private",
   "fields": [
     {

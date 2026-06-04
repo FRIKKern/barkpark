@@ -1,7 +1,7 @@
 {
   "name": "sound",
   "title": "Sound (SFX)",
-  "icon": "🔊",
+  "icon": "megaphone",
   "visibility": "private",
   "fields": [
     {

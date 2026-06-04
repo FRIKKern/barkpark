@@ -1,7 +1,7 @@
 {
   "name": "cameraPreset",
   "title": "Camera Preset",
-  "icon": "🎥",
+  "icon": "eye",
   "visibility": "private",
   "fields": [
     {

@@ -1,7 +1,7 @@
 {
   "name": "coordinatorLoop",
   "title": "Coordinator Loop (per-frame tick order)",
-  "icon": "🔄",
+  "icon": "refresh-cw",
   "visibility": "private",
   "fields": [
     {

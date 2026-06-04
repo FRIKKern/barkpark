@@ -1,7 +1,7 @@
 {
   "name": "overlay",
   "title": "Overlay",
-  "icon": "🖥️",
+  "icon": "eye",
   "visibility": "private",
   "fields": [
     {

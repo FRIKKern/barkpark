@@ -1,7 +1,7 @@
 {
   "name": "rune",
   "title": "Rune",
-  "icon": "🔮",
+  "icon": "package",
   "visibility": "private",
   "fields": [
     {

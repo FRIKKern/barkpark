@@ -1,7 +1,7 @@
 {
   "name": "ability",
   "title": "Ability",
-  "icon": "⚡",
+  "icon": "activity",
   "visibility": "private",
   "fields": [
     {

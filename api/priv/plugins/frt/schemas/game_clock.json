@@ -1,7 +1,7 @@
 {
   "name": "gameClock",
   "title": "Game Clock (time channels + tuning)",
-  "icon": "⏱️",
+  "icon": "history",
   "visibility": "private",
   "fields": [
     {
