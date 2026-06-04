@@ -351,6 +351,29 @@ defmodule Barkpark.PortableDoc.Render do
     %{"kind" => "_raw", "html" => diagram_html(source, caption, style)}
   end
 
+  # ── asciicast / terminal-recording blocks ──────────────────────────────────
+  # `asciicast` mirrors `diagram` exactly: it emits HTML DIRECTLY (a `_raw`
+  # Pd-node) rather than composing to a PdText tree, because the player mount
+  # point (`<div class="bp-asciicast" data-cast-src="…">`) must reach the DOM
+  # byte-exact so the PaperMermaid hook's `div.bp-asciicast` selector matches at
+  # runtime. The cast URL travels in a `data-` attribute through `safe_url` (so
+  # only allowlisted schemes survive, attribute-escaped).
+  #
+  # Article mode: an inline, playable asciinema-player mount inside a figure.
+  # Email/default mode: NO player runtime — degrade to a plain link, mirroring
+  # how `diagram`'s default clause never triggers the Mermaid engine.
+  def compose_block(%{"type" => "asciicast"} = b, :article) do
+    src = to_string(Map.get(b, "src", ""))
+    caption = to_string(Map.get(b, "caption", ""))
+    %{"kind" => "_raw", "html" => asciicast_html(src, caption, :article)}
+  end
+
+  def compose_block(%{"type" => "asciicast"} = b, style) do
+    src = to_string(Map.get(b, "src", ""))
+    caption = to_string(Map.get(b, "caption", ""))
+    %{"kind" => "_raw", "html" => asciicast_html(src, caption, style)}
+  end
+
   # generic `figure` — wraps a child block + caption. Cheap and clean: compose
   # the child through the normal path, then wrap it in the same figure chrome
   # as `diagram` (caption only, no mermaid). Article mode gets the card; email
@@ -812,6 +835,42 @@ defmodule Barkpark.PortableDoc.Render do
 
     ~s(<figure style="margin:16px 0">) <>
       ~s(<pre style="background:#f3f4f6;padding:12px;font-family:#{@font_mono};font-size:0.9em;overflow:auto;white-space:pre-wrap">#{escape_html(source)}</pre>) <>
+      cap <>
+      "</figure>"
+  end
+
+  # The asciinema terminal-recording figure. Article mode: a bordered mount
+  # point the PaperMermaid hook's `runAsciicast()` upgrades into a live player
+  # at runtime. The cast URL is carried in `data-cast-src` via `safe_url` (scheme
+  # allowlist + attribute escape). The figcaption reuses diagram_html's article
+  # styling. Email / default mode: no player runtime — degrade to a plain link.
+  defp asciicast_html(src, caption, :article) do
+    cap =
+      if caption == "" do
+        ""
+      else
+        ~s(<figcaption style="margin-top:0.8rem;color:#6a6a6a;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+      end
+
+    ~s(<figure style="margin:1.6rem 0">) <>
+      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}" style="border:1px solid #e6e2d8;border-radius:6px;overflow:hidden"></div>) <>
+      cap <>
+      "</figure>"
+  end
+
+  defp asciicast_html(src, caption, _style) do
+    # Email / default: no asciinema runtime, so link to the recording instead of
+    # mounting a player. The `bp-asciicast` mount point is intentionally ABSENT
+    # here — the hook must not be triggered in email contexts.
+    cap =
+      if caption == "" do
+        ""
+      else
+        ~s(<div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">#{figcaption_inner(caption)}</div>)
+      end
+
+    ~s(<figure style="margin:16px 0">) <>
+      ~s(<a href="#{safe_url(src)}">Terminal recording</a>) <>
       cap <>
       "</figure>"
   end
