@@ -1,0 +1,772 @@
+defmodule Barkpark.Plugins.Indx.Indexer do
+  @moduledoc """
+  Blue/green corpus rebuild for the dedicated single-tenant Indx instance.
+
+  ## Why blue/green
+
+  CRITICAL SYNC RULE (spike 2026-06-01): NEVER re-load an existing key onto
+  a live indexed dataset — it HANGS and WEDGES the engine manager. So a
+  sync is never an in-place update. Instead:
+
+    1. Pick a FRESH dataset name `<prefix>_<scope>_v<n>` (n = the next
+       version after the current live one).
+    2. `create_or_open` the fresh dataset.
+    3. `analyze_string` the FULL corpus (text/plain body) to populate the
+       dataset's `DocumentFields` — this MUST precede step 4. Without it
+       `set_field_configuration` 400s ("non existing fieldname") because
+       the configured names do not exist yet. `LoadString` does NOT
+       populate `DocumentFields`; only `AnalyzeString` does.
+    4. `set_field_configuration` with the FieldProxy maps built from the
+       configured weights (`field_proxies/1`). NOTE: the deprecated
+       `set_searchable_fields` Set*Fields path leaves v5 storing EMPTY
+       documents (`LoadString` 200s but `GetJson` returns "") — the spike
+       2026-06-03 confirmed `SetFieldConfiguration` is the working v5 path.
+    5. `load_string` the FULL corpus as one JSON array (text/plain body).
+    6. `index_dataset`, then poll `get_status` until ready.
+    7. Verify `get_number_of_json_records` equals the corpus size.
+    8. Return `{new_dataset, old_dataset}` so the caller can atomically
+       swap the query path (`swap/2`) and then `delete_dataset` the old one.
+
+  The fresh dataset name guarantees step 4 never touches a live dataset.
+
+  ## _id ↔ numeric key map (STABLE — load-bearing for delete)
+
+  Indx's document key field defaults to `"id"` (numeric / long), while
+  Barkpark `_id`s are strings (`"drafts.p1"`). The numeric key is derived
+  DETERMINISTICALLY from the `_id` via `key_for_id/1`, so the same `_id`
+  maps to the same `long` on every rebuild — there is NO per-rebuild
+  position dependency anymore. The render path layers per-corpus collision
+  probing on top, and `swap/2` records the resulting key→`_id` map on the
+  live pointer; `delete_record/3` reads THAT map to find the key a record
+  was actually indexed under (the map is genuinely load-bearing for
+  delete, not merely diagnostic).
+
+  ### Why deterministic, not positional
+
+  The old scheme assigned the key by 1-based position in the corpus list,
+  so the same `_id` got a different key after any insert/delete shifted
+  positions. That made the key useless as a delete target (the C#
+  `DeleteJsonRecord(long id)` needs a STABLE id). `key_for_id/1` removes
+  the position dependency: the bare hash is reproducible from the `_id`
+  alone, and for the common collision-free case it equals the key the
+  rebuild embedded.
+
+  ### Algorithm
+
+    1. `:crypto.hash(:sha256, _id)` → take the first 8 bytes as a big
+       unsigned 64-bit integer, then mask to 63 bits (`&&& 0x7FFF...`) so
+       the value is always a POSITIVE signed int64 — safe for the C#
+       `long` key and never negative. SHA-256 (not `:erlang.phash2`,
+       which is only 32-bit / 2^32 and collides at corpus scale) gives a
+       collision probability that is negligible for realistic corpora
+       (~2^63 space).
+    2. Collisions WITHIN a single corpus are still detected at render
+       time and resolved by DETERMINISTIC linear probing: `key, key+1,
+       key+2, …` (wrapping inside the 63-bit band) until a free slot is
+       found, in a stable iteration order (corpus list order). This keeps
+       the per-corpus key set INJECTIVE (one `_id` ⇒ one key, no two
+       `_id`s share a key) so `documentKey → _id` is unambiguous on the
+       read path.
+
+  ### How delete finds the right key
+
+  Render runs the collision probe, so on a collision the rebuilt key for
+  the *displaced* `_id` differs from its bare `key_for_id/1` (it is
+  `key_for_id/1 + k` for some probe distance `k`). The bare hash would
+  therefore be the WRONG delete target for a displaced `_id`. So
+  `delete_record/3` does NOT use the bare hash by default: it
+  reverse-looks-up the stored `key_map/1` (`%{key => _id}`, recorded by
+  `swap/2`) for EVERY key whose value is the target `_id`, and deletes
+  each — which deletes the exact probed key. The bare `key_for_id/1` is
+  used ONLY as a best-effort fallback when the `_id` is absent from the
+  stored map (no map yet, or a doc that predates map tracking). That
+  fallback can mis-target only under a true cross-`_id` SHA-256 collision
+  WITH the map absent (~2^-63 per colliding pair, AND no map) — with the
+  map present (the normal case) delete is exact. See `delete_record/3`.
+
+  Each rendered document embeds BOTH the numeric `"id"` and the original
+  `"_id"`. The retriever maps an Indx `documentKey` back to `_id` by
+  reading the embedded `_id` off the hydrated `GetJson` doc — so it does
+  not need the stored map on the read path. The key→`_id` map IS retained
+  on the live pointer specifically so the delete path can resolve the
+  exact probed key.
+
+  ## Live pointer
+
+  `pointer/1` / `swap/2` keep a per-scope `:persistent_term` pointer naming
+  the dataset the query path should read. `swap/2` is the atomic flip;
+  `current_dataset/1` is what the retriever reads. Because
+  `:persistent_term.put/2` triggers a global GC, swaps happen at most once
+  per rebuild (not on the hot read path). `upsert_record/3` and
+  `delete_record/3` keep the pointer's key_map current via small
+  read-modify-write merges (`merge_key_map/2`) WITHOUT changing the live
+  dataset name — they never swap.
+
+  ## Purity
+
+  `rebuild/3` takes the client MODULE (default `Barkpark.Plugins.Indx.Client`)
+  and a list of doc maps, so tests inject a fake client. It performs no DB
+  reads itself — the worker lists the corpus and hands it in.
+  """
+
+  require Logger
+  import Bitwise
+
+  alias Barkpark.Plugins.Indx.{Client, Settings}
+
+  @pointer_term {__MODULE__, :live_dataset}
+  @default_poll_attempts 30
+  @default_poll_interval_ms 500
+
+  # 63-bit positive band: the largest signed int64 keeps the key safe for
+  # the C# `long` document key and guarantees it is never negative.
+  @key_mask 0x7FFFFFFFFFFFFFFF
+
+  @typedoc "Result of a successful blue/green rebuild."
+  @type rebuild_result :: %{
+          new_dataset: String.t(),
+          old_dataset: String.t() | nil,
+          count: non_neg_integer(),
+          key_map: %{optional(integer()) => String.t()}
+        }
+
+  @doc """
+  Run a blue/green rebuild of `scope`'s corpus into a fresh dataset.
+
+  `docs` is a list of Barkpark document maps (each must carry an `"_id"`
+  or `:_id`). Renders each to an Indx record with a numeric `"id"` and the
+  embedded `"_id"`, loads the full corpus into `<prefix>_<scope>_v<n>`,
+  indexes, polls, and verifies the record count.
+
+  Returns `{:ok, rebuild_result}` on success — the caller then calls
+  `swap/2` to flip the live pointer and `delete_dataset/2` the old one.
+  Returns `{:error, struct()}` (an Indx error struct) on any failure;
+  NEVER re-loads an existing dataset.
+
+  Options:
+
+    * `:client`              — client module (default `Client`); injected in tests
+    * `:base_url`            — forwarded to every client call (test mock)
+    * `:poll_attempts`       — max status polls (default 30)
+    * `:poll_interval_ms`    — sleep between polls (default 500)
+    * `:weights`             — `[{field, weight}]`; default from `Settings`
+  """
+  @spec rebuild(String.t(), [map()], keyword()) ::
+          {:ok, rebuild_result()} | {:error, struct()}
+  def rebuild(scope, docs, opts \\ []) when is_binary(scope) and is_list(docs) do
+    client = Keyword.get(opts, :client, Client)
+    settings = Settings.get()
+    old_dataset = current_dataset(scope)
+    new_dataset = next_dataset_name(scope, old_dataset, settings.dataset_prefix)
+
+    {records, key_map} = render_corpus(docs)
+    weights = Keyword.get(opts, :weights, default_weights(settings))
+    field_proxies = field_proxies(weights)
+    client_opts = client_opts(opts)
+
+    with :ok <- client.create_or_open(new_dataset, client_opts),
+         :ok <- client.analyze_string(new_dataset, records, client_opts),
+         :ok <- client.set_field_configuration(new_dataset, field_proxies, client_opts),
+         :ok <- client.load_string(new_dataset, records, client_opts),
+         :ok <- client.index_dataset(new_dataset, client_opts),
+         :ok <- poll_ready(client, new_dataset, client_opts, opts),
+         {:ok, count} <- verify_count(client, new_dataset, length(records), client_opts) do
+      {:ok,
+       %{
+         new_dataset: new_dataset,
+         old_dataset: old_dataset,
+         count: count,
+         key_map: key_map
+       }}
+    end
+  end
+
+  @doc """
+  Atomically flip the live query-path dataset for `scope` to
+  `result.new_dataset` and record the key map. Returns the previous live
+  dataset name (or nil). Does NOT delete the old dataset — the caller does
+  that after the swap so the read path never points at a deleted dataset.
+  """
+  @spec swap(String.t(), rebuild_result()) :: String.t() | nil
+  def swap(scope, %{new_dataset: new_dataset} = result) when is_binary(scope) do
+    table = :persistent_term.get(@pointer_term, %{})
+    old = get_in(table, [scope, :dataset])
+
+    table =
+      Map.put(table, scope, %{
+        dataset: new_dataset,
+        key_map: Map.get(result, :key_map, %{})
+      })
+
+    :persistent_term.put(@pointer_term, table)
+    old
+  end
+
+  @doc """
+  Boot-recovery hook: point `scope`'s live query path at `dataset` with an
+  EMPTY key_map, but ONLY when `scope` currently has NO live dataset.
+
+  The `:persistent_term` pointer is wiped on every Barkpark restart, so
+  with `incremental_upsert` ON a restart leaves `current_dataset(scope) ==
+  nil` and upsert has nothing to write to. `Indx.Recovery` rediscovers the
+  live `<prefix>_<scope>_v<n>` dataset from `Client.get_user_datasets/1`
+  and calls this to re-seat the pointer. The key_map is left EMPTY — it is
+  rebuilt lazily on the upsert path (existence-probed via
+  `Client.get_json/3`) and on the next full rebuild.
+
+  Returns `:ok` after seating the pointer, or `:noop` when `scope` already
+  has a live dataset — so a rebuild that ran BEFORE recovery (the common
+  always-on race) is never clobbered.
+  """
+  @spec restore_pointer(String.t(), String.t()) :: :ok | :noop
+  def restore_pointer(scope, dataset) when is_binary(scope) and is_binary(dataset) do
+    case current_dataset(scope) do
+      nil ->
+        table = :persistent_term.get(@pointer_term, %{})
+        table = Map.put(table, scope, %{dataset: dataset, key_map: %{}})
+        :persistent_term.put(@pointer_term, table)
+        :ok
+
+      _live ->
+        :noop
+    end
+  end
+
+  @doc "The dataset name the query path should read for `scope`, or nil if none."
+  @spec current_dataset(String.t()) :: String.t() | nil
+  def current_dataset(scope) when is_binary(scope) do
+    :persistent_term.get(@pointer_term, %{})
+    |> get_in([scope, :dataset])
+  end
+
+  @doc "The stored key→_id map for `scope` (diagnostics; read path uses embedded _id)."
+  @spec key_map(String.t()) :: %{optional(integer()) => String.t()}
+  def key_map(scope) when is_binary(scope) do
+    :persistent_term.get(@pointer_term, %{})
+    |> get_in([scope, :key_map]) || %{}
+  end
+
+  @doc """
+  Delete a dataset via the client. Thin wrapper so the worker can drop the
+  old dataset after a successful `swap/2`. Tolerant: logs (does not raise)
+  on failure, returning the client result.
+  """
+  @spec delete_dataset(String.t() | nil, keyword()) :: :ok | {:error, struct()}
+  def delete_dataset(nil, _opts), do: :ok
+
+  def delete_dataset(dataset, opts) when is_binary(dataset) do
+    client = Keyword.get(opts, :client, Client)
+
+    case client.delete_dataset(dataset, client_opts(opts)) do
+      :ok ->
+        :ok
+
+      {:error, err} = result ->
+        Logger.warning("Indx.Indexer: failed to delete old dataset #{dataset}: #{inspect(err)}")
+        result
+    end
+  end
+
+  @doc """
+  Delete a single document from the CURRENT live dataset by its `_id`,
+  without a full rebuild.
+
+  Resolves the numeric delete target from the stored `key_map/1` for the
+  scope — the SAME map `swap/2` recorded after the last rebuild, which
+  reflects any in-corpus collision probing (`render_corpus/1`). Every key
+  whose value equals `id` is deleted via `client.delete_json_record/3`
+  (normally exactly one; more only under a pathological multi-key map).
+  Reading from the stored map is what makes a PROBE-DISPLACED `_id` (one
+  whose final key is `key_for_id(_id) + k`, not the bare hash) delete the
+  CORRECT key. When `id` is ABSENT from the stored map (no map yet, or a
+  doc indexed before the map was tracked) it falls back to the single bare
+  `key_for_id(id)` — best-effort. After the delete(s) it reads
+  `get_status/2` and inspects the engine's `ReIndexRequired` flag:
+
+    * `:ok` — the record(s) were deleted and no reindex is needed.
+    * `{:reindex_required, status}` — a delete landed but the engine
+      reports it must reindex before the change is query-visible (if more
+      than one key was deleted, this trips when ANY of them does); the
+      worker falls back to a full blue/green rebuild.
+    * `{:error, struct()}` — a client call failed (the FIRST hard error is
+      surfaced), OR there is no current live dataset for `scope` (nothing
+      to delete from).
+
+  ## Fallback caveat (honest)
+
+  The no-map fallback deletes `key_for_id(id)` directly. If the live
+  corpus had a true cross-`_id` SHA-256 collision AND the stored map is
+  absent, the bare key could belong to the OTHER colliding `_id` (the one
+  that won the natural slot) — so the fallback could mis-target. That is
+  the only mis-target path and it requires both a 63-bit hash collision
+  (~2^-63 per pair) AND a missing map; with the map present (the normal
+  case) the resolution is exact.
+
+  Does NOT swap the live pointer — a delete mutates the live dataset in
+  place (the one exception to "never touch a live dataset"; this is a
+  TARGETED single-key DELETE, not a re-LOAD of an existing key, which is
+  the operation the 2026-06-01 spike proved wedges the engine).
+
+  Options mirror `rebuild/3`: `:client` (default `Client`), `:base_url`,
+  `:timeout`.
+  """
+  @spec delete_record(String.t(), String.t(), keyword()) ::
+          :ok | {:reindex_required, term()} | {:error, struct()}
+  def delete_record(scope, id, opts \\ []) when is_binary(scope) and is_binary(id) do
+    client = Keyword.get(opts, :client, Client)
+    dataset = current_dataset(scope)
+    client_opts = client_opts(opts)
+
+    cond do
+      is_nil(dataset) ->
+        {:error,
+         %Barkpark.Plugins.Indx.Errors.IndexError{
+           status: 0,
+           endpoint: nil,
+           message: "Indx.Indexer: no live dataset for scope #{scope} — nothing to delete"
+         }}
+
+      true ->
+        keys = delete_target_keys(scope, id)
+        do_delete_record(client, dataset, keys, client_opts)
+    end
+  end
+
+  # Resolve the numeric key(s) the `_id` was ACTUALLY indexed under by
+  # reverse-looking-up the stored key_map (key => _id). Returns every key
+  # mapping to `id` (normally one). When `id` is absent from the map, fall
+  # back to the bare `key_for_id(id)` (best-effort single delete — see the
+  # `delete_record/3` fallback caveat).
+  defp delete_target_keys(scope, id) do
+    mapped =
+      scope
+      |> key_map()
+      |> Enum.filter(fn {_key, mapped_id} -> mapped_id == id end)
+      |> Enum.map(fn {key, _id} -> key end)
+
+    case mapped do
+      [] -> [key_for_id(id)]
+      keys -> keys
+    end
+  end
+
+  # Delete each resolved key, reading status after each. Aggregates:
+  #   * first client {:error, _} wins (returned immediately),
+  #   * {:reindex_required, status} if ANY delete trips the engine flag,
+  #   * :ok only when every delete landed cleanly with no reindex.
+  defp do_delete_record(client, dataset, keys, client_opts) do
+    Enum.reduce_while(keys, :ok, fn key, acc ->
+      with :ok <- client.delete_json_record(dataset, key, client_opts),
+           {:ok, status} <- client.get_status(dataset, client_opts) do
+        if reindex_required?(status) do
+          {:cont, {:reindex_required, status}}
+        else
+          {:cont, acc}
+        end
+      else
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  @doc """
+  Insert-or-update a SINGLE document into the CURRENT live dataset by its
+  `_id`, without a full rebuild. The incremental ADD/UPDATE sibling of
+  `delete_record/3`.
+
+  Renders `doc` to one Indx record (embedding the numeric `"id"` =
+  `key_for_id(_id)` and the original `"_id"` — the SAME per-element shape
+  `render_corpus/1` produces) and writes it to `current_dataset(scope)`:
+
+    * UPDATE (fast path) when the `_id` IS already in the scope's stored
+      `key_map/1` (the live index already holds a record under its key) →
+      `client.update_json_record/4` ("replace by key"). No engine round-trip.
+    * Otherwise EXISTENCE-PROBE the engine: `client.get_json/3` for `[key]`
+      → if it returns a non-empty list whose doc carries the SAME `_id`, the
+      record already exists → UPDATE; if it comes back empty → INSERT via
+      `client.insert_json_record/4`.
+
+  The decision does NOT depend on the key_map being populated. Boot-recovery
+  (`Indx.Recovery` → `restore_pointer/2`) re-seats the live pointer after a
+  restart with an EMPTY key_map, so the map cannot be the sole source of
+  truth: the GetJson probe makes upsert correct even on the FIRST edit after
+  a restart, when `current_dataset(scope)` is set but the map is empty.
+  When the map already knows the `_id` (after a rebuild, or after an earlier
+  upsert kept it current) the probe is skipped.
+
+  Operates on `current_dataset(scope)`; with no live dataset it returns the
+  same "no live dataset" `%IndexError{}` as `delete_record/3` and NEVER
+  swaps the pointer (an upsert mutates the live dataset in place — the same
+  exception to "never touch a live dataset" that the targeted delete is;
+  this is a single-key write, NOT a re-LOAD of an existing key, which is
+  the operation the spike proved wedges the engine).
+
+  After a successful write it merges `{key => _id}` into the scope's stored
+  `key_map` (via `merge_key_map/2`, which does NOT change `swap/2`'s
+  rebuild semantics) so a LATER delete/update of the same `_id` targets the
+  right key. It then reads `get_status/2`:
+
+    * `:ok` — the write landed and no reindex is needed.
+    * `{:reindex_required, status}` — the write landed but the engine
+      reports it must reindex before the change is query-visible; the
+      worker falls back to a full blue/green rebuild.
+    * `{:error, struct()}` — the client write failed, OR there is no live
+      dataset for `scope`.
+
+  CAUTION: like `delete_record/3`, this mutates a LIVE dataset and is
+  UNPROVEN until spiked against a real v5 engine.
+
+  Options mirror `rebuild/3`: `:client` (default `Client`), `:base_url`,
+  `:timeout`.
+  """
+  @spec upsert_record(String.t(), map(), keyword()) ::
+          :ok | {:reindex_required, term()} | {:error, struct()}
+  def upsert_record(scope, doc, opts \\ []) when is_binary(scope) and is_map(doc) do
+    client = Keyword.get(opts, :client, Client)
+    dataset = current_dataset(scope)
+    client_opts = client_opts(opts)
+
+    cond do
+      is_nil(dataset) ->
+        {:error,
+         %Barkpark.Plugins.Indx.Errors.IndexError{
+           status: 0,
+           endpoint: nil,
+           message: "Indx.Indexer: no live dataset for scope #{scope} — nothing to upsert"
+         }}
+
+      true ->
+        id = doc_id(doc)
+        key = key_for_id(id)
+        record = render_record(doc, key, id)
+
+        case decide_write(client, dataset, scope, id, key, client_opts) do
+          {:error, _} = err -> err
+          mode -> do_upsert_record(client, dataset, scope, key, id, record, mode, client_opts)
+        end
+    end
+  end
+
+  # Decide INSERT vs UPDATE WITHOUT depending on the key_map being
+  # populated — boot-recovery seats the live pointer with an EMPTY key_map,
+  # so right after a restart the map can't be the sole source of truth.
+  #
+  #   * FAST PATH: `id` already in the stored key_map → :update (no probe).
+  #   * ELSE existence-PROBE the engine: GetJson([key]) → if it returns a
+  #     non-empty list whose doc carries the SAME `_id`, the record already
+  #     exists under this key → :update; otherwise → :insert.
+  #
+  # A probe client error is surfaced unchanged so the worker classifies it
+  # (snooze / backoff) rather than guessing a write mode.
+  defp decide_write(client, dataset, scope, id, key, client_opts) do
+    if id_in_key_map?(scope, id) do
+      :update
+    else
+      case client.get_json(dataset, [key], client_opts) do
+        {:ok, docs} -> if doc_with_id?(docs, id), do: :update, else: :insert
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  # True when the hydrated GetJson docs include one whose embedded `_id`
+  # equals the target — i.e. the live dataset already holds this record.
+  defp doc_with_id?(docs, id) when is_list(docs) do
+    Enum.any?(docs, fn
+      %{} = doc -> doc_id(doc) == id
+      _ -> false
+    end)
+  end
+
+  defp doc_with_id?(_docs, _id), do: false
+
+  # INSERT (new _id) vs UPDATE (record already present). On a clean write,
+  # merge {key => _id} into the live pointer's key_map and read status:
+  # reindex-required surfaces, otherwise :ok. A client error is surfaced
+  # unchanged.
+  defp do_upsert_record(client, dataset, scope, key, id, record, mode, client_opts) do
+    write =
+      case mode do
+        :update -> client.update_json_record(dataset, key, record, client_opts)
+        :insert -> client.insert_json_record(dataset, key, record, client_opts)
+      end
+
+    with :ok <- write,
+         _ <- merge_key_map(scope, key, id),
+         {:ok, status} <- client.get_status(dataset, client_opts) do
+      if reindex_required?(status) do
+        {:reindex_required, status}
+      else
+        :ok
+      end
+    else
+      {:error, _} = err -> err
+    end
+  end
+
+  # Is `id` already known to the scope's stored key_map (key => _id)? True ⇒
+  # the live dataset already holds a record under this _id ⇒ UPDATE branch
+  # (the fast path that skips the GetJson existence probe).
+  defp id_in_key_map?(scope, id) do
+    scope
+    |> key_map()
+    |> Enum.any?(fn {_key, mapped_id} -> mapped_id == id end)
+  end
+
+  # Add ONE {key => _id} entry to the scope's stored key_map on the live
+  # pointer, leaving the live dataset name untouched. This is NOT a swap —
+  # it never rebuilds or repoints the dataset; it only keeps the
+  # delete/update target map current after an incremental upsert. A
+  # read-modify-write on the :persistent_term pointer (incremental upserts
+  # are debounced and rare, so the per-put global GC is acceptable, same as
+  # swap/2).
+  defp merge_key_map(scope, key, id) do
+    table = :persistent_term.get(@pointer_term, %{})
+
+    case Map.get(table, scope) do
+      %{} = entry ->
+        merged = Map.put(Map.get(entry, :key_map, %{}), key, id)
+        table = Map.put(table, scope, Map.put(entry, :key_map, merged))
+        :persistent_term.put(@pointer_term, table)
+
+      _ ->
+        # No live pointer entry — nothing to merge into. Upsert only runs
+        # with a live dataset, so this branch is unreachable in practice.
+        :ok
+    end
+  end
+
+  @doc """
+  Derive the STABLE numeric Indx key for a Barkpark `_id`.
+
+  Deterministic: the same `_id` always yields the same key, on every
+  rebuild and in the delete path. SHA-256 of the `_id`, first 8 bytes as
+  a big-endian unsigned integer, masked to a positive 63-bit signed
+  int64. Pure — no corpus context, no position. The render path layers
+  per-corpus collision probing on top (see `render_corpus/1`); this bare
+  function is the unprobed base key and the delete target for the common
+  collision-free case.
+  """
+  @spec key_for_id(String.t() | term()) :: pos_integer()
+  def key_for_id(id) do
+    <<n::unsigned-big-integer-size(64), _rest::binary>> =
+      :crypto.hash(:sha256, to_string(id))
+
+    # Mask to 63 bits → always a positive signed int64. Force away from 0
+    # so the key band starts at 1 (0 is reserved as "no key").
+    case n &&& @key_mask do
+      0 -> 1
+      k -> k
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Internals
+  # ---------------------------------------------------------------------------
+
+  # Assign a DETERMINISTIC stable key from each doc's `_id` via
+  # `key_for_id/1`, embedding both the numeric "id" and the original
+  # "_id" into each record. Detects collisions WITHIN this corpus and
+  # resolves them by deterministic linear probing (key, key+1, …, wrapped
+  # in the 63-bit band) in corpus order, so the key set is always
+  # injective. Returns the records list AND the key→_id map.
+  defp render_corpus(docs) do
+    {records, _used, key_map} =
+      Enum.reduce(docs, {[], MapSet.new(), %{}}, fn doc, {recs, used, kmap} ->
+        id = doc_id(doc)
+        key = assign_key(id, used)
+        record = render_record(doc, key, id)
+        {[record | recs], MapSet.put(used, key), Map.put(kmap, key, id)}
+      end)
+
+    {Enum.reverse(records), key_map}
+  end
+
+  # Linear-probe within the 63-bit band until a free key is found. The
+  # iteration order (corpus list order, via render_corpus/1's reduce) is
+  # deterministic, so the resolved key set is reproducible across runs of
+  # the SAME corpus and injective (no two _ids collide on a final key).
+  defp assign_key(id, used) do
+    probe(key_for_id(id), used)
+  end
+
+  defp probe(key, used) do
+    if MapSet.member?(used, key) do
+      probe(next_key(key), used)
+    else
+      key
+    end
+  end
+
+  defp next_key(key) do
+    case key + 1 do
+      k when k > @key_mask -> 1
+      k -> k
+    end
+  end
+
+  # Engine status reports ReIndexRequired in one of a few casings/shapes.
+  defp reindex_required?(status) when is_map(status) do
+    val =
+      Map.get(status, "reIndexRequired") ||
+        Map.get(status, "ReIndexRequired") ||
+        Map.get(status, "reindexRequired") ||
+        get_in(status, ["systemStatus", "reIndexRequired"]) ||
+        get_in(status, ["SystemStatus", "ReIndexRequired"])
+
+    val == true
+  end
+
+  defp reindex_required?(_), do: false
+
+  defp render_record(doc, key, id) do
+    doc
+    |> stringify_top()
+    |> Map.put("id", key)
+    |> Map.put("_id", id)
+  end
+
+  defp stringify_top(doc) when is_map(doc) and not is_struct(doc) do
+    Map.new(doc, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  defp stringify_top(%{__struct__: _} = struct) do
+    struct
+    |> Map.from_struct()
+    |> Map.drop([:__meta__])
+    |> Map.new(fn {k, v} -> {to_string(k), v} end)
+  end
+
+  defp doc_id(doc) when is_map(doc) do
+    cond do
+      v = Map.get(doc, "_id") -> to_string(v)
+      v = Map.get(doc, :_id) -> to_string(v)
+      v = Map.get(doc, "doc_id") -> to_string(v)
+      v = Map.get(doc, :doc_id) -> to_string(v)
+      true -> ""
+    end
+  end
+
+  # Next version: parse the trailing _v<n> off the old dataset name and add
+  # one, defaulting to v1 when there is no live dataset yet. The scope is
+  # slugified so a dataset name is always a safe URL/identifier segment.
+  defp next_dataset_name(scope, old_dataset, prefix) do
+    n = next_version(old_dataset)
+    "#{prefix}_#{slug(scope)}_v#{n}"
+  end
+
+  defp next_version(nil), do: 1
+
+  defp next_version(old) when is_binary(old) do
+    case Regex.run(~r/_v(\d+)$/, old) do
+      [_, n] -> String.to_integer(n) + 1
+      _ -> 1
+    end
+  end
+
+  defp slug(scope) do
+    scope
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "_")
+    |> String.trim("_")
+  end
+
+  defp default_weights(settings) do
+    [
+      {"title", settings.weight_high},
+      {"_id", settings.weight_low}
+    ]
+  end
+
+  # Map the `[{field, weight}]` weights list to v5 FieldProxy maps for
+  # `set_field_configuration/3`. Each configured field is searchable with
+  # word-level indexing (`wordIndexing: true` is REQUIRED for word-level
+  # title search — confirmed by the 2026-06-03 spike) and carries the
+  # field's weight plus the engine's default BM25 knobs.
+  defp field_proxies(weights) do
+    Enum.map(weights, fn {field, weight} ->
+      %{
+        "fieldName" => to_string(field),
+        "fieldType" => "String",
+        "isArray" => false,
+        "searchable" => true,
+        "filterable" => false,
+        "facetable" => false,
+        "sortable" => false,
+        "wordIndexing" => true,
+        "embeddable" => false,
+        "preloadFilters" => false,
+        "weight" => weight,
+        "bM25b" => 0.75,
+        "bM25k1" => 1.2
+      }
+    end)
+  end
+
+  defp poll_ready(client, dataset, client_opts, opts) do
+    attempts = Keyword.get(opts, :poll_attempts, @default_poll_attempts)
+    interval = Keyword.get(opts, :poll_interval_ms, @default_poll_interval_ms)
+    do_poll(client, dataset, client_opts, attempts, interval)
+  end
+
+  defp do_poll(_client, _dataset, _client_opts, 0, _interval), do: :ok
+
+  defp do_poll(client, dataset, client_opts, attempts, interval) do
+    case client.get_status(dataset, client_opts) do
+      {:ok, status} ->
+        if ready?(status) do
+          :ok
+        else
+          if interval > 0, do: Process.sleep(interval)
+          do_poll(client, dataset, client_opts, attempts - 1, interval)
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Engine status shapes vary; treat a few common "done" signals as ready,
+  # otherwise keep polling until attempts run out.
+  defp ready?(status) when is_map(status) do
+    done = Map.get(status, "isIndexed") || Map.get(status, "indexed") || Map.get(status, "done")
+
+    state =
+      (Map.get(status, "status") || Map.get(status, "state") || "")
+      |> to_string()
+      |> String.downcase()
+
+    done == true or state in ["ready", "indexed", "completed", "done", "idle"]
+  end
+
+  defp ready?(status) when is_binary(status) do
+    String.downcase(status) in ["ready", "indexed", "completed", "done", "idle", "true"]
+  end
+
+  defp ready?(true), do: true
+  defp ready?(_), do: false
+
+  defp verify_count(client, dataset, expected, client_opts) do
+    case client.get_number_of_json_records(dataset, client_opts) do
+      {:ok, ^expected} ->
+        {:ok, expected}
+
+      {:ok, actual} ->
+        Logger.warning(
+          "Indx.Indexer: count mismatch for #{dataset} — expected #{expected}, got #{actual}"
+        )
+
+        # Accept the engine's reported count rather than failing the rebuild
+        # on an off-by-one engine quirk; the swap still proceeds because the
+        # dataset indexed. Hard failure is reserved for client errors.
+        {:ok, actual}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp client_opts(opts) do
+    Keyword.take(opts, [:base_url, :timeout])
+  end
+end
