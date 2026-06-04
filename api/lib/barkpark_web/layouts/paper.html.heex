@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
   <title>Paper · Barkpark</title>
+  <%!-- asciinema-player CSS for `asciicast` blocks (a stylesheet, not a blocking
+        <script> — the golden no-blocking-script-in-head rule covers JS; the
+        player JS itself loads `defer` in the body alongside mermaid). Pinned to
+        3.8.0, the version proven in .artifacts/proofs-index.html. --%>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; background: #0b0b0d; color: #e7e7ea;
@@ -428,6 +433,11 @@
         hook runs it manually so it works with LiveView's streamed DOM, where
         diagram <pre> elements arrive AFTER the initial parse. --%>
   <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <%!-- asciinema-player engine for `asciicast` blocks. Same `defer` discipline
+        as mermaid (NEVER blocking in <head>); the PaperMermaid hook's
+        runAsciicast() mounts a player per `div.bp-asciicast`, with the same
+        deferred-load retry guard. Pinned to 3.8.0 (proven CDN/version). --%>
+  <script defer src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <script>
@@ -459,8 +469,43 @@
             }, { once: true });
           }
         },
-        mounted() { this.runMermaid(); },
-        updated() { this.runMermaid(); }
+        // runAsciicast: mount an asciinema player over any unprocessed
+        // `div.bp-asciicast` inside this hook's element. Mirrors runMermaid:
+        // registered on the streamed <article>, runs on mounted() + every
+        // updated() delta — exactly when a new `asciicast` block's mount point
+        // enters the DOM. Guarded for asciinema-player.min.js (deferred) not
+        // being ready yet: we retry on window load.
+        runAsciicast() {
+          let mountPlayer = (el) => {
+            let src = el.dataset.castSrc;
+            if (!src) return;
+            window.AsciinemaPlayer.create(src, el, {
+              fit: "width",
+              poster: "npt:0:1",
+              idleTimeLimit: 2,
+              theme: "asciinema"
+            });
+            el.dataset.asciicastDone = "true";
+          };
+          let nodes = Array.from(
+            this.el.querySelectorAll('div.bp-asciicast:not([data-asciicast-done="true"])')
+          );
+          if (!nodes.length) return;
+          if (window.AsciinemaPlayer && window.AsciinemaPlayer.create) {
+            nodes.forEach(mountPlayer);
+          } else {
+            // asciinema-player.min.js still deferred-loading — retry once ready.
+            window.addEventListener("load", () => {
+              if (window.AsciinemaPlayer && window.AsciinemaPlayer.create) {
+                Array.from(
+                  this.el.querySelectorAll('div.bp-asciicast:not([data-asciicast-done="true"])')
+                ).forEach(mountPlayer);
+              }
+            }, { once: true });
+          }
+        },
+        mounted() { this.runMermaid(); this.runAsciicast(); },
+        updated() { this.runMermaid(); this.runAsciicast(); }
       },
 
       // P6.U3 RailDiffSelect: shift-click two rail event rows to open a

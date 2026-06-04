@@ -557,6 +557,72 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # asciicast block — the terminal-recording figure. Article mode emits the
+  # `div.bp-asciicast` mount point (the PaperMermaid hook's runAsciicast()
+  # selector) with the cast URL in `data-cast-src`; email mode degrades to a
+  # plain link (no player runtime triggered).
+  describe "asciicast block — player mount (article) and degraded link (email)" do
+    @asciicast %{
+      "id" => "ac1",
+      "type" => "asciicast",
+      "src" => "https://asciinema.org/a/123.cast",
+      "caption" => "Figure 3. A live terminal session."
+    }
+
+    test "article mode emits div.bp-asciicast with data-cast-src + figcaption" do
+      html = Render.render_block(@asciicast, %{style: :article})
+
+      # The hook selects on this exact mount-point class.
+      assert html =~ ~s(class="bp-asciicast")
+      # Cast URL carried in the data attribute (scheme allowlisted + escaped).
+      assert html =~ ~s(data-cast-src="https://asciinema.org/a/123.cast")
+      # Bold "Figure N." run-in, remainder plain.
+      assert html =~ "<b>Figure 3.</b>"
+      assert html =~ "A live terminal session."
+      # Article figure chrome.
+      assert html =~ "<figure"
+      # NOT a degraded link in article mode.
+      refute html =~ "Terminal recording"
+    end
+
+    test "email/default mode degrades — a link, no player mount point" do
+      html = Render.render_block(@asciicast, %{style: :email})
+
+      # The player runtime must NOT be triggered in email contexts.
+      refute html =~ "bp-asciicast"
+      # A plain link to the recording instead.
+      assert html =~ ~s(<a href="https://asciinema.org/a/123.cast">Terminal recording</a>)
+      # Caption still rendered with the bold run-in.
+      assert html =~ "<b>Figure 3.</b>"
+    end
+
+    test "asciicast with no caption omits the figcaption (article)" do
+      block = Map.delete(@asciicast, "caption")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ ~s(class="bp-asciicast")
+      refute html =~ "<figcaption"
+    end
+
+    test "empty / missing src does not crash (article + email)" do
+      block = %{"id" => "ac2", "type" => "asciicast"}
+      article = Render.render_block(block, %{style: :article})
+      email = Render.render_block(block, %{style: :email})
+
+      # Mount point still emitted; empty src is neutralised to # by safe_url
+      # (no scheme, not a leading "/") — never raw and never a crash.
+      assert article =~ ~s(class="bp-asciicast")
+      assert article =~ ~s(data-cast-src="#")
+      assert email =~ "Terminal recording"
+    end
+
+    test "a disallowed-scheme src is neutralised to # in the data attribute" do
+      block = Map.put(@asciicast, "src", "javascript:alert(1)")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ ~s(data-cast-src="#")
+      refute html =~ "javascript:alert"
+    end
+  end
+
   describe "figure block — generic child + caption" do
     test "article mode wraps a composed child block with a captioned figure" do
       block = %{
