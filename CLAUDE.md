@@ -156,6 +156,8 @@ The legacy seed schemas (post, page, author, category, project, siteSettings, na
 
 **Plugin schemas auto-install on every server start** via the post-boot Task in `Barkpark.Application` (helper: `Barkpark.Plugins.Bootstrap.register_all_schemas/0`); seeds.exs calls the same helper for fresh databases. Idempotent on `(name, dataset)`. Do NOT reintroduce the legacy `mix run -e "...register_schemas..."` workaround — `book` and any future plugin schemas now land automatically. Full reference: `docs/plugins/INSTALL.md`.
 
+**The paper/document surface is now the Bulldoc plugin** (`api/lib/barkpark/plugins/bulldoc.ex`) — reader at `/papers/:slug`, ingest at `/v1/plugins/bulldoc/*` (with a `/v1/paperflow/*` back-compat alias). Core keeps the PortableDoc block engine (`Barkpark.PortableDoc.*`) as reusable utilities; the plugin is the thin wiring layer. See `api/CLAUDE.md` "Bulldoc plugin".
+
 ## Project Structure
 
 ```
