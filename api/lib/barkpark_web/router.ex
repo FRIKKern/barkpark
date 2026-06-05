@@ -99,9 +99,11 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.AssignDefaultScope
   end
 
-  # Paperflow paper-ingest: JSON in, shared-secret bearer auth (NOT the
-  # api_tokens table). Convergence MVP — masterplan Figure 6.
-  pipeline :paperflow_ingest do
+  # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
+  # table). Used by the Bulldoc paper-ingest API and any plugin that ships an
+  # `auth: :ingest` route via the plugin highway. (Convergence MVP — masterplan
+  # Figure 6 — originally `:paperflow_ingest`.)
+  pipeline :ingest do
     plug :accepts, ["json"]
     plug BarkparkWeb.Plugs.RequireIngestToken
   end
@@ -171,7 +173,7 @@ defmodule BarkparkWeb.Router do
   # Receives the extracted paper body from event-on-save.sh, upserts by slug,
   # and broadcasts on the per-doc PubSub topic PaperLive subscribes to.
   scope "/v1/paperflow", BarkparkWeb do
-    pipe_through :paperflow_ingest
+    pipe_through :ingest
 
     post "/papers", PaperIngestController, :ingest
     # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
@@ -295,6 +297,36 @@ defmodule BarkparkWeb.Router do
     pipe_through [:api, :require_admin]
 
     plugin_routes(scope: :api)
+  end
+
+  # ── Plugin-contributed routes — public root-layout (`auth: :public_root`) ──
+  # For plugin LiveViews that own a FULL-document root layout and mount at the
+  # top level WITHOUT the studio chrome — e.g. the Bulldoc paper reader at
+  # `/papers/:slug`. The plugin declares `root_layout:` in the route spec opts;
+  # the `plugin_routes/1` macro wraps each such route in its OWN live_session
+  # applying that layout (a per-route root layout the `:public` bucket can't
+  # express, since that one is pinned to `/studio` + the studio layout). No
+  # on_mount gate — these are public read surfaces and the plugin scopes its
+  # own data. Same no-alias rationale as the other plugin scopes — plugin LV
+  # modules are fully qualified. Expands to nothing until a plugin contributes
+  # a `:public_root` route.
+  scope "/" do
+    pipe_through :browser
+
+    plugin_routes(scope: :public_root)
+  end
+
+  # ── Plugin-contributed routes — ingest-token (`auth: :ingest`) ────────
+  # For plugin CONTROLLER routes authenticated by the shared-secret ingest
+  # token (`RequireIngestToken`) rather than an `api_tokens` bearer — e.g. the
+  # Bulldoc paper-ingest API. Mounts under `/v1/plugins/<slug>/…` via the
+  # `:ingest` pipeline (json + RequireIngestToken). Controller routes only, no
+  # live_session. Expands to nothing until a plugin contributes an `:ingest`
+  # route.
+  scope "/v1/plugins" do
+    pipe_through :ingest
+
+    plugin_routes(scope: :ingest)
   end
 
   # ── Plugin-contributed routes — workspace/project-scoped mirrors ──────

@@ -43,6 +43,15 @@ defmodule BarkparkWeb.Router.Plugins do
   | `:ops`     | `:ops`                    | `pipe_through :browser` + `live_session on_mount: …:ops`       |
   | `:public`  | `:public` (or `:none`)    | `pipe_through :browser` + `live_session` (no on_mount)         |
   | `:api`     | `:api`                    | `pipe_through [:api, :require_admin]` (controller routes only) |
+  | `:ingest`  | `:ingest`                 | `pipe_through :ingest` (RequireIngestToken; controller routes) |
+  | `:public_root` | `:public_root`        | `pipe_through :browser`; macro emits a per-route `live_session` with the spec's `root_layout:` |
+
+  The `:ingest` bucket gates controller routes with the shared-secret ingest
+  token (`RequireIngestToken`) instead of an `api_tokens` bearer — for ingest
+  APIs like the Bulldoc paper-ingest endpoint. The `:public_root` bucket mounts
+  a public LiveView at the host's top-level scope with its OWN full-document
+  root layout (declared via a `root_layout:` opt on the spec) and no studio
+  chrome — for reader surfaces like the Bulldoc paper at `/papers/:slug`.
 
   The `:ops` bucket gates routes via the loosened admin role used by the
   publish-ops console (see `BarkparkWeb.LiveAuth.on_mount(:ops, …)`).
@@ -82,6 +91,10 @@ defmodule BarkparkWeb.Router.Plugins do
     * `:ops`             — routes that opted in to `auth: :ops`
     * `:public`          — routes that opted in to `auth: :none`
     * `:api`             — routes that opted in to `auth: :api`
+    * `:ingest`          — routes that opted in to `auth: :ingest`
+    * `:public_root`     — routes that opted in to `auth: :public_root`
+                           (carry a `root_layout:` opt; each is wrapped in its
+                           own live_session applying that layout)
 
   Reads `Barkpark.Plugins.Registry.collect_routes/1` at compile time
   and filters by the requested scope. The caller is responsible for
@@ -91,9 +104,9 @@ defmodule BarkparkWeb.Router.Plugins do
   defmacro plugin_routes(opts \\ []) do
     scope = Keyword.get(opts, :scope, :admin)
 
-    unless scope in [:admin, :ops, :public, :api] do
+    unless scope in [:admin, :ops, :public, :api, :ingest, :public_root] do
       raise ArgumentError,
-            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api, got #{inspect(scope)}"
+            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :ingest | :public_root, got #{inspect(scope)}"
     end
 
     ctx = %{scope: scope, phase: :compile}
@@ -141,11 +154,30 @@ defmodule BarkparkWeb.Router.Plugins do
     end
   end
 
+  # `:public_root` LiveView routes own a full-document root layout and mount at
+  # a host-provided top-level scope without the studio/app chrome. The plugin
+  # declares `root_layout:` in the spec opts; we wrap the single route in its
+  # OWN uniquely-named live_session so Phoenix applies that root layout — the
+  # `:public` bucket can't, since it is pinned to the shared `/studio`
+  # live_session + studio layout. The LiveView's own `mount/3` returns
+  # `layout: false` to drop the app wrapper, mirroring the host's former
+  # `:papers` live_session exactly.
   defp emit_route_ast({:live, path, mod, action, opts}) when is_list(opts) do
     phoenix_opts = strip_plugin_opts(opts)
 
-    quote do
-      live(unquote(path), unquote(mod), unquote(action), unquote(phoenix_opts))
+    if Keyword.get(opts, :auth) == :public_root do
+      session_name = public_root_session_name(path, mod)
+      root_layout = Keyword.fetch!(opts, :root_layout)
+
+      quote do
+        live_session unquote(session_name), root_layout: unquote(Macro.escape(root_layout)) do
+          live(unquote(path), unquote(mod), unquote(action), unquote(phoenix_opts))
+        end
+      end
+    else
+      quote do
+        live(unquote(path), unquote(mod), unquote(action), unquote(phoenix_opts))
+      end
     end
   end
 
@@ -181,8 +213,23 @@ defmodule BarkparkWeb.Router.Plugins do
     quote do: patch(unquote(path), unquote(mod), unquote(action), unquote(opts))
   end
 
-  # Phoenix doesn't recognise our `:auth` key — strip it before forwarding
-  # the opts to the underlying router macro so we don't trip a compile
-  # warning on unknown route options.
-  defp strip_plugin_opts(opts), do: Keyword.drop(opts, [:auth])
+  # A unique, deterministic live_session name for a `:public_root` route.
+  # live_session names must be unique across the whole router, so derive one
+  # from the route path + module — two plugins (or two routes) never collide,
+  # and the name is stable across recompiles.
+  defp public_root_session_name(path, mod) do
+    slug =
+      path
+      |> String.replace(~r/[^A-Za-z0-9]+/, "_")
+      |> String.trim("_")
+
+    String.to_atom("plugin_root_#{slug}_#{:erlang.phash2(mod)}")
+  end
+
+  # Phoenix doesn't recognise our plugin-only opt keys — strip them before
+  # forwarding to the underlying router macro so we don't trip a compile
+  # warning on unknown route options. `:auth` is the scope selector;
+  # `:root_layout` is consumed by the `:public_root` live_session wrapper
+  # above and is not a valid `live/4` option.
+  defp strip_plugin_opts(opts), do: Keyword.drop(opts, [:auth, :root_layout])
 end

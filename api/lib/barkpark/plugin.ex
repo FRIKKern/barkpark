@@ -172,13 +172,20 @@ defmodule Barkpark.Plugin do
 
   `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :ops | :public | :api | :none` — auth gate. Defaults
-      to `:admin`. Buckets routes into the matching scope when the host
-      router's `plugin_routes/1` macro expands:
+    * `auth: :admin | :ops | :public | :none | :api | :ingest | :public_root` —
+      auth gate. Defaults to `:admin`. Buckets routes into the matching scope
+      when the host router's `plugin_routes/1` macro expands:
         - `:admin` — admin scope (LiveAuth.:admin, mounts under `/studio`)
         - `:ops`   — ops scope (LiveAuth.:ops, mounts under `/admin`)
         - `:public` / `:none` — no auth gate (mounts under `/studio`)
         - `:api`   — API pipeline + admin required (mounts under `/v1/plugins`)
+        - `:ingest` — ingest-token pipeline (RequireIngestToken); controller
+          routes under `/v1/plugins`
+        - `:public_root` — public LiveView at the host's top-level scope with
+          its OWN root layout (see `:root_layout`), no studio chrome
+    * `root_layout: {module, atom}` — REQUIRED for `:public_root` LiveView
+      routes; the full-document root layout the macro applies via a per-route
+      live_session. Ignored for other buckets.
     * `as: atom()` — Phoenix route name (`Routes.<as>_path/2`).
 
   Paths join under the macro's wrapping scope; specs should declare
@@ -336,11 +343,15 @@ defmodule Barkpark.Plugin do
 
   `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :ops | :public | :api | :none` — auth gate (defaults
-      to `:admin`). Buckets the route into the matching `plugin_routes/1`
-      scope: `:admin` under `/studio`, `:ops` under `/admin`, `:public`/
-      `:none` under `/studio` with no gate, `:api` under `/v1/plugins`
-      with the API pipeline + admin required.
+    * `auth: :admin | :ops | :public | :none | :api | :ingest | :public_root` —
+      auth gate (defaults to `:admin`). Buckets the route into the matching
+      `plugin_routes/1` scope: `:admin` under `/studio`, `:ops` under `/admin`,
+      `:public`/`:none` under `/studio` with no gate, `:api` under
+      `/v1/plugins` with the API pipeline + admin required, `:ingest` under
+      `/v1/plugins` with the RequireIngestToken pipeline, `:public_root` at the
+      host's top-level scope with the spec's own `root_layout:`.
+    * `root_layout: {module, atom}` — REQUIRED for `:public_root` routes; the
+      full-document root layout applied via a per-route live_session.
     * `as: atom()` — Phoenix route name (`Routes.<as>_path/2`).
 
   Paths join under the macro's wrapping scope; plugins declare relative
