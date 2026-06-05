@@ -610,13 +610,13 @@ Recognised `auth:` opt values inside a `route_spec()` tail:
   `[:api, :require_admin]` pipeline. No `live_session`.
 * `:ingest` — controller routes only, mounted under `/v1/plugins` behind the
   `:ingest` pipeline (the `RequireIngestToken` shared-secret check, **not** an
-  `api_tokens` bearer). For token-gated ingest APIs such as the Bulldoc
+  `api_tokens` bearer). For token-gated ingest APIs such as the Bulldocs
   paper-ingest endpoint.
 * `:public_root` — a public LiveView mounted at the host top-level scope (`/`)
   with `pipe_through :browser` and no studio chrome. The macro wraps each route
   in its own uniquely-named `live_session` applying the spec's `root_layout:`
   opt, so the reader page renders with a full-document layout. For public
-  reader surfaces such as the Bulldoc paper reader at `/papers/:slug`. Specs in
+  reader surfaces such as the Bulldocs paper reader at `/papers/:slug`. Specs in
   this bucket carry a `root_layout:` opt in the route tail.
 
 Example — a plugin contributing a public OAuth callback alongside its admin

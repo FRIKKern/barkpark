@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Router do
   end
 
   # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
-  # table). Used by the Bulldoc paper-ingest API and any plugin that ships an
+  # table). Used by the Bulldocs paper-ingest API and any plugin that ships an
   # `auth: :ingest` route via the plugin highway. (Convergence MVP — masterplan
   # Figure 6 — originally `:paperflow_ingest`.)
   pipeline :ingest do
@@ -152,10 +152,10 @@ defmodule BarkparkWeb.Router do
     post "/logout", SessionController, :delete
   end
 
-  # ── Bulldoc paper reader (LiveView) ─────────────────────────────────────
-  # The public reader at `/papers/:slug` is now contributed by the Bulldoc
+  # ── Bulldocs paper reader (LiveView) ────────────────────────────────────
+  # The public reader at `/papers/:slug` is now contributed by the Bulldocs
   # plugin via the `:public_root` route bucket — see
-  # `Barkpark.Plugins.Bulldoc.register_routes/1` and the
+  # `Barkpark.Plugins.Bulldocs.register_routes/1` and the
   # `scope "/" … plugin_routes(scope: :public_root)` block below. It mounts
   # `BarkparkWeb.PaperLive` in its own live_session with the full-document
   # `:paper` root layout: byte-identical URL + layout to the former hardcoded
@@ -163,9 +163,9 @@ defmodule BarkparkWeb.Router do
   # matches `BARKPARK_LIVEVIEW_PATH_TEMPLATE` = "/papers/{slug}" in paperflow's
   # event-on-save.sh.)
 
-  # ── Bulldoc paper ingest (JSON POST) — back-compat alias ────────────────
-  # The CANONICAL ingest API is now the Bulldoc plugin's `/v1/plugins/bulldoc/*`
-  # (the `:ingest` route bucket — see `Barkpark.Plugins.Bulldoc.register_routes/1`).
+  # ── Bulldocs paper ingest (JSON POST) — back-compat alias ───────────────
+  # The CANONICAL ingest API is now the Bulldocs plugin's `/v1/plugins/bulldocs/*`
+  # (the `:ingest` route bucket — see `Barkpark.Plugins.Bulldocs.register_routes/1`).
   # These flat `/v1/paperflow/*` routes are kept as a back-compat alias so
   # existing producers (paperflow's event-on-save.sh) keep working until
   # repointed — same controllers, same `:ingest` (RequireIngestToken) pipeline.
@@ -299,7 +299,7 @@ defmodule BarkparkWeb.Router do
 
   # ── Plugin-contributed routes — public root-layout (`auth: :public_root`) ──
   # For plugin LiveViews that own a FULL-document root layout and mount at the
-  # top level WITHOUT the studio chrome — e.g. the Bulldoc paper reader at
+  # top level WITHOUT the studio chrome — e.g. the Bulldocs paper reader at
   # `/papers/:slug`. The plugin declares `root_layout:` in the route spec opts;
   # the `plugin_routes/1` macro wraps each such route in its OWN live_session
   # applying that layout (a per-route root layout the `:public` bucket can't
@@ -317,7 +317,7 @@ defmodule BarkparkWeb.Router do
   # ── Plugin-contributed routes — ingest-token (`auth: :ingest`) ────────
   # For plugin CONTROLLER routes authenticated by the shared-secret ingest
   # token (`RequireIngestToken`) rather than an `api_tokens` bearer — e.g. the
-  # Bulldoc paper-ingest API. Mounts under `/v1/plugins/<slug>/…` via the
+  # Bulldocs paper-ingest API. Mounts under `/v1/plugins/<slug>/…` via the
   # `:ingest` pipeline (json + RequireIngestToken). Controller routes only, no
   # live_session. Expands to nothing until a plugin contributes an `:ingest`
   # route.

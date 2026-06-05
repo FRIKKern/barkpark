@@ -1,8 +1,0 @@
-{
-  "plugin_name": "bulldoc",
-  "version": "0.1.0",
-  "description": "Bulldoc — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers / paperflow feature; now a first-party plugin built on the core portable-doc utilities.",
-  "capabilities": ["schemas", "routes"],
-  "module": "Barkpark.Plugins.Bulldoc",
-  "schemas": [{ "name": "paper", "version": "1", "file": "schemas/paper.json" }]
-}

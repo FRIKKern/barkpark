@@ -48,10 +48,10 @@ defmodule BarkparkWeb.Router.Plugins do
 
   The `:ingest` bucket gates controller routes with the shared-secret ingest
   token (`RequireIngestToken`) instead of an `api_tokens` bearer — for ingest
-  APIs like the Bulldoc paper-ingest endpoint. The `:public_root` bucket mounts
+  APIs like the Bulldocs paper-ingest endpoint. The `:public_root` bucket mounts
   a public LiveView at the host's top-level scope with its OWN full-document
   root layout (declared via a `root_layout:` opt on the spec) and no studio
-  chrome — for reader surfaces like the Bulldoc paper at `/papers/:slug`.
+  chrome — for reader surfaces like the Bulldocs paper at `/papers/:slug`.
 
   The `:ops` bucket gates routes via the loosened admin role used by the
   publish-ops console (see `BarkparkWeb.LiveAuth.on_mount(:ops, …)`).

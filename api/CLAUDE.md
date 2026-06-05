@@ -31,23 +31,23 @@ mix run priv/repo/seeds.exs  # just reseed
 | `lib/barkpark/content/scope.ex` | `Barkpark.Content.Scope` — query-level tenant WHERE-clause scoping (`scope_to_workspace/3`); nil workspace fails CLOSED |
 | `lib/barkpark_web/plugs/scope_helpers.ex` | `BarkparkWeb.ScopeHelpers` — HTTP/LiveView scope extractor (`scope_opts/1`) every controller calls |
 | `lib/barkpark_web/controllers/tasks_controller.ex` | `/v1/tasks` (router ~:460) — task index/ready/claim/edges |
-| `lib/barkpark_web/controllers/rail_controller.ex` | `/v1/rail` (router ~:501) — goal-path / event / diff for the Bulldoc rail |
-| `lib/barkpark/plugins/bulldoc.ex` | **Bulldoc plugin** — the paper/document surface as a plugin. `register_schemas/1` declares the `paper` type; `register_routes/1` mounts the reader (`/papers/:slug`, `:public_root`) + ingest/intents API (`/v1/plugins/bulldoc/*`, `:ingest`). Reuses core modules as utilities — see "Bulldoc plugin" below. |
+| `lib/barkpark_web/controllers/rail_controller.ex` | `/v1/rail` (router ~:501) — goal-path / event / diff for the Bulldocs rail |
+| `lib/barkpark/plugins/bulldocs.ex` | **Bulldocs plugin** — the paper/document surface as a plugin. `register_schemas/1` declares the `paper` type; `register_routes/1` mounts the reader (`/papers/:slug`, `:public_root`) + ingest/intents API (`/v1/plugins/bulldocs/*`, `:ingest`). Reuses core modules as utilities — see "Bulldocs plugin" below. |
 | `priv/repo/seeds.exs` | Seed data — 13 schema rows (8 core + `paper` + 4 W7a task/goal/phase/event) + ~27 docs + dev token; plugin schemas (e.g. `book`) auto-register via `Bootstrap.register_all_schemas/0`. See the seed's `IO.puts` summary lines (~:229/:259/:289/:590/:646). |
 
 Tenancy note: alongside the flat routes there is a scoped route family
 `/w/:workspace_slug/p/:project_slug/*` (router ~:618) mirroring the flat
 endpoints under explicit workspace/project slugs.
 
-## Bulldoc plugin (the Papers surface)
+## Bulldocs plugin (the Papers surface)
 
 What used to be the built-in "Papers"/"paperflow" feature is now the
-**Bulldoc plugin** (`lib/barkpark/plugins/bulldoc.ex`,
-`priv/plugins/bulldoc/`). **Bulldoc is the plugin/producer brand; a "paper" is
+**Bulldocs plugin** (`lib/barkpark/plugins/bulldocs.ex`,
+`priv/plugins/bulldocs/`). **Bulldocs is the plugin/producer brand; a "paper" is
 the artifact it produces** — the persisted `type` is still `"paper"` and the
 reader URL is still `/papers/:slug` (no data migration, no public-URL break).
 
-The split is deliberate: **core stays the reusable machinery; Bulldoc is the
+The split is deliberate: **core stays the reusable machinery; Bulldocs is the
 thin wiring layer.**
 
 - **Core utilities (stay in `Barkpark.*` / `BarkparkWeb.*`):**
@@ -57,7 +57,7 @@ thin wiring layer.**
   block-document write/stream paths); `BarkparkWeb.PaperLive`; the
   `PaperIngestController` / `PaperIntentsController`; `Barkpark.Papers.Events`;
   the `RequireIngestToken` plug; `layouts/paper.html.heex`.
-- **Bulldoc plugin (`Barkpark.Plugins.Bulldoc`):** `register_schemas/1` (the
+- **Bulldocs plugin (`Barkpark.Plugins.Bulldocs`):** `register_schemas/1` (the
   `paper` schema) + `register_routes/1` (reader via `:public_root`, ingest via
   `:ingest`), pointing at those core modules.
 
@@ -69,7 +69,7 @@ full-document `root_layout:`, no studio chrome). Any future plugin that needs a
 public reader page or a token-gated ingest API reuses these.
 
 Back-compat: `/v1/paperflow/*` is kept as an alias of the canonical
-`/v1/plugins/bulldoc/*` ingest routes until producers repoint; the
+`/v1/plugins/bulldocs/*` ingest routes until producers repoint; the
 `:paperflow_ingest_token` config key / `PAPERFLOW_INGEST_TOKEN` env var are
 unchanged.
 
