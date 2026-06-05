@@ -228,36 +228,6 @@ end
 
 IO.puts("Seeded #{length(schemas)} schema definitions")
 
-# ── Paper schema (convergence: papers are type-"paper" documents) ────────────
-#
-# Papers live in the "production" dataset by default and open LIVE inside the
-# Studio editor pane at `/studio/:dataset/paper/:slug`. Seed the schema so the
-# Studio desk renders a "Papers" node when viewing that dataset. The migration
-# `20260524090000_papers_as_documents` seeds the same row for existing DBs and
-# moves any legacy paperflow-dataset papers into production; this keeps a fresh
-# `mix ecto.reset` consistent.
-
-paper_dataset = "production"
-
-%SchemaDefinition{}
-|> SchemaDefinition.changeset(%{
-  name: "paper",
-  title: "Papers",
-  icon: "📰",
-  visibility: "public",
-  dataset: paper_dataset,
-  fields: [
-    %{name: "title", title: "Title", type: "string"},
-    %{name: "event_type", title: "Event Type", type: "string"},
-    %{name: "source_doc", title: "Source Doc", type: "string"},
-    %{name: "goal_id", title: "Goal", type: "string"}
-  ]
-})
-|> stamp_schema_scope.()
-|> Repo.insert!(on_conflict: :nothing)
-
-IO.puts("Seeded paper schema (dataset=#{paper_dataset})")
-
 # ── W7a task/goal/phase/event schemas (W7 retire-beads substrate) ────────────
 #
 # Wave 7 step 1: tasks/goals/phases/events are first-class document types
