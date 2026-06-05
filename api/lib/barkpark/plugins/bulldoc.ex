@@ -67,4 +67,37 @@ defmodule Barkpark.Plugins.Bulldoc do
       }
     ]
   end
+
+  @doc """
+  Mounts Bulldoc's web surfaces through the plugin route highway
+  (`BarkparkWeb.Router.Plugins`):
+
+    * the public reader at `/papers/:slug` (`:public_root` — its own
+      full-document `:paper` root layout, no studio chrome), reusing the core
+      `BarkparkWeb.PaperLive`;
+    * the token-gated ingest + intents API under `/v1/plugins/bulldoc/…`
+      (`:ingest` — RequireIngestToken pipeline), reusing the core
+      `PaperIngestController` / `PaperIntentsController`.
+
+  The reader URL stays `/papers/:slug` (the artifact noun is unchanged). The
+  ingest API gains the canonical plugin prefix `/v1/plugins/bulldoc/…`; the
+  host keeps `/v1/paperflow/*` as a back-compat alias for existing producers
+  (see `BarkparkWeb.Router`).
+
+  These point at modules that remain in core — Bulldoc is the wiring layer, the
+  core block-document machinery is the utility it builds on.
+  """
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    [
+      {:live, "/papers/:slug", BarkparkWeb.PaperLive, :index,
+       auth: :public_root, root_layout: {BarkparkWeb.Layouts, :paper}},
+      {:post, "/bulldoc/papers", BarkparkWeb.PaperIngestController, :ingest, auth: :ingest},
+      {:post, "/bulldoc/papers/:slug/ops", BarkparkWeb.PaperIngestController, :apply_op,
+       auth: :ingest},
+      {:get, "/bulldoc/intents", BarkparkWeb.PaperIntentsController, :index, auth: :ingest},
+      {:post, "/bulldoc/intents/:id/processed", BarkparkWeb.PaperIntentsController,
+       :mark_processed, auth: :ingest}
+    ]
+  end
 end

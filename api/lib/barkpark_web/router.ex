@@ -152,26 +152,24 @@ defmodule BarkparkWeb.Router do
     post "/logout", SessionController, :delete
   end
 
-  # ── Paperflow papers (LiveView) — convergence MVP, masterplan Figure 6 ──
-  # A saved paperflow paper renders LIVE here with no page reload. The route
-  # template MUST match `BARKPARK_LIVEVIEW_PATH_TEMPLATE` (= "/papers/{slug}")
-  # in paperflow/hooks/event-on-save.sh. No admin gate — this is a personal-
-  # local read surface; the paper HTML is our own.
-  #
-  # `paper.html.heex` is a FULL document, so it is the ROOT layout here (set
-  # via live_session :root_layout); the inner/app layout is disabled in
-  # PaperLive.mount (`layout: false`) to avoid the studio chrome wrapper.
-  scope "/papers", BarkparkWeb do
-    pipe_through :browser
+  # ── Bulldoc paper reader (LiveView) ─────────────────────────────────────
+  # The public reader at `/papers/:slug` is now contributed by the Bulldoc
+  # plugin via the `:public_root` route bucket — see
+  # `Barkpark.Plugins.Bulldoc.register_routes/1` and the
+  # `scope "/" … plugin_routes(scope: :public_root)` block below. It mounts
+  # `BarkparkWeb.PaperLive` in its own live_session with the full-document
+  # `:paper` root layout: byte-identical URL + layout to the former hardcoded
+  # `scope "/papers"`, just sourced from the plugin. (The route template still
+  # matches `BARKPARK_LIVEVIEW_PATH_TEMPLATE` = "/papers/{slug}" in paperflow's
+  # event-on-save.sh.)
 
-    live_session :papers, root_layout: {BarkparkWeb.Layouts, :paper} do
-      live "/:slug", PaperLive
-    end
-  end
-
-  # ── Paperflow paper ingest (JSON POST) ──────────────────────────────────
-  # Receives the extracted paper body from event-on-save.sh, upserts by slug,
-  # and broadcasts on the per-doc PubSub topic PaperLive subscribes to.
+  # ── Bulldoc paper ingest (JSON POST) — back-compat alias ────────────────
+  # The CANONICAL ingest API is now the Bulldoc plugin's `/v1/plugins/bulldoc/*`
+  # (the `:ingest` route bucket — see `Barkpark.Plugins.Bulldoc.register_routes/1`).
+  # These flat `/v1/paperflow/*` routes are kept as a back-compat alias so
+  # existing producers (paperflow's event-on-save.sh) keep working until
+  # repointed — same controllers, same `:ingest` (RequireIngestToken) pipeline.
+  # Remove once every producer posts to the plugin URL.
   scope "/v1/paperflow", BarkparkWeb do
     pipe_through :ingest
 
