@@ -1,4 +1,4 @@
-defmodule Barkpark.Papers.Event do
+defmodule Barkpark.Plugins.Bulldocs.Event do
   @moduledoc """
   Ecto schema for `paper_events` — an append-only paperflow lifecycle event
   (`plan-written`, `goal-snapshot`, `phase-advanced`, …) scoped to a goal

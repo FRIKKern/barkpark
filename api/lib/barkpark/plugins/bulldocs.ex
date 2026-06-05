@@ -73,11 +73,11 @@ defmodule Barkpark.Plugins.Bulldocs do
   (`BarkparkWeb.Router.Plugins`):
 
     * the public reader at `/papers/:slug` (`:public_root` — its own
-      full-document `:paper` root layout, no studio chrome), reusing the core
-      `BarkparkWeb.PaperLive`;
+      full-document `:bulldocs` root layout, no studio chrome), reusing the core
+      `BarkparkWeb.BulldocsLive`;
     * the token-gated ingest + intents API under `/v1/plugins/bulldocs/…`
       (`:ingest` — RequireIngestToken pipeline), reusing the core
-      `PaperIngestController` / `PaperIntentsController`.
+      `BulldocsIngestController` / `BulldocsIntentsController`.
 
   The reader URL stays `/papers/:slug` (the artifact noun is unchanged). The
   ingest API gains the canonical plugin prefix `/v1/plugins/bulldocs/…`; the
@@ -90,13 +90,13 @@ defmodule Barkpark.Plugins.Bulldocs do
   @impl Barkpark.Plugin
   def register_routes(_ctx) do
     [
-      {:live, "/papers/:slug", BarkparkWeb.PaperLive, :index,
-       auth: :public_root, root_layout: {BarkparkWeb.Layouts, :paper}},
-      {:post, "/bulldocs/papers", BarkparkWeb.PaperIngestController, :ingest, auth: :ingest},
-      {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.PaperIngestController, :apply_op,
+      {:live, "/papers/:slug", BarkparkWeb.BulldocsLive, :index,
+       auth: :public_root, root_layout: {BarkparkWeb.Layouts, :bulldocs}},
+      {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
+      {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
-      {:get, "/bulldocs/intents", BarkparkWeb.PaperIntentsController, :index, auth: :ingest},
-      {:post, "/bulldocs/intents/:id/processed", BarkparkWeb.PaperIntentsController,
+      {:get, "/bulldocs/intents", BarkparkWeb.BulldocsIntentsController, :index, auth: :ingest},
+      {:post, "/bulldocs/intents/:id/processed", BarkparkWeb.BulldocsIntentsController,
        :mark_processed, auth: :ingest}
     ]
   end

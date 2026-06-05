@@ -38,7 +38,7 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
   alias Barkpark.{Content, Media, Repo, Tenancy}
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Media.MediaFile
-  alias Barkpark.Papers.Event, as: PaperEvent
+  alias Barkpark.Plugins.Bulldocs.Event, as: PaperEvent
   alias Barkpark.Search.Synonym
   alias Barkpark.Tenancy.Workspace
   alias Barkpark.Webhooks.Webhook

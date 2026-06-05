@@ -23,7 +23,7 @@ defmodule Barkpark.Papers.PaperEventsWorkspaceScopeTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
-  alias Barkpark.Papers.Events
+  alias Barkpark.Plugins.Bulldocs.Events
 
   @dataset "test"
 

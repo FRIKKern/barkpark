@@ -1,4 +1,4 @@
-defmodule Barkpark.Papers.EventsTest do
+defmodule Barkpark.Plugins.Bulldocs.EventsTest do
   @moduledoc """
   P6.U1 (barkpark-3s2u) — the `paper_events` Postgres event store, data spine
   for the native goal-path rail (P6.U2). Covers the `Events` context directly
@@ -7,7 +7,7 @@ defmodule Barkpark.Papers.EventsTest do
   use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
-  alias Barkpark.Papers.Events
+  alias Barkpark.Plugins.Bulldocs.Events
 
   describe "create_event/1" do
     test "inserts a valid event" do

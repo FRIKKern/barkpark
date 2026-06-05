@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperIngestController do
+defmodule BarkparkWeb.BulldocsIngestController do
   @moduledoc """
   Ingest endpoint for paperflow papers (convergence MVP, masterplan Figure 6).
 
@@ -26,7 +26,7 @@ defmodule BarkparkWeb.PaperIngestController do
       { "slug": "2026-05-23-foo", "body_html": "<article>…</article>", … }
 
   Upserts the paper keyed by slug and broadcasts on its per-doc PubSub topic
-  so any mounted `PaperLive` re-renders with no reload. Persists so a fresh
+  so any mounted `BulldocsLive` re-renders with no reload. Persists so a fresh
   mount renders the latest HTML. When `blocks` is present `Content.upsert_paper`
   renders the `body_html` cache from them in the article palette (style
   defaults to "article" on the blocks path); a `body_html`-only request stores

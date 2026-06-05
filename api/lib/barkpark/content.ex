@@ -51,7 +51,7 @@ defmodule Barkpark.Content do
   # Papers ride the SAME per-doc PubSub topic shape used in Wave 4 —
   # `doc:<dataset>:paper:<slug>` — and broadcast the SAME two frames
   # (`{:paper_updated, …}` whole-HTML, `{:paper_block, …}` delta) so
-  # `BarkparkWeb.PaperLive` keeps working with minimal change.
+  # `BarkparkWeb.BulldocsLive` keeps working with minimal change.
   @paper_type "paper"
   @paper_default_dataset "production"
 
@@ -2442,7 +2442,7 @@ defmodule Barkpark.Content do
   Default, both sides fall back to the literal `"global"` token, so they still
   agree.
 
-  PaperLive subscribes to this; writes broadcast to it.
+  BulldocsLive subscribes to this; writes broadcast to it.
   """
   def paper_topic(slug, workspace_id, dataset \\ @paper_default_dataset)
       when is_binary(slug) do
@@ -2906,7 +2906,7 @@ defmodule Barkpark.Content do
 
   # Append a `paper_events` row when this upsert carries a non-empty
   # `event_type`. Decoupled from Beads/W7 — pure Postgres via
-  # `Barkpark.Papers.Events`. Failures are logged, never raised.
+  # `Barkpark.Plugins.Bulldocs.Events`. Failures are logged, never raised.
   #
   # W1.5-C: the event inherits the saved paper document's workspace/project —
   # the paper already resolved Default-fallback (new rows) or kept its existing
@@ -2926,7 +2926,7 @@ defmodule Barkpark.Content do
         "project_id" => doc.project_id
       }
 
-      case Barkpark.Papers.Events.create_event(event_attrs) do
+      case Barkpark.Plugins.Bulldocs.Events.create_event(event_attrs) do
         {:ok, _event} ->
           :ok
 

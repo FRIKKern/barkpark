@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperLiveTest do
+defmodule BarkparkWeb.BulldocsLiveTest do
   @moduledoc """
   Gate-A surviving-sentinel test for the convergence MVP (masterplan Fig 6).
 
@@ -21,7 +21,7 @@ defmodule BarkparkWeb.PaperLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
-  alias Barkpark.Papers.Events
+  alias Barkpark.Plugins.Bulldocs.Events
 
   @slug "2026-05-23-convergence-demo"
 
@@ -287,7 +287,7 @@ defmodule BarkparkWeb.PaperLiveTest do
       # W1.5-C: the rail now scopes events to the paper's OWN workspace, so the
       # follow-up events must carry the paper's resolved scope (upsert_paper
       # Default-stamped the paper above) to appear in the rail — mirroring how a
-      # real PaperLive write stamps the paper's workspace onto each event.
+      # real BulldocsLive write stamps the paper's workspace onto each event.
       scope = %{"workspace_id" => paper.workspace_id, "project_id" => paper.project_id}
 
       {:ok, _} =

@@ -1,4 +1,4 @@
-defmodule Barkpark.Papers.Events do
+defmodule Barkpark.Plugins.Bulldocs.Events do
   @moduledoc """
   Context over the append-only `paper_events` store — the data spine for the
   native goal-path rail (P6.U2). Pure Ecto over `Barkpark.Repo`; never shells
@@ -8,7 +8,7 @@ defmodule Barkpark.Papers.Events do
   import Ecto.Query
   import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Repo
-  alias Barkpark.Papers.Event
+  alias Barkpark.Plugins.Bulldocs.Event
 
   @doc """
   Append a lifecycle event. Validates via `Event.changeset/2`
@@ -16,7 +16,7 @@ defmodule Barkpark.Papers.Events do
   Returns `{:ok, %Event{}}` or `{:error, changeset}`.
 
   W1.5-C: a paper_event FOLLOWS its goal — `workspace_id` / `project_id` in
-  `attrs` set the event's scope. The caller (upsert_paper, PaperLive) stamps
+  `attrs` set the event's scope. The caller (upsert_paper, BulldocsLive) stamps
   these from the resolved paper/goal scope (Default fallback when the caller
   provides none) so a goal's events share the goal's workspace/project.
   """

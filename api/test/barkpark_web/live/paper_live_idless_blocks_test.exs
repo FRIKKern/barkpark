@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperLiveIdlessBlocksTest do
+defmodule BarkparkWeb.BulldocsLiveIdlessBlocksTest do
   @moduledoc """
   Regression for e2e residual R2: a paper ingested with blocks that lack an
   "id" rendered ONLY the LAST block in the live LiveView, because the stream

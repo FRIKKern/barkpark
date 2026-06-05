@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperIntentsControllerTest do
+defmodule BarkparkWeb.BulldocsIntentsControllerTest do
   @moduledoc """
   P6.U6a (barkpark-jwai) — the pending-intents API over `paper_events`, the
   Barkpark half of the loop-closer.
@@ -7,11 +7,11 @@ defmodule BarkparkWeb.PaperIntentsControllerTest do
   <ingest token>` via the `:paperflow_ingest` pipeline (RequireIngestToken).
   Asserts a valid token lists pending `action:*`/`simplify-*` intents, that
   `POST …/processed` marks one (so a follow-up GET omits it), and that a
-  request without the token is rejected 401 (same as PaperIngestControllerTest).
+  request without the token is rejected 401 (same as BulldocsIngestControllerTest).
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.Papers.Events
+  alias Barkpark.Plugins.Bulldocs.Events
 
   # Set in config/test.exs (same shared-secret ingest token the papers test uses).
   @token "paperflow-test-ingest-token"

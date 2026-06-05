@@ -100,7 +100,7 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
 
   describe "LEAK GATE — paper_topic (barkpark-n56v, P0)" do
     test "A's subscriber receives NOTHING from B's paper broadcasts", %{ws_a: ws_a, ws_b: ws_b} do
-      # Subscribe to workspace A's paper topic (what PaperLive does after
+      # Subscribe to workspace A's paper topic (what BulldocsLive does after
       # get_public_paper resolves A's row).
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(@slug, ws_a.id))
 
@@ -125,7 +125,7 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
 
     test "PROOF the gate fails against the pre-fix workspace-less topic", %{ws_b: ws_b} do
       # Reconstruct the PRE-FIX topic shape `doc:<dataset>:paper:<slug>` (no
-      # workspace component). Subscribe to it the way PaperLive used to.
+      # workspace component). Subscribe to it the way BulldocsLive used to.
       prefix_topic = "doc:#{@dataset}:#{@paper_type}:#{@slug}"
       Phoenix.PubSub.subscribe(Barkpark.PubSub, prefix_topic)
 
@@ -303,7 +303,7 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
 
   describe "NULL-workspace (legacy) normalization agrees on both sides" do
     test "a Default/legacy paper's update reaches its public viewer" do
-      # The public viewer (PaperLive) resolves the paper through
+      # The public viewer (BulldocsLive) resolves the paper through
       # get_public_paper — which scopes to the seeded Default workspace — and
       # subscribes with that resolved row's workspace_id.
       default_ws = Tenancy.get_default_workspace()

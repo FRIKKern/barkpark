@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperLive do
+defmodule BarkparkWeb.BulldocsLive do
   @moduledoc """
   Live render of a paperflow paper inside Barkpark (convergence masterplan
   Figure 6; block-streaming in Wave 4).
@@ -27,7 +27,7 @@ defmodule BarkparkWeb.PaperLive do
   `#paper-sentinel` is rendered once at mount OUTSIDE the streamed container.
   It survives a `handle_info` DOM diff but would be torn down by a
   remount / navigate — the surviving-sentinel proof, now extended across a
-  multi-block append sequence (see `paper_live_test.exs`).
+  multi-block append sequence (see `bulldocs_live_test.exs`).
 
   Layout: the full-document `paper.html.heex` is the ROOT layout (set in the
   router's `:papers` live_session); `mount/3` returns `layout: false`.
@@ -42,7 +42,7 @@ defmodule BarkparkWeb.PaperLive do
   import Phoenix.HTML, only: [raw: 1]
 
   alias Barkpark.Content
-  alias Barkpark.Papers.Events
+  alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
 
@@ -433,7 +433,7 @@ defmodule BarkparkWeb.PaperLive do
 
   # Fold the paper's scope opts into a create_event attrs map as string keys.
   # An unscoped paper (scope == []) leaves attrs untouched → upsert_paper's
-  # Events.create_event Default-stamping is NOT involved here (PaperLive writes
+  # Events.create_event Default-stamping is NOT involved here (BulldocsLive writes
   # events directly), so a nil scope means the row is unscoped (back-compat).
   defp stamp_scope(attrs, scope) do
     attrs

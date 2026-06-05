@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperIntentsController do
+defmodule BarkparkWeb.BulldocsIntentsController do
   @moduledoc """
   Pending-intents API over `paper_events` — the Barkpark half of the
   loop-closer (P6.U6a, barkpark-jwai). The paperflow-side reader loop (U6b)
@@ -24,7 +24,7 @@ defmodule BarkparkWeb.PaperIntentsController do
   """
   use BarkparkWeb, :controller
 
-  alias Barkpark.Papers.Events
+  alias Barkpark.Plugins.Bulldocs.Events
 
   @doc """
   Return the pending actionable intents, oldest first, as a JSON list.

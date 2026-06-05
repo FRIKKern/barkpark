@@ -14,7 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # `raw/1` lives in Phoenix.HTML; the :live_view macro imports
   # Phoenix.HTML.Form but not the parent module, so import it here for the
-  # in-Studio paper block view (mirrors PaperLive).
+  # in-Studio paper block view (mirrors BulldocsLive).
   import Phoenix.HTML, only: [raw: 1]
 
   @impl true
@@ -107,7 +107,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # NOT the field form. `editor_view` is `:paper` while a paper is open,
        # `:form` (the default) otherwise. The paper's per-doc topic is
        # subscribed at open; `{:paper_block,…}` / `{:paper_updated,…}` frames
-       # update the pane in place with NO remount — mirroring PaperLive's
+       # update the pane in place with NO remount — mirroring BulldocsLive's
        # streaming. `paper_rev` tracks the last applied monotonic streaming
        # rev for gap detection; `paper_block_mode` flips false for HTML-only
        # papers (the raw-HTML fallback). `paper_topic` is the subscribed
@@ -246,7 +246,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # A paper open in the editor pane subscribes to its per-doc topic
   # (`doc:<dataset>:paper:<slug>` == Content.paper_topic/2). These frames patch
   # the block stream / HTML in place — NO rebuild_panes, NO remount. Mirrors
-  # PaperLive's delta handling so the Gate-B streaming property holds inside
+  # BulldocsLive's delta handling so the Gate-B streaming property holds inside
   # the Studio. Frames that arrive while no paper is open are ignored.
 
   @impl true
@@ -3203,7 +3203,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # ── In-Studio live paper view (convergence/papers-in-studio) ────────────────
   #
-  # The editor pane renders a paper's blocks LIVE, reusing PaperLive's render +
+  # The editor pane renders a paper's blocks LIVE, reusing BulldocsLive's render +
   # delta logic. A block-backed paper streams each top-level block as a keyed
   # stream item; an HTML-only (legacy) paper falls back to a raw-HTML re-assign.
   # `{:paper_block,…}` / `{:paper_updated,…}` frames (handle_info below) patch
@@ -3281,7 +3281,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Each stream item carries a stable id (the block id) and its rendered
   # fragment. Top-level blocks stream individually; a `section` renders as one
-  # fragment (its children live inside it). Mirrors PaperLive.to_stream_items/1.
+  # fragment (its children live inside it). Mirrors BulldocsLive.to_stream_items/1.
   defp paper_stream_items(blocks, dataset, scope) do
     resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset, scope) end
 
@@ -3294,13 +3294,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # `.bp-paper-surface h1, h2, h3` CSS rules (root.html.heex ~:2064) only
     # match real heading elements; with email-style spans the styles never
     # applied and the View pane in the desk read as a flat bold list instead
-    # of typeset prose. Mirrors PaperLive.render_opts(true) at paper_live.ex
+    # of typeset prose. Mirrors BulldocsLive.render_opts(true) at bulldocs_live.ex
     # ~:476 — same surface contract on both LiveViews.
     opts = %{ref_resolver: resolver, codelist_resolver: codelist_resolver, style: :article}
 
     # R2 fix (Option B): id-less blocks need a UNIQUE positional stream id, else
     # they collapse to the constant `paper_blocks-` DOM id and the stream
-    # dedupes all but the last. Mirrors PaperLive.stream_block_id/2.
+    # dedupes all but the last. Mirrors BulldocsLive.stream_block_id/2.
     blocks
     |> Enum.with_index()
     |> Enum.map(fn {block, index} ->
@@ -3323,7 +3323,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # A gap is any received rev that is not exactly the next one we expect. The
   # first delta on a paper mounted at rev 0 (never-streamed) also refetches —
-  # correct: there is nothing to append onto. Mirrors PaperLive.gap?/2.
+  # correct: there is nothing to append onto. Mirrors BulldocsLive.gap?/2.
   defp paper_gap?(last_rev, incoming_rev)
        when is_integer(last_rev) and is_integer(incoming_rev) do
     incoming_rev != last_rev + 1
@@ -3478,7 +3478,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # top-level block as a keyed `phx-update="stream"` item; HTML-only (legacy)
   # papers render `raw(@paper_html)`. The `#paper-sentinel` element is rendered
   # once OUTSIDE the streamed container so a `handle_info` DOM diff preserves it
-  # — the same no-reload proof PaperLive uses, now inside the Studio. Read-only:
+  # — the same no-reload proof BulldocsLive uses, now inside the Studio. Read-only:
   # editing stays on the paper-ingest ops endpoint.
   attr :paper_doc, :map, default: nil
   attr :paper_rev, :integer, default: 0

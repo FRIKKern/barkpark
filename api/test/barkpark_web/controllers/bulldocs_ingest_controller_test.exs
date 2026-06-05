@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.PaperIngestControllerTest do
+defmodule BarkparkWeb.BulldocsIngestControllerTest do
   @moduledoc """
   Focused test for the paperflow paper-ingest endpoint (convergence MVP).
 
@@ -79,7 +79,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       assert pc(paper, "goal_id") == "bd-test1"
       assert pc(paper, "event_type") == "plan-written"
 
-      # Broadcast landed on the topic PaperLive subscribes to.
+      # Broadcast landed on the topic BulldocsLive subscribes to.
       assert_receive {:paper_updated, %{slug: ^slug, html: html}}
       assert html =~ slug
     end
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.PaperIngestControllerTest do
       assert length(pc(paper, "blocks")) == 2
       assert pc(paper, "body_html") =~ "Streamed in."
 
-      # Delta frame landed on the per-doc topic PaperLive subscribes to.
+      # Delta frame landed on the per-doc topic BulldocsLive subscribes to.
       assert_receive {:paper_block, %{op_kind: "append-block", block_id: "b-new", rev: rev}}
       assert rev == rev0 + 1
     end

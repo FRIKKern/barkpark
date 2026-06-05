@@ -6,7 +6,7 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
   Papers are stamped `workspace_id` on write and slugs are PER-WORKSPACE (the
   Wave-2 uniqueness flip lifted the old global `(doc_id, type, dataset)` index
   to a per-workspace `(doc_id, type, dataset_id)` one). Before this fix,
-  `PaperLive.mount` called the bare `Content.get_paper(slug)` which runs
+  `BulldocsLive.mount` called the bare `Content.get_paper(slug)` which runs
   UNSCOPED — `scope_to_workspace(query, nil, …)` returns the query untouched —
   so `Repo.one` resolved the slug across EVERY tenant. Any unauthenticated
   visitor could read any workspace's paper by slug, and on a same-slug

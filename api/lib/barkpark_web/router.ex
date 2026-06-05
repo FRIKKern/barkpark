@@ -157,8 +157,8 @@ defmodule BarkparkWeb.Router do
   # plugin via the `:public_root` route bucket — see
   # `Barkpark.Plugins.Bulldocs.register_routes/1` and the
   # `scope "/" … plugin_routes(scope: :public_root)` block below. It mounts
-  # `BarkparkWeb.PaperLive` in its own live_session with the full-document
-  # `:paper` root layout: byte-identical URL + layout to the former hardcoded
+  # `BarkparkWeb.BulldocsLive` in its own live_session with the full-document
+  # `:bulldocs` root layout: byte-identical URL + layout to the former hardcoded
   # `scope "/papers"`, just sourced from the plugin. (The route template still
   # matches `BARKPARK_LIVEVIEW_PATH_TEMPLATE` = "/papers/{slug}" in paperflow's
   # event-on-save.sh.)
@@ -173,14 +173,14 @@ defmodule BarkparkWeb.Router do
   scope "/v1/paperflow", BarkparkWeb do
     pipe_through :ingest
 
-    post "/papers", PaperIngestController, :ingest
+    post "/papers", BulldocsIngestController, :ingest
     # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
     # auth; applies via Content.apply_paper_block_op, broadcasts a delta frame.
-    post "/papers/:slug/ops", PaperIngestController, :apply_op
+    post "/papers/:slug/ops", BulldocsIngestController, :apply_op
     # P6.U6a loop-closer (barkpark-jwai): the paperflow-side reader loop (U6b)
     # drains pending action:*/simplify-* intents here, then marks each done.
-    get "/intents", PaperIntentsController, :index
-    post "/intents/:id/processed", PaperIntentsController, :mark_processed
+    get "/intents", BulldocsIntentsController, :index
+    post "/intents/:id/processed", BulldocsIntentsController, :mark_processed
   end
 
   # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────

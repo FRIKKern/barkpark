@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
        with NO remount — same view pid before/after, and the `#paper-sentinel`
        (rendered OUTSIDE the streamed container) survives the delta.
 
-  This is the Studio-side mirror of `BarkparkWeb.PaperLiveTest`'s Gate-B
+  This is the Studio-side mirror of `BarkparkWeb.BulldocsLiveTest`'s Gate-B
   streaming proof — the same Content/PubSub spine, now embedded in the
   multi-pane Studio instead of the standalone /papers/:slug page.
   """
