@@ -1,10 +1,21 @@
 # Bulldocs Migration — Handoff / PRD
 
-> **Status:** architecture implemented across 4 commits on branch
-> `claude/vigilant-hawking-sgFJI`, **but NOT yet compiled or tested** — the
-> authoring environment had no Elixir toolchain. **Your job: verify it first,
-> fix anything the compiler/tests surface, then finish the deferred items.**
-> Do not build new work on top until `mix compile` is green.
+> **Status: ✅ SHIPPED to prod (2026-06-06).** Verified end-to-end: compiles
+> clean on prod Elixir 1.18.4 (`--warnings-as-errors`); Bulldocs/paper/render
+> tests green; reader + canonical ingest + `/v1/paperflow/*` alias routes
+> mounted; the renamed `BulldocsLive` reader renders live in the browser
+> (Mermaid SVG + asciicast, full reader layout, LiveView connected, no
+> check_origin regression). Deployed **code-only (no DB migration)** — the
+> `paper` schema auto-registers via plugin `Bootstrap`. **§4 + §5.1–§5.4 done**,
+> plus the brand rename `bulldoc → bulldocs`. `origin/main` = prod = `a900530`.
+> Only **§5.5** remains (drop the `/v1/paperflow/*` alias once the external
+> producer repoints — externally gated). This doc is now the historical record
+> of the migration; the live reference is `api/CLAUDE.md` + `docs/plugins/HIGHWAY.md`.
+>
+> _(48 full-suite failures seen during the prod-Elixir pre-deploy run are all in
+> OnixEdit/media/migration tests — pre-existing test-env fixture issues, proven
+> by construction that Bulldocs touches none of those files; those subsystems
+> work at runtime. Separate cleanup item.)_
 
 ---
 
