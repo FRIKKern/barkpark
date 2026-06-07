@@ -178,6 +178,12 @@ It's **both** a premium Bubble Tea wizard *and* a fully agent-driveable command.
 
 For agents the flow is **preview, then execute**: `--dry-run -o json` returns the full plan (ordered steps, env, plugin selection, destructive/`requires_confirm` flags, prerequisite `needs`) with zero side effects; re-run with `--yes` to apply, then parse the JSON `Result`. Destructive/outbound runs (local DB reset, deploy, provision-create) refuse to run without `--yes`; provision is **staged** — it plans unless the provider CLI, a credential, *and* `--yes` are all present.
 
+**Connect remembers servers.** Every successful `connect` is upserted into a most-recent-first cache; the wizard offers it as an interactive pick-list (the active server marked ★) so a returning user selects instead of re-typing a URL. Running `connect` with **no** `--server` reconnects to your active saved server (its token + scope ride along); with an empty cache it's a clean usage error, not a prompt. Agents read the cache from the connect plan's `known_servers[]` (credential-free — `server`, `active`, `last_connected`):
+
+```bash
+bp setup --target connect --dry-run -o json | jq '.known_servers'   # the remembered servers (★ = active)
+```
+
 ```bash
 bp setup --target connect --server https://api.example.com --dry-run -o json   # preview (no writes)
 bp setup --target connect --server https://api.example.com --yes -o json       # execute + structured receipt

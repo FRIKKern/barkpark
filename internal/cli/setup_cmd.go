@@ -61,6 +61,30 @@ func loadKnownServers() []setup.KnownServerInfo {
 	return out
 }
 
+// activeSavedServer resolves the currently-active saved server into a setup
+// ServerEntry-equivalent for the connect-without-`--server` convenience: it loads
+// the config, reads ActiveServer(), and finds the matching KnownServers entry so
+// the reconnect carries that server's token + scope. It returns ok=false when no
+// config / no active server exists (the clean usage-error case). When the active
+// URL has no matching history entry (an edge case), it still returns the URL with
+// empty credentials so the caller defaults to anonymous reads / standard scope.
+func activeSavedServer() (ServerEntry, bool) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return ServerEntry{}, false
+	}
+	active := cfg.ActiveServer()
+	if active == "" {
+		return ServerEntry{}, false
+	}
+	for _, e := range cfg.KnownServerList() {
+		if cfg.IsActiveServer(e.Server) {
+			return e, true
+		}
+	}
+	return ServerEntry{Server: active}, true
+}
+
 // runSetup is the `bp setup` built-in. It is first-class for AI/automation: the
 // interactive Bubble Tea wizard launches ONLY on a genuine interactive terminal
 // with no --target and no machine-output/--yes flags; every other path is
@@ -107,6 +131,33 @@ func runSetup(out *writer, g globals, tail []string) int {
 		plan.Dataset = g.dataset
 	}
 
+	// CONNECT convenience: when no --server was given anywhere (setup-local nor the
+	// global -s fall-through), default to the ACTIVE saved server so a returning
+	// agent/user reconnects without re-typing the URL. The matching KnownServers
+	// entry's token + scope ride along so the reconnect is complete; an explicit
+	// --server always overrides (handled above — this only fires on empty Server).
+	// With no saved server yet, reconnectedToSaved stays false and the empty-Server
+	// case falls through to Validate's clean usage error below.
+	reconnectedToSaved := false
+	if parsed["target"] && plan.Target == setup.TargetConnect && plan.Server == "" {
+		if entry, ok := activeSavedServer(); ok {
+			plan.Server = entry.Server
+			if plan.Token == "" {
+				plan.Token = entry.Token
+			}
+			if plan.Workspace == "" {
+				plan.Workspace = entry.Workspace
+			}
+			if plan.Project == "" {
+				plan.Project = entry.Project
+			}
+			if plan.Dataset == "" {
+				plan.Dataset = entry.Dataset
+			}
+			reconnectedToSaved = true
+		}
+	}
+
 	opts := setup.Options{
 		DryRun:       g.dryRun,
 		Confirm:      g.yes,
@@ -132,11 +183,26 @@ func runSetup(out *writer, g globals, tail []string) int {
 			"no --target and not an interactive terminal — pass --target connect|local|deploy|provision (see bp setup -h)")
 	}
 
+	// CONNECT with no --server AND no active saved server to fall back on: a clean
+	// usage error (exit 2), never a prompt. This is more actionable than Validate's
+	// bare "--server is required" because it tells the agent both escape hatches.
+	if plan.Target == setup.TargetConnect && plan.Server == "" && !reconnectedToSaved {
+		return setupUsageError(out, jsonOut, "usage",
+			"no --server and no saved server yet — pass --server <url> or run `bp setup` interactively")
+	}
+
 	// (4) NON-INTERACTIVE INPUT VALIDATION — surface SetupPlan.Validate's errors as
 	// a clean structured error (exit 2), NEVER a prompt. (Validate runs again
 	// inside Execute/BuildPlan; this fail-fast keeps the error path uniform.)
 	if verr := plan.Validate(); verr != nil {
 		return setupUsageError(out, jsonOut, "usage", verr.Error())
+	}
+
+	// When the saved-server default kicked in, make the reconnect explicit on the
+	// human path so the user/agent sees which URL we resolved and how to override.
+	// JSON callers read connect_to / known_servers from the plan or result instead.
+	if reconnectedToSaved && !jsonOut {
+		out.outf("reconnecting to saved server %s (pass --server to override)", plan.Server)
 	}
 
 	// (1) STRUCTURED JSON / human DRY-RUN.

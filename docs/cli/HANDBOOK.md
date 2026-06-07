@@ -505,6 +505,53 @@ Pass `--target` and the run is fully non-interactive. The complete flag list
 The setup-local flags fall through to the global `-s` / `-w` / `-p` / `-d` when
 absent, so `bp -s URL setup --target connect` works too.
 
+### Known servers (cache)
+
+Every successful `connect` is remembered, so a returning user (or agent) does not
+re-type a URL. The cache lives in the same file as the active connection —
+`${XDG_CONFIG_HOME:-~/.config}/barkpark/config.json` (written 0600 in a 0700 dir,
+since it holds tokens) — under the `known_servers` key. It builds up as you
+connect: a fresh install starts with an empty cache.
+
+- **Recorded on every connect.** A successful connect upserts an entry into
+  `known_servers` (`RememberServer`, `internal/cli/config.go`). Upsert is by
+  normalized server URL (trailing slash trimmed, scheme + host lowercased), so
+  connecting to the same server twice collapses to one entry that moves to the
+  front. The list is most-recent-first and capped at 20 entries. The connected
+  server is also promoted to the active flat context, so it is the head of the
+  list **and** the server bare `bp` defaults to.
+- **Interactive pick-list.** In the wizard, choosing `connect` with a non-empty
+  cache shows a pick-list — one row per remembered server (URL + a dim
+  "last connected …"), the active one marked ★, then a final
+  "＋ enter a new server…" escape row. Picking a saved row fills the server URL +
+  its token/scope from history and skips the text input.
+- **No `--server` default (non-interactive).** `bp setup --target connect` with no
+  `--server` (and no global `-s` fall-through) reconnects to your **active** saved
+  server; its token + scope ride along so the reconnect is complete (an explicit
+  `--server`/`--token`/scope flag always overrides). The human path prints
+  `reconnecting to saved server <url> (pass --server to override)`. With an empty
+  cache there is nothing to fall back on, so it is a clean usage error
+  (exit **2**), never a prompt:
+
+  ```
+  no --server and no saved server yet — pass --server <url> or run `bp setup` interactively
+  ```
+
+- **JSON view.** A connect dry-run (`--dry-run -o json`) carries a credential-free
+  `known_servers` array so an agent can inspect the cache before connecting. Each
+  entry is `{ "server", "active", "last_connected"? }` — tokens are never exposed.
+  The array is always present on a connect plan (empty `[]` on a fresh cache).
+
+  ```bash
+  bp setup --target connect --dry-run -o json | jq '.known_servers'
+  ```
+  ```json
+  [
+    { "server": "https://api.example.com",     "active": true,  "last_connected": "2026-06-05T12:00:00Z" },
+    { "server": "https://staging.example.com", "active": false, "last_connected": "2026-06-01T09:30:00Z" }
+  ]
+  ```
+
 ### The JSON contract
 
 With `-o json` (or `--json`) setup emits exactly one JSON object on stdout. There
