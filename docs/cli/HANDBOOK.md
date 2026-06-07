@@ -166,6 +166,7 @@ a baked-in v1 fallback so the CLI works out of the box against a local dev serve
 | `BARKPARK_WORKSPACE` | `default` | workspace |
 | `BARKPARK_PROJECT` | `default` | project |
 | `BARKPARK_DATASET` | `production` | dataset |
+| `BARKPARK_PERSPECTIVE` | `drafts` (TUI only) | dataset view (`published` / `drafts` / `raw`) the **interactive TUI** reads |
 | `BARKPARK_INGEST_TOKEN` (then `PAPERFLOW_INGEST_TOKEN`) | resolved bearer token | ingest secret (`ingest`-tier commands) |
 | `BARKPARK_MANIFEST` | — | local manifest file (same as `--manifest`) |
 
@@ -182,11 +183,13 @@ field by field, by this precedence (`manifest.Resolve`):
 flags  >  env (BARKPARK_*)  >  active context  >  defaults
 ```
 
-The **active context** layer is a forward seam: v1 ships one default server and
-**no persistence**, so there is no `context use` command and the active layer is
-always empty. Because `ConfigFromEnv` bakes in the fallbacks above, the env layer
-is effectively never empty for those fields — the env fallbacks are the
-documented v1 floor.
+The **active context** layer is the persisted `config.json` (`bp setup`,
+`bp use <name>` — see §13). With **no** env var set, the active server wins over
+the baked default, so flipping it with `bp use <name>` repoints every later
+command (and the TUI — below). An explicit `BARKPARK_API_URL` / `BARKPARK_SERVER`
+still sits above it and overrides per-invocation. (The interactive TUI resolves
+through this exact chain via `ResolvedAPIConfig`, then adds its own
+`drafts`-perspective default — `BARKPARK_PERSPECTIVE` to change.)
 
 ---
 
@@ -593,6 +596,17 @@ normalized URL (`FindServer`). On a hit it promotes that entry's server + token
 $ bp use prod
 ✓ now using prod [cloud] — https://api.barkpark.cloud  (scope w=default p=default d=production)
 ```
+
+The **interactive TUI shares this same active server**: launching `barkpark`
+with no args resolves the connection through the identical
+`flags > env > active-config > defaults` chain (`ResolvedAPIConfig` →
+`resolveContext`, `internal/cli/cli.go`), so `bp use <name>` repoints the TUI
+too — no env var needed. An explicit `BARKPARK_API_URL` still overrides. One
+extra TUI-only default rides on top: the dataset view is **`drafts`** (so the
+editing desk shows unpublished work), overridable with
+`BARKPARK_PERSPECTIVE=published|drafts|raw` (`PerspectiveFromEnv`,
+`internal/apiclient/client.go`). The CLI's manifest-driven reads never set a
+perspective, so they keep the server's `published` default.
 
 With **no argument** it reports the active server and lists the known handles:
 

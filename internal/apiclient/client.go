@@ -57,6 +57,14 @@ type Config struct {
 	Workspace string
 	Project   string
 	Dataset   string
+	// Perspective selects which view of the dataset Query reads:
+	// "published" (public default), "drafts" (Studio-style: drafts overlaid on
+	// published), or "raw" (everything). An EMPTY string means "do not send a
+	// perspective param" — the server then applies its own default (published).
+	// The CLI's manifest-driven doc reads leave this empty so they keep the
+	// published default; the TUI sets it to "drafts" so editing surfaces show
+	// unpublished work. See ConfigFromEnv for the BARKPARK_PERSPECTIVE override.
+	Perspective string
 	// Timeout is the per-request HTTP timeout. Zero means DefaultTimeout.
 	// (The SSE listener always uses an unbounded timeout, independent of this.)
 	Timeout time.Duration
@@ -92,11 +100,27 @@ func ConfigFromEnv() Config {
 	}
 
 	return Config{
-		BaseURL:   baseURL,
-		Token:     token,
-		Workspace: workspace,
-		Project:   project,
-		Dataset:   dataset,
+		BaseURL:     baseURL,
+		Token:       token,
+		Workspace:   workspace,
+		Project:     project,
+		Dataset:     dataset,
+		Perspective: PerspectiveFromEnv(),
+	}
+}
+
+// PerspectiveFromEnv resolves the dataset view for the interactive TUI: the
+// BARKPARK_PERSPECTIVE env var when set to a recognised value (published|drafts|
+// raw), else the TUI default "drafts" so editing surfaces show unpublished work.
+// An unrecognised value falls back to the "drafts" default rather than passing
+// junk to the server. This is the TUI/apiclient default ONLY — the CLI's
+// manifest-driven reads never call this and keep the published default.
+func PerspectiveFromEnv() string {
+	switch os.Getenv("BARKPARK_PERSPECTIVE") {
+	case "published", "drafts", "raw":
+		return os.Getenv("BARKPARK_PERSPECTIVE")
+	default:
+		return "drafts"
 	}
 }
 
@@ -109,7 +133,10 @@ type Client struct {
 	Workspace string
 	Project   string
 	Dataset   string
-	client    *http.Client
+	// Perspective is the dataset view Query reads ("published"/"drafts"/"raw").
+	// Empty means "send no perspective param" — the server defaults to published.
+	Perspective string
+	client      *http.Client
 	// OnChange, if set, is invoked when the SSE listener / poll fallback detects
 	// that the dataset changed. It replaces the old tea.Program coupling: the TUI
 	// sets it to program.Send(DataStoreRefreshMsg{}); a CLI may leave it nil.
@@ -135,12 +162,13 @@ func New(cfg Config) *Client {
 		timeout = DefaultTimeout
 	}
 	return &Client{
-		baseURL:   cfg.BaseURL,
-		token:     cfg.Token,
-		Workspace: cfg.Workspace,
-		Project:   cfg.Project,
-		Dataset:   cfg.Dataset,
-		client:    &http.Client{Timeout: timeout},
+		baseURL:     cfg.BaseURL,
+		token:       cfg.Token,
+		Workspace:   cfg.Workspace,
+		Project:     cfg.Project,
+		Dataset:     cfg.Dataset,
+		Perspective: cfg.Perspective,
+		client:      &http.Client{Timeout: timeout},
 	}
 }
 
@@ -254,10 +282,23 @@ func (c *Client) Mutate(mutations []map[string]interface{}) error {
 }
 
 // Query fetches documents from the API by type, with optional filter.
+//
+// When Client.Perspective is non-empty it is appended as ?perspective=<p>,
+// combined with any filter via the right ?/& separator. An empty Perspective
+// sends no param, so the server applies its own default (published) — that is
+// the CLI/manifest contract; the TUI sets Perspective="drafts" to surface
+// unpublished work.
 func (c *Client) Query(typeName, filter string) []Doc {
 	endpoint := c.scopedURL("/v1/data/query/" + c.Dataset + "/" + typeName)
+	params := url.Values{}
 	if filter != "" {
-		endpoint += "?filter=" + url.QueryEscape(filter)
+		params.Set("filter", filter)
+	}
+	if c.Perspective != "" {
+		params.Set("perspective", c.Perspective)
+	}
+	if qs := params.Encode(); qs != "" {
+		endpoint += "?" + qs
 	}
 
 	resp, err := c.authGet(endpoint)

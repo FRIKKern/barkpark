@@ -258,6 +258,53 @@ func bakedDefaults() manifest.Defaults {
 	return d
 }
 
+// ResolvedAPIConfig returns the connection the interactive TUI should use,
+// resolved through the EXACT precedence the CLI applies to every command:
+//
+//	explicitly-set BARKPARK_* env  >  saved-config ACTIVE server  >  baked defaults
+//
+// It reuses resolveContext (which folds envContext / the persisted config's
+// ToActiveContext / bakedDefaults through manifest.Resolve) so the TUI and CLI
+// can never drift on what "the active server" is — `bp use <name>` moves the
+// config's active server, and the TUI then connects there. An explicit
+// BARKPARK_API_URL still wins, because envContext sits above the config layer.
+//
+// The Perspective field is the TUI's editing-view default ("drafts", overridable
+// via BARKPARK_PERSPECTIVE) — it is set here, NOT in resolveContext, so the CLI's
+// manifest-driven reads (which never call this) keep the server's published
+// default.
+func ResolvedAPIConfig() apiclient.Config {
+	ctx := resolveContext(globals{})
+	return apiclient.Config{
+		BaseURL:     ctx.Server,
+		Token:       ctx.Token,
+		Workspace:   ctx.Workspace,
+		Project:     ctx.Project,
+		Dataset:     ctx.Dataset,
+		Perspective: apiclient.PerspectiveFromEnv(),
+	}
+}
+
+// ServerSource describes where ResolvedAPIConfig's server came from, for the
+// TUI's startup banner. It is a cheap, best-effort attribution computed from the
+// same layers resolveContext consults: an explicitly-set env var → "env"; else a
+// saved active server → "saved: <name>" (the display handle from the config);
+// else the baked floor → "default". It re-derives rather than threading state
+// through manifest.Resolve, so it stays a pure read with no behavioural coupling.
+func ServerSource() string {
+	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+		return "env"
+	}
+	if c, err := LoadConfig(); err == nil && c != nil && c.Server != "" {
+		// Name the active server the way `bp servers` / `bp use` would show it.
+		if e, ok := c.FindServer(c.Server); ok {
+			return "saved: " + c.DisplayName(e)
+		}
+		return "saved: " + c.Server
+	}
+	return "default"
+}
+
 // lookupNoun returns the noun node if present.
 func lookupNoun(t *manifest.Tree, name string) (*manifest.TreeNoun, bool) {
 	for _, n := range t.Nouns {

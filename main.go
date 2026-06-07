@@ -25,12 +25,17 @@ func main() {
 // the structure tree, and run the Bubble Tea program with the live-refresh SSE
 // wiring intact. Returns the process exit code.
 func runTUI() int {
-	cfg := apiclient.ConfigFromEnv()
+	// Follow the SAME active server the `bp` CLI uses: resolved through
+	// flags(none here) > explicitly-set BARKPARK_* env > saved-config active
+	// server > baked defaults. So `bp use prod` moves the TUI too, and an
+	// explicit BARKPARK_API_URL still overrides. The TUI also reads the editing
+	// "drafts" perspective by default (overridable via BARKPARK_PERSPECTIVE).
+	cfg := cli.ResolvedAPIConfig()
 	ds := apiclient.New(cfg)
 
 	// Load schemas from Phoenix API
-	fmt.Fprintf(os.Stderr, "Connecting to %s (workspace=%s project=%s dataset=%s)...\n",
-		cfg.BaseURL, ds.Workspace, ds.Project, ds.Dataset)
+	fmt.Fprintf(os.Stderr, "Connecting to %s [%s] (workspace=%s project=%s dataset=%s perspective=%s)...\n",
+		cfg.BaseURL, cli.ServerSource(), ds.Workspace, ds.Project, ds.Dataset, ds.Perspective)
 	loaded, err := ds.LoadSchemas()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)

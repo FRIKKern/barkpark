@@ -235,6 +235,8 @@ Editor-header and group-tab buttons render as inline SVG icons (from `BarkparkWe
 
 The same desk in the terminal — keyboard-driven, talks to the Phoenix API over HTTP + SSE. Point it at a remote server with `BARKPARK_API_URL=http://host:4000 go run .`
 
+The TUI follows the **same active server as the `bp` CLI** (`config.json`), so `bp use <name>` moves both — no env var needed. An explicit `BARKPARK_API_URL` still overrides. The TUI defaults to the **`drafts`** (editing) perspective so unpublished work is visible; set `BARKPARK_PERSPECTIVE=published|drafts|raw` to change it.
+
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
 | `j` / `k` | Move up/down | `Space` | Toggle boolean / cycle select |
