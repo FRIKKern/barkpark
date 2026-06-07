@@ -140,8 +140,9 @@ func indexOfWorkspace(list []WorkspaceInfo, slug string) int {
 // applyScope commits the chosen scope to the DataStore, reloads schemas, and
 // rebuilds the desk structure + panes. On any blank field it refuses and leaves
 // the modal open with an inline error. Schema-load failure is surfaced the same
-// way and the previous scope is left intact (loadSchemas only swaps the global
-// `schemas` on success).
+// way and the previous scope is left intact — LoadSchemasFor probes the
+// prospective scope without mutating the client, and the caller-owned `schemas`
+// slice is only swapped on success.
 func (m *model) applyScope(ws, pr, dsName string) {
 	ws = strings.TrimSpace(ws)
 	pr = strings.TrimSpace(pr)
@@ -152,10 +153,12 @@ func (m *model) applyScope(ws, pr, dsName string) {
 		return
 	}
 
-	if err := loadSchemas(m.ds.baseURL, m.ds.token, ws, pr, dsName); err != nil {
+	loaded, err := m.ds.LoadSchemasFor(ws, pr, dsName)
+	if err != nil {
 		m.selector.err = fmt.Sprintf("load failed: %v", err)
 		return
 	}
+	schemas = loaded
 
 	m.ds.Workspace = ws
 	m.ds.Project = pr

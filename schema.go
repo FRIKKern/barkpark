@@ -1,52 +1,36 @@
 package main
 
-import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
-)
+import "github.com/FRIKKern/barkpark/internal/apiclient"
 
-// FieldType enumerates the supported form field types.
-type FieldType int
+// The schema model types now live in the framework-free apiclient package.
+// These aliases keep the existing TUI code (tui.go, structure.go, selector.go)
+// compiling unchanged while the HTTP + parsing logic lives in apiclient.
+type (
+	FieldType = apiclient.FieldType
+	Field     = apiclient.Field
+	Schema    = apiclient.Schema
+)
 
 const (
-	FieldString    FieldType = iota
-	FieldSlug
-	FieldText
-	FieldRichText
-	FieldImage
-	FieldSelect
-	FieldBoolean
-	FieldDatetime
-	FieldColor
-	FieldReference
-	FieldArray
+	FieldString    = apiclient.FieldString
+	FieldSlug      = apiclient.FieldSlug
+	FieldText      = apiclient.FieldText
+	FieldRichText  = apiclient.FieldRichText
+	FieldImage     = apiclient.FieldImage
+	FieldSelect    = apiclient.FieldSelect
+	FieldBoolean   = apiclient.FieldBoolean
+	FieldDatetime  = apiclient.FieldDatetime
+	FieldColor     = apiclient.FieldColor
+	FieldReference = apiclient.FieldReference
+	FieldArray     = apiclient.FieldArray
 )
 
-// Field defines a single form field inside a document schema.
-type Field struct {
-	Name    string
-	Title   string
-	Type    FieldType
-	Options []string
-	RefType string
-	Rows    int
-}
-
-// Schema defines a document type.
-type Schema struct {
-	Name       string
-	Title      string
-	Icon       string
-	Visibility string // "public" or "private"
-	Fields     []Field
-}
-
-// schemas is populated at startup by loadSchemas().
+// schemas is the TUI's caller-owned schema slice, populated at startup and on
+// every scope switch. The apiclient no longer holds global mutable schema state;
+// the loaded slice lives here and findSchema reads it.
 var schemas []Schema
 
-// findSchema looks up a schema by its machine name.
+// findSchema looks up a schema by its machine name in the caller-owned slice.
 func findSchema(name string) *Schema {
 	for i := range schemas {
 		if schemas[i].Name == name {
@@ -54,102 +38,4 @@ func findSchema(name string) *Schema {
 		}
 	}
 	return nil
-}
-
-// loadSchemas fetches schema definitions from the Phoenix API, scoped onto the
-// /w/<workspace>/p/<project>/v1/schemas/<dataset> routing.
-func loadSchemas(baseURL, token, workspace, project, dataset string) error {
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	schemasURL := fmt.Sprintf("%s/w/%s/p/%s/v1/schemas/%s", baseURL, workspace, project, dataset)
-	req, err := http.NewRequest("GET", schemasURL, nil)
-	if err != nil {
-		return fmt.Errorf("fetch schemas: %w", err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch schemas: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetch schemas: status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Schemas []struct {
-			Name       string `json:"name"`
-			Title      string `json:"title"`
-			Icon       string `json:"icon"`
-			Visibility string `json:"visibility"`
-			Fields     []struct {
-				Name    string   `json:"name"`
-				Title   string   `json:"title"`
-				Type    string   `json:"type"`
-				Options []string `json:"options,omitempty"`
-				RefType string   `json:"refType,omitempty"`
-				Rows    int      `json:"rows,omitempty"`
-			} `json:"fields"`
-		} `json:"schemas"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("parse schemas: %w", err)
-	}
-
-	schemas = make([]Schema, 0, len(result.Schemas))
-	for _, as := range result.Schemas {
-		s := Schema{
-			Name:       as.Name,
-			Title:      as.Title,
-			Icon:       as.Icon,
-			Visibility: as.Visibility,
-		}
-		for _, af := range as.Fields {
-			s.Fields = append(s.Fields, Field{
-				Name:    af.Name,
-				Title:   af.Title,
-				Type:    parseFieldType(af.Type),
-				Options: af.Options,
-				RefType: af.RefType,
-				Rows:    af.Rows,
-			})
-		}
-		schemas = append(schemas, s)
-	}
-
-	return nil
-}
-
-func parseFieldType(s string) FieldType {
-	switch s {
-	case "string":
-		return FieldString
-	case "slug":
-		return FieldSlug
-	case "text":
-		return FieldText
-	case "richText":
-		return FieldRichText
-	case "image":
-		return FieldImage
-	case "select":
-		return FieldSelect
-	case "boolean":
-		return FieldBoolean
-	case "datetime":
-		return FieldDatetime
-	case "color":
-		return FieldColor
-	case "reference":
-		return FieldReference
-	case "array":
-		return FieldArray
-	default:
-		return FieldString
-	}
 }
