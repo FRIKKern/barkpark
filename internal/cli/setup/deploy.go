@@ -53,22 +53,25 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 	publicURL := scheme + "://" + plan.Domain
 
 	if opts.DryRun {
-		fmt.Fprintf(w, "setup deploy — would install Barkpark on %s\n", host)
-		fmt.Fprintf(w, "  1. stream the installer into the remote shell:\n")
-		fmt.Fprintf(w, "      $ %s\n", rendered)
-		fmt.Fprintf(w, "  2. env handed to the remote bash:\n")
-		fmt.Fprintf(w, "      DOMAIN=%s\n", plan.Domain)
-		fmt.Fprintf(w, "      PHX_SCHEME=%s\n", scheme)
-		if envSet {
-			fmt.Fprintf(w, "      BARKPARK_PLUGINS=%s\n", envValue)
-		} else {
-			fmt.Fprintf(w, "      (BARKPARK_PLUGINS unset — server discovers all plugins)\n")
+		// JSON dry-run is rendered by the caller from BuildPlan; print nothing.
+		if !opts.json() {
+			fmt.Fprintf(w, "setup deploy — would install Barkpark on %s\n", host)
+			fmt.Fprintf(w, "  1. stream the installer into the remote shell:\n")
+			fmt.Fprintf(w, "      $ %s\n", rendered)
+			fmt.Fprintf(w, "  2. env handed to the remote bash:\n")
+			fmt.Fprintf(w, "      DOMAIN=%s\n", plan.Domain)
+			fmt.Fprintf(w, "      PHX_SCHEME=%s\n", scheme)
+			if envSet {
+				fmt.Fprintf(w, "      BARKPARK_PLUGINS=%s\n", envValue)
+			} else {
+				fmt.Fprintf(w, "      (BARKPARK_PLUGINS unset — server discovers all plugins)\n")
+			}
+			fmt.Fprintf(w, "  3. installer script: %s\n", displayScript)
+			fmt.Fprintf(w, "  4. verify %s/v1/capabilities + %s/studio\n", publicURL, publicURL)
+			fmt.Fprintf(w, "  5. connect bp to %s\n", publicURL)
+			fmt.Fprintf(w, "\n  plugins: %s\n", PluginsSummary(plan.Plugins))
+			fmt.Fprintf(w, "  (no execution — dry run; nothing was sent to %s)\n", host)
 		}
-		fmt.Fprintf(w, "  3. installer script: %s\n", displayScript)
-		fmt.Fprintf(w, "  4. verify %s/v1/capabilities + %s/studio\n", publicURL, publicURL)
-		fmt.Fprintf(w, "  5. connect bp to %s\n", publicURL)
-		fmt.Fprintf(w, "\n  plugins: %s\n", PluginsSummary(plan.Plugins))
-		fmt.Fprintf(w, "  (no execution — dry run; nothing was sent to %s)\n", host)
 		return nil
 	}
 
@@ -84,23 +87,29 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 	}
 
 	// Stream the installer.
-	fmt.Fprintf(w, ">> Deploying to %s\n", host)
-	fmt.Fprintf(w, "   %s\n", rendered)
+	if !opts.json() {
+		fmt.Fprintf(w, ">> Deploying to %s\n", host)
+		fmt.Fprintf(w, "   %s\n", rendered)
+	}
 	ctx := context.Background()
 	if err := streamSSHInstaller(ctx, w, host, envPrefix, scriptPath); err != nil {
 		return fmt.Errorf("setup deploy: installer failed: %w", err)
 	}
 
 	// Verify the new server.
-	fmt.Fprintf(w, "\n>> Verifying %s\n", publicURL)
+	if !opts.json() {
+		fmt.Fprintf(w, "\n>> Verifying %s\n", publicURL)
+	}
 	if err := verifyServer(publicURL, plan.Token); err != nil {
 		return fmt.Errorf("setup deploy: post-install verification failed: %w\n  the installer ran but the server is not answering; check `make logs` on %s", err, host)
 	}
-	fmt.Fprintf(w, "   /v1/capabilities OK\n")
-	fmt.Fprintf(w, "   /studio OK\n")
+	if !opts.json() {
+		fmt.Fprintf(w, "   /v1/capabilities OK\n")
+		fmt.Fprintf(w, "   /studio OK\n")
 
-	// Point bp here.
-	fmt.Fprintf(w, "\n>> Connecting bp to %s\n", publicURL)
+		// Point bp here.
+		fmt.Fprintf(w, "\n>> Connecting bp to %s\n", publicURL)
+	}
 	connectPlan := SetupPlan{
 		Target:    TargetConnect,
 		Server:    publicURL,
@@ -109,7 +118,59 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 		Project:   plan.Project,
 		Dataset:   plan.Dataset,
 	}
-	return executeConnect(connectPlan, opts)
+	if err := executeConnect(connectPlan, opts); err != nil {
+		return err
+	}
+	if opts.Result != nil {
+		opts.Result.Target = TargetDeploy
+	}
+	return nil
+}
+
+// buildDeployPlan builds the structured dry-run plan for deploy. It re-derives
+// the same host/scheme/env/script the executor would use and lays out the five
+// ordered steps. It is destructive + outbound (provisions/restarts a live
+// server) and requires --yes for the real run.
+func buildDeployPlan(plan SetupPlan, _ Options) (Plan, error) {
+	if err := validateDeploy(plan); err != nil {
+		return Plan{}, err
+	}
+	host := normalizeSSHHost(plan.SSHHost)
+	scheme := firstNonEmpty(plan.Scheme, "https")
+	envValue, envSet := PluginsEnvValue(plan.Plugins)
+
+	scriptPath, _ := locateDeployScript()
+	displayScript := scriptPath
+	if displayScript == "" {
+		displayScript = "deploy.sh"
+	}
+
+	envParts := []string{"DOMAIN=" + plan.Domain, "PHX_SCHEME=" + scheme}
+	if envSet {
+		envParts = append(envParts, "BARKPARK_PLUGINS="+envValue)
+	}
+	envPrefix := strings.Join(envParts, " ")
+	sshArgv := []string{"ssh", host, envPrefix + " bash -s"}
+	rendered := shJoin(sshArgv) + " < " + displayScript
+	publicURL := scheme + "://" + plan.Domain
+
+	p := Plan{
+		Target:          TargetDeploy,
+		DryRun:          true,
+		Destructive:     true, // provisions/restarts a live server
+		RequiresConfirm: true,
+		Plugins:         planPlugins(plan.Plugins),
+		ConnectTo:       publicURL,
+		Env:             map[string]string{"DOMAIN": plan.Domain, "PHX_SCHEME": scheme},
+	}
+	if envSet {
+		p.Env["BARKPARK_PLUGINS"] = envValue
+	}
+	p.addStep("stream the installer into the remote shell", rendered)
+	p.addStep("installer script: "+displayScript, "")
+	p.addStep(fmt.Sprintf("verify %s/v1/capabilities + %s/studio", publicURL, publicURL), "")
+	p.addStep("connect bp to "+publicURL, "")
+	return p, nil
 }
 
 // validateDeploy enforces the deploy-target invariants: an SSH host and a public

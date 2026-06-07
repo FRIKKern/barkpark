@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
+	"github.com/mattn/go-isatty"
 )
 
 // configStoreAdapter bridges the cli package's on-disk Config persistence onto
@@ -28,17 +30,35 @@ func (configStoreAdapter) Save(s setup.SavedConfig) error {
 	return SaveConfig(cfg)
 }
 
-// runSetup is the `bp setup` built-in. It supports the non-interactive flag form
-// (parsed from tail) and leaves the no-target-on-a-TTY path to the setup
-// package's RunInteractive hook (the modes step wires the real wizard there).
+// runSetup is the `bp setup` built-in. It is first-class for AI/automation: the
+// interactive Bubble Tea wizard launches ONLY on a genuine interactive terminal
+// with no --target and no machine-output/--yes flags; every other path is
+// non-interactive and NEVER touches /dev/tty. With -o json (or --json) the plan,
+// the real-run result, and any error are emitted as a single machine-readable
+// JSON object on stdout.
 //
 // Recognised flags: --target, --server, --token, --workspace, --project,
-// --dataset. The global --dry-run (g.dryRun) drives DryRun.
+// --dataset, --docker, --ssh-host, --domain, --scheme, --provider, --region,
+// --server-type, --plugins. The global --dry-run drives DryRun; --yes confirms a
+// destructive/outbound real run; -o json / --json select machine output.
 func runSetup(out *writer, g globals, tail []string) int {
+	// JSON mode is driven by an EXPLICIT -o json / --json only. The writer's
+	// piped-default ("json when stdout is not a tty") must NOT silently turn
+	// setup machine-mode: the contract is that an agent opts in with -o json, and
+	// a plain piped run still gets human prose / a one-line error. g.outputSet is
+	// true exactly when the user passed -o/--output or --json.
+	jsonOut := g.outputSet && g.output == "json"
+
+	// (2) TTY-SAFE HELP — must come BEFORE any wizard/TTY logic so `bp setup -h`
+	// prints usage instead of opening /dev/tty.
+	if g.help || hasHelpFlag(tail) {
+		printSetupHelp(out)
+		return exitOK
+	}
+
 	plan, parsed, perr := parseSetupFlags(tail)
 	if perr != nil {
-		out.errf("barkpark: %v", perr)
-		return exitUsage
+		return setupUsageError(out, jsonOut, "usage", perr.Error())
 	}
 
 	// Fall through to the global -s/-w/-p/-d when the setup-local flag is absent,
@@ -62,23 +82,216 @@ func runSetup(out *writer, g globals, tail []string) int {
 		Out:     out.stdout,
 		Store:   configStoreAdapter{},
 		Wizard:  setup.Wizard,
+		JSON:    jsonOut,
 	}
 
-	// No --target: interactive path (the modes step fills the wizard). On the
-	// foundation this prints the modes-step pointer and exits 0.
+	// (3) NEVER-PROMPT / NEVER-HANG. No --target: the interactive wizard launches
+	// ONLY when ALL of: stdin AND stdout are a TTY, not -o json/--json, not --yes.
+	// Any other no-target case is a CLEAN error (never /dev/tty), exit 2.
 	if !parsed["target"] {
-		if err := setup.RunInteractive(opts); err != nil {
+		if canRunWizard(jsonOut, g.yes) {
+			if err := setup.RunInteractive(opts); err != nil {
+				out.errf("barkpark: %v", err)
+				return exitGeneric
+			}
+			return exitOK
+		}
+		return setupUsageError(out, jsonOut, "usage",
+			"no --target and not an interactive terminal — pass --target connect|local|deploy|provision (see bp setup -h)")
+	}
+
+	// (4) NON-INTERACTIVE INPUT VALIDATION — surface SetupPlan.Validate's errors as
+	// a clean structured error (exit 2), NEVER a prompt. (Validate runs again
+	// inside Execute/BuildPlan; this fail-fast keeps the error path uniform.)
+	if verr := plan.Validate(); verr != nil {
+		return setupUsageError(out, jsonOut, "usage", verr.Error())
+	}
+
+	// (1) STRUCTURED JSON / human DRY-RUN.
+	if g.dryRun {
+		built, berr := setup.BuildPlan(plan, opts)
+		if berr != nil {
+			return setupUsageError(out, jsonOut, "usage", berr.Error())
+		}
+		if jsonOut {
+			out.renderJSON(setupPlanEnvelope(built))
+			return exitOK
+		}
+		// Human dry-run: let the executor print its prose (byte-identical to the
+		// pre-refactor output).
+		if err := setup.Execute(plan, opts); err != nil {
 			out.errf("barkpark: %v", err)
 			return exitGeneric
 		}
 		return exitOK
 	}
 
+	// REAL RUN. (5) --yes is the confirm for destructive/outbound runs (unchanged).
+	var result setup.Result
+	opts.Result = &result
 	if err := setup.Execute(plan, opts); err != nil {
-		out.errf("barkpark: %v", err)
-		return exitGeneric
+		return setupRunError(out, jsonOut, err)
+	}
+	if jsonOut {
+		result.OK = true
+		out.renderJSON(result)
 	}
 	return exitOK
+}
+
+// canRunWizard reports whether the interactive wizard may launch: a genuine
+// interactive terminal (BOTH stdin and stdout are a TTY) AND not a machine-output
+// request (-o json) AND not a pre-confirmed run (--yes). Any false here routes to
+// the clean no-target error instead of opening /dev/tty.
+func canRunWizard(jsonOut, yes bool) bool {
+	if jsonOut || yes {
+		return false
+	}
+	return isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+}
+
+// hasHelpFlag scans setup's own tail for -h/--help (parseGlobals leaves these in
+// tail for the setup noun, so we detect them here before any TTY logic).
+func hasHelpFlag(tail []string) bool {
+	for _, a := range tail {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// setupPlanEnvelope wraps a structured Plan in the {"ok":true, …plan} object the
+// JSON dry-run emits. The Plan's own JSON tags supply the body; ok is added.
+func setupPlanEnvelope(p setup.Plan) map[string]any {
+	return map[string]any{
+		"ok":               true,
+		"target":           p.Target,
+		"dry_run":          p.DryRun,
+		"destructive":      p.Destructive,
+		"requires_confirm": p.RequiresConfirm,
+		"steps":            planStepsJSON(p.Steps),
+		"env":              p.Env,
+		"plugins":          planPluginsJSON(p.Plugins),
+		"needs":            planNeedsJSON(p.Needs),
+		"connect_to":       p.ConnectTo,
+		"provider":         emptyToOmit(p.Provider),
+		"region":           emptyToOmit(p.Region),
+		"server_type":      emptyToOmit(p.ServerType),
+	}
+}
+
+func planStepsJSON(steps []setup.PlanStep) []map[string]any {
+	out := make([]map[string]any, 0, len(steps))
+	for _, s := range steps {
+		m := map[string]any{"n": s.N, "description": s.Description}
+		if s.Command != "" {
+			m["command"] = s.Command
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func planPluginsJSON(p setup.PlanPlugins) map[string]any {
+	m := map[string]any{"mode": p.Mode}
+	if p.Value != "" {
+		m["value"] = p.Value
+	}
+	return m
+}
+
+func planNeedsJSON(needs []setup.PlanNeed) []map[string]any {
+	out := make([]map[string]any, 0, len(needs))
+	for _, n := range needs {
+		out = append(out, map[string]any{"what": n.What, "present": n.Present})
+	}
+	return out
+}
+
+func emptyToOmit(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// setupUsageError emits a usage-class error: JSON {ok:false,error:{code,message}}
+// on stdout when -o json, else a one-line message on stderr. Always exit 2.
+func setupUsageError(out *writer, jsonOut bool, code, msg string) int {
+	if jsonOut {
+		out.renderJSON(map[string]any{
+			"ok":    false,
+			"error": map[string]any{"code": code, "message": msg},
+		})
+		return exitUsage
+	}
+	out.errf("barkpark: %s", msg)
+	return exitUsage
+}
+
+// setupRunError emits a real-run failure. JSON callers get the structured error
+// on stdout; human callers get the message on stderr. Exit is generic (1) — the
+// setup engine's errors are operational (network/SSH/install), not the API's
+// coded envelope.
+func setupRunError(out *writer, jsonOut bool, err error) int {
+	if jsonOut {
+		out.renderJSON(map[string]any{
+			"ok":    false,
+			"error": map[string]any{"code": "failed", "message": err.Error()},
+		})
+		return exitGeneric
+	}
+	out.errf("barkpark: %v", err)
+	return exitGeneric
+}
+
+// printSetupHelp writes the `bp setup` usage to stdout WITHOUT touching the TTY.
+func printSetupHelp(out *writer) {
+	const help = `bp setup — connect to, bring up, deploy, or provision a Barkpark server.
+
+USAGE
+  bp setup --target <connect|local|deploy|provision> [flags]
+  bp setup                       # interactive wizard (TTY only)
+
+TARGETS
+  connect     point bp at an existing server (--server URL)
+  local       bring up a local dev server here (--docker for compose)
+  deploy      install on a server you own over SSH (--ssh-host, --domain)
+  provision   create a cloud host, then deploy (--provider; staged)
+
+FLAGS
+  --target <t>        one of connect|local|deploy|provision
+  --server <url>      server URL for connect (http:// or https://)
+  --token <tok>       bearer token to persist with the connection
+  -w, --workspace <w> workspace scope (default: default)
+  -p, --project <p>   project scope (default: default)
+  -d, --dataset <ds>  dataset scope (default: production)
+  --docker            local: bring up via docker compose (else native mix)
+  --ssh-host <h>      deploy: user@host (bare host defaults to root@)
+  --domain <d>        deploy: public DNS hostname (required for deploy)
+  --scheme <http|https>  deploy: public scheme (default: https)
+  --provider <p>      provision: hetzner | azure
+  --region <r>        provision: region (provider default if omitted)
+  --server-type <t>   provision: instance type (provider default if omitted)
+  --plugins <csv>     plugin whitelist; "" = none (kill switch); absent = all
+  --dry-run           print the plan; run NOTHING
+  --yes               confirm a destructive/outbound real run (no prompt)
+  -o json | --json    emit one machine-readable JSON object on stdout
+  -h, --help          print this help (never opens a TTY)
+
+AUTOMATION / AI
+  # Preview as JSON (no side effects), then execute with --yes:
+  bp setup --target connect --server https://api.example.com --dry-run -o json
+  bp setup --target connect --server https://api.example.com --yes -o json
+
+  bp setup --target local --docker --plugins bulldocs,onixedit --dry-run -o json
+  bp setup --target deploy --ssh-host root@1.2.3.4 --domain d.example.com --dry-run -o json
+  bp setup --target provision --provider hetzner --region nbg1 --server-type cax11 --dry-run -o json
+
+  # Without --target on a non-interactive stdin/stdout, setup errors (exit 2)
+  # instead of prompting — pass --target so an agent is never blocked.`
+	out.outf("%s", help)
 }
 
 // parseSetupFlags pulls the setup-local flags out of tail and returns the

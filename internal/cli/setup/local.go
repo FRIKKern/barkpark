@@ -25,16 +25,18 @@ func executeLocal(plan SetupPlan, opts Options) error {
 	envValue, envSet := PluginsEnvValue(plan.Plugins)
 	steps := localSteps(plan, envValue, envSet)
 
-	mode := "native toolchain"
-	if plan.Docker {
-		mode = "docker compose"
-	}
-	heading := fmt.Sprintf("setup local (%s) — would bring up a dev server at %s", mode, localServerURL)
-
 	if opts.DryRun {
-		printPlan(w, heading, localStepsAsSteps(steps))
-		fmt.Fprintf(w, "\n  plugins: %s\n", PluginsSummary(plan.Plugins))
-		fmt.Fprintf(w, "  then:    connect bp to %s (no execution — dry run)\n", localServerURL)
+		// JSON dry-run is rendered by the caller from BuildPlan; print nothing.
+		if !opts.json() {
+			mode := "native toolchain"
+			if plan.Docker {
+				mode = "docker compose"
+			}
+			heading := fmt.Sprintf("setup local (%s) — would bring up a dev server at %s", mode, localServerURL)
+			printPlan(w, heading, localStepsAsSteps(steps))
+			fmt.Fprintf(w, "\n  plugins: %s\n", PluginsSummary(plan.Plugins))
+			fmt.Fprintf(w, "  then:    connect bp to %s (no execution — dry run)\n", localServerURL)
+		}
 		return nil
 	}
 
@@ -69,7 +71,9 @@ func executeLocal(plan SetupPlan, opts Options) error {
 
 	// Bring-up succeeded — point bp here and apply the plugin selection by
 	// reusing the CONNECT executor.
-	fmt.Fprintf(w, "\n>> Connecting bp to %s\n", localServerURL)
+	if !opts.json() {
+		fmt.Fprintf(w, "\n>> Connecting bp to %s\n", localServerURL)
+	}
 	connectPlan := SetupPlan{
 		Target:    TargetConnect,
 		Server:    localServerURL,
@@ -78,7 +82,52 @@ func executeLocal(plan SetupPlan, opts Options) error {
 		Project:   plan.Project,
 		Dataset:   plan.Dataset,
 	}
-	return executeConnect(connectPlan, opts)
+	if err := executeConnect(connectPlan, opts); err != nil {
+		return err
+	}
+	// The chained connect recorded a Result with target=connect; re-stamp it as
+	// the outer "local" target so a JSON caller sees the mode it actually ran.
+	if opts.Result != nil {
+		opts.Result.Target = TargetLocal
+	}
+	return nil
+}
+
+// buildLocalPlan builds the structured dry-run plan for the local bring-up. It
+// mirrors the human plan exactly: the ordered bring-up steps, the plugin env,
+// the destructive flag (it resets a DB), and the connect-to target.
+func buildLocalPlan(plan SetupPlan, _ Options) Plan {
+	envValue, envSet := PluginsEnvValue(plan.Plugins)
+	steps := localSteps(plan, envValue, envSet)
+
+	p := Plan{
+		Target:          TargetLocal,
+		DryRun:          true,
+		Destructive:     true, // resets a database
+		RequiresConfirm: true, // --yes gates the real run
+		Plugins:         planPlugins(plan.Plugins),
+		ConnectTo:       localServerURL,
+		Env:             map[string]string{},
+	}
+	if envSet {
+		p.Env["BARKPARK_PLUGINS"] = envValue
+	}
+	for _, s := range steps {
+		p.addStep(s.Title, planCommand(s.step))
+	}
+	return p
+}
+
+// planCommand renders a step's displayable command line for the structured plan
+// (env prefix + cmd), or "" for narration-only steps.
+func planCommand(s step) string {
+	if s.Cmd == "" {
+		return ""
+	}
+	if s.EnvLine != "" {
+		return s.EnvLine + " " + s.Cmd
+	}
+	return s.Cmd
 }
 
 // localStep wraps a plan step with an optional inline wait closure. Docker

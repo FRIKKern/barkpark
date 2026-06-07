@@ -128,6 +128,29 @@ type Options struct {
 	// The foundation leaves it nil — RunInteractive then prints the modes-step
 	// pointer. The modes agent wires the real wizard here.
 	Wizard WizardFunc
+
+	// JSON, when true, suppresses every executor's human prose on Out: the cli
+	// built-in renders the structured Plan (dry-run) or Result (real run) itself
+	// after Execute/BuildPlan returns. Executors check opts.json() before writing
+	// any progress narration so a JSON run keeps stdout machine-clean.
+	JSON bool
+
+	// Result, when non-nil, receives the structured outcome of a successful real
+	// (non-dry-run) Execute so the JSON caller can render it. Executors fill it on
+	// success; a nil pointer means the caller does not want it (human path).
+	Result *Result
+}
+
+// json reports whether this run should suppress human prose (the cli built-in
+// renders structured JSON instead).
+func (o Options) json() bool { return o.JSON }
+
+// setResult records the structured real-run outcome when the caller wired a
+// Result pointer; a no-op otherwise.
+func (o Options) setResult(r Result) {
+	if o.Result != nil {
+		*o.Result = r
+	}
 }
 
 // out returns a non-nil writer for opts, defaulting to io.Discard so a zero
@@ -159,6 +182,29 @@ func Execute(plan SetupPlan, opts Options) error {
 	default:
 		// Validate already rejects this; kept for total switch coverage.
 		return fmt.Errorf("setup: unknown target %q", plan.Target)
+	}
+}
+
+// BuildPlan returns the structured dry-run Plan for a SetupPlan WITHOUT any side
+// effect (no network, no writes, no shelling out). It validates first, then
+// dispatches to the per-target plan builder. The cli built-in calls this for the
+// JSON dry-run path; the human dry-run path inside each executor builds the same
+// Plan and renders it via Plan.RenderHuman, so the two never drift.
+func BuildPlan(plan SetupPlan, opts Options) (Plan, error) {
+	if err := plan.Validate(); err != nil {
+		return Plan{}, err
+	}
+	switch plan.Target {
+	case TargetConnect:
+		return buildConnectPlan(plan, opts), nil
+	case TargetLocal:
+		return buildLocalPlan(plan, opts), nil
+	case TargetDeploy:
+		return buildDeployPlan(plan, opts)
+	case TargetProvision:
+		return buildProvisionPlan(plan, opts)
+	default:
+		return Plan{}, fmt.Errorf("setup: unknown target %q", plan.Target)
 	}
 }
 

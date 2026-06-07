@@ -48,10 +48,13 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	}
 
 	if opts.DryRun {
-		fmt.Fprintf(w, "dry-run: would connect to %s\n", server)
-		fmt.Fprintf(w, "  scope:  w=%s p=%s d=%s\n", saved.Workspace, saved.Project, saved.Dataset)
-		fmt.Fprintf(w, "  token:  %s\n", redactToken(saved.Token))
-		fmt.Fprintf(w, "  would write %s and default bp here (no network call, no write)\n", configHint())
+		// JSON dry-run is rendered by the caller from BuildPlan; print nothing.
+		if !opts.json() {
+			fmt.Fprintf(w, "dry-run: would connect to %s\n", server)
+			fmt.Fprintf(w, "  scope:  w=%s p=%s d=%s\n", saved.Workspace, saved.Project, saved.Dataset)
+			fmt.Fprintf(w, "  token:  %s\n", redactToken(saved.Token))
+			fmt.Fprintf(w, "  would write %s and default bp here (no network call, no write)\n", configHint())
+		}
 		return nil
 	}
 
@@ -67,6 +70,19 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	}
 	if err := opts.Store.Save(saved); err != nil {
 		return fmt.Errorf("connect: persist config: %w", err)
+	}
+
+	// Record the structured outcome for a JSON caller (no-op on the human path).
+	opts.setResult(Result{
+		OK:         true,
+		Target:     TargetConnect,
+		Server:     server,
+		Tier:       tier,
+		ConfigPath: configHint(),
+		Message:    "connected to " + server + " as " + tier + "; bp now defaults here",
+	})
+	if opts.json() {
+		return nil
 	}
 
 	// Premium summary.
@@ -88,6 +104,30 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		fmt.Fprintf(w, "  api:    %s..%s\n", meta.MinAPIVersion, meta.MaxAPIVersion)
 	}
 	return nil
+}
+
+// buildConnectPlan builds the structured dry-run plan for connect. Connect has a
+// single conceptual step (write the config + default bp here); no network call,
+// no destructive action, no confirm required.
+func buildConnectPlan(plan SetupPlan, _ Options) Plan {
+	server := strings.TrimRight(plan.Server, "/")
+	saved := SavedConfig{
+		Server:    server,
+		Token:     plan.Token,
+		Workspace: firstNonEmpty(plan.Workspace, "default"),
+		Project:   firstNonEmpty(plan.Project, "default"),
+		Dataset:   firstNonEmpty(plan.Dataset, "production"),
+	}
+	p := Plan{
+		Target:    TargetConnect,
+		DryRun:    true,
+		Plugins:   planPlugins(plan.Plugins),
+		ConnectTo: server,
+		Env:       map[string]string{},
+	}
+	p.addStep(fmt.Sprintf("write %s and default bp here (scope w=%s p=%s d=%s, token %s)",
+		configHint(), saved.Workspace, saved.Project, saved.Dataset, redactToken(saved.Token)), "")
+	return p
 }
 
 // probeCapabilities GETs /v1/capabilities and returns the caller's resolved tier

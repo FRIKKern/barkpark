@@ -142,19 +142,22 @@ func executeProvision(plan SetupPlan, opts Options) error {
 	haveCLI := lookExec(cliName)
 
 	// ── Always render the plan (this IS the default for provision). ──
-	heading := fmt.Sprintf("setup provision (%s) — would create a %s server in %s [STAGED]", plan.Provider, serverType, region)
 	if opts.DryRun || !opts.Confirm {
-		printPlan(w, heading, createCmds)
-		fmt.Fprintf(w, "\n  then CHAIN into deploy: ssh root@<new-ip> '%sbash -s' < deploy.sh\n",
-			chainedDeployEnv(firstNonEmpty(plan.Domain, "<domain>"), plan.Plugins))
-		fmt.Fprintf(w, "  plugins: %s\n", PluginsSummary(plan.Plugins))
-		fmt.Fprintf(w, "\n  needs: %s + --yes to actually create\n", tokenHint)
-		fmt.Fprintf(w, "  cli:   %s %s\n", cliName, presence(haveCLI))
-		fmt.Fprintf(w, "  auth:  %s %s\n", tokenHint, presence(haveAuth))
-		if opts.DryRun {
-			fmt.Fprintf(w, "  (no execution — dry run; nothing was created)\n")
-		} else {
-			fmt.Fprintf(w, "  (no --yes — plan only; nothing was created)\n")
+		// JSON dry-run is rendered by the caller from BuildPlan; print nothing.
+		if !opts.json() {
+			heading := fmt.Sprintf("setup provision (%s) — would create a %s server in %s [STAGED]", plan.Provider, serverType, region)
+			printPlan(w, heading, createCmds)
+			fmt.Fprintf(w, "\n  then CHAIN into deploy: ssh root@<new-ip> '%sbash -s' < deploy.sh\n",
+				chainedDeployEnv(firstNonEmpty(plan.Domain, "<domain>"), plan.Plugins))
+			fmt.Fprintf(w, "  plugins: %s\n", PluginsSummary(plan.Plugins))
+			fmt.Fprintf(w, "\n  needs: %s + --yes to actually create\n", tokenHint)
+			fmt.Fprintf(w, "  cli:   %s %s\n", cliName, presence(haveCLI))
+			fmt.Fprintf(w, "  auth:  %s %s\n", tokenHint, presence(haveAuth))
+			if opts.DryRun {
+				fmt.Fprintf(w, "  (no execution — dry run; nothing was created)\n")
+			} else {
+				fmt.Fprintf(w, "  (no --yes — plan only; nothing was created)\n")
+			}
 		}
 		return nil
 	}
@@ -171,7 +174,9 @@ func executeProvision(plan SetupPlan, opts Options) error {
 	}
 
 	ctx := context.Background()
-	fmt.Fprintf(w, ">> Provisioning a %s server on %s\n", serverType, plan.Provider)
+	if !opts.json() {
+		fmt.Fprintf(w, ">> Provisioning a %s server on %s\n", serverType, plan.Provider)
+	}
 
 	// Run the create step(s); the LAST step's stdout is the IP read-back.
 	var newIP string
@@ -182,7 +187,9 @@ func executeProvision(plan SetupPlan, opts Options) error {
 				return fmt.Errorf("setup provision %s: reading new server IP failed: %w", plan.Provider, err)
 			}
 			newIP = strings.TrimSpace(out)
-			fmt.Fprintf(w, "   new server IP: %s\n", newIP)
+			if !opts.json() {
+				fmt.Fprintf(w, "   new server IP: %s\n", newIP)
+			}
 			continue
 		}
 		if err := runStep(ctx, w, s); err != nil {
@@ -194,16 +201,100 @@ func executeProvision(plan SetupPlan, opts Options) error {
 	}
 
 	// Brief settle before SSH is reachable.
-	fmt.Fprintf(w, ">> Waiting for SSH on %s to come up…\n", newIP)
+	if !opts.json() {
+		fmt.Fprintf(w, ">> Waiting for SSH on %s to come up…\n", newIP)
+	}
 	time.Sleep(5 * time.Second)
 
 	// CHAIN into deploy.
-	fmt.Fprintf(w, ">> Chaining into deploy on root@%s\n", newIP)
+	if !opts.json() {
+		fmt.Fprintf(w, ">> Chaining into deploy on root@%s\n", newIP)
+	}
 	deployPlan := plan
 	deployPlan.Target = TargetDeploy
 	deployPlan.SSHHost = "root@" + newIP
 	deployPlan.Scheme = firstNonEmpty(plan.Scheme, "https")
-	return executeDeploy(deployPlan, opts)
+	if err := executeDeploy(deployPlan, opts); err != nil {
+		return err
+	}
+	if opts.Result != nil {
+		opts.Result.Target = TargetProvision
+	}
+	return nil
+}
+
+// buildProvisionPlan builds the structured dry-run plan for provision. It mirrors
+// the human plan: the provider-CLI create steps, the chained-deploy env, the
+// plugin selection, and the two prerequisite needs (the provider CLI on PATH and
+// the credential). Provision is STAGED — destructive + requires-confirm.
+func buildProvisionPlan(plan SetupPlan, _ Options) (Plan, error) {
+	if err := validateProvision(plan); err != nil {
+		return Plan{}, err
+	}
+	def := defaultsFor(plan.Provider)
+	region := firstNonEmpty(plan.Region, def.region)
+	serverType := firstNonEmpty(plan.ServerType, def.serverType)
+
+	var (
+		cliName   string
+		tokenHint string
+		haveAuth  bool
+		steps     []step
+	)
+	switch plan.Provider {
+	case ProviderHetzner:
+		cliName = "hcloud"
+		tokenHint = "HCLOUD_TOKEN (or an `hcloud context` active)"
+		haveAuth = os.Getenv("HCLOUD_TOKEN") != "" || hcloudContextActive()
+		steps = []step{
+			{Title: "create the server", Cmd: shJoin([]string{
+				"hcloud", "server", "create", "--name", "barkpark",
+				"--type", serverType, "--image", def.image, "--location", region,
+				"--ssh-key", "<your-ssh-key-name>",
+			})},
+			{Title: "read back the new server's public IPv4", Cmd: shJoin([]string{"hcloud", "server", "ip", "barkpark"})},
+		}
+	case ProviderAzure:
+		cliName = "az"
+		tokenHint = "an `az login` session + selected subscription"
+		haveAuth = azLoggedIn()
+		steps = []step{
+			{Title: "create the resource group (idempotent)", Cmd: shJoin([]string{"az", "group", "create", "--name", "barkpark", "--location", region})},
+			{Title: "create the VM", Cmd: shJoin([]string{
+				"az", "vm", "create", "--resource-group", "barkpark", "--name", "barkpark",
+				"--image", def.image, "--size", serverType, "--location", region,
+				"--admin-username", "root", "--generate-ssh-keys",
+			})},
+			{Title: "read back the new VM's public IP", Cmd: shJoin([]string{
+				"az", "vm", "show", "-d", "--resource-group", "barkpark",
+				"--name", "barkpark", "--query", "publicIps", "-o", "tsv",
+			})},
+		}
+	}
+	haveCLI := lookExec(cliName)
+
+	p := Plan{
+		Target:          TargetProvision,
+		DryRun:          true,
+		Destructive:     true, // creates a billable cloud host, then chains into deploy
+		RequiresConfirm: true,
+		Plugins:         planPlugins(plan.Plugins),
+		Provider:        plan.Provider,
+		Region:          region,
+		ServerType:      serverType,
+		Env:             map[string]string{},
+		Needs: []PlanNeed{
+			{What: cliName, Present: haveCLI},
+			{What: tokenHint, Present: haveAuth},
+		},
+	}
+	if value, set := PluginsEnvValue(plan.Plugins); set {
+		p.Env["BARKPARK_PLUGINS"] = value
+	}
+	for _, s := range steps {
+		p.addStep(s.Title, s.Cmd)
+	}
+	return p, nil
 }
 
 // validateProvision enforces a known provider; region/type fall back to
