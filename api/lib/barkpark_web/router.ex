@@ -556,6 +556,17 @@ defmodule BarkparkWeb.Router do
     delete "/:dataset/:name", SchemaController, :delete
   end
 
+  # ── Plugin roster — admin-only installed-plugin index ──────────────────
+  # The real route behind the capabilities manifest's `plugin.ls` core command.
+  # Bare `/v1/plugins` (no trailing segment) so it never collides with the
+  # `/v1/plugins/<slug>/…` plugin-contributed `:api` / `:ingest` route buckets
+  # nor the `/v1/plugins/settings/:plugin_name` CRUD scope below.
+  scope "/v1/plugins", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/", PluginsController, :index
+  end
+
   # ── Plugin settings — admin-only encrypted-JSON CRUD ───────────────────
   scope "/v1/plugins/settings", BarkparkWeb do
     pipe_through [:api, :require_admin]

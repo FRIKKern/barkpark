@@ -79,11 +79,20 @@ type Command struct {
 }
 
 // Arg is a positional argument (thin per the M0 freeze: name/required/type/summary).
+//
+// In is an OPTIONAL transport hint the Elixir manifest track MAY emit:
+// "path" | "query" | "body". It is omitempty so a manifest that does not carry
+// it still decodes cleanly (the strict Parse only rejects UNKNOWN fields, so a
+// present "in" must be modelled here). When absent, the CLI INFERS the location:
+// path if the arg name appears as a :placeholder in http.path_template, else
+// query for a read (GET) or body for a write (POST/PUT/PATCH). See
+// Command.ArgLocation.
 type Arg struct {
 	Name     string `json:"name"`
 	Required bool   `json:"required"`
 	Type     string `json:"type"`
 	Summary  string `json:"summary"`
+	In       string `json:"in,omitempty"`
 }
 
 // Flag is a named command-local flag. Default is any JSON value (absent = no

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -50,11 +52,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return exitUsage
 	}
 
-	// Apply query-string flags (pagination + manifest-declared query flags).
-	rawURL = applyQuery(rawURL, g, cmd, cmdFlags)
+	// Apply query-string params: pagination, manifest-declared query flags, and
+	// any declared arg whose location is query (a non-path arg on a read).
+	rawURL = applyQuery(rawURL, g, cmd, cmdFlags, argMap)
 
-	// Build the request body for writes (from --file or stdin / --set pairs).
-	body, contentType, err := buildBody(cmd, cmdFlags)
+	// Build the request body for writes. Declared non-path args seed the JSON
+	// object; --set merges over them; --file (or stdin) overrides everything; a
+	// file-typed arg on a media route is sent as multipart/form-data instead.
+	body, contentType, err := buildBody(cmd, cmdFlags, argMap)
 	if err != nil {
 		out.errf("barkpark: %v", err)
 		return exitUsage
@@ -94,25 +99,22 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	return handleResponse(out, cmd, status, respBody)
 }
 
-// authHeaders returns the tier-appropriate auth headers for cmd. read/none send
-// nothing extra (a scoped read still carries the resolved token because the
-// server's ResolveWorkspace fails closed — but a flat public read needs none);
-// write/admin send the bearer token; ingest sends the ingest secret. NOTE: a
-// scoped_admin command is NEVER client-preflight-refused (rule #2) — it is sent
-// with the bearer token and the server's 403 is surfaced cleanly.
+// authHeaders returns the tier-appropriate auth headers for cmd. Only `none`
+// (public, existence-hiding floor) sends no credential. Every authenticated
+// tier — read, write, admin, scoped_admin — carries the resolved api bearer
+// token whenever one is present, regardless of scoped_prefix: flat
+// auth-required reads (e.g. GET /api/workspaces, GET /v1/tasks/:dataset) need
+// the bearer just as much as scoped ones, and an OptionalToken public read
+// simply ignores a bearer it doesn't need. `ingest` sends the shared ingest
+// secret instead of the bearer. NOTE: a scoped_admin command is NEVER
+// client-preflight-refused (rule #2) — it is sent with the bearer token and the
+// server's 403, if any, is surfaced cleanly.
 func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 	h := map[string]string{}
 	switch cmd.AuthTier {
 	case "none":
 		// Public, unauthenticated. Send nothing.
-	case "read":
-		// Public reads need no creds on flat paths; scoped reads (scoped_prefix
-		// set) require workspace resolution, which fails closed for an anonymous
-		// caller — so carry the resolved token when the path is scoped.
-		if cmd.ScopedPrefix != nil && *cmd.ScopedPrefix != "" && ctx.Token != "" {
-			h["Authorization"] = "Bearer " + ctx.Token
-		}
-	case "write", "admin", "scoped_admin":
+	case "read", "write", "admin", "scoped_admin":
 		if ctx.Token != "" {
 			h["Authorization"] = "Bearer " + ctx.Token
 		}
@@ -255,9 +257,11 @@ func bindArgs(cmd manifest.Command, pos []string) (map[string]string, error) {
 }
 
 // applyQuery appends query-string parameters: pagination (--limit/--offset for a
-// paginated command) plus any manifest-declared string/int flags that are not
-// the body-carrying file/set flags.
-func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string][]string) string {
+// paginated command), any manifest-declared string/int flags that are not the
+// body-carrying file/set flags, and any declared positional arg whose location
+// resolves to "query" (a non-path arg on a read — e.g. search's `q`). Path
+// placeholders are already consumed by BuildURL and are skipped here.
+func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string][]string, args map[string]string) string {
 	q := url.Values{}
 
 	if cmd.Paginated {
@@ -266,6 +270,17 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 		}
 		if g.offsetSet {
 			q.Set("offset", strconv.Itoa(g.offset))
+		}
+	}
+
+	// Declared positional args that belong in the query string (e.g. search.query
+	// `q` against /v1/data/search/:dataset, which has no :q placeholder).
+	for _, a := range cmd.Args {
+		if cmd.ArgLocation(a) != "query" {
+			continue
+		}
+		if v, ok := args[a.Name]; ok && v != "" {
+			q.Add(a.Name, v)
 		}
 	}
 
@@ -291,14 +306,30 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 	return rawURL + sep + q.Encode()
 }
 
-// buildBody builds the request body for a write command. A --file flag reads the
-// payload from a path (or - for stdin); --set k=v pairs build a JSON object.
-// Reads and bodyless writes return nil.
-func buildBody(cmd manifest.Command, flags map[string][]string) (body []byte, contentType string, err error) {
+// buildBody builds the request body for a write command. Sources, in increasing
+// precedence:
+//
+//  1. declared non-path positional args (arg name -> value) whose location
+//     resolves to "body" — e.g. webhook.create `url` -> {"url":"…"},
+//     workspace.project-create `name` -> {"name":"…"}.
+//  2. --set k=v pairs, merged over the arg-seeded object.
+//  3. --file <path> (or - for stdin), which overrides everything and wins.
+//
+// A file-typed arg on a media route is special-cased FIRST: it ships as
+// multipart/form-data with the file under the "file" form field, not as JSON.
+// Reads return nil; a write with no body source sends an empty JSON object so a
+// POST/PUT that expects JSON does not choke on an empty body.
+func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, contentType string, err error) {
 	if !cmd.Writes {
 		return nil, "", nil
 	}
 
+	// Media upload (or any file-typed arg on a POST media route): multipart.
+	if path, ok := mediaUploadFileArg(cmd, args); ok {
+		return buildMultipartFile(path)
+	}
+
+	// --file (or stdin) wins outright when given.
 	if files, ok := flags["file"]; ok && len(files) > 0 {
 		path := files[len(files)-1]
 		var raw []byte
@@ -313,8 +344,17 @@ func buildBody(cmd manifest.Command, flags map[string][]string) (body []byte, co
 		return raw, "application/json", nil
 	}
 
+	// Seed the body object from declared body-location args, then merge --set.
+	obj := map[string]any{}
+	for _, a := range cmd.Args {
+		if cmd.ArgLocation(a) != "body" {
+			continue
+		}
+		if v, ok := args[a.Name]; ok && v != "" {
+			obj[a.Name] = v
+		}
+	}
 	if sets, ok := flags["set"]; ok && len(sets) > 0 {
-		obj := map[string]any{}
 		for _, kv := range sets {
 			eq := strings.IndexByte(kv, '=')
 			if eq < 0 {
@@ -322,13 +362,62 @@ func buildBody(cmd manifest.Command, flags map[string][]string) (body []byte, co
 			}
 			obj[kv[:eq]] = kv[eq+1:]
 		}
-		raw, _ := json.Marshal(obj)
-		return raw, "application/json", nil
 	}
 
-	// A write with no body source: send an empty JSON object so a POST/PUT that
-	// expects JSON does not choke on an empty body.
-	return []byte("{}"), "application/json", nil
+	if len(obj) == 0 {
+		// A write with no body source: send an empty JSON object so a POST/PUT
+		// that expects JSON does not choke on an empty body.
+		return []byte("{}"), "application/json", nil
+	}
+	raw, _ := json.Marshal(obj)
+	return raw, "application/json", nil
+}
+
+// mediaUploadFileArg returns the bound file path when cmd has a file-typed
+// declared arg AND posts to a media route — the signal that the payload must be
+// sent as multipart/form-data rather than JSON. The route check keeps the
+// multipart path narrow (only media uploads), so a future file-typed arg on a
+// non-media route still goes through the JSON path unless the manifest opts it
+// in via a media path.
+func mediaUploadFileArg(cmd manifest.Command, args map[string]string) (string, bool) {
+	if cmd.HTTP.Method != "POST" {
+		return "", false
+	}
+	if !strings.Contains(cmd.HTTP.PathTemplate, "/media") {
+		return "", false
+	}
+	for _, a := range cmd.Args {
+		if a.Type != "file" {
+			continue
+		}
+		if v, ok := args[a.Name]; ok && v != "" {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// buildMultipartFile reads path and wraps it in a multipart/form-data body under
+// the "file" form field (the field name the server's media upload plug expects).
+// The returned content type carries the generated boundary.
+func buildMultipartFile(path string) ([]byte, string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("read upload file %q: %w", path, err)
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		return nil, "", fmt.Errorf("multipart create: %w", err)
+	}
+	if _, err := fw.Write(raw); err != nil {
+		return nil, "", fmt.Errorf("multipart write: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return nil, "", fmt.Errorf("multipart close: %w", err)
+	}
+	return buf.Bytes(), mw.FormDataContentType(), nil
 }
 
 // doRequest performs the HTTP call and returns status + body.

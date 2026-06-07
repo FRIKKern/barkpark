@@ -174,7 +174,7 @@
           "type": "string"
         }
       ],
-      "auth_tier": "none",
+      "auth_tier": "admin",
       "batch": false,
       "default_output": "table",
       "dry_run": false,
@@ -188,19 +188,12 @@
       "paginated": false,
       "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
       "source": "core",
-      "summary": "Fetch one public schema definition.",
+      "summary": "Fetch one schema definition.",
       "verb": "get",
       "writes": false
     },
     {
-      "args": [
-        {
-          "name": "name",
-          "required": true,
-          "summary": "Schema name.",
-          "type": "string"
-        }
-      ],
+      "args": [],
       "auth_tier": "admin",
       "batch": false,
       "default_output": "minimal",
@@ -213,15 +206,15 @@
         }
       ],
       "http": {
-        "method": "PUT",
-        "path_template": "/v1/schemas/:dataset/:name"
+        "method": "POST",
+        "path_template": "/v1/schemas/:dataset"
       },
       "id": "schema.apply",
       "noun": "schema",
       "paginated": false,
       "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
       "source": "core",
-      "summary": "Register or update a schema definition.",
+      "summary": "Register or update a schema definition (upsert).",
       "verb": "apply",
       "writes": true
     },
@@ -386,7 +379,7 @@
       ],
       "http": {
         "method": "GET",
-        "path_template": "/v1/tasks/:dataset"
+        "path_template": "/v1/tasks"
       },
       "id": "task.ls",
       "noun": "task",
@@ -397,29 +390,107 @@
       "writes": false
     },
     {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max tasks to return.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/ready"
+      },
+      "id": "task.ready",
+      "noun": "task",
+      "paginated": true,
+      "source": "core",
+      "summary": "List ready (unblocked) tasks.",
+      "verb": "ready",
+      "writes": false
+    },
+    {
       "args": [
         {
-          "name": "task_id",
+          "name": "doc_id",
           "required": true,
-          "summary": "Task id to claim.",
+          "summary": "Task document id.",
           "type": "string"
         }
       ],
-      "auth_tier": "admin",
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/:doc_id"
+      },
+      "id": "task.get",
+      "noun": "task",
+      "paginated": false,
+      "source": "core",
+      "summary": "Fetch one task by id.",
+      "verb": "get",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "doc_id",
+          "required": true,
+          "summary": "Task document id to claim.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
       "batch": false,
       "default_output": "minimal",
       "dry_run": false,
       "flags": [],
       "http": {
         "method": "POST",
-        "path_template": "/v1/tasks/:dataset/:task_id/claim"
+        "path_template": "/v1/tasks/:doc_id/claim"
       },
       "id": "task.claim",
       "noun": "task",
       "paginated": false,
       "source": "core",
-      "summary": "Claim a ready task (admin queue op).",
+      "summary": "Claim a ready task by id.",
       "verb": "claim",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "doc_id",
+          "required": true,
+          "summary": "Task document id to close.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/close"
+      },
+      "id": "task.close",
+      "noun": "task",
+      "paginated": false,
+      "source": "core",
+      "summary": "Close a claimed task by id.",
+      "verb": "close",
       "writes": true
     },
     {
@@ -470,9 +541,9 @@
     {
       "args": [
         {
-          "name": "goal_id",
+          "name": "goal",
           "required": true,
-          "summary": "Goal id.",
+          "summary": "Goal id (sent as the ?goal= query param).",
           "type": "string"
         }
       ],
@@ -483,7 +554,7 @@
       "flags": [],
       "http": {
         "method": "GET",
-        "path_template": "/v1/rail/:dataset/:goal_id"
+        "path_template": "/v1/rail/goal-path"
       },
       "id": "rail.path",
       "noun": "rail",
@@ -495,7 +566,7 @@
     },
     {
       "args": [],
-      "auth_tier": "read",
+      "auth_tier": "admin",
       "batch": false,
       "default_output": "table",
       "dry_run": false,
@@ -515,9 +586,9 @@
     {
       "args": [
         {
-          "name": "slug",
+          "name": "plugin_name",
           "required": true,
-          "summary": "Plugin slug.",
+          "summary": "Plugin name.",
           "type": "string"
         }
       ],
@@ -535,7 +606,7 @@
       ],
       "http": {
         "method": "PUT",
-        "path_template": "/v1/plugins/:slug/settings"
+        "path_template": "/v1/plugins/settings/:plugin_name"
       },
       "id": "plugin.settings",
       "noun": "plugin",
@@ -697,8 +768,8 @@
       "writes": false
     }
   ],
-  "etag": "W/\"caps-017e323422e8e175\"",
-  "generated_at": "2026-06-07T13:16:21.225654Z",
+  "etag": "W/\"caps-3b5dd19355146959\"",
+  "generated_at": "2026-06-07T17:19:10.036789Z",
   "manifest_version": "1",
   "nouns": [
     {

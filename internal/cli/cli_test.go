@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -231,10 +234,27 @@ func TestAuthHeaders(t *testing.T) {
 		t.Errorf("scoped_admin should carry token (no client refuse): %v", h)
 	}
 
-	// flat read (workspace ls has no scoped_prefix) -> no token required.
+	// FLAT read (workspace ls has no scoped_prefix) -> token IS attached now.
+	// The server's OptionalToken / RequireWritePermission read gate needs the
+	// bearer for auth-required reads like /api/workspaces; an OptionalToken
+	// public read simply ignores it. Sending it regardless is the fix.
 	wls, _ := tree.Lookup("workspace", "ls")
-	if h := authHeaders(*wls, ctx); h["Authorization"] != "" {
-		t.Errorf("flat read should not force token: %v", h)
+	if wls.AuthTier != "read" {
+		t.Fatalf("fixture changed: workspace ls tier = %q, want read", wls.AuthTier)
+	}
+	if h := authHeaders(*wls, ctx); h["Authorization"] != "Bearer tok" {
+		t.Errorf("flat read should carry token when present: %v", h)
+	}
+
+	// none -> never carries a token, even when one is present.
+	none := manifest.Command{ID: "x.public", AuthTier: "none", HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/data/doc/:dataset/:type/:id"}}
+	if h := authHeaders(none, ctx); h["Authorization"] != "" {
+		t.Errorf("none tier must not send a token: %v", h)
+	}
+
+	// No token in context -> no Authorization header for an auth tier.
+	if h := authHeaders(*wls, manifest.Context{}); h["Authorization"] != "" {
+		t.Errorf("no token -> no auth header: %v", h)
 	}
 }
 
@@ -449,6 +469,146 @@ func TestShortFileFlag(t *testing.T) {
 	// An unknown short flag is rejected, not silently swallowed.
 	if _, _, err := splitArgs(*patch, []string{"my-slug", "-z", "x"}); err == nil {
 		t.Error("unknown short flag -z: expected error")
+	}
+}
+
+// --- query-arg + body-arg behaviour ------------------------------------------
+
+// TestApplyQueryArg asserts a declared positional arg that is NOT a path
+// placeholder (search.query `q` against /v1/data/search/:dataset) lands in the
+// query string, while a placeholder arg (doc.get `type`/`doc_id`) does not.
+func TestApplyQueryArg(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+
+	sq, ok := tree.Lookup("search", "query")
+	if !ok {
+		t.Fatal("search query missing")
+	}
+	base := "https://api.barkpark.cloud/v1/data/search/production"
+	got := applyQuery(base, globals{}, *sq, map[string][]string{}, map[string]string{"q": "headless"})
+	if got != base+"?q=headless" {
+		t.Errorf("search q query = %q, want %q", got, base+"?q=headless")
+	}
+
+	// A path-placeholder arg must NOT leak into the query string.
+	dg, _ := tree.Lookup("doc", "get")
+	base2 := "https://api.barkpark.cloud/v1/data/doc/production/post/p1"
+	got2 := applyQuery(base2, globals{}, *dg, map[string][]string{}, map[string]string{"type": "post", "doc_id": "p1"})
+	if got2 != base2 {
+		t.Errorf("path args must not become query: got %q", got2)
+	}
+}
+
+// TestArgLocation exercises the path/query/body inference and the explicit
+// arg.In override.
+func TestArgLocation(t *testing.T) {
+	read := manifest.Command{HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/data/search/:dataset"}}
+	if loc := read.ArgLocation(manifest.Arg{Name: "q"}); loc != "query" {
+		t.Errorf("non-path read arg = %q, want query", loc)
+	}
+	if loc := read.ArgLocation(manifest.Arg{Name: "dataset"}); loc != "path" {
+		t.Errorf("placeholder arg = %q, want path", loc)
+	}
+	write := manifest.Command{Writes: true, HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/webhooks/:dataset"}}
+	if loc := write.ArgLocation(manifest.Arg{Name: "url"}); loc != "body" {
+		t.Errorf("non-path write arg = %q, want body", loc)
+	}
+	// Explicit hint wins over inference.
+	if loc := write.ArgLocation(manifest.Arg{Name: "url", In: "query"}); loc != "query" {
+		t.Errorf("explicit in=query = %q, want query", loc)
+	}
+}
+
+// TestBuildBodyFromArgs asserts declared body-location args seed the JSON body
+// (webhook.create url=…, workspace.project-create name=…), --set merges over
+// them, and --file overrides everything.
+func TestBuildBodyFromArgs(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+
+	wc, ok := tree.Lookup("webhook", "create")
+	if !ok {
+		t.Fatal("webhook create missing")
+	}
+	body, ct, err := buildBody(*wc, map[string][]string{}, map[string]string{"url": "https://hook.example/x"})
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if ct != "application/json" {
+		t.Errorf("content type = %q", ct)
+	}
+	var got map[string]any
+	if json.Unmarshal(body, &got) != nil || got["url"] != "https://hook.example/x" {
+		t.Errorf("webhook body = %s, want url field", body)
+	}
+
+	pc, _ := tree.Lookup("workspace", "project-create")
+	body2, _, _ := buildBody(*pc, map[string][]string{}, map[string]string{"name": "Marketing"})
+	var got2 map[string]any
+	if json.Unmarshal(body2, &got2) != nil || got2["name"] != "Marketing" {
+		t.Errorf("project-create body = %s, want name field", body2)
+	}
+
+	// --set merges over arg-seeded fields.
+	body3, _, _ := buildBody(*wc, map[string][]string{"set": {"secret=s3cr3t"}}, map[string]string{"url": "https://hook/x"})
+	var got3 map[string]any
+	_ = json.Unmarshal(body3, &got3)
+	if got3["url"] != "https://hook/x" || got3["secret"] != "s3cr3t" {
+		t.Errorf("merged body = %s, want url+secret", body3)
+	}
+}
+
+// TestBuildBodyMediaMultipart asserts media.upload serialises the file as
+// multipart/form-data with a "file" form field, not a JSON body.
+func TestBuildBodyMediaMultipart(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+	up, ok := tree.Lookup("media", "upload")
+	if !ok {
+		t.Fatal("media upload missing")
+	}
+
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "photo.jpg")
+	if err := os.WriteFile(fp, []byte("JPEGBYTES"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	body, ct, err := buildBody(*up, map[string][]string{}, map[string]string{"file": fp})
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if !strings.HasPrefix(ct, "multipart/form-data; boundary=") {
+		t.Errorf("content type = %q, want multipart/form-data", ct)
+	}
+	if !bytes.Contains(body, []byte(`name="file"`)) {
+		t.Errorf("multipart body missing file field: %s", body)
+	}
+	if !bytes.Contains(body, []byte("JPEGBYTES")) {
+		t.Errorf("multipart body missing file contents")
+	}
+	if !bytes.Contains(body, []byte(`filename="photo.jpg"`)) {
+		t.Errorf("multipart body missing filename")
+	}
+}
+
+// TestClassifyTaskNotFound covers the regression: a tasks {"ok":false,
+// "reason":"not_found","message":"task not found"} response must map to exit 4
+// (not found), NOT the blanket exit 2 the ok-false branch used to apply.
+func TestClassifyTaskNotFound(t *testing.T) {
+	ae := classifyError(404, []byte(`{"message":"task not found","ok":false,"reason":"not_found"}`))
+	if ae.exit != exitNotFound {
+		t.Errorf("task not_found exit = %d, want %d (not found)", ae.exit, exitNotFound)
+	}
+	if ae.code != "not_found" {
+		t.Errorf("code = %q, want not_found", ae.code)
+	}
+	if msg := ae.errorMessage(); !strings.Contains(msg, "not found") {
+		t.Errorf("message = %q, want a not-found phrasing", msg)
+	}
+
+	// The add-edge validation shape stays on exit 2 (unknown reason -> usage).
+	ae2 := classifyError(422, []byte(`{"ok":false,"reason":"invalid_edge"}`))
+	if ae2.exit != exitUsage {
+		t.Errorf("invalid_edge exit = %d, want %d (usage)", ae2.exit, exitUsage)
 	}
 }
 

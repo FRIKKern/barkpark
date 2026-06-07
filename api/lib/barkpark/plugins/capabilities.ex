@@ -376,14 +376,32 @@ defmodule Barkpark.Plugins.Capabilities do
   # Plugins OFF ⇒ exactly these nouns/commands are emitted.
   #
   # Tiering follows the ROUTER (the code fact behind the schema's auth_tier
-  # $comment): the public read surface (`doc get/ls/query`, `schema get`,
-  # `search query`, `media ls`) sits behind the `:api` pipeline's OptionalToken
-  # (no RequireToken) — genuinely anon-invokable — so it carries `auth_tier:
+  # $comment): the public read surface (`doc get/ls/query`, `search query`,
+  # `media ls`) sits behind the `:api` pipeline's OptionalToken (no
+  # RequireToken) — genuinely anon-invokable — so it carries `auth_tier:
   # "none"`, the existence-hiding floor. An admin caller (rank above none) still
   # sees every `none` command, so the admin projection stays a superset of the
   # anon projection (matching the fixture PAIRING). Truly gated verbs keep their
-  # real tier: write (mutate/upload/webhook.create), admin (schema.apply,
-  # task.claim, webhook.ls, plugin.settings), scoped_admin (project-create).
+  # real tier: read (task.* — the /v1/tasks scope is :api+:require_token, NOT
+  # admin; claim/close are bearer-gated workflow ops), write
+  # (mutate/upload/webhook.create), admin (`schema get/apply` behind
+  # :require_admin, webhook.ls, plugin.ls, plugin.settings), scoped_admin
+  # (project-create). NOTE schema.get is admin, not anon: the /v1/schemas scope
+  # is :require_admin — public schema discovery rides /api/schemas (legacy),
+  # not this verb.
+  #
+  # Arg-location contract (the manifest arg shape has NO "in"/"location"
+  # field — frozen `arg` def is additionalProperties:false). The CLI INFERS
+  # where each declared arg goes:
+  #   * path  — when the arg name matches a `:placeholder` in http.path_template
+  #             (e.g. `doc_id` in `/v1/tasks/:doc_id/claim`).
+  #   * query — a GET arg with NO matching path placeholder (e.g. `goal` in
+  #             rail.path → `/v1/rail/goal-path?goal=…`; `q` in search.query).
+  #   * body  — a POST/PUT/PATCH arg with no matching path placeholder.
+  # If a future verb needs an explicit hint, add an OPTIONAL `"in"` field to
+  # the arg in BOTH manifest.schema.json's $defs/arg (additive) and the
+  # `arg/4`+`arg/5` builders here, then regenerate the fixtures — keep it
+  # additive so existing manifests still validate.
 
   defp core_nouns do
     [
@@ -447,15 +465,14 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("schema.get", "schema", "get", "Fetch one public schema definition.",
-        "GET", "/v1/schemas/:dataset/:name", "none",
+      core_cmd("schema.get", "schema", "get", "Fetch one schema definition.",
+        "GET", "/v1/schemas/:dataset/:name", "admin",
         args: [arg("name", true, "string", "Schema name.")],
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("schema.apply", "schema", "apply", "Register or update a schema definition.",
-        "PUT", "/v1/schemas/:dataset/:name", "admin",
-        args: [arg("name", true, "string", "Schema name.")],
+      core_cmd("schema.apply", "schema", "apply", "Register or update a schema definition (upsert).",
+        "POST", "/v1/schemas/:dataset", "admin",
         flags: [flag("file", "file", "Schema definition from a file or - for stdin.")],
         writes: true,
         default_output: "minimal",
@@ -504,14 +521,31 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd("task.ls", "task", "ls", "List tasks in the queue.",
-        "GET", "/v1/tasks/:dataset", "read",
+        "GET", "/v1/tasks", "read",
         flags: [flag("limit", "int", "Max tasks to return.", default: 50)],
         paginated: true,
         default_output: "table"
       ),
-      core_cmd("task.claim", "task", "claim", "Claim a ready task (admin queue op).",
-        "POST", "/v1/tasks/:dataset/:task_id/claim", "admin",
-        args: [arg("task_id", true, "string", "Task id to claim.")],
+      core_cmd("task.ready", "task", "ready", "List ready (unblocked) tasks.",
+        "GET", "/v1/tasks/ready", "read",
+        flags: [flag("limit", "int", "Max tasks to return.", default: 50)],
+        paginated: true,
+        default_output: "table"
+      ),
+      core_cmd("task.get", "task", "get", "Fetch one task by id.",
+        "GET", "/v1/tasks/:doc_id", "read",
+        args: [arg("doc_id", true, "string", "Task document id.")],
+        default_output: "table"
+      ),
+      core_cmd("task.claim", "task", "claim", "Claim a ready task by id.",
+        "POST", "/v1/tasks/:doc_id/claim", "read",
+        args: [arg("doc_id", true, "string", "Task document id to claim.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd("task.close", "task", "close", "Close a claimed task by id.",
+        "POST", "/v1/tasks/:doc_id/close", "read",
+        args: [arg("doc_id", true, "string", "Task document id to close.")],
         writes: true,
         default_output: "minimal"
       ),
@@ -525,18 +559,22 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # `goal` is a QUERY param, not a path segment: GET /v1/rail/goal-path?goal=…
+      # The path template carries no :placeholder for it, so the CLI infers it
+      # as a query param (GET + no matching path placeholder → query). See the
+      # arg-location contract note in this section's header comment.
       core_cmd("rail.path", "rail", "path", "Read the goal-path lifecycle events for a goal.",
-        "GET", "/v1/rail/:dataset/:goal_id", "read",
-        args: [arg("goal_id", true, "string", "Goal id.")],
+        "GET", "/v1/rail/goal-path", "read",
+        args: [arg("goal", true, "string", "Goal id (sent as the ?goal= query param).")],
         default_output: "table"
       ),
       core_cmd("plugin.ls", "plugin", "ls", "List installed plugins.",
-        "GET", "/v1/plugins", "read",
+        "GET", "/v1/plugins", "admin",
         default_output: "table"
       ),
       core_cmd("plugin.settings", "plugin", "settings", "Read or update a plugin's settings.",
-        "PUT", "/v1/plugins/:slug/settings", "admin",
-        args: [arg("slug", true, "string", "Plugin slug.")],
+        "PUT", "/v1/plugins/settings/:plugin_name", "admin",
+        args: [arg("plugin_name", true, "string", "Plugin name.")],
         flags: [flag("set", "string", "key=value setting to apply.", repeatable: true)],
         writes: true,
         default_output: "minimal"

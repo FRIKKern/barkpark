@@ -100,9 +100,24 @@ func classifyError(status int, body []byte) apiError {
 		}
 	}
 
-	// {"ok":false,"reason":…} (tasks add-edge) -> validation/usage.
+	// {"ok":false,"reason":…} (tasks claim/add-edge). Route the reason through the
+	// canonical code->exit table so a not_found reason lands on exit 4 (not the
+	// blanket exit 2 this branch used to apply, which mislabeled task 404s). A
+	// reason absent from the table still falls back to exitGeneric via
+	// exitForCode; we keep usage for the historical add-edge `invalid_edge` shape
+	// by letting the table miss surface there.
 	if strErr.OK != nil && !*strErr.OK && strErr.Reason != "" {
-		return apiError{exit: exitUsage, code: strErr.Reason, message: strErr.Reason}
+		exit := exitForCode(strErr.Reason)
+		if _, known := codeExit[strErr.Reason]; !known {
+			// Unknown reason (e.g. invalid_edge): bucket conservatively as usage,
+			// preserving the prior behaviour for the add-edge validation shape.
+			exit = exitUsage
+		}
+		msg := strErr.Reason
+		if m := bodyMessage(body); m != "" {
+			msg = m
+		}
+		return apiError{exit: exit, code: strErr.Reason, message: msg}
 	}
 
 	// Message-only no-code envelope: default usage, downgrade to not-found when
@@ -126,6 +141,19 @@ func classifyError(status int, body []byte) apiError {
 		msg = "request failed"
 	}
 	return apiError{exit: exitGeneric, message: msg}
+}
+
+// bodyMessage extracts a top-level "message" string from an error body, used to
+// give the {"ok":false,"reason":…} shape a human one-liner (e.g. "task not
+// found") instead of the bare reason token. Returns "" when absent.
+func bodyMessage(body []byte) string {
+	var m struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &m); err == nil {
+		return strings.TrimSpace(m.Message)
+	}
+	return ""
 }
 
 func vetoMessage(reason string) string {

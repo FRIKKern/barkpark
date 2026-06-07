@@ -70,6 +70,40 @@ func fillTemplate(tmpl string, ctx Context, args map[string]string) (string, err
 	return out, nil
 }
 
+// PathPlaceholders returns the set of :placeholder names present in the
+// command's flat http.path_template. The CLI uses this to decide whether a
+// declared positional arg is path-bound (its name appears here) or whether it
+// should instead ride as a ?query= param (reads) or a JSON body field (writes).
+func (c Command) PathPlaceholders() map[string]bool {
+	set := map[string]bool{}
+	for _, m := range placeholderRe.FindAllString(c.HTTP.PathTemplate, -1) {
+		set[m[1:]] = true // strip leading ':'
+	}
+	return set
+}
+
+// ArgLocation reports where a declared arg's value belongs: "path", "query", or
+// "body". The explicit arg.In hint wins when the Elixir manifest track sets it;
+// otherwise the location is inferred — path if the arg name is a placeholder in
+// http.path_template, else query for a read (GET) and body for a write
+// (non-GET). A write GET (unusual) still infers query.
+func (c Command) ArgLocation(a Arg) string {
+	switch a.In {
+	case "path", "query", "body":
+		return a.In
+	}
+	if c.PathPlaceholders()[a.Name] {
+		return "path"
+	}
+	if c.HTTP.Method == "GET" || (!c.Writes && c.HTTP.Method == "") {
+		return "query"
+	}
+	if c.Writes {
+		return "body"
+	}
+	return "query"
+}
+
 // resolvePlaceholder maps a placeholder name to its value from ctx-scope first,
 // then the per-call args map.
 func resolvePlaceholder(name string, ctx Context, args map[string]string) (string, bool) {
