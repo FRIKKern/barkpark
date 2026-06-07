@@ -235,3 +235,134 @@ func TestToActiveContext(t *testing.T) {
 		t.Fatalf("nil config should yield empty ActiveContext")
 	}
 }
+
+func TestDisplayNameDerivation(t *testing.T) {
+	cases := []struct {
+		server string
+		want   string
+	}{
+		{"http://localhost:4000", "local"},
+		{"http://127.0.0.1:4000", "local"},
+		{"http://[::1]:4000", "local"},
+		{"https://api.barkpark.cloud", "barkpark"},
+		{"https://www.example.com", "example"},
+		{"https://staging.foo.com", "staging"},
+		{"https://foo.com", "foo"},
+		{"http://192.168.1.10:4000", "192.168.1.10"},
+		{"", "server"},
+	}
+	for _, tc := range cases {
+		if got := DisplayName(ServerEntry{Server: tc.server}); got != tc.want {
+			t.Errorf("DisplayName(%q) = %q, want %q", tc.server, got, tc.want)
+		}
+	}
+
+	// An explicit Name always wins over derivation.
+	if got := DisplayName(ServerEntry{Name: "prod", Server: "http://localhost:4000"}); got != "prod" {
+		t.Errorf("explicit Name should win, got %q", got)
+	}
+}
+
+func TestDisplayNameUniqueness(t *testing.T) {
+	// Two unnamed entries that derive the SAME base ("barkpark") must render
+	// distinctly: the front one keeps the base, the later one is suffixed -2. The
+	// list is most-recent-first; ranking counts earlier same-base unnamed entries.
+	c := &Config{KnownServers: []ServerEntry{
+		{Server: "https://api.barkpark.cloud"},      // front → "barkpark"
+		{Server: "https://api.barkpark.io"},          // later → "barkpark-2"
+		{Name: "prod", Server: "https://other.com"},  // explicit name unaffected
+	}}
+	if got := c.DisplayName(c.KnownServers[0]); got != "barkpark" {
+		t.Errorf("front entry = %q, want barkpark", got)
+	}
+	if got := c.DisplayName(c.KnownServers[1]); got != "barkpark-2" {
+		t.Errorf("collision entry = %q, want barkpark-2", got)
+	}
+	if got := c.DisplayName(c.KnownServers[2]); got != "prod" {
+		t.Errorf("explicit-name entry = %q, want prod", got)
+	}
+}
+
+func TestRememberServerDerivesUniqueName(t *testing.T) {
+	c := &Config{}
+	// First connect, no name → derives "barkpark".
+	c.RememberServer(ServerEntry{Server: "https://api.barkpark.cloud", LastConnected: "2026-06-01T00:00:00Z"})
+	// Second connect to a DIFFERENT server that derives the same base → "barkpark-2".
+	c.RememberServer(ServerEntry{Server: "https://api.barkpark.io", LastConnected: "2026-06-02T00:00:00Z"})
+
+	list := c.KnownServerList()
+	// Most-recent-first: barkpark.io is at front and must NOT collide with the
+	// older barkpark.cloud's derived name.
+	names := map[string]string{}
+	for _, e := range list {
+		names[e.Server] = e.Name
+	}
+	if names["https://api.barkpark.cloud"] != "barkpark" {
+		t.Errorf("first server name = %q, want barkpark", names["https://api.barkpark.cloud"])
+	}
+	if names["https://api.barkpark.io"] != "barkpark-2" {
+		t.Errorf("second server name = %q, want barkpark-2", names["https://api.barkpark.io"])
+	}
+}
+
+func TestRememberServerExplicitNameAndInherit(t *testing.T) {
+	c := &Config{}
+	c.RememberServer(ServerEntry{Name: "prod", Server: "https://api.barkpark.cloud", Token: "t1", LastConnected: "2026-06-01T00:00:00Z"})
+	// Re-connect to the SAME url with NO name → inherits "prod".
+	c.RememberServer(ServerEntry{Server: "https://api.barkpark.cloud", Token: "t2", LastConnected: "2026-06-02T00:00:00Z"})
+
+	list := c.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("upsert should collapse to 1 entry, got %d", len(list))
+	}
+	if list[0].Name != "prod" {
+		t.Errorf("re-connect should inherit prior name, got %q", list[0].Name)
+	}
+	if list[0].Token != "t2" {
+		t.Errorf("re-connect should refresh token, got %q", list[0].Token)
+	}
+}
+
+func TestFindServer(t *testing.T) {
+	c := &Config{KnownServers: []ServerEntry{
+		{Name: "cloud", Server: "https://api.barkpark.cloud", Dataset: "staging"},
+		{Server: "http://localhost:4000"}, // unnamed → DisplayName "local"
+	}}
+
+	// By explicit Name (case-insensitive).
+	if e, ok := c.FindServer("CLOUD"); !ok || e.Server != "https://api.barkpark.cloud" {
+		t.Errorf("FindServer by name failed: %+v ok=%v", e, ok)
+	}
+	// By derived DisplayName.
+	if e, ok := c.FindServer("local"); !ok || e.Server != "http://localhost:4000" {
+		t.Errorf("FindServer by derived name failed: %+v ok=%v", e, ok)
+	}
+	// By normalized URL (trailing slash, uppercase host).
+	if e, ok := c.FindServer("https://API.barkpark.cloud/"); !ok || e.Name != "cloud" {
+		t.Errorf("FindServer by URL failed: %+v ok=%v", e, ok)
+	}
+	// Miss.
+	if _, ok := c.FindServer("nope"); ok {
+		t.Errorf("FindServer should miss on unknown")
+	}
+	// Empty query → miss.
+	if _, ok := c.FindServer(""); ok {
+		t.Errorf("FindServer should miss on empty query")
+	}
+}
+
+func TestSetActiveServer(t *testing.T) {
+	c := &Config{Server: "http://localhost:4000", Token: "dev", Workspace: "default", Project: "default", Dataset: "production"}
+	c.SetActiveServer(ServerEntry{Server: "https://api.barkpark.cloud", Token: "tok-cloud", Dataset: "staging"})
+
+	if c.Server != "https://api.barkpark.cloud" || c.Token != "tok-cloud" {
+		t.Errorf("SetActiveServer did not promote server/token: %+v", *c)
+	}
+	if c.Dataset != "staging" {
+		t.Errorf("SetActiveServer should promote dataset, got %q", c.Dataset)
+	}
+	// Empty workspace/project on the entry leave the existing scope intact.
+	if c.Workspace != "default" || c.Project != "default" {
+		t.Errorf("SetActiveServer should not blank unset scope: w=%q p=%q", c.Workspace, c.Project)
+	}
+}

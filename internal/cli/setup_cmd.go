@@ -25,6 +25,7 @@ func (configStoreAdapter) Save(s setup.SavedConfig) error {
 		cfg = &Config{}
 	}
 	cfg.RememberServer(ServerEntry{
+		Name:          s.Name,
 		Server:        s.Server,
 		Token:         s.Token,
 		Workspace:     s.Workspace,
@@ -377,6 +378,7 @@ TARGETS
 FLAGS
   --target <t>        one of connect|local|deploy|provision
   --server <url>      server URL for connect (http:// or https://)
+  --name <handle>     short name to save this server under (bp use <handle>)
   --token <tok>       bearer token to persist with the connection
   -w, --workspace <w> workspace scope (default: default)
   -p, --project <p>   project scope (default: default)
@@ -419,6 +421,7 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 	valueFlag := map[string]*string{
 		"target":    &plan.Target,
 		"server":    &plan.Server,
+		"name":      &plan.Name,
 		"token":     &plan.Token,
 		"workspace": &plan.Workspace,
 		"project":   &plan.Project,

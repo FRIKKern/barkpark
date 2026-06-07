@@ -88,6 +88,18 @@ func Execute(args []string) int {
 		return runCapabilities(out, g, ctx)
 	case "whoami":
 		return runWhoami(out, g, ctx)
+	case "use":
+		// `bp use <name|url>` — flip the active server locally (no network).
+		return runUse(out, rest[1:])
+	case "servers":
+		// `bp servers` — list saved servers.
+		return runServers(out, rest[1:])
+	case "server":
+		// `bp server ls` is an alias for `bp servers`. Any other `server <verb>`
+		// is not a built-in; fall through to the manifest tree below.
+		if verb == "ls" {
+			return runServers(out, tail)
+		}
 	case "setup":
 		// setup's own --flags are not global flags, so parseGlobals passed them
 		// through into rest as verb+tail. Hand setup everything after the noun.
@@ -153,14 +165,16 @@ func resolveContext(g globals) manifest.Context {
 	// Persisted config is the ActiveContext layer. A missing/empty config is a
 	// no-op (empty ActiveContext); a malformed one is non-fatal here — we fall
 	// back to the empty active layer rather than failing every command.
+	var cfg *Config
 	var active manifest.ActiveContext
-	if cfg, err := LoadConfig(); err == nil {
-		active = cfg.ToActiveContext()
+	if c, err := LoadConfig(); err == nil {
+		cfg = c
+		active = c.ToActiveContext()
 	}
 
 	flags := map[string]string{}
-	if g.server != "" {
-		flags[manifest.FlagServer] = g.server
+	if g.token != "" {
+		flags[manifest.FlagToken] = g.token
 	}
 	if g.workspace != "" {
 		flags[manifest.FlagWorkspace] = g.workspace
@@ -173,6 +187,36 @@ func resolveContext(g globals) manifest.Context {
 	}
 	if g.output != "" {
 		flags[manifest.FlagOutput] = g.output
+	}
+
+	// -s/--server resolution: when the value matches a known server's name /
+	// DisplayName / URL, resolve to that entry's URL and carry its token + scope
+	// at flag precedence — but NEVER clobber an explicitly-passed -w/-p/-d/--token
+	// (those are already in `flags` above and win). A value that matches nothing
+	// known is treated as a raw URL (today's behaviour). Env vars still win over
+	// these injected values? No — an explicit -s is the user's deliberate choice,
+	// so the resolved URL goes in as a flag (highest layer); the carried token/
+	// scope are injected as flags ONLY where the user did not set the matching
+	// flag, so they sit above env/active config exactly like the -s URL does.
+	if g.server != "" {
+		if entry, ok := cfg.FindServer(g.server); ok {
+			flags[manifest.FlagServer] = entry.Server
+			if _, set := flags[manifest.FlagToken]; !set && entry.Token != "" {
+				flags[manifest.FlagToken] = entry.Token
+			}
+			if _, set := flags[manifest.FlagWorkspace]; !set && entry.Workspace != "" {
+				flags[manifest.FlagWorkspace] = entry.Workspace
+			}
+			if _, set := flags[manifest.FlagProject]; !set && entry.Project != "" {
+				flags[manifest.FlagProject] = entry.Project
+			}
+			if _, set := flags[manifest.FlagDataset]; !set && entry.Dataset != "" {
+				flags[manifest.FlagDataset] = entry.Dataset
+			}
+		} else {
+			// Unknown name → raw URL, as before.
+			flags[manifest.FlagServer] = g.server
+		}
 	}
 
 	return manifest.Resolve(flags, envContext(), active, bakedDefaults())

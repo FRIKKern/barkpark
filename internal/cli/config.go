@@ -43,7 +43,13 @@ type Config struct {
 // enough to re-select the server from the wizard without re-typing anything —
 // the URL, the token + scope it was reached with, the resolved tier, and when
 // it was last connected (RFC3339, stamped by the caller).
+//
+// Name is the short handle the user types in `bp use <name>` and `bp -s <name>`.
+// It is set explicitly via `bp setup --name`, else derived from the URL by
+// DisplayName. An empty Name on a pre-existing entry is fine — DisplayName
+// derives one on the fly, and bp never re-connects just to backfill it.
 type ServerEntry struct {
+	Name          string `json:"name,omitempty"`
 	Server        string `json:"server,omitempty"`
 	Token         string `json:"token,omitempty"`
 	Workspace     string `json:"workspace,omitempty"`
@@ -177,13 +183,25 @@ func (c *Config) RememberServer(entry ServerEntry) {
 	key := normalizeServerURL(entry.Server)
 
 	// Drop any existing entry for the same normalized URL; we re-insert at front.
+	// If the incoming entry has no explicit Name, inherit the name the matched
+	// entry already carried so a plain re-connect keeps a previously-chosen handle.
 	kept := c.KnownServers[:0:0]
 	for _, e := range c.KnownServers {
 		if normalizeServerURL(e.Server) == key {
+			if entry.Name == "" {
+				entry.Name = e.Name
+			}
 			continue
 		}
 		kept = append(kept, e)
 	}
+
+	// Derive a Name when none was supplied (and none inherited). Uniqueness is
+	// computed against the OTHER kept entries so the new handle never collides.
+	if strings.TrimSpace(entry.Name) == "" {
+		entry.Name = deriveUniqueName(entry.Server, kept)
+	}
+
 	c.KnownServers = append([]ServerEntry{entry}, kept...)
 	if len(c.KnownServers) > maxKnownServers {
 		c.KnownServers = c.KnownServers[:maxKnownServers]
@@ -213,6 +231,205 @@ func (c *Config) KnownServerList() []ServerEntry {
 	out := make([]ServerEntry, len(c.KnownServers))
 	copy(out, c.KnownServers)
 	return out
+}
+
+// DisplayName returns the short handle for an entry: its explicit Name when set,
+// else a handle auto-derived from the server URL. localhost / 127.0.0.1 / ::1 →
+// "local"; any other host → the first meaningful DNS label with a leading "api"
+// or "www" dropped (api.barkpark.cloud → "barkpark", staging.foo.com →
+// "staging"). DisplayName does NOT enforce uniqueness on its own — call it
+// through DisplayName on the Config (the method below) to get collision suffixes
+// across known_servers. This free function is the per-entry derivation only.
+func DisplayName(e ServerEntry) string {
+	if n := strings.TrimSpace(e.Name); n != "" {
+		return n
+	}
+	return deriveName(e.Server)
+}
+
+// DisplayName (method) returns the unique display handle for one entry within
+// the context of the whole known-server list: an explicit Name is returned
+// verbatim; an unnamed entry's derived handle is suffixed -2/-3/… when it would
+// otherwise collide with another entry's display handle that sorts ahead of it
+// (earlier in the most-recent-first list). This is what `bp servers` / `bp use`
+// show so two unnamed servers that derive the same base never print identically.
+func (c *Config) DisplayName(e ServerEntry) string {
+	if n := strings.TrimSpace(e.Name); n != "" {
+		return n
+	}
+	if c == nil {
+		return deriveName(e.Server)
+	}
+	base := deriveName(e.Server)
+	key := normalizeServerURL(e.Server)
+	// Walk the list; count how many DISTINCT earlier servers derive the same base
+	// (skipping ones that carry an explicit Name — those don't claim the base).
+	rank := 0
+	for _, other := range c.KnownServers {
+		if normalizeServerURL(other.Server) == key {
+			break
+		}
+		if strings.TrimSpace(other.Name) != "" {
+			continue
+		}
+		if deriveName(other.Server) == base {
+			rank++
+		}
+	}
+	if rank == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, rank+1)
+}
+
+// deriveName turns a server URL into a base handle (no uniqueness). It is the
+// dependency-free core of DisplayName: localhost family → "local"; otherwise the
+// first meaningful DNS label with a leading "api"/"www" dropped, lowercased. A
+// bare IP or unparseable host falls back to the host text itself; an empty URL
+// yields "server".
+func deriveName(server string) string {
+	host := hostOf(server)
+	if host == "" {
+		return "server"
+	}
+	low := strings.ToLower(host)
+	switch low {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return "local"
+	}
+	// Numeric IPv4 → use it verbatim (no DNS labels to mine).
+	if isIPv4(low) {
+		return low
+	}
+	labels := strings.Split(low, ".")
+	// Drop a leading "api"/"www" so api.barkpark.cloud → barkpark.
+	idx := 0
+	if len(labels) > 1 && (labels[0] == "api" || labels[0] == "www") {
+		idx = 1
+	}
+	if idx < len(labels) && labels[idx] != "" {
+		return labels[idx]
+	}
+	return low
+}
+
+// deriveUniqueName derives a base handle for server and suffixes it -2/-3/… until
+// it does not collide (case-insensitively) with any display handle already
+// claimed by the others. Used by RememberServer when no explicit --name is given.
+func deriveUniqueName(server string, others []ServerEntry) string {
+	taken := map[string]bool{}
+	for _, e := range others {
+		taken[strings.ToLower(DisplayName(e))] = true
+	}
+	base := deriveName(server)
+	if !taken[strings.ToLower(base)] {
+		return base
+	}
+	for n := 2; ; n++ {
+		cand := fmt.Sprintf("%s-%d", base, n)
+		if !taken[strings.ToLower(cand)] {
+			return cand
+		}
+	}
+}
+
+// hostOf extracts the host (authority minus userinfo/port/path) from a URL
+// without importing net/url. It mirrors normalizeServerURL's parsing.
+func hostOf(raw string) string {
+	s := strings.TrimSpace(raw)
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	// Strip path.
+	if j := strings.IndexByte(s, '/'); j >= 0 {
+		s = s[:j]
+	}
+	// Strip userinfo.
+	if at := strings.LastIndexByte(s, '@'); at >= 0 {
+		s = s[at+1:]
+	}
+	// Bracketed IPv6 literal: keep the brackets intact (matched verbatim above).
+	if strings.HasPrefix(s, "[") {
+		if end := strings.IndexByte(s, ']'); end >= 0 {
+			return s[:end+1]
+		}
+		return s
+	}
+	// Strip :port.
+	if c := strings.LastIndexByte(s, ':'); c >= 0 {
+		s = s[:c]
+	}
+	return s
+}
+
+// isIPv4 reports whether s is a dotted-quad IPv4 literal (cheap check, no net).
+func isIPv4(s string) bool {
+	parts := strings.Split(s, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" || len(p) > 3 {
+			return false
+		}
+		for _, r := range p {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// FindServer resolves a name-or-URL to a known ServerEntry. It matches, in
+// order: a case-insensitive equality against each entry's explicit Name; against
+// each entry's unique DisplayName; and a normalized-URL equality against each
+// entry's Server. The first hit wins (most-recent-first order). Returns ok=false
+// when nothing matches.
+func (c *Config) FindServer(nameOrURL string) (ServerEntry, bool) {
+	if c == nil {
+		return ServerEntry{}, false
+	}
+	q := strings.TrimSpace(nameOrURL)
+	if q == "" {
+		return ServerEntry{}, false
+	}
+	qLower := strings.ToLower(q)
+	qURL := normalizeServerURL(q)
+	for _, e := range c.KnownServers {
+		if strings.TrimSpace(e.Name) != "" && strings.EqualFold(e.Name, q) {
+			return e, true
+		}
+		if strings.ToLower(c.DisplayName(e)) == qLower {
+			return e, true
+		}
+		if normalizeServerURL(e.Server) == qURL {
+			return e, true
+		}
+	}
+	return ServerEntry{}, false
+}
+
+// SetActiveServer promotes a known entry's server + token + scope to the active
+// flat fields. The caller is responsible for SaveConfig afterwards. Empty scope
+// fields on the entry leave the existing active scope intact (so promoting an
+// entry that never recorded a workspace does not blank the current one); the
+// Server and Token are always taken verbatim from the entry.
+func (c *Config) SetActiveServer(e ServerEntry) {
+	if c == nil {
+		return
+	}
+	c.Server = e.Server
+	c.Token = e.Token
+	if e.Workspace != "" {
+		c.Workspace = e.Workspace
+	}
+	if e.Project != "" {
+		c.Project = e.Project
+	}
+	if e.Dataset != "" {
+		c.Dataset = e.Dataset
+	}
 }
 
 // ActiveServer returns the URL of the currently-active server (the flat Server

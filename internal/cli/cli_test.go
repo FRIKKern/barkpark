@@ -612,6 +612,67 @@ func TestClassifyTaskNotFound(t *testing.T) {
 	}
 }
 
+// --- -s name resolution ------------------------------------------------------
+
+// clearBarkparkEnv unsets the BARKPARK_* vars so resolveContext reads purely from
+// the seeded config + flags (env would otherwise win and mask the test).
+func clearBarkparkEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN", "BARKPARK_WORKSPACE", "BARKPARK_PROJECT", "BARKPARK_DATASET"} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestResolveContextNamedServer(t *testing.T) {
+	withTempConfigHome(t)
+	clearBarkparkEnv(t)
+
+	cfg := &Config{
+		Server:    "http://localhost:4000",
+		Token:     "dev",
+		Workspace: "default", Project: "default", Dataset: "production",
+		KnownServers: []ServerEntry{
+			{Server: "http://localhost:4000", Token: "dev", Workspace: "default", Project: "default", Dataset: "production"},
+			{Name: "cloud", Server: "https://api.barkpark.cloud", Token: "tok-cloud", Workspace: "default", Project: "default", Dataset: "staging"},
+		},
+	}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	// -s cloud → resolves URL + carries token + scope.
+	ctx := resolveContext(globals{server: "cloud"})
+	if ctx.Server != "https://api.barkpark.cloud" {
+		t.Errorf("-s cloud server = %q, want the cloud URL", ctx.Server)
+	}
+	if ctx.Token != "tok-cloud" {
+		t.Errorf("-s cloud token = %q, want carried token", ctx.Token)
+	}
+	if ctx.Dataset != "staging" {
+		t.Errorf("-s cloud dataset = %q, want staging", ctx.Dataset)
+	}
+
+	// -s local (derived name) → resolves the unnamed localhost entry.
+	if ctx := resolveContext(globals{server: "local"}); ctx.Server != "http://localhost:4000" {
+		t.Errorf("-s local server = %q, want localhost", ctx.Server)
+	}
+
+	// Explicit -d overrides the named server's saved dataset (precedence).
+	if ctx := resolveContext(globals{server: "cloud", dataset: "production"}); ctx.Dataset != "production" {
+		t.Errorf("explicit -d should win, got %q", ctx.Dataset)
+	}
+
+	// Explicit --token overrides the named server's saved token.
+	if ctx := resolveContext(globals{server: "cloud", token: "override"}); ctx.Token != "override" {
+		t.Errorf("explicit --token should win, got %q", ctx.Token)
+	}
+
+	// An unknown -s value is treated as a raw URL (today's behaviour).
+	if ctx := resolveContext(globals{server: "https://raw.example.com"}); ctx.Server != "https://raw.example.com" {
+		t.Errorf("unknown -s should pass through as raw URL, got %q", ctx.Server)
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 func equalStrings(a, b []string) bool {

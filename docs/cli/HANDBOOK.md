@@ -552,6 +552,83 @@ connect: a fresh install starts with an empty cache.
   ]
   ```
 
+### Switching servers
+
+Once two or more servers are in the cache, three built-ins (no manifest, no
+network) move between them. Switching is **local and instant** — `bp use` only
+rewrites the active fields in `config.json`; nothing is contacted.
+
+**Names.** Each remembered server has a short handle you type instead of a URL.
+A handle is **auto-derived** from the URL unless you set one with
+`bp setup --name <handle>` on connect:
+
+- `localhost` / `127.0.0.1` / `::1` → `local`
+- any other host → the first meaningful DNS label, with a leading `api`/`www`
+  dropped (`api.barkpark.cloud` → `barkpark`, `staging.foo.com` → `staging`)
+- a bare IPv4 → the address verbatim
+- two unnamed servers that derive the same base get `-2`/`-3` suffixes so the
+  printed handles never collide
+
+(`deriveName` / `DisplayName`, `internal/cli/config.go`.) An explicit `--name`
+always wins and is shown verbatim.
+
+**`bp use <name|url>`** — make a saved server the active default. The argument
+matches, in order, an entry's explicit name, its display handle, or its
+normalized URL (`FindServer`). On a hit it promotes that entry's server + token
++ scope to the active context and saves:
+
+```
+$ bp use prod
+✓ now using prod — https://api.barkpark.cloud  (scope w=default p=default d=production)
+```
+
+With **no argument** it reports the active server and lists the known handles:
+
+```
+$ bp use
+active: local — http://localhost:4000  (scope w=default p=default d=production)
+known:  prod, local
+hint:   bp use <name>   to switch
+```
+
+An unknown name/URL is a clean usage error (exit **2**) that lists the known
+handles so you can fix the typo:
+
+```
+$ bp use staging
+barkpark: no known server matches "staging"
+known servers: prod, local
+run `bp servers` for details.
+```
+
+**`bp servers`** (alias `bp server ls`) — list every saved server, the active
+one marked ★, with its tier and last-connected stamp. Read-only, no network:
+
+```
+$ bp servers
+★ prod         https://api.barkpark.cloud  (admin, 2026-06-05T10:00:00Z)
+  local        http://localhost:4000  (admin, 2026-06-04T09:00:00Z)
+```
+
+**`-s <name|url>`** — target one server for a single command without changing
+the active default. The global `-s` flag (§3) resolves a saved name the same way
+`bp use` does (`resolveContext`, `internal/cli/cli.go`); the resolved URL **and**
+that entry's saved token + scope ride along at flag precedence — except where you
+passed an explicit `--token`/`-w`/`-p`/`-d`, which still win. A value matching no
+known server is treated as a raw URL (today's behaviour), so `-s https://…` keeps
+working:
+
+```bash
+bp use local                       # default = local
+bp -s prod doc ls post             # this one command hits prod
+bp doc ls post                     # back to local — the default never moved
+bp -s https://other.example.com whoami   # raw URL: unknown name → used verbatim
+```
+
+`-o json` is available on all three: `bp use`/`bp use <name>` emit
+`{ ok, active, known? }`, `bp servers` emits `{ servers:[…], active }`, and an
+unknown `bp use` target emits `{ ok:false, error:{ code:"not_found", … } }`.
+
 ### The JSON contract
 
 With `-o json` (or `--json`) setup emits exactly one JSON object on stdout. There

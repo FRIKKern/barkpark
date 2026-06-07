@@ -13,6 +13,7 @@ import (
 // command runner.
 type globals struct {
 	server    string
+	token     string // --token: explicit bearer token; wins over a named server's saved token
 	workspace string
 	project   string
 	dataset   string
@@ -49,7 +50,8 @@ type globals struct {
 // we can split cleanly at the first positional (the noun).
 var valueFlags = map[string]bool{
 	"-s": true, "--server": true,
-	"-w": true, "--workspace": true,
+	"--token": true,
+	"-w":      true, "--workspace": true,
 	"-p": true, "--project": true,
 	"-d": true, "--dataset": true,
 	"-o": true, "--output": true,
@@ -137,6 +139,8 @@ func (g *globals) set(key, val string) error {
 	switch key {
 	case "-s", "--server":
 		g.server = val
+	case "--token":
+		g.token = val
 	case "-w", "--workspace":
 		g.workspace = val
 	case "-p", "--project":

@@ -42,6 +42,7 @@ func executeConnect(plan SetupPlan, opts Options) error {
 
 	saved := SavedConfig{
 		Server:    server,
+		Name:      strings.TrimSpace(plan.Name),
 		Token:     plan.Token,
 		Workspace: firstNonEmpty(plan.Workspace, "default"),
 		Project:   firstNonEmpty(plan.Project, "default"),

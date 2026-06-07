@@ -69,22 +69,41 @@ type metaResponse struct {
 // candidate. active reports whether the resolved server is the saved config's
 // active server (only meaningful for "saved").
 func whoamiSource(g globals, ctx manifest.Context) (source string, active bool) {
+	s, a, _ := whoamiSourceName(g, ctx)
+	return s, a
+}
+
+// whoamiSourceName extends whoamiSource with the resolved server NAME: the
+// DisplayName of whichever known entry matches ctx.Server (by name or URL),
+// empty when no known entry matches (a raw -s URL or env var pointing somewhere
+// unsaved). The name is purely cosmetic — it never changes the source/active
+// classification.
+func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bool, name string) {
+	cfg, _ := LoadConfig()
+	if cfg != nil {
+		// Resolve the name from whatever known entry matches the RESOLVED server
+		// URL (works for a -s name, a -s URL, the saved active, or env).
+		if e, ok := cfg.FindServer(ctx.Server); ok {
+			name = cfg.DisplayName(e)
+		}
+	}
+
 	// 1. Explicit --server flag wins.
 	if g.server != "" {
-		return "flag", false
+		return "flag", false, name
 	}
 	// 2. Env var (BARKPARK_API_URL / BARKPARK_SERVER), if actually set.
 	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
-		return "env", false
+		return "env", false, name
 	}
 	// 3. Saved config — the resolved server matches the persisted active server.
-	if cfg, err := LoadConfig(); err == nil && cfg.ActiveServer() != "" {
+	if cfg != nil && cfg.ActiveServer() != "" {
 		if normalizeServerURL(cfg.ActiveServer()) == normalizeServerURL(ctx.Server) {
-			return "saved", cfg.IsActiveServer(ctx.Server)
+			return "saved", cfg.IsActiveServer(ctx.Server), name
 		}
 	}
 	// 4. Otherwise it's the baked localhost default.
-	return "default", false
+	return "default", false, name
 }
 
 // runWhoami answers "what am I connected to" — and it is LOCAL-FIRST, so it
@@ -94,7 +113,7 @@ func whoamiSource(g globals, ctx manifest.Context) (source string, active bool) 
 // GET /v1/meta are BEST-EFFORT enrichment that never fail the command. whoami
 // reports your config; it is not a connectivity gate, so it always exits 0.
 func runWhoami(out *writer, g globals, ctx manifest.Context) int {
-	source, active := whoamiSource(g, ctx)
+	source, active, name := whoamiSourceName(g, ctx)
 	tokenPresent := ctx.Token != ""
 
 	// Best-effort manifest fetch (short timeout via loadManifest's client). On
@@ -124,6 +143,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 			tierVal = authTier
 		}
 		out.renderJSON(map[string]any{
+			"name":          name,
 			"server":        ctx.Server,
 			"source":        source,
 			"active":        active,
@@ -144,12 +164,18 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		return exitOK
 	}
 
-	// Human output — the target line always renders.
+	// Human output — the target line always renders. When the resolved server
+	// matches a known entry, lead with its NAME so "target: prod — https://…" reads
+	// at a glance; an unknown server (raw -s URL) shows the URL alone as before.
 	prodMark := ""
 	if prod {
 		prodMark = "  ⚠ PROD"
 	}
-	out.outf("target:    %s (%s)%s", ctx.Server, whoamiSourceLabel(source, active), prodMark)
+	if name != "" {
+		out.outf("target:    %s — %s (%s)%s", name, ctx.Server, whoamiSourceLabel(source, active), prodMark)
+	} else {
+		out.outf("target:    %s (%s)%s", ctx.Server, whoamiSourceLabel(source, active), prodMark)
+	}
 	out.outf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)
 	if tokenPresent {
 		out.outf("token:     set")

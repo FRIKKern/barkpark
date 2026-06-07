@@ -38,6 +38,7 @@ type SetupPlan struct {
 
 	// connect / all
 	Server    string
+	Name      string // optional short handle saved with the connection (bp use <name>)
 	Token     string
 	Workspace string
 	Project   string
@@ -102,6 +103,7 @@ type ConfigStore interface {
 // history via cli.Config.RememberServer).
 type SavedConfig struct {
 	Server    string
+	Name      string // optional short handle (bp use <name>); empty → adapter derives one
 	Token     string
 	Workspace string
 	Project   string

@@ -184,6 +184,15 @@ For agents the flow is **preview, then execute**: `--dry-run -o json` returns th
 bp setup --target connect --dry-run -o json | jq '.known_servers'   # the remembered servers (★ = active)
 ```
 
+**Jumping between servers.** Running a local dev box plus one or more remotes is the normal case. Each remembered server gets a short name (auto-derived — `localhost` → `local`, otherwise the host label, e.g. `api.barkpark.cloud` → `barkpark`; override with `bp setup --name prod`). Switching is **local and instant — no network call:**
+
+```bash
+bp servers                       # list saved servers (★ = active)
+bp use prod                      # flip the default to prod (instant, offline)
+bp doc ls post                   # …now runs against prod
+bp -s local doc ls post          # target one server for a single command, default unchanged
+```
+
 ```bash
 bp setup --target connect --server https://api.example.com --dry-run -o json   # preview (no writes)
 bp setup --target connect --server https://api.example.com --yes -o json       # execute + structured receipt
