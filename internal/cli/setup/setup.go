@@ -98,13 +98,39 @@ type ConfigStore interface {
 
 // SavedConfig is the connection bundle Execute hands the store on a successful
 // connect. It mirrors the fields cli.Config carries that setup is responsible
-// for; the adapter maps it onto the real cli.Config.
+// for; the adapter maps it onto the real cli.Config (and into the connect
+// history via cli.Config.RememberServer).
 type SavedConfig struct {
 	Server    string
 	Token     string
 	Workspace string
 	Project   string
 	Dataset   string
+
+	// Tier is the resolved auth tier the connect probe reported. The adapter
+	// records it on the remembered ServerEntry so the pick-list can show it.
+	Tier string
+
+	// LastConnected is the RFC3339 timestamp the executor stamps on a successful
+	// connect (time.Now in the executor — kept out of the pure history helper).
+	// The adapter passes it straight into ServerEntry.LastConnected.
+	LastConnected string
+}
+
+// KnownServerInfo is one remembered server projected into the setup package for
+// the wizard pick-list and the connect Plan's known_servers array. The cli
+// adapter builds these from cli.Config.KnownServerList so setup never imports
+// cli. Token/scope ride along so the wizard can re-select a saved server
+// without re-prompting for credentials.
+type KnownServerInfo struct {
+	Server        string
+	Token         string
+	Workspace     string
+	Project       string
+	Dataset       string
+	Tier          string
+	LastConnected string // RFC3339, "" if unknown
+	Active        bool   // true for the currently-active server
 }
 
 // WizardFunc is the interactive-wizard hook. The modes step implements it
@@ -139,6 +165,11 @@ type Options struct {
 	// (non-dry-run) Execute so the JSON caller can render it. Executors fill it on
 	// success; a nil pointer means the caller does not want it (human path).
 	Result *Result
+
+	// KnownServers is the connect history (most-recent-first) the cli built-in
+	// loaded from the persisted config. The connect Plan surfaces it as
+	// known_servers; the wizard offers it as a pick-list. Empty on a first run.
+	KnownServers []KnownServerInfo
 }
 
 // json reports whether this run should suppress human prose (the cli built-in

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,7 +22,7 @@ import (
 // the user quits before confirming, so the caller can exit cleanly without
 // running anything.
 func Wizard(opts Options) (SetupPlan, error) {
-	m := newWizardModel()
+	m := newWizardModel(opts.KnownServers)
 	prog := tea.NewProgram(m)
 	res, err := prog.Run()
 	if err != nil {
@@ -55,6 +56,7 @@ type wizardStage int
 
 const (
 	stageTarget wizardStage = iota
+	stageServerPick // connect-only: pick a remembered server or "enter a new server…"
 	stageInputs
 	stagePlugins
 	stageConfirm
@@ -83,6 +85,17 @@ type wizardModel struct {
 	// target select
 	targetIdx int
 
+	// connect pick-list: remembered servers (most-recent-first) the connect flow
+	// offers before the text input. Empty => no pick-list (text input only, as
+	// before). serverIdx points at the highlighted row; the final row (index ==
+	// len(knownServers)) is the "enter a new server…" escape. pickedNew is set
+	// once the user chose that row (or there were no known servers), revealing the
+	// text input. pickedServer holds the chosen entry when a saved row was picked.
+	knownServers []KnownServerInfo
+	serverIdx    int
+	pickedNew    bool
+	pickedServer *KnownServerInfo
+
 	// per-target inputs (a small set of textinputs + a docker toggle)
 	inputs    []textinput.Model
 	inputKeys []string // parallel to inputs: which SetupPlan field each fills
@@ -97,16 +110,17 @@ type wizardModel struct {
 	confirmYes bool
 }
 
-func newWizardModel() wizardModel {
+func newWizardModel(known []KnownServerInfo) wizardModel {
 	plugins := DiscoverPlugins()
 	pick := make([]bool, len(plugins))
 	for i := range pick {
 		pick[i] = true // default: all bundled checked
 	}
 	return wizardModel{
-		stage:      stageTarget,
-		plugins:    plugins,
-		pluginPick: pick,
+		stage:        stageTarget,
+		plugins:      plugins,
+		pluginPick:   pick,
+		knownServers: known,
 	}
 }
 
@@ -170,6 +184,8 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.stage {
 	case stageTarget:
 		return m.updateTarget(key)
+	case stageServerPick:
+		return m.updateServerPick(key)
 	case stageInputs:
 		return m.updateInputs(key)
 	case stagePlugins:
@@ -191,10 +207,53 @@ func (m wizardModel) updateTarget(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.targetIdx++
 		}
 	case "enter":
+		// Connect with a non-empty history: offer the pick-list first. Every other
+		// case goes straight to the inputs stage (text input / docker toggle).
+		if m.target() == TargetConnect && len(m.knownServers) > 0 {
+			m.serverIdx = 0
+			m.pickedNew = false
+			m.pickedServer = nil
+			m.stage = stageServerPick
+			return m, nil
+		}
 		m.buildInputs()
 		// Local with no text inputs jumps straight to the docker toggle within
 		// the inputs stage; the inputs view renders the toggle for local.
 		m.stage = stageInputs
+	}
+	return m, nil
+}
+
+// updateServerPick drives the connect pick-list. Rows 0..len-1 are remembered
+// servers; the final row is "enter a new server…". Enter on a saved row fills
+// the server from history and skips the text input (straight to plugins); enter
+// on the new row reveals the text input.
+func (m wizardModel) updateServerPick(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	newRow := len(m.knownServers) // index of the "＋ enter a new server…" row
+	switch key.String() {
+	case "up", "k":
+		if m.serverIdx > 0 {
+			m.serverIdx--
+		}
+	case "down", "j":
+		if m.serverIdx < newRow {
+			m.serverIdx++
+		}
+	case "enter":
+		if m.serverIdx == newRow {
+			// "enter a new server…" — reveal the text input.
+			m.pickedNew = true
+			m.pickedServer = nil
+			m.buildInputs()
+			m.stage = stageInputs
+			return m, nil
+		}
+		// A saved server was picked: fill it and skip the text input.
+		picked := m.knownServers[m.serverIdx]
+		m.pickedServer = &picked
+		m.pickedNew = false
+		m.stage = stagePlugins
+		return m, nil
 	}
 	return m, nil
 }
@@ -316,7 +375,9 @@ func (m wizardModel) selectedPlugins() []string {
 	}
 }
 
-// plan assembles the final SetupPlan from the collected state.
+// plan assembles the final SetupPlan from the collected state. When the connect
+// pick-list selected a remembered server, the server URL + its token/scope come
+// from history rather than the (skipped) text input.
 func (m wizardModel) plan() SetupPlan {
 	p := SetupPlan{Target: m.target(), Plugins: m.selectedPlugins()}
 	vals := map[string]string{}
@@ -333,6 +394,13 @@ func (m wizardModel) plan() SetupPlan {
 	if m.target() == TargetLocal {
 		p.Docker = m.docker
 	}
+	if m.pickedServer != nil {
+		p.Server = m.pickedServer.Server
+		p.Token = m.pickedServer.Token
+		p.Workspace = m.pickedServer.Workspace
+		p.Project = m.pickedServer.Project
+		p.Dataset = m.pickedServer.Dataset
+	}
 	return p
 }
 
@@ -342,6 +410,8 @@ func (m wizardModel) View() string {
 	switch m.stage {
 	case stageTarget:
 		return m.viewTarget()
+	case stageServerPick:
+		return m.viewServerPick()
 	case stageInputs:
 		return m.viewInputs()
 	case stagePlugins:
@@ -365,6 +435,44 @@ func (m wizardModel) viewTarget() string {
 		b.WriteString(fmt.Sprintf("%s%-10s %s\n", cursor, label, wzDim.Render(c.blurb)))
 	}
 	b.WriteString("\n" + wzDim.Render("↑/↓ move · enter select · q quit") + "\n")
+	return b.String()
+}
+
+// viewServerPick renders the remembered-server pick-list: one row per saved
+// server (URL + dim "last connected <when>", the active one marked ▸★), then a
+// final "＋ enter a new server…" row.
+func (m wizardModel) viewServerPick() string {
+	var b strings.Builder
+	b.WriteString(wzTitle.Render("bp setup → connect") + wzDim.Render(" — pick a server") + "\n\n")
+
+	for i, s := range m.knownServers {
+		cursor := "  "
+		mark := "  "
+		url := s.Server
+		if s.Active {
+			mark = wzCheck.Render("★ ")
+		}
+		if i == m.serverIdx {
+			cursor = wzSel.Render("▸ ")
+			url = wzSel.Render(url)
+		}
+		when := ""
+		if s.LastConnected != "" {
+			when = wzDim.Render("  last connected " + relativeTime(s.LastConnected))
+		}
+		b.WriteString(fmt.Sprintf("%s%s%s%s\n", cursor, mark, url, when))
+	}
+
+	// Final row: enter a new server.
+	cursor := "  "
+	label := "＋ enter a new server…"
+	if m.serverIdx == len(m.knownServers) {
+		cursor = wzSel.Render("▸ ")
+		label = wzSel.Render(label)
+	}
+	b.WriteString(fmt.Sprintf("%s  %s\n", cursor, label))
+
+	b.WriteString("\n" + wzDim.Render("↑/↓ move · enter select · esc quit") + "\n")
 	return b.String()
 }
 
@@ -451,6 +559,27 @@ func (m wizardModel) viewConfirm() string {
 
 	b.WriteString("\n" + wzAmber.Render("proceed for real?") + " " + wzDim.Render("y confirm · n abort") + "\n")
 	return b.String()
+}
+
+// relativeTime renders an RFC3339 timestamp as a coarse "<n> ago" phrase for the
+// pick-list. An unparseable value is returned verbatim so the row still shows
+// something rather than a blank.
+func relativeTime(rfc3339 string) string {
+	t, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		return rfc3339
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
 
 func dash(s string) string {

@@ -17,17 +17,48 @@ type configStoreAdapter struct{}
 
 func (configStoreAdapter) Save(s setup.SavedConfig) error {
 	// Preserve any non-connection fields (admin/ingest tokens, output pref) the
-	// user already persisted; overlay the connection setup resolved.
+	// user already persisted; overlay the connection setup resolved. RememberServer
+	// both promotes this server to the active flat context AND upserts it into the
+	// most-recent-first connect history, so the next wizard run offers it.
 	cfg, err := LoadConfig()
 	if err != nil {
 		cfg = &Config{}
 	}
-	cfg.Server = s.Server
-	cfg.Token = s.Token
-	cfg.Workspace = s.Workspace
-	cfg.Project = s.Project
-	cfg.Dataset = s.Dataset
+	cfg.RememberServer(ServerEntry{
+		Server:        s.Server,
+		Token:         s.Token,
+		Workspace:     s.Workspace,
+		Project:       s.Project,
+		Dataset:       s.Dataset,
+		Tier:          s.Tier,
+		LastConnected: s.LastConnected,
+	})
 	return SaveConfig(cfg)
+}
+
+// loadKnownServers projects the persisted connect history into the setup
+// package's KnownServerInfo view (most-recent-first), marking the active one.
+// A load failure yields an empty list — the wizard/plan simply show no cache.
+func loadKnownServers() []setup.KnownServerInfo {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil
+	}
+	list := cfg.KnownServerList()
+	out := make([]setup.KnownServerInfo, 0, len(list))
+	for _, e := range list {
+		out = append(out, setup.KnownServerInfo{
+			Server:        e.Server,
+			Token:         e.Token,
+			Workspace:     e.Workspace,
+			Project:       e.Project,
+			Dataset:       e.Dataset,
+			Tier:          e.Tier,
+			LastConnected: e.LastConnected,
+			Active:        cfg.IsActiveServer(e.Server),
+		})
+	}
+	return out
 }
 
 // runSetup is the `bp setup` built-in. It is first-class for AI/automation: the
@@ -77,12 +108,13 @@ func runSetup(out *writer, g globals, tail []string) int {
 	}
 
 	opts := setup.Options{
-		DryRun:  g.dryRun,
-		Confirm: g.yes,
-		Out:     out.stdout,
-		Store:   configStoreAdapter{},
-		Wizard:  setup.Wizard,
-		JSON:    jsonOut,
+		DryRun:       g.dryRun,
+		Confirm:      g.yes,
+		Out:          out.stdout,
+		Store:        configStoreAdapter{},
+		Wizard:       setup.Wizard,
+		JSON:         jsonOut,
+		KnownServers: loadKnownServers(),
 	}
 
 	// (3) NEVER-PROMPT / NEVER-HANG. No --target: the interactive wizard launches
@@ -175,10 +207,26 @@ func setupPlanEnvelope(p setup.Plan) map[string]any {
 		"plugins":          planPluginsJSON(p.Plugins),
 		"needs":            planNeedsJSON(p.Needs),
 		"connect_to":       p.ConnectTo,
+		"known_servers":    planKnownServersJSON(p.KnownServers),
 		"provider":         emptyToOmit(p.Provider),
 		"region":           emptyToOmit(p.Region),
 		"server_type":      emptyToOmit(p.ServerType),
 	}
+}
+
+// planKnownServersJSON renders the connect history for the JSON dry-run. Always
+// an array (possibly empty) so an agent can rely on the key being present on a
+// connect plan.
+func planKnownServersJSON(servers []setup.PlanKnownServer) []map[string]any {
+	out := make([]map[string]any, 0, len(servers))
+	for _, s := range servers {
+		m := map[string]any{"server": s.Server, "active": s.Active}
+		if s.LastConnected != "" {
+			m["last_connected"] = s.LastConnected
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func planStepsJSON(steps []setup.PlanStep) []map[string]any {

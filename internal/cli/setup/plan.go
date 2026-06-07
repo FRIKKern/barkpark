@@ -17,10 +17,23 @@ type Plan struct {
 	Needs           []PlanNeed        `json:"needs,omitempty"`
 	ConnectTo       string            `json:"connect_to,omitempty"`
 
+	// KnownServers is the connect history surfaced to a JSON dry-run so an agent
+	// can see the cached servers (and which is active) before connecting. Only
+	// populated for the connect target.
+	KnownServers []PlanKnownServer `json:"known_servers,omitempty"`
+
 	// provision-only descriptors (omitted when empty)
 	Provider   string `json:"provider,omitempty"`
 	Region     string `json:"region,omitempty"`
 	ServerType string `json:"server_type,omitempty"`
+}
+
+// PlanKnownServer is one remembered server in the connect Plan's known_servers
+// array — the minimal, credential-free view an agent needs to see the cache.
+type PlanKnownServer struct {
+	Server        string `json:"server"`
+	Active        bool   `json:"active"`
+	LastConnected string `json:"last_connected,omitempty"`
 }
 
 // PlanStep is one ordered action in the plan. N is 1-based. Command is the

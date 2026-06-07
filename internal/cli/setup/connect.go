@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
@@ -53,7 +54,8 @@ func executeConnect(plan SetupPlan, opts Options) error {
 			fmt.Fprintf(w, "dry-run: would connect to %s\n", server)
 			fmt.Fprintf(w, "  scope:  w=%s p=%s d=%s\n", saved.Workspace, saved.Project, saved.Dataset)
 			fmt.Fprintf(w, "  token:  %s\n", redactToken(saved.Token))
-			fmt.Fprintf(w, "  would write %s and default bp here (no network call, no write)\n", configHint())
+			fmt.Fprintf(w, "  would write %s, remember this server, and default bp here (no network call, no write)\n", configHint())
+			writeKnownServersLine(w, opts.KnownServers)
 		}
 		return nil
 	}
@@ -68,6 +70,11 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	if opts.Store == nil {
 		return fmt.Errorf("connect: no config store wired (internal error)")
 	}
+	// Stamp the connect time here (impure side: time.Now()) and hand the resolved
+	// tier to the store so it lands on the remembered ServerEntry. The pure upsert
+	// logic lives in cli.Config.RememberServer, which takes the timestamp as data.
+	saved.Tier = tier
+	saved.LastConnected = time.Now().UTC().Format(time.RFC3339)
 	if err := opts.Store.Save(saved); err != nil {
 		return fmt.Errorf("connect: persist config: %w", err)
 	}
@@ -103,13 +110,31 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	if meta.MinAPIVersion != "" {
 		fmt.Fprintf(w, "  api:    %s..%s\n", meta.MinAPIVersion, meta.MaxAPIVersion)
 	}
+	writeKnownServersLine(w, opts.KnownServers)
 	return nil
+}
+
+// writeKnownServersLine prints a tight one-line summary of the connect history.
+// Empty history => nothing. The active server (if any) is starred.
+func writeKnownServersLine(w interface{ Write([]byte) (int, error) }, known []KnownServerInfo) {
+	if len(known) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(known))
+	for _, s := range known {
+		label := s.Server
+		if s.Active {
+			label = "★" + label
+		}
+		parts = append(parts, label)
+	}
+	fmt.Fprintf(w, "  known servers: %s\n", strings.Join(parts, ", "))
 }
 
 // buildConnectPlan builds the structured dry-run plan for connect. Connect has a
 // single conceptual step (write the config + default bp here); no network call,
 // no destructive action, no confirm required.
-func buildConnectPlan(plan SetupPlan, _ Options) Plan {
+func buildConnectPlan(plan SetupPlan, opts Options) Plan {
 	server := strings.TrimRight(plan.Server, "/")
 	saved := SavedConfig{
 		Server:    server,
@@ -119,15 +144,33 @@ func buildConnectPlan(plan SetupPlan, _ Options) Plan {
 		Dataset:   firstNonEmpty(plan.Dataset, "production"),
 	}
 	p := Plan{
-		Target:    TargetConnect,
-		DryRun:    true,
-		Plugins:   planPlugins(plan.Plugins),
-		ConnectTo: server,
-		Env:       map[string]string{},
+		Target:       TargetConnect,
+		DryRun:       true,
+		Plugins:      planPlugins(plan.Plugins),
+		ConnectTo:    server,
+		Env:          map[string]string{},
+		KnownServers: knownServersForPlan(opts.KnownServers),
 	}
-	p.addStep(fmt.Sprintf("write %s and default bp here (scope w=%s p=%s d=%s, token %s)",
+	p.addStep(fmt.Sprintf("write %s, remember this server, and default bp here (scope w=%s p=%s d=%s, token %s)",
 		configHint(), saved.Workspace, saved.Project, saved.Dataset, redactToken(saved.Token)), "")
 	return p
+}
+
+// knownServersForPlan projects the connect history onto the credential-free
+// PlanKnownServer view the JSON dry-run exposes.
+func knownServersForPlan(known []KnownServerInfo) []PlanKnownServer {
+	if len(known) == 0 {
+		return nil
+	}
+	out := make([]PlanKnownServer, 0, len(known))
+	for _, s := range known {
+		out = append(out, PlanKnownServer{
+			Server:        s.Server,
+			Active:        s.Active,
+			LastConnected: s.LastConnected,
+		})
+	}
+	return out
 }
 
 // probeCapabilities GETs /v1/capabilities and returns the caller's resolved tier
