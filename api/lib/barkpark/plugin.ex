@@ -329,6 +329,53 @@ defmodule Barkpark.Plugin do
           ]
         }
 
+  # ── CLI command types (M1 — capabilities manifest) ───────────────────
+
+  @typedoc """
+  A single CLI command a plugin contributes to the `/v1/capabilities`
+  manifest. Each map matches the frozen `commands[]` per-command schema in
+  `docs/cli/manifest.schema.json` field-for-field — the controller folds
+  these straight into `commands[]` (after stamping provenance), so the field
+  names are load-bearing.
+
+  Plugins do NOT set `source` themselves; the capabilities controller derives
+  `source: "plugin:<name>"` from the owning plugin's manifest during the fold.
+  """
+  @type cli_command :: %{
+          required(:id) => String.t(),
+          required(:noun) => String.t(),
+          required(:verb) => String.t(),
+          required(:summary) => String.t(),
+          required(:http) => %{
+            required(:method) => String.t(),
+            required(:path_template) => String.t()
+          },
+          required(:auth_tier) => String.t(),
+          required(:args) => [
+            %{
+              required(:name) => String.t(),
+              required(:required) => boolean(),
+              required(:type) => String.t(),
+              required(:summary) => String.t()
+            }
+          ],
+          required(:flags) => [
+            %{
+              required(:name) => String.t(),
+              required(:type) => String.t(),
+              required(:summary) => String.t(),
+              optional(:default) => term(),
+              optional(:repeatable) => boolean()
+            }
+          ],
+          required(:writes) => boolean(),
+          required(:batch) => boolean(),
+          required(:paginated) => boolean(),
+          required(:dry_run) => boolean(),
+          required(:default_output) => String.t(),
+          optional(:scoped_prefix) => String.t() | nil
+        }
+
   @callback manifest() :: map()
 
   @doc """
@@ -608,6 +655,39 @@ defmodule Barkpark.Plugin do
   """
   @callback api_tests() :: [api_test_spec()]
 
+  # ── CLI command callback (M1 — capabilities manifest) ────────────────
+
+  @doc """
+  Declare ergonomic CLI verbs the plugin contributes to the
+  `/v1/capabilities` manifest's `commands[]` array.
+
+  Returns a list of `cli_command()` maps, each matching the frozen
+  `commands[]` per-command schema in `docs/cli/manifest.schema.json`
+  exactly. The capabilities controller lifts these via
+  `resolve_cli_commands/2`, collects them with
+  `Plugins.Registry.collect_cli_commands/1`, stamps provenance
+  (`source: "plugin:<name>"`), and folds them into `commands[]`.
+
+  Default implementation (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback cli_commands() :: [cli_command()]
+
+  @doc """
+  Resolve the list of CLI commands the plugin contributes.
+
+  `ctx` shape: `%{}` — no per-callback context today; the capabilities
+  controller folds every command with the same provenance-stamping rules
+  regardless of the calling plugin.
+
+  Default implementation lifts `cli_commands/0` via `prev ++ result`.
+  Plugins wanting to reorder, remove, or amend sibling-plugin commands
+  override `resolve_cli_commands/2` directly.
+  """
+  @callback resolve_cli_commands(
+              prev :: [cli_command()],
+              ctx :: map()
+            ) :: [cli_command()]
+
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       register_schemas: 1,
@@ -630,6 +710,8 @@ defmodule Barkpark.Plugin do
                       lifecycle_hooks: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
+                      cli_commands: 0,
+                      resolve_cli_commands: 2,
                       content_renderer: 3,
                       test_connection: 1
 
@@ -787,6 +869,19 @@ defmodule Barkpark.Plugin do
         end
       end
 
+      @impl Barkpark.Plugin
+      def cli_commands, do: []
+
+      @impl Barkpark.Plugin
+      def resolve_cli_commands(prev, _ctx) do
+        if function_exported?(__MODULE__, :cli_commands, 0) do
+          result = __MODULE__.cli_commands()
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
       # Default content_renderer: opt out. Plugins that contribute a
       # preview override this clause with a pattern-matched
       # `content_renderer/3` and return `{:ok, iodata}` for the types
@@ -823,6 +918,8 @@ defmodule Barkpark.Plugin do
                      lifecycle_hooks: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
+                     cli_commands: 0,
+                     resolve_cli_commands: 2,
                      content_renderer: 3,
                      test_connection: 1
     end

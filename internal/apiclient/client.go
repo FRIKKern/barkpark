@@ -178,6 +178,51 @@ func (c *Client) authGet(url string) (*http.Response, error) {
 	return c.client.Do(req)
 }
 
+// ConditionalGetResult carries the outcome of GetConditional: the HTTP status,
+// the response body (nil on 304), and the response ETag header (if any).
+type ConditionalGetResult struct {
+	StatusCode int
+	Body       []byte
+	ETag       string
+}
+
+// GetConditional issues an authenticated GET to an ABSOLUTE url, attaching
+// If-None-Match when ifNoneMatch is non-empty so the server can answer 304 Not
+// Modified. It returns the status, the body (read fully, nil on 304), and the
+// response ETag. This is an additive, behaviour-preserving helper used by the
+// manifest fetcher — it does not alter any existing method.
+func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	res := &ConditionalGetResult{
+		StatusCode: resp.StatusCode,
+		ETag:       resp.Header.Get("ETag"),
+	}
+	if resp.StatusCode != http.StatusNotModified {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		res.Body = body
+	}
+	return res, nil
+}
+
 // Mutate sends a mutation to the Phoenix API (Sanity format).
 func (c *Client) Mutate(mutations []map[string]interface{}) error {
 	endpoint := c.scopedURL("/v1/data/mutate/" + c.Dataset)

@@ -434,6 +434,16 @@ defmodule BarkparkWeb.Router do
     get "/meta", MetaController, :index
   end
 
+  # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────
+  # The `:api` pipeline runs `OptionalToken`, so the controller resolves the
+  # caller's tier (none when anonymous) and projects the manifest through the
+  # existence-hiding allow-list keyed on it.
+  scope "/v1", BarkparkWeb do
+    pipe_through :api
+
+    get "/capabilities", CapabilitiesController, :index
+  end
+
   # ── Federated discovery ─────────────────────────────────────────────────
   scope "/v1", BarkparkWeb do
     pipe_through :api

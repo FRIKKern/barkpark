@@ -100,7 +100,8 @@ defmodule Barkpark.Plugins.Registry do
     resolve_top_menu_entries: {:top_menu_entries, 0, [], :list_concat},
     resolve_desk_items: {:desk_items, 1, [], :list_concat},
     resolve_doc_actions: {nil, nil, nil, :none},
-    resolve_api_tests: {:api_tests, 0, [], :list_concat}
+    resolve_api_tests: {:api_tests, 0, [], :list_concat},
+    resolve_cli_commands: {:cli_commands, 0, [], :list_concat}
   }
 
   # ─── Public API ─────────────────────────────────────────────────────────
@@ -379,6 +380,31 @@ defmodule Barkpark.Plugins.Registry do
     baseline = Keyword.get(opts, :baseline, [])
     ctx = Keyword.get(opts, :ctx, %{})
     reduce_resolvers(:resolve_api_tests, baseline, ctx)
+  end
+
+  @doc """
+  Walks every registered plugin and drives the `resolve_cli_commands/2`
+  chain, returning the flat concatenated list of `cli_command()` maps the
+  `/v1/capabilities` controller folds into the manifest's `commands[]`.
+
+  Accepts `:baseline` / `:ctx` — see `collect_action_handlers/1`. Not
+  cached: capability assembly is an admin-/request-time read, not a hot
+  path, so it deliberately skips the `:persistent_term` snapshot the cached
+  collectors consult. The host MAY seed the core CLI verbs via `:baseline`
+  so plugins can drop or reorder them, symmetric with how `collect_api_tests/1`
+  lets the host seed built-in smoke tests.
+
+  Plugins typically implement the additive `cli_commands/0` form; the
+  default `resolve_cli_commands/2` supplied by `use Barkpark.Plugin` lifts
+  the additive return via `prev ++ result`. Plugins wanting to filter or
+  reorder sibling-plugin commands override `resolve_cli_commands/2`
+  directly.
+  """
+  @spec collect_cli_commands(keyword()) :: [Barkpark.Plugin.cli_command()]
+  def collect_cli_commands(opts \\ []) do
+    baseline = Keyword.get(opts, :baseline, [])
+    ctx = Keyword.get(opts, :ctx, %{})
+    reduce_resolvers(:resolve_cli_commands, baseline, ctx)
   end
 
   @doc """

@@ -103,6 +103,30 @@ defmodule Barkpark.PortableDoc.Patch do
     apply_to_blocks(blocks, op)
   end
 
+  @doc """
+  Apply a LIST of ops to a PortableDoc (or bare block list) **atomically** —
+  all-or-nothing.
+
+  Each op is applied in order via `apply_patch/2`, threading the result of
+  one op into the next. The fold halts on the FIRST op that errors and
+  returns `{:error, reason}` with the ORIGINAL input unchanged — a partially
+  applied batch is never returned. `{:ok, doc}` is returned only when every
+  op applied cleanly.
+
+  Pure and immutable, like `apply_patch/2`: no Repo access, no I/O. An empty
+  list is a no-op that returns `{:ok, input}`.
+  """
+  @spec apply_patches(doc(), [op()]) :: {:ok, doc()} | error()
+  @spec apply_patches(blocks(), [op()]) :: {:ok, blocks()} | error()
+  def apply_patches(doc_or_blocks, ops) when is_list(ops) do
+    Enum.reduce_while(ops, {:ok, doc_or_blocks}, fn op, {:ok, acc} ->
+      case apply_patch(acc, op) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
   # ── op dispatch — one clause per discriminator ─────────────────────────────
 
   defp apply_to_blocks(blocks, %{"op" => "append-block", "block" => block}) do
