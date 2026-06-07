@@ -7,9 +7,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/cli"
 )
 
+// main routes between the two faces of the one binary. With any positional
+// argument it is the CLI (`barkpark <noun> <verb> …`); with no args it launches
+// the interactive TUI unchanged. The CLI returns a process exit code; the TUI
+// path is identical to before this split.
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(cli.Execute(os.Args[1:]))
+	}
+	os.Exit(runTUI())
+}
+
+// runTUI is the original main() body: connect to Phoenix, load schemas, build
+// the structure tree, and run the Bubble Tea program with the live-refresh SSE
+// wiring intact. Returns the process exit code.
+func runTUI() int {
 	cfg := apiclient.ConfigFromEnv()
 	ds := apiclient.New(cfg)
 
@@ -20,7 +35,7 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
-		os.Exit(1)
+		return 1
 	}
 	schemas = loaded
 	fmt.Fprintf(os.Stderr, "Loaded %d schemas\n", len(schemas))
@@ -38,6 +53,7 @@ func main() {
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

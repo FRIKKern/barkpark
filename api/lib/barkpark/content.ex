@@ -3031,6 +3031,134 @@ defmodule Barkpark.Content do
   end
 
   @doc """
+  Apply a LIST of portable-doc ops to a paper's block list **atomically** —
+  the batch twin of `apply_paper_block_op/4`.
+
+  All-or-nothing: the ops fold over the paper's block list in order; the FIRST
+  op that fails halts the fold and the function returns the error with the
+  paper **UNCHANGED** (no Repo write, no rev bump, no broadcast). Only when
+  every op applies cleanly is the result persisted **once** (one row update,
+  one rev bump) and a single delta frame broadcast.
+
+  Flow:
+
+    1. Load the paper (scoped). Unknown slug ⇒ `{:error, :not_found}`. An
+       HTML-only paper seeds an empty block list so the first op can append.
+    2. Fold the ops through `Barkpark.PortableDoc.Patch.apply_patch/2`,
+       collecting each op's affected block id against the intermediate state.
+       Halt + return `{:error, reason}` on the first failure (the same tagged
+       tuples `apply_paper_block_op/4` surfaces), leaving the paper untouched.
+    3. On full success: render the new block list, refresh the `body_html`
+       cache, project-on-write, bump `content["rev"]` once, persist once.
+    4. Broadcast one `{:paper_block, …}` delta frame carrying the new rev and
+       the list of affected block ids.
+
+  Returns `{:ok, %{slug:, op_count:, rev:, block_ids:}}` on success — the
+  MINIMAL batch receipt (no per-op fragment_html). An empty `ops` list is a
+  no-op that still loads the paper and returns the receipt at the current rev
+  with `op_count: 0` and no block_ids, without writing.
+  """
+  def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_binary(slug) and is_list(ops) do
+    with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
+         blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         {:ok, new_blocks, block_ids} <- fold_paper_ops(blocks, ops) do
+      cond do
+        ops == [] ->
+          # Nothing to apply — report the current rev, no write, no broadcast.
+          {:ok,
+           %{
+             slug: slug,
+             op_count: 0,
+             rev: paper_current_rev(doc),
+             block_ids: []
+           }}
+
+        true ->
+          rev = paper_next_rev(doc)
+          style = get_in(doc.content || %{}, ["style"])
+          render_opts = paper_render_opts(dataset, style)
+          body_html = Render.render_blocks(new_blocks, render_opts)
+
+          content =
+            (doc.content || %{})
+            |> Map.put("blocks", new_blocks)
+            |> Map.put("body_html", body_html)
+            |> Map.put("rev", rev)
+            |> Projection.project(new_blocks, render_opts)
+
+          title = paper_title(content, slug)
+
+          changeset =
+            Document.changeset(doc, %{
+              "content" => content,
+              "title" => title,
+              "rev" => generate_rev()
+            })
+
+          case Repo.update(changeset) do
+            {:ok, _saved} ->
+              frame = %{
+                op_kind: :batch,
+                block_id: List.last(block_ids),
+                block_ids: block_ids,
+                fragment_html: nil,
+                position: nil,
+                rev: rev
+              }
+
+              broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
+
+              {:ok,
+               %{
+                 slug: slug,
+                 op_count: length(ops),
+                 rev: rev,
+                 block_ids: block_ids
+               }}
+
+            {:error, changeset} ->
+              {:error, changeset}
+          end
+      end
+    else
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  # Atomic fold: thread the block list through each op via Patch.apply_patch/2,
+  # collecting the affected block id per op against the post-op state. Halts on
+  # the first failure (returning that op's tagged error) so a partial batch is
+  # never persisted. Affected ids are de-duped while preserving first-seen order.
+  defp fold_paper_ops(blocks, ops) do
+    Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
+      with {:ok, next} <- Patch.apply_patch(acc, op),
+           {:ok, affected} <- locate_paper_affected(op, next) do
+        new_ids =
+          case affected.block_id do
+            nil -> ids
+            id -> if id in ids, do: ids, else: ids ++ [id]
+          end
+
+        {:cont, {:ok, next, new_ids}}
+      else
+        {:error, _reason} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  # The CURRENT streaming rev (no bump) — used by the empty-batch no-op receipt.
+  defp paper_current_rev(%Document{content: content}) when is_map(content) do
+    case Map.get(content, "rev") do
+      n when is_integer(n) -> n
+      _ -> 0
+    end
+  end
+
+  defp paper_current_rev(_), do: 0
+
+  @doc """
   Apply a single portable-doc `op` to ANY Expectation-bearing document's block
   list (Exp-P3.2 — the generalization of `apply_paper_block_op/3` off the
   hardcoded `"paper"` type onto an arbitrary `{doc_id, type}`).

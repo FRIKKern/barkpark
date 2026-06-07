@@ -219,4 +219,144 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert resp["error"]["op"] == "patch-block"
     end
   end
+
+  describe "M2 batch ops endpoint (POST /:slug/ops with {ops: [...]})" do
+    defp ops_path_b(slug), do: "#{@path}/#{slug}/ops"
+
+    defp auth_post_b(conn, slug, body) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> @token)
+      |> put_req_header("content-type", "application/json")
+      |> post(ops_path_b(slug), body)
+    end
+
+    defp append_op_b(id, text) do
+      %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => id,
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+    end
+
+    setup do
+      slug = "batch-target-#{System.unique_integer([:positive])}"
+
+      {:ok, paper} =
+        Content.upsert_paper(%{
+          slug: slug,
+          blocks: [
+            %{
+              "id" => "intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Intro."}]
+            }
+          ]
+        })
+
+      {:ok, slug: slug, rev0: pc(paper, "rev")}
+    end
+
+    test "a 3-op batch applies atomically and returns a minimal receipt with the new rev",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug, nil))
+
+      ops = [
+        append_op_b("b1", "First."),
+        append_op_b("b2", "Second."),
+        %{
+          "op" => "patch-block",
+          "id" => "intro",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Patched intro."}]}
+        }
+      ]
+
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      resp = json_response(conn, 200)
+      # Minimal receipt — slug + op-count + new rev + affected block ids.
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      assert resp["op_count"] == 3
+      assert resp["rev"] == rev0 + 1
+      assert resp["block_ids"] == ["b1", "b2", "intro"]
+      # fragment_html is SUPPRESSED on the batch path.
+      refute Map.has_key?(resp, "fragment_html")
+
+      # Persisted once: all three ops landed, rev bumped exactly once.
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 3
+      assert pc(paper, "rev") == rev0 + 1
+      assert pc(paper, "body_html") =~ "First."
+      assert pc(paper, "body_html") =~ "Second."
+      assert pc(paper, "body_html") =~ "Patched intro."
+
+      # A single batch delta frame on the per-doc topic.
+      assert_receive {:paper_block, %{op_kind: :batch, block_ids: ["b1", "b2", "intro"], rev: rev}}
+      assert rev == rev0 + 1
+    end
+
+    test "a batch whose middle op fails leaves the paper at its ORIGINAL rev (rollback)",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      ops = [
+        append_op_b("b1", "First."),
+        # Middle op targets a block id that does not exist → whole batch fails.
+        %{
+          "op" => "patch-block",
+          "id" => "no-such-block",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "x"}]}
+        },
+        append_op_b("b3", "Third.")
+      ]
+
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "block_not_found"
+      assert resp["error"]["op"] == "patch-block"
+
+      # Rollback: paper untouched — still just the seeded block, original rev.
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 1
+      assert pc(paper, "rev") == rev0
+      refute pc(paper, "body_html") =~ "First."
+      refute pc(paper, "body_html") =~ "Third."
+    end
+
+    test "single-op back-compat path still works (body IS the op)",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      conn = auth_post_b(conn, slug, append_op_b("solo", "Solo block."))
+
+      resp = json_response(conn, 200)
+      # Full single-op receipt — op + block_id + fragment_html present.
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      assert resp["op"] == "append-block"
+      assert resp["block_id"] == "solo"
+      assert resp["rev"] == rev0 + 1
+      assert resp["fragment_html"] =~ "Solo block."
+
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 2
+    end
+
+    test "unknown slug on the batch path → 404", %{conn: conn} do
+      conn = auth_post_b(conn, "no-such-batch-paper", %{"ops" => [append_op_b("b1", "x")]})
+      assert json_response(conn, 404)["error"]["code"] == "not_found"
+    end
+
+    test "a batch containing a malformed op → 422 malformed_op, no mutation",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      ops = [append_op_b("b1", "ok"), %{"op" => "frobnicate"}]
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      assert json_response(conn, 422)["error"]["code"] == "malformed_op"
+      # Untouched.
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 1
+      assert pc(paper, "rev") == rev0
+    end
+  end
 end

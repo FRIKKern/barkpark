@@ -44,6 +44,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   refreshes the HTML cache, bumps the rev, and broadcasts a `{:paper_block, …}`
   delta frame. Papers are stored as `documents` rows of type "paper" — the
   streaming protocol (topic, frames) is unchanged.
+
+  M2 adds a BATCH shape on the same `/ops` route. When the body carries an
+  `"ops"` array (`{"ops": [ <op>, … ]}`) the ops apply ATOMICALLY via
+  `Content.apply_paper_block_ops/2` — all-or-nothing, one rev bump, one
+  broadcast. The batch path returns a MINIMAL receipt
+  (`{ok, slug, op_count, rev, block_ids}`, `fragment_html` suppressed). The
+  single-op path (the body IS the op) is unchanged.
   """
   use BarkparkWeb, :controller
 
@@ -135,12 +142,80 @@ defmodule BarkparkWeb.BulldocsIngestController do
   end
 
   @doc """
-  Apply a single DocPatchOp to the paper at `:slug`. The JSON body IS the op.
+  Apply ops to the paper at `:slug`. The endpoint accepts EITHER shape on the
+  same route — the request body discriminates them:
 
-  Returns 200 with `{ok, slug, op, rev, block_id, fragment_html, position}` on
-  success; 404 for an unknown slug; 422 for a malformed op or a patch failure
-  (e.g. a block-not-found / type-mismatch on the target block list).
+    * **BATCH** — `{"ops": [ <op>, <op>, … ]}` (the `"ops"` key is a list).
+      All ops apply ATOMICALLY (all-or-nothing) via
+      `Content.apply_paper_block_ops/2`. On any op failure the paper is left
+      UNCHANGED at its original rev and the error is returned. Returns the
+      MINIMAL receipt by default — `{ok, slug, op_count, rev, block_ids}` —
+      with `fragment_html` SUPPRESSED.
+
+    * **SINGLE** (back-compat, unchanged) — the JSON body IS the op
+      (`{"op": "append-block", "block": {…}}`). Applies one DocPatchOp via
+      `Content.apply_paper_block_op/2` and returns the full per-op receipt
+      `{ok, slug, op, rev, block_id, fragment_html, position}`.
+
+  Common errors: 404 for an unknown slug; 422 for a malformed op or a patch
+  failure (e.g. a block-not-found / type-mismatch on the target block list).
   """
+  # BATCH path — `{"ops": [ … ]}`. Detected by the array-native `"ops"` key,
+  # mirroring the mutate controller's `%{"mutations" => list}` discriminator.
+  def apply_op(conn, %{"slug" => slug, "ops" => ops}) when is_list(ops) do
+    cond do
+      not Enum.all?(ops, &valid_op_shape?/1) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "malformed_op", message: "every op must name a known DocPatchOp"}
+        })
+
+      true ->
+        case Content.apply_paper_block_ops(slug, ops) do
+          {:ok, result} ->
+            # MINIMAL receipt — slug + op-count + new rev + affected block ids.
+            # fragment_html is deliberately SUPPRESSED on the batch path.
+            conn
+            |> put_status(:ok)
+            |> json(%{
+              ok: true,
+              slug: result.slug,
+              op_count: result.op_count,
+              rev: result.rev,
+              block_ids: result.block_ids
+            })
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, {:invalid_op, _}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "an op could not be applied"}})
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "an op could not be applied"}})
+        end
+    end
+  end
+
   def apply_op(conn, %{"slug" => slug} = params) do
     op = Map.delete(params, "slug")
 
