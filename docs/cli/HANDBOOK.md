@@ -434,3 +434,178 @@ These are declared v1 constraints (not bugs), each with a forward seam:
 - **`login`** and **`completion`** are stubs that print and exit 0.
 - **`scoped_prefix`** is inert; the flat path is what the CLI calls (rule #4).
 - **Active/named contexts** are not persisted; there is no `context use` (§4).
+
+---
+
+## 13 · Setup (`bp setup`)
+
+`bp setup` is the on-ramp — it points `bp` at a server, or brings one into
+existence. It is a **CLI-native built-in** (outside the manifest tree, like
+`whoami` / `capabilities`): it does not need a reachable server to run, because
+its whole job is to get you connected to one. Source: `internal/cli/setup_cmd.go`
+(flag parser + help + wizard gate) and the `internal/cli/setup` engine package.
+
+> **Two unrelated `--dry-run`s.** §8's `--dry-run` previews an *API write request*.
+> The `bp setup --dry-run` here previews a *setup plan* (ordered steps, env,
+> prerequisites) and emits a structured Plan object under `-o json`. Same flag
+> name, different surface.
+
+### The four modes
+
+| Target | What it does | Rides |
+|---|---|---|
+| `connect` | Points `bp` at an existing server: probes `GET /v1/capabilities` + `GET /v1/meta` to confirm reachability and resolve the caller's auth tier, then persists the connection + scope so `bp` defaults there. | `apiclient` (HTTP); writes `${XDG_CONFIG_HOME:-~/.config}/barkpark/config.json` (0600) |
+| `local` | Brings up a local dev server at `http://localhost:4000`, then chains into `connect`. **Destructive** — it resets a database (drop/create/migrate/seed). | `docker compose up -d` + `ecto.reset` (with `--docker`), else native `mix deps.get` / `mix ecto.reset` / `mix phx.server` in `api/` |
+| `deploy` | Installs Barkpark on a server you already own over SSH, streaming the repo's `deploy.sh` into `bash -s` on the remote with `DOMAIN` / `PHX_SCHEME` / `BARKPARK_PLUGINS` env, verifies `/v1/capabilities` + `/studio`, then chains into `connect`. **Destructive/outbound** — provisions and restarts a live server. | `ssh <host> '<env> bash -s' < deploy.sh` |
+| `provision` | **STAGED.** Creates a cloud host, then chains into `deploy`. By default it only *plans* — it prints the exact provider-CLI create commands plus a "needs `<credential>` + `--yes`" line. Real creation runs only when the provider CLI **and** a credential **and** `--yes` are all present. | `hcloud server create` (Hetzner) or `az group/vm create` (Azure); then the `deploy` ride |
+
+`local`, `deploy`, and `provision` all finish by re-using the `connect` executor,
+so a successful bring-up leaves `bp` pointed at the new server automatically.
+
+### Interactive (the wizard)
+
+On a genuine interactive terminal, a bare `bp setup` (no `--target`) launches the
+premium Bubble Tea wizard. The wizard walks the four modes, shows the dry-run plan,
+takes an explicit confirm, then runs for real. It launches **only** when *all* of:
+stdin **and** stdout are a TTY, no `-o json` / `--json`, and no `--yes`. Any other
+no-target invocation is a clean usage error (exit 2) — `bp setup` never opens
+`/dev/tty` in a non-interactive context, so an agent or CI job is never blocked
+on a prompt.
+
+```bash
+bp setup            # interactive wizard (TTY only)
+```
+
+### Automation / AI (flags)
+
+Pass `--target` and the run is fully non-interactive. The complete flag list
+(mirrors `bp setup -h` exactly):
+
+| Flag | Applies to | Meaning |
+|---|---|---|
+| `--target <t>` | all | one of `connect` \| `local` \| `deploy` \| `provision` |
+| `--server <url>` | connect | server URL (must start `http://` or `https://`) |
+| `--token <tok>` | all | bearer token to persist with the connection |
+| `-w, --workspace <w>` | all | workspace scope (default: `default`) |
+| `-p, --project <p>` | all | project scope (default: `default`) |
+| `-d, --dataset <ds>` | all | dataset scope (default: `production`) |
+| `--docker` | local | bring up via `docker compose` (else native `mix`) |
+| `--ssh-host <h>` | deploy | `user@host` (a bare host defaults to `root@`) |
+| `--domain <d>` | deploy | public DNS hostname (**required** for deploy) |
+| `--scheme <http\|https>` | deploy | public scheme (default: `https`) |
+| `--provider <p>` | provision | `hetzner` \| `azure` |
+| `--region <r>` | provision | region (provider default if omitted) |
+| `--server-type <t>` | provision | instance type (provider default if omitted) |
+| `--plugins <csv>` | all | plugin whitelist; `""` = none (kill switch); absent = all |
+| `--dry-run` | all | print the plan; run **nothing** |
+| `--yes` | all | confirm a destructive/outbound real run (no prompt) |
+| `-o json` / `--json` | all | emit one machine-readable JSON object on stdout |
+| `-h, --help` | all | print help (never opens a TTY) |
+
+The setup-local flags fall through to the global `-s` / `-w` / `-p` / `-d` when
+absent, so `bp -s URL setup --target connect` works too.
+
+### The JSON contract
+
+With `-o json` (or `--json`) setup emits exactly one JSON object on stdout. There
+are three shapes. JSON mode is opt-in only — a plain piped run still gets human
+prose, not machine output.
+
+**Dry-run → Plan** (`--dry-run -o json`). Fields, from `internal/cli/setup/plan.go`
+plus the `ok` envelope:
+
+| Field | Type | Notes |
+|---|---|---|
+| `ok` | bool | `true` for a built plan |
+| `target` | string | the resolved target |
+| `dry_run` | bool | always `true` here |
+| `destructive` | bool | `true` for local / deploy / provision |
+| `requires_confirm` | bool | `true` when `--yes` gates the real run |
+| `steps` | array of `{n, description, command?}` | ordered actions; `command` is the copy-pasteable shell line, omitted for narration-only beats |
+| `env` | object (string→string) | env the run would set (e.g. `BARKPARK_PLUGINS`, `DOMAIN`, `PHX_SCHEME`); omitted when empty |
+| `plugins` | object `{mode, value?}` | `mode` is `all` \| `none` \| `whitelist`; `value` is the CSV in whitelist mode |
+| `needs` | array of `{what, present}` | prerequisites (provision: provider CLI + credential), with live presence; omitted when empty |
+| `connect_to` | string | the server `bp` ends up pointed at; omitted when empty |
+| `provider` / `region` / `server_type` | string | provision-only; `null` for other targets |
+
+**Real run → Result** (`--yes -o json`). Fields, from the `Result` struct in
+`plan.go`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `ok` | bool | `true` on success |
+| `target` | string | the mode that actually ran (re-stamped through chains, e.g. `local` not `connect`) |
+| `server` | string | the server `bp` is now pointed at; omitted when empty |
+| `tier` | string | the caller's resolved auth tier; omitted when empty |
+| `config_path` | string | where the connection was written; omitted when empty |
+| `message` | string | short human one-liner; omitted when empty |
+
+**Error** (either path). Usage/validation failures and real-run failures share one
+shape:
+
+```json
+{ "ok": false, "error": { "code": "usage", "message": "setup connect: --server is required" } }
+```
+
+`code` is `usage` for flag/validation errors (exit **2**) and `failed` for an
+operational real-run failure — network / SSH / install (exit **1**).
+
+**Exit codes:** `0` ok (built plan or successful run), `2` usage/validation (bad
+flags, unknown target, missing required input), `1` real-run failure. (Note: piping
+through `jq` masks the process exit — branch on `bp`'s own exit code, or on the
+`ok` field.)
+
+### Safety
+
+- **Dry-run first.** Every target builds the same Plan in dry-run that it executes
+  for real, so `--dry-run` is a faithful preview with no network call, no writes,
+  no shelling out.
+- **`--yes` gates side effects.** Destructive/outbound runs — `local` (resets a
+  DB), `deploy` (provisions/restarts a live server), and `provision`-create —
+  refuse to run without `--yes`. Connect is non-destructive and needs no confirm.
+- **Provision is staged.** Even with `--yes`, provision only creates a host when
+  the provider CLI is on PATH **and** a credential is present (`HCLOUD_TOKEN` /
+  active `hcloud context` for Hetzner; an `az login` session for Azure). Otherwise
+  it prints install/auth guidance and exits non-zero.
+- **Never prompts non-interactively.** The wizard launches only on a real TTY with
+  no `--target` / `-o json` / `--yes`; every other path is a clean structured error,
+  never `/dev/tty`.
+
+### Plugin selection
+
+`--plugins` maps onto the `BARKPARK_PLUGINS` env the server reads, with kill-switch
+semantics (`internal/cli/setup/plugins.go`, mirroring `Barkpark.Plugins.EnvConfig`):
+
+| `--plugins` | `plugins.mode` | `BARKPARK_PLUGINS` | Effect |
+|---|---|---|---|
+| *absent* | `all` | unset (no env line) | registry discovers every bundled plugin |
+| `--plugins ""` | `none` | `BARKPARK_PLUGINS=` (empty) | the kill switch — **no** plugins registered |
+| `--plugins bulldocs,onixedit` | `whitelist` | `BARKPARK_PLUGINS=bulldocs,onixedit` | only the listed plugins |
+
+The list is honoured by the registry kill-switch — an empty value is the explicit
+"register nothing" signal, distinct from the flag being absent.
+
+### Copy-paste examples
+
+```bash
+# 1. Point bp at an existing server (connect is non-destructive — no --yes needed)
+bp setup --target connect --server https://api.example.com --token "$TOKEN"
+
+# 2. AI flow: preview the plan as JSON (zero side effects)…
+bp setup --target connect --server https://api.example.com --dry-run -o json | jq .
+#    …then execute and parse the structured receipt
+bp setup --target connect --server https://api.example.com --yes -o json | jq '.server, .tier'
+
+# 3. Bring up a local dev server via docker compose with two plugins (resets the DB)
+bp setup --target local --docker --plugins bulldocs,onixedit --yes
+
+# 4. Preview a local native bring-up without touching anything
+bp setup --target local --dry-run -o json | jq '.destructive, .steps[].command'
+
+# 5. Deploy to a server you own over SSH
+bp setup --target deploy --ssh-host root@1.2.3.4 --domain d.example.com --scheme https --yes
+
+# 6. Provision a Hetzner host (staged — plans unless hcloud + HCLOUD_TOKEN + --yes)
+bp setup --target provision --provider hetzner --region nbg1 --server-type cax11 \
+  --domain d.example.com --dry-run -o json | jq '.needs, .steps[].command'
+```

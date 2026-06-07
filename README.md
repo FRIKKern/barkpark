@@ -163,6 +163,28 @@ flags  >  env (BARKPARK_*)  >  active context  >  defaults
 
 **Read more:** the full as-built **[CLI Handbook](docs/cli/HANDBOOK.md)** (grammar, every flag, auth tiers, batch, exit codes, examples) · the manifest contract in **[m0-decisions.md](docs/cli/m0-decisions.md)** · the thin **[TypeScript authoring SDK](sdk/README.md)** for Bulldocs papers.
 
+### Getting connected: `bp setup`
+
+`bp setup` is the on-ramp — it points `bp` at a server, or brings one into existence. Four targets:
+
+```bash
+bp setup --target connect   --server https://api.example.com                # point bp at an existing server
+bp setup --target local     --docker                                        # bring up a dev server here (compose or native mix)
+bp setup --target deploy    --ssh-host root@1.2.3.4 --domain d.example.com   # install on a server you own over SSH
+bp setup --target provision --provider hetzner                              # create a cloud VM, then deploy (staged)
+```
+
+It's **both** a premium Bubble Tea wizard *and* a fully agent-driveable command. Run `bp setup` with no args on a real terminal and the interactive wizard launches; pass `--target …` (or `-o json`, or `--yes`) and it never touches the TTY — flags in, structured output out.
+
+For agents the flow is **preview, then execute**: `--dry-run -o json` returns the full plan (ordered steps, env, plugin selection, destructive/`requires_confirm` flags, prerequisite `needs`) with zero side effects; re-run with `--yes` to apply, then parse the JSON `Result`. Destructive/outbound runs (local DB reset, deploy, provision-create) refuse to run without `--yes`; provision is **staged** — it plans unless the provider CLI, a credential, *and* `--yes` are all present.
+
+```bash
+bp setup --target connect --server https://api.example.com --dry-run -o json   # preview (no writes)
+bp setup --target connect --server https://api.example.com --yes -o json       # execute + structured receipt
+```
+
+**Read more:** the **[Setup section of the CLI Handbook](docs/cli/HANDBOOK.md#13--setup-bp-setup)** — every flag, the four modes, the JSON plan/result/error contracts, and copy-paste examples.
+
 ---
 
 ## The other surfaces
