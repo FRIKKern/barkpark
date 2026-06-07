@@ -1,0 +1,77 @@
+F I E L D   N O T E S                                                                                                   
+                                                                                                                        
+▌ A standfirst lead paragraph that introduces the piece and runs long enough to wrap across the narrower widths so the  
+▌ left accent bar is visible on every continuation line.                                                                
+                                                                                                                        
+Knut Hamsun · 2026-06-08 · Terminal desk                                                                                
+────────────────────────────────────────                                                                                
+                                                                                                                        
+▌ GO                                                                                                                    
+▌ package main                                                                                                          
+▌                                                                                                                       
+▌ import "fmt"                                                                                                          
+▌                                                                                                                       
+▌ func main() {                                                                                                         
+▌ 	fmt.Println("hello, bulldocs")                                                                                        
+▌ }                                                                                                                     
+                                                                                                                        
+┌───────────────────────────────────────┬───────────────────────────────────────┬──────────────────────────────────────┐
+│ BLOCK                                 │ CHARM LIB                             │ FIDELITY                             │
+├───────────────────────────────────────┼───────────────────────────────────────┼──────────────────────────────────────┤
+│ code                                  │ chroma                                │ high                                 │
+│ table                                 │ lipgloss/table                        │ high                                 │
+│ figure                                │ registry recursion                    │ high                                 │
+└───────────────────────────────────────┴───────────────────────────────────────┴──────────────────────────────────────┘
+                                                                                                                        
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮  
+│ The figure's single child block is composed through the full registry, exactly like a section child, then          │  
+│ captioned                                                                                                          │  
+│ below.                                                                                                             │  
+│ Figure 1. A nested paragraph rendered through the registry.                                                        │  
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  
+                                                                                                                        
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮  
+│ Second figure body.                                                                                                │  
+│ Figure 2. A second figure to prove the counter increments.                                                         │  
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  
+                                                                                                                        
+ Read the full paper  (https://barkpark.cloud/papers/m1)                                                                
+                                                                                                                        
+┌─────────────┐                                                                                                         
+│ View source │                                                                                                         
+└─────────────┘ (https://barkpark.cloud/source)                                                                         
+                                                                                                                        
+▌ Every block type is a self-contained renderer that, given a width and a theme, returns styled lines.                  
+                                                                                                                        
+Title                                                                                                                   
+Bulldocs Terminal Render                                                                                                
+                                                                                                                        
+Slug                                                                                                                    
+bulldocs-terminal-render                                                                                                
+                                                                                                                        
+Summary                                                                                                                 
+A multi-line summary field whose value is long enough to wrap under the bold label line when the width is narrow.       
+                                                                                                                        
+Published                                                                                                               
+Yes                                                                                                                     
+                                                                                                                        
+Featured                                                                                                                
+No                                                                                                                      
+                                                                                                                        
+Category                                                                                                                
+Technology                                                                                                              
+                                                                                                                        
+Published at                                                                                                            
+2026-05-24 10:00                                                                                                        
+                                                                                                                        
+Accent                                                                                                                  
+   #a23925                                                                                                              
+                                                                                                                        
+Author                                                                                                                  
+Knut Hamsun                                                                                                             
+                                                                                                                        
+Cover                                                                                                                   
+🖼 https://barkpark.cloud/media/cover.jpg                                                                                
+                                                                                                                        
+Thumbnail                                                                                                               
+No image                                                                                                                

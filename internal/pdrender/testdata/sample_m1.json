@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "eb1",
+      "type": "eyebrow",
+      "text": "Field Notes"
+    },
+    {
+      "id": "in1",
+      "type": "ingress",
+      "content": [
+        { "type": "text", "value": "A standfirst lead paragraph that introduces the piece and runs long enough to wrap across the narrower widths so the left accent bar is visible on every continuation line." }
+      ]
+    },
+    {
+      "id": "by1",
+      "type": "byline",
+      "items": ["Knut Hamsun", "2026-06-08", "Terminal desk"]
+    },
+    {
+      "id": "code1",
+      "type": "code",
+      "value": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello, bulldocs\")\n}"
+    },
+    {
+      "id": "tbl1",
+      "type": "table",
+      "head": ["Block", "Charm lib", "Fidelity"],
+      "rows": [
+        [
+          [{ "type": "text", "value": "code" }],
+          [{ "type": "text", "value": "chroma" }],
+          [{ "type": "text", "value": "high" }]
+        ],
+        [
+          [{ "type": "text", "value": "table" }],
+          [{ "type": "text", "value": "lipgloss/table" }],
+          [{ "type": "text", "value": "high" }]
+        ],
+        ["figure", "registry recursion", "high"]
+      ]
+    },
+    {
+      "id": "fig1",
+      "type": "figure",
+      "caption": "A nested paragraph rendered through the registry.",
+      "child": {
+        "id": "figp1",
+        "type": "paragraph",
+        "content": [
+          { "type": "text", "value": "The figure's single child block is composed through the full registry, exactly like a section child, then captioned below." }
+        ]
+      }
+    },
+    {
+      "id": "fig2",
+      "type": "figure",
+      "caption": "A second figure to prove the counter increments.",
+      "child": {
+        "id": "figp2",
+        "type": "paragraph",
+        "content": [{ "type": "text", "value": "Second figure body." }]
+      }
+    },
+    {
+      "id": "act1",
+      "type": "action",
+      "label": "Read the full paper",
+      "href": "https://barkpark.cloud/papers/m1",
+      "priority": "primary"
+    },
+    {
+      "id": "act2",
+      "type": "action",
+      "label": "View source",
+      "href": "https://barkpark.cloud/source",
+      "priority": "secondary"
+    },
+    {
+      "id": "pq1",
+      "type": "pullquote",
+      "content": [
+        { "type": "text", "value": "Every block type is a self-contained renderer that, given a width and a theme, returns styled lines." }
+      ]
+    },
+    {
+      "id": "fstr",
+      "type": "field-string",
+      "label": "Title",
+      "value": "Bulldocs Terminal Render"
+    },
+    {
+      "id": "fslug",
+      "type": "field-slug",
+      "label": "Slug",
+      "value": "bulldocs-terminal-render"
+    },
+    {
+      "id": "ftext",
+      "type": "field-text",
+      "label": "Summary",
+      "value": "A multi-line summary field whose value is long enough to wrap under the bold label line when the width is narrow."
+    },
+    {
+      "id": "fbool",
+      "type": "field-boolean",
+      "label": "Published",
+      "value": true
+    },
+    {
+      "id": "fbool2",
+      "type": "field-boolean",
+      "label": "Featured",
+      "value": "false"
+    },
+    {
+      "id": "fsel",
+      "type": "field-select",
+      "label": "Category",
+      "value": "tech",
+      "options": [
+        { "value": "tech", "label": "Technology" },
+        { "value": "art", "label": "Art" }
+      ]
+    },
+    {
+      "id": "fdt",
+      "type": "field-datetime",
+      "label": "Published at",
+      "value": "2026-05-24T10:00"
+    },
+    {
+      "id": "fcol",
+      "type": "field-color",
+      "label": "Accent",
+      "value": "#a23925"
+    },
+    {
+      "id": "fref",
+      "type": "field-reference",
+      "label": "Author",
+      "refType": "author",
+      "value": "a1"
+    },
+    {
+      "id": "fimg",
+      "type": "field-image",
+      "label": "Cover",
+      "value": "https://barkpark.cloud/media/cover.jpg"
+    },
+    {
+      "id": "fimg2",
+      "type": "field-image",
+      "label": "Thumbnail",
+      "value": ""
+    }
+  ]
+}

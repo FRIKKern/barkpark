@@ -26,6 +26,27 @@ type Theme struct {
 	// left-bar style and a body style.
 	Callout func(tone string) (bar, body lipgloss.Style)
 
+	// ── M1 additions ────────────────────────────────────────────────────────
+	// CodeBar styles the left accent bar of a `code` block; ChromaStyle is the
+	// chroma style-registry name picked by light/dark (the one piece of the
+	// palette chroma doesn't resolve adaptively).
+	CodeBar     lipgloss.Style
+	ChromaStyle string
+
+	// Action button styles: primary = filled accent bg + contrasting fg (the
+	// publishBtnStyle idiom); secondary = accent-outline box.
+	ActionPrimary   lipgloss.Style
+	ActionSecondary lipgloss.Style
+
+	// FieldLabel is the bold label line atop every field-* leaf box.
+	FieldLabel lipgloss.Style
+
+	// Ingress / Pullquote left-accent bars (the standfirst / quote cue a
+	// terminal substitutes for font size).
+	Ingress      lipgloss.Style
+	IngressBar   lipgloss.Style
+	PullquoteBar lipgloss.Style
+
 	// name distinguishes the two built-in presets (also used by isZero).
 	name string
 }
@@ -78,6 +99,7 @@ var (
 	pdCodeFg = lipgloss.AdaptiveColor{Light: "#be123c", Dark: "#fda4af"}
 	pdLabel  = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"} // styles.go editorLabelStyle
 	pdTerra  = lipgloss.AdaptiveColor{Light: "#a23925", Dark: "#d98a6a"} // doc.css terracotta (pullquote bar)
+	pdBtnFg  = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#ffffff"} // contrasting fg on the filled primary action
 	toneInfo = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"}
 	toneOK   = lipgloss.AdaptiveColor{Light: "#047857", Dark: "#34d399"} // styles.go greenDot-ish
 	toneWarn = lipgloss.AdaptiveColor{Light: "#92400e", Dark: "#fbbf24"} // styles.go amberDot-ish
@@ -113,6 +135,39 @@ func buildTheme(name string) Theme {
 		Caption:   lipgloss.NewStyle().Foreground(pdDim).Italic(true),
 	}
 
+	// ── M1 styles ───────────────────────────────────────────────────────────
+	// Code chrome: a terracotta left bar (mirrors doc.css code's 3px accent
+	// border). ChromaStyle picks a built-in chroma style by light/dark — the one
+	// non-adaptive choice, made here at build time.
+	t.CodeBar = lipgloss.NewStyle().Foreground(pdTerra)
+	if name == "light" {
+		t.ChromaStyle = "github"
+	} else {
+		t.ChromaStyle = "monokai"
+	}
+
+	// Action buttons: primary fills the accent bg with a contrasting fg (the
+	// publishBtnStyle idiom); secondary is an accent-outline box.
+	t.ActionPrimary = lipgloss.NewStyle().
+		Foreground(pdBtnFg).
+		Background(pdAccent).
+		Bold(true)
+	t.ActionSecondary = lipgloss.NewStyle().
+		Foreground(pdAccent).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(pdAccent).
+		Bold(true)
+
+	// Field label: muted bold (mirrors styles.go editorLabelStyle).
+	t.FieldLabel = lipgloss.NewStyle().Foreground(pdLabel).Bold(true)
+
+	// Ingress: brighter ink (NOT dimmed) so it reads as a standfirst; a left
+	// accent bar substitutes for the larger font size. Pullquote bar is
+	// terracotta (doc.css's 3px left-border).
+	t.Ingress = lipgloss.NewStyle().Foreground(pdInk)
+	t.IngressBar = lipgloss.NewStyle().Foreground(pdAccent)
+	t.PullquoteBar = lipgloss.NewStyle().Foreground(pdTerra)
+
 	// Headings — terminals have no font sizes, so level is encoded as
 	// weight/case/rule (per the spec): L1 bold ink (rule added by the renderer
 	// as an underline), L2 bold accent, L3 bold dim.
@@ -139,10 +194,16 @@ func buildTheme(name string) Theme {
 		return bar, bodyStyle
 	}
 
-	// pullquote bar uses terracotta to mirror doc.css's 3px left-border.
-	_ = pdTerra
-	_ = pdLabel
 	return t
+}
+
+// ruleColor extracts the foreground color the Rule style carries, for renderers
+// (e.g. figure's card border) that need the raw color rather than the style.
+func ruleColor(t Theme) lipgloss.TerminalColor {
+	if c := t.Rule.GetForeground(); c != nil {
+		return c
+	}
+	return pdRule
 }
 
 // DarkTheme is the default preset for dark terminals.

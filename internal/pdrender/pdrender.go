@@ -68,6 +68,13 @@ type RenderCtx struct {
 	// whole document render. A pointer so the increment is visible to sibling
 	// figures rendered later in the same RenderDoc pass.
 	figureN *int
+
+	// RefResolver is the caller-supplied seam for field-reference: given a
+	// referenced doc id and its refType, it returns the doc's TITLE for display.
+	// Nil → field-reference falls back to the raw id (the no-fetch rendering of
+	// the stored datum). Mirrors render.ex's injected :ref_resolver opt — the
+	// renderer stays pure (no API/Repo dependency), the caller wires the lookup.
+	RefResolver func(id, refType string) string
 }
 
 // WithWidth returns a copy of the ctx with a new target width.
@@ -168,5 +175,28 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["divider"] = dividerRenderer{}
 	// section recurses through the registry, so it holds a back-reference.
 	r.blocks["section"] = sectionRenderer{reg: r}
+
+	// ── M1 rich + typographic + field blocks ──────────────────────────────────
+	r.blocks["code"] = newCodeRenderer()
+	r.blocks["table"] = tableRenderer{ir: ir}
+	// figure recurses through the registry (its single Child), so it holds a
+	// back-reference like section.
+	r.blocks["figure"] = figureRenderer{reg: r}
+	r.blocks["action"] = actionRenderer{}
+	r.blocks["pullquote"] = pullquoteRenderer{ir: ir}
+	r.blocks["ingress"] = ingressRenderer{ir: ir}
+	r.blocks["eyebrow"] = eyebrowRenderer{}
+	r.blocks["byline"] = bylineRenderer{}
+
+	// field-* leaf blocks.
+	r.blocks["field-string"] = fieldTextRenderer{}
+	r.blocks["field-slug"] = fieldTextRenderer{}
+	r.blocks["field-text"] = fieldTextRenderer{}
+	r.blocks["field-boolean"] = fieldBooleanRenderer{}
+	r.blocks["field-select"] = fieldSelectRenderer{}
+	r.blocks["field-datetime"] = fieldDatetimeRenderer{}
+	r.blocks["field-color"] = fieldColorRenderer{}
+	r.blocks["field-reference"] = fieldReferenceRenderer{}
+	r.blocks["field-image"] = fieldImageRenderer{}
 	return r
 }
