@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://barkpark.cloud/schemas/cli/manifest.schema.json",
+  "title": "Barkpark CLI capabilities manifest",
+  "description": "THE single frozen superset schema for the manifest emitted by GET /v1/capabilities. Assembled at request time, auth-aware, additive-evolution only. Every consumer surface (CLI, MCP, SDK, batch, testing) builds its command tree, tool list, and completion ONLY from this document — nothing downstream hardcodes a noun, verb, flag, or route. Structural objects are strict (additionalProperties:false) so a typo or stray field fails fast; growth axes (noun names, verb names, command ids, plugin names) stay UNCONSTRAINED so a future plugin adds commands with zero schema change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "server",
+    "auth_tier",
+    "generated_at",
+    "etag",
+    "nouns",
+    "commands"
+  ],
+  "properties": {
+    "$comment": {
+      "type": "string",
+      "description": "OPTIONAL free-text annotation on a manifest instance (e.g. a fixture documenting its role). Allowed ONLY at the document root — structural sub-objects stay strict. Ignored by consumers; carries no contract meaning."
+    },
+    "manifest_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Manifest contract version. Additive evolution only; bump on a breaking change. Pinned to \"1\" for the M0 freeze."
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "base_url"],
+      "description": "Identity of the responding Barkpark instance.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable server / deployment name (e.g. \"prod\", \"api.barkpark.cloud\")."
+        },
+        "version": {
+          "type": "string",
+          "description": "Server release version string."
+        },
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Absolute base URL the CLI prepends to every command's http.path_template."
+        },
+        "api_version": {
+          "type": "string",
+          "description": "OPTIONAL (additive). The API contract version this manifest describes — distinct from the server release `version`. Lets a consumer assert which contract surface it is talking to without inferring from the release string."
+        },
+        "min_cli": {
+          "type": "string",
+          "description": "OPTIONAL (additive). Minimum CLI semver required to drive this server. A CLI older than this MUST abort with a clear upgrade message rather than silently mis-driving a newer contract."
+        }
+      }
+    },
+    "auth_tier": {
+      "$ref": "#/$defs/auth_tier",
+      "description": "The CALLER's projected tier — the resolved tier of THIS request's token. Echoes the auth context so the CLI can render `whoami` without a dedicated endpoint (the manifest's caller-tier echo + GET /v1/meta cover whoami's needs; see plan open decision #6). DISTINCT from each command's required auth_tier."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp of when this manifest was assembled."
+    },
+    "etag": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Content-addressed ETag. Varies by auth tier (an admin manifest and a public manifest have different etags) — drives 304 Not Modified and the on-disk cache keyed by token tier."
+    },
+    "nouns": {
+      "type": "array",
+      "description": "All nouns the caller may see, projected through the SAME default-deny allow-list as commands (existence-hiding: an anonymous caller learns zero admin noun names). Noun `name` is intentionally a free string with NO enum — new plugins add nouns additively.",
+      "items": { "$ref": "#/$defs/noun" }
+    },
+    "commands": {
+      "type": "array",
+      "description": "Every command the caller may see — `<noun> <verb>` leaves of the CLI tree. Forward-compatible: unknown FUTURE commands validate as long as each one is structurally well-formed.",
+      "items": { "$ref": "#/$defs/command" }
+    }
+  },
+  "$defs": {
+    "auth_tier": {
+      "type": "string",
+      "enum": ["none", "read", "write", "admin", "scoped_admin", "ingest"],
+      "$comment": "CODE FACT over handbook. The handbook (make_cli_handbook_paper.py §3) lists FOUR tiers — read, write, admin, ingest — and omits `none` and `scoped_admin`. The router (api/lib/barkpark_web/router.ex) proves SIX distinct auth pipelines: OptionalToken public reads => `none`/`read`, `:require_write` (RequireWritePermission) => `write`, `:require_admin` => `admin`, `:scoped_admin` (RequireWorkspaceRole, per-workspace role gate) => `scoped_admin`, `:ingest` (RequireIngestToken) => `ingest`. Per the contract spine's non-negotiable rule #2, `scoped_admin` MUST be distinct from `admin` (a global tier cannot express per-workspace role), and `none` is the existence-hiding floor an anonymous caller sees. This enum is one of the FEW closed enums in the schema because auth pipelines are fixed in code, not grown by plugins."
+    },
+    "default_output": {
+      "type": "string",
+      "enum": ["table", "json", "yaml", "minimal"],
+      "$comment": "Handbook §4/§28 names `table | json | yaml` as the -o/--output values; the contract spine (cli_plan.md) adds `minimal` for the token-efficient agent receipt (rev + ids only). Folded both => 4 values. Closed enum: output renderers are CLI-internal, not plugin-grown."
+    },
+    "http_method": {
+      "type": "string",
+      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      "$comment": "Every method present in router.ex. Closed enum — HTTP verbs do not grow."
+    },
+    "noun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "summary"],
+      "description": "A top-level resource in the CLI tree. Core nouns (doc, schema, media, search, workspace, task, webhook, rail, plugin) carry plugin:null; plugin-contributed nouns (bulldocs, onixedit, indx, frt) carry plugin:<slug>.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The noun token typed on the command line (e.g. \"doc\", \"bulldocs\"). NO enum — additive-only growth axis."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line description of the noun."
+        },
+        "plugin": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Owning plugin slug, or null for a core host noun. Optional; absence is equivalent to null (core)."
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "noun",
+        "verb",
+        "summary",
+        "http",
+        "auth_tier",
+        "args",
+        "flags",
+        "writes",
+        "batch",
+        "paginated",
+        "dry_run",
+        "default_output"
+      ],
+      "description": "One `<noun> <verb>` command = one API call. The CLI wires NO per-verb code; it builds the leaf entirely from these fields.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable, unique command identifier (e.g. \"doc.get\", \"bulldocs.publish\"). NO enum — additive-only growth axis."
+        },
+        "noun": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The noun this command hangs under; matches a nouns[].name. NO enum."
+        },
+        "verb": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The action token (e.g. \"get\", \"ls\", \"publish\"). NO enum — additive-only growth axis."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line description of what the command does."
+        },
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "path_template"],
+          "description": "The single API call this command makes. Templates are FLAT (contract spine rule #4); the CLI prepends its own /w/:ws/p/:project prefix locally from resolved scope when scoped_prefix is set.",
+          "properties": {
+            "method": { "$ref": "#/$defs/http_method" },
+            "path_template": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Flat path template with :placeholders (e.g. \"/v1/data/doc/:dataset/:type/:doc_id\")."
+            }
+          }
+        },
+        "auth_tier": {
+          "$ref": "#/$defs/auth_tier",
+          "description": "The tier REQUIRED to invoke this command. The CLI maps it to the credential it sends. NOTE: the CLI must NOT preflight-refuse a `scoped_admin` command — only the server knows the caller's per-workspace role (contract spine rule #2)."
+        },
+        "args": {
+          "type": "array",
+          "description": "Positional arguments in declaration order.",
+          "items": { "$ref": "#/$defs/arg" }
+        },
+        "flags": {
+          "type": "array",
+          "description": "Named flags for this command (command-local; global flags live in the CLI itself).",
+          "items": { "$ref": "#/$defs/flag" }
+        },
+        "writes": {
+          "type": "boolean",
+          "description": "True if this is a mutating verb (sends through a write/admin/ingest path)."
+        },
+        "batch": {
+          "type": "boolean",
+          "description": "True if the command accepts a batch body ({ops:[…]} or mutations[]) for atomic multi-op application."
+        },
+        "paginated": {
+          "type": "boolean",
+          "description": "True if the command supports list pagination (--limit/--offset/--all). $comment: the contract spine (cli_plan.md line 44) modelled this as paginated:{strategy:offset|cursor|none}; the FROZEN superset uses a plain boolean per the prompt's field contract — strategy detail is deferred (CLI v1 uses offset pagination uniformly per handbook §4)."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "True ONLY if the SERVER supports validate-only for this command. HONEST flag (contract spine rule #5): ships false on every command in v1 unless the batch team builds server-side validate-only; the CLI's --dry-run degrades to client-side request-printing when this is false."
+        },
+        "default_output": {
+          "$ref": "#/$defs/default_output",
+          "description": "What an agent/default-shape caller gets for this command (writes typically advertise \"minimal\"; reads \"table\")."
+        },
+        "scoped_prefix": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Optional hint that this flat command has a scoped mirror — the CLI may prepend /w/:ws/p/:project locally. The scoped MIRROR ENDPOINT itself is deferred (contract spine rule #4); null/absent means flat-only."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OPTIONAL (additive). Provenance of the command — \"core\" for a host-built command, or \"plugin:<slug>\" (e.g. \"plugin:bulldocs\") for a plugin-contributed one. Free string, NOT in the required list, so existing manifests still validate."
+        },
+        "since": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OPTIONAL (additive). The manifest/api version in which this command first appeared — used for version gating so a CLI can tell when a command is too new for the server it is pointed at. Free string, NOT in the required list."
+        }
+      }
+    },
+    "arg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "required", "type", "summary"],
+      "description": "A positional argument. Per the M0 freeze the arg shape is intentionally THIN (name/required/type/summary) — rich per-arg JSON Schema is deferred (plan open decision #1).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Argument name (e.g. \"type\", \"doc_id\")."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "True if the argument must be supplied."
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Scalar type hint (e.g. \"string\", \"slug\", \"int\"). Free string — NOT a closed enum, so plugins can introduce type names additively."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line description of the argument."
+        }
+      }
+    },
+    "flag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "summary"],
+      "description": "A named command-local flag.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Flag name without leading dashes (e.g. \"set\", \"engine\", \"file\")."
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Flag value type hint (e.g. \"string\", \"bool\", \"file\"). Free string — not a closed enum."
+        },
+        "default": {
+          "description": "Optional default value when the flag is omitted. Any JSON type; absent means no default."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line description of the flag."
+        },
+        "repeatable": {
+          "type": "boolean",
+          "default": false,
+          "description": "True if the flag may be supplied multiple times (e.g. --set k=v --set k2=v2). Optional; absence equals false."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "$comment": "ANON EXISTENCE-HIDING fixture. The SAME fresh install as core-manifest.json, but queried by an ANONYMOUS caller (auth_tier \"none\"), plugins OFF. Projected through the default-deny allow-list, the anon caller sees ONLY public-readable commands (doc get/ls/query reads, schema get, search query, media ls) and ZERO write/admin commands — no doc.mutate, no schema.apply/rm, no plugin.settings, no task admin, no webhook writes. This is the golden that PROVES admin command/noun names do not leak to anonymous callers. PAIRING: diffing anon vs admin = the existence-hiding assertion — core-manifest.json = full-access fresh-install (all 9 nouns), core-manifest-anon.json = the anon projection (read-only subset). whoami stays a CLI built-in (GET /v1/meta + manifest caller tier); it is NOT a manifest command and there is no `meta` noun.",
+  "manifest_version": "1",
+  "server": {
+    "name": "prod",
+    "version": "2026.06.07",
+    "base_url": "https://api.barkpark.cloud",
+    "api_version": "1",
+    "min_cli": "1.0.0"
+  },
+  "auth_tier": "none",
+  "generated_at": "2026-06-07T12:00:00Z",
+  "etag": "W/\"caps-anon-1b0e55d2\"",
+  "nouns": [
+    { "name": "doc", "summary": "Documents — the content workhorse.", "plugin": null },
+    { "name": "schema", "summary": "Document type definitions.", "plugin": null },
+    { "name": "search", "summary": "Full-text search over documents.", "plugin": null },
+    { "name": "media", "summary": "Assets and collections.", "plugin": null }
+  ],
+  "commands": [
+    {
+      "id": "doc.get",
+      "noun": "doc",
+      "verb": "get",
+      "summary": "Fetch one document by type and id.",
+      "http": { "method": "GET", "path_template": "/v1/data/doc/:dataset/:type/:doc_id" },
+      "auth_tier": "none",
+      "args": [
+        { "name": "type", "required": true, "type": "string", "summary": "Document type (schema name)." },
+        { "name": "doc_id", "required": true, "type": "string", "summary": "Document id." }
+      ],
+      "flags": [
+        { "name": "perspective", "type": "string", "default": "published", "summary": "published (anon only sees published)." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "doc.ls",
+      "noun": "doc",
+      "verb": "ls",
+      "summary": "List documents of a type.",
+      "http": { "method": "GET", "path_template": "/v1/data/query/:dataset/:type" },
+      "auth_tier": "none",
+      "args": [
+        { "name": "type", "required": true, "type": "string", "summary": "Document type to list." }
+      ],
+      "flags": [
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max rows to return." },
+        { "name": "offset", "type": "int", "default": 0, "summary": "Rows to skip." },
+        { "name": "all", "type": "bool", "default": false, "summary": "Fetch every page." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "doc.query",
+      "noun": "doc",
+      "verb": "query",
+      "summary": "Filtered read (GROQ-lite) over a type.",
+      "http": { "method": "GET", "path_template": "/v1/data/query/:dataset/:type" },
+      "auth_tier": "none",
+      "args": [
+        { "name": "type", "required": true, "type": "string", "summary": "Document type to query." }
+      ],
+      "flags": [
+        { "name": "query", "type": "string", "summary": "Filter expression.", "repeatable": false },
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max rows to return." },
+        { "name": "offset", "type": "int", "default": 0, "summary": "Rows to skip." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "schema.get",
+      "noun": "schema",
+      "verb": "get",
+      "summary": "Fetch one public schema definition.",
+      "http": { "method": "GET", "path_template": "/v1/schemas/:dataset/:name" },
+      "auth_tier": "none",
+      "args": [
+        { "name": "name", "required": true, "type": "string", "summary": "Schema name." }
+      ],
+      "flags": [],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "search.query",
+      "noun": "search",
+      "verb": "query",
+      "summary": "Full-text search public documents in a dataset.",
+      "http": { "method": "GET", "path_template": "/v1/data/search/:dataset" },
+      "auth_tier": "none",
+      "args": [
+        { "name": "q", "required": true, "type": "string", "summary": "Search query string." }
+      ],
+      "flags": [
+        { "name": "engine", "type": "string", "default": "postgres", "summary": "Search engine (e.g. postgres, indx)." },
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max hits to return." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "media.ls",
+      "noun": "media",
+      "verb": "ls",
+      "summary": "List public media assets in a dataset.",
+      "http": { "method": "GET", "path_template": "/v1/media/:dataset" },
+      "auth_tier": "none",
+      "args": [],
+      "flags": [
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max assets to return." },
+        { "name": "offset", "type": "int", "default": 0, "summary": "Assets to skip." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    }
+  ]
+}

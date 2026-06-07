@@ -1,0 +1,383 @@
+{
+  "$comment": "FULL-ACCESS FRESH-INSTALL fixture. A fresh Barkpark with plugins OFF, queried by an admin-tier caller, exposes EXACTLY the nine canonical core nouns (doc, schema, media, search, workspace, task, webhook, rail, plugin) and their representative commands. PAIRING: diffing this against core-manifest-anon.json is the existence-hiding assertion — core-manifest.json = full-access fresh-install (all 9 nouns, writes + admin visible); core-manifest-anon.json = the anon projection (read-only public subset, zero admin names leaked). whoami is a CLI built-in that calls GET /v1/meta + reads the manifest's caller auth_tier — it is intentionally NOT modelled as a manifest command and there is NO `meta` noun. project verbs fold under the `workspace` noun.",
+  "manifest_version": "1",
+  "server": {
+    "name": "prod",
+    "version": "2026.06.07",
+    "base_url": "https://api.barkpark.cloud",
+    "api_version": "1",
+    "min_cli": "1.0.0"
+  },
+  "auth_tier": "admin",
+  "generated_at": "2026-06-07T12:00:00Z",
+  "etag": "W/\"caps-admin-7f3a91c4\"",
+  "nouns": [
+    { "name": "doc", "summary": "Documents — the content workhorse.", "plugin": null },
+    { "name": "schema", "summary": "Document type definitions.", "plugin": null },
+    { "name": "media", "summary": "Assets and collections.", "plugin": null },
+    { "name": "search", "summary": "Full-text search over documents.", "plugin": null },
+    { "name": "workspace", "summary": "Tenancy — workspaces and projects.", "plugin": null },
+    { "name": "task", "summary": "The bd-shim task queue.", "plugin": null },
+    { "name": "webhook", "summary": "Outbound webhook subscriptions.", "plugin": null },
+    { "name": "rail", "summary": "Goal-path lifecycle events.", "plugin": null },
+    { "name": "plugin", "summary": "Installed plugins and their settings.", "plugin": null }
+  ],
+  "commands": [
+    {
+      "id": "doc.get",
+      "noun": "doc",
+      "verb": "get",
+      "summary": "Fetch one document by type and id.",
+      "http": { "method": "GET", "path_template": "/v1/data/doc/:dataset/:type/:doc_id" },
+      "auth_tier": "read",
+      "args": [
+        { "name": "type", "required": true, "type": "string", "summary": "Document type (schema name)." },
+        { "name": "doc_id", "required": true, "type": "string", "summary": "Document id." }
+      ],
+      "flags": [
+        { "name": "perspective", "type": "string", "default": "published", "summary": "published | drafts | raw." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "doc.ls",
+      "noun": "doc",
+      "verb": "ls",
+      "summary": "List documents of a type.",
+      "http": { "method": "GET", "path_template": "/v1/data/query/:dataset/:type" },
+      "auth_tier": "read",
+      "args": [
+        { "name": "type", "required": true, "type": "string", "summary": "Document type to list." }
+      ],
+      "flags": [
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max rows to return." },
+        { "name": "offset", "type": "int", "default": 0, "summary": "Rows to skip." },
+        { "name": "all", "type": "bool", "default": false, "summary": "Fetch every page." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "doc.query",
+      "noun": "doc",
+      "verb": "query",
+      "summary": "Filtered read (GROQ-lite) over a type.",
+      "http": { "method": "GET", "path_template": "/v1/data/query/:dataset/:type" },
+      "auth_tier": "read",
+      "args": [
+        { "name": "type", "required": true, "type": "string", "summary": "Document type to query." }
+      ],
+      "flags": [
+        { "name": "query", "type": "string", "summary": "Filter expression.", "repeatable": false },
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max rows to return." },
+        { "name": "offset", "type": "int", "default": 0, "summary": "Rows to skip." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "doc.mutate",
+      "noun": "doc",
+      "verb": "mutate",
+      "summary": "Apply an atomic batch of mutations (create/patch/publish/unpublish/delete).",
+      "http": { "method": "POST", "path_template": "/v1/data/mutate/:dataset" },
+      "auth_tier": "write",
+      "args": [],
+      "flags": [
+        { "name": "file", "type": "file", "summary": "Mutations payload from a file or - for stdin." },
+        { "name": "quiet", "type": "bool", "default": false, "summary": "Print only the resulting rev." }
+      ],
+      "writes": true,
+      "batch": true,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "schema.get",
+      "noun": "schema",
+      "verb": "get",
+      "summary": "Fetch one schema definition.",
+      "http": { "method": "GET", "path_template": "/v1/schemas/:dataset/:name" },
+      "auth_tier": "admin",
+      "args": [
+        { "name": "name", "required": true, "type": "string", "summary": "Schema name." }
+      ],
+      "flags": [],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "schema.apply",
+      "noun": "schema",
+      "verb": "apply",
+      "summary": "Register or update a schema definition.",
+      "http": { "method": "PUT", "path_template": "/v1/schemas/:dataset/:name" },
+      "auth_tier": "admin",
+      "args": [
+        { "name": "name", "required": true, "type": "string", "summary": "Schema name." }
+      ],
+      "flags": [
+        { "name": "file", "type": "file", "summary": "Schema definition from a file or - for stdin." }
+      ],
+      "writes": true,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "media.ls",
+      "noun": "media",
+      "verb": "ls",
+      "summary": "List media assets in a dataset.",
+      "http": { "method": "GET", "path_template": "/v1/media/:dataset" },
+      "auth_tier": "read",
+      "args": [],
+      "flags": [
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max assets to return." },
+        { "name": "offset", "type": "int", "default": 0, "summary": "Assets to skip." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "media.upload",
+      "noun": "media",
+      "verb": "upload",
+      "summary": "Upload a media asset.",
+      "http": { "method": "POST", "path_template": "/v1/media/:dataset" },
+      "auth_tier": "write",
+      "args": [
+        { "name": "file", "required": true, "type": "file", "summary": "File to upload." }
+      ],
+      "flags": [],
+      "writes": true,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "search.query",
+      "noun": "search",
+      "verb": "query",
+      "summary": "Full-text search documents in a dataset.",
+      "http": { "method": "GET", "path_template": "/v1/data/search/:dataset" },
+      "auth_tier": "read",
+      "args": [
+        { "name": "q", "required": true, "type": "string", "summary": "Search query string." }
+      ],
+      "flags": [
+        { "name": "engine", "type": "string", "default": "postgres", "summary": "Search engine (e.g. postgres, indx)." },
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max hits to return." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core"
+    },
+    {
+      "id": "workspace.ls",
+      "noun": "workspace",
+      "verb": "ls",
+      "summary": "List workspaces the token can reach.",
+      "http": { "method": "GET", "path_template": "/api/workspaces" },
+      "auth_tier": "read",
+      "args": [],
+      "flags": [],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "workspace.project-create",
+      "noun": "workspace",
+      "verb": "project-create",
+      "summary": "Create a project under a workspace (project verbs fold under workspace).",
+      "http": { "method": "POST", "path_template": "/api/workspaces/:workspace_slug/projects" },
+      "auth_tier": "scoped_admin",
+      "args": [
+        { "name": "name", "required": true, "type": "string", "summary": "Project name." }
+      ],
+      "flags": [],
+      "writes": true,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "task.ls",
+      "noun": "task",
+      "verb": "ls",
+      "summary": "List tasks in the queue.",
+      "http": { "method": "GET", "path_template": "/v1/tasks/:dataset" },
+      "auth_tier": "read",
+      "args": [],
+      "flags": [
+        { "name": "limit", "type": "int", "default": 50, "summary": "Max tasks to return." }
+      ],
+      "writes": false,
+      "batch": false,
+      "paginated": true,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "task.claim",
+      "noun": "task",
+      "verb": "claim",
+      "summary": "Claim a ready task (admin queue op).",
+      "http": { "method": "POST", "path_template": "/v1/tasks/:dataset/:task_id/claim" },
+      "auth_tier": "admin",
+      "args": [
+        { "name": "task_id", "required": true, "type": "string", "summary": "Task id to claim." }
+      ],
+      "flags": [],
+      "writes": true,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "webhook.ls",
+      "noun": "webhook",
+      "verb": "ls",
+      "summary": "List webhook subscriptions.",
+      "http": { "method": "GET", "path_template": "/v1/webhooks/:dataset" },
+      "auth_tier": "admin",
+      "args": [],
+      "flags": [],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "webhook.create",
+      "noun": "webhook",
+      "verb": "create",
+      "summary": "Create a webhook subscription.",
+      "http": { "method": "POST", "path_template": "/v1/webhooks/:dataset" },
+      "auth_tier": "write",
+      "args": [
+        { "name": "url", "required": true, "type": "string", "summary": "Delivery URL." }
+      ],
+      "flags": [],
+      "writes": true,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "rail.path",
+      "noun": "rail",
+      "verb": "path",
+      "summary": "Read the goal-path lifecycle events for a goal.",
+      "http": { "method": "GET", "path_template": "/v1/rail/:dataset/:goal_id" },
+      "auth_tier": "read",
+      "args": [
+        { "name": "goal_id", "required": true, "type": "string", "summary": "Goal id." }
+      ],
+      "flags": [],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "plugin.ls",
+      "noun": "plugin",
+      "verb": "ls",
+      "summary": "List installed plugins.",
+      "http": { "method": "GET", "path_template": "/v1/plugins" },
+      "auth_tier": "read",
+      "args": [],
+      "flags": [],
+      "writes": false,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "table",
+      "scoped_prefix": null,
+      "source": "core"
+    },
+    {
+      "id": "plugin.settings",
+      "noun": "plugin",
+      "verb": "settings",
+      "summary": "Read or update a plugin's settings.",
+      "http": { "method": "PUT", "path_template": "/v1/plugins/:slug/settings" },
+      "auth_tier": "admin",
+      "args": [
+        { "name": "slug", "required": true, "type": "string", "summary": "Plugin slug." }
+      ],
+      "flags": [
+        { "name": "set", "type": "string", "summary": "key=value setting to apply.", "repeatable": true }
+      ],
+      "writes": true,
+      "batch": false,
+      "paginated": false,
+      "dry_run": false,
+      "default_output": "minimal",
+      "scoped_prefix": null,
+      "source": "core"
+    }
+  ]
+}
