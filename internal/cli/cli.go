@@ -111,6 +111,13 @@ func Execute(args []string) int {
 		// --yes is a global bool, but migrate also accepts its own flags, so we
 		// hand it everything after the noun.
 		return runMigrate(out, g, rest[1:])
+	case "paper":
+		// `bp paper view <slug> [flags]` — one-shot CLI render of a Bulldocs
+		// paper to the terminal (the headless counterpart to the browser reader).
+		// A built-in (not a manifest command) because it drives the pdrender
+		// pipeline the generic command runner knows nothing about; it resolves the
+		// target server/token/scope through the saved-server config like the rest.
+		return runPaper(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}

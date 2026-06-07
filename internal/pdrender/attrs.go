@@ -28,6 +28,21 @@ func attrStrDefault(m map[string]any, key, def string) string {
 	return s
 }
 
+// attrStrFirst reads the first NON-EMPTY string field among keys, coercing as
+// attrStr does. This is the defensive dual-read for fields the wire emits under
+// more than one name (e.g. code source = "code"||"value", code language =
+// "language"||"lang") — the same "prefer the live key, fall back to the legacy
+// key" discipline the client already uses (PaperBlocks prefers `blocks`, falls
+// back to `content.blocks`). Returns "" when every key is absent/empty.
+func attrStrFirst(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s := attrStr(m, k); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // attrBool reads a strict boolean field; anything else → false (mirrors the
 // `== true` checks in render.ex, e.g. ordered lists and field-boolean).
 func attrBool(m map[string]any, key string) bool {

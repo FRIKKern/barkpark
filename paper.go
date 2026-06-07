@@ -38,11 +38,11 @@ const (
 func barkparkPaperTheme() pdrender.Theme {
 	dark := lipgloss.HasDarkBackground()
 
-	body := normalItemStyle              // zinc-grey body text
-	dim := dimStyle                      // muted — captions, byline, link suffix
-	rule := dividerStyle                 // hairline rules
-	label := editorLabelStyle            // bold muted field label
-	accent := highlight                  // blue accent → headings/links/accent
+	body := normalItemStyle   // zinc-grey body text
+	dim := dimStyle           // muted — captions, byline, link suffix
+	rule := dividerStyle      // hairline rules
+	label := editorLabelStyle // bold muted field label
+	accent := highlight       // blue accent → headings/links/accent
 
 	t := pdrender.Theme{
 		Body:   body,

@@ -62,8 +62,14 @@ type codeKey struct {
 }
 
 func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
-	source := attrStr(b.Attrs, "value")
-	lang := attrStr(b.Attrs, "lang") // usually absent in the model; tolerated.
+	// Field-name reconciliation (verified against live Bulldocs JSON): code
+	// blocks emit their source under EITHER `code` (the newer shape, e.g.
+	// {"type":"code","code":"…","language":"bash"}) OR `value` (the legacy/
+	// flat-mode shape render.ex's compose_block reads). Prefer the live `code`
+	// key, fall back to `value`; likewise `language`||`lang`. Without this dual
+	// read a real `code`-shaped block renders as an EMPTY accent bar.
+	source := attrStrFirst(b.Attrs, "code", "value")
+	lang := attrStrFirst(b.Attrs, "language", "lang") // usually absent; tolerated.
 
 	key := codeKey{
 		hash:    hashStrings(source, lang),

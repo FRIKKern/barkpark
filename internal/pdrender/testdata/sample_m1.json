@@ -21,7 +21,8 @@
     {
       "id": "code1",
       "type": "code",
-      "value": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello, bulldocs\")\n}"
+      "language": "go",
+      "code": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello, bulldocs\")\n}"
     },
     {
       "id": "tbl1",
