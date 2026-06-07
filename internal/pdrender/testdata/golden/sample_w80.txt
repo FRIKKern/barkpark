@@ -1,0 +1,34 @@
+BULLDOCS TERMINAL RENDER                                                        
+────────────────────────                                                        
+                                                                                
+This paragraph mixes bold, italic, inline code() and a link                     
+(https://barkpark.cloud) so wrapping at the target width can be eyeballed across
+several lines of running prose.                                                 
+                                                                                
+A level-two heading                                                             
+                                                                                
+• first bullet, short                                                           
+• second bullet with a strong run that is long enough to wrap onto a hanging    
+  continuation line under the item text                                         
+• third bullet                                                                  
+                                                                                
+1. step one                                                                     
+2. step two                                                                     
+                                                                                
+▌ Heads up This is a warning callout whose body is long enough to wrap inside   
+▌ the left-bar so the hanging bar is visible across multiple lines.             
+                                                                                
+────────────────────────────────────── § ───────────────────────────────────────
+                                                                                
+Level three heading                                                             
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+A nested section                                                                
+                                                                                
+A paragraph living inside a section, rendered through the registry at the       
+reduced child width with an indent.                                             
+                                                                                
+▌ A success callout nested one level deep inside the section.                   
+────────────────────────────────────────────────────────────────────────────────
+                                                                                
+under+strike: underlined / struck / nested emphasis                             

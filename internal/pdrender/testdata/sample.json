@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Bulldocs Terminal Render"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "value": "This paragraph mixes " },
+        { "type": "text", "value": "bold", "marks": [{ "type": "bold" }] },
+        { "type": "text", "value": ", " },
+        { "type": "text", "value": "italic", "marks": [{ "type": "italic" }] },
+        { "type": "text", "value": ", inline " },
+        { "type": "code", "value": "code()" },
+        { "type": "text", "value": " and a " },
+        { "type": "link", "href": "https://barkpark.cloud", "children": [{ "type": "text", "value": "link" }] },
+        { "type": "text", "value": " so wrapping at the target width can be eyeballed across several lines of running prose." }
+      ]
+    },
+    {
+      "id": "h2",
+      "type": "heading",
+      "level": 2,
+      "text": "A level-two heading"
+    },
+    {
+      "id": "l1",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [{ "type": "text", "value": "first bullet, short" }],
+        [
+          { "type": "text", "value": "second bullet with a " },
+          { "type": "text", "value": "strong run", "marks": [{ "type": "bold" }] },
+          { "type": "text", "value": " that is long enough to wrap onto a hanging continuation line under the item text" }
+        ],
+        [{ "type": "text", "value": "third bullet" }]
+      ]
+    },
+    {
+      "id": "ol1",
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [{ "type": "text", "value": "step one" }],
+        [{ "type": "text", "value": "step two" }]
+      ]
+    },
+    {
+      "id": "c1",
+      "type": "callout",
+      "tone": "warning",
+      "title": "Heads up",
+      "content": [
+        { "type": "text", "value": "This is a warning callout whose body is long enough to wrap inside the left-bar so the hanging bar is visible across multiple lines." }
+      ]
+    },
+    {
+      "id": "d1",
+      "type": "divider"
+    },
+    {
+      "id": "h3",
+      "type": "heading",
+      "level": 3,
+      "text": "Level three heading"
+    },
+    {
+      "id": "sec1",
+      "type": "section",
+      "title": "A nested section",
+      "blocks": [
+        {
+          "id": "sp1",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "A paragraph living inside a section, rendered through the registry at the reduced child width with an indent." }]
+        },
+        {
+          "id": "sc1",
+          "type": "callout",
+          "tone": "success",
+          "content": [{ "type": "text", "value": "A success callout nested one level deep inside the section." }]
+        }
+      ]
+    },
+    {
+      "id": "marks",
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "value": "under+strike: " },
+        { "type": "text", "value": "underlined", "marks": [{ "type": "underline" }] },
+        { "type": "text", "value": " / " },
+        { "type": "text", "value": "struck", "marks": [{ "type": "strikethrough" }] },
+        { "type": "text", "value": " / " },
+        { "type": "strong", "children": [{ "type": "text", "value": "nested " }, { "type": "em", "children": [{ "type": "text", "value": "emphasis" }] }] }
+      ]
+    }
+  ]
+}
