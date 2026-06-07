@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -61,35 +62,80 @@ type metaResponse struct {
 	SchemaHashes  map[string]string `json:"currentDatasetSchemaHash"`
 }
 
-// runWhoami composes identity from GET /v1/meta + the manifest's caller
-// auth_tier echo (M0 decision A3 — no dedicated endpoint). It shows the active
-// target, ⚠ PROD when prod, and the resolved caller tier.
+// whoamiSource classifies where ctx.Server was chosen from, for whoami's
+// "saved/default/env/flag" annotation. It mirrors resolveContext's precedence
+// (flags > env > saved config > baked default) WITHOUT touching that function —
+// it re-derives the winning layer by comparing the resolved server against each
+// candidate. active reports whether the resolved server is the saved config's
+// active server (only meaningful for "saved").
+func whoamiSource(g globals, ctx manifest.Context) (source string, active bool) {
+	// 1. Explicit --server flag wins.
+	if g.server != "" {
+		return "flag", false
+	}
+	// 2. Env var (BARKPARK_API_URL / BARKPARK_SERVER), if actually set.
+	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+		return "env", false
+	}
+	// 3. Saved config — the resolved server matches the persisted active server.
+	if cfg, err := LoadConfig(); err == nil && cfg.ActiveServer() != "" {
+		if normalizeServerURL(cfg.ActiveServer()) == normalizeServerURL(ctx.Server) {
+			return "saved", cfg.IsActiveServer(ctx.Server)
+		}
+	}
+	// 4. Otherwise it's the baked localhost default.
+	return "default", false
+}
+
+// runWhoami answers "what am I connected to" — and it is LOCAL-FIRST, so it
+// ALWAYS works even when the server is down. It prints the resolved target
+// (server URL + how it was chosen, scope, token presence) from ctx alone; the
+// manifest's caller auth_tier echo (M0 decision A3 — no dedicated endpoint) and
+// GET /v1/meta are BEST-EFFORT enrichment that never fail the command. whoami
+// reports your config; it is not a connectivity gate, so it always exits 0.
 func runWhoami(out *writer, g globals, ctx manifest.Context) int {
-	m, err := loadManifest(g, ctx)
-	if err != nil {
-		out.errf("barkpark: %v", err)
-		return exitGeneric
+	source, active := whoamiSource(g, ctx)
+	tokenPresent := ctx.Token != ""
+
+	// Best-effort manifest fetch (short timeout via loadManifest's client). On
+	// ANY failure we leave the server identity / tier / prod fields unknown and
+	// mark the server unreachable — whoami must not die because the server is.
+	reachable := false
+	serverName := ""
+	authTier := ""
+	prod := false
+	if m, err := loadManifest(g, ctx); err == nil {
+		reachable = true
+		serverName = m.Server.Name
+		authTier = m.AuthTier
+		prod = isProd(ctx, m)
 	}
 
-	// Best-effort /v1/meta fetch; whoami still renders if it fails.
+	// Best-effort /v1/meta for server_time + api version range. Never fatal.
 	metaURL := strings.TrimRight(ctx.Server, "/") + "/v1/meta"
 	var meta metaResponse
 	if status, body, derr := doRequest("GET", metaURL, map[string]string{}, nil); derr == nil && status >= 200 && status < 300 {
 		_ = json.Unmarshal(body, &meta)
 	}
 
-	prod := isProd(ctx, m)
-
 	if out.output == "json" {
+		var tierVal any // null when unreachable
+		if reachable {
+			tierVal = authTier
+		}
 		out.renderJSON(map[string]any{
-			"server":      ctx.Server,
-			"server_name": m.Server.Name,
-			"workspace":   ctx.Workspace,
-			"project":     ctx.Project,
-			"dataset":     ctx.Dataset,
-			"auth_tier":   m.AuthTier,
-			"prod":        prod,
-			"server_time": meta.ServerTime,
+			"server":        ctx.Server,
+			"source":        source,
+			"active":        active,
+			"workspace":     ctx.Workspace,
+			"project":       ctx.Project,
+			"dataset":       ctx.Dataset,
+			"token_present": tokenPresent,
+			"reachable":     reachable,
+			"server_name":   serverName,
+			"auth_tier":     tierVal,
+			"prod":          prod,
+			"server_time":   meta.ServerTime,
 			"api_version_range": map[string]string{
 				"min": meta.MinAPIVersion,
 				"max": meta.MaxAPIVersion,
@@ -98,20 +144,49 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		return exitOK
 	}
 
+	// Human output — the target line always renders.
 	prodMark := ""
 	if prod {
 		prodMark = "  ⚠ PROD"
 	}
-	out.outf("server:    %s (%s)%s", ctx.Server, m.Server.Name, prodMark)
+	out.outf("target:    %s (%s)%s", ctx.Server, whoamiSourceLabel(source, active), prodMark)
 	out.outf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)
-	out.outf("auth_tier: %s", m.AuthTier)
-	if meta.ServerTime != "" {
-		out.outf("server_time: %s", meta.ServerTime)
+	if tokenPresent {
+		out.outf("token:     set")
+	} else {
+		out.outf("token:     none — anonymous")
 	}
-	if meta.MinAPIVersion != "" {
-		out.outf("api_version: %s..%s", meta.MinAPIVersion, meta.MaxAPIVersion)
+
+	if reachable {
+		out.outf("server:    %s (%s)", serverName, ctx.Server)
+		out.outf("auth_tier: %s", authTier)
+		if meta.ServerTime != "" {
+			out.outf("server_time: %s", meta.ServerTime)
+		}
+		if meta.MinAPIVersion != "" {
+			out.outf("api_version: %s..%s", meta.MinAPIVersion, meta.MaxAPIVersion)
+		}
+	} else {
+		out.outf("server:    (unreachable — check it's running or run 'bp setup --target connect')")
 	}
 	return exitOK
+}
+
+// whoamiSourceLabel renders the parenthetical source annotation for the human
+// target line, e.g. "saved · active", "default — no saved config; run 'bp setup
+// --target connect'", "env", "flag".
+func whoamiSourceLabel(source string, active bool) string {
+	switch source {
+	case "saved":
+		if active {
+			return "saved · active"
+		}
+		return "saved"
+	case "default":
+		return "default — no saved config; run 'bp setup --target connect'"
+	default:
+		return source // "env" or "flag"
+	}
 }
 
 // runLogin is a v1 stub: token-based auth is configured via BARKPARK_API_TOKEN /
