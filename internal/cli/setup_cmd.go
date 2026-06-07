@@ -131,6 +131,13 @@ func runSetup(out *writer, g globals, tail []string) int {
 	if plan.Dataset == "" {
 		plan.Dataset = g.dataset
 	}
+	// --token is a GLOBAL flag (shared with migrate), so the global parser captures
+	// it into g.token before setup's own flag parse sees it. Thread it through so
+	// `bp setup --target connect --token X` actually persists the token onto the
+	// saved server (otherwise plan.Token stays empty and the entry saves tokenless).
+	if plan.Token == "" {
+		plan.Token = g.token
+	}
 
 	// CONNECT convenience: when no --server was given anywhere (setup-local nor the
 	// global -s fall-through), default to the ACTIVE saved server so a returning
