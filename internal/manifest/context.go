@@ -12,6 +12,15 @@ type Context struct {
 	Project   string
 	Dataset   string
 	Output    string
+
+	// ScopedMirror reports whether the target server exposes the workspace/
+	// project-scoped route mirror. In v1 this is FALSE everywhere: the scoped
+	// mirror is deferred (M0 decision rule #4), so a command's scoped_prefix hint
+	// is INERT and BuildURL uses the flat path_template. When a future server
+	// advertises the mirror, set this true (e.g. from a manifest server flag) and
+	// BuildURL will prepend /w/:ws/p/:project. Prepending while false would point
+	// the CLI at a non-existent path and break every scoped command.
+	ScopedMirror bool
 }
 
 // ActiveContext is the persisted-context layer — the saved named target a user

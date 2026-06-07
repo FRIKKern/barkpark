@@ -3061,6 +3061,7 @@ defmodule Barkpark.Content do
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
+         :ok <- check_paper_if_rev(doc, Keyword.get(opts, :if_rev)),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          {:ok, new_blocks, block_ids} <- fold_paper_ops(blocks, ops) do
       cond do
@@ -3157,6 +3158,34 @@ defmodule Barkpark.Content do
   end
 
   defp paper_current_rev(_), do: 0
+
+  # M3 optimistic-concurrency guard. When the caller supplies an `ifRev`, reject
+  # the batch BEFORE applying any op unless it matches the paper's current rev.
+  # Absent `ifRev` (nil) keeps the prior behaviour (always proceed). The expected
+  # value may arrive as an integer or a stringified integer (the wire shape);
+  # both are compared against the integer `content["rev"]`.
+  defp check_paper_if_rev(_doc, nil), do: :ok
+
+  defp check_paper_if_rev(%Document{} = doc, expected) do
+    current = paper_current_rev(doc)
+
+    case normalize_if_rev(expected) do
+      :invalid -> {:error, :precondition_failed}
+      ^current -> :ok
+      _other -> {:error, :precondition_failed}
+    end
+  end
+
+  defp normalize_if_rev(n) when is_integer(n), do: n
+
+  defp normalize_if_rev(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> :invalid
+    end
+  end
+
+  defp normalize_if_rev(_), do: :invalid
 
   @doc """
   Apply a single portable-doc `op` to ANY Expectation-bearing document's block

@@ -12,9 +12,17 @@ import (
 var placeholderRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 
 // BuildURL assembles the absolute URL for cmd: it fills the flat
-// http.path_template placeholders from ctx + args and, when cmd.ScopedPrefix is
-// non-nil, prepends the scope prefix LOCALLY (contract spine rule #4 — flat
-// templates, CLI-side scope prepend). The server base_url is read from ctx.Server.
+// http.path_template placeholders from ctx + args. The server base_url is read
+// from ctx.Server.
+//
+// Scope prefix (contract rule #4): a command may carry a scoped_prefix HINT
+// (e.g. "/w/:ws/p/:project"). In v1 the scoped route mirror is deferred — it
+// does not exist on any server — so the hint is INERT: BuildURL uses the flat
+// path_template and does NOT prepend. Prepending against a flat-only server
+// turns "/v1/data/query/..." into "/w/default/p/default/v1/data/query/..." which
+// 404/403s. The prepend activates only when ctx.ScopedMirror is true (a future
+// server that advertises the mirror); the hint still ships in the manifest so
+// nothing needs a breaking change when that day comes.
 //
 // Placeholder resolution per name:
 //   - :dataset                          -> ctx.Dataset
@@ -27,7 +35,7 @@ var placeholderRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 func (m *Manifest) BuildURL(cmd Command, ctx Context, args map[string]string) (string, error) {
 	path := cmd.HTTP.PathTemplate
 
-	if cmd.ScopedPrefix != nil && *cmd.ScopedPrefix != "" {
+	if ctx.ScopedMirror && cmd.ScopedPrefix != nil && *cmd.ScopedPrefix != "" {
 		path = *cmd.ScopedPrefix + path
 	}
 

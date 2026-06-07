@@ -1,0 +1,767 @@
+{
+  "auth_tier": "admin",
+  "commands": [
+    {
+      "args": [
+        {
+          "name": "type",
+          "required": true,
+          "summary": "Document type (schema name).",
+          "type": "string"
+        },
+        {
+          "name": "doc_id",
+          "required": true,
+          "summary": "Document id.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "none",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": "published",
+          "name": "perspective",
+          "summary": "published | drafts | raw.",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/doc/:dataset/:type/:doc_id"
+      },
+      "id": "doc.get",
+      "noun": "doc",
+      "paginated": false,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Fetch one document by type and id.",
+      "verb": "get",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "type",
+          "required": true,
+          "summary": "Document type to list.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "none",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max rows to return.",
+          "type": "int"
+        },
+        {
+          "default": 0,
+          "name": "offset",
+          "summary": "Rows to skip.",
+          "type": "int"
+        },
+        {
+          "default": false,
+          "name": "all",
+          "summary": "Fetch every page.",
+          "type": "bool"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/query/:dataset/:type"
+      },
+      "id": "doc.ls",
+      "noun": "doc",
+      "paginated": true,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "List documents of a type.",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "type",
+          "required": true,
+          "summary": "Document type to query.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "none",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "query",
+          "repeatable": false,
+          "summary": "Filter expression.",
+          "type": "string"
+        },
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max rows to return.",
+          "type": "int"
+        },
+        {
+          "default": 0,
+          "name": "offset",
+          "summary": "Rows to skip.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/query/:dataset/:type"
+      },
+      "id": "doc.query",
+      "noun": "doc",
+      "paginated": true,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Filtered read (GROQ-lite) over a type.",
+      "verb": "query",
+      "writes": false
+    },
+    {
+      "args": [],
+      "auth_tier": "write",
+      "batch": true,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "file",
+          "summary": "Mutations payload from a file or - for stdin.",
+          "type": "file"
+        },
+        {
+          "default": false,
+          "name": "quiet",
+          "summary": "Print only the resulting rev.",
+          "type": "bool"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      },
+      "id": "doc.mutate",
+      "noun": "doc",
+      "paginated": false,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Apply an atomic batch of mutations (create/patch/publish/unpublish/delete).",
+      "verb": "mutate",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "summary": "Schema name.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "none",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/schemas/:dataset/:name"
+      },
+      "id": "schema.get",
+      "noun": "schema",
+      "paginated": false,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Fetch one public schema definition.",
+      "verb": "get",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "summary": "Schema name.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "file",
+          "summary": "Schema definition from a file or - for stdin.",
+          "type": "file"
+        }
+      ],
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/schemas/:dataset/:name"
+      },
+      "id": "schema.apply",
+      "noun": "schema",
+      "paginated": false,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Register or update a schema definition.",
+      "verb": "apply",
+      "writes": true
+    },
+    {
+      "args": [],
+      "auth_tier": "none",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max assets to return.",
+          "type": "int"
+        },
+        {
+          "default": 0,
+          "name": "offset",
+          "summary": "Assets to skip.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset"
+      },
+      "id": "media.ls",
+      "noun": "media",
+      "paginated": true,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "List media assets in a dataset.",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "file",
+          "required": true,
+          "summary": "File to upload.",
+          "type": "file"
+        }
+      ],
+      "auth_tier": "write",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset"
+      },
+      "id": "media.upload",
+      "noun": "media",
+      "paginated": false,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Upload a media asset.",
+      "verb": "upload",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "q",
+          "required": true,
+          "summary": "Search query string.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "none",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": "postgres",
+          "name": "engine",
+          "summary": "Search engine: postgres | indx.",
+          "type": "string"
+        },
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max hits to return.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset"
+      },
+      "id": "search.query",
+      "noun": "search",
+      "paginated": true,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "core",
+      "summary": "Full-text search documents in a dataset.",
+      "verb": "query",
+      "writes": false
+    },
+    {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/api/workspaces"
+      },
+      "id": "workspace.ls",
+      "noun": "workspace",
+      "paginated": false,
+      "source": "core",
+      "summary": "List workspaces the token can reach.",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "summary": "Project name.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "scoped_admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/api/workspaces/:workspace_slug/projects"
+      },
+      "id": "workspace.project-create",
+      "noun": "workspace",
+      "paginated": false,
+      "source": "core",
+      "summary": "Create a project under a workspace (project verbs fold under workspace).",
+      "verb": "project-create",
+      "writes": true
+    },
+    {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max tasks to return.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/:dataset"
+      },
+      "id": "task.ls",
+      "noun": "task",
+      "paginated": true,
+      "source": "core",
+      "summary": "List tasks in the queue.",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "task_id",
+          "required": true,
+          "summary": "Task id to claim.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:dataset/:task_id/claim"
+      },
+      "id": "task.claim",
+      "noun": "task",
+      "paginated": false,
+      "source": "core",
+      "summary": "Claim a ready task (admin queue op).",
+      "verb": "claim",
+      "writes": true
+    },
+    {
+      "args": [],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/webhooks/:dataset"
+      },
+      "id": "webhook.ls",
+      "noun": "webhook",
+      "paginated": false,
+      "source": "core",
+      "summary": "List webhook subscriptions.",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "url",
+          "required": true,
+          "summary": "Delivery URL.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "write",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/webhooks/:dataset"
+      },
+      "id": "webhook.create",
+      "noun": "webhook",
+      "paginated": false,
+      "source": "core",
+      "summary": "Create a webhook subscription.",
+      "verb": "create",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "goal_id",
+          "required": true,
+          "summary": "Goal id.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/rail/:dataset/:goal_id"
+      },
+      "id": "rail.path",
+      "noun": "rail",
+      "paginated": false,
+      "source": "core",
+      "summary": "Read the goal-path lifecycle events for a goal.",
+      "verb": "path",
+      "writes": false
+    },
+    {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins"
+      },
+      "id": "plugin.ls",
+      "noun": "plugin",
+      "paginated": false,
+      "source": "core",
+      "summary": "List installed plugins.",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "slug",
+          "required": true,
+          "summary": "Plugin slug.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "set",
+          "repeatable": true,
+          "summary": "key=value setting to apply.",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/plugins/:slug/settings"
+      },
+      "id": "plugin.settings",
+      "noun": "plugin",
+      "paginated": false,
+      "source": "core",
+      "summary": "Read or update a plugin's settings.",
+      "verb": "settings",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "slug",
+          "required": true,
+          "summary": "Paper slug (its public id).",
+          "type": "slug"
+        }
+      ],
+      "auth_tier": "ingest",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "file",
+          "summary": "Payload (blocks or body_html) from a file or - for stdin.",
+          "type": "file"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/papers"
+      },
+      "id": "bulldocs.publish",
+      "noun": "bulldocs",
+      "paginated": false,
+      "scoped_prefix": null,
+      "source": "plugin:bulldocs",
+      "summary": "Publish (upsert) a paper from a portable-doc or HTML payload.",
+      "verb": "publish",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "slug",
+          "required": true,
+          "summary": "Paper slug to patch.",
+          "type": "slug"
+        }
+      ],
+      "auth_tier": "ingest",
+      "batch": true,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "file",
+          "summary": "Ops payload {\"ops\":[…]} from a file or - for stdin.",
+          "type": "file"
+        },
+        {
+          "name": "if-rev",
+          "summary": "Reject unless the paper is still at this rev (optimistic concurrency).",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/papers/:slug/ops"
+      },
+      "id": "bulldocs.patch",
+      "noun": "bulldocs",
+      "paginated": false,
+      "scoped_prefix": null,
+      "source": "plugin:bulldocs",
+      "summary": "Apply an atomic batch of block ops to a paper (optimistic --if-rev guard).",
+      "verb": "patch",
+      "writes": true
+    },
+    {
+      "args": [],
+      "auth_tier": "ingest",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/bulldocs/intents"
+      },
+      "id": "bulldocs.intents",
+      "noun": "bulldocs",
+      "paginated": false,
+      "scoped_prefix": null,
+      "source": "plugin:bulldocs",
+      "summary": "List pending actionable paper intents (oldest first).",
+      "verb": "intents",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Intent (paper_event) id.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "ingest",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/intents/:id/processed"
+      },
+      "id": "bulldocs.intent-processed",
+      "noun": "bulldocs",
+      "paginated": false,
+      "scoped_prefix": null,
+      "source": "plugin:bulldocs",
+      "summary": "Mark a pending intent processed so it drops out of the queue.",
+      "verb": "intent-processed",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "dataset",
+          "required": true,
+          "summary": "Dataset (e.g. production).",
+          "type": "string"
+        },
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Book document id.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/onixedit/export/:dataset/:id"
+      },
+      "id": "onixedit.export",
+      "noun": "onixedit",
+      "paginated": false,
+      "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+      "source": "plugin:onixedit",
+      "summary": "Export a book document as ONIX 3.0 XML.",
+      "verb": "export",
+      "writes": false
+    }
+  ],
+  "etag": "W/\"caps-017e323422e8e175\"",
+  "generated_at": "2026-06-07T13:16:21.225654Z",
+  "manifest_version": "1",
+  "nouns": [
+    {
+      "name": "doc",
+      "plugin": null,
+      "summary": "Documents — the content workhorse."
+    },
+    {
+      "name": "schema",
+      "plugin": null,
+      "summary": "Document type definitions."
+    },
+    {
+      "name": "media",
+      "plugin": null,
+      "summary": "Assets and collections."
+    },
+    {
+      "name": "search",
+      "plugin": null,
+      "summary": "Full-text search over documents."
+    },
+    {
+      "name": "workspace",
+      "plugin": null,
+      "summary": "Tenancy — workspaces and projects."
+    },
+    {
+      "name": "task",
+      "plugin": null,
+      "summary": "The bd-shim task queue."
+    },
+    {
+      "name": "webhook",
+      "plugin": null,
+      "summary": "Outbound webhook subscriptions."
+    },
+    {
+      "name": "rail",
+      "plugin": null,
+      "summary": "Goal-path lifecycle events."
+    },
+    {
+      "name": "plugin",
+      "plugin": null,
+      "summary": "Installed plugins and their settings."
+    },
+    {
+      "name": "bulldocs",
+      "plugin": "bulldocs",
+      "summary": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers / paperflow feature; now a first-party plugin built on the core portable-doc utilities."
+    },
+    {
+      "name": "onixedit",
+      "plugin": "onixedit",
+      "summary": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3."
+    }
+  ],
+  "server": {
+    "api_version": "1",
+    "base_url": "http://localhost:4000",
+    "min_cli": "1.0.0",
+    "name": "barkpark",
+    "version": "0.1.0"
+  }
+}

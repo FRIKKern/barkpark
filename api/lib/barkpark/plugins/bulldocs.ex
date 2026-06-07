@@ -100,4 +100,122 @@ defmodule Barkpark.Plugins.Bulldocs do
        :mark_processed, auth: :ingest}
     ]
   end
+
+  @doc """
+  Ergonomic CLI verbs Bulldocs contributes to the `/v1/capabilities` manifest
+  (M3). Each command is grounded in a route that `register_routes/1` ABOVE
+  actually mounts — `path_template` is the flat plugin path (the canonical
+  `/v1/plugins/bulldocs/…` prefix; the `/v1/paperflow/…` alias is a back-compat
+  mirror, not modelled here). Every ingest route maps to `auth_tier: "ingest"`,
+  the route's highway bucket.
+
+  Five verbs over four routes:
+
+    * `publish` — `POST /v1/plugins/bulldocs/papers` (the ingest endpoint;
+      `blocks` or `body_html` payload from a file/stdin). WRITES, MINIMAL receipt.
+    * `patch` — `POST /v1/plugins/bulldocs/papers/:slug/ops` (the batch ops
+      endpoint). Accepts an `{ops:[…]}` BATCH body applied atomically; carries
+      the optional `--if-rev` optimistic-concurrency guard (M3) the controller +
+      `Content.apply_paper_block_ops/2` honour. WRITES, BATCH.
+    * `intents` — `GET /v1/plugins/bulldocs/intents` (pending actionable intents,
+      oldest first). READ-shaped over the ingest pipeline.
+    * `intent-processed` — `POST /v1/plugins/bulldocs/intents/:id/processed`
+      (mark one intent drained). WRITES.
+
+  No `get`/`ls` paper verb is declared: the paper reader at `/papers/:slug` is a
+  LiveView (`:public_root`), not a JSON API route, so there is no honest flat
+  `http.path_template` for it — declaring one would invent an endpoint.
+  """
+  @impl Barkpark.Plugin
+  def cli_commands do
+    [
+      %{
+        id: "bulldocs.publish",
+        noun: "bulldocs",
+        verb: "publish",
+        summary: "Publish (upsert) a paper from a portable-doc or HTML payload.",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Paper slug (its public id)."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Payload (blocks or body_html) from a file or - for stdin."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "bulldocs.patch",
+        noun: "bulldocs",
+        verb: "patch",
+        summary: "Apply an atomic batch of block ops to a paper (optimistic --if-rev guard).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers/:slug/ops"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Paper slug to patch."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Ops payload {\"ops\":[…]} from a file or - for stdin."
+          },
+          %{
+            name: "if-rev",
+            type: "int",
+            summary: "Reject unless the paper is still at this rev (optimistic concurrency)."
+          }
+        ],
+        writes: true,
+        batch: true,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "bulldocs.intents",
+        noun: "bulldocs",
+        verb: "intents",
+        summary: "List pending actionable paper intents (oldest first).",
+        http: %{method: "GET", path_template: "/v1/plugins/bulldocs/intents"},
+        auth_tier: "ingest",
+        args: [],
+        flags: [],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "bulldocs.intent-processed",
+        noun: "bulldocs",
+        verb: "intent-processed",
+        summary: "Mark a pending intent processed so it drops out of the queue.",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/intents/:id/processed"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "id", required: true, type: "string", summary: "Intent (paper_event) id."}
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      }
+    ]
+  end
 end

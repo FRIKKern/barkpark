@@ -9,16 +9,22 @@ import (
 )
 
 const fixtureManifest = "../../docs/cli/fixtures/core-manifest.json"
+const fullManifest = "../../docs/cli/fixtures/full-manifest.json"
 
 func loadFixtureTree(t *testing.T) (*manifest.Manifest, *manifest.Tree) {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Clean(fixtureManifest))
+	return loadTreeFrom(t, fixtureManifest)
+}
+
+func loadTreeFrom(t *testing.T, path string) (*manifest.Manifest, *manifest.Tree) {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		t.Fatalf("read fixture: %v", err)
+		t.Fatalf("read fixture %s: %v", path, err)
 	}
 	m, err := manifest.Parse(body)
 	if err != nil {
-		t.Fatalf("parse fixture: %v", err)
+		t.Fatalf("parse fixture %s: %v", path, err)
 	}
 	return m, m.Tree()
 }
@@ -307,6 +313,142 @@ func TestIsProd(t *testing.T) {
 		Server: manifest.Server{Name: "dev", BaseURL: "http://localhost:4000"},
 	}) {
 		t.Errorf("localhost should not be prod")
+	}
+}
+
+// --- plugins-on manifest -----------------------------------------------------
+
+// TestPluginTreeFromFullManifest asserts that the command tree built from the
+// plugins-ON manifest surfaces the plugin nouns AND their verbs with zero
+// CLI-side code — the tree is a pure function of the manifest.
+func TestPluginTreeFromFullManifest(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+
+	// Plugin nouns must appear as top-level tree nodes, tagged with their plugin.
+	wantPluginNouns := map[string]string{
+		"bulldocs": "bulldocs",
+		"onixedit": "onixedit",
+	}
+	for noun, wantPlugin := range wantPluginNouns {
+		n, ok := lookupNoun(tree, noun)
+		if !ok {
+			t.Errorf("plugin noun %q missing from tree", noun)
+			continue
+		}
+		if n.Plugin == nil || *n.Plugin != wantPlugin {
+			t.Errorf("noun %q plugin tag = %v, want %q", noun, n.Plugin, wantPlugin)
+		}
+	}
+
+	// Each plugin noun's verbs must resolve through Tree.Lookup.
+	wantVerbs := map[string][]string{
+		"bulldocs": {"publish", "patch", "intents", "intent-processed"},
+		"onixedit": {"export"},
+	}
+	for noun, verbs := range wantVerbs {
+		for _, verb := range verbs {
+			cmd, ok := tree.Lookup(noun, verb)
+			if !ok {
+				t.Errorf("%s %s not found in tree", noun, verb)
+				continue
+			}
+			if cmd.Noun != noun || cmd.Verb != verb {
+				t.Errorf("%s %s resolved to %s %s", noun, verb, cmd.Noun, cmd.Verb)
+			}
+		}
+	}
+
+	// Core nouns must still be present alongside the plugin nouns.
+	for _, core := range []string{"doc", "schema", "media", "search"} {
+		if _, ok := lookupNoun(tree, core); !ok {
+			t.Errorf("core noun %q missing from full manifest tree", core)
+		}
+	}
+}
+
+// TestIngestAuthHeader asserts an ingest-tier command (bulldocs writes) sends
+// the ingest secret on the Authorization: Bearer header — NOT the bearer api
+// token — and prefers BARKPARK_INGEST_TOKEN over PAPERFLOW_INGEST_TOKEN over
+// the resolved api token.
+func TestIngestAuthHeader(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+	pub, ok := tree.Lookup("bulldocs", "publish")
+	if !ok {
+		t.Fatal("bulldocs publish missing")
+	}
+	if pub.AuthTier != "ingest" {
+		t.Fatalf("fixture changed: bulldocs publish tier = %q, want ingest", pub.AuthTier)
+	}
+
+	ctx := manifest.Context{Token: "api-bearer-tok"}
+
+	t.Run("BARKPARK_INGEST_TOKEN wins", func(t *testing.T) {
+		t.Setenv("BARKPARK_INGEST_TOKEN", "bp-ingest")
+		t.Setenv("PAPERFLOW_INGEST_TOKEN", "pf-ingest")
+		h := authHeaders(*pub, ctx)
+		if h["Authorization"] != "Bearer bp-ingest" {
+			t.Errorf("Authorization = %q, want Bearer bp-ingest", h["Authorization"])
+		}
+		if _, leaked := h["X-Ingest-Secret"]; leaked {
+			t.Errorf("legacy X-Ingest-Secret header must not be sent: %v", h)
+		}
+	})
+
+	t.Run("PAPERFLOW_INGEST_TOKEN fallback", func(t *testing.T) {
+		t.Setenv("BARKPARK_INGEST_TOKEN", "")
+		t.Setenv("PAPERFLOW_INGEST_TOKEN", "pf-ingest")
+		h := authHeaders(*pub, ctx)
+		if h["Authorization"] != "Bearer pf-ingest" {
+			t.Errorf("Authorization = %q, want Bearer pf-ingest", h["Authorization"])
+		}
+	})
+
+	t.Run("ingest secret is NOT the api bearer token", func(t *testing.T) {
+		t.Setenv("BARKPARK_INGEST_TOKEN", "distinct-ingest")
+		t.Setenv("PAPERFLOW_INGEST_TOKEN", "")
+		h := authHeaders(*pub, ctx)
+		if h["Authorization"] == "Bearer api-bearer-tok" {
+			t.Errorf("ingest command must not send the api bearer token")
+		}
+		if h["Authorization"] != "Bearer distinct-ingest" {
+			t.Errorf("Authorization = %q, want Bearer distinct-ingest", h["Authorization"])
+		}
+	})
+}
+
+// TestShortFileFlag asserts the -f short form aliases --file for a command that
+// declares a file flag (bulldocs patch), and that batch payload binds the same
+// way through both forms.
+func TestShortFileFlag(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+	patch, ok := tree.Lookup("bulldocs", "patch")
+	if !ok {
+		t.Fatal("bulldocs patch missing")
+	}
+
+	pos, flags, err := splitArgs(*patch, []string{"my-slug", "-f", "ops.json"})
+	if err != nil {
+		t.Fatalf("splitArgs -f: %v", err)
+	}
+	if !equalStrings(pos, []string{"my-slug"}) {
+		t.Errorf("pos = %v, want [my-slug]", pos)
+	}
+	if got := flags["file"]; len(got) != 1 || got[0] != "ops.json" {
+		t.Errorf("-f bound file = %v, want [ops.json]", got)
+	}
+
+	// Long form binds identically.
+	_, flags2, err := splitArgs(*patch, []string{"my-slug", "--file", "ops.json"})
+	if err != nil {
+		t.Fatalf("splitArgs --file: %v", err)
+	}
+	if got := flags2["file"]; len(got) != 1 || got[0] != "ops.json" {
+		t.Errorf("--file bound file = %v, want [ops.json]", got)
+	}
+
+	// An unknown short flag is rejected, not silently swallowed.
+	if _, _, err := splitArgs(*patch, []string{"my-slug", "-z", "x"}); err == nil {
+		t.Error("unknown short flag -z: expected error")
 	}
 }
 

@@ -117,13 +117,15 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 			h["Authorization"] = "Bearer " + ctx.Token
 		}
 	case "ingest":
-		// Ingest secret rides its own header; fall back to BARKPARK_INGEST_SECRET.
-		secret := os.Getenv("BARKPARK_INGEST_SECRET")
-		if secret == "" {
-			secret = ctx.Token // best-effort: a single configured secret
-		}
-		if secret != "" {
-			h["X-Ingest-Secret"] = secret
+		// Ingest commands (e.g. bulldocs writes) authenticate with the shared
+		// ingest secret, NOT the api_tokens bearer. The server's
+		// RequireIngestToken plug reads `Authorization: Bearer <secret>` and
+		// constant-time-compares it against the configured :paperflow_ingest_token
+		// (wired from PAPERFLOW_INGEST_TOKEN / BARKPARK_INGEST_TOKEN). So the
+		// secret rides the standard Authorization: Bearer header — same header,
+		// different credential source than the bearer api token.
+		if secret := ingestSecret(ctx); secret != "" {
+			h["Authorization"] = "Bearer " + secret
 		}
 	default:
 		// Unknown tier: be permissive and attach the token if we have one.
@@ -134,9 +136,35 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 	return h
 }
 
+// ingestSecret resolves the shared ingest secret for an `auth_tier: ingest`
+// command. It reads BARKPARK_INGEST_TOKEN first, then the PAPERFLOW_INGEST_TOKEN
+// alias (the original convergence env var the server still honours). As a last
+// resort it falls back to the resolved bearer token — best-effort only, for the
+// single-secret dev setup where both happen to be the same value. The server's
+// RequireIngestToken plug compares this against :paperflow_ingest_token.
+func ingestSecret(ctx manifest.Context) string {
+	if s := os.Getenv("BARKPARK_INGEST_TOKEN"); s != "" {
+		return s
+	}
+	if s := os.Getenv("PAPERFLOW_INGEST_TOKEN"); s != "" {
+		return s
+	}
+	return ctx.Token
+}
+
+// shortFlagAliases maps a single-dash short flag to the canonical long flag
+// name it stands for. Only -f/--file is wired today (the universal batch-payload
+// short form); the table keeps it discoverable and additive. A short alias is
+// only honoured when the command actually declares the long flag — so it never
+// invents a flag the manifest didn't.
+var shortFlagAliases = map[string]string{
+	"-f": "file",
+}
+
 // splitArgs separates positional args from command-local flags in tail.
 // Command flags are looked up in cmd.Flags; an unknown -flag is an error so a
-// typo doesn't get silently swallowed as a positional.
+// typo doesn't get silently swallowed as a positional. Long flags use
+// --name[=val]; the -f short form aliases --file when the command declares it.
 func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[string][]string, err error) {
 	flags = map[string][]string{}
 	byName := map[string]manifest.Flag{}
@@ -147,6 +175,8 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 	i := 0
 	for i < len(tail) {
 		a := tail[i]
+
+		// Long flag: --name or --name=value.
 		if len(a) >= 2 && strings.HasPrefix(a, "--") {
 			name := a[2:]
 			val := ""
@@ -175,6 +205,31 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			i++
 			continue
 		}
+
+		// Short flag: -f (and any future -x aliases). Resolve to its canonical
+		// long flag, then reuse the long-flag value-consume path.
+		if len(a) == 2 && a[0] == '-' && a != "-" {
+			long, aliased := shortFlagAliases[a]
+			if !aliased {
+				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+			}
+			f, ok := byName[long]
+			if !ok {
+				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+			}
+			if f.Type == "bool" {
+				flags[long] = append(flags[long], "true")
+				i++
+				continue
+			}
+			if i+1 >= len(tail) {
+				return nil, nil, fmt.Errorf("flag %s needs a value", a)
+			}
+			flags[long] = append(flags[long], tail[i+1])
+			i += 2
+			continue
+		}
+
 		pos = append(pos, a)
 		i++
 	}

@@ -162,7 +162,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   """
   # BATCH path — `{"ops": [ … ]}`. Detected by the array-native `"ops"` key,
   # mirroring the mutate controller's `%{"mutations" => list}` discriminator.
-  def apply_op(conn, %{"slug" => slug, "ops" => ops}) when is_list(ops) do
+  #
+  # M3: an OPTIONAL `"ifRev"` at the body head is an optimistic-concurrency
+  # guard. When present and != the paper's current rev, the batch is REJECTED
+  # with 412 precondition_failed BEFORE any op applies (additive — absent ifRev
+  # is the prior behaviour). Threaded into Content.apply_paper_block_ops/2 as the
+  # `:if_rev` opt so the check happens inside the atomic load, not racily here.
+  def apply_op(conn, %{"slug" => slug, "ops" => ops} = params) when is_list(ops) do
     cond do
       not Enum.all?(ops, &valid_op_shape?/1) ->
         conn
@@ -172,7 +178,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
         })
 
       true ->
-        case Content.apply_paper_block_ops(slug, ops) do
+        op_opts =
+          case Map.get(params, "ifRev") do
+            nil -> []
+            if_rev -> [if_rev: if_rev]
+          end
+
+        case Content.apply_paper_block_ops(slug, ops, Content.paper_default_dataset(), op_opts) do
           {:ok, result} ->
             # MINIMAL receipt — slug + op-count + new rev + affected block ids.
             # fragment_html is deliberately SUPPRESSED on the batch path.
@@ -184,6 +196,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
               op_count: result.op_count,
               rev: result.rev,
               block_ids: result.block_ids
+            })
+
+          {:error, :precondition_failed} ->
+            conn
+            |> put_status(:precondition_failed)
+            |> json(%{
+              error: %{
+                code: "precondition_failed",
+                message: "ifRev did not match the paper's current rev; no ops applied"
+              }
             })
 
           {:error, :not_found} ->

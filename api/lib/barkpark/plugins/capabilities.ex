@@ -478,11 +478,14 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
+      # from registry.ex) — it is reached via the core `search` noun's --engine
+      # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.
       core_cmd("search.query", "search", "query", "Full-text search documents in a dataset.",
         "GET", "/v1/data/search/:dataset", "none",
         args: [arg("q", true, "string", "Search query string.")],
         flags: [
-          flag("engine", "string", "Search engine (e.g. postgres, indx).", default: "postgres"),
+          flag("engine", "string", "Search engine: postgres | indx.", default: "postgres"),
           flag("limit", "int", "Max hits to return.", default: 50)
         ],
         paginated: true,

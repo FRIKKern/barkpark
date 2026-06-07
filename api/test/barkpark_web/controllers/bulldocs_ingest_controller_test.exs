@@ -358,5 +358,32 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert length(pc(paper, "blocks")) == 1
       assert pc(paper, "rev") == rev0
     end
+
+    # ── M3 optimistic-concurrency guard (ifRev) ──────────────────────────
+    test "ifRev matching the current rev applies the batch",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      conn = auth_post_b(conn, slug, %{"ifRev" => rev0, "ops" => [append_op_b("b1", "ok")]})
+
+      resp = json_response(conn, 200)
+      assert resp["ok"] == true
+      assert resp["rev"] == rev0 + 1
+
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 2
+    end
+
+    test "stale ifRev → 412 precondition_failed, paper rolled back (no op applied)",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      conn = auth_post_b(conn, slug, %{"ifRev" => rev0 - 1, "ops" => [append_op_b("b1", "nope")]})
+
+      resp = json_response(conn, 412)
+      assert resp["error"]["code"] == "precondition_failed"
+
+      # Untouched: still the seeded block at the original rev.
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 1
+      assert pc(paper, "rev") == rev0
+      refute pc(paper, "body_html") =~ "nope"
+    end
   end
 end

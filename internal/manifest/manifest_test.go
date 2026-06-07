@@ -239,7 +239,8 @@ func nounNode(tree *Tree, name string) (*TreeNoun, bool) {
 	return nil, false
 }
 
-// (c) BuildURL fills a template + prepends scoped_prefix correctly.
+// (c) BuildURL fills a template; scoped_prefix is INERT in v1 (flat path) and
+// prepended only when ctx.ScopedMirror is true (the deferred mirror, rule #4).
 func TestBuildURL(t *testing.T) {
 	admin := parseFixture(t, "core-manifest.json")
 	tree := admin.Tree()
@@ -250,15 +251,27 @@ func TestBuildURL(t *testing.T) {
 		Dataset:   "production",
 	}
 
-	// Scoped command: doc.get — scoped_prefix prepended, :dataset/:type/:doc_id filled.
 	docGet, _ := tree.Lookup("doc", "get")
+
+	// v1 (ScopedMirror false): scoped_prefix is inert -> FLAT path, no prepend.
+	// This is what the live flat API actually serves.
 	url, err := admin.BuildURL(*docGet, ctx, map[string]string{"type": "post", "doc_id": "p1"})
 	if err != nil {
 		t.Fatalf("BuildURL doc.get: %v", err)
 	}
-	want := "https://api.barkpark.cloud/w/acme/p/site/v1/data/doc/production/post/p1"
-	if url != want {
-		t.Errorf("doc.get url = %q, want %q", url, want)
+	if want := "https://api.barkpark.cloud/v1/data/doc/production/post/p1"; url != want {
+		t.Errorf("doc.get (flat v1) url = %q, want %q", url, want)
+	}
+
+	// Future (ScopedMirror true): the scoped_prefix hint activates and prepends.
+	ctxMirror := ctx
+	ctxMirror.ScopedMirror = true
+	url, err = admin.BuildURL(*docGet, ctxMirror, map[string]string{"type": "post", "doc_id": "p1"})
+	if err != nil {
+		t.Fatalf("BuildURL doc.get (mirror): %v", err)
+	}
+	if want := "https://api.barkpark.cloud/w/acme/p/site/v1/data/doc/production/post/p1"; url != want {
+		t.Errorf("doc.get (scoped mirror) url = %q, want %q", url, want)
 	}
 
 	// Flat command (scoped_prefix null): workspace.ls — no prefix prepended.

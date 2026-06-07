@@ -120,11 +120,15 @@ These are the invariants every Wave-2 deliverable must uphold.
    exit code (`error-exit-table.md`). The CLI maps the `code`, never re-derives
    from HTTP status.
 
-4. **Flat path templates + local scope-prefix prepend.** Every command's
-   `http.path_template` is FLAT. When a command carries a `scoped_prefix` hint, the
-   CLI prepends its own `/w/:ws/p/:project` prefix locally from resolved scope. The
-   scoped *mirror endpoint* itself is deferred — the hint ships, the endpoint does
-   not.
+4. **Flat path templates; the `scoped_prefix` hint is INERT in v1.** Every
+   command's `http.path_template` is FLAT and is exactly what the CLI calls in v1.
+   A command MAY carry a `scoped_prefix` hint, but because the scoped *mirror
+   endpoint* is deferred (it exists on no server today), the CLI does **NOT**
+   prepend it in v1 — prepending `/w/:ws/p/:project` onto a flat-only server turns
+   `/v1/data/...` into `/w/default/p/default/v1/data/...`, which 404/403s and would
+   break every core command. The hint ships in the manifest for
+   forward-compatibility; the CLI activates the prepend only when a server
+   advertises the mirror (gated by `Context.ScopedMirror`, false in v1).
 
 5. **`dry_run` is honest.** The manifest's `dry_run` is `true` ONLY when the server
    genuinely supports validate-only for that command. It ships `false` across the
