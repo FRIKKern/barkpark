@@ -32,16 +32,29 @@ mix deps.compile --force
 mix compile
 cd ..
 
-# Rebuild Go TUI
-echo "[post-merge] Building Go TUI..."
-go mod tidy 2>/dev/null
-go build -o bin/barkpark . 2>/dev/null
-
-# Restart service
+# Restart the API service FIRST. The API is the only workload this server runs;
+# it must never be held hostage to the client TUI build below. (Past incident:
+# a Go module floor bump would have failed `go build` under `set -e` and
+# silently skipped this restart, half-deploying the API.)
 if systemctl is-active barkpark > /dev/null 2>&1; then
   echo "[post-merge] Restarting service..."
   sudo systemctl restart barkpark
   echo "[post-merge] Done. Service restarted."
 else
   echo "[post-merge] Service not running. Start with: systemctl start barkpark"
+fi
+
+# Rebuild the Go TUI client — NON-FATAL by design. The server runs the API,
+# not the TUI, so a TUI build/dep failure must never abort the deploy or skip
+# the restart above. Failures are surfaced as a WARN, not hidden behind
+# 2>/dev/null. (set -e is suppressed inside the `if` condition.)
+echo "[post-merge] Building Go TUI client (non-fatal)..."
+if command -v go > /dev/null 2>&1; then
+  if go mod tidy && go build -o bin/barkpark . ; then
+    echo "[post-merge] Go TUI client built."
+  else
+    echo "[post-merge] WARN: Go TUI client build failed — API deploy unaffected."
+  fi
+else
+  echo "[post-merge] go not found — skipping TUI client build."
 fi
