@@ -965,15 +965,26 @@ func (m model) buildEditorContent(width int) string {
 func (m model) renderField(field Field, width int, isFocused, isEditing bool) []string {
 	var lines []string
 
-	// Label — highlight when focused
-	label := "  " + strings.ToUpper(field.Title)
+	// Label — highlight when focused. A right-aligned dim annotation (e.g. the
+	// slug field's [gen]) rides on the label line so every field box can keep the
+	// same full width and all the box right edges line up.
+	labelText := "  " + strings.ToUpper(field.Title)
+	labelStyle := editorLabelStyle
 	if isFocused {
-		lines = append(lines, lipgloss.NewStyle().
-			Bold(true).
-			Foreground(highlight).
-			Render(label))
+		labelStyle = lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	}
+	annotation := ""
+	if field.Type == FieldSlug {
+		annotation = dimStyle.Render("[gen]")
+	}
+	if annotation != "" {
+		gap := width - lipgloss.Width(labelText) - lipgloss.Width(annotation)
+		if gap < 1 {
+			gap = 1
+		}
+		lines = append(lines, labelStyle.Render(labelText)+strings.Repeat(" ", gap)+annotation)
 	} else {
-		lines = append(lines, editorLabelStyle.Render(label))
+		lines = append(lines, labelStyle.Render(labelText))
 	}
 
 	val := m.getFieldValue(field.Name)
@@ -1010,15 +1021,12 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		if slug == "" && m.selectedDoc != nil {
 			slug = toSlug(m.selectedDoc.Title)
 		}
-		slugWidth := fieldContentWidth - 6
-		if slugWidth < 10 {
-			slugWidth = 10
-		}
+		// Full width like every other field — the [gen] hint moved to the label
+		// line above so all the box right edges align.
 		if isEditing {
-			lines = append(lines, "  "+activeFieldStyle.Width(slugWidth).Render(m.textInput.View())+" "+dimStyle.Render("[gen]"))
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
 		} else {
-			box := activeFieldStyle.Width(slugWidth).Render(dimStyle.Render(slug))
-			lines = append(lines, "  "+box+" "+dimStyle.Render("[gen]"))
+			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(slug)))
 		}
 
 	case FieldText:
