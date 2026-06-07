@@ -88,6 +88,10 @@ func Execute(args []string) int {
 		return runCapabilities(out, g, ctx)
 	case "whoami":
 		return runWhoami(out, g, ctx)
+	case "setup":
+		// setup's own --flags are not global flags, so parseGlobals passed them
+		// through into rest as verb+tail. Hand setup everything after the noun.
+		return runSetup(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}
@@ -133,12 +137,26 @@ func Execute(args []string) int {
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
-// resolveContext composes the manifest.Context from globals + env + defaults.
-// Env is read through apiclient.ConfigFromEnv so the CLI and TUI share one
-// BARKPARK_* contract. Flags win over env; the baked DefaultDefaults are the
-// floor.
+// resolveContext composes the manifest.Context by precedence:
+//
+//	flags > env(actually-set) > active(persisted config) > baked defaults
+//
+// The crucial subtlety: apiclient.ConfigFromEnv() bakes a non-empty
+// localhost/dev-token/default floor even when no BARKPARK_* var is set, which
+// would mask the persisted-config layer entirely. So the CLI reads the env layer
+// from the RAW vars (envContext) — an UNSET var leaves the field empty so the
+// saved config can win — and moves apiclient's historical floor down into the
+// Defaults layer where it belongs. A var the operator DID set still wins over the
+// config, exactly as documented. The TUI's apiclient.ConfigFromEnv contract is
+// untouched (this is a CLI-local read).
 func resolveContext(g globals) manifest.Context {
-	env := apiclient.ConfigFromEnv()
+	// Persisted config is the ActiveContext layer. A missing/empty config is a
+	// no-op (empty ActiveContext); a malformed one is non-fatal here — we fall
+	// back to the empty active layer rather than failing every command.
+	var active manifest.ActiveContext
+	if cfg, err := LoadConfig(); err == nil {
+		active = cfg.ToActiveContext()
+	}
 
 	flags := map[string]string{}
 	if g.server != "" {
@@ -157,7 +175,36 @@ func resolveContext(g globals) manifest.Context {
 		flags[manifest.FlagOutput] = g.output
 	}
 
-	return manifest.Resolve(flags, env, manifest.ActiveContext{}, manifest.DefaultDefaults())
+	return manifest.Resolve(flags, envContext(), active, bakedDefaults())
+}
+
+// envContext reads ONLY the BARKPARK_* vars that are actually set, leaving every
+// unset field empty so a lower layer (persisted config, baked defaults) can win.
+// This is deliberately NOT apiclient.ConfigFromEnv (which bakes a non-empty
+// floor); the floor lives in bakedDefaults instead.
+func envContext() apiclient.Config {
+	server := os.Getenv("BARKPARK_API_URL")
+	if server == "" {
+		server = os.Getenv("BARKPARK_SERVER")
+	}
+	return apiclient.Config{
+		BaseURL:   server,
+		Token:     os.Getenv("BARKPARK_API_TOKEN"),
+		Workspace: os.Getenv("BARKPARK_WORKSPACE"),
+		Project:   os.Getenv("BARKPARK_PROJECT"),
+		Dataset:   os.Getenv("BARKPARK_DATASET"),
+	}
+}
+
+// bakedDefaults is the lowest-precedence floor — the same values
+// apiclient.ConfigFromEnv historically baked into the env layer, relocated here
+// so they only apply when neither an env var nor the persisted config supplies
+// the field.
+func bakedDefaults() manifest.Defaults {
+	d := manifest.DefaultDefaults()
+	d.Server = "http://localhost:4000"
+	d.Token = "barkpark-dev-token"
+	return d
 }
 
 // lookupNoun returns the noun node if present.

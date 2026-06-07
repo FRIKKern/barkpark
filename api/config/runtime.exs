@@ -76,6 +76,22 @@ if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
 end
 
+# Plugin selection from `bp setup` (BARKPARK_PLUGINS in .env). This is the
+# runtime side of the registry kill switch — see
+# `Barkpark.Plugins.Registry.discover_and_register/0`:
+#
+#   * env UNSET  -> leave :plugins unconfigured = discover-all-from-disk
+#                   (fresh-install / production default — do NOT force []).
+#   * env ""     -> config :plugins, [] = the kill switch (register nothing).
+#   * env "a,b"  -> config :plugins, ["a", "b"] = explicit whitelist.
+#
+# `EnvConfig.parse/1` returns `:unset` only for nil, so the common unset case
+# never touches the env and behaviour is identical to before.
+case Barkpark.Plugins.EnvConfig.parse(System.get_env("BARKPARK_PLUGINS")) do
+  :unset -> :ok
+  plugins when is_list(plugins) -> config :barkpark, :plugins, plugins
+end
+
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
     val when is_binary(val) and val != "" ->
