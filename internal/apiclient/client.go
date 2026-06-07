@@ -311,11 +311,20 @@ func (c *Client) Query(typeName, filter string) []Doc {
 		return nil
 	}
 
+	// The query controller wraps the page in {"result":{"documents":[...]}};
+	// some/older endpoints put "documents" at the top level. Accept both so the
+	// TUI's lists populate regardless of the envelope shape.
 	var result struct {
+		Result struct {
+			Documents []Doc `json:"documents"`
+		} `json:"result"`
 		Documents []Doc `json:"documents"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil
+	}
+	if len(result.Result.Documents) > 0 {
+		return result.Result.Documents
 	}
 	return result.Documents
 }
