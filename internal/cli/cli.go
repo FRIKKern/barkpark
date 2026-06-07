@@ -104,6 +104,13 @@ func Execute(args []string) int {
 		// setup's own --flags are not global flags, so parseGlobals passed them
 		// through into rest as verb+tail. Hand setup everything after the noun.
 		return runSetup(out, g, rest[1:])
+	case "migrate":
+		// `bp migrate <from> <to> [flags]` — server-to-server data copy. A
+		// built-in (not a manifest command) because it spans TWO servers and
+		// must resolve both via the saved-server config before any network call.
+		// --yes is a global bool, but migrate also accepts its own flags, so we
+		// hand it everything after the noun.
+		return runMigrate(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}

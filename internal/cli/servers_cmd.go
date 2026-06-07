@@ -1,5 +1,10 @@
 package cli
 
+import (
+	"fmt"
+	"strings"
+)
+
 // runUse is the `bp use <name|url>` built-in — the headline of the named-server
 // switching layer. It flips the active server LOCALLY: resolve the argument to a
 // known entry, promote it to the active flat context, save, and print. There is
@@ -31,12 +36,14 @@ func runUse(out *writer, args []string) int {
 	}
 
 	name := cfg.DisplayName(entry)
+	kind := cfg.KindOf(entry)
 	if out.output == "json" {
 		out.renderJSON(map[string]any{
 			"ok": true,
 			"active": map[string]any{
 				"name":      name,
 				"server":    cfg.Server,
+				"kind":      kind,
 				"workspace": cfg.Workspace,
 				"project":   cfg.Project,
 				"dataset":   cfg.Dataset,
@@ -44,8 +51,8 @@ func runUse(out *writer, args []string) int {
 		})
 		return exitOK
 	}
-	out.outf("✓ now using %s — %s  (scope w=%s p=%s d=%s)",
-		name, cfg.Server, cfg.Workspace, cfg.Project, cfg.Dataset)
+	out.outf("✓ now using %s [%s] — %s  (scope w=%s p=%s d=%s)",
+		name, kind, cfg.Server, cfg.Workspace, cfg.Project, cfg.Dataset)
 	return exitOK
 }
 
@@ -54,8 +61,10 @@ func runUse(out *writer, args []string) int {
 func runUseStatus(out *writer, cfg *Config) int {
 	activeEntry, hasActive := activeEntry(cfg)
 	activeName := ""
+	activeKind := ""
 	if hasActive {
 		activeName = cfg.DisplayName(activeEntry)
+		activeKind = cfg.KindOf(activeEntry)
 	}
 	names := knownNames(cfg)
 
@@ -65,6 +74,7 @@ func runUseStatus(out *writer, cfg *Config) int {
 			active = map[string]any{
 				"name":      activeName,
 				"server":    cfg.Server,
+				"kind":      activeKind,
 				"workspace": cfg.Workspace,
 				"project":   cfg.Project,
 				"dataset":   cfg.Dataset,
@@ -79,8 +89,8 @@ func runUseStatus(out *writer, cfg *Config) int {
 	}
 
 	if hasActive {
-		out.outf("active: %s — %s  (scope w=%s p=%s d=%s)",
-			activeName, cfg.Server, cfg.Workspace, cfg.Project, cfg.Dataset)
+		out.outf("active: %s [%s] — %s  (scope w=%s p=%s d=%s)",
+			activeName, activeKind, cfg.Server, cfg.Workspace, cfg.Project, cfg.Dataset)
 	} else if cfg.Server != "" {
 		out.outf("active: %s  (not in known servers)", cfg.Server)
 	} else {
@@ -128,7 +138,23 @@ func runServers(out *writer, args []string) int {
 	if err != nil {
 		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
 	}
+
+	// Optional --kind local|cloud filter. An unrecognised value is a usage error.
+	kindFilter, kerr := parseKindFlag(args)
+	if kerr != nil {
+		return useError(out, "usage", kerr.Error(), exitUsage)
+	}
+
 	list := cfg.KnownServerList()
+	if kindFilter != "" {
+		filtered := make([]ServerEntry, 0, len(list))
+		for _, e := range list {
+			if cfg.KindOf(e) == kindFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		list = filtered
+	}
 	activeName := ""
 	if e, ok := activeEntry(cfg); ok {
 		activeName = cfg.DisplayName(e)
@@ -140,6 +166,7 @@ func runServers(out *writer, args []string) int {
 			rows = append(rows, map[string]any{
 				"name":           cfg.DisplayName(e),
 				"server":         e.Server,
+				"kind":           cfg.KindOf(e),
 				"active":         cfg.IsActiveServer(e.Server),
 				"last_connected": e.LastConnected,
 				"tier":           e.Tier,
@@ -153,17 +180,22 @@ func runServers(out *writer, args []string) int {
 	}
 
 	if len(list) == 0 {
-		out.outf("no saved servers yet — run 'bp setup --target connect --server <url>'")
+		if kindFilter != "" {
+			out.outf("no saved %s servers", kindFilter)
+		} else {
+			out.outf("no saved servers yet — run 'bp setup --target connect --server <url>'")
+		}
 		return exitOK
 	}
 
-	// Human table: ★ NAME  URL  (tier, last_connected)
+	// Human table: ★ NAME  [kind]  URL  (tier, last_connected)
 	for _, e := range list {
 		mark := "  "
 		if cfg.IsActiveServer(e.Server) {
 			mark = "★ "
 		}
 		name := cfg.DisplayName(e)
+		kind := "[" + cfg.KindOf(e) + "]"
 		extra := ""
 		switch {
 		case e.Tier != "" && e.LastConnected != "":
@@ -173,9 +205,40 @@ func runServers(out *writer, args []string) int {
 		case e.LastConnected != "":
 			extra = "  (" + e.LastConnected + ")"
 		}
-		out.outf("%s%-12s %s%s", mark, name, e.Server, extra)
+		out.outf("%s%-12s %-8s %s%s", mark, name, kind, e.Server, extra)
 	}
 	return exitOK
+}
+
+// parseKindFlag scans args for a `--kind <value>` or `--kind=<value>` flag and
+// returns the lowercased value ("local"/"cloud"), "" when absent. Any other
+// value — or a missing argument after a bare `--kind` — is a usage error.
+func parseKindFlag(args []string) (string, error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		val := ""
+		switch {
+		case a == "--kind":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("--kind needs a value: local|cloud")
+			}
+			val = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--kind="):
+			val = a[len("--kind="):]
+		default:
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "local":
+			return "local", nil
+		case "cloud":
+			return "cloud", nil
+		default:
+			return "", fmt.Errorf("invalid --kind %q: want local|cloud", val)
+		}
+	}
+	return "", nil
 }
 
 // activeEntry returns the known ServerEntry that matches the active flat server,

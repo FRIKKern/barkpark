@@ -184,13 +184,21 @@ For agents the flow is **preview, then execute**: `--dry-run -o json` returns th
 bp setup --target connect --dry-run -o json | jq '.known_servers'   # the remembered servers (★ = active)
 ```
 
-**Jumping between servers.** Running a local dev box plus one or more remotes is the normal case. Each remembered server gets a short name (auto-derived — `localhost` → `local`, otherwise the host label, e.g. `api.barkpark.cloud` → `barkpark`; override with `bp setup --name prod`). Switching is **local and instant — no network call:**
+**Jumping between servers.** Running a local dev box plus one or more remotes is the normal case — **many servers coexist** (several locals, several remotes). Each remembered server gets a short name (auto-derived — `localhost` → `local`, otherwise the host label, e.g. `api.barkpark.cloud` → `barkpark`; override with `bp setup --name prod`) and a **kind** `bp servers` shows in-line: `[local]` for the loopback family, `*.local`, and RFC1918 private IPs; `[cloud]` for everything else. Switching is **local and instant — no network call:**
 
 ```bash
-bp servers                       # list saved servers (★ = active)
-bp use prod                      # flip the default to prod (instant, offline)
-bp doc ls post                   # …now runs against prod
+bp servers                       # list saved servers (★ = active, kind shown as [local]/[cloud])
+bp use barkpark                  # flip the default to the cloud server (instant, offline)
+bp doc ls post                   # …now runs against barkpark
 bp -s local doc ls post          # target one server for a single command, default unchanged
+```
+
+**Copy data between servers.** `bp migrate <from> <to>` copies every document (drafts + published) from one saved server to another in one command — **dry-run first by default** (prints the plan, writes nothing), `--yes` to execute, and a cloud target is never written without `--yes` and prints a ⚠ warning:
+
+```bash
+bp migrate local barkpark                       # dry-run: plan only, nothing written
+bp migrate local barkpark --type post --yes     # execute: copy just the `post` type
+bp migrate prod local --include-schemas --yes   # pull prod → local, schemas first
 ```
 
 ```bash

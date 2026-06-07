@@ -57,6 +57,11 @@ type ServerEntry struct {
 	Dataset       string `json:"dataset,omitempty"`
 	Tier          string `json:"tier,omitempty"`
 	LastConnected string `json:"last_connected,omitempty"`
+	// Kind is an OPTIONAL override for the derived local/cloud classification. It
+	// is left empty by default — KindOf derives "local"/"cloud" from the URL on
+	// demand — and exists only so a future workflow can pin an entry's kind (e.g.
+	// a private-IP server the user wants treated as "cloud"). Empty → derived.
+	Kind string `json:"kind,omitempty"`
 }
 
 // maxKnownServers caps the connect history so the file never grows unbounded.
@@ -262,6 +267,31 @@ func (c *Config) DisplayName(e ServerEntry) string {
 	}
 	base := deriveName(e.Server)
 	key := normalizeServerURL(e.Server)
+
+	// Localhost family special-case: the bare "local" handle goes to whichever
+	// local sorts FIRST (most-recent-first); any additional local disambiguates by
+	// PORT ("local-4001") rather than a bare ordinal. "Already claimed" counts any
+	// earlier entry whose DISPLAY handle is "local" — including one that carries an
+	// explicit Name "local" — so we never print two identical "local" rows.
+	if base == "local" {
+		claimed := false
+		for _, other := range c.KnownServers {
+			if normalizeServerURL(other.Server) == key {
+				break
+			}
+			if strings.EqualFold(c.DisplayName(other), "local") {
+				claimed = true
+				break
+			}
+		}
+		name := localBaseName(e.Server, !claimed)
+		if name != "local" || !claimed {
+			return name
+		}
+		// Port-less additional local with the bare handle taken — ordinal fallback.
+		return fmt.Sprintf("%s-2", base)
+	}
+
 	// Walk the list; count how many DISTINCT earlier servers derive the same base
 	// (skipping ones that carry an explicit Name — those don't claim the base).
 	rank := 0
@@ -280,6 +310,67 @@ func (c *Config) DisplayName(e ServerEntry) string {
 		return base
 	}
 	return fmt.Sprintf("%s-%d", base, rank+1)
+}
+
+// ServerKind classifies a server URL as "local" or "cloud" from its host alone,
+// dependency-free (no net/url, reusing hostOf / isIPv4). "local" covers the
+// loopback family (localhost, 127.0.0.1, ::1, [::1]), any *.local mDNS name, and
+// the RFC1918 private IPv4 ranges (10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12 —
+// i.e. 172.16–172.31). Everything else — public DNS names and public IPs — is
+// "cloud". This is the deriving classifier; an explicit ServerEntry.Kind
+// override (when present) is honoured by Config.KindOf, not here.
+func ServerKind(server string) string {
+	host := strings.ToLower(hostOf(server))
+	if host == "" {
+		return "cloud"
+	}
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return "local"
+	}
+	// *.local mDNS names (e.g. mymac.local) are local.
+	if strings.HasSuffix(host, ".local") {
+		return "local"
+	}
+	// RFC1918 private IPv4 ranges → local.
+	if isIPv4(host) {
+		parts := strings.Split(host, ".")
+		a := atoiByte(parts[0])
+		b := atoiByte(parts[1])
+		switch {
+		case a == 10:
+			return "local"
+		case a == 192 && b == 168:
+			return "local"
+		case a == 172 && b >= 16 && b <= 31:
+			return "local"
+		}
+		return "cloud"
+	}
+	return "cloud"
+}
+
+// atoiByte parses a 1–3 digit decimal octet to an int (0 on garbage). Cheap, no
+// strconv — the input is already isIPv4-validated to be all-digit, ≤3 chars.
+func atoiByte(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// KindOf returns the kind of one entry: its explicit Kind override when set,
+// else the derived ServerKind of its URL. The free ServerKind ignores overrides;
+// this method is the one to call when an entry might carry a pin.
+func (c *Config) KindOf(e ServerEntry) string {
+	if k := strings.TrimSpace(e.Kind); k != "" {
+		return k
+	}
+	return ServerKind(e.Server)
 }
 
 // deriveName turns a server URL into a base handle (no uniqueness). It is the
@@ -325,6 +416,16 @@ func deriveUniqueName(server string, others []ServerEntry) string {
 	if !taken[strings.ToLower(base)] {
 		return base
 	}
+	// Localhost family: prefer "local-<port>" over a bare ordinal when the base
+	// "local" is already claimed and this server carries a port.
+	if base == "local" {
+		if p := portOf(server); p != "" {
+			cand := "local-" + p
+			if !taken[strings.ToLower(cand)] {
+				return cand
+			}
+		}
+	}
 	for n := 2; ; n++ {
 		cand := fmt.Sprintf("%s-%d", base, n)
 		if !taken[strings.ToLower(cand)] {
@@ -360,6 +461,54 @@ func hostOf(raw string) string {
 		s = s[:c]
 	}
 	return s
+}
+
+// portOf extracts the port from a URL's authority, or "" when none is present.
+// Mirrors hostOf's parsing: strips scheme, path, and userinfo, leaves an IPv6
+// literal's bracketed body alone, and returns the text after the LAST ':' when
+// that ':' sits outside any bracket. "http://localhost:4001/x" → "4001".
+func portOf(raw string) string {
+	s := strings.TrimSpace(raw)
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if j := strings.IndexByte(s, '/'); j >= 0 {
+		s = s[:j]
+	}
+	if at := strings.LastIndexByte(s, '@'); at >= 0 {
+		s = s[at+1:]
+	}
+	// Bracketed IPv6 literal — a port follows the closing ']'.
+	if strings.HasPrefix(s, "[") {
+		if end := strings.IndexByte(s, ']'); end >= 0 {
+			rest := s[end+1:]
+			if strings.HasPrefix(rest, ":") {
+				return rest[1:]
+			}
+			return ""
+		}
+		return ""
+	}
+	if c := strings.LastIndexByte(s, ':'); c >= 0 {
+		return s[c+1:]
+	}
+	return ""
+}
+
+// localBaseName derives the base handle for a server already known to derive the
+// localhost base "local". The FIRST local keeps the bare "local"; an additional
+// local on a DIFFERENT port disambiguates by port ("local-4001") rather than a
+// bare ordinal "-2". isFirst tells the caller whether this entry is the one that
+// claims the bare "local" (the most-recent-first front local). When the port is
+// absent or the entry is the first local, the bare base "local" is returned.
+func localBaseName(server string, isFirst bool) string {
+	if isFirst {
+		return "local"
+	}
+	if p := portOf(server); p != "" {
+		return "local-" + p
+	}
+	return "local"
 }
 
 // isIPv4 reports whether s is a dotted-quad IPv4 literal (cheap check, no net).

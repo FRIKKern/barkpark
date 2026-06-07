@@ -116,6 +116,16 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 	source, active, name := whoamiSourceName(g, ctx)
 	tokenPresent := ctx.Token != ""
 
+	// Kind classification of the resolved target — honour a known entry's Kind
+	// override when ctx.Server matches one, else derive local/cloud from the URL.
+	// whoami works without any saved config, so the free ServerKind is the floor.
+	kind := ServerKind(ctx.Server)
+	if cfg, _ := LoadConfig(); cfg != nil {
+		if e, ok := cfg.FindServer(ctx.Server); ok {
+			kind = cfg.KindOf(e)
+		}
+	}
+
 	// Best-effort manifest fetch (short timeout via loadManifest's client). On
 	// ANY failure we leave the server identity / tier / prod fields unknown and
 	// mark the server unreachable — whoami must not die because the server is.
@@ -145,6 +155,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		out.renderJSON(map[string]any{
 			"name":          name,
 			"server":        ctx.Server,
+			"kind":          kind,
 			"source":        source,
 			"active":        active,
 			"workspace":     ctx.Workspace,
@@ -172,9 +183,9 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		prodMark = "  ⚠ PROD"
 	}
 	if name != "" {
-		out.outf("target:    %s — %s (%s)%s", name, ctx.Server, whoamiSourceLabel(source, active), prodMark)
+		out.outf("target:    %s — %s [%s] (%s)%s", name, ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
 	} else {
-		out.outf("target:    %s (%s)%s", ctx.Server, whoamiSourceLabel(source, active), prodMark)
+		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
 	}
 	out.outf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)
 	if tokenPresent {

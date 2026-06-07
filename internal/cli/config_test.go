@@ -351,6 +351,93 @@ func TestFindServer(t *testing.T) {
 	}
 }
 
+func TestServerKind(t *testing.T) {
+	cases := []struct {
+		server string
+		want   string
+	}{
+		{"http://localhost:4000", "local"},
+		{"http://127.0.0.1:4000", "local"},
+		{"http://[::1]:4000", "local"},
+		{"http://mymac.local:4000", "local"},
+		{"http://10.0.0.5:4000", "local"},
+		{"http://192.168.1.20:4000", "local"},
+		{"http://172.16.0.1:4000", "local"},
+		{"http://172.31.255.255:4000", "local"},
+		{"http://172.15.0.1:4000", "cloud"}, // just below the private range
+		{"http://172.32.0.1:4000", "cloud"}, // just above the private range
+		{"http://8.8.8.8:4000", "cloud"},
+		{"https://api.barkpark.cloud", "cloud"},
+		{"https://staging.foo.com", "cloud"},
+		{"", "cloud"},
+	}
+	for _, tc := range cases {
+		if got := ServerKind(tc.server); got != tc.want {
+			t.Errorf("ServerKind(%q) = %q, want %q", tc.server, got, tc.want)
+		}
+	}
+}
+
+func TestKindOfHonorsOverride(t *testing.T) {
+	var c *Config // KindOf is nil-safe via the receiver guard below
+	c = &Config{}
+	// Derived when no override.
+	if got := c.KindOf(ServerEntry{Server: "http://localhost:4000"}); got != "local" {
+		t.Errorf("derived kind = %q, want local", got)
+	}
+	// Explicit override wins over the derived classification (a private IP pinned
+	// to cloud).
+	if got := c.KindOf(ServerEntry{Server: "http://10.0.0.5:4000", Kind: "cloud"}); got != "cloud" {
+		t.Errorf("override kind = %q, want cloud", got)
+	}
+}
+
+func TestMultiLocalNamingByPort(t *testing.T) {
+	// Two locals on different ports: the first (front, most-recent-first) keeps the
+	// bare "local"; the second disambiguates by PORT, not a bare ordinal.
+	c := &Config{KnownServers: []ServerEntry{
+		{Name: "local", Server: "http://localhost:4000"}, // front → "local"
+		{Server: "http://localhost:4001"},                 // unnamed later → "local-4001"
+	}}
+	if got := c.DisplayName(c.KnownServers[0]); got != "local" {
+		t.Errorf("front local = %q, want local", got)
+	}
+	if got := c.DisplayName(c.KnownServers[1]); got != "local-4001" {
+		t.Errorf("second local = %q, want local-4001", got)
+	}
+
+	// RememberServer derives the same port-disambiguated handle at connect time.
+	rc := &Config{}
+	rc.RememberServer(ServerEntry{Server: "http://localhost:4000", LastConnected: "2026-06-01T00:00:00Z"})
+	rc.RememberServer(ServerEntry{Server: "http://localhost:4001", LastConnected: "2026-06-02T00:00:00Z"})
+	names := map[string]string{}
+	for _, e := range rc.KnownServerList() {
+		names[e.Server] = e.Name
+	}
+	if names["http://localhost:4000"] != "local" {
+		t.Errorf("first local name = %q, want local", names["http://localhost:4000"])
+	}
+	if names["http://localhost:4001"] != "local-4001" {
+		t.Errorf("second local name = %q, want local-4001", names["http://localhost:4001"])
+	}
+}
+
+func TestPortOf(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"http://localhost:4001/x", "4001"},
+		{"http://localhost", ""},
+		{"https://api.barkpark.cloud", ""},
+		{"http://[::1]:4000", "4000"},
+		{"http://[::1]", ""},
+		{"http://user@host:8080", "8080"},
+	}
+	for _, tc := range cases {
+		if got := portOf(tc.in); got != tc.want {
+			t.Errorf("portOf(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestSetActiveServer(t *testing.T) {
 	c := &Config{Server: "http://localhost:4000", Token: "dev", Workspace: "default", Project: "default", Dataset: "production"}
 	c.SetActiveServer(ServerEntry{Server: "https://api.barkpark.cloud", Token: "tok-cloud", Dataset: "staging"})

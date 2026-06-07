@@ -556,7 +556,19 @@ connect: a fresh install starts with an empty cache.
 
 Once two or more servers are in the cache, three built-ins (no manifest, no
 network) move between them. Switching is **local and instant** — `bp use` only
-rewrites the active fields in `config.json`; nothing is contacted.
+rewrites the active fields in `config.json`; nothing is contacted. Any number of
+servers coexist — several locals **and** several remotes in the same cache.
+
+**Server kinds.** Each server is classified `local` or `cloud`, derived from its
+host alone (`ServerKind`, `internal/cli/config.go`): the loopback family
+(`localhost` / `127.0.0.1` / `::1`), any `*.local` mDNS name, and the RFC1918
+private IPv4 ranges (`10.0.0.0/8`, `192.168.0.0/16`, `172.16.0.0/12`) are
+`local`; every public DNS name or public IP is `cloud`. The cache happily holds
+**multiple of each kind** — `bp servers` shows the kind as `[local]`/`[cloud]`
+on every row, and you can filter with `bp servers --kind local|cloud`. (An entry
+may pin an explicit `kind` in `config.json` to override the derivation;
+`Config.KindOf` honours the pin, falling back to the host derivation when empty.)
+The kind also drives the `bp migrate` cloud-target guard (below).
 
 **Names.** Each remembered server has a short handle you type instead of a URL.
 A handle is **auto-derived** from the URL unless you set one with
@@ -579,15 +591,15 @@ normalized URL (`FindServer`). On a hit it promotes that entry's server + token
 
 ```
 $ bp use prod
-✓ now using prod — https://api.barkpark.cloud  (scope w=default p=default d=production)
+✓ now using prod [cloud] — https://api.barkpark.cloud  (scope w=default p=default d=production)
 ```
 
 With **no argument** it reports the active server and lists the known handles:
 
 ```
 $ bp use
-active: local — http://localhost:4000  (scope w=default p=default d=production)
-known:  prod, local
+active: local [local] — http://localhost:4000  (scope w=default p=default d=production)
+known:  local, prod
 hint:   bp use <name>   to switch
 ```
 
@@ -602,12 +614,13 @@ run `bp servers` for details.
 ```
 
 **`bp servers`** (alias `bp server ls`) — list every saved server, the active
-one marked ★, with its tier and last-connected stamp. Read-only, no network:
+one marked ★, with its kind, tier, and last-connected stamp. Read-only, no
+network. `--kind local|cloud` filters the list:
 
 ```
 $ bp servers
-★ prod         https://api.barkpark.cloud  (admin, 2026-06-05T10:00:00Z)
-  local        http://localhost:4000  (admin, 2026-06-04T09:00:00Z)
+★ local        [local]  http://localhost:4000  (admin, 2026-06-04T09:00:00Z)
+  prod         [cloud]  https://api.barkpark.cloud  (admin, 2026-06-05T10:00:00Z)
 ```
 
 **`-s <name|url>`** — target one server for a single command without changing
@@ -732,4 +745,109 @@ bp setup --target deploy --ssh-host root@1.2.3.4 --domain d.example.com --scheme
 # 6. Provision a Hetzner host (staged — plans unless hcloud + HCLOUD_TOKEN + --yes)
 bp setup --target provision --provider hetzner --region nbg1 --server-type cax11 \
   --domain d.example.com --dry-run -o json | jq '.needs, .steps[].command'
+```
+
+### Migrating between servers (`bp migrate`)
+
+`bp migrate <from> <to>` copies documents from one saved server to another in a
+single command — the companion to switching servers. It is a built-in (no
+manifest, no `<noun> <verb>`), and like `bp setup` it is **safety-first**: it
+always computes a full plan from the source first, prints that plan on a dry-run
+(**the default**), and writes **only** when `--yes` is given.
+
+**Synopsis**
+
+```
+bp migrate <from> <to> [--dataset <name>] [--type <t>] [--include-schemas]
+                       [--dry-run] [--yes] [-o json]
+```
+
+`<from>` and `<to>` are saved-server references resolved exactly like
+`bp use` / `-s` (`FindServer` — explicit name, then display handle, then
+normalized URL). An unresolvable end is a clean usage error (exit **2**) listing
+the known handles. Each endpoint's saved token + workspace/project scope ride
+along; when an entry carries no token, a shared fallback is used — the global
+`--token` flag, else `BARKPARK_API_TOKEN`. For distinct creds per end, save them
+on the entries via `bp setup`.
+
+**Flags**
+
+| Flag | Effect |
+|---|---|
+| `--dataset <name>` | dataset to migrate (default: the source entry's dataset, else `production`) |
+| `--type <t>` | migrate just one type; omit to migrate **all** source types (enumerated via `GET /v1/schemas/:dataset`, which needs admin on the source) |
+| `--include-schemas` | POST the source schemas to the target **first**, so the target knows the types before documents land (best-effort per schema; a failure is recorded, not fatal) |
+| `--dry-run` | plan only, write nothing — **the default**, accepted explicitly as a no-op |
+| `--yes` | execute the migration (required to write anything) |
+| `-o json` / `--json` | machine-readable plan (dry-run) or result (execute) |
+
+**Safety model.** Three guards, all enforced in `runMigrate`
+(`internal/cli/migrate_cmd.go`):
+
+- **Dry-run first.** With no `--yes`, `bp migrate` prints the plan and writes
+  nothing. The plan is computed from the source for real (it pages the source to
+  count docs), so it is a faithful preview, not an estimate.
+- **`--yes` gates every write.** No document or schema is POSTed to the target
+  unless `--yes` is set.
+- **Cloud-target guard.** When the target's kind is `cloud`, a real run prints a
+  loud `⚠ writing N docs to <url> [cloud]` line first; the dry-run prints
+  `⚠ target <url> is CLOUD — a real run writes to a remote server.` A cloud
+  target is therefore never written silently, and never without `--yes`.
+
+**Overwrite semantics.** Migration uses **`createOrReplace`** mutations keyed by
+each document's `_id`: the source document JSON becomes the body of a
+`createOrReplace` op verbatim, so `_id` / `_type` and every field round-trip. On
+the target this is **overwrite-by-id** — a document with the same id is replaced
+in full, not merged; a new id is created. The source is read with
+`perspective=raw`, so **both drafts and published rows** migrate. Documents are
+written in batches (50 per request); the source is paged 100 at a time.
+
+**JSON shapes** (`migratePlanJSON`). The dry-run **plan**:
+
+```json
+{
+  "from":    { "name": "local",    "url": "http://localhost:4000",       "kind": "local" },
+  "to":      { "name": "barkpark", "url": "https://api.barkpark.cloud",  "kind": "cloud" },
+  "dataset": "production",
+  "types":   [ { "type": "post", "count": 38 } ],
+  "total":   38,
+  "include_schemas": false,
+  "dry_run": true
+}
+```
+
+The execute **result** adds, alongside `"dry_run": false`, the per-type counts
+actually written, the grand total, and any per-batch errors:
+
+```json
+{
+  "from": { … }, "to": { … }, "dataset": "production",
+  "types": [ { "type": "post", "count": 38 } ], "total": 38,
+  "include_schemas": false, "dry_run": false,
+  "migrated": [ { "type": "post", "count": 38 } ],
+  "total_migrated": 38,
+  "errors": []
+}
+```
+
+An execute that completes with one or more batch/schema errors still emits the
+result but exits **1**, with `errors[]` populated. An unresolvable server emits
+`{ "ok": false, "error": { "code": "not_found", … } }` (exit **2**).
+
+**Examples**
+
+```bash
+# 1. Dry-run (default): plan only, nothing written. Counts every type on the source.
+bp migrate local barkpark
+#    migration plan (DRY RUN — nothing written)
+#      from:    local [local] — http://localhost:4000
+#      to:      barkpark [cloud] — https://api.barkpark.cloud
+#      …
+#    ⚠ target https://api.barkpark.cloud is CLOUD — a real run writes to a remote server.
+
+# 2. Execute one type to a cloud target (prints the ⚠ guard, then writes)
+bp --token "$TOKEN" migrate local barkpark --type post --yes
+
+# 3. Pull a remote down to local, schemas first, as a JSON receipt
+bp migrate prod local --include-schemas --yes -o json | jq '.total_migrated, .errors'
 ```
