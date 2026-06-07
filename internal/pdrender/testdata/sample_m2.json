@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "dia1",
+      "type": "diagram",
+      "caption": "The render pipeline as a flow.",
+      "source": "flowchart TD\n  A[Decode JSON] --> B[RenderDoc]\n  B --> C{Block type?}\n  C -->|prose| D[wrap to width]\n  C -->|rich| E[chroma / table]\n  D --> F[Viewport]\n  E --> F"
+    },
+    {
+      "id": "dia2",
+      "type": "diagram",
+      "caption": "A sequence, for kind detection.",
+      "source": "sequenceDiagram\n  Caller->>Registry: Render(block, ctx)\n  Registry->>Renderer: dispatch\n  Renderer-->>Caller: []string"
+    },
+    {
+      "id": "cast1",
+      "type": "asciicast",
+      "caption": "A recorded session.",
+      "src": "https://barkpark.cloud/casts/demo.cast",
+      "duration": 42,
+      "cols": 80,
+      "rows": 24
+    },
+    {
+      "id": "cast2",
+      "type": "asciicast",
+      "caption": "A cast with a v2 header object.",
+      "src": "https://barkpark.cloud/casts/header.cast",
+      "header": { "width": 120, "height": 30, "duration": 125 }
+    },
+    {
+      "id": "img1",
+      "type": "image",
+      "src": "https://barkpark.cloud/media/diagram.png",
+      "alt": "Architecture diagram",
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "id": "img2",
+      "type": "image",
+      "src": "https://barkpark.cloud/media/bare.png"
+    },
+    {
+      "id": "comp1",
+      "type": "composite",
+      "label": "Dimensions",
+      "fields": [
+        { "name": "width", "title": "Width" },
+        { "name": "height", "title": "Height" },
+        { "name": "unit" }
+      ],
+      "value": { "width": 19.5, "height": 23, "unit": "cm" }
+    },
+    {
+      "id": "arr1",
+      "type": "arrayOf",
+      "label": "Contributors",
+      "ordered": true,
+      "value": [
+        { "role": "author", "name": "Knut Hamsun" },
+        { "role": "editor", "name": "Marie" },
+        "Anonymous"
+      ]
+    },
+    {
+      "id": "arr2",
+      "type": "arrayOf",
+      "label": "Tags",
+      "value": []
+    },
+    {
+      "id": "code1",
+      "type": "codelist",
+      "label": "Thema subject",
+      "plugin": "onixedit",
+      "codelistId": "73",
+      "value": "FBA"
+    },
+    {
+      "id": "code2",
+      "type": "codelist",
+      "label": "Unresolved subject",
+      "plugin": "onixedit",
+      "codelistId": "73",
+      "value": "ZZZ"
+    },
+    {
+      "id": "code3",
+      "type": "codelist",
+      "label": "Empty subject",
+      "plugin": "onixedit",
+      "codelistId": "73",
+      "value": ""
+    },
+    {
+      "id": "loc1",
+      "type": "localizedText",
+      "label": "Blurb",
+      "languages": ["en", "nb", "de"],
+      "value": {
+        "en": "A terminal renderer for portable documents.",
+        "nb": "En terminal-renderer for portable dokumenter.",
+        "de": "Ein Terminal-Renderer für portable Dokumente."
+      }
+    },
+    {
+      "id": "form1",
+      "type": "questionnaire",
+      "kind": "questionnaire",
+      "questions": [
+        {
+          "id": "q1",
+          "type": "yesno",
+          "prompt": "Should the diagram block ship a mermaid-ascii dependency now?",
+          "rationale": "It would let flowchart kinds render as real ASCII rather than a folded-source box.",
+          "recommendation": "No — keep the labeled box; defer the dep to a future milestone."
+        },
+        {
+          "id": "q2",
+          "type": "single",
+          "prompt": "Which default for v2 nested fields?",
+          "options": ["Flat summary", "JSON dump"],
+          "recommendation": "Flat summary — strictly more readable than a JSON blob."
+        },
+        {
+          "id": "q3",
+          "type": "multi",
+          "prompt": "Which placeholders need an OSC8 link?",
+          "options": ["diagram", "asciicast", "image"]
+        },
+        {
+          "id": "q4",
+          "type": "scale",
+          "prompt": "How honest is the asciicast placeholder?",
+          "scale": { "min": 1, "max": 5 }
+        },
+        {
+          "id": "q5",
+          "type": "text",
+          "prompt": "Any other block type the terminal cannot honestly draw?"
+        }
+      ]
+    }
+  ]
+}

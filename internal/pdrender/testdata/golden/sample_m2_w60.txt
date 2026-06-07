@@ -1,0 +1,99 @@
+╭──────────────────────────────────────────────────────────╮
+│ ◇ Mermaid diagram (flowchart)                            │
+│ flowchart TD                                             │
+│   A[Decode JSON] --> B[RenderDoc]                        │
+│   B --> C{Block type?}                                   │
+│   C -->|prose| D[wrap to width]                          │
+│   C -->|rich| E[chroma / table]                          │
+│   D --> F[Viewport]                                      │
+│   E --> F                                                │
+│ Figure 1. The render pipeline as a flow. (view in        │
+│ Studio)                                                  │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ ◇ Mermaid diagram (sequenceDiagram)                      │
+│ sequenceDiagram                                          │
+│   Caller->>Registry: Render(block, ctx)                  │
+│   Registry->>Renderer: dispatch                          │
+│   Renderer-->>Caller: []string                           │
+│ Figure 2. A sequence, for kind detection. (view in       │
+│ Studio)                                                  │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ ▶ Asciicast · 0:42 · 80x24 · open in browser             │
+│ (https://barkpark.cloud/casts/demo.cast)                 │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ ▶ Asciicast · 2:05 · 120x30 · open in browser            │
+│ (https://barkpark.cloud/casts/header.cast)               │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ 🖼 Architecture diagram · 1280×720 (view in Studio)       │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ 🖼 https://barkpark.cloud/media/bare.png (view in Studio) │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+Dimensions                                                  
+Width: 19.5                                                 
+Height: 23                                                  
+unit: cm                                                    
+                                                            
+Contributors                                                
+1. name: Knut Hamsun, role: author                          
+2. name: Marie, role: editor                                
+3. Anonymous                                                
+                                                            
+Tags                                                        
+—                                                           
+                                                            
+Thema subject                                               
+Modern & contemporary fiction                               
+                                                            
+Unresolved subject                                          
+ZZZ                                                         
+                                                            
+Empty subject                                               
+—                                                           
+                                                            
+Blurb                                                       
+en: A terminal renderer for portable documents.             
+nb: En terminal-renderer for portable dokumenter.           
+de: Ein Terminal-Renderer für portable Dokumente.           
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ Should the diagram block ship a mermaid-ascii dependency │
+│ now?                                                     │
+│ It would let flowchart kinds render as real ASCII rather │
+│ than a folded-source box.                                │
+│ Recommendation: No — keep the labeled box; defer the dep │
+│ to a future milestone.                                   │
+│ ( ) Yes  ( ) No                                          │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ Which default for v2 nested fields?                      │
+│ Recommendation: Flat summary — strictly more readable    │
+│ than a JSON blob.                                        │
+│ ( ) Flat summary  ( ) JSON dump                          │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ Which placeholders need an OSC8 link?                    │
+│ [ ] diagram  [ ] asciicast  [ ] image                    │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ How honest is the asciicast placeholder?                 │
+│ 1 2 3 4 5                                                │
+╰──────────────────────────────────────────────────────────╯
+                                                            
+╭──────────────────────────────────────────────────────────╮
+│ Any other block type the terminal cannot honestly draw?  │
+│ [ … ]                                                    │
+╰──────────────────────────────────────────────────────────╯

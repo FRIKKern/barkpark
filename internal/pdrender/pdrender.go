@@ -75,6 +75,23 @@ type RenderCtx struct {
 	// the stored datum). Mirrors render.ex's injected :ref_resolver opt — the
 	// renderer stays pure (no API/Repo dependency), the caller wires the lookup.
 	RefResolver func(id, refType string) string
+
+	// CodelistResolver is the v2 sibling of RefResolver, for the `codelist`
+	// block: given the registry-backed (plugin, issue/codelistId, code) tuple it
+	// returns the human-readable LABEL for display. Nil → codelist falls back to
+	// the raw code (then "—" for an empty code). Mirrors render.ex's injected
+	// :codelist_resolver opt (`fn plugin, codelist_id, code -> label end`) — the
+	// renderer stays pure; the caller wires the registry lookup.
+	CodelistResolver func(plugin, issue, code string) string
+
+	// V2AsJSON, when true, renders the four v2 nested field blocks
+	// (composite/arrayOf/codelist/localizedText) as a raw JSON dump instead of
+	// the flat labelled summary. It DEFAULTS to false — the flat summary is
+	// strictly more readable than a JSON blob and the flattening logic already
+	// mirrors render.ex's composite_scalar. The flag exists only as a one-line
+	// opt-out for a caller that wants to honor the TUI's documented "JSON dump"
+	// constraint literally; the summary path is the recommended default.
+	V2AsJSON bool
 }
 
 // WithWidth returns a copy of the ctx with a new target width.
@@ -198,5 +215,23 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["field-color"] = fieldColorRenderer{}
 	r.blocks["field-reference"] = fieldReferenceRenderer{}
 	r.blocks["field-image"] = fieldImageRenderer{}
+
+	// ── M2 hard blocks (honest, labeled, never-panic) ─────────────────────────
+	// No terminal draws mermaid, plays a cast, or paints inline graphics in a
+	// scroll viewport — each of these renders a clearly-labeled box stating its
+	// ceiling rather than faking a capability it lacks.
+	r.blocks["diagram"] = diagramRenderer{}
+	r.blocks["asciicast"] = asciicastRenderer{}
+	r.blocks["image"] = imageRenderer{}
+
+	// v2 nested field blocks: flat labelled summary by default (V2AsJSON opt-out).
+	r.blocks["composite"] = compositeRenderer{}
+	r.blocks["arrayOf"] = arrayOfRenderer{}
+	r.blocks["codelist"] = codelistRenderer{}
+	r.blocks["localizedText"] = localizedTextRenderer{}
+
+	// form / questionnaire (alias): render-only fieldsets, no input wiring.
+	r.blocks["form"] = formRenderer{}
+	r.blocks["questionnaire"] = formRenderer{}
 	return r
 }

@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -87,10 +89,31 @@ type model struct {
 	statusErr bool
 	// Scope selector (workspace/project/dataset picker)
 	selector selectorState
+	// ── Paper rendering (pdrender) ──────────────────────────────────────────
+	// paperRegistry/paperTheme/paperProfile are built ONCE in runTUI and reused
+	// for every paper render. selectedPaperBlocks holds the decoded block tree of
+	// the currently selected paper (nil for non-papers); it is re-parsed on
+	// selection and on every DataStoreRefreshMsg so a Studio edit re-renders live.
+	paperRegistry       *pdrender.Registry
+	paperTheme          pdrender.Theme
+	paperProfile        pdrender.Profile
+	selectedPaperBlocks []pdrender.Block
 }
 
 func initialModel(ds *DataStore) model {
-	m := model{ds: ds, width: 120, height: 40}
+	// Build the pdrender theme/profile/registry ONCE: the theme mirrors styles.go
+	// (chroma style + heading accents picked by terminal background), the profile
+	// is detected once and reused, and the registry is the shared composition root
+	// every paper render dispatches through.
+	theme := barkparkPaperTheme()
+	m := model{
+		ds:            ds,
+		width:         120,
+		height:        40,
+		paperTheme:    theme,
+		paperProfile:  detectPaperProfile(),
+		paperRegistry: pdrender.DefaultRegistry(theme),
+	}
 	m.rebuildPanes()
 	return m
 }
@@ -196,6 +219,11 @@ done:
 		m.focus.Target = FocusPane
 		m.focus.PaneIndex = len(m.panes) - 1
 	}
+
+	// Re-decode the (possibly new) selected paper's blocks. Covers the cleared
+	// case (selectedDoc == nil) and the NodeDocument auto-select above; the
+	// DataStoreRefreshMsg path runs through here too, so a Studio edit re-parses.
+	m.syncSelectedPaper()
 }
 
 func (m *model) buildListPane(node *StructureNode) Pane {
@@ -250,6 +278,59 @@ func (m *model) resetViewport() {
 	}
 }
 
+// syncSelectedPaper (re)decodes the selected document's block tree into
+// m.selectedPaperBlocks when it is a paper, and clears it otherwise. It is the
+// single seam where a Doc's raw block JSON becomes []pdrender.Block — called on
+// selection (drillIn / rebuildPanes) and on every live refresh, so a paper
+// edited in Studio re-parses and re-renders. Decoding lives HERE (in an Update
+// path), never in View(), keeping View pure and synchronous.
+func (m *model) syncSelectedPaper() {
+	m.selectedPaperBlocks = nil
+	if m.selectedDoc == nil || m.selectedDoc.Type != "paper" {
+		return
+	}
+	raw := m.selectedDoc.PaperBlocks()
+	if len(raw) == 0 {
+		return
+	}
+	blocks, err := pdrender.Decode(raw)
+	if err != nil {
+		// A malformed block tree falls back to the existing view rather than
+		// crashing — selectedPaperBlocks stays nil, isCurrentPaper() is false.
+		return
+	}
+	m.selectedPaperBlocks = blocks
+}
+
+// isCurrentPaper reports whether the editor should render the selected document
+// as a paper (a paper with a successfully decoded, non-empty block tree). When
+// false, the editor falls through to the existing field-form path.
+func (m model) isCurrentPaper() bool {
+	return m.selectedDoc != nil &&
+		m.selectedDoc.Type == "paper" &&
+		len(m.selectedPaperBlocks) > 0
+}
+
+// findDocInPanes returns the (freshly-queried) Doc with the given id from the
+// current doc-list panes, or nil. Used after a refresh to re-point selectedDoc
+// at the rebuilt slice so its blocks reflect the latest server state. Type is a
+// soft filter — matched when non-empty so two types sharing an id don't collide.
+func (m *model) findDocInPanes(id, docType string) *Doc {
+	for pi := range m.panes {
+		pane := &m.panes[pi]
+		if !pane.IsDocList {
+			continue
+		}
+		for ii := range pane.Items {
+			d := pane.Items[ii].Doc
+			if d != nil && d.ID == id && (docType == "" || d.Type == docType) {
+				return d
+			}
+		}
+	}
+	return nil
+}
+
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  INIT / UPDATE                                                          ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
@@ -259,7 +340,25 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case DataStoreRefreshMsg:
+		// Remember which document was open so a paper drilled in from a doc-list
+		// survives the rebuild (rebuildPanes nils selectedDoc; the doc-list case
+		// does not restore it). This is what lets a Studio edit re-render live.
+		prevID, prevType, hadEditor := "", "", m.showEditor
+		if m.selectedDoc != nil {
+			prevID, prevType = m.selectedDoc.ID, m.selectedDoc.Type
+		}
 		m.rebuildPanes()
+		// Re-resolve the previously-selected doc against the freshly-queried panes
+		// so its (possibly edited) blocks re-parse. Only needed when rebuildPanes
+		// did not itself restore a selection (the doc-list drill-in case).
+		if hadEditor && m.selectedDoc == nil && prevID != "" {
+			if doc := m.findDocInPanes(prevID, prevType); doc != nil {
+				m.selectedDoc = doc
+				m.editorSchema = findSchema(prevType)
+				m.showEditor = true
+				m.syncSelectedPaper()
+			}
+		}
 		if m.showEditor && m.selectedDoc != nil {
 			m.refreshViewport()
 		}
@@ -314,6 +413,62 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		m.refreshViewport()
+		return m, nil
+	}
+
+	// ── Read-only paper: the editor is a scroll surface, not a field form ──
+	// A focused paper BYPASSES every field-editing handler (startFieldEdit,
+	// toggleField, commitFieldEdit, ctrl+s save) — a paper is read-only in the
+	// TUI (the documented v1 constraint; editing happens in Studio). Scroll the
+	// viewport directly; the ~3-lines-per-field scrollToField heuristic does not
+	// apply to free-form blocks. Pane/back navigation still works.
+	if m.focus.Target == FocusEditor && m.isCurrentPaper() {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "s":
+			return m, m.openSelector()
+		case "j", "down":
+			if m.vpReady {
+				m.viewport.ScrollDown(1)
+			}
+			return m, nil
+		case "k", "up":
+			if m.vpReady {
+				m.viewport.ScrollUp(1)
+			}
+			return m, nil
+		case "ctrl+d", "pgdown":
+			if m.vpReady {
+				m.viewport.HalfPageDown()
+			}
+			return m, nil
+		case "ctrl+u", "pgup":
+			if m.vpReady {
+				m.viewport.HalfPageUp()
+			}
+			return m, nil
+		case " ":
+			if m.vpReady {
+				m.viewport.PageDown()
+			}
+			return m, nil
+		case "g", "home":
+			if m.vpReady {
+				m.viewport.GotoTop()
+			}
+			return m, nil
+		case "G", "end":
+			if m.vpReady {
+				m.viewport.GotoBottom()
+			}
+			return m, nil
+		case "h", "left", "shift+tab", "backspace", "esc":
+			// Leave the paper, back to the last pane (mirrors the field editor).
+			m.focus = focusState{Target: FocusPane, PaneIndex: len(m.panes) - 1}
+			return m, nil
+		}
+		// Any other key is a no-op on a read-only paper (no edit, no toggle).
 		return m, nil
 	}
 
@@ -639,6 +794,7 @@ func (m model) drillIn() (tea.Model, tea.Cmd) {
 		m.showEditor = true
 		m.focus.Target = FocusEditor
 		m.fieldCursor = 0
+		m.syncSelectedPaper()
 		m.resetViewport()
 	} else {
 		m.path = m.path[:m.focus.PaneIndex]
@@ -779,6 +935,8 @@ func (m model) renderHelpBar() string {
 		help = " tab/j/k move  enter next/apply  ctrl+s apply  esc cancel"
 	} else if m.editing {
 		help = " type to edit  enter confirm  esc cancel"
+	} else if m.focus.Target == FocusEditor && m.isCurrentPaper() {
+		help = " j/k scroll  ctrl+d/u half-page  g/G top/bottom  read-only  esc back"
 	} else if m.focus.Target == FocusEditor {
 		help = " j/k fields  enter edit  space toggle  ctrl+s save  s scope  esc back"
 	} else {
@@ -905,6 +1063,14 @@ func (m model) renderEditor(width, height int, isActive bool) string {
 func (m model) buildEditorContent(width int) string {
 	if m.selectedDoc == nil || m.editorSchema == nil {
 		return ""
+	}
+
+	// Paper branch: a paper with a decoded block tree renders as a real document
+	// via pdrender, NOT as a field form. buildDocPreview routes through here too,
+	// so papers render in the preview pane for free. Any non-paper (or a paper
+	// with no/undecodable blocks) falls through to the field-form loop unchanged.
+	if m.isCurrentPaper() {
+		return m.buildPaperContent(width)
 	}
 
 	var lines []string
@@ -1180,9 +1346,14 @@ func (m model) renderPreview(width, height int) string {
 
 // buildDocPreview renders a document's fields, same as the editor content.
 func (m model) buildDocPreview(doc *Doc, schema *Schema, width int) string {
-	// Value receiver — safe to mutate the copy to reuse buildEditorContent
+	// Value receiver — safe to mutate the copy to reuse buildEditorContent.
 	m.selectedDoc = doc
 	m.editorSchema = schema
+	// Decode the PREVIEW doc's own blocks into the copy so isCurrentPaper /
+	// buildPaperContent see this doc, not whatever paper is selected in the
+	// editor. syncSelectedPaper clears selectedPaperBlocks for non-papers, so a
+	// non-paper preview falls through to the field-form path unchanged.
+	m.syncSelectedPaper()
 	return m.buildEditorContent(width)
 }
 
