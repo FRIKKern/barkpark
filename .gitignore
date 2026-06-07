@@ -20,6 +20,9 @@ erl_crash.dump
 go.sum
 vendor/
 
+# bp CLI release binaries (cross-compile artifacts — `make cli-release`)
+dist/
+
 # Air (hot reload)
 tmp/
 

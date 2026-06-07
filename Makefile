@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -63,6 +63,26 @@ build: ## Build Go TUI binary
 clean: ## Remove build artifacts
 	rm -rf bin/ tmp/
 	cd api && rm -rf _build/
+
+# ── bp CLI release (M4 GA) ───────────────────────────────────────────────────
+# Cross-compile the single `bp` binary (root package main: CLI + TUI) for the
+# four supported targets into dist/. dist/ is gitignored — these are build
+# artifacts consumed by scripts/install-cli.sh (curl|sh installer).
+# -s -w strips symbol tables + DWARF to slim each binary.
+
+cli-build: ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
+	@echo ">> Building native bp -> dist/bp..."
+	go build -ldflags "-s -w" -o dist/bp .
+	@echo ">> Done: dist/bp"
+
+cli-release: ## Cross-compile bp for darwin/linux × arm64/amd64 into dist/
+	@echo ">> Cross-compiling bp for 4 targets into dist/..."
+	GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/bp-darwin-arm64 .
+	GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w" -o dist/bp-darwin-amd64 .
+	GOOS=linux  GOARCH=arm64 go build -ldflags "-s -w" -o dist/bp-linux-arm64 .
+	GOOS=linux  GOARCH=amd64 go build -ldflags "-s -w" -o dist/bp-linux-amd64 .
+	@echo ">> Done. Artifacts:"
+	@ls -lh dist/bp-*
 
 # ── Docker (alternative to native) ──────────────────────────────────────────
 

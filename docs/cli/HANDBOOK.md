@@ -1,0 +1,436 @@
+# Barkpark `bp` CLI — Handbook (M4 GA)
+
+> The `bp` command is the headless client for a Barkpark server. The **same Go
+> binary** is the interactive TUI (run with no arguments) and the CLI (run with a
+> command). This handbook documents the CLI face as built.
+>
+> Everything in this document is grounded in the shipped code
+> (`internal/cli/`, `internal/manifest/`) and the frozen manifest contract
+> (`docs/cli/manifest.schema.json`, `docs/cli/m0-decisions.md`,
+> `docs/cli/error-exit-table.md`). Where v1 intentionally defers a capability, it
+> is called out — not hidden.
+
+---
+
+## 1 · Install
+
+The CLI ships as a single static binary named `bp`. Install it with the curl|sh
+installer, which downloads the right `dist/bp-<os>-<arch>` artifact for your
+platform and drops it on your `PATH`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+```
+
+The installer detects your OS (`darwin`/`linux`) and arch (`arm64`/`amd64`),
+downloads the matching `bp-<os>-<arch>` release asset, and installs it to
+`/usr/local/bin` — falling back to `~/.local/bin` when that is not writable (it
+prints a PATH hint if the chosen dir is not on your `PATH`). Two env tunables:
+`BARKPARK_BIN_DIR` overrides the install directory, and
+`BARKPARK_CLI_RELEASE_BASE` overrides the download base URL.
+
+### Build from source
+
+If you have Go ≥ 1.24 and a checkout, build it yourself:
+
+```bash
+# native binary for this host -> dist/bp
+make cli-build
+
+# or cross-compile all four targets -> dist/bp-{darwin,linux}-{arm64,amd64}
+make cli-release
+
+# put it on your PATH
+install dist/bp /usr/local/bin/bp
+```
+
+Verify the install:
+
+```bash
+bp version          # -> barkpark 1.0.0
+bp version -o json  # -> {"cli_version":"1.0.0"}
+```
+
+> **Note on the binary name.** The release artifact is `bp`. The Go module and
+> repo are `barkpark`; the program prints `barkpark <version>` for `bp version`,
+> and all diagnostic messages are prefixed `barkpark:`. Running the binary with
+> **no arguments** launches the interactive TUI, not the CLI.
+
+---
+
+## 2 · The `bp <noun> <verb>` grammar
+
+Every CLI invocation is:
+
+```
+bp [global flags] <noun> <verb> [positional args] [command flags]
+```
+
+- **noun** — a resource (`doc`, `schema`, `media`, `search`, …). Plugins add
+  their own nouns (`bulldocs`, `onixedit`).
+- **verb** — an action on that noun (`ls`, `get`, `query`, `mutate`, …).
+- **args** — positional values bound by declared order (e.g. the type, then the
+  doc id).
+- **command flags** — per-command flags declared by the manifest (e.g.
+  `--perspective`, `--file`, `--if-rev`).
+
+The command tree is **not hardcoded**. It is a pure function of the capabilities
+manifest the server returns from `GET /v1/capabilities`. A plugin that adds a
+noun/verb appears in `bp` with zero client code change.
+
+Global flags may appear **before or after** the noun — these are identical:
+
+```bash
+bp doc ls post -o json
+bp -o json doc ls post
+```
+
+### Discovering the surface
+
+```bash
+bp capabilities          # human summary: server identity, your tier, all commands
+bp help                  # list every command grouped by noun
+bp <noun>                # list the verbs under one noun (exit 2 — incomplete usage)
+bp <noun> <verb> -h      # show one command's args + flags
+```
+
+A few commands are **CLI-native built-ins** that do not come from the manifest
+tree: `capabilities`, `whoami`, `version`, `login`, `completion`.
+
+---
+
+## 3 · Global flags
+
+Parsed before the noun, recognised anywhere in the argument list. Source of
+truth: `internal/cli/globals.go`.
+
+| Flag | Takes value | Default | Effect |
+|---|---|---|---|
+| `-s`, `--server <url>` | yes | env / `http://localhost:4000` | API base URL. |
+| `-w <slug>`, `--workspace <slug>` | yes | env / `default` | Workspace slug. |
+| `-p <slug>`, `--project <slug>` | yes | env / `default` | Project slug. |
+| `-d`, `--dataset <name>` | yes | env / `production` | Dataset. |
+| `-o`, `--output <fmt>` | yes | `table` on a TTY, `json` when piped | Output shape: `table` \| `json` \| `yaml` \| `minimal`. Invalid value → exit 2. |
+| `--json` | no | — | Shorthand for `-o json`. |
+| `-q`, `--quiet` | no | off | Minimal receipt (rev + ids) on writes. Forces `minimal` output. |
+| `-v`, `--verbose` | no | off | Extra diagnostics on stderr (e.g. `request_id` on errors). |
+| `--no-color` | no | color on a TTY | Disable colour. |
+| `--dry-run` | no | off | Print the request that *would* be sent, then exit 0 without sending. See §8. |
+| `--yes` | no | off | Skip the production write-guard confirmation prompt. |
+| `--limit <n>` | yes | command-declared (e.g. 50) | Pagination page size (paginated reads). |
+| `--offset <n>` | yes | 0 | Pagination offset (paginated reads). |
+| `--all` | no | off | Fetch every page of a paginated read (loops offsets, 100/page). |
+| `--manifest <path>` | yes | — | Load the manifest from a local file instead of `GET /v1/capabilities`. |
+| `-h`, `--help` | no | — | Usage. |
+
+> **Output default.** When you do **not** pass `-o`/`--output`/`--json`, the CLI
+> picks `table` if stdout is a terminal and `json` when it is piped, so
+> `bp doc ls post | jq` Just Works. A write command whose manifest
+> `default_output` is `minimal` prints the minimal receipt by default on a TTY;
+> `-q` forces `minimal` everywhere.
+
+---
+
+## 4 · Auth tiers and credentials
+
+Each command declares an `auth_tier` in the manifest. The CLI attaches the
+correct credential per tier (`internal/cli/run.go` `authHeaders`):
+
+| `auth_tier` | What the CLI sends | Credential source |
+|---|---|---|
+| `none` | nothing | public, unauthenticated |
+| `read` | bearer token **only when the path is scoped** (`scoped_prefix` set + token present); flat public reads send nothing | resolved token |
+| `write` / `admin` / `scoped_admin` | `Authorization: Bearer <token>` | resolved token |
+| `ingest` | `Authorization: Bearer <secret>` | ingest secret (see below) |
+
+Notes that match the as-built behaviour:
+
+- **`scoped_admin` is never client-preflight-refused** (M0 contract rule #2).
+  Only the server knows your per-workspace role, so the CLI sends the request
+  with the bearer token and surfaces the server's 403 cleanly.
+- **`ingest` uses a different secret**, not your api token. The CLI reads
+  `BARKPARK_INGEST_TOKEN`, then the `PAPERFLOW_INGEST_TOKEN` alias, then falls
+  back to the resolved bearer token (single-secret dev setups). It rides the same
+  `Authorization: Bearer` header — the server's `RequireIngestToken` plug
+  constant-time-compares it against the configured ingest token.
+
+### Environment variables (`BARKPARK_*`)
+
+The CLI and TUI share one env contract (`apiclient.ConfigFromEnv`). Each var has
+a baked-in v1 fallback so the CLI works out of the box against a local dev server:
+
+| Env var | Falls back to | Maps to |
+|---|---|---|
+| `BARKPARK_API_URL` (then `BARKPARK_SERVER`) | `http://localhost:4000` | server |
+| `BARKPARK_API_TOKEN` | `barkpark-dev-token` | bearer token |
+| `BARKPARK_WORKSPACE` | `default` | workspace |
+| `BARKPARK_PROJECT` | `default` | project |
+| `BARKPARK_DATASET` | `production` | dataset |
+| `BARKPARK_INGEST_TOKEN` (then `PAPERFLOW_INGEST_TOKEN`) | resolved bearer token | ingest secret (`ingest`-tier commands) |
+| `BARKPARK_MANIFEST` | — | local manifest file (same as `--manifest`) |
+
+> There is **no interactive `login`** in v1. `bp login` is a stub that explains
+> the token mechanism and exits 0. Configure auth via `BARKPARK_API_TOKEN` or
+> `-s` + the dev token.
+
+### Context precedence
+
+Server / workspace / project / dataset / output each resolve **independently**,
+field by field, by this precedence (`manifest.Resolve`):
+
+```
+flags  >  env (BARKPARK_*)  >  active context  >  defaults
+```
+
+The **active context** layer is a forward seam: v1 ships one default server and
+**no persistence**, so there is no `context use` command and the active layer is
+always empty. Because `ConfigFromEnv` bakes in the fallbacks above, the env layer
+is effectively never empty for those fields — the env fallbacks are the
+documented v1 floor.
+
+---
+
+## 5 · The core noun → verb surface
+
+This is the core (non-plugin) surface as it appears in the manifest fixtures.
+Your live surface comes from your server's `GET /v1/capabilities`; run
+`bp capabilities` to see exactly what your token can reach (the manifest is
+auth-tier projected — an anonymous caller does not even see admin noun names).
+
+| Command | HTTP | Tier | Notes |
+|---|---|---|---|
+| `bp doc get <type> <doc_id>` | GET | none | `--perspective published\|drafts\|raw` (default `published`). |
+| `bp doc ls <type>` | GET | none | Paginated. `--limit`, `--offset`, `--all`. |
+| `bp doc query <type>` | GET | none | Paginated; `--query <expr>` filter. |
+| `bp doc mutate` | POST | write | **Batch**; body `{"mutations":[…]}` via `-f`. |
+| `bp schema get <name>` | GET | none | Fetch one public schema. |
+| `bp schema apply <name>` | PUT | admin | Register/update a schema; body via `-f`. |
+| `bp media ls` | GET | none | Paginated. |
+| `bp media upload <file>` | POST | write | Upload an asset (positional file). |
+| `bp search query <q>` | GET | none | `--engine postgres\|indx`, `--limit`. Paginated. |
+| `bp workspace ls` | GET | read | List workspaces your token reaches. |
+| `bp workspace project-create <name>` | POST | scoped_admin | Project verbs fold under `workspace`. |
+| `bp task ls` | GET | read | Paginated; `--limit`. |
+| `bp task claim <task_id>` | POST | admin | Claim a ready task. |
+| `bp webhook ls` | GET | admin | List webhook subscriptions. |
+| `bp webhook create <url>` | POST | write | Create a subscription. |
+| `bp rail path <goal_id>` | GET | read | Goal-path lifecycle events. |
+| `bp plugin ls` | GET | read | List installed plugins. |
+| `bp plugin settings <slug>` | PUT | admin | `--set key=value` (repeatable). |
+
+### Plugin verbs
+
+Plugins contribute ergonomic verbs into the same `commands[]` array via the
+`cli_commands/0` callback — **no host edit, no client edit**. They appear in the
+tree tagged with `source: plugin:<slug>` and the owning noun carries the plugin
+slug. From the fixtures:
+
+| Command | HTTP | Tier | Notes |
+|---|---|---|---|
+| `bp bulldocs publish <slug>` | POST | ingest | Upsert a paper from a portable-doc/HTML payload; body via `-f`. |
+| `bp bulldocs patch <slug>` | POST | ingest | **Batch** block ops `{"ops":[…]}` via `-f`; `--if-rev <n>` optimistic guard. |
+| `bp bulldocs intents` | GET | ingest | List pending actionable paper intents. |
+| `bp bulldocs intent-processed <id>` | POST | ingest | Mark an intent processed. |
+| `bp onixedit export <dataset> <id>` | GET | admin | Export a book document as ONIX 3.0 XML. |
+
+---
+
+## 6 · Batch writes (`{ops:[…]}` / `{mutations:[…]}`) with `-f`
+
+A command marked `batch: true` in the manifest accepts a JSON payload that wraps
+an array of operations and applies them **atomically in one request**. The
+universal short flag `-f` aliases the declared `--file` flag; pass a path, or `-`
+for stdin.
+
+```bash
+# Mutations batch (doc mutate) — create + publish in one atomic call
+bp doc mutate -f mutations.json
+
+# Block-ops batch (bulldocs patch) — append/patch/move blocks atomically
+bp bulldocs patch 2026-06-07-demo -f ops.json
+
+# From stdin
+cat ops.json | bp bulldocs patch 2026-06-07-demo -f -
+```
+
+The body is sent verbatim with `Content-Type: application/json`. The CLI does
+not reshape it — `mutations.json` must already be `{"mutations":[…]}` and
+`ops.json` must already be `{"ops":[…]}` (optionally with `ifRev`). A write with
+no `-f` and no `--set` sends an empty `{}` body.
+
+> Some non-batch writes (e.g. `schema apply`, `bulldocs publish`) also take their
+> body via `-f`; "batch" specifically means the payload is an array of
+> operations applied atomically.
+
+---
+
+## 7 · Output formats
+
+`-o table | json | yaml | minimal` (or `--json` for json, `-q` for minimal).
+
+- **table** — human-readable columns for list/object payloads; system
+  (underscore) keys are hidden from the table view (full data is one `-o json`
+  away). Eyeballs only.
+- **json** — pretty, stable JSON. The API wraps data in `{"result": …}`; the CLI
+  **unwraps** it so you see the payload, not the envelope.
+- **yaml** — the same value space as YAML (hand-rolled emitter, sorted keys).
+- **minimal** — the token-efficient write receipt: `rev: …` plus any `id: …`
+  lines found in the payload, else `ok`. This is the default for writes whose
+  manifest `default_output` is `minimal`, and the shape `-q` forces.
+
+```bash
+bp doc ls post -o json | jq '.documents[].title'
+bp doc get post p2 -o yaml
+bp doc mutate -f mutations.json -q     # -> rev: <txn>   id: <created id>
+```
+
+---
+
+## 8 · `--dry-run` (client-side only in v1)
+
+`--dry-run` prints the **resolved** request — method, absolute URL (placeholders
+filled), tier-appropriate headers with credentials **redacted**, and the body —
+then exits 0 **without sending** (M0 decision A1). It is honest about its limits:
+the manifest's per-command `dry_run` is `false` across the board in v1 (no server
+validate-only endpoint exists), so the CLI announces:
+
+```
+dry-run: client-side preview only (server validate-only not available)
+```
+
+```bash
+bp doc mutate -f mutations.json --dry-run
+# stderr: dry-run: client-side preview only (server validate-only not available)
+# stdout: POST http://localhost:4000/v1/data/mutate/production
+#         Authorization: Bearer ****
+#         Content-Type: application/json
+#
+#         {"mutations":[...]}
+```
+
+When a server later supports validate-only for a command, that command's
+manifest `dry_run` flips to `true` and `--dry-run` sends the request instead of
+printing.
+
+### Production write-guard
+
+A **write** against a prod-looking target prompts `⚠ PROD: … Continue? [y/N]` on
+stderr unless `--yes` is passed. "Prod-looking" is a local heuristic on the
+server name/URL (`prod`/`production`, or `api.barkpark.cloud`; `localhost` /
+`127.0.0.1` / `0.0.0.0` are never prod). This guard is local UX only — it does
+not preflight-refuse `scoped_admin` (contract rule #2).
+
+---
+
+## 9 · Exit codes
+
+The CLI maps the API error envelope's `error.code` string to a process exit code.
+It **never** re-derives the exit from the HTTP status (contract rule #3). Source:
+`docs/cli/error-exit-table.md`, `internal/cli/errors.go`.
+
+| Exit | Bucket | When |
+|---|---|---|
+| `0` | success | Command completed (prints result, or the minimal receipt on writes). |
+| `1` | generic / unexpected | Network / timeout, unknown `error.code`, or an unrecognised error shape. |
+| `2` | usage / unknown command | Bad args, malformed request, unknown command/sub-command. |
+| `3` | auth / forbidden | Missing/invalid credential or insufficient permission. |
+| `4` | not-found | Resource or schema does not exist. |
+| `5` | validation | Payload failed schema or op validation. |
+| `6` | conflict | Optimistic-concurrency / write-conflict / precondition (`rev_mismatch`, `precondition_failed`, `conflict`, lifecycle `halted`). |
+| `7` | rate-limited | Throttled. |
+| `8` | server (5xx) | Server-side `internal_error`. |
+
+Representative `error.code` → exit mappings (the full table is canonical):
+
+| `error.code` | Exit |
+|---|---|
+| `not_found`, `schema_unknown`, `share_expired` | 4 |
+| `unauthorized`, `forbidden`, `cors_forbidden`, `csrf_required` | 3 |
+| `malformed` | 2 |
+| `validation_failed`, `invalid_paper`, `malformed_op`, `invalid_op`, `block_not_found`, `type_mismatch`, `duplicate_id` | 5 |
+| `rev_mismatch`, `precondition_failed`, `conflict` | 6 |
+| `rate_limited` | 7 |
+| `internal_error` | 8 |
+
+A few non-canonical wire shapes are handled too: the bare `{"error":"halted"}`
+lifecycle veto → 6; the tasks `{"ok":false,"reason":…}` shape → 2; bare-string
+`{"error":"not_found"}` (intents / plugin-settings) → 4; a code-less
+`{"error":{"message":…}}` → 2 (or 4 when the message reads like a not-found).
+
+---
+
+## 10 · `scoped_prefix` is INERT in v1
+
+A command's manifest may carry a `scoped_prefix` hint (e.g.
+`/w/:workspace_slug/p/:project_slug`). In v1 **this hint does nothing** — the
+scoped route *mirror* exists on no server today, so the CLI calls the **flat**
+`http.path_template` and does **not** prepend the prefix (contract rule #4,
+`manifest.BuildURL`).
+
+Prepending against a flat-only server would turn `/v1/data/query/…` into
+`/w/default/p/default/v1/data/query/…`, which 404/403s and would break every
+scoped command. The prepend activates only when a future server advertises the
+mirror (gated by `Context.ScopedMirror`, which is `false` everywhere in v1). The
+hint ships in the manifest now purely for forward-compatibility — your
+workspace/project flags still resolve other things (e.g. `workspace
+project-create`), but they do **not** rewrite flat data paths in v1.
+
+> The `--manifest <path>` / `BARKPARK_MANIFEST` override exists for the same
+> forward-compat reason: `/v1/capabilities` is not live on every server yet, so a
+> committed fixture lets the CLI run end-to-end against an API that only has the
+> data endpoints.
+
+---
+
+## 11 · Copy-paste examples
+
+All examples assume a local dev server with the baked-in token; set
+`BARKPARK_API_URL` / `BARKPARK_API_TOKEN` to point elsewhere.
+
+```bash
+# 1. List documents of a type as JSON, pull titles with jq
+bp doc ls post -o json | jq '.documents[].title'
+
+# 2. Fetch one document by type + id
+bp doc get post p2
+
+# 3. List draft documents (perspective flag), as a table
+bp doc ls post --perspective drafts
+
+# 4. Apply an atomic mutation batch from a file, minimal receipt
+bp doc mutate -f mutations.json -q
+#    mutations.json: {"mutations":[{"create":{"_type":"post","_id":"x","title":"New"}}]}
+
+# 5. Publish a Bulldocs paper (ingest tier) — slug arg + payload via -f
+bp bulldocs publish 2026-06-07-demo -f paper.json
+
+# 6. Apply a batch of block-ops to a paper, guarded by the current rev
+bp bulldocs patch 2026-06-07-demo -f ops.json --if-rev 1
+#    ops.json: {"ops":[{"op":"append-block","block":{"id":"b9","type":"paragraph","content":["Added."]}}]}
+
+# 7. Inspect the resolved manifest and filter commands with jq
+bp capabilities -o json | jq '.commands[] | {id, auth_tier, path: .http.path_template}'
+
+# 8. Who am I / what am I pointed at (note ⚠ PROD marker when prod)
+bp whoami
+
+# 9. Dry-run a write to preview the request without sending it
+bp doc mutate -f mutations.json --dry-run
+
+# 10. Full-text search via the indx engine, fetch every page
+bp search query "barkpark" --engine indx --all -o json
+```
+
+---
+
+## 12 · v1 deferral summary
+
+These are declared v1 constraints (not bugs), each with a forward seam:
+
+- **`--dry-run`** is client-side request-printing; no server validate-only yet.
+- **Dataset discovery** is absent — `production` is the assumed default (A2).
+- **`whoami`** is composed from `GET /v1/meta` + the manifest's caller
+  `auth_tier`; no dedicated identity endpoint (A3).
+- **`login`** and **`completion`** are stubs that print and exit 0.
+- **`scoped_prefix`** is inert; the flat path is what the CLI calls (rule #4).
+- **Active/named contexts** are not persisted; there is no `context use` (§4).
