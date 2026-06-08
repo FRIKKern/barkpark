@@ -2535,9 +2535,32 @@ defmodule Barkpark.Content do
   Returns the `%Document{}` or `nil`.
   """
   def get_public_paper(slug, dataset \\ @paper_default_dataset) when is_binary(slug) do
+    get_public_document(@paper_type, slug, dataset)
+  end
+
+  @doc """
+  Resolve a document of `type` by `slug` for a PUBLIC, unauthenticated surface.
+
+  This is `get_public_paper/2` generalized over the document type: identical
+  workspace/tenant scoping, identical nil-handling, identical return shape — it
+  simply filters on the passed `type` instead of the hardcoded `"paper"`.
+
+  As with `get_public_paper/2`, the read is pinned to the seeded **Default**
+  (public) workspace so a same-slug document in any non-Default workspace is
+  NEVER exposed, and a slug resolves to AT MOST ONE row (barkpark-w9dg). Fails
+  closed: if no Default workspace is seeded there is no public tenant, so it
+  returns `nil` rather than fall back to an unscoped read.
+
+  Returns the `%Document{}` or `nil`.
+  """
+  def get_public_document(type, slug, dataset \\ @paper_default_dataset)
+      when is_binary(type) and is_binary(slug) do
     case Barkpark.Tenancy.get_default_workspace() do
       %{id: ws_id} when is_binary(ws_id) ->
-        get_paper(slug, dataset, workspace_id: ws_id)
+        case get_document(slug, type, dataset, workspace_id: ws_id) do
+          {:ok, doc} -> doc
+          {:error, :not_found} -> nil
+        end
 
       _ ->
         nil
@@ -2637,10 +2660,14 @@ defmodule Barkpark.Content do
           required(:layout) => [map()],
           optional(:prefill) => map()
         }) :: [map()]
-  @spec available_expected_fields([map()], %{
-          required(:layout) => [map()],
-          optional(:prefill) => map()
-        }, SchemaDefinition.t() | map() | nil) :: [map()]
+  @spec available_expected_fields(
+          [map()],
+          %{
+            required(:layout) => [map()],
+            optional(:prefill) => map()
+          },
+          SchemaDefinition.t() | map() | nil
+        ) :: [map()]
   def available_expected_fields(blocks, expectation, schema \\ nil)
 
   def available_expected_fields(blocks, %{layout: layout}, schema)
@@ -2831,7 +2858,7 @@ defmodule Barkpark.Content do
     next_rev = paper_next_rev(existing)
 
     content =
-      (existing && existing.content || %{})
+      ((existing && existing.content) || %{})
       |> Map.put("body_html", body_html)
       |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
       |> maybe_put_paper("style", style)
@@ -3263,8 +3290,7 @@ defmodule Barkpark.Content do
   # Resolve which block an op affected (post-apply) plus its top-level position.
   # Identical to the former Barkpark.Papers.locate_affected/2.
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
-    {:ok,
-     %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
+    {:ok, %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
   end
 
   defp locate_paper_affected(%{"op" => "insert-after", "block" => block}, new_blocks) do
