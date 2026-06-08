@@ -26,14 +26,13 @@ mix run priv/repo/seeds.exs  # just reseed
 | `lib/barkpark_web/controllers/schema_controller.ex` | Schema CRUD |
 | `lib/barkpark_web/controllers/legacy_controller.ex` | Go TUI backward compat |
 | `lib/barkpark_web/controllers/listen_controller.ex` | SSE real-time stream |
-| `lib/barkpark/tasks.ex` | W7 task substrate — goal/phase/task/event docs, claim/close/relabel, `mutation_events` emit |
+| `lib/barkpark/tasks.ex` | W7 task substrate — everything is a `task` doc (a root task is a "goal", ordered siblings are "phases", nesting via `content.parent_id`), claim/close/relabel, `mutation_events` emit |
 | `lib/barkpark/tenancy.ex` | W2 workspace/project tenancy context |
 | `lib/barkpark/content/scope.ex` | `Barkpark.Content.Scope` — query-level tenant WHERE-clause scoping (`scope_to_workspace/3`); nil workspace fails CLOSED |
 | `lib/barkpark_web/plugs/scope_helpers.ex` | `BarkparkWeb.ScopeHelpers` — HTTP/LiveView scope extractor (`scope_opts/1`) every controller calls |
-| `lib/barkpark_web/controllers/tasks_controller.ex` | `/v1/tasks` (router ~:460) — task index/ready/claim/edges |
-| `lib/barkpark_web/controllers/rail_controller.ex` | `/v1/rail` (router ~:501) — goal-path / event / diff for the Bulldocs rail |
+| `lib/barkpark_web/controllers/tasks_controller.ex` | `/v1/tasks` (router ~:460) — task index/ready/claim/edges; `GET /v1/tasks?parent=<doc_id>` lists a task's direct child tasks (its "rail") chronologically; `GET /v1/tasks/:doc_id` returns those inline as `children` (+ `child_count`); `POST /v1/tasks/:doc_id/papers {add,remove}` edits `content.papers[]` |
 | `lib/barkpark/plugins/bulldocs.ex` | **Bulldocs plugin** — the paper/document surface as a plugin. `register_schemas/1` declares the `paper` type; `register_routes/1` mounts the reader (`/papers/:slug`, `:public_root`) + ingest/intents API (`/v1/plugins/bulldocs/*`, `:ingest`). Reuses core modules as utilities — see "Bulldocs plugin" below. |
-| `priv/repo/seeds.exs` | Seed data — 13 schema rows (8 core + `paper` + 4 W7a task/goal/phase/event) + ~27 docs + dev token; plugin schemas (e.g. `book`) auto-register via `Bootstrap.register_all_schemas/0`. See the seed's `IO.puts` summary lines (~:229/:259/:289/:590/:646). |
+| `priv/repo/seeds.exs` | Seed data — 10 schema rows (8 core + `paper` + 1 W7a `task`) + ~27 docs + dev token; plugin schemas (e.g. `book`) auto-register via `Bootstrap.register_all_schemas/0`. See the seed's `IO.puts` summary lines (~:229/:259/:289/:590/:646). |
 
 Tenancy note: alongside the flat routes there is a scoped route family
 `/w/:workspace_slug/p/:project_slug/*` (router ~:618) mirroring the flat
@@ -115,5 +114,4 @@ The `/v1/data/listen/:dataset` endpoint streams these as SSE events.
 Task mutations (W7) emit `mutation_events` rows of kind `task.claimed` /
 `task.closed` / `task.mutated` / `task.relabeled` (`tasks.ex`), `task.lease_expired`
 (`tasks/ttl_sweeper.ex`), and `task.compacted` / `task.compaction_restored`
-(`tasks/compactor.ex`). The goal-path rail filters on this kind set in
-`rail_controller.ex`.
+(`tasks/compactor.ex`).

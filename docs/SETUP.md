@@ -71,7 +71,7 @@ Verified counts from a clean database:
 
 | Object | Count | Notes |
 |---|---|---|
-| `schema_definitions` | 18 | 16 distinct names (legacy content types + `paper`×3 + the 4 task-substrate schemas: task/goal/phase/event) |
+| `schema_definitions` | 15 | 13 distinct names (legacy content types + `paper`×3 + the single `task` schema) |
 | `documents` | 27 | post 9, page 5, project 4, author 3, category 3, colors/navigation/siteSettings 1 each |
 | Workspaces | 1 | Default Workspace |
 | Projects | 1 | Default Project (slug `default`) |
@@ -81,7 +81,7 @@ Verified counts from a clean database:
 Details worth knowing:
 
 - **`paper` registered 3×** — one NULL-scoped plus two dataset-scoped. This is the known media/tenancy pattern, **not a bug**.
-- **Zero task/goal/phase/event documents** — seeds populate only legacy content. The task substrate schemas exist; no rows are seeded into them.
+- **Zero task documents** — seeds populate only legacy content. The single `task` schema exists; no rows are seeded into it.
 - **Tenancy is bootstrapped at MIGRATE time** (migration `20260527110200_backfill_default_tenancy`), not lazily. The Default Workspace/Project/datasets exist after `mix ecto.migrate`, before any write.
 - **`barkpark-dev-token`** has label `dev-studio` and perms read/write/admin. It is stored **sha256-hashed** — the plaintext above is what you send on the wire.
 

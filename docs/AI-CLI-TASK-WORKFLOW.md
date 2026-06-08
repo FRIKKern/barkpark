@@ -8,7 +8,7 @@ This guide is for an **AI coding agent** (Claude Code, Cursor, Aider, any CLI) �
 
 Three pieces, one Postgres store:
 
-- **Barkpark** — the Postgres document store. Tasks *and* papers are documents (`type ∈ {goal, phase, task, event, paper}`).
+- **Barkpark** — the Postgres document store. Tasks *and* papers are documents (`type ∈ {task, paper}`). Everything is a **task**: a "goal" is just a *root* task (no `content.parent_id`), a "phase" is just ordered sibling tasks, and a task nests under another task via `content.parent_id` (recursive).
 - **Paperflow** — the orchestration model plus `bd-shim`, a bd-CLI-compatible wrapper. An AI CLI runs `bd …` → bd-shim → barkpark HTTP (`/v1/tasks/*`). Unknown verbs fall through to real `bd`.
 - **PortableDoc** — the block format for papers (headings / paragraphs / callouts / lists / code / tables). See [`../../portable-doc/examples/welcome.json`](../../portable-doc/examples/welcome.json).
 
@@ -16,11 +16,11 @@ Three pieces, one Postgres store:
 AI CLI ──bd──────► bd-shim ──HTTP──► barkpark /v1/tasks      (task tracking)
        ──papers──► PortableDoc blocks ──► /v1/paperflow/papers  (artifacts)
 
-  Goal hub (type:goal) ties them together:
-    content.papers[]  +  the /v1/rail/goal-path event timeline
+  A root task ties them together:
+    content.papers[]  +  its child tasks (its "rail")
 ```
 
-The goal document is the hub: it lists its papers in `content.papers[]`, and its lifecycle is the event timeline at `/v1/rail/goal-path`.
+A root task is the hub: it lists its papers in `content.papers[]` (managed via `POST /v1/tasks/:doc_id/papers`), and its "rail" is its direct child tasks in chronological order — read them with `GET /v1/tasks?parent=<doc_id>`, or inline as the `children` field on `GET /v1/tasks/:doc_id`.
 
 ## Prerequisites
 
@@ -36,47 +36,42 @@ bd --version
 
 Tokens for direct HTTP calls:
 
-- `barkpark-dev-token` — reading tasks, rail, timelines.
+- `barkpark-dev-token` — reading and writing tasks (`/v1/tasks/*`).
 - `paperflow-dev-ingest-token` — publishing papers.
 
 ## The task lifecycle
 
-The worked example: a **goal** → a **phase** → **two tasks with a dependency**, then drive them to done. Run these in order.
+Everything is a **task**. The worked example: a **root task** (what you'd call the "goal") → **two child tasks under it with a dependency**, then drive them to done. Run these in order.
 
-### 1. Create a goal
+### 1. Create the root task (the "goal")
 
-`bd create` writes to barkpark via the shim — `--type epic` maps to `kind:goal`.
+`bd create` writes to barkpark via the shim. A task with no parent is a root task — it plays the "goal" role.
 
 ```bash
-bd create "my goal" --type epic --label myproj
-# ✓ Created issue: <goal-id>
+bd create "my goal" --type task --label myproj
+# ✓ Created issue: <root-id>
 ```
 
-### 2. Create a phase
+### 2. Create two child tasks under it
+
+Nest each task under the root via `--parent` (the shim writes `content.parent_id`).
 
 ```bash
-bd create "build phase" --type task --label kind:phase --label myproj --parent <goal-id>
-# ✓ Created issue: <phase-id>
-```
-
-### 3. Create two tasks
-
-```bash
-bd create "task A" --type task --label myproj --parent <phase-id>
+bd create "task A" --type task --label myproj --parent <root-id>
 # ✓ Created issue: <task-A>
 
-bd create "task B" --type task --label myproj --parent <phase-id>
+bd create "task B" --type task --label myproj --parent <root-id>
 # ✓ Created issue: <task-B>
 ```
 
-### 4. List what landed in barkpark
+### 3. List what landed in barkpark
 
 ```bash
 bd list --label myproj
-# shows the 4 docs: the goal, the phase, task A, task B
+# shows the 3 docs: the root task, task A, task B
 ```
 
-### 5. Add a dependency
+### 4. Add a dependency
 
 B blocks on A. Bare ids work.
 
@@ -85,7 +80,7 @@ bd dep add <task-B> <task-A>
 # ✓ Added dependency: <task-B> blocks on <task-A>
 ```
 
-### 6. The dependency-aware ready queue (the centerpiece)
+### 5. The dependency-aware ready queue (the centerpiece)
 
 `bd ready` returns only unblocked work. **A appears; B does NOT** — it's waiting on A.
 
@@ -97,7 +92,7 @@ bd ready
 
 > **Caveat:** `bd ready --label <x>` does **not** yet scope (see Known Limitations #1). `bd ready` returns the **global** ready queue. In a multi-goal store, filter the output client-side by your label / namespace.
 
-### 7. Claim and close A
+### 6. Claim and close A
 
 ```bash
 bd update <task-A> --claim
@@ -109,7 +104,7 @@ bd close <task-A>
 
 > Claim **before** you close. `bd close` on an unclaimed task returns HTTP 409 (fencing — see Known Limitations #3).
 
-### 8. Ready again → B is now unblocked
+### 7. Ready again → B is now unblocked
 
 This is the whole point: closing a blocker unblocks its dependents.
 
@@ -119,36 +114,51 @@ bd ready
 # (now appears — A is done)
 ```
 
-### 9. Inspect
+### 8. Inspect
 
 ```bash
 bd show <id>            # single doc, JSON
 bd list --label myproj  # filtered list
 ```
 
-### 10. Close the goal
+### 9. Close the root task
+
+The root task is just a task — close it like any other (claim first, then close).
 
 ```bash
-bd epic close <goal-id>
-# ✓ <goal-id> → done
+bd update <root-id> --claim
+bd close <root-id>
+# ✓ <root-id> → done
 ```
 
-> `bd epic close` is a **forced** close — it closes the goal regardless of child state (Known Limitations #4).
+> There is **no** epic/goal close surface. `bd epic close`, `GET /v1/tasks/epic/close-eligible`, and the `--type epic` epic concept were **removed** — a root task closes through the ordinary claim → close path. (If your `bd` still offers `bd epic …`, treat it as an **accepted, intentional breakage** — it falls through to real `bd` and does not talk to barkpark.)
 
-## Event timeline (the rail)
+## A task's rail (its child tasks)
 
-Every claim and close emits a `mutation_event`. Read the goal's timeline directly:
+A task's "rail" is its direct child tasks in chronological order — there is **no** separate event-timeline surface (`/v1/rail/*` was removed). Read the children two ways.
+
+Inline, as the `children` field on the single-task fetch:
 
 ```bash
 curl -s -H "Authorization: Bearer barkpark-dev-token" \
-  "http://localhost:4000/v1/rail/goal-path?goal=<goal-id>"
-# {"ok":true,"events":[
-#   {"kind":"task.closed", ...},
-#   {"kind":"task.claimed", ...}
+  "http://localhost:4000/v1/tasks/<root-id>"
+# {"ok":true,"task":{ ...,
+#   "children":[ {"doc_id":"<task-A>", ...}, {"doc_id":"<task-B>", ...} ],
+#   "child_count":2 }}
+```
+
+Or directly, as a chronological list, with the `parent` query param:
+
+```bash
+curl -s -H "Authorization: Bearer barkpark-dev-token" \
+  "http://localhost:4000/v1/tasks?parent=<root-id>"
+# {"ok":true,"tasks":[
+#   {"doc_id":"<task-A>", ...},   # oldest first
+#   {"doc_id":"<task-B>", ...}
 # ]}
 ```
 
-> **Caveat:** the goal-close event arrives with `kind` `task.closed` (carrying the goal's title), **not** `goal.closed`. Kind does not map 1:1 to type (Known Limitations #5).
+Because parenting is recursive, the same call walks any level: pass any task's id as `parent=` to get that task's own rail.
 
 ## Producing documents / papers (PortableDoc)
 
@@ -175,19 +185,25 @@ POST /v1/paperflow/papers/:slug/ops
 # op ∈ { append-block, insert-after, patch-block, replace-block, remove-block }
 ```
 
-**Link a paper to a goal** by adding it to the goal's `content.papers[]`.
+**Link a paper to a task** by adding it to the task's `content.papers[]`:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer barkpark-dev-token" \
+  -H "Content-Type: application/json" \
+  "http://localhost:4000/v1/tasks/<root-id>/papers" \
+  -d '{"add":["my-paper"]}'        # or {"remove":["my-paper"]}
+```
 
 > **Caveat:** assign a per-block `"id"` to every block if you need the live stream to be exact (Known Limitations #2). See [`../../portable-doc/examples/welcome.json`](../../portable-doc/examples/welcome.json) for the full block vocabulary with ids.
 
 ## Known limitations
 
-Five tested residuals. Each has a workaround.
+Three tested residuals. Each has a workaround.
 
-1. **`bd ready --label <x>` ignores the filter** — it returns the global ready queue. Filter client-side by your namespace / label until phase-scoping is wired through the shim.
+1. **`bd ready --label <x>` ignores the filter** — it returns the global ready queue. Filter client-side by your namespace / label until label-scoping is wired through the shim.
 2. **Papers with blocks that lack an `"id"` render only the LAST block** in the live LiveView (`/papers/:slug`) due to a stream-dedup bug. The stored data and `body_html` are correct — assign per-block ids if you need the live stream exact.
 3. **`bd close` on an unclaimed task returns HTTP 409 (fencing).** Claim first (`bd update <id> --claim`), then close.
-4. **`bd epic close <goal-id>` is a forced close** — it closes regardless of child state. It is *not* gated on all children being done.
-5. **Goal-close events carry kind `task.closed`** (with the goal title), not a distinct `goal.closed`.
 
 ## Troubleshooting
 
