@@ -303,6 +303,46 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["ok"] == false
       assert payload["reason"] == "not_found"
     end
+
+    # C2 (task carries its rail): the show response surfaces the task's DIRECT
+    # child tasks (one level only) in chronological order, plus child_count.
+    test "C2: returns direct children (the rail) in chronological order, not grandchildren",
+         %{conn: conn, scope: scope} do
+      root = mk_task!(uniq("c2-root"), scope)
+      first = mk_task!(uniq("c2-child-1"), scope, %{"parent_id" => root.doc_id})
+      second = mk_task!(uniq("c2-child-2"), scope, %{"parent_id" => root.doc_id})
+      # A grandchild (child of `first`) must NOT appear in root's rail.
+      _grandchild = mk_task!(uniq("c2-grandchild"), scope, %{"parent_id" => first.doc_id})
+
+      resp = conn |> authed() |> get("/v1/tasks/#{root.doc_id}")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+
+      child_ids = payload["children"] |> Enum.map(& &1["doc_id"])
+      assert child_ids == [first.doc_id, second.doc_id]
+      assert payload["child_count"] == 2
+
+      # Children are lightweight summaries, not the full render_doc.
+      summary = hd(payload["children"])
+      assert summary["doc_id"] == first.doc_id
+      assert summary["title"] == first.title
+      assert summary["lifecycle_status"] == "open"
+      assert Map.has_key?(summary, "inserted_at")
+    end
+
+    test "C2: a childless task returns children == [] and child_count == 0",
+         %{conn: conn, scope: scope} do
+      leaf = mk_task!(uniq("c2-leaf"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks/#{leaf.doc_id}")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["children"] == []
+      assert payload["child_count"] == 0
+    end
   end
 
   describe "POST /v1/tasks/:doc_id/claim — targeted (w7-08)" do

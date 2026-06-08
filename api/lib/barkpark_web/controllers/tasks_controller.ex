@@ -249,11 +249,61 @@ defmodule BarkparkWeb.TasksController do
         # w7-08c: count edges on the single-doc path too. batch_edge_counts/1
         # accepts a 1-element list and runs the same two grouped queries.
         counts = batch_edge_counts([doc])
-        json(conn, %{ok: true, doc: render_doc_with_counts(doc, counts)})
+
+        # C2 (task carries its rail): the task's direct child tasks — the rows
+        # whose `content.parent_id` (OR `content.parent`) points at this doc,
+        # in chronological order. Reuses the SAME prefix-agnostic parent filter
+        # the index's `parent=` slice walks (`maybe_filter_parent_id/2`) plus
+        # the tenancy filters, so the matching logic lives in one place. One
+        # level only — children render as lightweight summaries (NOT the full
+        # render_doc) to keep the payload lean and avoid deep recursion.
+        children = child_tasks(doc.doc_id, conn)
+
+        json(conn, %{
+          ok: true,
+          doc: render_doc_with_counts(doc, counts),
+          children: Enum.map(children, &child_summary/1),
+          child_count: length(children)
+        })
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
+  end
+
+  # C2: the direct child tasks of `doc_id` — its rail — ordered chronologically
+  # (inserted_at ASC, oldest first), tenancy-scoped to the caller's
+  # workspace+project. Mirrors the index's C1 parent slice (lines ~85-101):
+  # the SAME `maybe_filter_parent_id/2` (prefix-agnostic on both `parent_id`
+  # and `parent`, `drafts.` stripped) + the SAME workspace/project filters,
+  # over the four substrate types. No duplicated matching logic — the filter
+  # helpers are shared with `index/2`.
+  defp child_tasks(doc_id, conn) do
+    scope = scope_opts(conn)
+    workspace_id = Keyword.get(scope, :workspace_id)
+    project_id = Keyword.get(scope, :project_id)
+
+    from(d in Document,
+      where: d.type in ["task", "goal", "phase", "event"],
+      order_by: [asc: d.inserted_at]
+    )
+    |> maybe_filter_workspace(workspace_id)
+    |> maybe_filter_project(project_id)
+    |> maybe_filter_parent_id(doc_id)
+    |> Repo.all()
+  end
+
+  # C2: a lightweight child summary — just enough to render the rail without
+  # the full render_doc payload or a recursive child fetch (one level only).
+  defp child_summary(%Document{} = doc) do
+    content = doc.content || %{}
+
+    %{
+      doc_id: doc.doc_id,
+      title: doc.title,
+      lifecycle_status: Map.get(content, "lifecycle_status"),
+      inserted_at: doc.inserted_at
+    }
   end
 
   # ─── POST /v1/tasks/:doc_id/claim ───────────────────────────────────────
