@@ -61,8 +61,17 @@ type focusState struct {
 const (
 	// borderCost is the number of terminal columns added by paneBorder's right border.
 	borderCost = 1
-	// minEditorWidth is the minimum interior content width for the editor column.
+	// minEditorWidth is the PREFERRED minimum interior content width for the editor
+	// column in the multi-pane (Miller-columns) layout. When the budget can host at
+	// least one list column plus an editor this wide, we stay multi-pane.
 	minEditorWidth = 40
+	// minEditorUsable is the smallest interior editor width we will squeeze the
+	// editor down to (dropping additional list columns first) before giving up on
+	// multi-pane and collapsing to a single full-width column.
+	minEditorUsable = 24
+	// minFrameWidth is the horizontal twin of the m.height<5 guard: below it there
+	// is no usable column at all, so View() emits the one-line "too small" message.
+	minFrameWidth = 16
 )
 
 type model struct {
@@ -127,27 +136,134 @@ func (m model) paneWidth() int {
 	return 28
 }
 
-// calcEditorWidth computes the interior content width for the editor column.
+// calcEditorWidth computes the interior content width for the editor column for
+// the CURRENT terminal width. It delegates to the single horizontal-layout
+// planner (computeLayout) so the viewport's content-wrap width always matches
+// what View() will actually render — including the narrow collapse where the
+// editor takes the whole frame (m.width - border).
 func (m model) calcEditorWidth() int {
+	return m.computeLayout().editorWidth
+}
+
+// layoutPlan is the result of the single horizontal-layout planner. Every
+// width decision flows through computeLayout so View() and the viewport agree.
+//
+//	collapsed       — true when the frame is too narrow for even one list column
+//	                  plus a usable editor; only ONE full-width column is shown.
+//	startPane       — first list pane index to render (multi-pane windowing).
+//	showListPanes   — true when list columns are rendered (always in multi-pane;
+//	                  in collapse only when the focused column is a list pane).
+//	editorWidth     — interior width for the editor/preview/empty column.
+//	listWidth       — interior width for each rendered list column (== paneWidth
+//	                  in multi-pane; == editorWidth in a collapsed-to-list view).
+type layoutPlan struct {
+	collapsed     bool
+	startPane     int
+	showListPanes bool
+	editorWidth   int
+	listWidth     int
+}
+
+// computeLayout is the ONE place horizontal space is divided. The hard budget is
+// m.width; every returned column's physical width (interior + borderCost) sums to
+// EXACTLY m.width, so the JoinHorizontal body equals m.width and never pads the
+// toolbar/helpbar past the terminal.
+//
+// Multi-pane (Miller columns) is kept whenever the budget hosts at least one list
+// column plus an editor of at least minEditorUsable interior columns. We first
+// drop trailing-most LIST columns (oldest-first windowing, like before), then
+// shrink the editor toward minEditorUsable, before falling back to collapse.
+//
+// Collapse renders a SINGLE full-width column = m.width: the editor/preview when
+// the editor has focus or a doc is open, otherwise the focused LIST pane.
+func (m model) computeLayout() layoutPlan {
 	pw := m.paneWidth()
-	colWidth := pw + borderCost
-	minEditor := minEditorWidth
+	colWidth := pw + borderCost // physical width of one bordered list column
 
-	maxPanes := (m.width - minEditor - borderCost) / colWidth
-	if maxPanes < 1 {
-		maxPanes = 1
+	// How many list columns we'd LIKE to show (the full chain, capped later).
+	want := len(m.panes)
+	if want < 1 {
+		want = 1
 	}
 
-	visible := len(m.panes)
-	if visible > maxPanes {
-		visible = maxPanes
+	// Tier 1 — PREFERRED multi-pane, byte-identical to the pre-change layout: how
+	// many list columns fit while leaving the editor at least minEditorWidth (40)
+	// interior columns. At wide widths this is exactly the old windowing, so the
+	// wide layout is UNCHANGED.
+	maxListPreferred := (m.width - minEditorWidth - borderCost) / colWidth
+	if maxListPreferred >= 1 {
+		shown := want
+		if shown > maxListPreferred {
+			shown = maxListPreferred
+		}
+		start := len(m.panes) - shown
+		if start < 0 {
+			start = 0
+		}
+		editorWidth := m.width - shown*colWidth - borderCost
+		if editorWidth < minEditorWidth {
+			editorWidth = minEditorWidth
+		}
+		return layoutPlan{
+			collapsed:     false,
+			startPane:     start,
+			showListPanes: true,
+			editorWidth:   editorWidth,
+			listWidth:     pw,
+		}
 	}
 
-	ew := m.width - visible*colWidth - borderCost
-	if ew < minEditor {
-		ew = minEditor
+	// Tier 2 — SQUEEZED multi-pane: the editor can't reach 40 but a list column
+	// plus an editor of at least minEditorUsable still fits. Drop extra list
+	// columns first, then shrink the editor toward minEditorUsable. The summed
+	// physical width stays == m.width, so no overflow.
+	maxList := (m.width - minEditorUsable - borderCost) / colWidth
+	if maxList >= 1 {
+		shown := want
+		if shown > maxList {
+			shown = maxList
+		}
+		start := len(m.panes) - shown
+		if start < 0 {
+			start = 0
+		}
+		editorWidth := m.width - shown*colWidth - borderCost
+		if editorWidth < minEditorUsable {
+			editorWidth = minEditorUsable
+		}
+		return layoutPlan{
+			collapsed:     false,
+			startPane:     start,
+			showListPanes: true,
+			editorWidth:   editorWidth,
+			listWidth:     pw,
+		}
 	}
-	return ew
+
+	// Collapse: one full-width column that FOLLOWS FOCUS, so h/l/tab visibly move
+	// between the single list column and the editor. Focus on a list pane shows
+	// that pane; focus on the editor shows the editor. Only when there is no list
+	// focus AND a doc is open do we default to the editor/preview surface.
+	full := m.width - borderCost
+	if full < 1 {
+		full = 1
+	}
+	focusList := m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes)
+	showList := focusList
+	start := len(m.panes) - 1
+	if start < 0 {
+		start = 0
+	}
+	if focusList {
+		start = m.focus.PaneIndex
+	}
+	return layoutPlan{
+		collapsed:     true,
+		startPane:     start,
+		showListPanes: showList,
+		editorWidth:   full,
+		listWidth:     full,
+	}
 }
 
 // paneHeight returns the interior content height passed to each column's
@@ -933,64 +1049,107 @@ func (m model) View() string {
 		return "Loading..."
 	}
 
-	// Terminal too small to host toolbar + a bordered body + helpbar (the
-	// smallest bounded frame is ph(1) + 2 border + 2 bars = 5): emit a single
-	// truncated line so the frame can never exceed m.height.
-	if m.height < 5 {
-		return truncate("terminal too small", m.width)
+	// Terminal too small on EITHER axis: emit a single truncated line so the
+	// frame can never exceed m.height OR m.width. The vertical floor is 5 (the
+	// smallest bounded frame is ph(1) + 2 border + 2 bars); the horizontal floor
+	// is minFrameWidth (below it no usable column survives). One combined guard.
+	if m.height < 5 || m.width < minFrameWidth {
+		return clampLine(truncate("terminal too small", m.width), m.width)
 	}
 
 	toolbar := m.renderToolbar()
 	helpBar := m.renderHelpBar()
 	ph := m.paneHeight()
-	pw := m.paneWidth()
-	colWidth := pw + borderCost
 
-	// Determine visible panes
-	minEditor := minEditorWidth
-	maxPanes := (m.width - minEditor - borderCost) / colWidth
-	if maxPanes < 1 {
-		maxPanes = 1
-	}
+	plan := m.computeLayout()
 
-	visiblePanes := len(m.panes)
-	startPane := 0
-	if visiblePanes > maxPanes {
-		visiblePanes = maxPanes
-		startPane = len(m.panes) - visiblePanes
-	}
-
-	editorWidth := m.width - visiblePanes*colWidth - borderCost
-	if editorWidth < minEditor {
-		editorWidth = minEditor
-	}
-
-	// Render visible panes
+	// Render columns against the planned budget. The summed physical width of the
+	// returned columns equals m.width, so the JoinHorizontal body is EXACTLY
+	// m.width — the toolbar/helpbar are never padded past the terminal.
 	var columns []string
-	for i := startPane; i < len(m.panes); i++ {
-		isActive := m.focus.Target == FocusPane && i == m.focus.PaneIndex
-		columns = append(columns, m.renderPane(m.panes[i], pw, ph, isActive))
-	}
-
-	// Editor, preview, or empty state
-	if m.showEditor {
-		isActive := m.focus.Target == FocusEditor
-		columns = append(columns, m.renderEditor(editorWidth, ph, isActive))
-	} else if preview := m.renderPreview(editorWidth, ph); preview != "" {
-		columns = append(columns, preview)
+	if plan.collapsed {
+		// Single full-width column following focus.
+		if plan.showListPanes && plan.startPane < len(m.panes) {
+			isActive := m.focus.Target == FocusPane && plan.startPane == m.focus.PaneIndex
+			columns = append(columns, m.renderPane(m.panes[plan.startPane], plan.listWidth, ph, isActive))
+		} else if m.showEditor {
+			isActive := m.focus.Target == FocusEditor
+			columns = append(columns, m.renderEditor(plan.editorWidth, ph, isActive))
+		} else if preview := m.renderPreview(plan.editorWidth, ph); preview != "" {
+			columns = append(columns, preview)
+		} else {
+			columns = append(columns, m.renderEmptyState(plan.editorWidth, ph))
+		}
 	} else {
-		columns = append(columns, m.renderEmptyState(editorWidth, ph))
+		// Multi-pane (Miller columns): list windows + editor/preview/empty.
+		for i := plan.startPane; i < len(m.panes); i++ {
+			isActive := m.focus.Target == FocusPane && i == m.focus.PaneIndex
+			columns = append(columns, m.renderPane(m.panes[i], plan.listWidth, ph, isActive))
+		}
+		if m.showEditor {
+			isActive := m.focus.Target == FocusEditor
+			columns = append(columns, m.renderEditor(plan.editorWidth, ph, isActive))
+		} else if preview := m.renderPreview(plan.editorWidth, ph); preview != "" {
+			columns = append(columns, preview)
+		} else {
+			columns = append(columns, m.renderEmptyState(plan.editorWidth, ph))
+		}
 	}
 
 	var body string
 	if m.selector.active {
 		// Replace the column body with the centred scope-selector modal.
-		bodyHeight := ph
-		body = m.renderSelector(m.width, bodyHeight)
+		body = m.renderSelector(m.width, ph)
 	} else {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, toolbar, body, helpBar)
+
+	// Per-line width backstop: clamp every body row to m.width. computeLayout
+	// already keeps the sum at m.width, but this guarantees no row can overflow
+	// horizontally even in odd transient states (mid-resize, modal, rounding).
+	body = clampBlock(body, m.width)
+
+	frame := lipgloss.JoinVertical(lipgloss.Left, toolbar, body, helpBar)
+	return clampBlock(frame, m.width)
+}
+
+// clampLine truncates a single line to at most w display columns (ANSI/width
+// aware, no ellipsis — the caller chooses the message). Never widens.
+func clampLine(s string, w int) string {
+	if w < 0 {
+		w = 0
+	}
+	return ansi.Truncate(s, w, "")
+}
+
+// clampBlock applies clampLine to every line of a multi-line block. The
+// horizontal safety net: nothing the body emits can exceed m.width.
+func clampBlock(s string, w int) string {
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if lipgloss.Width(ln) > w {
+			lines[i] = clampLine(ln, w)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// clampItemLines flattens a list-item's rendered lines into line-accurate,
+// width-bounded physical rows: any embedded newline (lipgloss soft-wrap) is
+// split out and every resulting segment is hard-truncated to w columns. This
+// keeps renderListInterior's per-item row count truthful so the window can never
+// overflow the box height, and keeps each row within the column width.
+func clampItemLines(il []string, w int) []string {
+	var out []string
+	for _, seg := range il {
+		for _, line := range strings.Split(seg, "\n") {
+			if lipgloss.Width(line) > w {
+				line = clampLine(line, w)
+			}
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // ── Toolbar ──────────────────────────────────────────────────────────────────
@@ -1150,6 +1309,14 @@ func (m model) renderListInterior(pane Pane, width, interiorHeight int, isActive
 			isCursor := i == pane.Cursor && !isActive
 			il = m.renderPaneItem(item, width, isSelected, isCursor, pane.IsDocList)
 		}
+		// Line-accuracy backstop: a styled item whose content exceeds `width`
+		// soft-wraps into a single string carrying embedded newlines — len(il)
+		// would then undercount physical rows and the window would overflow the
+		// box (and the column would exceed its width). Split any embedded newlines
+		// and hard-truncate each physical segment to `width` so rsLen matches the
+		// real rendered height and nothing can spill horizontally. Items that fit
+		// (the common case — real icons are short) pass through byte-identical.
+		il = clampItemLines(il, width)
 		rsLen[i] = len(il)
 		allLines = append(allLines, il...)
 	}
@@ -1426,7 +1593,7 @@ func (m model) buildEditorContent(width int) string {
 	title := truncate(m.selectedDoc.Title, width-20)
 	badge := dimStyle.Render("[" + m.selectedDoc.Status + "]")
 	lines = append(lines, fmt.Sprintf(" %s %s %s", dot, headerStyle.Render(title), badge))
-	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, dividerStyle.Render(strings.Repeat("─", maxInt(width-2, 0))))
 
 	// Schema info
 	lines = append(lines, dimStyle.Render(fmt.Sprintf(
@@ -1451,7 +1618,7 @@ func (m model) buildEditorContent(width int) string {
 
 	// Footer
 	lines = append(lines, "")
-	lines = append(lines, dividerStyle.Render(" "+strings.Repeat("─", width-4)))
+	lines = append(lines, dividerStyle.Render(" "+strings.Repeat("─", maxInt(width-4, 0))))
 
 	footerLeft := dimStyle.Render(fmt.Sprintf("  Edited %s", timeAgo(m.selectedDoc.UpdatedAt)))
 	var footerRight string
@@ -1802,6 +1969,9 @@ func clipContentToHeight(content string, height int) string {
 }
 
 func truncate(s string, max int) string {
+	if max < 0 {
+		max = 0
+	}
 	if len(s) <= max {
 		return s
 	}
