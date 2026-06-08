@@ -87,16 +87,14 @@ config :barkpark, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"30 3 * * *", Barkpark.Search.Workers.Crystallize},
-       {"0 4 * * *", Barkpark.Search.Workers.Prune},
-       # W7-05 TTL sweep — runs every minute (the finest Oban.Cron
-       # granularity). Sub-minute cadence is intentionally NOT
-       # supported; see :task_lease_ttl_seconds comment below.
-       {"* * * * *", Barkpark.Tasks.TtlSweeper},
-       # W7-06 task-document compaction — every 6 hours. Coarser than
-       # TTL sweep because compaction is batch storage maintenance, not
-       # real-time crash recovery. The per-task advisory lock (same key
-       # as TtlSweeper / Tasks.close) serializes with claim/close/sweep.
-       {"0 */6 * * *", Barkpark.Tasks.Compactor}
+       {"0 4 * * *", Barkpark.Search.Workers.Prune}
+       # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
+       # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
+       # entries now live in the Tasks plugin's `oban_crontab/0`
+       # (`Barkpark.Plugins.Tasks`); the C4-1 boot merge folds them back into
+       # this crontab via `Plugins.Registry.collect_oban_crontab/0`. The
+       # `tasks_ttl` / `tasks_compact` queues above stay here — only the worker
+       # scheduling moved to the plugin.
      ]}
   ]
 

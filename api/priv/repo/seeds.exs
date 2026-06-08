@@ -232,32 +232,16 @@ IO.puts("Seeded #{length(schemas)} schema definitions")
 #
 # Wave 7 step 1: everything is a task — a single first-class document type
 # living beside papers in the same workspace/project/dataset hierarchy (a
-# goal/epic is just a root task, a phase is a task with children). Register the
-# `task` schema the same way `paper` is seeded above so it appears in the Studio
-# desk + `Content.get_schema/2` + `Content.list_schemas/2` immediately after
-# `mix ecto.reset`. The shape contract (`content.kind`,
-# `content.lifecycle_status`, etc.) is enforced at the write boundary by
-# `Barkpark.Tasks.validate_kind_content/2` (wired into `Content.create_document/4`
-# + `Content.upsert_document/4`); the schema row here is the "first-class
-# document type" half (so Studio renders it) — the validation is the
-# field-shape half. See `lib/barkpark/tasks.ex` moduledoc for the full
-# rationale + status-axis choice (b).
-
-tasks_dataset = "production"
-
-for schema_def <- Barkpark.Tasks.schema_definitions(tasks_dataset) do
-  attrs =
-    schema_def
-    |> Map.from_struct()
-    |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
-
-  %SchemaDefinition{}
-  |> SchemaDefinition.changeset(attrs)
-  |> stamp_schema_scope.()
-  |> Repo.insert!(on_conflict: :nothing)
-end
-
-IO.puts("Seeded W7a task schema (dataset=#{tasks_dataset})")
+# goal/epic is just a root task, a phase is a task with children). The `task`
+# schema is no longer seeded inline here: it is now declared by the **Tasks
+# plugin** (`Barkpark.Plugins.Tasks`) and auto-registered by
+# `Barkpark.Plugins.Bootstrap.register_all_schemas/0` (called below in the
+# "Registering plugin schemas" section, and on every server boot). This mirrors
+# how the Bulldocs lift removed its inline `paper` seed. The shape contract
+# (`content.kind`, `content.lifecycle_status`, etc.) is still enforced at the
+# write boundary by `Barkpark.Tasks.validate_kind_content/2`. See
+# `lib/barkpark/plugins/tasks.ex` for the wiring and `lib/barkpark/tasks.ex` for
+# the schema builder + status-axis rationale (choice b).
 
 # ── Documents ────────────────────────────────────────────────────────────────
 

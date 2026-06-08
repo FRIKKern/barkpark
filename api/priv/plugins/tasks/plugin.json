@@ -1,0 +1,7 @@
+{
+  "plugin_name": "tasks",
+  "version": "0.1.0",
+  "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",
+  "capabilities": ["schemas", "workers"],
+  "module": "Barkpark.Plugins.Tasks"
+}
