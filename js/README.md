@@ -4,12 +4,12 @@ TypeScript packages for Barkpark clients and integrations.
 
 ## Packages
 
-- `@barkpark/core` — runtime-agnostic HTTP client (ADR-002, ADR-009)
-- `@barkpark/codegen` — schema introspection + typed-client codegen (ADR-006)
-- `@barkpark/nextjs` — Next.js App Router integration (ADR-003, ADR-004, ADR-008)
+- `@barkpark/core` — runtime-agnostic HTTP client
+- `@barkpark/codegen` — schema introspection + typed-client codegen
+- `@barkpark/nextjs` — Next.js App Router integration (ADR-0003 — cache tag scheme)
 - `@barkpark/react` — framework-free renderers (PortableText, Image, Reference)
-- `@barkpark/groq` — **1.1 roadmap** — reserved npm name (ADR-000)
-- `@barkpark/nextjs-query` — **1.1 roadmap** — reserved npm name (ADR-012)
+- `@barkpark/groq` — **1.1 roadmap** — reserved npm name
+- `@barkpark/nextjs-query` — **1.1 roadmap** — reserved npm name
 - `create-barkpark-app` — project scaffolder
 
 ## Setup

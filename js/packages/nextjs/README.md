@@ -11,4 +11,4 @@ Next.js App Router integration. Eight subpath entries: `.`, `./server`, `./clien
 - `./preload` — preload helpers
 - root — `revalidateBarkpark` is a throw-only Phase-3 **stub** (`src/index.ts`); use `./revalidate` for the working implementation. Also re-exports public types.
 
-See **ADR-003** (cache tag scheme), **ADR-004** (draft-mode branching), **ADR-008** (mutations + defineActions).
+See **ADR-0003** (cache tag scheme — `api/docs/adr/ADR-0003-canonical-sync-tag-convention.md`).

@@ -258,8 +258,51 @@ Use the decision-tree table. If severity is Critical, Boss is the approver (DM /
 
 ### 7. Postmortem (within 48h)
 
-- Write `.doey/plans/postmortem-<incident>-<date>.md` with: timeline, detection gap, decision rationale, fix, prevention (test we should have had, CI gate we should add).
-- File preventive tickets in the 1.0.1 backlog.
+- **Record the postmortem as a task in the task system** — dogfood it; the
+  task is the durable postmortem record. Do **not** write to `.doey/plans/`
+  (that directory was archived to `_attic`, it is not a live destination).
+
+  A task is a `type:"task"` document created via the standard mutate endpoint
+  (`content.kind` must equal `"task"`) — there is no `POST /v1/tasks` create
+  verb; the `bp task` verbs are read/lifecycle only.
+
+  ```bash
+  TOKEN=barkpark-dev-token
+
+  # Create the postmortem task. Capture timeline, detection gap, decision
+  # rationale, fix, and prevention right in the content. Pick a stable doc id.
+  curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"mutations":[{"create":{
+          "_id": "postmortem-<incident>-<date>",
+          "_type": "task",
+          "title": "postmortem: <incident> (<date>)",
+          "content": {
+            "kind": "task",
+            "lifecycle_status": "open",
+            "timeline": "<…>",
+            "detection_gap": "<…>",
+            "decision_rationale": "<which mechanism + why>",
+            "fix": "<patch version shipped>",
+            "prevention": "<test we should have had, CI gate we should add>",
+            "labels": ["postmortem", "incident", "ops"]
+          }
+        }}]}'
+  # → the doc id you chose is <task_id> below.
+  ```
+
+  For a long-form write-up, author a Bulldocs paper and attach it to the task
+  (the task references the paper):
+
+  ```bash
+  curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"add": ["postmortem-<incident>-<date>"]}'
+  ```
+
+- File preventive tickets in the 1.0.1 backlog (each one its own task).
 - If the same class of bug has caused two incidents, the prevention task is upgraded to P0 for 1.0.1.
 
 ---
@@ -330,6 +373,40 @@ Per slice 8.0 preflight: this playbook must be **drilled at least once** before 
 1. Publish `@barkpark/core@0.0.0-rollback-drill-<timestamp>` to `@preview` dist-tag.
 2. Deprecate it within 5 minutes.
 3. Unpublish it within 60 minutes (inside 72h window).
-4. Record timestamps and observed behavior in `.doey/plans/rollback-drill-<date>.md`.
+4. **Record the drill as a task in the task system** — dogfood it; the task is
+   the durable drill record. Do **not** write to `.doey/plans/` (archived to
+   `_attic`, not a live destination). Capture timestamps and observed behavior
+   in the task body:
+
+   A task is a `type:"task"` document created via the standard mutate endpoint
+   (`content.kind` must equal `"task"`); the `bp task` verbs are read/lifecycle
+   only, so there is no `POST /v1/tasks` create verb.
+
+   ```bash
+   TOKEN=barkpark-dev-token
+
+   curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"mutations":[{"create":{
+           "_id": "rollback-drill-<date>",
+           "_type": "task",
+           "title": "rollback drill (<date>)",
+           "content": {
+             "kind": "task",
+             "lifecycle_status": "open",
+             "published_at": "<ts>",
+             "deprecated_at": "<ts> (target <5m)",
+             "unpublished_at": "<ts> (target <60m)",
+             "observed": "<observed behavior / deviations>",
+             "labels": ["rollback-drill", "ops"]
+           }
+         }}]}'
+   # → the doc id you chose is <task_id>; attach a written paper if a long-form
+   #   record is warranted:
+   #   curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
+   #     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+   #     -d '{"add": ["rollback-drill-<date>"]}'
+   ```
 
 After GA, annual re-drill. Sooner if on-call personnel change.

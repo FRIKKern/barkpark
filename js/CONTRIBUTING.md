@@ -45,7 +45,7 @@ pnpm --filter @barkpark/core test:all   # core: node + workerd + browser
 pnpm size
 ```
 
-CI fails on > 2% regression (ADR-001).
+CI fails on > 2% regression.
 
 ## ADRs
 

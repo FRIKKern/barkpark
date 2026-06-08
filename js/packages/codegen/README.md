@@ -4,4 +4,4 @@ Schema-path helpers for codegen tooling (preview.0). Exports `defineConfig` (con
 
 Schema fetches default to the flat `/v1/schemas/:dataset` path. Set both `workspace` and `project` (config or `--workspace`/`--project` CLI flags) to use the scoped `/w/:workspace/p/:project/v1/schemas/:dataset` path; omit them for the flat back-compat path.
 
-See **ADR-006** (two-step typedClient codegen).
+See `docs/adr/` for architectural decision records.

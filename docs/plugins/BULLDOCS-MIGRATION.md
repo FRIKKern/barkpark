@@ -53,9 +53,10 @@ open a PR unless the user explicitly asks.
    to "document".)
 3. **Core modules stay put as utilities.** `Barkpark.PortableDoc.*`,
    `Content.upsert_paper`/`apply_paper_block_op`/`apply_document_block_op`/
-   `get_public_paper`/`doc_topic`, `BarkparkWeb.PaperLive`, the
-   `PaperIngestController`/`PaperIntentsController`, `Barkpark.Papers.Events`,
-   `RequireIngestToken`, `layouts/paper.html.heex`. Bulldocs reuses them. Do not
+   `get_public_paper`/`doc_topic`, `BarkparkWeb.BulldocsLive`, the
+   `BulldocsIngestController`/`BulldocsIntentsController`,
+   `Barkpark.Plugins.Bulldocs.Events`, `RequireIngestToken`,
+   `layouts/bulldocs.html.heex`. Bulldocs reuses them. Do not
    mass-rename them unless the user explicitly approves the optional rename in
    §5.4.
 4. **The plugin route highway was extended, not bypassed.** Two new buckets:
@@ -107,12 +108,12 @@ mix test
    path — no other plugin uses `:public_root`). It emits, per reader route:
    ```elixir
    live_session :plugin_root_papers_slug_<hash>,
-     root_layout: {BarkparkWeb.Layouts, :paper} do
-     live "/papers/:slug", BarkparkWeb.PaperLive, :index, []
+     root_layout: {BarkparkWeb.Layouts, :bulldocs} do
+     live "/papers/:slug", BarkparkWeb.BulldocsLive, :index, []
    end
    ```
    This mirrors the old hand-written `live_session :papers`. If compile or
-   runtime complains: confirm `BarkparkWeb.PaperLive.mount/3` still returns
+   runtime complains: confirm `BarkparkWeb.BulldocsLive.mount/3` still returns
    `{:ok, socket, layout: false}` (it does — that's what drops the app chrome);
    if the app layout still wraps it, add `layout: false` to the live_session
    opts in `emit_route_ast/1` (`router/plugins.ex`).
@@ -146,8 +147,8 @@ curl -s -H "Authorization: Bearer barkpark-dev-token" \
   localhost:4000/v1/schemas/production | grep -o '"name":"paper"'
 ```
 
-Existing `paper_live_test.exs` / `paper_ingest_controller_test.exs` /
-`paper_intents_controller_test.exs` should still pass: the reader path/layout
+Existing `bulldocs_live_test.exs` / `bulldocs_ingest_controller_test.exs` /
+`bulldocs_intents_controller_test.exs` should still pass: the reader path/layout
 is unchanged and the old `/v1/paperflow/*` ingest URLs are kept as the alias.
 
 **Report compile/test results before doing §5.** If green, commit any
@@ -183,13 +184,14 @@ user.** Note: these modules are named after "paper" (the artifact, which
 *stays*), so leaving them is defensible. If the user wants the rename, do it
 with the compiler as your safety net (it catches missed references), one module
 at a time, updating every reference + test:
-- `BarkparkWeb.PaperLive` → `BarkparkWeb.BulldocLive` (+ `paper_live_test.exs`)
+- `BarkparkWeb.PaperLive` → `BarkparkWeb.BulldocsLive` (+ `bulldocs_live_test.exs`)
 - `BarkparkWeb.PaperIngestController` / `PaperIntentsController` →
-  `Bulldocs*` (+ their tests, + router alias scope + plugin route specs)
+  `BarkparkWeb.BulldocsIngestController` / `BulldocsIntentsController`
+  (+ their tests, + router alias scope + plugin route specs)
 - `Barkpark.Papers.{Event,Events}` → `Barkpark.Plugins.Bulldocs.{Event,Events}`
-  (+ `paper_live.ex`, `paper_intents_controller.ex`, `content.ex` event-emit,
-  + tests under `test/barkpark/papers/`)
-- `bp-paper-editor.bundle.js`, `layouts/paper.html.heex` filenames
+  (+ `bulldocs_live.ex`, `bulldocs_intents_controller.ex`, `content.ex`
+  event-emit, + tests under `test/barkpark/plugins/bulldocs/`)
+- `bp-paper-editor.bundle.js`, `layouts/bulldocs.html.heex` filenames
 - doc-comment mentions of `:paperflow_ingest` (now `:ingest`) and "paperflow"
 Keep the `:paperflow_ingest_token` config key + `PAPERFLOW_INGEST_TOKEN` env var
 (user-facing config; renaming breaks their `.env`).
@@ -205,7 +207,7 @@ Once the producer posts to `/v1/plugins/bulldocs/*`, remove the
 ### Core/plugin split
 | Layer | Modules |
 |---|---|
-| **Core utilities (stay)** | `PortableDoc.{Render,Patch,Projection,Synthesis}`; `Content` paper helpers (`upsert_paper`, `apply_paper_block_op`, `apply_document_block_op`, `get_public_paper`, `paper_topic`, `doc_topic`); `PaperLive`; ingest/intents controllers; `Papers.Events`/`Event`; `RequireIngestToken`; `paper.html.heex` |
+| **Core utilities (stay)** | `PortableDoc.{Render,Patch,Projection,Synthesis}`; `Content` paper helpers (`upsert_paper`, `apply_paper_block_op`, `apply_document_block_op`, `get_public_paper`, `paper_topic`, `doc_topic`); `BulldocsLive`; ingest/intents controllers; `Plugins.Bulldocs.Events`/`Event`; `RequireIngestToken`; `bulldocs.html.heex` |
 | **Bulldocs plugin (wiring)** | `Barkpark.Plugins.Bulldocs` — `register_schemas/1` (the `paper` type) + `register_routes/1` (reader + ingest) |
 
 ### The two new highway buckets (`BarkparkWeb.Router.Plugins`)
@@ -218,9 +220,9 @@ Once the producer posts to `/v1/plugins/bulldocs/*`, remove the
 
 Route spec shapes (`Barkpark.Plugins.Bulldocs.register_routes/1`):
 ```elixir
-{:live, "/papers/:slug", BarkparkWeb.PaperLive, :index,
- auth: :public_root, root_layout: {BarkparkWeb.Layouts, :paper}}
-{:post, "/bulldocs/papers", BarkparkWeb.PaperIngestController, :ingest, auth: :ingest}
+{:live, "/papers/:slug", BarkparkWeb.BulldocsLive, :index,
+ auth: :public_root, root_layout: {BarkparkWeb.Layouts, :bulldocs}}
+{:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest}
 # … /bulldocs/papers/:slug/ops, /bulldocs/intents, /bulldocs/intents/:id/processed
 ```
 
@@ -238,7 +240,7 @@ Papers are `documents` rows of `type:"paper"`. The payload lives in `content`:
 counter), `style` (`"article"`), `source_doc`, `goal_id`. The reader streams
 each top-level block as a keyed LiveView stream item; deltas patch one block;
 a rev-gap triggers a full refetch. `paper_events` is an append-only lifecycle
-log (`Papers.Events`) backing the goal-path rail; `processed_at IS NULL` rows
+log (`Plugins.Bulldocs.Events`) backing the goal-path rail; `processed_at IS NULL` rows
 are the intent queue drained by an external loop via the intents API.
 
 ---

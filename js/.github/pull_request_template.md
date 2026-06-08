@@ -6,7 +6,7 @@
 
 ## ADR references
 
-<!-- List any relevant ADRs (e.g., ADR-001, ADR-012). Delete this section if none. -->
+<!-- List any relevant ADRs (e.g., ADR-0001, ADR-0003). Delete this section if none. -->
 
 ## Checklist
 

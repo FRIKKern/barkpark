@@ -95,10 +95,54 @@ What it does **not** catch (still requires Reviewer + tests):
 ## When to override
 
 The `mix-prod-compile` gate may be bypassed only by an explicit Boss
-decision documented in the decision log
-(`.doey/plans/decision-log.md`) with a reason and a follow-up task to
-remove the override. Any merge that lands without the gate green must
-be reverted within 24h unless the override entry exists.
+decision **recorded as a task in the task system** (dogfood it — the task
+*is* the durable decision record; do not write to `.doey/plans/`, that
+directory was archived to `_attic`). Capture the reason and the follow-up
+to remove the override on the task itself:
+
+A task is a `type:"task"` document created through the standard mutate
+endpoint (`content.kind` must equal `"task"`); there is no bespoke
+`POST /v1/tasks` create verb — the `bp task` verbs are read/lifecycle only
+(`ls`, `ready`, `get`, `claim`, `close`).
+
+```bash
+TOKEN=barkpark-dev-token
+
+# 1. Record the override decision as a task. Pick a stable doc id (<task_id>).
+curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mutations":[{"create":{
+        "_id": "merge-gate-override-<pr>",
+        "_type": "task",
+        "title": "merge-gate override: mix-prod-compile bypassed for <PR #>",
+        "content": {
+          "kind": "task",
+          "lifecycle_status": "open",
+          "decision": "Boss approved bypassing the mix-prod-compile gate.",
+          "reason": "<why>",
+          "follow_up": "<remove the override: what + when>",
+          "merge_sha": "<sha>",
+          "labels": ["merge-gate-override", "ops"]
+        }
+      }}]}'
+# → the create lands as drafts.merge-gate-override-<pr>; the doc id you chose
+#   is <task_id> below.
+```
+
+Optionally attach a written paper (a Bulldocs paper the task references) when
+the rationale needs prose longer than a task body — author it through the
+Bulldocs ingest API, then link it:
+
+```bash
+curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"add": ["merge-gate-override-<pr>"]}'
+```
+
+Any merge that lands without the gate green must be reverted within 24h
+unless that override task exists.
 
 ## Quick reference
 

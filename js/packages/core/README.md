@@ -4,4 +4,4 @@ Runtime-agnostic HTTP client for the Barkpark Phoenix API. Zero runtime deps, fe
 
 Provides the client factory, filter-builder, fluent patch, transactions, `listen()`, and the full error taxonomy.
 
-See **ADR-002** (fetch-only transport) and **ADR-009** (error taxonomy).
+See `docs/adr/` for architectural decision records.

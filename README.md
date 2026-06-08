@@ -19,9 +19,9 @@
 | Core model | Sanity-style draft/published, perspectives (`published` / `drafts` / `raw`) |
 | The CLI idea | **One binary = your whole API.** The `<noun> <verb>` tree is a pure function of the server's `GET /v1/capabilities` — install a plugin, its verbs appear; disable it, they vanish. One command = one API call. |
 | Plugin system | `Barkpark.Plugin` behaviour — callbacks for schemas, routes, workers, cron, resolver chain, lifecycle hooks. Plugins ship data + behaviour (and may own routes/readers). |
-| Reference plugins | **OnixEdit** (ONIX 3.0 book metadata + Bokbasen) · **Bulldocs** (portable-doc papers at `/papers/:slug`) · **Tasks** (`/v1/tasks/*` substrate) |
+| Reference plugins | **OnixEdit** (ONIX 3.0 book metadata + Bokbasen) · **Bulldocs** (portable-doc papers at `/papers/:slug`) · **Tasks** (`/v1/tasks/*` substrate) · **Media** (native asset library, metadata-per-asset) · **Frt** (Godot game content model, tick-ordered desk) |
 | Stack | Elixir 1.15+ (tested 1.19) / Phoenix LiveView 1.1 / PostgreSQL / Oban / Go 1.24+ |
-| Tests | 1324 mix tests, 47 HTTP integration tests, full ONIX export round-trip |
+| Tests | 2303 mix tests, 89 HTTP integration tests, full ONIX export round-trip |
 
 ---
 
@@ -339,6 +339,8 @@ Eight events bracket the four mutating Content operations. `before_*` are **sync
 - **OnixEdit** — book editor → ONIX 3.0 export → Bokbasen `publisher`/`distributor` metadata-import API with a 9-state machine (`pending → staging → staged → polling → accepted | rejected | failed | cancelled | cannot_cancel`). Exercises the full contract: Schema v2 types, codelist seeders, action handlers, Cloak-encrypted settings, Oban workers, lifecycle hooks, top-menu/desk-item resolvers, `api_tests/0`. Validated reference output at `proof/onix-sample.xml`, byte-stable round-trip guarded by `export_proof_test.exs`.
 - **Bulldocs** — portable-doc "papers" reader at `/papers/:slug`, ingest at `/v1/plugins/bulldocs/*`. Drives the `bp bulldocs` verbs and the `@barkpark/bulldocs-sdk` TypeScript SDK.
 - **Tasks** — the task substrate. Owns the `task` schema, the `/v1/tasks/*` routes (`auth: :token_root`), the TTL/compactor Oban cron (via `oban_crontab/0`), and the `bp task` verbs (`source: plugin:tasks`). Everything is a task: a goal is a root task, a phase is ordered sibling tasks, a rail is a task's child tasks (`GET /v1/tasks?parent=<doc_id>` and the `children` + `child_count` fields on `GET /v1/tasks/:doc_id`).
+- **Media** — a native media library: one `mediaAsset` document per uploaded file, plus `mediaCollection`. Binary bytes stay in `media_files` + `/media/files/*`; rich metadata (alt text, collections, rights, tags) lives on plugin documents queried via the standard `/v1/data/query` API. Wires the upload/delete lifecycle (`after_media_upload` creates the companion draft asset, `after_media_delete` removes it), seeds codelists, and ships `api_tests/0`.
+- **Frt** — "Frickin Real Time", an author-first content model whose 25 `private` schemas mirror a Godot game's structure. Its `desk_items/1` builds eight `:nested` groups ordered to follow `coordinator.gd`'s tick loop (Frame & Time → Player → Combat → Enemies → The Run → Progression → Game Feel → World), so browsing the Studio top-to-bottom teaches how a frame of the game is assembled.
 
 ### Plugin admin (Studio)
 
@@ -379,6 +381,8 @@ flowchart TB
     OnixEdit[OnixEdit]
     Bulldocs[Bulldocs]
     Tasks[Tasks]
+    Media[Media]
+    Frt[Frt]
   end
 
   PG[(PostgreSQL<br/>JSONB)]
@@ -395,6 +399,8 @@ flowchart TB
   Registry -.->|prev, ctx -> next| OnixEdit
   Registry -.->|prev, ctx -> next| Bulldocs
   Registry -->|register_routes -> /v1/tasks| Tasks
+  Registry -.->|after_media_* hooks| Media
+  Registry -.->|desk_items -> tick-order desk| Frt
   Content -->|before_* halt? after_* async| Registry
   Content --> PG
   Workers --> Content
@@ -462,8 +468,8 @@ ssh root@YOUR_VPS_IP 'cd /opt/barkpark && make deploy' # or, manually: pull + cl
 
 ```bash
 cd api
-mix test                                                       # ~1324 tests
-mix test test/barkpark_web/integration                         # 47 HTTP integration tests
+mix test                                                       # ~2303 tests
+mix test test/barkpark_web/integration                         # 89 HTTP integration tests
 mix test test/barkpark/plugins/onixedit/export_proof_test.exs  # ONIX export round-trip (byte-stable)
 ```
 
@@ -518,7 +524,7 @@ barkpark/
       live/studio                                             StudioLive, MediaLive, ApiTesterLive
       live/admin                                              PluginsLive, PluginSettingsLive
     priv/repo/seeds.exs                                       Seed: schemas, sample docs, dev token
-    test/barkpark_web/integration/                            47 HTTP integration tests
+    test/barkpark_web/integration/                            89 HTTP integration tests
   docs/plugins/  docs/ops/                                    ARCHITECTURE, RECIPE, SCHEMA_V2, INSTALL · PROD_OPS, runbooks
   web/                                                        Next.js Vercel demo (optional, make web)
 ```
