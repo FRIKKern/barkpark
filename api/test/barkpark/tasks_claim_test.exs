@@ -237,16 +237,22 @@ defmodule Barkpark.TasksClaimTest do
                )
     end
 
-    test "close on a task with NO claim record → :fenced_off (defense-in-depth)",
+    test "close on a task with NO claim record → closes (no lease to fence; C3b)",
          %{scope: scope} do
+      # C3b generalized fencing: a task with no claim lease has nothing to fence
+      # against, so it closes cleanly (this is what lets a never-claimed root
+      # task — a "goal" — be closed). A CLAIMED task still requires a matching
+      # epoch (covered by the epoch-mismatch test above).
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
       task = mk_task!(uniq("fc"), scope)
 
-      assert {:error, :fenced_off} =
+      assert {:ok, closed} =
                Tasks.close(task.id, "ghost",
                  observed_epoch: 1,
                  lifecycle_status: "done"
                )
+
+      assert closed.content["lifecycle_status"] == "done"
     end
 
     test "epoch bumps monotonically across re-claims", %{scope: scope} do
@@ -283,9 +289,24 @@ defmodule Barkpark.TasksClaimTest do
 
       phase_id = uniq("phase-casc")
       a = mk_task!(uniq("casc-a"), scope, %{"parent_id" => phase_id})
-      b = mk_task!(uniq("casc-b"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
-      c = mk_task!(uniq("casc-c"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
-      d = mk_task!(uniq("casc-d"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
+
+      b =
+        mk_task!(uniq("casc-b"), scope, %{
+          "parent_id" => phase_id,
+          "lifecycle_status" => "blocked"
+        })
+
+      c =
+        mk_task!(uniq("casc-c"), scope, %{
+          "parent_id" => phase_id,
+          "lifecycle_status" => "blocked"
+        })
+
+      d =
+        mk_task!(uniq("casc-d"), scope, %{
+          "parent_id" => phase_id,
+          "lifecycle_status" => "blocked"
+        })
 
       {:ok, _} = Tasks.add_dep(b.id, a.id, :blocks)
       {:ok, _} = Tasks.add_dep(c.id, a.id, :blocks)
@@ -294,6 +315,7 @@ defmodule Barkpark.TasksClaimTest do
       # Claim A first so the close has a valid epoch to assert against.
       {:ok, claimed_a} =
         Tasks.claim("worker-A", scope ++ [phase_id: phase_id, dataset: @dataset])
+
       assert claimed_a.id == a.id
 
       assert {:ok, closed_a} =
@@ -325,7 +347,9 @@ defmodule Barkpark.TasksClaimTest do
       phase_id = uniq("phase-multi")
       a1 = mk_task!(uniq("m-a1"), scope, %{"parent_id" => phase_id})
       a2 = mk_task!(uniq("m-a2"), scope, %{"parent_id" => phase_id})
-      b = mk_task!(uniq("m-b"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
+
+      b =
+        mk_task!(uniq("m-b"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
 
       {:ok, _} = Tasks.add_dep(b.id, a1.id, :blocks)
       {:ok, _} = Tasks.add_dep(b.id, a2.id, :blocks)
@@ -367,7 +391,10 @@ defmodule Barkpark.TasksClaimTest do
 
       phase_id = uniq("phase-ser")
       a = mk_task!(uniq("ser-a"), scope, %{"parent_id" => phase_id})
-      b = mk_task!(uniq("ser-b"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
+
+      b =
+        mk_task!(uniq("ser-b"), scope, %{"parent_id" => phase_id, "lifecycle_status" => "blocked"})
+
       {:ok, _} = Tasks.add_dep(b.id, a.id, :blocks)
 
       {:ok, claimed} = Tasks.claim("w", scope ++ [phase_id: phase_id, dataset: @dataset])
@@ -551,7 +578,8 @@ defmodule Barkpark.TasksClaimTest do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
       assert {:error, :not_found} =
-               Tasks.claim_by_id("no-such-doc-id-#{System.unique_integer([:positive])}",
+               Tasks.claim_by_id(
+                 "no-such-doc-id-#{System.unique_integer([:positive])}",
                  "w",
                  scope
                )
