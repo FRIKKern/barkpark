@@ -310,6 +310,23 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :token)
   end
 
+  # ── Plugin-contributed routes — token-gated, ROOT-mounted (`auth: :token_root`) ─
+  # Root-mounted sibling of the `:token` bucket above: same `[:api, :require_token]`
+  # pipeline (authenticated bearer, NOT admin), but mounted at the host `/v1`
+  # TOP-LEVEL scope instead of under `/v1/plugins`. A spec
+  # `{:get, "/tasks/ready", Mod, :ready, auth: :token_root}` therefore lands at
+  # `/v1/tasks/ready` — analogous to how `:public_root` (`scope "/"`) is the
+  # root-mounted sibling of `:public` (`/studio`). Controller routes only, no
+  # live_session. Coexists with the existing core `/v1` scopes (Phoenix allows
+  # multiple `scope "/v1"` blocks). Expands to nothing until a plugin contributes
+  # an `auth: :token_root` route (dormant, like `:token`/`:ingest`/`:public_root`
+  # were when first added).
+  scope "/v1", BarkparkWeb do
+    pipe_through [:api, :require_token]
+
+    plugin_routes(scope: :token_root)
+  end
+
   # ── Plugin-contributed routes — public root-layout (`auth: :public_root`) ──
   # For plugin LiveViews that own a FULL-document root layout and mount at the
   # top level WITHOUT the studio chrome — e.g. the Bulldocs paper reader at

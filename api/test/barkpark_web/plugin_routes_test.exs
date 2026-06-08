@@ -269,4 +269,47 @@ defmodule BarkparkWeb.PluginRoutesTest do
       end
     end
   end
+
+  # ── Describe 5 — `:token_root` plugin-route bucket selection (C4-2) ────
+  #
+  # The `:token_root` highway bucket is the ROOT-mounted sibling of `:token`:
+  # same `[:api, :require_token]` pipeline (controller routes only), but mounted
+  # at the host `/v1` top-level scope instead of under `/v1/plugins` — so a spec
+  # `{:get, "/tasks/ready", Mod, :ready, auth: :token_root}` lands at
+  # `/v1/tasks/ready`. It is DORMANT until a plugin contributes an
+  # `auth: :token_root` route.
+  #
+  # As with the `:token` bucket, the macro filters `collect_routes/1` through the
+  # generic `auth == scope` clause. We lock that selection contract directly: a
+  # 5-tuple route spec declared with `auth: :token_root` is selected by
+  # `scope: :token_root` and is NOT selected by `scope: :token` or `scope: :api`.
+
+  describe "`:token_root` plugin-route bucket selection (C4-2)" do
+    @token_root_spec {:get, "/tasks/ready", BarkparkWeb.PageController, :index, auth: :token_root}
+
+    test "an `auth: :token_root` route is selected by scope :token_root only" do
+      assert select_for_scope([@token_root_spec], :token_root) == [@token_root_spec],
+             "expected the auth: :token_root route to be selected by the :token_root bucket"
+
+      assert select_for_scope([@token_root_spec], :token) == [],
+             "expected the auth: :token_root route to be EXCLUDED from the :token bucket"
+
+      assert select_for_scope([@token_root_spec], :api) == [],
+             "expected the auth: :token_root route to be EXCLUDED from the :api bucket"
+    end
+
+    test "`plugin_routes(scope: :token_root)` is an accepted bucket (guard list)" do
+      # The macro raises ArgumentError for an unknown scope; :token_root must pass.
+      assert :token_root in [
+               :admin,
+               :ops,
+               :public,
+               :api,
+               :token,
+               :token_root,
+               :ingest,
+               :public_root
+             ]
+    end
+  end
 end

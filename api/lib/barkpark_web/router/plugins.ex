@@ -44,6 +44,7 @@ defmodule BarkparkWeb.Router.Plugins do
   | `:public`  | `:public` (or `:none`)    | `pipe_through :browser` + `live_session` (no on_mount)         |
   | `:api`     | `:api`                    | `pipe_through [:api, :require_admin]` (controller routes only) |
   | `:token`   | `:token`                  | `pipe_through [:api, :require_token]` (controller routes only) |
+  | `:token_root` | `:token_root`          | `pipe_through [:api, :require_token]`, mounted at host `/v1` (controller routes only) |
   | `:ingest`  | `:ingest`                 | `pipe_through :ingest` (RequireIngestToken; controller routes) |
   | `:public_root` | `:public_root`        | `pipe_through :browser`; macro emits a per-route `live_session` with the spec's `root_layout:` |
 
@@ -53,6 +54,13 @@ defmodule BarkparkWeb.Router.Plugins do
   a public LiveView at the host's top-level scope with its OWN full-document
   root layout (declared via a `root_layout:` opt on the spec) and no studio
   chrome — for reader surfaces like the Bulldocs paper at `/papers/:slug`.
+
+  The `:token_root` bucket is the root-mounted sibling of `:token`: same
+  `[:api, :require_token]` pipeline (controller routes only), but mounted at the
+  host `/v1` top-level scope instead of under `/v1/plugins`. A spec
+  `{:get, "/tasks/ready", Mod, :ready, auth: :token_root}` therefore lands at
+  `/v1/tasks/ready` — analogous to how `:public_root` is the root-mounted
+  sibling of `:public`.
 
   The `:ops` bucket gates routes via the loosened admin role used by the
   publish-ops console (see `BarkparkWeb.LiveAuth.on_mount(:ops, …)`).
@@ -93,6 +101,8 @@ defmodule BarkparkWeb.Router.Plugins do
     * `:public`          — routes that opted in to `auth: :none`
     * `:api`             — routes that opted in to `auth: :api`
     * `:token`           — routes that opted in to `auth: :token`
+    * `:token_root`      — routes that opted in to `auth: :token_root`
+                           (root-mounted sibling of `:token`, at host `/v1`)
     * `:ingest`          — routes that opted in to `auth: :ingest`
     * `:public_root`     — routes that opted in to `auth: :public_root`
                            (carry a `root_layout:` opt; each is wrapped in its
@@ -106,9 +116,9 @@ defmodule BarkparkWeb.Router.Plugins do
   defmacro plugin_routes(opts \\ []) do
     scope = Keyword.get(opts, :scope, :admin)
 
-    unless scope in [:admin, :ops, :public, :api, :token, :ingest, :public_root] do
+    unless scope in [:admin, :ops, :public, :api, :token, :token_root, :ingest, :public_root] do
       raise ArgumentError,
-            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :ingest | :public_root, got #{inspect(scope)}"
+            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :token_root | :ingest | :public_root, got #{inspect(scope)}"
     end
 
     ctx = %{scope: scope, phase: :compile}
