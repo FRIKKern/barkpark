@@ -281,7 +281,7 @@ defmodule Barkpark.Tasks do
 
   @doc """
   Edge kinds in this codebase today. `blocks` is the ready-query primitive;
-  `discovered-from` carries the goal-path rail's walk-back lineage.
+  `discovered-from` records walk-back / derivation lineage between tasks.
   """
   @spec edge_kinds() :: [String.t()]
   def edge_kinds, do: Edge.kinds()
@@ -364,7 +364,7 @@ defmodule Barkpark.Tasks do
   The documents `task_id` depends on — the blockers, the `to_id` side of
   every outbound edge. The W7-03 ready query is a `NOT EXISTS` over this
   set; this function is the higher-level read for orchestrator surfaces
-  (Goal-path rail, build pre-flight, debug `bd dep ls`).
+  (build pre-flight, debug `bd dep ls`).
 
   ## Options
     * `:kind` — filter to one kind (atom or string). Default: `:blocks`.
@@ -551,8 +551,8 @@ defmodule Barkpark.Tasks do
     3. **Durable-then-ack** — a `mutation_events` row of kind `"task.claimed"`
        is INSERTED in the SAME transaction as the claim UPDATE, BEFORE the
        function returns. If the caller crashes between getting the doc and
-       starting work, the claim is still durable + observable in the goal-
-       path rail (W7c) + sweepable by TTL (W7-05).
+       starting work, the claim is still durable + observable in the
+       `mutation_events` log + sweepable by TTL (W7-05).
 
     4. **Concurrency** — `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1` (the W7-03
        skeleton) still drives row selection; the new CAS guards against the
