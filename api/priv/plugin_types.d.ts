@@ -57,6 +57,8 @@ export interface PluginManifest {
   description: string;
   capabilities: PluginCapability[];
   module?: string;
+  /** CLI noun tokens this plugin owns, for /v1/capabilities provenance. */
+  nouns?: string[];
   dependencies?: PluginDependency[];
   schemas?: PluginSchemaRef[];
   routes?: string[];
