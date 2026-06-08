@@ -228,17 +228,18 @@ end
 
 IO.puts("Seeded #{length(schemas)} schema definitions")
 
-# ── W7a task/goal/phase/event schemas (W7 retire-beads substrate) ────────────
+# ── W7a task schema (W7 retire-beads substrate) ──────────────────────────────
 #
-# Wave 7 step 1: tasks/goals/phases/events are first-class document types
-# living beside papers in the same workspace/project/dataset hierarchy. Register
-# the four schemas the same way `paper` is seeded above so they appear in the
-# Studio desk + `Content.get_schema/2` + `Content.list_schemas/2` immediately
-# after `mix ecto.reset`. The shape contracts (`content.kind`,
-# `content.lifecycle_status`, etc.) are enforced at the write boundary by
+# Wave 7 step 1: everything is a task — a single first-class document type
+# living beside papers in the same workspace/project/dataset hierarchy (a
+# goal/epic is just a root task, a phase is a task with children). Register the
+# `task` schema the same way `paper` is seeded above so it appears in the Studio
+# desk + `Content.get_schema/2` + `Content.list_schemas/2` immediately after
+# `mix ecto.reset`. The shape contract (`content.kind`,
+# `content.lifecycle_status`, etc.) is enforced at the write boundary by
 # `Barkpark.Tasks.validate_kind_content/2` (wired into `Content.create_document/4`
-# + `Content.upsert_document/4`); the schema rows here are the "first-class
-# document type" half (so Studio renders them) — the validation is the
+# + `Content.upsert_document/4`); the schema row here is the "first-class
+# document type" half (so Studio renders it) — the validation is the
 # field-shape half. See `lib/barkpark/tasks.ex` moduledoc for the full
 # rationale + status-axis choice (b).
 
@@ -256,7 +257,7 @@ for schema_def <- Barkpark.Tasks.schema_definitions(tasks_dataset) do
   |> Repo.insert!(on_conflict: :nothing)
 end
 
-IO.puts("Seeded W7a task/goal/phase/event schemas (dataset=#{tasks_dataset})")
+IO.puts("Seeded W7a task schema (dataset=#{tasks_dataset})")
 
 # ── Documents ────────────────────────────────────────────────────────────────
 
@@ -632,7 +633,10 @@ IO.puts("\n=== Seeding codelist registry from bundled EDItEUR snapshot ===")
 
 case Barkpark.Codelists.EDItEUR.seed_bundled() do
   {:ok, :no_snapshot} ->
-    IO.puts(:stderr, "Bundled codelist snapshot missing — skipped (see api/priv/codelists/README.md)")
+    IO.puts(
+      :stderr,
+      "Bundled codelist snapshot missing — skipped (see api/priv/codelists/README.md)"
+    )
 
   {:ok, count} ->
     IO.puts("Seeded #{count} codelist(s) from bundled snapshot")
@@ -654,7 +658,10 @@ IO.puts("\n=== Seeding Thema codelist from bundled EDItEUR snapshot ===")
 
 case Barkpark.Codelists.EDItEUR.seed_thema() do
   {:ok, :no_snapshot} ->
-    IO.puts(:stderr, "Bundled Thema snapshot missing — skipped (see api/priv/codelists/thema-1.6/README.md)")
+    IO.puts(
+      :stderr,
+      "Bundled Thema snapshot missing — skipped (see api/priv/codelists/thema-1.6/README.md)"
+    )
 
   {:ok, count} ->
     IO.puts("Seeded #{count} Thema codelist(s)")

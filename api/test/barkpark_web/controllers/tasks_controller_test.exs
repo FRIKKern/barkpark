@@ -63,24 +63,6 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
-  # Generic doc maker for goal / phase / event — uses the per-kind validator
-  # (goal needs `goal_slug`, phase needs `phase_name`, event needs `event_kind`).
-  # Pass `lifecycle_status` in content_extra for phases that should count as
-  # already-done (for the epic close-eligible aggregator tests).
-  defp mk_doc!(type, doc_id, scope, content) do
-    content = Map.put(content, "kind", type)
-
-    {:ok, doc} =
-      Content.create_document(
-        type,
-        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
-        @dataset,
-        scope
-      )
-
-    doc
-  end
-
   defp authed(conn) do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
@@ -199,45 +181,32 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["reason"] == "fenced_off"
     end
 
-    test "#6: closes a goal (type=goal, NO claim) without fenced_off — backs `bd epic close`",
+    # C3b regression — the KEY behaviour to lock. Everything is a task now:
+    # goal/phase document types are gone, and fencing is generalized so a task
+    # with NO claim record (a never-claimed root/container task — a former
+    # "goal"/"phase") closes cleanly. The old type-keyed `goal/phase -> :ok`
+    # fence branch is gone; the close is keyed on the ABSENCE of a claim lease,
+    # not on the doc type.
+    test "closes a root task (no parent, never claimed) without fenced_off",
          %{conn: conn, scope: scope} do
-      # Goals/phases are never claimed (no `content.claim` lease), so the old
-      # fencing check rejected the close with `fenced_off`, and `bd epic close`
-      # could never terminate a goal. A no-claim doc must close gracefully.
-      goal = mk_doc!("goal", uniq("goal-close6"), scope, %{"goal_slug" => "c6"})
-      refute Map.has_key?(goal.content, "claim")
+      # A root task = a former "goal"/"epic": no parent_id, never claimed, so
+      # it carries no `content.claim` lease.
+      root = mk_task!(uniq("c3b-root-close"), scope)
+      refute Map.has_key?(root.content, "claim")
+      refute Map.has_key?(root.content, "parent_id")
 
       # The shim sends observed_epoch: (claim.epoch || 1) — i.e. 1 for a doc
-      # with no claim. The close must succeed regardless of that value.
+      # with no claim. The close must succeed regardless of that value because
+      # there is no lease to fence against.
       close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
-      resp = conn |> authed() |> post("/v1/tasks/#{goal.doc_id}/close", close_body)
+      resp = conn |> authed() |> post("/v1/tasks/#{root.doc_id}/close", close_body)
       assert resp.status == 200
 
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
-      assert payload["doc"]["type"] == "goal"
+      assert payload["doc"]["type"] == "task"
       assert payload["doc"]["lifecycle_status"] == "done"
       refute payload["reason"] == "fenced_off"
-    end
-
-    test "#6: closes a phase (type=phase, NO claim) gracefully",
-         %{conn: conn, scope: scope} do
-      goal = mk_doc!("goal", uniq("goal-ph6"), scope, %{"goal_slug" => "ph6"})
-
-      phase =
-        mk_doc!("phase", uniq("phase-close6"), scope, %{
-          "phase_name" => "build",
-          "parent" => goal.doc_id
-        })
-
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
-      resp = conn |> authed() |> post("/v1/tasks/#{phase.doc_id}/close", close_body)
-      assert resp.status == 200
-
-      payload = Jason.decode!(resp.resp_body)
-      assert payload["ok"] == true
-      assert payload["doc"]["type"] == "phase"
-      assert payload["doc"]["lifecycle_status"] == "done"
     end
   end
 
@@ -380,104 +349,6 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
-  describe "GET /v1/tasks/epic/close-eligible" do
-    test "happy path: returns goal whose entire subtree is closed", %{conn: conn, scope: scope} do
-      goal_id = uniq("goal-elig")
-      phase_id = uniq("phase-elig")
-      work_id = uniq("work-elig")
-
-      goal = mk_doc!("goal", goal_id, scope, %{"goal_slug" => "elig"})
-
-      _phase =
-        mk_doc!("phase", phase_id, scope, %{
-          "phase_name" => "build",
-          "parent" => goal.doc_id,
-          "lifecycle_status" => "done"
-        })
-
-      # `mk_task!` doesn't return the prefixed doc_id directly — get it via
-      # `Content.create_document` flow. For the work-task, its parent_id must
-      # point at the persisted phase doc_id.
-      phase_persisted = phase_id |> then(fn _ -> "drafts.#{phase_id}" end)
-
-      _work =
-        mk_task!(work_id, scope, %{
-          "parent_id" => phase_persisted,
-          "lifecycle_status" => "done"
-        })
-
-      resp = conn |> authed() |> get("/v1/tasks/epic/close-eligible")
-      assert resp.status == 200
-
-      payload = Jason.decode!(resp.resp_body)
-      assert payload["ok"] == true
-      assert is_list(payload["doc_ids"])
-      assert goal.doc_id in payload["doc_ids"]
-    end
-
-    test "error path: goal with an open work-task is NOT eligible", %{conn: conn, scope: scope} do
-      goal_id = uniq("goal-inelig")
-      phase_id = uniq("phase-inelig")
-      open_work = uniq("work-still-open")
-
-      goal = mk_doc!("goal", goal_id, scope, %{"goal_slug" => "inelig"})
-
-      phase =
-        mk_doc!("phase", phase_id, scope, %{
-          "phase_name" => "build",
-          "parent" => goal.doc_id,
-          "lifecycle_status" => "done"
-        })
-
-      _open =
-        mk_task!(open_work, scope, %{
-          "parent_id" => phase.doc_id,
-          "lifecycle_status" => "open"
-        })
-
-      resp = conn |> authed() |> get("/v1/tasks/epic/close-eligible")
-      assert resp.status == 200
-
-      payload = Jason.decode!(resp.resp_body)
-      refute goal.doc_id in payload["doc_ids"]
-    end
-
-    test "#7: rollup counts children across the BARE-parent / drafts-doc_id mismatch (not vacuously eligible)",
-         %{conn: conn, scope: scope} do
-      # Live e2e #7: phase.parent is the BARE goal id while goal.doc_id is
-      # drafts-prefixed (and task.parent_id bare vs phase.doc_id drafts). The
-      # old `=` join found 0 children → `NOT EXISTS` was vacuously true →
-      # the goal was flagged close-eligible despite a real OPEN work-task.
-      # Prefix-agnostic join must see the open child and EXCLUDE the goal.
-      goal = mk_doc!("goal", uniq("goal-7elig"), scope, %{"goal_slug" => "p7"})
-      bare_goal = String.replace_prefix(goal.doc_id, "drafts.", "")
-
-      phase =
-        mk_doc!("phase", uniq("phase-7elig"), scope, %{
-          "phase_name" => "build",
-          # BARE parent — the #7 mismatch.
-          "parent" => bare_goal,
-          "lifecycle_status" => "done"
-        })
-
-      bare_phase = String.replace_prefix(phase.doc_id, "drafts.", "")
-
-      _open =
-        mk_task!(uniq("work-7open"), scope, %{
-          # BARE parent_id — the #7 mismatch.
-          "parent_id" => bare_phase,
-          "lifecycle_status" => "open"
-        })
-
-      resp = conn |> authed() |> get("/v1/tasks/epic/close-eligible")
-      assert resp.status == 200
-
-      payload = Jason.decode!(resp.resp_body)
-      # The open child is found across the prefix mismatch → goal NOT eligible.
-      refute goal.doc_id in payload["doc_ids"]
-    end
-  end
-
   describe "POST /v1/tasks/edges" do
     test "happy path: creates a blocks edge between two existing tasks",
          %{conn: conn, scope: scope} do
@@ -499,19 +370,12 @@ defmodule BarkparkWeb.TasksControllerTest do
   # ─── w7-08c (paperflow-y1c): list-all endpoint ─────────────────────────
 
   describe "GET /v1/tasks" do
-    test "basic list: returns every task/goal/phase in the tenant",
+    test "basic list: returns tasks in the tenant (root + child are both tasks)",
          %{conn: conn, scope: scope} do
-      # Three documents of three different types in the same tenant.
-      goal = mk_doc!("goal", uniq("idx-goal"), scope, %{"goal_slug" => "idx"})
-
-      _phase =
-        mk_doc!("phase", uniq("idx-phase"), scope, %{
-          "phase_name" => "build",
-          "parent" => goal.doc_id,
-          "lifecycle_status" => "open"
-        })
-
-      _task = mk_task!(uniq("idx-task"), scope)
+      # Everything is a task: a root task (a former "goal") + a child task
+      # whose parent_id points at it (the rail). Both are `type == "task"`.
+      root = mk_task!(uniq("idx-root"), scope)
+      _child = mk_task!(uniq("idx-child"), scope, %{"parent_id" => root.doc_id})
 
       resp = conn |> authed() |> get("/v1/tasks")
       assert resp.status == 200
@@ -519,8 +383,13 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["ok"] == true
       assert is_list(payload["docs"])
       types = payload["docs"] |> Enum.map(& &1["type"]) |> MapSet.new()
-      # All three substrate types should be present.
-      assert MapSet.subset?(MapSet.new(["goal", "phase", "task"]), types)
+      # Only the single `task` type exists now.
+      assert MapSet.subset?(MapSet.new(["task"]), types)
+      refute MapSet.member?(types, "goal")
+      refute MapSet.member?(types, "phase")
+
+      ids = payload["docs"] |> Enum.map(& &1["doc_id"])
+      assert root.doc_id in ids
 
       # Count fields ride on the list shape too.
       first = hd(payload["docs"])
@@ -529,18 +398,17 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert Map.has_key?(first, "comment_count")
     end
 
-    test "filter by kind: type=goal narrows to goal rows only",
+    test "filter by type=task narrows to task rows only",
          %{conn: conn, scope: scope} do
-      _g1 = mk_doc!("goal", uniq("kind-g1"), scope, %{"goal_slug" => "kg1"})
-      _g2 = mk_doc!("goal", uniq("kind-g2"), scope, %{"goal_slug" => "kg2"})
-      _task = mk_task!(uniq("kind-task"), scope)
+      _t1 = mk_task!(uniq("kind-t1"), scope)
+      _t2 = mk_task!(uniq("kind-t2"), scope)
 
-      resp = conn |> authed() |> get("/v1/tasks?type=goal")
+      resp = conn |> authed() |> get("/v1/tasks?type=task")
       assert resp.status == 200
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
       types = payload["docs"] |> Enum.map(& &1["type"]) |> Enum.uniq()
-      assert types == ["goal"]
+      assert types == ["task"]
       assert length(payload["docs"]) >= 2
     end
 

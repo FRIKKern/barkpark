@@ -610,20 +610,20 @@ defmodule Barkpark.Content do
     end
   end
 
-  # W7a step 1 — task/goal/phase/event documents carry a tight `content`
-  # field contract (`Barkpark.Tasks.validate_kind_content/2`) on top of the
-  # generic schema-field validation. Enforced here at the write boundary so
-  # neither `create_document/4` nor `upsert_document/4` can land a malformed
-  # task/goal/phase/event row. Defense-in-depth: migration
-  # `20260528100000_w7a_task_schema` adds a DB CHECK constraint that catches
-  # raw-Repo writes that bypass this hook.
+  # W7a step 1 — task documents carry a tight `content` field contract
+  # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
+  # schema-field validation. Enforced here at the write boundary so neither
+  # `create_document/4` nor `upsert_document/4` can land a malformed task
+  # row. Defense-in-depth: migration `20260528100000_w7a_task_schema` adds a
+  # DB CHECK constraint that catches raw-Repo writes that bypass this hook.
   #
-  # Returns `:ok` for non-task-kind types so the existing post/page/paper
-  # write path is unaffected.
-  defp validate_task_kind(type, attrs) when type in ["task", "goal", "phase", "event"] do
+  # Everything is a task — goals/phases/events are gone as document types.
+  # Returns `:ok` for non-task types so the existing post/page/paper write
+  # path is unaffected.
+  defp validate_task_kind("task", attrs) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
 
-    case Barkpark.Tasks.validate_kind_content(type, content) do
+    case Barkpark.Tasks.validate_kind_content("task", content) do
       :ok ->
         :ok
 

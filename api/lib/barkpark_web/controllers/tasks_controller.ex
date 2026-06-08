@@ -7,7 +7,6 @@ defmodule BarkparkWeb.TasksController do
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
-    * `GET    /v1/tasks/epic/close-eligible` — child-tree aggregator
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
@@ -56,12 +55,12 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
-  # w7-08c (paperflow-y1c): list-all endpoint. Returns every task-substrate
-  # doc (type ∈ goal/phase/task/event) in the caller's tenant, optionally
-  # narrowed by `type`, `kind`, `lifecycle_status`, or `phase_id` (parent
-  # match). Used by the bd-shim's `bd list --json` family — replaces the
-  # previous "ready --limit 1000 then client-side filter" path (which lost
-  # in-progress + closed rows and never surfaced phases/goals).
+  # w7-08c (paperflow-y1c): list-all endpoint. Returns every task doc in the
+  # caller's tenant, optionally narrowed by `kind`, `lifecycle_status`, or
+  # `phase_id` (parent match). Everything is a task — goals/phases/events are
+  # gone as types. Used by the bd-shim's `bd list --json` family — replaces
+  # the previous "ready --limit 1000 then client-side filter" path (which lost
+  # in-progress + closed rows).
   #
   # Why server-side filtering: the shim used to fetch ready and filter
   # client-side, which (a) only saw the ready slice (no in_progress / done /
@@ -84,7 +83,7 @@ defmodule BarkparkWeb.TasksController do
 
     base =
       from(d in Document,
-        where: d.type in ["task", "goal", "phase", "event"],
+        where: d.type == "task",
         limit: ^limit
       )
 
@@ -106,11 +105,6 @@ defmodule BarkparkWeb.TasksController do
   end
 
   defp maybe_filter_type(query, nil), do: query
-
-  # bd-shape "epic" is our type "goal" — translate at the boundary so
-  # `bd list --type epic` finds the goal rows.
-  defp maybe_filter_type(query, "epic"),
-    do: from(d in query, where: d.type == "goal")
 
   defp maybe_filter_type(query, t) when is_binary(t),
     do: from(d in query, where: d.type == ^t)
@@ -276,15 +270,15 @@ defmodule BarkparkWeb.TasksController do
   # workspace+project. Mirrors the index's C1 parent slice (lines ~85-101):
   # the SAME `maybe_filter_parent_id/2` (prefix-agnostic on both `parent_id`
   # and `parent`, `drafts.` stripped) + the SAME workspace/project filters,
-  # over the four substrate types. No duplicated matching logic — the filter
-  # helpers are shared with `index/2`.
+  # over `type == "task"`. No duplicated matching logic — the filter helpers
+  # are shared with `index/2`.
   defp child_tasks(doc_id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
     from(d in Document,
-      where: d.type in ["task", "goal", "phase", "event"],
+      where: d.type == "task",
       order_by: [asc: d.inserted_at]
     )
     |> maybe_filter_workspace(workspace_id)
@@ -332,65 +326,6 @@ defmodule BarkparkWeb.TasksController do
       _ ->
         bad_request(conn, "worker_id is required")
     end
-  end
-
-  # ─── GET /v1/tasks/epic/close-eligible ──────────────────────────────────
-  # w7-08: aggregator returning [doc_id, …] for kind=goal tasks whose full
-  # child-subtree (phases + work-tasks) is closed. Tenancy-scoped on
-  # workspace + project. Returns BOTH open and closed goals that qualify —
-  # the caller decides what to do (close them, just report, etc.).
-
-  def epic_close_eligible(conn, _params) do
-    scope = scope_opts(conn)
-    workspace_id = Keyword.get(scope, :workspace_id)
-    project_id = Keyword.get(scope, :project_id)
-
-    # Tenant boundary is workspace + project (the hard tenancy contract).
-    # `dataset_id` is intentionally NOT in the WHERE clause — the bd-shim
-    # surface is dataset-agnostic and goals can live anywhere within the
-    # workspace's datasets. Each document's `type` is goal/phase/task — those
-    # are the four kinds registered via `Tasks.schema_definitions/1`; the
-    # `content.kind` field is a discriminator for the JSON validator only.
-    # Prefix-agnostic parent↔doc_id matching (#7): a phase's `content.parent`
-    # may be stored bare (`goal-258703`) while the goal's `doc_id` carries the
-    # draft prefix (`drafts.goal-258703`) — or vice-versa. A naive `=` join
-    # then finds zero children, and the `NOT EXISTS` becomes vacuously true,
-    # flagging a goal with real open work as close-eligible (the e2e #7 bug:
-    # `0/0 children`, closed===total when both 0). We strip a leading `drafts.`
-    # from BOTH sides of every parent↔doc_id comparison via
-    # `regexp_replace(…, '^drafts\\.', '')`, so the rollup counts children
-    # robustly regardless of which writer's prefix convention is in play.
-    sql = """
-    SELECT g.doc_id FROM documents g
-    WHERE g.type = 'goal'
-      AND ($1::uuid IS NULL OR g.workspace_id = $1::uuid)
-      AND ($2::uuid IS NULL OR g.project_id = $2::uuid)
-      AND NOT EXISTS (
-        SELECT 1 FROM documents c
-        WHERE c.type = 'phase'
-          AND regexp_replace(c.content->>'parent', '^drafts\\.', '') = regexp_replace(g.doc_id, '^drafts\\.', '')
-          AND ($1::uuid IS NULL OR c.workspace_id = $1::uuid)
-          AND ($2::uuid IS NULL OR c.project_id = $2::uuid)
-          AND (
-            COALESCE(c.content->>'lifecycle_status', '') NOT IN ('done','cancelled')
-            OR EXISTS (
-              SELECT 1 FROM documents w
-              WHERE w.type = 'task'
-                AND regexp_replace(w.content->>'parent_id', '^drafts\\.', '') = regexp_replace(c.doc_id, '^drafts\\.', '')
-                AND ($1::uuid IS NULL OR w.workspace_id = $1::uuid)
-                AND ($2::uuid IS NULL OR w.project_id = $2::uuid)
-                AND COALESCE(w.content->>'lifecycle_status', '') NOT IN ('done','cancelled')
-            )
-          )
-      )
-    ORDER BY g.doc_id
-    """
-
-    %{rows: rows} =
-      Repo.query!(sql, [dump_uuid(workspace_id), dump_uuid(project_id)])
-
-    doc_ids = Enum.map(rows, fn [doc_id] -> doc_id end)
-    json(conn, %{ok: true, doc_ids: doc_ids})
   end
 
   # ─── POST /v1/tasks/:doc_id/close ───────────────────────────────────────
@@ -565,13 +500,12 @@ defmodule BarkparkWeb.TasksController do
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
-    # w7-08: widen from `type == "task"` to the four W7 substrate types
-    # (goal/phase/task/event). The bd-shim's `bd show <id>` is generic —
-    # consumers pass a doc_id without knowing the kind. The tenancy
-    # filters below remain the hard boundary.
+    # Everything is a task — `bd show <id>` resolves any doc_id on the single
+    # `type == "task"` filter. The tenancy filters below remain the hard
+    # boundary.
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type in ["task", "goal", "phase", "event"]
+        where: d.doc_id == ^doc_id and d.type == "task"
       )
 
     query =
@@ -685,18 +619,6 @@ defmodule BarkparkWeb.TasksController do
 
   defp put_opt(opts, _key, nil), do: opts
   defp put_opt(opts, key, value), do: Keyword.put(opts, key, value)
-
-  # Repo.query! takes RAW Postgrex params — uuids must be 16-byte binaries,
-  # not the human "73ad…" strings Ecto.UUID hands back from the scope helpers.
-  # Dump nil → nil so the SQL's `$1::uuid IS NULL` branch fires.
-  defp dump_uuid(nil), do: nil
-
-  defp dump_uuid(uuid) when is_binary(uuid) do
-    case Ecto.UUID.dump(uuid) do
-      {:ok, raw} -> raw
-      :error -> uuid
-    end
-  end
 
   defp fetch_string(params, key) do
     case Map.get(params, key) do

@@ -2,13 +2,14 @@ defmodule Barkpark.Tasks do
   @moduledoc """
   W7a step 1 — Task-document schema on the existing `documents` substrate.
 
-  Tasks, Goals, Phases, and Events live as rows in the `documents` table,
-  scoped by the shipped workspace/project/dataset tenancy primitives. This
-  module owns:
+  Tasks live as rows in the `documents` table, scoped by the shipped
+  workspace/project/dataset tenancy primitives. Everything is a task: a
+  goal/epic is just a root task, a phase is just a task with children, and
+  a rail is the chronological child tasks of a task. This module owns:
 
-    * the four schema definitions (`task`, `goal`, `phase`, `event`) the
-      seeds.exs and `Plugins.Bootstrap` paths register so they appear in
-      the `schema_definitions` table alongside `post`/`page`/`paper`;
+    * the single `task` schema definition the seeds.exs and
+      `Plugins.Bootstrap` paths register so it appears in the
+      `schema_definitions` table alongside `post`/`page`/`paper`;
     * the **lifecycle status** axis for task documents — a separate axis
       from the existing `documents.status` (Sanity draft/published flow);
     * a `validate_task_content/1` validator the document write paths call
@@ -51,17 +52,13 @@ defmodule Barkpark.Tasks do
           "ts_iso" => "2026-05-27T11:23:45Z",
           "epoch"  => 1
         },
-        "parent_id" => "<phase-or-goal-doc-id>" # optional string (hierarchy)
+        "parent_id" => "<parent-task-doc-id>"   # optional string (hierarchy)
       }
-
-  For `kind:goal`: `goal_slug` (required string).
-  For `kind:phase`: `phase_name` (required string), `parent` (the goal doc_id).
-  For `kind:event`: `event_kind` (required string), `payload` (optional map).
 
   The validator enforces only what is REQUIRED + the enum shape of the five
   string fields; everything else is shape-checked permissively (the
   authoritative `task_edges` table arrives in W7-02). The plan calls this
-  "the tightened contract — what the four live readers actually consume."
+  "the tightened contract — what the live readers actually consume."
   """
 
   import Ecto.Query, only: [from: 2]
@@ -86,40 +83,36 @@ defmodule Barkpark.Tasks do
   @closed_lifecycle_statuses ~w(done cancelled blocked)
 
   @lifecycle_statuses ~w(open in_progress blocked done cancelled)
-  @kinds ~w(goal phase task event)
+  @kinds ~w(task)
 
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
   def lifecycle_statuses, do: @lifecycle_statuses
 
-  @doc "The four `content.kind` discriminator values."
+  @doc "The `content.kind` discriminator values (only `task`)."
   @spec kinds() :: [String.t()]
   def kinds, do: @kinds
 
   # ─── Schema definitions (registered via seeds.exs + Plugins.Bootstrap) ─────
 
   @doc """
-  Returns the four `%SchemaDefinition{}` structs the W7 substrate needs:
-  `task`, `goal`, `phase`, `event`.
+  Returns the `%SchemaDefinition{}` struct the W7 substrate needs: `task`.
 
-  Each struct mirrors the shape the existing `paper` schema uses (a flat
+  The struct mirrors the shape the existing `paper` schema uses (a flat
   field list with `name/title/type`), so Studio + the existing schema
-  catalogue endpoints render them with zero extra work. The actual
+  catalogue endpoints render it with zero extra work. The actual
   contract for `content` is enforced by `validate_task_content/1` —
-  the schema field list here exists so the four document kinds are
-  first-class types in the `schema_definitions` table, queryable like
-  `post` / `page` / `paper`.
+  the schema field list here exists so `task` is a first-class type in
+  the `schema_definitions` table, queryable like `post` / `page` / `paper`.
+
+  Everything is a task: goals/epics, phases, and events are all just tasks
+  (a goal is a root task, a phase is a task with children).
 
   `dataset` defaults to `"production"` — matching every other seed schema.
   """
   @spec schema_definitions(String.t()) :: [SchemaDefinition.t()]
   def schema_definitions(dataset \\ "production") do
-    [
-      task_schema(dataset),
-      goal_schema(dataset),
-      phase_schema(dataset),
-      event_schema(dataset)
-    ]
+    [task_schema(dataset)]
   end
 
   @doc "Just the `task` schema struct (callers that only need one)."
@@ -144,61 +137,6 @@ defmodule Barkpark.Tasks do
     }
   end
 
-  @doc "Just the `goal` schema struct."
-  @spec goal_schema(String.t()) :: SchemaDefinition.t()
-  def goal_schema(dataset \\ "production") do
-    %SchemaDefinition{
-      name: "goal",
-      title: "Goal",
-      icon: "🎯",
-      visibility: "public",
-      dataset: dataset,
-      fields: [
-        %{"name" => "title", "title" => "Title", "type" => "string"},
-        %{"name" => "kind", "title" => "Kind", "type" => "string"},
-        %{"name" => "goal_slug", "title" => "Slug", "type" => "string"},
-        %{"name" => "papers", "title" => "Papers", "type" => "array"}
-      ]
-    }
-  end
-
-  @doc "Just the `phase` schema struct."
-  @spec phase_schema(String.t()) :: SchemaDefinition.t()
-  def phase_schema(dataset \\ "production") do
-    %SchemaDefinition{
-      name: "phase",
-      title: "Phase",
-      icon: "📋",
-      visibility: "public",
-      dataset: dataset,
-      fields: [
-        %{"name" => "title", "title" => "Title", "type" => "string"},
-        %{"name" => "kind", "title" => "Kind", "type" => "string"},
-        %{"name" => "phase_name", "title" => "Phase", "type" => "string"},
-        %{"name" => "parent", "title" => "Parent goal", "type" => "string"}
-      ]
-    }
-  end
-
-  @doc "Just the `event` schema struct."
-  @spec event_schema(String.t()) :: SchemaDefinition.t()
-  def event_schema(dataset \\ "production") do
-    %SchemaDefinition{
-      name: "event",
-      title: "Event",
-      icon: "🟢",
-      visibility: "public",
-      dataset: dataset,
-      fields: [
-        %{"name" => "title", "title" => "Title", "type" => "string"},
-        %{"name" => "kind", "title" => "Kind", "type" => "string"},
-        %{"name" => "event_kind", "title" => "Event kind", "type" => "string"},
-        %{"name" => "payload", "title" => "Payload", "type" => "object"},
-        %{"name" => "parent", "title" => "Parent", "type" => "string"}
-      ]
-    }
-  end
-
   # ─── Validation ────────────────────────────────────────────────────────────
 
   @doc """
@@ -216,9 +154,6 @@ defmodule Barkpark.Tasks do
   Shape-checked when present: `priority` (integer 0..4), `assignee`
   (string), `dependencies` (list of strings), `parent_id` (string),
   `claim` (map).
-
-  This validator is **task-specific**. Goal/phase/event documents have
-  their own (lighter) shape, validated by `validate_kind_content/2`.
   """
   @spec validate_task_content(map() | nil) :: :ok | {:error, map()}
   def validate_task_content(content), do: validate_kind_content("task", content)
@@ -228,8 +163,7 @@ defmodule Barkpark.Tasks do
   to the per-kind validator; unknown kinds are rejected.
 
   Used by the document-write paths (`Content.create_document/4`,
-  `Content.upsert_document/4`) when the `type` argument equals one of
-  `kinds/0`.
+  `Content.upsert_document/4`) when the `type` argument equals `"task"`.
   """
   @spec validate_kind_content(String.t(), map() | nil) :: :ok | {:error, map()}
   def validate_kind_content(kind, content) when kind in @kinds do
@@ -263,8 +197,8 @@ defmodule Barkpark.Tasks do
     end
   end
 
-  # Per-kind required + shape checks. Kept tight per the plan: only what the
-  # four live readers consume.
+  # Required + shape checks for `task`. Kept tight per the plan: only what the
+  # live readers consume.
 
   defp validate_kind_specific(errors, "task", content) do
     errors
@@ -276,34 +210,7 @@ defmodule Barkpark.Tasks do
     |> check_optional_map(content, "claim")
   end
 
-  defp validate_kind_specific(errors, "goal", content) do
-    errors
-    |> require_string(content, "goal_slug")
-    |> check_optional_string_list(content, "papers")
-  end
-
-  defp validate_kind_specific(errors, "phase", content) do
-    errors
-    |> require_string(content, "phase_name")
-    |> check_optional_string(content, "parent")
-  end
-
-  defp validate_kind_specific(errors, "event", content) do
-    errors
-    |> require_string(content, "event_kind")
-    |> check_optional_map(content, "payload")
-    |> check_optional_string(content, "parent")
-  end
-
   # ─── Per-field micro-validators ────────────────────────────────────────────
-
-  defp require_string(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      v when is_binary(v) and byte_size(v) > 0 -> errors
-      nil -> Map.put(errors, key, ["is required"])
-      other -> Map.put(errors, key, ["must be a non-empty string, got #{inspect(other)}"])
-    end
-  end
 
   defp require_string_in(errors, content, key, allowed) do
     case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
@@ -748,15 +655,14 @@ defmodule Barkpark.Tasks do
     end
   end
 
-  # #6: widen from `type == "task"` to the four W7 substrate types
-  # (goal/phase/task/event) so the TARGETED `claim_by_id`/close paths can
-  # operate on a goal or phase doc — `bd epic close <goal-id>` needs to fetch a
-  # goal here. The READY-QUEUE claim (`claim/2` → `ready_query/1`) keeps its
-  # own `type == "task"` filter, so you still never claim a goal off the queue.
+  # Everything is a task: the TARGETED `claim_by_id`/close paths fetch by
+  # doc_id on `type == "task"`. Root/container tasks (a former "goal"/"phase")
+  # are tasks too, so a single type filter covers them. The READY-QUEUE claim
+  # (`claim/2` → `ready_query/1`) shares this `type == "task"` filter.
   defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type in ["task", "goal", "phase", "event"],
+        where: d.doc_id == ^doc_id and d.type == "task",
         lock: "FOR UPDATE"
       )
 
@@ -1089,28 +995,22 @@ defmodule Barkpark.Tasks do
   defp papers_of(%{"papers" => papers}) when is_list(papers), do: papers
   defp papers_of(_), do: []
 
-  # Fencing applies only to docs that carry a claim lease. Work-tasks are
+  # Fencing applies only to tasks that carry a claim lease. Work-tasks are
   # claimed before close, so they have `content.claim.epoch` and the observed
   # epoch must match (the dead-worker guard).
   #
-  # #6: goals and phases are never claimed (you don't `bd update --claim` an
-  # epic) — they have NO claim record, so there is no lease to fence against.
-  # For `type ∈ {goal, phase}` a missing claim closes gracefully (return :ok),
-  # which is what lets `bd epic close <goal-id>` terminate a goal/phase via
-  # this same path.
-  #
-  # For a TASK, a missing claim still → `:fenced_off` (defense-in-depth: a
-  # never-claimed task should not be closeable; closing implies you held a
-  # lease). A doc WITH a claim ALWAYS requires the epoch to match, regardless
-  # of type — the fencing guarantee for real claimed work is unchanged.
-  defp check_fencing(%Document{content: content} = doc, observed_epoch) do
+  # Generalized (everything-is-a-task): a task with NO claim record has no
+  # lease to fence against, so it closes gracefully (return `:ok`). This is
+  # what lets a never-claimed root/container task (a former "goal"/"phase")
+  # close via this same path — the close is keyed on the absence of a lease,
+  # not on the doc type. A task WITH a claim ALWAYS requires the epoch to
+  # match — the fencing guarantee for real claimed work is unchanged.
+  defp check_fencing(%Document{content: content}, observed_epoch) do
     case content do
       %{"claim" => %{"epoch" => row_epoch}} when row_epoch == observed_epoch -> :ok
       %{"claim" => %{"epoch" => _}} -> {:error, :fenced_off}
-      # No claim lease: graceful for unclaimable doc types (goal/phase),
-      # but a never-claimed task is still fenced off.
-      _ when doc.type in ["goal", "phase"] -> :ok
-      _ -> {:error, :fenced_off}
+      # No claim lease — nothing to fence against, close cleanly.
+      _ -> :ok
     end
   end
 
@@ -1119,10 +1019,11 @@ defmodule Barkpark.Tasks do
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
     # Stamp close metadata into the claim lease when one exists (work-tasks).
-    # Goals/phases have no claim (#6) — close them without inventing one; we
-    # only flip lifecycle_status. `Map.update/4`'s default is used verbatim
-    # (NOT run through the fun), so a no-claim doc would otherwise get a bare
-    # `claim => %{}`; the explicit branch keeps the doc shape honest.
+    # A never-claimed root/container task has no claim — close it without
+    # inventing one; we only flip lifecycle_status. `Map.update/4`'s default
+    # is used verbatim (NOT run through the fun), so a no-claim doc would
+    # otherwise get a bare `claim => %{}`; the explicit branch keeps the doc
+    # shape honest.
     new_content =
       case doc.content do
         %{"claim" => claim} when is_map(claim) ->

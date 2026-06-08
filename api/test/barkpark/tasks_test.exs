@@ -5,8 +5,8 @@ defmodule Barkpark.TasksTest do
   Four surfaces under test (per the brief's VERIFY gate):
 
     1. **Schema registration** — after seed/boot, `Content.get_schema("task")`
-       (and goal / phase / event) returns the registered SchemaDefinition;
-       field shape matches the contract.
+       returns the registered SchemaDefinition; field shape matches the
+       contract. Everything is a task — goal/phase/event types are gone.
     2. **Validation** — a task document with valid content creates fine;
        missing required fields (kind / lifecycle_status) is rejected with a
        clear error; invalid lifecycle_status value is rejected.
@@ -26,8 +26,8 @@ defmodule Barkpark.TasksTest do
   @dataset "production"
 
   setup do
-    # Register the four task-kind schemas into the per-test sandbox so
-    # `Content.get_schema/2` resolves them. Mirrors what seeds.exs +
+    # Register the task schema into the per-test sandbox so
+    # `Content.get_schema/2` resolves it. Mirrors what seeds.exs +
     # Plugins.Bootstrap.register_all_schemas/0 do at boot. Idempotent.
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
@@ -48,13 +48,17 @@ defmodule Barkpark.TasksTest do
   # ─── (1) Schema registration ──────────────────────────────────────────────
 
   describe "schema registration" do
-    test "every kind is queryable via Content.get_schema/2", %{scope: scope} do
-      for name <- ~w(task goal phase event) do
-        assert {:ok, %SchemaDefinition{name: ^name} = schema} =
-                 Content.get_schema(name, @dataset, scope)
+    test "the task schema is queryable via Content.get_schema/2", %{scope: scope} do
+      assert {:ok, %SchemaDefinition{name: "task"} = schema} =
+               Content.get_schema("task", @dataset, scope)
 
-        assert is_list(schema.fields) and schema.fields != []
-        assert schema.visibility == "public"
+      assert is_list(schema.fields) and schema.fields != []
+      assert schema.visibility == "public"
+    end
+
+    test "goal/phase/event are NOT registered types", %{scope: scope} do
+      for name <- ~w(goal phase event) do
+        assert {:error, _} = Content.get_schema(name, @dataset, scope)
       end
     end
 
@@ -63,7 +67,8 @@ defmodule Barkpark.TasksTest do
       names = Enum.map(schema.fields, & &1["name"])
 
       for required <- ~w(kind lifecycle_status priority assignee dependencies claim parent_id) do
-        assert required in names, "task schema missing field #{inspect(required)} (have #{inspect(names)})"
+        assert required in names,
+               "task schema missing field #{inspect(required)} (have #{inspect(names)})"
       end
     end
 
@@ -71,7 +76,7 @@ defmodule Barkpark.TasksTest do
       assert Tasks.lifecycle_statuses() ==
                ~w(open in_progress blocked done cancelled)
 
-      assert Tasks.kinds() == ~w(goal phase task event)
+      assert Tasks.kinds() == ~w(task)
     end
   end
 
@@ -180,38 +185,11 @@ defmodule Barkpark.TasksTest do
     end
   end
 
-  describe "validate_kind_content/2 — goal/phase/event" do
-    test "goal requires goal_slug" do
-      assert :ok =
-               Tasks.validate_kind_content("goal", %{
-                 "kind" => "goal",
-                 "goal_slug" => "w7-retire-beads"
-               })
-
-      assert {:error, errors} = Tasks.validate_kind_content("goal", %{"kind" => "goal"})
-      assert errors["goal_slug"]
-    end
-
-    test "phase requires phase_name" do
-      assert :ok =
-               Tasks.validate_kind_content("phase", %{
-                 "kind" => "phase",
-                 "phase_name" => "build"
-               })
-
-      assert {:error, errors} = Tasks.validate_kind_content("phase", %{"kind" => "phase"})
-      assert errors["phase_name"]
-    end
-
-    test "event requires event_kind" do
-      assert :ok =
-               Tasks.validate_kind_content("event", %{
-                 "kind" => "event",
-                 "event_kind" => "goal-opened"
-               })
-
-      assert {:error, errors} = Tasks.validate_kind_content("event", %{"kind" => "event"})
-      assert errors["event_kind"]
+  describe "validate_kind_content/2 — only `task` is a valid kind" do
+    test "rejects the retired goal/phase/event kinds" do
+      for kind <- ~w(goal phase event) do
+        assert {:error, %{"kind" => _}} = Tasks.validate_kind_content(kind, %{})
+      end
     end
 
     test "rejects unknown kinds" do

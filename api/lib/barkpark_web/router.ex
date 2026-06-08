@@ -519,9 +519,6 @@ defmodule BarkparkWeb.Router do
     # the documented Phoenix idiom for static/dynamic disambiguation).
     get "/", TasksController, :index
     get "/ready", TasksController, :ready
-    # w7-08: epic aggregator — declared BEFORE the `/:doc_id` catchall so
-    # "/epic/close-eligible" doesn't get matched as `:doc_id = "epic"`.
-    get "/epic/close-eligible", TasksController, :epic_close_eligible
     post "/claim", TasksController, :claim
     post "/edges", TasksController, :add_edge
     get "/:doc_id", TasksController, :show
