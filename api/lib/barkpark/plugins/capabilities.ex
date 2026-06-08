@@ -395,8 +395,8 @@ defmodule Barkpark.Plugins.Capabilities do
   # where each declared arg goes:
   #   * path  — when the arg name matches a `:placeholder` in http.path_template
   #             (e.g. `doc_id` in `/v1/tasks/:doc_id/claim`).
-  #   * query — a GET arg with NO matching path placeholder (e.g. `goal` in
-  #             rail.path → `/v1/rail/goal-path?goal=…`; `q` in search.query).
+  #   * query — a GET arg with NO matching path placeholder (e.g. `q` in
+  #             search.query).
   #   * body  — a POST/PUT/PATCH arg with no matching path placeholder.
   # If a future verb needs an explicit hint, add an OPTIONAL `"in"` field to
   # the arg in BOTH manifest.schema.json's $defs/arg (additive) and the
@@ -409,18 +409,27 @@ defmodule Barkpark.Plugins.Capabilities do
       %{"name" => "schema", "summary" => "Document type definitions.", "plugin" => nil},
       %{"name" => "media", "summary" => "Assets and collections.", "plugin" => nil},
       %{"name" => "search", "summary" => "Full-text search over documents.", "plugin" => nil},
-      %{"name" => "workspace", "summary" => "Tenancy — workspaces and projects.", "plugin" => nil},
+      %{
+        "name" => "workspace",
+        "summary" => "Tenancy — workspaces and projects.",
+        "plugin" => nil
+      },
       %{"name" => "task", "summary" => "The bd-shim task queue.", "plugin" => nil},
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
-      %{"name" => "rail", "summary" => "Goal-path lifecycle events.", "plugin" => nil},
       %{"name" => "plugin", "summary" => "Installed plugins and their settings.", "plugin" => nil}
     ]
   end
 
   defp core_commands do
     [
-      core_cmd("doc.get", "doc", "get", "Fetch one document by type and id.",
-        "GET", "/v1/data/doc/:dataset/:type/:doc_id", "none",
+      core_cmd(
+        "doc.get",
+        "doc",
+        "get",
+        "Fetch one document by type and id.",
+        "GET",
+        "/v1/data/doc/:dataset/:type/:doc_id",
+        "none",
         args: [
           arg("type", true, "string", "Document type (schema name)."),
           arg("doc_id", true, "string", "Document id.")
@@ -429,8 +438,14 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("doc.ls", "doc", "ls", "List documents of a type.",
-        "GET", "/v1/data/query/:dataset/:type", "none",
+      core_cmd(
+        "doc.ls",
+        "doc",
+        "ls",
+        "List documents of a type.",
+        "GET",
+        "/v1/data/query/:dataset/:type",
+        "none",
         args: [arg("type", true, "string", "Document type to list.")],
         flags: [
           flag("limit", "int", "Max rows to return.", default: 50),
@@ -441,8 +456,14 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("doc.query", "doc", "query", "Filtered read (GROQ-lite) over a type.",
-        "GET", "/v1/data/query/:dataset/:type", "none",
+      core_cmd(
+        "doc.query",
+        "doc",
+        "query",
+        "Filtered read (GROQ-lite) over a type.",
+        "GET",
+        "/v1/data/query/:dataset/:type",
+        "none",
         args: [arg("type", true, "string", "Document type to query.")],
         flags: [
           flag("query", "string", "Filter expression.", repeatable: false),
@@ -453,9 +474,14 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("doc.mutate", "doc", "mutate",
+      core_cmd(
+        "doc.mutate",
+        "doc",
+        "mutate",
         "Apply an atomic batch of mutations (create/patch/publish/unpublish/delete).",
-        "POST", "/v1/data/mutate/:dataset", "write",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
         flags: [
           flag("file", "file", "Mutations payload from a file or - for stdin."),
           flag("quiet", "bool", "Print only the resulting rev.", default: false)
@@ -465,21 +491,39 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("schema.get", "schema", "get", "Fetch one schema definition.",
-        "GET", "/v1/schemas/:dataset/:name", "admin",
+      core_cmd(
+        "schema.get",
+        "schema",
+        "get",
+        "Fetch one schema definition.",
+        "GET",
+        "/v1/schemas/:dataset/:name",
+        "admin",
         args: [arg("name", true, "string", "Schema name.")],
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("schema.apply", "schema", "apply", "Register or update a schema definition (upsert).",
-        "POST", "/v1/schemas/:dataset", "admin",
+      core_cmd(
+        "schema.apply",
+        "schema",
+        "apply",
+        "Register or update a schema definition (upsert).",
+        "POST",
+        "/v1/schemas/:dataset",
+        "admin",
         flags: [flag("file", "file", "Schema definition from a file or - for stdin.")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("media.ls", "media", "ls", "List media assets in a dataset.",
-        "GET", "/v1/media/:dataset", "none",
+      core_cmd(
+        "media.ls",
+        "media",
+        "ls",
+        "List media assets in a dataset.",
+        "GET",
+        "/v1/media/:dataset",
+        "none",
         flags: [
           flag("limit", "int", "Max assets to return.", default: 50),
           flag("offset", "int", "Assets to skip.", default: 0)
@@ -488,8 +532,14 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("media.upload", "media", "upload", "Upload a media asset.",
-        "POST", "/v1/media/:dataset", "write",
+      core_cmd(
+        "media.upload",
+        "media",
+        "upload",
+        "Upload a media asset.",
+        "POST",
+        "/v1/media/:dataset",
+        "write",
         args: [arg("file", true, "file", "File to upload.")],
         writes: true,
         default_output: "minimal",
@@ -498,8 +548,14 @@ defmodule Barkpark.Plugins.Capabilities do
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
       # from registry.ex) — it is reached via the core `search` noun's --engine
       # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.
-      core_cmd("search.query", "search", "query", "Full-text search documents in a dataset.",
-        "GET", "/v1/data/search/:dataset", "none",
+      core_cmd(
+        "search.query",
+        "search",
+        "query",
+        "Full-text search documents in a dataset.",
+        "GET",
+        "/v1/data/search/:dataset",
+        "none",
         args: [arg("q", true, "string", "Search query string.")],
         flags: [
           flag("engine", "string", "Search engine: postgres | indx.", default: "postgres"),
@@ -509,71 +565,120 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
-      core_cmd("workspace.ls", "workspace", "ls", "List workspaces the token can reach.",
-        "GET", "/api/workspaces", "read",
+      core_cmd(
+        "workspace.ls",
+        "workspace",
+        "ls",
+        "List workspaces the token can reach.",
+        "GET",
+        "/api/workspaces",
+        "read",
         default_output: "table"
       ),
-      core_cmd("workspace.project-create", "workspace", "project-create",
+      core_cmd(
+        "workspace.project-create",
+        "workspace",
+        "project-create",
         "Create a project under a workspace (project verbs fold under workspace).",
-        "POST", "/api/workspaces/:workspace_slug/projects", "scoped_admin",
+        "POST",
+        "/api/workspaces/:workspace_slug/projects",
+        "scoped_admin",
         args: [arg("name", true, "string", "Project name.")],
         writes: true,
         default_output: "minimal"
       ),
-      core_cmd("task.ls", "task", "ls", "List tasks in the queue.",
-        "GET", "/v1/tasks", "read",
+      core_cmd("task.ls", "task", "ls", "List tasks in the queue.", "GET", "/v1/tasks", "read",
         flags: [flag("limit", "int", "Max tasks to return.", default: 50)],
         paginated: true,
         default_output: "table"
       ),
-      core_cmd("task.ready", "task", "ready", "List ready (unblocked) tasks.",
-        "GET", "/v1/tasks/ready", "read",
+      core_cmd(
+        "task.ready",
+        "task",
+        "ready",
+        "List ready (unblocked) tasks.",
+        "GET",
+        "/v1/tasks/ready",
+        "read",
         flags: [flag("limit", "int", "Max tasks to return.", default: 50)],
         paginated: true,
         default_output: "table"
       ),
-      core_cmd("task.get", "task", "get", "Fetch one task by id.",
-        "GET", "/v1/tasks/:doc_id", "read",
+      core_cmd(
+        "task.get",
+        "task",
+        "get",
+        "Fetch one task by id.",
+        "GET",
+        "/v1/tasks/:doc_id",
+        "read",
         args: [arg("doc_id", true, "string", "Task document id.")],
         default_output: "table"
       ),
-      core_cmd("task.claim", "task", "claim", "Claim a ready task by id.",
-        "POST", "/v1/tasks/:doc_id/claim", "read",
+      core_cmd(
+        "task.claim",
+        "task",
+        "claim",
+        "Claim a ready task by id.",
+        "POST",
+        "/v1/tasks/:doc_id/claim",
+        "read",
         args: [arg("doc_id", true, "string", "Task document id to claim.")],
         writes: true,
         default_output: "minimal"
       ),
-      core_cmd("task.close", "task", "close", "Close a claimed task by id.",
-        "POST", "/v1/tasks/:doc_id/close", "read",
+      core_cmd(
+        "task.close",
+        "task",
+        "close",
+        "Close a claimed task by id.",
+        "POST",
+        "/v1/tasks/:doc_id/close",
+        "read",
         args: [arg("doc_id", true, "string", "Task document id to close.")],
         writes: true,
         default_output: "minimal"
       ),
-      core_cmd("webhook.ls", "webhook", "ls", "List webhook subscriptions.",
-        "GET", "/v1/webhooks/:dataset", "admin",
+      core_cmd(
+        "webhook.ls",
+        "webhook",
+        "ls",
+        "List webhook subscriptions.",
+        "GET",
+        "/v1/webhooks/:dataset",
+        "admin",
         default_output: "table"
       ),
-      core_cmd("webhook.create", "webhook", "create", "Create a webhook subscription.",
-        "POST", "/v1/webhooks/:dataset", "write",
+      core_cmd(
+        "webhook.create",
+        "webhook",
+        "create",
+        "Create a webhook subscription.",
+        "POST",
+        "/v1/webhooks/:dataset",
+        "write",
         args: [arg("url", true, "string", "Delivery URL.")],
         writes: true,
         default_output: "minimal"
       ),
-      # `goal` is a QUERY param, not a path segment: GET /v1/rail/goal-path?goal=…
-      # The path template carries no :placeholder for it, so the CLI infers it
-      # as a query param (GET + no matching path placeholder → query). See the
-      # arg-location contract note in this section's header comment.
-      core_cmd("rail.path", "rail", "path", "Read the goal-path lifecycle events for a goal.",
-        "GET", "/v1/rail/goal-path", "read",
-        args: [arg("goal", true, "string", "Goal id (sent as the ?goal= query param).")],
+      core_cmd(
+        "plugin.ls",
+        "plugin",
+        "ls",
+        "List installed plugins.",
+        "GET",
+        "/v1/plugins",
+        "admin",
         default_output: "table"
       ),
-      core_cmd("plugin.ls", "plugin", "ls", "List installed plugins.",
-        "GET", "/v1/plugins", "admin",
-        default_output: "table"
-      ),
-      core_cmd("plugin.settings", "plugin", "settings", "Read or update a plugin's settings.",
-        "PUT", "/v1/plugins/settings/:plugin_name", "admin",
+      core_cmd(
+        "plugin.settings",
+        "plugin",
+        "settings",
+        "Read or update a plugin's settings.",
+        "PUT",
+        "/v1/plugins/settings/:plugin_name",
+        "admin",
         args: [arg("plugin_name", true, "string", "Plugin name.")],
         flags: [flag("set", "string", "key=value setting to apply.", repeatable: true)],
         writes: true,
