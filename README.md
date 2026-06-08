@@ -378,6 +378,7 @@ flowchart TB
   subgraph Plugins
     OnixEdit[OnixEdit]
     Bulldocs[Bulldocs]
+    Tasks[Tasks]
   end
 
   PG[(PostgreSQL<br/>JSONB)]
@@ -393,6 +394,7 @@ flowchart TB
   Caps --> Registry
   Registry -.->|prev, ctx -> next| OnixEdit
   Registry -.->|prev, ctx -> next| Bulldocs
+  Registry -->|register_routes -> /v1/tasks| Tasks
   Content -->|before_* halt? after_* async| Registry
   Content --> PG
   Workers --> Content

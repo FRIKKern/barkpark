@@ -10,7 +10,7 @@ Three pieces, one Postgres store:
 
 - **Barkpark** — the Postgres document store. Tasks *and* papers are documents (`type ∈ {task, paper}`). Everything is a **task**: a "goal" is just a *root* task (no `content.parent_id`), a "phase" is just ordered sibling tasks, and a task nests under another task via `content.parent_id` (recursive).
 - **Paperflow** — the orchestration model plus `bd-shim`, a bd-CLI-compatible wrapper. An AI CLI runs `bd …` → bd-shim → barkpark HTTP (`/v1/tasks/*`). Unknown verbs fall through to real `bd`.
-- **PortableDoc** — the block format for papers (headings / paragraphs / callouts / lists / code / tables). See [`../../portable-doc/examples/welcome.json`](../../portable-doc/examples/welcome.json).
+- **PortableDoc** — the block format for papers (headings / paragraphs / callouts / lists / code / tables). See the worked sample [`../internal/pdrender/testdata/sample_m1.json`](../internal/pdrender/testdata/sample_m1.json), or the authoritative block vocabulary in `api/lib/barkpark/portable_doc/render.ex` (`compose_block`/`compose_inline`).
 
 ```
 AI CLI ──bd──────► bd-shim ──HTTP──► barkpark /v1/tasks      (task tracking)
@@ -195,7 +195,7 @@ curl -s -X POST \
   -d '{"add":["my-paper"]}'        # or {"remove":["my-paper"]}
 ```
 
-> **Caveat:** assign a per-block `"id"` to every block if you need the live stream to be exact (Known Limitations #2). See [`../../portable-doc/examples/welcome.json`](../../portable-doc/examples/welcome.json) for the full block vocabulary with ids.
+> **Caveat:** assign a per-block `"id"` to every block if you need the live stream to be exact (Known Limitations #2). See [`../internal/pdrender/testdata/sample_m1.json`](../internal/pdrender/testdata/sample_m1.json) for a worked block sample with ids.
 
 ## Known limitations
 
