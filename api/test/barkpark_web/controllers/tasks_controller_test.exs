@@ -552,6 +552,86 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # ─── C1 (task as universal node): GET /v1/tasks?parent= ────────────────
+  # "A goal is just a root task" + "a rail is the chronological child tasks of
+  # a task". The `parent` filter mirrors `phase_id` exactly but is exposed
+  # under the generic param and orders the result chronologically (inserted_at
+  # ASC) so it reads as that task's timeline/rail.
+
+  describe "GET /v1/tasks?parent= (C1 universal node)" do
+    test "root → child → grandchild: parent walks the recursive task chain, chronologically",
+         %{conn: conn, scope: scope} do
+      # Root task A has NO parent_id (a root task = a "goal"). B's parent_id is
+      # A's persisted doc_id; C's parent_id is B's — a task pointing at ANOTHER
+      # task (recursive nesting), not a phase. All accepted by the validator
+      # with zero relaxation.
+      a = mk_task!(uniq("c1-root-a"), scope)
+      b = mk_task!(uniq("c1-child-b"), scope, %{"parent_id" => a.doc_id})
+      c = mk_task!(uniq("c1-grandchild-c"), scope, %{"parent_id" => b.doc_id})
+
+      # parent=A → [B] only (the grandchild C hangs off B, not A).
+      resp_a = conn |> authed() |> get("/v1/tasks?parent=#{a.doc_id}")
+      assert resp_a.status == 200
+      payload_a = Jason.decode!(resp_a.resp_body)
+      assert payload_a["ok"] == true
+      ids_a = payload_a["docs"] |> Enum.map(& &1["doc_id"])
+      assert ids_a == [b.doc_id]
+
+      # parent=B → [C].
+      resp_b = conn |> authed() |> get("/v1/tasks?parent=#{b.doc_id}")
+      assert resp_b.status == 200
+      payload_b = Jason.decode!(resp_b.resp_body)
+      ids_b = payload_b["docs"] |> Enum.map(& &1["doc_id"])
+      assert ids_b == [c.doc_id]
+    end
+
+    test "chronological ordering: multiple children of one parent come back inserted_at ASC",
+         %{conn: conn, scope: scope} do
+      root = mk_task!(uniq("c1-rail-root"), scope)
+      # Inserted in order; the rail should preserve that order (oldest first).
+      first = mk_task!(uniq("c1-rail-1"), scope, %{"parent_id" => root.doc_id})
+      second = mk_task!(uniq("c1-rail-2"), scope, %{"parent_id" => root.doc_id})
+      third = mk_task!(uniq("c1-rail-3"), scope, %{"parent_id" => root.doc_id})
+
+      resp = conn |> authed() |> get("/v1/tasks?parent=#{root.doc_id}")
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      ids = payload["docs"] |> Enum.map(& &1["doc_id"])
+      assert ids == [first.doc_id, second.doc_id, third.doc_id]
+    end
+
+    test "root task (no parent_id) is listable and claimable/closable",
+         %{conn: conn, scope: scope} do
+      # A root task = a "goal": no content.parent_id, still a valid task.
+      root = mk_task!(uniq("c1-listable-root"), scope)
+      refute Map.has_key?(root.content, "parent_id")
+
+      # Listable in the un-filtered index.
+      list_resp = conn |> authed() |> get("/v1/tasks?type=task")
+      assert list_resp.status == 200
+      list_ids = Jason.decode!(list_resp.resp_body)["docs"] |> Enum.map(& &1["doc_id"])
+      assert root.doc_id in list_ids
+
+      # Claimable via the targeted-claim path (a leaf claim still works on a
+      # root task).
+      claim_body = Jason.encode!(%{worker_id: "c1-worker"})
+      claim_resp = conn |> authed() |> post("/v1/tasks/#{root.doc_id}/claim", claim_body)
+      assert claim_resp.status == 200
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      assert claim_payload["ok"] == true
+      assert claim_payload["doc"]["lifecycle_status"] == "in_progress"
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      # Closable.
+      close_body = Jason.encode!(%{worker_id: "c1-worker", observed_epoch: epoch})
+      close_resp = conn |> authed() |> post("/v1/tasks/#{root.doc_id}/close", close_body)
+      assert close_resp.status == 200
+      close_payload = Jason.decode!(close_resp.resp_body)
+      assert close_payload["ok"] == true
+      assert close_payload["doc"]["lifecycle_status"] == "done"
+    end
+  end
+
   # ─── tt5: GET /v1/tasks?label= generic exact-string filter ─────────────
   # Backs the bd-shim's `bd list --label file-claim:<path>` (and any
   # arbitrary label) → find every task holding a given claim.

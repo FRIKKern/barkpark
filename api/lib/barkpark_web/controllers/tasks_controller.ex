@@ -75,10 +75,16 @@ defmodule BarkparkWeb.TasksController do
     project_id = Keyword.get(scope, :project_id)
     limit = parse_int(params["limit"], 1000)
 
+    # C1 (task as universal node): when `parent` is given, the result reads as
+    # that task's timeline/rail — its chronological child tasks (a "rail is the
+    # chronological child tasks of a task"). Order by inserted_at ASC (oldest
+    # first) for that view; keep the default desc:updated_at "most recently
+    # touched first" ordering for the un-parent-filtered list.
+    parent = params["parent"]
+
     base =
       from(d in Document,
         where: d.type in ["task", "goal", "phase", "event"],
-        order_by: [desc: d.updated_at],
         limit: ^limit
       )
 
@@ -90,7 +96,9 @@ defmodule BarkparkWeb.TasksController do
       |> maybe_filter_kind(params["kind"])
       |> maybe_filter_lifecycle(params["lifecycle_status"])
       |> maybe_filter_parent(params["phase_id"])
+      |> maybe_filter_parent_id(parent)
       |> maybe_filter_label(params["label"])
+      |> apply_index_order(parent)
 
     docs = Repo.all(query)
     counts = batch_edge_counts(docs)
@@ -146,6 +154,36 @@ defmodule BarkparkWeb.TasksController do
             fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
     )
   end
+
+  # C1 (task as universal node): `parent=<doc_id>` — keep only docs whose
+  # `content.parent_id` (OR `content.parent`) points at the given doc_id. This
+  # is the same edge the `phase_id` filter walks, but exposed under the generic
+  # `parent` param so it reads as "the child tasks of ANY task" — realizing
+  # "a goal is just a root task" and "a rail is the chronological child tasks of
+  # a task". Mirrors `maybe_filter_parent/2` EXACTLY (prefix-agnostic match on
+  # both `parent_id` and `parent`); the index applies chronological ordering
+  # (inserted_at ASC) when this filter is active so the result reads as that
+  # task's timeline/rail.
+  defp maybe_filter_parent_id(query, nil), do: query
+
+  defp maybe_filter_parent_id(query, p) when is_binary(p) do
+    from(d in query,
+      where:
+        fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
+          fragment("regexp_replace(?, '^drafts\\.', '')", ^p) or
+          fragment("regexp_replace(?->>'parent', '^drafts\\.', '')", d.content) ==
+            fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
+    )
+  end
+
+  # When `parent` is given, order chronologically (oldest first) so the slice
+  # reads as the parent task's rail/timeline. Otherwise keep the default
+  # "most recently touched first" ordering.
+  defp apply_index_order(query, parent) when is_binary(parent),
+    do: from(d in query, order_by: [asc: d.inserted_at])
+
+  defp apply_index_order(query, _),
+    do: from(d in query, order_by: [desc: d.updated_at])
 
   # tt5: `label=<exact>` — keep only docs whose `content.labels` JSON array
   # CONTAINS the exact label string. Backs the bd-shim's `bd list --label
