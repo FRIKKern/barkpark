@@ -1640,6 +1640,20 @@ func (m model) buildEditorContent(width int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
+// indentLines prefixes n spaces to EVERY line of s. lipgloss box styles
+// (RoundedBorder etc.) render to a multi-line string (top border / content
+// row(s) / bottom border); a bare `"  " + box` concat only indents the first
+// line, shifting the top border right while content + bottom border stay at
+// column 0. Indenting every line keeps the whole box a clean rectangle.
+func indentLines(s string, n int) string {
+	pad := strings.Repeat(" ", n)
+	parts := strings.Split(s, "\n")
+	for i, p := range parts {
+		parts[i] = pad + p
+	}
+	return strings.Join(parts, "\n")
+}
+
 // renderField generates the TUI lines for a single schema field.
 func (m model) renderField(field Field, width int, isFocused, isEditing bool) []string {
 	var lines []string
@@ -1690,9 +1704,9 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 	switch field.Type {
 	case FieldString:
 		if isEditing {
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(placeholder("Enter "+field.Title+"...")))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(placeholder("Enter "+field.Title+"...")), 2))
 		}
 
 	case FieldSlug:
@@ -1703,9 +1717,9 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		// Full width like every other field — the [gen] hint moved to the label
 		// line above so all the box right edges align.
 		if isEditing {
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(slug)))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(slug)), 2))
 		}
 
 	case FieldText:
@@ -1714,13 +1728,13 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 			rows = 3
 		}
 		if isEditing {
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
 			content := placeholder("Enter " + field.Title + "...")
 			for i := 1; i < rows; i++ {
 				content += "\n"
 			}
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(content))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
 		}
 
 	case FieldRichText:
@@ -1728,18 +1742,18 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		content := dimStyle.Render("Start writing...")
 		content += "\n"
 		content += "\n"
-		lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(content))
+		lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
 
 	case FieldImage:
 		if isFocused {
-			lines = append(lines, "  "+lipgloss.NewStyle().
+			lines = append(lines, indentLines(lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(highlight).
 				Align(lipgloss.Center).
 				Padding(1, 0).
-				Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")))
+				Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")), 2))
 		} else {
-			lines = append(lines, "  "+imageDropStyle.Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")))
+			lines = append(lines, indentLines(imageDropStyle.Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")), 2))
 		}
 
 	case FieldSelect:
@@ -1766,10 +1780,10 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 
 	case FieldDatetime:
 		if isEditing {
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
 			dv := placeholder("YYYY-MM-DD HH:MM")
-			lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(dv))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(dv), 2))
 		}
 
 	case FieldColor:
@@ -1777,19 +1791,25 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		if cv == "" {
 			cv = "#3b82f6"
 		}
+		// The bordered value box is multi-line (border top/content/bottom), so the
+		// swatch must be joined as a column beside the whole box — not concatenated
+		// onto line 1 only — and the composite indented uniformly.
 		swatch := lipgloss.NewStyle().Background(lipgloss.Color(cv)).Render("    ")
+		var box string
 		if isEditing {
-			lines = append(lines, "  "+swatch+" "+activeFieldStyle.Render(m.textInput.View()))
+			box = activeFieldStyle.Render(m.textInput.View())
 		} else {
-			lines = append(lines, "  "+swatch+" "+activeFieldStyle.Render(cv))
+			box = activeFieldStyle.Render(cv)
 		}
+		composite := lipgloss.JoinHorizontal(lipgloss.Center, swatch, " ", box)
+		lines = append(lines, indentLines(composite, 2))
 
 	case FieldReference:
 		rv := val
 		if rv == "" {
 			rv = dimStyle.Render("Select " + field.RefType + "...")
 		}
-		lines = append(lines, "  "+activeFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")))
+		lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")), 2))
 
 	case FieldArray:
 		lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
@@ -1800,7 +1820,7 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		// Documents whose schema declares any v2 type render through this
 		// default branch (no panic, no editor surface). Editing happens in the
 		// LiveView Studio at /studio via BarkparkWeb.Studio.Plugins.Adapter.
-		lines = append(lines, "  "+editorFieldStyle.Width(fieldContentWidth).Render(placeholder("...")))
+		lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(placeholder("...")), 2))
 	}
 
 	return lines
