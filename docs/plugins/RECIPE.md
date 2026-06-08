@@ -87,7 +87,8 @@ defmodule Barkpark.Plugins.Vlie do
   Surfaces:
 
     * `Barkpark.Plugins.Vlie.Actions.publish_to_vlie/3` — schema-action
-      handler dispatched by StudioLive on the editor's `publish_to_vlie`
+      handler (arity 3: `doc_id`, `dataset`, `mode`) dispatched by
+      StudioLive's `dispatch_action/5` on the editor's `publish_to_vlie`
       modal action.
 
     * `Barkpark.Plugins.Vlie.Client` — REST client for Vlie's publish +
@@ -523,8 +524,9 @@ defmodule Barkpark.Plugins.Vlie.Actions do
   @moduledoc """
   Schema-action handlers for the Vlie plugin.
 
-  Dispatched by `BarkparkWeb.Studio.StudioLive`'s `dispatch_action/4` clause
-  for `"publish_to_vlie"`. The two modes mirror Bokbasen:
+  Dispatched by `BarkparkWeb.Studio.StudioLive`'s `dispatch_action/5` for
+  `"publish_to_vlie"` (the looked-up handler is itself arity 3). The two
+  modes mirror Bokbasen:
 
     * `:dryrun` — render the document as ONIX XML in memory, return a
       preview map. Does NOT enqueue any job.
@@ -669,8 +671,8 @@ On the next server restart, `Plugins.Bootstrap.register_all_schemas/0`
 upserts the refreshed schema. The Studio editor's action bar shows
 "Publish to Vlie" alongside "Publish to Bokbasen" on every `book`
 document. Clicking it opens the `ConfirmModal`; the dryrun and real
-clicks dispatch via `StudioLive.dispatch_action/4`, which looks the
-handler up in `Plugins.Registry.collect_action_handlers/0` and calls
+clicks dispatch via `StudioLive.dispatch_action/5`, which looks the
+handler up in `Plugins.Registry.collect_action_handlers/1` and calls
 `Plugins.Vlie.Actions.publish_to_vlie/3` — wired by File 2's
 `action_handlers/0` callback, no `studio_live.ex` edit required.
 
@@ -735,7 +737,7 @@ Verify the action surfaces:
 ```bash
 curl -s -H "Authorization: Bearer barkpark-dev-token" \
   http://89.167.28.206/w/acme/p/web/v1/schemas/production \
-  | jq '.[] | select(.name=="book") | .actions[] | .name'
+  | jq '.schemas[] | select(.name=="book") | .actions[] | .name'
 # "export_onix"
 # "publish_to_bokbasen"
 # "publish_to_vlie"

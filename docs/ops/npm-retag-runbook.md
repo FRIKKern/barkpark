@@ -151,8 +151,8 @@ reassign it to a different version. After Run 1+2:
   `npm install @barkpark/core@preview` (or pin to the explicit
   `@1.0.0-preview.1` version) and are unaffected.
 
-> **Note on ADR divergence:** ADR 0002 §Consequences (line 78) suggests
-> *not* stripping `latest` mid-incident. This runbook follows the explicit
+> **Note on ADR divergence:** ADR 0002 §Consequences (the first bullet,
+> lines 73–78) suggests *not* stripping `latest` mid-incident. This runbook follows the explicit
 > incident-response decision to **clear** `latest` so consumers fail loud
 > rather than silently install a pre-release. If the ADR posture is to be
 > reasserted, run only `add_tag=preview` with `remove_tag=` (empty) — see

@@ -70,7 +70,7 @@ validation DSL + cross-codelist checkers) are the foundation it sits on.
                 ┌────────────┼────────────┐
                 ▼            ▼            ▼
         BookEditor pill  sign-off badge  AdminLive row
-                       (Phase 8 WI3)   (/admin/bokbasen)
+                       (Phase 8 WI3)   (/admin/onixedit/bokbasen)
 ```
 
 Out-of-band: the ONIX 3.0 export pipeline (Phase 6) produces the staged
@@ -382,7 +382,7 @@ of that fixture is the criterion to honor.
 - [`docs/spec/bokbasen-onix-pre-flight.md`](bokbasen-onix-pre-flight.md)
   — Bokbasen sender pre-flight + Norwegian locale audit.
 - [`docs/spec/onix-export-mapping.md`](onix-export-mapping.md) — book
-  schema → ONIX 3.0 element mapping (~750 lines, line-by-line).
+  schema → ONIX 3.0 element mapping (~1000 lines, line-by-line).
 - [`docs/auth.md`](../auth.md) — `:ops` and `:admin` role layering;
   LiveAuth and controller plug pipelines.
 - [`proof/onix-sample.xml`](../../proof/onix-sample.xml) — XSD-validated

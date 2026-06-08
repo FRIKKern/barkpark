@@ -18,8 +18,8 @@
 | Clients | **`bp` CLI** · Web Studio (LiveView) · Terminal TUI (Go) · REST API |
 | Core model | Sanity-style draft/published, perspectives (`published` / `drafts` / `raw`) |
 | The CLI idea | **One binary = your whole API.** The `<noun> <verb>` tree is a pure function of the server's `GET /v1/capabilities` — install a plugin, its verbs appear; disable it, they vanish. One command = one API call. |
-| Plugin system | `Barkpark.Plugin` behaviour — 14 callbacks, resolver chain, lifecycle hooks. Plugins ship data + behaviour, never UI. |
-| Reference plugins | **OnixEdit** (ONIX 3.0 book metadata + Bokbasen) · **Bulldocs** (portable-doc papers at `/papers/:slug`) |
+| Plugin system | `Barkpark.Plugin` behaviour — callbacks for schemas, routes, workers, cron, resolver chain, lifecycle hooks. Plugins ship data + behaviour (and may own routes/readers). |
+| Reference plugins | **OnixEdit** (ONIX 3.0 book metadata + Bokbasen) · **Bulldocs** (portable-doc papers at `/papers/:slug`) · **Tasks** (`/v1/tasks/*` substrate) |
 | Stack | Elixir 1.15+ (tested 1.19) / Phoenix LiveView 1.1 / PostgreSQL / Oban / Go 1.24+ |
 | Tests | 1324 mix tests, 47 HTTP integration tests, full ONIX export round-trip |
 
@@ -123,12 +123,8 @@ The core (non-plugin) nouns and verbs, exactly as they appear in the capabilitie
 | `bp search query <q>` | GET | none | `--engine postgres\|indx`, `--limit` |
 | `bp workspace ls` | GET | read | Workspaces your token reaches |
 | `bp workspace project-create <name>` | POST | scoped_admin | Project verbs fold under `workspace` |
-| `bp task ls` / `task ready` | GET | read | Paginated; `--limit` |
-| `bp task get <id>` | GET | read | One task |
-| `bp task claim <id>` / `task close <id>` | POST | read | Claim / close a task |
 | `bp webhook ls` | GET | admin | List subscriptions |
 | `bp webhook create <url>` | POST | write | Create a subscription |
-| `bp rail path <goal>` | GET | read | Goal-path lifecycle events |
 | `bp plugin ls` | GET | admin | Installed plugins |
 | `bp plugin settings <name>` | PUT | admin | `--set key=value` (repeatable) |
 
@@ -136,6 +132,9 @@ The core (non-plugin) nouns and verbs, exactly as they appear in the capabilitie
 
 | Command | HTTP | Tier | Notes |
 |---|---|---|---|
+| `bp task ls` / `task ready` | GET | read | Paginated; `--limit` |
+| `bp task get <id>` | GET | read | One task (carries `children` + `child_count`) |
+| `bp task claim <id>` / `task close <id>` | POST | read | Claim / close a task |
 | `bp bulldocs publish <slug>` | POST | ingest | Upsert a paper from a portable-doc/HTML payload; body via `-f` |
 | `bp bulldocs patch <slug>` | POST | ingest | **Batch** block ops `{"ops":[…]}` via `-f`; `--if-rev <n>` optimistic guard |
 | `bp bulldocs intents` | GET | ingest | List pending actionable paper intents |
@@ -290,7 +289,7 @@ Editing a published doc creates a draft overlay. Publishing copies the draft to 
 
 ## Plugin system
 
-Barkpark's plugins are **first-party Elixir modules** that contribute data and behaviour. The host stays in charge of UI — plugins ship no LiveViews, no HEEx, no plugin-specific routes. UI is driven entirely by schema metadata plus the 14-callback surface. With **all plugins off, Barkpark still works fine** — the fresh-install invariant is the test of correctness.
+Barkpark's plugins are **first-party Elixir modules** that contribute data and behaviour. Studio UI is driven by schema metadata plus the resolver/menu callbacks — the host stays in charge of the desk. Plugins *can* own routes, though: they contribute route specs via `register_routes/1` that the host mounts onto documented **highway buckets** (`:ingest`, `:public_root`, `:token`, `:token_root`), so a plugin can ship a token-gated API or a public reader page (Bulldocs mounts the `/papers/:slug` reader and its ingest API; Tasks owns `/v1/tasks/*`). With **all plugins off, Barkpark still works fine** — the fresh-install invariant is the test of correctness.
 
 ```mermaid
 flowchart LR
@@ -304,14 +303,15 @@ flowchart LR
   Cap -->|nouns + commands + cli_commands| CLI[bp command tree]
 ```
 
-### The 14 callbacks
+### The callbacks
 
 | Callback | Resolver | Purpose |
 |---|---|---|
 | `manifest/0` | — | Frozen plugin.json (compile-time read) |
 | `register_schemas/1` | — | SchemaDefinition rows installed at boot |
-| `register_routes/1` | — | Reserved; plugins currently never own routes |
+| `register_routes/1` | — | Route specs the host mounts onto the highway buckets (`:ingest` / `:public_root` / `:token` / `:token_root`) |
 | `register_workers/1` | — | Child specs added to the supervision tree |
+| `oban_crontab/0` | — | Oban Cron entries folded into the host's scheduler (e.g. Tasks' TTL sweep + compactor) |
 | `validate_settings/1` | — | Validate the plugin's settings row before save |
 | `checkers/0` | `resolve_checkers/2` | Background invariant checkers |
 | `action_handlers/0` | `resolve_action_handlers/2` | Named handlers for schema-declared actions |
@@ -338,6 +338,7 @@ Eight events bracket the four mutating Content operations. `before_*` are **sync
 
 - **OnixEdit** — book editor → ONIX 3.0 export → Bokbasen `publisher`/`distributor` metadata-import API with a 9-state machine (`pending → staging → staged → polling → accepted | rejected | failed | cancelled | cannot_cancel`). Exercises the full contract: Schema v2 types, codelist seeders, action handlers, Cloak-encrypted settings, Oban workers, lifecycle hooks, top-menu/desk-item resolvers, `api_tests/0`. Validated reference output at `proof/onix-sample.xml`, byte-stable round-trip guarded by `export_proof_test.exs`.
 - **Bulldocs** — portable-doc "papers" reader at `/papers/:slug`, ingest at `/v1/plugins/bulldocs/*`. Drives the `bp bulldocs` verbs and the `@barkpark/bulldocs-sdk` TypeScript SDK.
+- **Tasks** — the task substrate. Owns the `task` schema, the `/v1/tasks/*` routes (`auth: :token_root`), the TTL/compactor Oban cron (via `oban_crontab/0`), and the `bp task` verbs (`source: plugin:tasks`). Everything is a task: a goal is a root task, a phase is ordered sibling tasks, a rail is a task's child tasks (`GET /v1/tasks?parent=<doc_id>` and the `children` + `child_count` fields on `GET /v1/tasks/:doc_id`).
 
 ### Plugin admin (Studio)
 
@@ -355,7 +356,7 @@ Eight events bracket the four mutating Content operations. `before_*` are **sync
 
 That projection is **default-deny and existence-hiding** — keyed on the caller's `auth_tier`, an anonymous caller never even learns the names of admin nouns or routes (a golden test enforces it). The CLI never client-preflight-refuses `scoped_admin`: only the server knows your per-workspace role, so `bp` sends the request and surfaces the server's 403 cleanly. There is exactly one `error.code → exit` table, and the CLI maps the code, never the HTTP status.
 
-This is the **highway**: plugins ride a documented public `Barkpark.*` API, contributing data and behaviour through the 14 callbacks and the `collect_*` fold. A plugin's noun + verbs travel from Elixir to the manifest to the `bp` tree with no client code at any hop.
+This is the **highway**: plugins ride a documented public `Barkpark.*` API, contributing data and behaviour through the plugin callbacks and the `collect_*` fold. A plugin's noun + verbs travel from Elixir to the manifest to the `bp` tree with no client code at any hop.
 
 ```mermaid
 flowchart TB
@@ -506,14 +507,14 @@ barkpark/
   api/
     lib/barkpark/
       content.ex                                              Document + schema CRUD, publish, perspectives
-      plugin.ex                                               The 14-callback behaviour + __using__/1
-      plugins/                                                Registry, resolver chain, bootstrap, onixedit/, bulldocs.ex
+      plugin.ex                                               The Barkpark.Plugin behaviour + __using__/1
+      plugins/                                                Registry, resolver chain, bootstrap, onixedit/, bulldocs.ex, tasks.ex
       portable_doc/                                           PortableDoc block engine (Bulldocs rides this)
     lib/barkpark_web/
       router.ex                                               Routes (incl. GET /v1/capabilities)
-      controllers/                                            Query, Mutate, Schema, Listen, Media, Preview, Legacy, Capabilities
+      controllers/                                            Query (also serves /v1/preview), Mutate, Schema, Listen, Media, Legacy, Capabilities, Tasks, Webhook
       live/studio                                             StudioLive, MediaLive, ApiTesterLive
-      live/admin                                              PluginsLive, PluginSettingsLive, BokbasenLive
+      live/admin                                              PluginsLive, PluginSettingsLive
     priv/repo/seeds.exs                                       Seed: schemas, sample docs, dev token
     test/barkpark_web/integration/                            47 HTTP integration tests
   docs/plugins/  docs/ops/                                    ARCHITECTURE, RECIPE, SCHEMA_V2, INSTALL · PROD_OPS, runbooks

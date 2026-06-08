@@ -149,10 +149,13 @@ later if there is demand).
 ## Stale-codelist remediation
 
 Once you upgrade to a new issue, some codes may have been retired.
-Barkpark plans to ship `mix barkpark.codelists.scan` to walk every
-document and report references to retired codes; severity is *warning*
-in Studio, not blocking. (Tracked under the Phase 4 task description —
-see `doey task get --id 8`.)
+`mix codelists.staleness --report` walks every `book` document in the
+`production` dataset and reports references to non-current codes against
+the current registry issue (default `73`, override with
+`--current-issue`); it lists the dotted path, codelist id, ref issue, and
+status for each stale ref. A companion `mix codelists.staleness
+--revalidate --book-id <doc_id>` mode revalidates a single document and
+prints the diff. Stale refs are surfaced as warnings, not blocking.
 
 ## Tests
 

@@ -213,13 +213,19 @@ auth-tier projected — an anonymous caller does not even see admin noun names).
 | `bp search query <q>` | GET | none | `--engine postgres\|indx`, `--limit`. Paginated. |
 | `bp workspace ls` | GET | read | List workspaces your token reaches. |
 | `bp workspace project-create <name>` | POST | scoped_admin | Project verbs fold under `workspace`. |
-| `bp task ls` | GET | read | Paginated; `--limit`. |
-| `bp task claim <task_id>` | POST | admin | Claim a ready task. |
 | `bp webhook ls` | GET | admin | List webhook subscriptions. |
 | `bp webhook create <url>` | POST | write | Create a subscription. |
-| `bp rail path <goal_id>` | GET | read | Goal-path lifecycle events. |
 | `bp plugin ls` | GET | read | List installed plugins. |
 | `bp plugin settings <slug>` | PUT | admin | `--set key=value` (repeatable). |
+
+> The `task` noun is **no longer core** — it ships from the Tasks plugin
+> (`Barkpark.Plugins.Tasks`), so its verbs appear under **Plugin verbs** below
+> tagged `source: plugin:tasks` even though the plugin is bundled with a fresh
+> install. There is **no** `rail` noun: goal-path / lifecycle navigation moved
+> into the task tree itself (everything is a task — a goal is a root task, a
+> phase is ordered sibling tasks, and a task's "rail" is its chronological child
+> tasks via `bp task ls` filtered by parent / the `children` field on
+> `bp task get <doc_id>`).
 
 ### Plugin verbs
 
@@ -235,6 +241,11 @@ slug. From the fixtures:
 | `bp bulldocs intents` | GET | ingest | List pending actionable paper intents. |
 | `bp bulldocs intent-processed <id>` | POST | ingest | Mark an intent processed. |
 | `bp onixedit export <dataset> <id>` | GET | admin | Export a book document as ONIX 3.0 XML. |
+| `bp task ls` | GET | read | List tasks in the queue. Paginated; `--limit`. (`source: plugin:tasks`) |
+| `bp task ready` | GET | read | List ready (unblocked) tasks. Paginated; `--limit`. |
+| `bp task get <doc_id>` | GET | read | Fetch one task by id (carries `children` + `child_count`). |
+| `bp task claim <doc_id>` | POST | read | Claim a ready task by id (bearer-gated workflow op). |
+| `bp task close <doc_id>` | POST | read | Close a claimed task by id. |
 
 ---
 

@@ -150,8 +150,9 @@ have moved.
   Accepts the WI1 `validation_result` map, the legacy
   `%{field => [string]}` map from `Barkpark.Content.Validation`, or a
   flat list of strings.
-* Plug: `BarkparkWeb.Plugs.ErrorEnvelopeNegotiation` — wired into
-  `:api`, `:api_unlimited`, and `:api_preview` pipelines.
+* Plug: `BarkparkWeb.Plugs.ErrorEnvelopeNegotiation` — wired into the
+  `:api`, `:scoped_api`, `:api_unlimited`, `:api_preview`, `:media_mutate`,
+  and `:media_processing_callback` pipelines.
 * Controllers: today only `MutateController` reshapes its response
   body for v2 (and only for `validation_failed`). Other controllers
   pick up the negotiation assign automatically when they need it.

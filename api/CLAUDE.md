@@ -30,12 +30,13 @@ mix run priv/repo/seeds.exs  # just reseed
 | `lib/barkpark/tenancy.ex` | W2 workspace/project tenancy context |
 | `lib/barkpark/content/scope.ex` | `Barkpark.Content.Scope` — query-level tenant WHERE-clause scoping (`scope_to_workspace/3`); nil workspace fails CLOSED |
 | `lib/barkpark_web/plugs/scope_helpers.ex` | `BarkparkWeb.ScopeHelpers` — HTTP/LiveView scope extractor (`scope_opts/1`) every controller calls |
-| `lib/barkpark_web/controllers/tasks_controller.ex` | `/v1/tasks` (router ~:460) — task index/ready/claim/edges; `GET /v1/tasks?parent=<doc_id>` lists a task's direct child tasks (its "rail") chronologically; `GET /v1/tasks/:doc_id` returns those inline as `children` (+ `child_count`); `POST /v1/tasks/:doc_id/papers {add,remove}` edits `content.papers[]` |
+| `lib/barkpark_web/controllers/tasks_controller.ex` | `/v1/tasks` — task index/ready/claim/edges; `GET /v1/tasks?parent=<doc_id>` lists a task's direct child tasks (its "rail") chronologically; `GET /v1/tasks/:doc_id` returns those inline as `children` (+ `child_count`); `POST /v1/tasks/:doc_id/papers {add,remove}` edits `content.papers[]`. Controller stays in core; the *routes* are owned by the `tasks` plugin (`auth: :token_root`). |
+| `lib/barkpark/plugins/tasks.ex` | **Tasks plugin** — `Barkpark.Plugins.Tasks` (`priv/plugins/tasks/plugin.json`). `register_schemas/1` declares the `task` type (via `Barkpark.Tasks.schema_definitions/1`); `register_routes/1` mounts the ten `/v1/tasks` routes (`auth: :token_root`); `oban_crontab/0` schedules the TTL sweep + compactor cron; `cli_commands/0` contributes the five `task.*` CLI verbs (`source: "plugin:tasks"`). Core `Barkpark.Tasks.*` machinery stays as reusable utilities. |
 | `lib/barkpark/plugins/bulldocs.ex` | **Bulldocs plugin** — the paper/document surface as a plugin. `register_schemas/1` declares the `paper` type; `register_routes/1` mounts the reader (`/papers/:slug`, `:public_root`) + ingest/intents API (`/v1/plugins/bulldocs/*`, `:ingest`). Reuses core modules as utilities — see "Bulldocs plugin" below. |
-| `priv/repo/seeds.exs` | Seed data — 10 schema rows (8 core + `paper` + 1 W7a `task`) + ~27 docs + dev token; plugin schemas (e.g. `book`) auto-register via `Bootstrap.register_all_schemas/0`. See the seed's `IO.puts` summary lines (~:229/:259/:289/:590/:646). |
+| `priv/repo/seeds.exs` | Seed data — 8 core schema rows + ~27 docs + dev token; the `paper`, `task`, and other plugin schemas (e.g. `book`) auto-register via `Bootstrap.register_all_schemas/0`. See the seed's `IO.puts` summary lines (~:229/:545/:586/:601). |
 
 Tenancy note: alongside the flat routes there is a scoped route family
-`/w/:workspace_slug/p/:project_slug/*` (router ~:618) mirroring the flat
+`/w/:workspace_slug/p/:project_slug/*` (router ~:672) mirroring the flat
 endpoints under explicit workspace/project slugs.
 
 ## Bulldocs plugin (the Papers surface)
@@ -53,9 +54,12 @@ thin wiring layer.**
   `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis}` (the block
   engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`,
   `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4` (generic
-  block-document write/stream paths); `BarkparkWeb.PaperLive`; the
-  `PaperIngestController` / `PaperIntentsController`; `Barkpark.Papers.Events`;
-  the `RequireIngestToken` plug; `layouts/paper.html.heex`.
+  block-document write/stream paths);
+  the `BarkparkWeb.Plugs.RequireIngestToken` plug.
+- **Bulldocs-owned web/event modules** (live under `BarkparkWeb.Bulldocs*` /
+  `Barkpark.Plugins.Bulldocs.*`): `BarkparkWeb.BulldocsLive` (the reader
+  LiveView); `BulldocsIngestController` / `BulldocsIntentsController`;
+  `Barkpark.Plugins.Bulldocs.Events`; `layouts/bulldocs.html.heex`.
 - **Bulldocs plugin (`Barkpark.Plugins.Bulldocs`):** `register_schemas/1` (the
   `paper` schema) + `register_routes/1` (reader via `:public_root`, ingest via
   `:ingest`), pointing at those core modules.

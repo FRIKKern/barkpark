@@ -49,7 +49,8 @@ captured in [`docs/ops/research/realtime-gap-analysis.md`](./research/realtime-g
 
 ## Canonical tag scheme
 
-`barkparkFetch` (in `@barkpark/core`) tags every cached fetch with three
+`barkparkFetch` (in `@barkpark/nextjs`, exported from
+`@barkpark/nextjs/server`) tags every cached fetch with three
 keys per document touched. The webhook handler must invalidate those exact
 tags, not loose paths.
 
@@ -58,6 +59,13 @@ tags, not loose paths.
 | `bp:ds:<dataset>:_all`       | Any read against the dataset (list queries).  |
 | `bp:ds:<dataset>:doc:<id>`   | Reads of a specific published document id.    |
 | `bp:ds:<dataset>:type:<type>`| Reads filtered by document `_type`.           |
+
+When `barkparkFetch` is configured with a workspace + project (and the
+dispatcher delivers a scoped payload), the same three suffixes are emitted
+under the **scoped** prefix `bp:ws:<ws>:p:<project>:ds:<dataset>` as well — e.g.
+`bp:ws:<ws>:p:<project>:ds:<dataset>:_all`. The legacy flat `bp:ds:*` prefix is
+retained for back-compat; unscoped mutations resolve `<ws>`/`<project>` to
+`default`.
 
 Which event invalidates which tags:
 
@@ -90,8 +98,11 @@ specific id or type still rerenders.
     "content": { "category": "Tech" }
   },
   "dataset": "production",
+  "workspace": "default",
+  "project": "default",
   "sync_tags": [
-    "bp:ds:production:_all",
+    "bp:ws:default:p:default:ds:production:doc:p1",
+    "bp:ws:default:p:default:ds:production:type:post",
     "bp:ds:production:doc:p1",
     "bp:ds:production:type:post"
   ],
@@ -99,8 +110,15 @@ specific id or type still rerenders.
 }
 ```
 
-The handler trusts `sync_tags` for fanout and falls back to constructing
-tags from `dataset`, `doc_id`, and `type` if `sync_tags` is missing.
+`build_payload/6` (`dispatcher.ex`) emits **both** the workspace/project-scoped
+`bp:ws:<ws>:p:<project>:ds:<dataset>:*` tags and the legacy flat
+`bp:ds:<dataset>:*` tags, each with `:doc:<id>` and `:type:<type>` suffixes
+(`<ws>`/`<project>` default to `default` for unscoped mutations). Note the
+dispatcher does **not** put an `:_all` tag in `sync_tags` — the handler
+reconstructs `_all` from the payload fields. The handler trusts `sync_tags`
+verbatim for fanout and falls back to constructing tags from `dataset`,
+`doc_id`, and `type` (scoped when `workspace` + `project` are present) if
+`sync_tags` is missing.
 
 ## Configuration
 

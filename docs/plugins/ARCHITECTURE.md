@@ -49,10 +49,17 @@ A plugin **MAY**:
 
 A plugin **MUST NOT**:
 
-- Ship LiveViews, HEEx templates, or function components.
+- Ship LiveViews, HEEx templates, or function components **into the Studio
+  surface** (`/studio`). The host owns Studio chrome. A plugin MAY ship its own
+  LiveViews/controllers under the `Barkpark.Plugins.<Slug>.Web.*` namespace and
+  mount them via `register_routes/1` through a route bucket (e.g. `:public_root`
+  for a public reader page); it MUST NOT define modules in `BarkparkWeb.*` or
+  mount LiveViews directly under `lib/barkpark_web/live/`. See
+  [HIGHWAY.md](HIGHWAY.md) §8.
 - Ship CSS files or JavaScript / Web Components.
-- Ship routes (except controller-mounted file-download endpoints under
-  `/v1/plugins/<plugin_name>/...`).
+- Add routes at runtime via `Phoenix.Router` — routes are compile-time only;
+  contribute them through `register_routes/1` (and the host route buckets:
+  `:ingest`, `:public_root`, `:token`, `:token_root`, etc.).
 - Ship plugin-specific field renderers — extend the four native v2
   field components for all plugins, not just yours.
 - Broadcast plugin-specific PubSub messages when the generic
@@ -144,7 +151,7 @@ interpolated. No LiveView round-trip.
 ```
 
 **`kind: "event"`** — fires `phx-click="schema_action" phx-value-name="<name>"`
-into StudioLive. The host calls back into `dispatch_action/4` (see "The
+into StudioLive. The host calls back into `dispatch_action/5` (see "The
 action-dispatch contract" below).
 
 **`kind: "modal"`** — opens the generic `ConfirmModal` with an optional
@@ -226,8 +233,8 @@ contribution collectors, and their `resolve_*/2` resolver companions).
 The host reads them three ways: at register time, at compile time
 (routes), and at runtime (the resolver chain that folds plugin
 contributions into host UI). `register_routes/1` and `register_workers/1`
-are **both live**, not reserved — see "Plugin lifecycle" and "URL paths"
-below.
+are **both live**, not reserved — see "Plugin lifecycle" below and the
+route-bucket reference in [HIGHWAY.md](HIGHWAY.md).
 
 **[HIGHWAY.md](HIGHWAY.md) is the canonical, exhaustive callback
 reference.** It carries every callback's signature, default, when-fires,
@@ -372,7 +379,7 @@ end
 ```
 
 These three callbacks replaced what used to be three hardcoded
-touchpoints in the host (a `dispatch_action/4` clause in
+touchpoints in the host (a `dispatch_action/5` clause in
 `studio_live.ex`, a `@entries` map in `external_sync.ex`, and a pair of
 seed calls in `application.ex`). Declarative plugin metadata; zero host
 edits per integration.
@@ -438,7 +445,7 @@ sequenceDiagram
     participant U as User
     participant SL as StudioLive
     participant Mod as ConfirmModal
-    participant Disp as dispatch_action/4
+    participant Disp as dispatch_action/5
     participant Act as <Plugin>.Actions
 
     U->>SL: click "Publish to Bokbasen" (kind:modal)
@@ -458,15 +465,24 @@ sequenceDiagram
     Disp-->>SL: flash + rebuild_panes
 ```
 
-### `dispatch_action/4` — runtime Registry lookup
+### `dispatch_action/5` — runtime Registry lookup
 
-`StudioLive.dispatch_action/4` is a one-liner that asks
-`Barkpark.Plugins.Registry.collect_action_handlers/0` for the merged
-`%{action_name => fun/3}` map and calls the matching handler:
+`StudioLive.dispatch_action/5` builds an action-handler `ctx` from the socket,
+asks `Barkpark.Plugins.Registry.collect_action_handlers/1` for the merged
+`%{action_name => fun/3}` map (seeding the host's own handlers as `:baseline`),
+and calls the matching handler:
 
 ```elixir
-defp dispatch_action(name, doc_id, dataset, mode) do
-  case Map.get(Barkpark.Plugins.Registry.collect_action_handlers(), name) do
+defp dispatch_action(socket, name, doc_id, dataset, mode) do
+  ctx = action_handler_ctx(socket, doc_id, dataset)
+
+  handlers =
+    Barkpark.Plugins.Registry.collect_action_handlers(
+      baseline: default_action_handlers(ctx),
+      ctx: ctx
+    )
+
+  case Map.get(handlers, name) do
     handler when is_function(handler, 3) -> handler.(doc_id, dataset, mode)
     _ -> {:error, {:unknown_action, name}}
   end
@@ -527,7 +543,7 @@ Three pieces:
    `BarkparkWeb.Components.ExternalSyncPill` — it reads
    `Barkpark.ExternalSync.all/0`, which merges host-owned entries
    (`@entries` in `external_sync.ex`, today empty) with every plugin's
-   contribution via `Plugins.Registry.collect_external_sync_entries/0`.
+   contribution via `Plugins.Registry.collect_external_sync_entries/1`.
 
 Adding a new system **requires NO host edits** — declare it in
 `external_sync_entries/0` and the next boot picks it up. Plugin entries
@@ -593,11 +609,15 @@ When a plugin owns codelist data (controlled vocabularies, taxonomies):
 
 Plugins explicitly must not touch:
 
-- **LiveViews / HEEx / function components.** The host owns Studio, the
-  editor pane, all field renderers, all modals.
-- **Routes** beyond controller-mounted file endpoints under
-  `/v1/plugins/<plugin>/...` (e.g. `/v1/plugins/onixedit/export/.../X.onix`).
-  Document edit URLs are always `/studio/:dataset/:type/:id` — host-owned.
+- **The Studio surface.** The host owns Studio, the editor pane, all field
+  renderers, all modals — a plugin must not inject LiveViews / HEEx / function
+  components there, nor define modules in `BarkparkWeb.*`. (A plugin's own
+  LiveViews/controllers live under `Barkpark.Plugins.<Slug>.Web.*` and mount via
+  `register_routes/1` through a route bucket — see [HIGHWAY.md](HIGHWAY.md) §8.)
+- **Runtime route registration.** Routes are compile-time only; contribute them
+  via `register_routes/1` and the host route buckets (`:ingest`, `:public_root`,
+  `:token`, `:token_root`, …), never via `Phoenix.Router` at runtime. Document
+  edit URLs are always `/studio/:dataset/:type/:id` — host-owned.
 - **CSS files.** Inline styles in `root.html.heex` using existing
   `--bg` / `--fg` / `--border` CSS variables. If a plugin needs a new
   style, it's a host-level addition.
@@ -606,7 +626,7 @@ Plugins explicitly must not touch:
 - **Migrations beyond plugin-specific tables.** `plugin_settings` is the
   host-owned encrypted store accessed via `Barkpark.Plugins.Settings`.
 - **Direct `studio_live.ex` socket assigns.** Use schema-declared actions
-  and the `dispatch_action/4` clause; never `phx-click` from plugin code.
+  and the `dispatch_action/5` clause; never `phx-click` from plugin code.
 - **Plugin-specific PubSub topics** when `external_sync:<system>:<doc_id>`
   fits. Generic topics work for any future plugin.
 
@@ -642,8 +662,8 @@ the plugin's.
 | Codelist registry | `api/lib/barkpark/content/codelists.ex` |
 | External-sync host map | `api/lib/barkpark/external_sync.ex` (empty `@entries`; plugin-owned slice merged at call time) |
 | External-sync pill | `api/lib/barkpark_web/components/external_sync_pill.ex` |
-| Schema-action dispatch | `api/lib/barkpark_web/live/studio/studio_live.ex` (`dispatch_action/4` — one-liner over `Plugins.Registry.collect_action_handlers/0`) |
-| Plugin collectors | `Plugins.Registry.collect_action_handlers/0` · `collect_external_sync_entries/0` · `run_all_codelist_seeders/0` |
+| Schema-action dispatch | `api/lib/barkpark_web/live/studio/studio_live.ex` (`dispatch_action/5` over `Plugins.Registry.collect_action_handlers/1`) |
+| Plugin collectors | `Plugins.Registry.collect_action_handlers/1` · `collect_external_sync_entries/1` · `run_all_codelist_seeders/0` |
 | ConfirmModal | `api/lib/barkpark_web/components/confirm_modal.ex` |
 | Plugin settings (encrypted) | `api/lib/barkpark/plugins/settings.ex` |
 | OnixEdit reference plugin | `api/lib/barkpark/plugins/onixedit.ex` and subtree |

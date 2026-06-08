@@ -33,7 +33,7 @@ CI's `changeset-check` job blocks merges that touch `packages/**` without one.
 
 ```bash
 pnpm test                              # all projects
-pnpm test --project=core               # single package
+pnpm test --project=node               # single package (core, node env)
 pnpm test --project=core-workerd       # workerd parity
 pnpm test --project=react-browser      # DOM tests
 pnpm --filter @barkpark/core test:all   # core: node + workerd + browser
@@ -49,7 +49,8 @@ CI fails on > 2% regression (ADR-001).
 
 ## ADRs
 
-Architecture Decision Records live in `.doey/plans/adrs/`. Any change touching
+Architecture Decision Records live in `docs/adr/` (with backend ADRs in
+`api/docs/adr/`). Any change touching
 the **Decision** section of a locked ADR requires a follow-up amendment ADR.
 
 ## No `node:` imports

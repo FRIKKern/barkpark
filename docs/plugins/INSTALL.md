@@ -99,7 +99,7 @@ MIX_ENV=dev mix ecto.reset            # drops, migrates, seeds — fires path (a
 mix phx.server &                      # boot the app — fires path (b)
 sleep 2
 curl -s -H "Authorization: Bearer barkpark-dev-token" \
-  http://localhost:4000/w/acme/p/web/v1/schemas/production | jq '.[] | .name'
+  http://localhost:4000/w/default/p/default/v1/schemas/production | jq '.[] | .name'
 ```
 
 > Flat alias: `GET /v1/schemas/production` (no `/w/.../p/...` prefix) → resolves the `Default` workspace + project. See `docs/api-v1.md` §1a and §8.

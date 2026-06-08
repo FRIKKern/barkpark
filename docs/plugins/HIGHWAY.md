@@ -94,13 +94,13 @@ Source of truth: `api/lib/barkpark/plugin.ex`. Every callback below is
 `use Barkpark.Plugin`. The defaults are listed for each entry so authors know
 what they inherit by doing nothing.
 
-The 14 host-invoked callbacks split into three groups: identity + registration
-(manifest, register_*, validate_settings), additive contributions (the seven
-`*_entries` / `*_seeders` callbacks that feed the resolver chain), and direct
-host hooks (lifecycle, api_tests, content_renderer, test_connection). The
-eight resolver-pair callbacks (`resolve_*/2`) are listed at the end — plugins
-override one of these whenever they need to *mutate* the running accumulator
-rather than just append to it.
+The host-invoked callbacks split into three groups: identity + registration
+(manifest, register_*, oban_crontab, validate_settings), additive contributions
+(the `*_entries` / `*_seeders` / `cli_commands` callbacks that feed the resolver
+chain), and direct host hooks (lifecycle, api_tests, content_renderer,
+test_connection). The resolver-pair callbacks (`resolve_*/2`) are listed at the
+end — plugins override one of these whenever they need to *mutate* the running
+accumulator rather than just append to it.
 
 ### `manifest/0`
 
@@ -172,6 +172,21 @@ rather than just append to it.
   — a lazy OAuth2 token cache.
 * **Failure mode.** A raise or non-list return logs a warning and skips the
   plugin; the boot continues.
+
+### `oban_crontab/0`
+
+* **Signature.** `@callback oban_crontab() :: [{String.t(), module()} | {String.t(), module(), keyword()}]`.
+* **When fires.** `Barkpark.Application.start/2` calls
+  `Plugins.Registry.collect_oban_crontab/0` at boot and appends every plugin's
+  contribution to the host's `Oban.Plugins.Cron` `:crontab` entry before Oban
+  starts.
+* **Returns.** A list of Oban crontab elements — each a `{cron_expr, worker}`
+  pair or `{cron_expr, worker, opts}` triple, where `cron_expr` is a 5-field
+  POSIX cron string (e.g. `"* * * * *"`).
+* **Default.** `[]`.
+* **Example.** The `tasks` plugin
+  (`Barkpark.Plugins.Tasks.oban_crontab/0`) returns two entries — the task TTL
+  lease sweep (every minute) and the task compactor.
 
 ### `validate_settings/1`
 
@@ -385,9 +400,25 @@ rather than just append to it.
   `{:ok, %{message: "Bokbasen reachable: token OK."}}` or
   `{:error, "Bokbasen unreachable: <reason>"}`.
 
+### `cli_commands/0`
+
+* **Signature.** `@callback cli_commands() :: [cli_command()]`.
+* **When fires.** Read by `Plugins.Registry.collect_cli_commands/1` when the
+  capabilities controller builds the `/v1/capabilities` manifest's `commands[]`
+  array. The controller stamps provenance (`source: "plugin:<name>"`) and folds
+  the commands in.
+* **Returns.** List of `cli_command()` maps, each matching the per-command
+  schema in `docs/cli/manifest.schema.json`.
+* **Default.** `[]`.
+* **Resolver pair.** `resolve_cli_commands/2` — default lifts via `prev ++ result`.
+* **Example.** The `tasks` plugin
+  (`Barkpark.Plugins.Tasks.cli_commands/0`) contributes the `bp task` verbs
+  (`ls`, `ready`, `get`, `claim`, `close`), which surface in the manifest with
+  `source: "plugin:tasks"`.
+
 ### Resolver-pair callbacks (`resolve_*/2`)
 
-Eight of the additive callbacks above have a companion `resolve_X/2` of shape
+Each additive callback above has a companion `resolve_X/2` of shape
 `(prev, ctx) -> next`. The host seeds `prev` with its built-in baseline
 (or the schema-declared list for `resolve_doc_actions/2`); each plugin sees
 the running accumulator and may transform it. The default supplied by
@@ -407,6 +438,7 @@ entries from the running list rather than just append.
 | `resolve_desk_items/2` | `prev ++ desk_items(ctx.dataset)` | `%{dataset, current_path}` |
 | `resolve_doc_actions/2` | identity (`prev`) — no additive predecessor | `%{dataset, doc_id, doc_type, doc}` |
 | `resolve_api_tests/2` | `prev ++ api_tests()` | `%{}` |
+| `resolve_cli_commands/2` | `prev ++ cli_commands()` | `%{}` |
 
 Defining **both** the resolver and the additive form for the same callback
 triggers a `Logger.warning` from `Registry.warn_duplicate_forms/0` on every
@@ -467,6 +499,7 @@ baseline, `ctx` to `%{}`. Cached calls short-circuit through the
 | `collect_settings_schema/1` | `(opts) -> [field]` | admin Plugin Settings LV (cross-plugin) | concatenated list |
 | `collect_doc_actions/1` | `(opts) -> [action_map]` | Studio editor header | host seeds `:baseline` with schema-declared actions |
 | `collect_api_tests/1` | `(opts) -> [spec]` | `Barkpark.ApiTestRunner.run/2` | concatenated list, not cached |
+| `collect_cli_commands/1` | `(opts) -> [cli_command]` | `/v1/capabilities` manifest builder | concatenated list, provenance-stamped |
 
 ### First-wins collectors
 
@@ -498,6 +531,9 @@ on disk and folds bundled plugins in.
 * `collect_workers(ctx \\ %{}) :: [Supervisor.child_spec()]` — called from
   `Barkpark.Application.start/2`. Folds plugin children into the host
   supervision tree.
+* `collect_oban_crontab() :: [crontab_entry]` — called from
+  `Barkpark.Application.start/2`. Folds every plugin's `oban_crontab/0` entries
+  into the host's `Oban.Plugins.Cron` `:crontab` before Oban starts.
 * `collect_routes(ctx \\ %{}) :: [route_spec()]` — called at compile time
   from the `plugin_routes/1` macro in `BarkparkWeb.Router.Plugins`.
 
@@ -563,6 +599,8 @@ auth bucket to emit:
 | `:ops` | `:ops` | `pipe_through :browser` + `live_session on_mount: …:ops` | `/admin` |
 | `:public` | `:public` or `:none` | `pipe_through :browser` + `live_session` (no on_mount) | `/studio` |
 | `:api` | `:api` | `pipe_through [:api, :require_admin]` (controller routes only) | `/v1/plugins` |
+| `:token` | `:token` | `pipe_through [:api, :require_token]` (any valid `api_tokens` bearer; controller routes only) | `/v1/plugins` |
+| `:token_root` | `:token_root` | `pipe_through [:api, :require_token]`, mounted at the host top-level scope (controller routes only) | `/v1` |
 | `:ingest` | `:ingest` | `pipe_through :ingest` (RequireIngestToken shared-secret; controller routes only) | `/v1/plugins` |
 | `:public_root` | `:public_root` | `pipe_through :browser`; macro wraps each route in its OWN uniquely-named `live_session` applying the spec's `root_layout:` opt | `/` |
 
@@ -608,6 +646,15 @@ Recognised `auth:` opt values inside a `route_spec()` tail:
   chosen so plugin authors read `auth: :none` as "no auth required."
 * `:api` — controller routes only, mounted under `/v1/plugins` with the
   `[:api, :require_admin]` pipeline. No `live_session`.
+* `:token` — controller routes only, mounted under `/v1/plugins` with the
+  `[:api, :require_token]` pipeline — i.e. any valid `api_tokens` bearer, not
+  the stricter admin gate of `:api`. No `live_session`.
+* `:token_root` — the root-mounted sibling of `:token`: same
+  `[:api, :require_token]` pipeline (controller routes only), but mounted at the
+  host top-level scope (`/v1`) instead of under `/v1/plugins`. A spec
+  `{:get, "/tasks/ready", Mod, :ready, auth: :token_root}` lands at
+  `/v1/tasks/ready`. This is the bucket the `tasks` plugin's
+  `/v1/tasks` endpoints mount through.
 * `:ingest` — controller routes only, mounted under `/v1/plugins` behind the
   `:ingest` pipeline (the `RequireIngestToken` shared-secret check, **not** an
   `api_tokens` bearer). For token-gated ingest APIs such as the Bulldocs

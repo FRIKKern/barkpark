@@ -56,9 +56,12 @@ Barkpark = Publisher (Onix-Block-access blocks 0–12).
 
 ## Safety
 
-- **Never** commit a real client secret. The pre-commit hooks treat
-  any 20+ char alphanumeric value adjacent to `bokbasen` /
-  `client_secret` as a leak.
+- **Never** commit a real client secret. There is no automated
+  secret-leak scanner — the `.githooks/pre-commit` hook only runs
+  `mix format --check-formatted` on staged Elixir files. The single
+  safeguard is `.gitignore` (`secrets/*.env`), so keep real values in
+  `secrets/bokbasen.env` and never paste them into the committed
+  `secrets/bokbasen.env.example`.
 - The `secrets/` directory is intentionally outside `api/` so it is
   not picked up by Phoenix's static-asset pipeline.
 - WI3 (HTTP client) and WI4 (Oban worker) ship later; WI2 only

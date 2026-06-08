@@ -217,7 +217,7 @@ Round-trip is byte-stable: export → import → re-export produces identical XM
 
 Not yet a thing. You can bulk-publish/unpublish, but bulk-edit-a-field is not exposed in the UI. Options:
 - Edit each book manually
-- Write a one-off `mix run -e '...'` script using `Barkpark.Content.update_document/3`
+- Write a one-off `mix run -e '...'` script using `Barkpark.Content.upsert_document/4`
 - Ask the dev team to add a bulk-edit affordance to the schema-action registry
 
 ### "A field is showing as disabled with '(no codelist registered)'"
@@ -240,7 +240,7 @@ On prod, restart the service (`systemctl restart barkpark`) — the post-boot Ta
 4. Re-run the dry-run until clean
 5. Then click Confirm to submit for real
 
-The status pill walks `draft → queued → staging → staged → polling → accepted`. If it goes `→ rejected` or `→ failed`, the `bp_export_status.last_error` field has Bokbasen's error message.
+The status pill walks `draft → pending → staging → staged → polling → accepted`. If it goes `→ rejected` or `→ failed`, the `bp_export_status.last_error` field has Bokbasen's error message.
 
 ## Keyboard shortcuts
 
@@ -255,7 +255,7 @@ None custom yet. Browser defaults work (Cmd/Ctrl+S triggers form submit which is
 /studio/production/book?desk=drafts      → only drafts
 /studio/production/book/<doc-id>         → editor for one book
 /studio/production/post/post-all/<id>    → editor for one post (3-deep path)
-/studio/production/onixedit/staleness    → admin: book sync status overview
+/admin/onixedit/staleness                → admin: book sync status overview
 ```
 
 ## Getting help

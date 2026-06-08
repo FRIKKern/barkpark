@@ -146,7 +146,7 @@ The Phase 0 plugin foundation introduces four nested field types beyond the v1 p
 - `codelist` — registry-backed enum pinned to an `issue` version (e.g. ONIX issue 73)
 - `localizedText` — multi-language string with `languages`, `format`, and `fallbackChain`
 
-**The Go TUI is read-only for plugin schemas in v1.** Documents whose schema declares any of the four v2 types render as **JSON dumps** in the TUI; edits go through the LiveView Studio at `/studio`. The TUI editor menus skip composite / array / codelist / localizedText fields entirely — there is no inline form for them. (The original masterplan that recorded this as "decision 12" is no longer in the tree; the surviving design notes live under `.doey/plans/research/`.)
+**The Go TUI is read-only for plugin schemas in v1.** Documents whose schema declares any of the four v2 types render as **JSON dumps** in the TUI; edits go through the LiveView Studio at `/studio`. The TUI editor menus skip composite / array / codelist / localizedText fields entirely — there is no inline form for them. (The original masterplan that recorded this as "decision 12" is no longer in the tree; the surviving design notes live under `_attic/.doey/plans/research/`.)
 
 This is a declared v1 constraint, NOT a missing feature. v2 may add TUI editing for these types once a publisher actually demands it; until then, Studio is the editing surface.
 
@@ -201,9 +201,10 @@ barkpark/
 ## Web Studio (LiveView)
 
 - **URL:** `/studio` (single LiveView manages multi-pane layout)
-- **JS dependencies loaded via CDN** (no asset pipeline, no Node.js):
-  - Phoenix JS: `cdn.jsdelivr.net/npm/phoenix@1.8.5`
-  - LiveView JS: `cdn.jsdelivr.net/npm/phoenix_live_view@1.1.28`
+- **Phoenix + LiveView JS served locally** from `priv/static/assets/` (no asset pipeline, no Node.js, no CDN dependency):
+  - `/assets/phoenix.js`
+  - `/assets/phoenix_live_view.js` (bundled v1.1.28)
+  - Loaded near the bottom of `root.html.heex` (not in `<head>`).
 - **Lucide icons are inline SVG** served from `BarkparkWeb.Icons` (`api/lib/barkpark_web/components/icons.ex`, copied from Lucide v0.460) — no Lucide CDN, no MutationObserver, zero JS dependency.
 - **PubSub** updates panes in real-time when documents change
 

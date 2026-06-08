@@ -12,7 +12,8 @@ the host's ~25 callbacks to reach for, and which surfaces are off-limits.
 
 Everything below is grounded in `api/lib/barkpark/plugin.ex` (the behaviour),
 `api/lib/barkpark/plugins/registry.ex` (the discovery + resolver engine), and
-`api/lib/barkpark/plugins/onixedit.ex` (the one real plugin). Where this guide
+`api/lib/barkpark/plugins/onixedit.ex` (the richest reference plugin — alongside
+the `bulldocs`, `tasks`, `frt`, and `media` plugins now shipping in-tree). Where this guide
 is brief, it links to the deep reference. Where it disagrees with an older doc,
 trust this one — it was reconciled against source.
 
@@ -368,6 +369,14 @@ retrospective on why this rule exists.)
    primitive for: a submission queue, a drift dashboard, a sync-status board —
    mounted under `/admin/<plugin>/` with `auth: :ops`.
 
+(The token-gated and public-reader buckets below — `:token`, `:token_root`,
+`:ingest`, `:public_root` — extend these two cases for plugins that expose a
+token-scoped data API or a public reader page: the `tasks` plugin mounts its
+`/v1/tasks` API at `:token_root`, and the `bulldocs` plugin serves its
+`/papers/:slug` reader at `:public_root` and its ingest API at `:ingest`. The
+rule that still holds: none of these may reimplement the host's schema-driven
+document editor.)
+
 OnixEdit is the reference. Its four routes obey the rule precisely — a Bokbasen
 ops console and a codelist-staleness console (`:ops`, under `/admin`), an ONIX
 XML export controller (`:api`, under `/v1/plugins`), and a pilot ping
@@ -384,7 +393,11 @@ prefix. The buckets, from `Barkpark.Plugin`'s `register_routes/1` docs:
 | `:admin` (default) | strict admin (`LiveAuth :admin`) | `/studio` |
 | `:ops` | ops-team gate (`LiveAuth :ops`) | `/admin` |
 | `:public` / `:none` | none (bare `live_session`) | `/studio` |
-| `:api` | `[:api, :require_admin]` pipeline | `/v1/plugins` |
+| `:api` | API pipeline + admin required | `/v1/plugins` |
+| `:token` | API pipeline + token required (NOT admin) | `/v1/plugins` |
+| `:token_root` | API pipeline + token required (NOT admin); root-mounted sibling of `:token` | `/v1` |
+| `:ingest` | shared-secret ingest pipeline | `/v1/plugins` |
+| `:public_root` | none; own full-document `root_layout:` (no studio chrome) | host top-level scope |
 
 Route specs are tagged tuples — `{:live, path, module, action [, opts]}` for
 LiveViews, `{verb, path, controller, action [, opts]}` for controllers. The

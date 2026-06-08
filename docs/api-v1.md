@@ -355,7 +355,7 @@ data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello
 | `type` | string | Document type |
 | `documentId` | string | Full document id (with `drafts.` if a draft) |
 | `rev` | string | Rev of the document after this mutation |
-| `previousRev` | string\|null | Always `null` in v1 (reserved) |
+| `previousRev` | string\|null | Rev of the document *before* this mutation. `null` for `create` (no prior revision); populated for `update`/`publish`/`unpublish`/`discardDraft`/`delete` |
 | `result` | object | Full document envelope at the time of the event |
 
 **Keepalive:** `: keepalive` comment frame sent every 30 seconds when idle.
@@ -488,11 +488,11 @@ Any breaking change to the shapes documented above requires bumping the URL pref
 
 ## 12. Rate Limiting
 
-All `/v1/*` endpoints are rate-limited per token (when present) or per IP. Default limit: **200 requests per minute** with a token-bucket replenishment model. When a client exceeds the limit, the response is:
+All `/v1/*` endpoints are rate-limited per token (when present) or per IP, with separate buckets per **method class** and per **dataset**. Reads (`GET`/`HEAD`) and writes (all other verbs) are billed against independent token buckets. Default limits: **300 read requests per minute** and **60 write requests per minute**. Per-dataset overrides are supported via `config :barkpark, :rate_limits`, and the read/write defaults can be tuned with the `BARKPARK_RATE_LIMIT_READ` / `BARKPARK_RATE_LIMIT_WRITE` env vars. When a client exceeds the limit, the response is:
 
     HTTP/1.1 429 Too Many Requests
     Content-Type: application/json
-    Retry-After: 60
+    Retry-After: <seconds>
 
     {
       "error": {

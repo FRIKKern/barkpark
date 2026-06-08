@@ -1,7 +1,7 @@
 # Schema Definition v2 — Plugin author reference
 
 > Phase 0 deliverable. Source of truth: `api/lib/barkpark/content/schema_definition.ex`.
-> Masterplan: `.doey/plans/masterplan-20260425-085425.md` (Phase 0, decisions 1–21, risks).
+> Masterplan (Phase 0, decisions 1–21, risks): the original `.doey/plans/masterplan-20260425-085425.md` is no longer in the tree — see the summary at `docs/spec/onixedit-masterplan-summary.md` and the surviving design notes under `_attic/.doey/plans/research/`.
 
 ## Audience and purpose
 
@@ -61,7 +61,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 }
 ```
 
-`ordered: true` arrays sort by index and surface up/down reorder buttons in the LiveView field component (`Barkpark.Web.Components.Fields.ArrayField.array_field/1`). `ordered: false` arrays are unordered sets — the up/down buttons are hidden. Drag reorder (Sortable.js + LiveView JS hook) is **deferred to v2**: Phase 0 ships up/down buttons + a "move to position N" input. This honors CLAUDE.md golden rule #4 (no blocking `<script>` in `<head>`); no JS hook contract is wired in Phase 0.
+`ordered: true` arrays sort by index and surface up/down reorder buttons in the LiveView field component (`BarkparkWeb.Components.Fields.ArrayField.array_field/1`). `ordered: false` arrays are unordered sets — the up/down buttons are hidden. Drag reorder (Sortable.js + LiveView JS hook) is **deferred to v2**: Phase 0 ships up/down buttons + a "move to position N" input. This honors CLAUDE.md golden rule #4 (no blocking `<script>` in `<head>`); no JS hook contract is wired in Phase 0.
 
 ### `codelist` — registry-backed enum pinned to an issue
 
@@ -74,7 +74,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 }
 ```
 
-`codelistId` follows the `<plugin>:<name>` convention (Decision 20). The registry is `Barkpark.Content.Codelists`. The core now **seeds bundled codelists on database setup** — `Barkpark.Codelists.EDItEUR.seed_bundled/0` loads the EDItEUR ONIX snapshot and `seed_thema/0` loads Thema (`api/priv/repo/seeds.exs:661-694`).
+`codelistId` follows the `<plugin>:<name>` convention (Decision 20). The registry is `Barkpark.Content.Codelists`. The core now **seeds bundled codelists on database setup** — `Barkpark.Codelists.EDItEUR.seed_bundled/0` loads the EDItEUR ONIX snapshot and `seed_thema/0` loads Thema (`api/priv/repo/seeds.exs:609-654`).
 
 `version` is the codelist issue. ONIX integers like `73` are typical; the column is `:string` so semantic versions like `"2024-q1"` or publisher-specific tags also work.
 
@@ -192,7 +192,7 @@ LocalizedText.resolve(
 
 The convention default is `["nob", "eng", "first-non-empty"]`. Plugin authors override it per-field in the schema. The token `"first-non-empty"` walks any remaining language slot in iteration order and returns the first non-blank value; `"any"` is an accepted alias. Whitespace-only values are treated as missing.
 
-When the **primary** language (the head of `fallbackChain`) is missing and a fallback is used, the LiveView field component (`Barkpark.Web.Components.Fields.LocalizedTextField.localized_text_field/1`) renders a `<span class="warning bp-localized-warning" data-severity="warning" data-missing-primary="<lang>" data-using-fallback="<lang>">`. This is a **tag class today** — the full severity DSL with `error | warning | info` semantics ships in Phase 3. Phase 0 surfaces the signal so Phase 3 has a hook; the visual treatment follows Phase 3's spec.
+When the **primary** language (the head of `fallbackChain`) is missing and a fallback is used, the LiveView field component (`BarkparkWeb.Components.Fields.LocalizedTextField.localized_text_field/1`) renders a `<span class="warning bp-localized-warning" data-severity="warning" data-missing-primary="<lang>" data-using-fallback="<lang>">`. This is a **tag class today** — the full severity DSL with `error | warning | info` semantics ships in Phase 3. Phase 0 surfaces the signal so Phase 3 has a hook; the visual treatment follows Phase 3's spec.
 
 ONIX export (Phase 6) and Studio (Phase 5) honor the same chain via the same resolver — single source of truth.
 
@@ -214,7 +214,7 @@ Hierarchical lists (Thema, codelist 93, ~3000 nodes) use a `parent_id` self-refe
 | `tree/2` | Nested tree map for hierarchical lists |
 | `list/1` | Index of registered lists for a plugin |
 
-**Core seeds bundled codelists.** The registry tables + module exist, and `api/priv/repo/seeds.exs:661-694` now seeds the bundled EDItEUR ONIX snapshot (`Barkpark.Codelists.EDItEUR.seed_bundled/0`) and Thema (`seed_thema/0`) on database setup. Publishers can still bring their own EDItEUR-licensed snapshot per the bring-your-own-snapshot model (Decision 21).
+**Core seeds bundled codelists.** The registry tables + module exist, and `api/priv/repo/seeds.exs:609-654` now seeds the bundled EDItEUR ONIX snapshot (`Barkpark.Codelists.EDItEUR.seed_bundled/0`) and Thema (`seed_thema/0`) on database setup. Publishers can still bring their own EDItEUR-licensed snapshot per the bring-your-own-snapshot model (Decision 21).
 
 ## Phase 0 vs Phase 1+ boundary
 
@@ -232,7 +232,7 @@ What Phase 0 ships (this slice):
 Already shipped beyond the original Phase 0 slice:
 
 - **Cross-field rule evaluator** — `Barkpark.Content.Validation.Rules` (`api/lib/barkpark/content/validation/rules.ex`) compiles and interprets the top-level `validations: [...]` slot at runtime.
-- **Bundled core codelists** — `seeds.exs:661-694` seeds the EDItEUR ONIX snapshot + Thema via `Barkpark.Codelists.EDItEUR`.
+- **Bundled core codelists** — `seeds.exs:609-654` seeds the EDItEUR ONIX snapshot + Thema via `Barkpark.Codelists.EDItEUR`.
 - **OnixEdit plugin + ONIX 3.0 export + Bokbasen** — live under `api/lib/barkpark/plugins/onixedit/**` (`export.ex`, `bokbasen/`, `lifecycle.ex`, `importer.ex`).
 
 Still forward work:
@@ -265,5 +265,5 @@ These are non-negotiable for any change touching `schema_definition.ex`, the val
 | LocalizedText resolver | `api/lib/barkpark/content/localized_text.ex` |
 | Field components | `api/lib/barkpark_web/components/fields/{composite,array,codelist,localized_text}_field.ex` |
 | Tests | `api/test/barkpark/content/{schema_definition,validation,codelists,localized_text}_test.exs` + `api/test/barkpark_web/components/fields/*_test.exs` |
-| Masterplan | `.doey/plans/masterplan-20260425-085425.md` |
+| Masterplan summary | `docs/spec/onixedit-masterplan-summary.md` (original `.doey/plans/masterplan-20260425-085425.md` no longer in tree; design notes under `_attic/.doey/plans/research/`) |
 | TUI constraint | `CLAUDE.md` § "Plugin schemas" |

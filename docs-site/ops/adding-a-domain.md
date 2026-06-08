@@ -91,16 +91,19 @@ Verify from a laptop that `http://89.167.28.206:4000` times out while
 
 ## Step 6 — Re-enable `force_ssl` in `api/config/prod.exs`
 
-Uncomment:
+Uncomment (the block is commented out in `api/config/prod.exs`):
 
 ```elixir
 config :barkpark, BarkparkWeb.Endpoint,
-  force_ssl: [rewrite_on: [:x_forwarded_proto], hsts: true]
+  force_ssl: [rewrite_on: [:x_forwarded_proto]]
 ```
+
+(Add `hsts: true` to that keyword list if you also want Phoenix to emit the
+HSTS header; Caddy already sets `Strict-Transport-Security` in Step 2.)
 
 The `rewrite_on: [:x_forwarded_proto]` option trusts the Caddy-set
 `X-Forwarded-Proto` header — this is what avoids the 301-loop burn documented
-in `/home/doey/GitHub/barkpark/CLAUDE.md` → "Past Mistakes" #5. Without it,
+in the repo-root `CLAUDE.md` → "Past Mistakes" #5. Without it,
 Phoenix sees the incoming scheme as `http` (because Caddy terminates TLS) and
 redirects back to HTTPS forever.
 

@@ -55,7 +55,7 @@ This is the single most important section. Read it first, act only after.
 # Mandatory: use a production-scoped token. 2FA on owner account must be automation-compatible.
 export NPM_TOKEN=<...>
 
-npm deprecate @barkpark/core@1.0.0 "broken TypeScript types — upgrade to 1.0.1 (see https://github.com/frikk/barkpark/releases/tag/v1.0.1)"
+npm deprecate @barkpark/core@1.0.0 "broken TypeScript types — upgrade to 1.0.1 (see https://github.com/FRIKKern/barkpark/releases/tag/v1.0.1)"
 
 # Un-deprecate (rollback of the deprecation itself — rare, used if the replacement turned out worse):
 npm deprecate @barkpark/core@1.0.0 ""
@@ -225,7 +225,7 @@ Tied to §8.11 on-call in the v2 masterplan. Follow in order; don't skip.
 
 ### 1. Detect (target: <30 min from publish)
 
-- Signals: GitHub Issues spike on `frikk/barkpark`, Twitter mentions tagged `@barkpark`, HN comments on the launch thread, Uptime Kuma alert, beta-channel Slack/Discord message, CI failure on a downstream staging project.
+- Signals: GitHub Issues spike on `FRIKKern/barkpark`, Twitter mentions tagged `@barkpark`, HN comments on the launch thread, Uptime Kuma alert, beta-channel Slack/Discord message, CI failure on a downstream staging project.
 - First on-call action: acknowledge in `#incidents` (or Boss DM if pre-launch).
 
 ### 2. Assess (target: <15 min)

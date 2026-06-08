@@ -24,7 +24,7 @@ Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and rel
 
 | Layer | Status |
 |-------|--------|
-| Core API | `Intelligence.record/suggest/insights/prune/record_interaction` |
+| Core API | `Intelligence.record/suggestions/insights/prune/record_interaction` |
 | Surfaces | `media`, `documents` adapters |
 | Synonyms | `Barkpark.Search.Synonyms` + admin routes |
 | Suggestions | recent / popular / nohits |

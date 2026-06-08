@@ -53,7 +53,7 @@ unchanged.
 |------------|---------------------------------------------------------------------|--------------------------------------------------------------|
 | `read`     | Public reads on private datasets / private schemas                  | `/w/:workspace_slug/p/:project_slug/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
 | `write`    | Mutations (create, patch, publish, unpublish, delete)               | `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` (flat alias `POST /v1/data/mutate/:dataset`), `POST /media/upload` |
-| `ops`      | Operate the Bokbasen publish pipeline (read-only on plugin secrets) | `/admin/bokbasen` LiveView                                   |
+| `ops`      | Operate the Bokbasen publish pipeline (read-only on plugin secrets) | `/admin/onixedit/bokbasen` LiveView (old `/admin/bokbasen` 301-redirects here) |
 | `admin`    | All of the above + plugin-settings reveal/audit + schema CRUD       | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*`, `/v1/plugins/onixedit/export/*` |
 
 ### Hierarchy
@@ -66,7 +66,8 @@ which means existing admin tokens keep working unchanged when an
 
 ### Why `:ops` is separate from `:admin`
 
-The Bokbasen publish console (`/admin/bokbasen`, Phase 7 WI6) needs to
+The Bokbasen publish console (`/admin/onixedit/bokbasen`, an OnixEdit
+plugin-contributed LiveView; old `/admin/bokbasen` 301-redirects here) needs to
 be operated by people who should *not* be able to read the encrypted
 Bokbasen `client_secret` (which is what `/studio/settings` exposes via
 the plugin-secret reveal flow). Splitting `ops` out lets a publishing

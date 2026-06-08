@@ -20,4 +20,4 @@ cd js && pnpm install
 
 ## ADRs
 
-See `api/docs/adr/` for architectural decisions driving this layout.
+See `docs/adr/` and `api/docs/adr/` for architectural decisions driving this layout.

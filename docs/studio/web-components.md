@@ -1,11 +1,13 @@
 # Studio Web Components — integration recipe
 
 > Status: v1 prototype. The first widget shipped under this contract was
-> `bp-rich-text-editor` (Task #11 WI4). Three of the next four have since
+> `bp-rich-text-editor` (Task #11 WI4). The field-bridge picker set has since
 > shipped under the same contract — `bp-media-picker`, `bp-reference-picker`,
-> and `bp-document-preview` all live in `api/priv/static/assets/`. Only
-> `bp-json-inspector` remains to be added — the pattern is designed so it
-> can land with no changes to the bridge or the server.
+> and `bp-document-preview` all live in `api/priv/static/assets/`. The bp-*
+> suite has grown beyond the original field widgets (e.g. `bp-asset-browser`,
+> `bp-asset-explorer`, `bp-overflow-menu`, `bp-search-intel`); not all of
+> those use the field-bridge pattern below. The pattern is designed so a new
+> field widget can land with no changes to the bridge or the server.
 
 ## Pattern
 

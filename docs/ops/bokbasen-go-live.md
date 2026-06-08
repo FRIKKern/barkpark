@@ -34,7 +34,7 @@ Fill in the five Bokbasen fields:
 Click **Save**. Then click **Test connection** — a green flash confirms
 Bokbasen accepted the credentials. The secret never appears in the DOM
 again unless you explicitly click "Reveal" (which records a `"reveal"`
-audit row in `plugin_settings_audits`). "Clear" wipes a single field.
+audit row in `plugin_settings_audit`). "Clear" wipes a single field.
 
 No restart needed — `Bokbasen.Settings.get_credentials/0` reads the
 encrypted row on every token fetch, so the next publish picks up the
@@ -74,7 +74,7 @@ plugin_settings row, so this is also useful for one-off overrides
 cd /opt/barkpark/api
 mix run -e '
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Auth
-  case Auth.fetch_token() do
+  case Auth.token() do
     {:ok, token} -> IO.puts "TOKEN OK: #{String.slice(token, 0, 20)}..."
     {:error, e}  -> IO.puts "TOKEN FAILED: #{inspect(e)}"
   end
@@ -136,8 +136,10 @@ psql "$PG_URL" -c "SELECT id, state, attempt, last_error FROM oban_jobs WHERE wo
 
 ```bash
 mix run -e '
+  alias Barkpark.Content
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Status
-  Status.write(%{doc_id: "<doc-id>", dataset: "production"}, %{state: "draft", last_error: nil})
+  doc = Content.get_document("<doc-id>", "book", "production")
+  Status.write(doc, %{state: "draft", last_error: nil})
 '
 ```
 

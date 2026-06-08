@@ -71,7 +71,7 @@ Verified counts from a clean database:
 
 | Object | Count | Notes |
 |---|---|---|
-| `schema_definitions` | 15 | 13 distinct names (legacy content types + `paper`×3 + the single `task` schema) |
+| `schema_definitions` | varies | 8 legacy content types (seeded directly) + plugin-contributed schemas registered on boot via `Plugins.Bootstrap.register_all_schemas/0` (`paper`, the single `task` schema, plus any other enabled plugins' schemas, e.g. media/onixedit/frt). Run `SELECT count(*), count(distinct name) FROM schema_definitions;` against a freshly-seeded DB for the exact tally — it tracks the enabled plugin set. |
 | `documents` | 27 | post 9, page 5, project 4, author 3, category 3, colors/navigation/siteSettings 1 each |
 | Workspaces | 1 | Default Workspace |
 | Projects | 1 | Default Project (slug `default`) |
@@ -119,7 +119,7 @@ Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server
 - **libvips required.** The `image` dependency needs it; without it media probing fails. `brew install vips`.
 - **NULL `dataset_id` docs are invisible to scoped reads.** Documents written with no tenancy scope (e.g. one of the three `paper` registrations) drop out of strict dataset-scoped reads. Stamp the Default dataset on docs you want visible.
 - **The `drafts.` prefix model.** Create writes to `drafts.{id}`; publish copies it to `{id}`. A freshly created doc lives under the `drafts.` prefix until published.
-- **`web/` Next.js demo is missing its `package.json`** right now — skip it.
+- **`web/` is a separate Next.js demo**, not part of the API setup. It's a self-contained Vercel app (`pnpm install && pnpm dev` inside `web/`) that reads the Phoenix API read-only — skip it for backend setup.
 - **`:4000` port conflicts.** If the server won't bind, something else owns the port.
 
 ## Troubleshooting
