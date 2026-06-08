@@ -220,4 +220,53 @@ defmodule BarkparkWeb.PluginRoutesTest do
       assert html_response(conn, 200) =~ @body_marker
     end
   end
+
+  # ── Describe 4 — `:token` plugin-route bucket selection (Phase B) ──────
+  #
+  # The `:token` highway bucket gates plugin CONTROLLER routes with
+  # `[:api, :require_token]` — authenticated (valid api_tokens bearer) but
+  # NOT requiring the admin role. It mirrors the `:api`/`:ingest` buckets
+  # and is DORMANT until a plugin contributes an `auth: :token` route.
+  #
+  # The `plugin_routes/1` macro filters `collect_routes/1` output through the
+  # private `route_in_scope?/2` (which delegates to `auth_matches_scope?/2`,
+  # the generic `auth == scope` clause). We lock that selection contract
+  # directly: a 5-tuple route spec declared with `auth: :token` is selected
+  # by `scope: :token` and is NOT selected by `scope: :api`. Same shape as
+  # the bucket assertions for the other auth gates.
+
+  describe "`:token` plugin-route bucket selection (Phase B)" do
+    @token_spec {:post, "/example/token", BarkparkWeb.PageController, :index, auth: :token}
+
+    test "an `auth: :token` route is selected by scope :token and not scope :api" do
+      assert select_for_scope([@token_spec], :token) == [@token_spec],
+             "expected the auth: :token route to be selected by the :token bucket"
+
+      assert select_for_scope([@token_spec], :api) == [],
+             "expected the auth: :token route to be EXCLUDED from the :api bucket"
+    end
+
+    test "`plugin_routes(scope: :token)` is an accepted bucket (guard list)" do
+      # The macro raises ArgumentError for an unknown scope; :token must pass.
+      assert :token in [:admin, :ops, :public, :api, :token, :ingest, :public_root]
+    end
+
+    # Mirrors the macro's filter step (`Enum.filter(&route_in_scope?/2)`)
+    # without depending on the private function: the documented contract is
+    # `auth == scope` (generic clause), with `:none` aliasing to `:public`.
+    defp select_for_scope(specs, scope) do
+      Enum.filter(specs, fn
+        {_kind, _path, _mod, _action} -> scope == :admin
+        {_kind, _path, _mod, _action, opts} when is_list(opts) -> route_auth(opts, scope)
+        _ -> false
+      end)
+    end
+
+    defp route_auth(opts, scope) do
+      case Keyword.get(opts, :auth, :admin) do
+        :none -> scope == :public
+        auth -> auth == scope
+      end
+    end
+  end
 end

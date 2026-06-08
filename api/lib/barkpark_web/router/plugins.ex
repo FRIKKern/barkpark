@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Router.Plugins do
   | `:ops`     | `:ops`                    | `pipe_through :browser` + `live_session on_mount: …:ops`       |
   | `:public`  | `:public` (or `:none`)    | `pipe_through :browser` + `live_session` (no on_mount)         |
   | `:api`     | `:api`                    | `pipe_through [:api, :require_admin]` (controller routes only) |
+  | `:token`   | `:token`                  | `pipe_through [:api, :require_token]` (controller routes only) |
   | `:ingest`  | `:ingest`                 | `pipe_through :ingest` (RequireIngestToken; controller routes) |
   | `:public_root` | `:public_root`        | `pipe_through :browser`; macro emits a per-route `live_session` with the spec's `root_layout:` |
 
@@ -91,6 +92,7 @@ defmodule BarkparkWeb.Router.Plugins do
     * `:ops`             — routes that opted in to `auth: :ops`
     * `:public`          — routes that opted in to `auth: :none`
     * `:api`             — routes that opted in to `auth: :api`
+    * `:token`           — routes that opted in to `auth: :token`
     * `:ingest`          — routes that opted in to `auth: :ingest`
     * `:public_root`     — routes that opted in to `auth: :public_root`
                            (carry a `root_layout:` opt; each is wrapped in its
@@ -104,9 +106,9 @@ defmodule BarkparkWeb.Router.Plugins do
   defmacro plugin_routes(opts \\ []) do
     scope = Keyword.get(opts, :scope, :admin)
 
-    unless scope in [:admin, :ops, :public, :api, :ingest, :public_root] do
+    unless scope in [:admin, :ops, :public, :api, :token, :ingest, :public_root] do
       raise ArgumentError,
-            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :ingest | :public_root, got #{inspect(scope)}"
+            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :ingest | :public_root, got #{inspect(scope)}"
     end
 
     ctx = %{scope: scope, phase: :compile}
@@ -184,7 +186,8 @@ defmodule BarkparkWeb.Router.Plugins do
   # Controller routes — one clause per HTTP verb so the unqualified
   # macro name resolves correctly. `Phoenix.Router` exports `get/4`,
   # `post/4`, etc. as macros in scope inside the host router.
-  defp emit_route_ast({verb, path, mod, action}) when verb in [:get, :post, :put, :delete, :patch] do
+  defp emit_route_ast({verb, path, mod, action})
+       when verb in [:get, :post, :put, :delete, :patch] do
     emit_verb_ast(verb, path, mod, action, [])
   end
 

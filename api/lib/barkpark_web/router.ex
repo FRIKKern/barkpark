@@ -297,6 +297,19 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :api)
   end
 
+  # ── Plugin-contributed routes — token-gated (`auth: :token`) ──────────
+  # Mirror of the `:api` bucket above, but gated by `[:api, :require_token]`
+  # instead of `[:api, :require_admin]` — i.e. AUTHENTICATED (valid api_tokens
+  # bearer) but NOT requiring the admin role. For plugin CONTROLLER routes that
+  # any token holder may call, mounted under `/v1/plugins/<slug>/…`. No
+  # live_session. Expands to nothing until a plugin contributes an `auth: :token`
+  # route (dormant, like `:ingest`/`:public_root` were when first added).
+  scope "/v1/plugins" do
+    pipe_through [:api, :require_token]
+
+    plugin_routes(scope: :token)
+  end
+
   # ── Plugin-contributed routes — public root-layout (`auth: :public_root`) ──
   # For plugin LiveViews that own a FULL-document root layout and mount at the
   # top level WITHOUT the studio chrome — e.g. the Bulldocs paper reader at
