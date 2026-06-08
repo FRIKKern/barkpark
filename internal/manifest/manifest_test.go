@@ -48,11 +48,11 @@ func TestParseFixtures(t *testing.T) {
 	if admin.Server.MinCLI == nil || *admin.Server.MinCLI != "1.0.0" {
 		t.Errorf("admin server.min_cli not parsed as pointer to \"1.0.0\"")
 	}
-	if len(admin.Nouns) != 9 {
-		t.Errorf("admin nouns = %d, want 9", len(admin.Nouns))
+	if len(admin.Nouns) != 8 {
+		t.Errorf("admin nouns = %d, want 8", len(admin.Nouns))
 	}
-	if len(admin.Commands) != 18 {
-		t.Errorf("admin commands = %d, want 18", len(admin.Commands))
+	if len(admin.Commands) != 17 {
+		t.Errorf("admin commands = %d, want 17", len(admin.Commands))
 	}
 
 	anon := parseFixture(t, "core-manifest-anon.json")
@@ -101,13 +101,16 @@ func TestParseAcceptsComment(t *testing.T) {
 	}
 }
 
-// (b) Tree() from core-manifest.json yields exactly the 9 canonical nouns with
-// their commands; the anon fixture yields its read-only subset.
+// (b) Tree() from core-manifest.json yields the eight canonical core nouns plus
+// the plugin-contributed `task` noun, with their commands; the anon fixture
+// yields its read-only subset. The old `rail` noun is gone, and `task` carries
+// source "plugin:tasks" (the Tasks plugin lift) — the Tree is a pure function of
+// whatever nouns/commands the manifest carries, regardless of provenance.
 func TestTreeFromCoreManifest(t *testing.T) {
 	admin := parseFixture(t, "core-manifest.json")
 	tree := admin.Tree()
 
-	wantNouns := []string{"doc", "media", "plugin", "rail", "schema", "search", "task", "webhook", "workspace"}
+	wantNouns := []string{"doc", "media", "plugin", "schema", "search", "task", "webhook", "workspace"}
 	if got := tree.NounNames(); !reflect.DeepEqual(got, wantNouns) {
 		t.Errorf("admin noun names = %v, want %v", got, wantNouns)
 	}
@@ -121,7 +124,6 @@ func TestTreeFromCoreManifest(t *testing.T) {
 		"workspace": {"ls", "project-create"},
 		"task":      {"ls", "claim"},
 		"webhook":   {"ls", "create"},
-		"rail":      {"path"},
 		"plugin":    {"ls", "settings"},
 	}
 	assertVerbs(t, tree, wantVerbs)

@@ -371,9 +371,12 @@ defmodule Barkpark.Plugins.Capabilities do
 
   # ── Core verb registry (hand-maintained) ──────────────────────────────────
   #
-  # The nine canonical core nouns + representative commands. Mirrors the
+  # The eight canonical core nouns + representative commands. Mirrors the
   # frozen fixtures docs/cli/fixtures/core-manifest.json (admin/full view).
-  # Plugins OFF ⇒ exactly these nouns/commands are emitted.
+  # Plugins OFF ⇒ exactly these nouns/commands are emitted. The `task` noun and
+  # its `task.*` verbs are NO LONGER core — they moved to the Tasks plugin
+  # (`Barkpark.Plugins.Tasks.cli_commands/0`), which the controller stamps with
+  # `source: "plugin:tasks"`; and the old `rail` noun is gone entirely.
   #
   # Tiering follows the ROUTER (the code fact behind the schema's auth_tier
   # $comment): the public read surface (`doc get/ls/query`, `search query`,
@@ -382,10 +385,8 @@ defmodule Barkpark.Plugins.Capabilities do
   # "none"`, the existence-hiding floor. An admin caller (rank above none) still
   # sees every `none` command, so the admin projection stays a superset of the
   # anon projection (matching the fixture PAIRING). Truly gated verbs keep their
-  # real tier: read (task.* — the /v1/tasks scope is :api+:require_token, NOT
-  # admin; claim/close are bearer-gated workflow ops), write
-  # (mutate/upload/webhook.create), admin (`schema get/apply` behind
-  # :require_admin, webhook.ls, plugin.ls, plugin.settings), scoped_admin
+  # real tier: write (mutate/upload/webhook.create), admin (`schema get/apply`
+  # behind :require_admin, webhook.ls, plugin.ls, plugin.settings), scoped_admin
   # (project-create). NOTE schema.get is admin, not anon: the /v1/schemas scope
   # is :require_admin — public schema discovery rides /api/schemas (legacy),
   # not this verb.
@@ -414,7 +415,6 @@ defmodule Barkpark.Plugins.Capabilities do
         "summary" => "Tenancy — workspaces and projects.",
         "plugin" => nil
       },
-      %{"name" => "task", "summary" => "The bd-shim task queue.", "plugin" => nil},
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
       %{"name" => "plugin", "summary" => "Installed plugins and their settings.", "plugin" => nil}
     ]
@@ -584,58 +584,6 @@ defmodule Barkpark.Plugins.Capabilities do
         "/api/workspaces/:workspace_slug/projects",
         "scoped_admin",
         args: [arg("name", true, "string", "Project name.")],
-        writes: true,
-        default_output: "minimal"
-      ),
-      core_cmd("task.ls", "task", "ls", "List tasks in the queue.", "GET", "/v1/tasks", "read",
-        flags: [flag("limit", "int", "Max tasks to return.", default: 50)],
-        paginated: true,
-        default_output: "table"
-      ),
-      core_cmd(
-        "task.ready",
-        "task",
-        "ready",
-        "List ready (unblocked) tasks.",
-        "GET",
-        "/v1/tasks/ready",
-        "read",
-        flags: [flag("limit", "int", "Max tasks to return.", default: 50)],
-        paginated: true,
-        default_output: "table"
-      ),
-      core_cmd(
-        "task.get",
-        "task",
-        "get",
-        "Fetch one task by id.",
-        "GET",
-        "/v1/tasks/:doc_id",
-        "read",
-        args: [arg("doc_id", true, "string", "Task document id.")],
-        default_output: "table"
-      ),
-      core_cmd(
-        "task.claim",
-        "task",
-        "claim",
-        "Claim a ready task by id.",
-        "POST",
-        "/v1/tasks/:doc_id/claim",
-        "read",
-        args: [arg("doc_id", true, "string", "Task document id to claim.")],
-        writes: true,
-        default_output: "minimal"
-      ),
-      core_cmd(
-        "task.close",
-        "task",
-        "close",
-        "Close a claimed task by id.",
-        "POST",
-        "/v1/tasks/:doc_id/close",
-        "read",
-        args: [arg("doc_id", true, "string", "Task document id to close.")],
         writes: true,
         default_output: "minimal"
       ),

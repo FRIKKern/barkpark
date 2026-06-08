@@ -37,6 +37,12 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
+    * `cli_commands/0` — the five `task.*` CLI verbs (`ls`, `ready`, `get`,
+      `claim`, `close`) the `/v1/capabilities` manifest exposes, moved verbatim
+      from `Barkpark.Plugins.Capabilities`'s core verb registry. `task` is no
+      longer a core noun: the capabilities controller now derives
+      `source: "plugin:tasks"` provenance for these commands.
+
   The persisted `type` discriminator is still `"task"` and the API surface
   (`/v1/tasks`, `/v1/rail`) is unchanged — only the registration/scheduling/routing
   wiring became a plugin.
@@ -109,6 +115,121 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root}
+    ]
+  end
+
+  @doc """
+  The CLI verbs Tasks contributes to the `/v1/capabilities` manifest (M3),
+  moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry (the
+  C4 plugin lift — task is no longer a core noun). Each command is grounded in a
+  `/v1/tasks` route that `register_routes/1` ABOVE actually mounts; the
+  verb/method/path/auth_tier/args/flags are byte-identical to the former core
+  definitions — only the provenance changes (the capabilities controller now
+  stamps `source: "plugin:tasks"` instead of `"core"`).
+
+  Five verbs over five routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
+  not document mutations):
+
+    * `ls` — `GET /v1/tasks` (paginated). READ, table.
+    * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
+    * `get` — `GET /v1/tasks/:doc_id`. READ, table.
+    * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
+    * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
+  """
+  @impl Barkpark.Plugin
+  def cli_commands do
+    [
+      %{
+        id: "task.ls",
+        noun: "task",
+        verb: "ls",
+        summary: "List tasks in the queue.",
+        http: %{method: "GET", path_template: "/v1/tasks"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50}
+        ],
+        writes: false,
+        batch: false,
+        paginated: true,
+        dry_run: false,
+        default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.ready",
+        noun: "task",
+        verb: "ready",
+        summary: "List ready (unblocked) tasks.",
+        http: %{method: "GET", path_template: "/v1/tasks/ready"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50}
+        ],
+        writes: false,
+        batch: false,
+        paginated: true,
+        dry_run: false,
+        default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.get",
+        noun: "task",
+        verb: "get",
+        summary: "Fetch one task by id.",
+        http: %{method: "GET", path_template: "/v1/tasks/:doc_id"},
+        auth_tier: "read",
+        args: [
+          %{name: "doc_id", required: true, type: "string", summary: "Task document id."}
+        ],
+        flags: [],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.claim",
+        noun: "task",
+        verb: "claim",
+        summary: "Claim a ready task by id.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/claim"},
+        auth_tier: "read",
+        args: [
+          %{name: "doc_id", required: true, type: "string", summary: "Task document id to claim."}
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.close",
+        noun: "task",
+        verb: "close",
+        summary: "Close a claimed task by id.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
+        auth_tier: "read",
+        args: [
+          %{name: "doc_id", required: true, type: "string", summary: "Task document id to close."}
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      }
     ]
   end
 end

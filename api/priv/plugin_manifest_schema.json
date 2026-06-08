@@ -36,6 +36,12 @@
       "pattern": "^[A-Z][A-Za-z0-9_]*(\\.[A-Z][A-Za-z0-9_]*)*$",
       "description": "Optional Elixir module override. Defaults to auto-derived from plugin_name."
     },
+    "nouns": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "CLI noun tokens this plugin owns, for /v1/capabilities provenance. When a contributed cli_command's noun appears here, the capabilities controller stamps source \"plugin:<plugin_name>\". Needed when the noun differs from plugin_name (e.g. plugin \"tasks\" owning the \"task\" noun). When absent, only plugin_name itself is treated as a noun token."
+    },
     "dependencies": {
       "type": "array",
       "items": {

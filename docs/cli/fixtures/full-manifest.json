@@ -384,7 +384,7 @@
       "id": "task.ls",
       "noun": "task",
       "paginated": true,
-      "source": "core",
+      "source": "plugin:tasks",
       "summary": "List tasks in the queue.",
       "verb": "ls",
       "writes": false
@@ -410,7 +410,7 @@
       "id": "task.ready",
       "noun": "task",
       "paginated": true,
-      "source": "core",
+      "source": "plugin:tasks",
       "summary": "List ready (unblocked) tasks.",
       "verb": "ready",
       "writes": false
@@ -436,7 +436,7 @@
       "id": "task.get",
       "noun": "task",
       "paginated": false,
-      "source": "core",
+      "source": "plugin:tasks",
       "summary": "Fetch one task by id.",
       "verb": "get",
       "writes": false
@@ -462,7 +462,7 @@
       "id": "task.claim",
       "noun": "task",
       "paginated": false,
-      "source": "core",
+      "source": "plugin:tasks",
       "summary": "Claim a ready task by id.",
       "verb": "claim",
       "writes": true
@@ -488,7 +488,7 @@
       "id": "task.close",
       "noun": "task",
       "paginated": false,
-      "source": "core",
+      "source": "plugin:tasks",
       "summary": "Close a claimed task by id.",
       "verb": "close",
       "writes": true
@@ -537,32 +537,6 @@
       "summary": "Create a webhook subscription.",
       "verb": "create",
       "writes": true
-    },
-    {
-      "args": [
-        {
-          "name": "goal",
-          "required": true,
-          "summary": "Goal id (sent as the ?goal= query param).",
-          "type": "string"
-        }
-      ],
-      "auth_tier": "read",
-      "batch": false,
-      "default_output": "table",
-      "dry_run": false,
-      "flags": [],
-      "http": {
-        "method": "GET",
-        "path_template": "/v1/rail/goal-path"
-      },
-      "id": "rail.path",
-      "noun": "rail",
-      "paginated": false,
-      "source": "core",
-      "summary": "Read the goal-path lifecycle events for a goal.",
-      "verb": "path",
-      "writes": false
     },
     {
       "args": [],
@@ -799,18 +773,13 @@
     },
     {
       "name": "task",
-      "plugin": null,
+      "plugin": "tasks",
       "summary": "The bd-shim task queue."
     },
     {
       "name": "webhook",
       "plugin": null,
       "summary": "Outbound webhook subscriptions."
-    },
-    {
-      "name": "rail",
-      "plugin": null,
-      "summary": "Goal-path lifecycle events."
     },
     {
       "name": "plugin",

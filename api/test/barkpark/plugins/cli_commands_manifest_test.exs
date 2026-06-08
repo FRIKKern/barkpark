@@ -15,7 +15,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   """
   use ExUnit.Case, async: true
 
-  alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit}
+  alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit, Tasks}
 
   # The flat plugin paths these plugins actually register (Bulldocs +
   # OnixEdit `register_routes/1`), prefixed with the host's `/v1/plugins` mount.
@@ -27,6 +27,16 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                    ])
 
   @onixedit_routes MapSet.new(["/v1/plugins/onixedit/export/:dataset/:id"])
+
+  # The flat `/v1/tasks` paths the Tasks plugin's cli verbs are grounded in
+  # (every one is mounted by Tasks.register_routes/1).
+  @tasks_paths MapSet.new([
+                 "/v1/tasks",
+                 "/v1/tasks/ready",
+                 "/v1/tasks/:doc_id",
+                 "/v1/tasks/:doc_id/claim",
+                 "/v1/tasks/:doc_id/close"
+               ])
 
   defp atomize_for_manifest(cmds) do
     # The manifest folds atom-keyed cli_command() maps into string keys; mirror
@@ -61,6 +71,56 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert patch.batch
       assert patch.writes
       assert Enum.any?(patch.flags, &(&1.name == "if-rev"))
+    end
+  end
+
+  describe "Tasks.cli_commands/0" do
+    test "declares the five task verbs, all read-tier, grounded in a real /v1/tasks route" do
+      cmds = Tasks.cli_commands()
+
+      ids = Enum.map(cmds, & &1.id)
+      assert "task.ls" in ids
+      assert "task.ready" in ids
+      assert "task.get" in ids
+      assert "task.claim" in ids
+      assert "task.close" in ids
+      assert length(cmds) == 5
+
+      # task is no longer a core noun — the verbs moved verbatim onto the Tasks
+      # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
+      # admin).
+      assert Enum.all?(cmds, &(&1.noun == "task"))
+      assert Enum.all?(cmds, &(&1.auth_tier == "read"))
+
+      # Every path_template is a route the plugin actually mounts.
+      assert Enum.all?(cmds, fn c -> MapSet.member?(@tasks_paths, c.http.path_template) end)
+
+      # claim/close are the writing workflow ops.
+      claim = Enum.find(cmds, &(&1.id == "task.claim"))
+      close = Enum.find(cmds, &(&1.id == "task.close"))
+      assert claim.writes
+      assert close.writes
+      assert claim.default_output == "minimal"
+    end
+
+    test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do
+      # The capabilities controller stamps source "plugin:<plugin_name>" by mapping
+      # a command's NOUN back to a plugin via that plugin's manifest "nouns"
+      # (falling back to the plugin slug). The Tasks plugin's noun ("task") differs
+      # from its slug ("tasks"), so plugin.json MUST declare nouns: ["task"] — else
+      # provenance silently degrades to a bare "plugin" (regression guard for the
+      # bug found in Phase D review).
+      manifest = Tasks.manifest()
+      declared = manifest["nouns"] || []
+      slug = manifest["plugin_name"]
+
+      for noun <- Tasks.cli_commands() |> Enum.map(& &1.noun) |> Enum.uniq() do
+        assert noun in declared or noun == slug,
+               "cli noun #{inspect(noun)} is neither in manifest nouns #{inspect(declared)} " <>
+                 "nor equal to plugin_name #{inspect(slug)} — capabilities would stamp bare :plugin"
+      end
+
+      assert "task" in declared
     end
   end
 

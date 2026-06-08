@@ -25,7 +25,7 @@ func TestCacheRoundTrip(t *testing.T) {
 	if etag != `W/"caps-admin-7f3a91c4"` {
 		t.Errorf("etag = %q", etag)
 	}
-	if m.AuthTier != "admin" || len(m.Nouns) != 9 {
+	if m.AuthTier != "admin" || len(m.Nouns) != 8 {
 		t.Errorf("round-tripped manifest wrong: tier=%q nouns=%d", m.AuthTier, len(m.Nouns))
 	}
 }

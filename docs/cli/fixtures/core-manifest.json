@@ -1,5 +1,5 @@
 {
-  "$comment": "FULL-ACCESS FRESH-INSTALL fixture. A fresh Barkpark with plugins OFF, queried by an admin-tier caller, exposes EXACTLY the nine canonical core nouns (doc, schema, media, search, workspace, task, webhook, rail, plugin) and their representative commands. PAIRING: diffing this against core-manifest-anon.json is the existence-hiding assertion — core-manifest.json = full-access fresh-install (all 9 nouns, writes + admin visible); core-manifest-anon.json = the anon projection (read-only public subset, zero admin names leaked). whoami is a CLI built-in that calls GET /v1/meta + reads the manifest's caller auth_tier — it is intentionally NOT modelled as a manifest command and there is NO `meta` noun. project verbs fold under the `workspace` noun.",
+  "$comment": "FULL-ACCESS FRESH-INSTALL fixture. A fresh Barkpark with plugins OFF, queried by an admin-tier caller, exposes the eight canonical core nouns (doc, schema, media, search, workspace, webhook, plugin) plus the plugin-contributed `task` noun (the Tasks plugin ships with a fresh install; its commands carry source \"plugin:tasks\"). The old `rail` noun is gone. PAIRING: diffing this against core-manifest-anon.json is the existence-hiding assertion — core-manifest.json = full-access fresh-install (writes + admin visible); core-manifest-anon.json = the anon projection (read-only public subset, zero admin names leaked). whoami is a CLI built-in that calls GET /v1/meta + reads the manifest's caller auth_tier — it is intentionally NOT modelled as a manifest command and there is NO `meta` noun. project verbs fold under the `workspace` noun.",
   "manifest_version": "1",
   "server": {
     "name": "prod",
@@ -17,9 +17,8 @@
     { "name": "media", "summary": "Assets and collections.", "plugin": null },
     { "name": "search", "summary": "Full-text search over documents.", "plugin": null },
     { "name": "workspace", "summary": "Tenancy — workspaces and projects.", "plugin": null },
-    { "name": "task", "summary": "The bd-shim task queue.", "plugin": null },
+    { "name": "task", "summary": "The task queue.", "plugin": "tasks" },
     { "name": "webhook", "summary": "Outbound webhook subscriptions.", "plugin": null },
-    { "name": "rail", "summary": "Goal-path lifecycle events.", "plugin": null },
     { "name": "plugin", "summary": "Installed plugins and their settings.", "plugin": null }
   ],
   "commands": [
@@ -265,7 +264,7 @@
       "dry_run": false,
       "default_output": "table",
       "scoped_prefix": null,
-      "source": "core"
+      "source": "plugin:tasks"
     },
     {
       "id": "task.claim",
@@ -284,7 +283,7 @@
       "dry_run": false,
       "default_output": "minimal",
       "scoped_prefix": null,
-      "source": "core"
+      "source": "plugin:tasks"
     },
     {
       "id": "webhook.ls",
@@ -319,25 +318,6 @@
       "paginated": false,
       "dry_run": false,
       "default_output": "minimal",
-      "scoped_prefix": null,
-      "source": "core"
-    },
-    {
-      "id": "rail.path",
-      "noun": "rail",
-      "verb": "path",
-      "summary": "Read the goal-path lifecycle events for a goal.",
-      "http": { "method": "GET", "path_template": "/v1/rail/:dataset/:goal_id" },
-      "auth_tier": "read",
-      "args": [
-        { "name": "goal_id", "required": true, "type": "string", "summary": "Goal id." }
-      ],
-      "flags": [],
-      "writes": false,
-      "batch": false,
-      "paginated": false,
-      "dry_run": false,
-      "default_output": "table",
       "scoped_prefix": null,
       "source": "core"
     },
