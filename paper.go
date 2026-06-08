@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -10,52 +9,39 @@ import (
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
 
-// A4-portrait reading column for the TUI paper viewer.
+// Width-driven reading column for the TUI paper viewer.
 //
 // pdrender is width-agnostic — it renders a block tree to whatever column count
 // the caller hands it. Left to its own devices the caller passed the FULL pane
-// width, so on a wide terminal a paper's prose sprawled edge to edge. These
-// constants let buildPaperContent cap the render to a column proportioned like an
-// A4 page (210mm × 297mm portrait) and CENTER it in the pane — the cap + centering
-// live entirely in this caller; pdrender never learns about page geometry.
+// width, so on a wide terminal a paper's prose sprawled edge to edge. The cap
+// below lets buildPaperContent render to a comfortable measure and CENTER it in
+// the pane — the cap + centering live entirely in this caller; pdrender never
+// learns about page geometry. The column responds to terminal WIDTH only; the
+// terminal HEIGHT has no effect on it.
 const (
-	// paperCellAspect is the terminal cell height-to-width ratio. A monospace cell
-	// is roughly twice as tall as it is wide, so to make a column LOOK like A4
-	// portrait we multiply the visible row count by this before applying the page
-	// ratio. cellH/cellW ≈ 2.0.
-	paperCellAspect = 2.0
-	// a4PortraitWHRatio is A4 portrait's width-over-height ratio (210/297).
-	a4PortraitWHRatio = 210.0 / 297.0
-	// minPaperWidth is the readable FLOOR for the A4 column: a short terminal would
-	// otherwise compute an unreadably narrow column. The A4 ratio is honored ABOVE
-	// this floor; paneW is the only upper cap.
-	minPaperWidth = 48
+	// maxPaperWidth is the readable maximum measure (a standard max-width
+	// container). The render column grows with the pane up to this cap, then the
+	// side margins grow instead of the text. Tunable: lower it for a tighter
+	// page, raise it for a wider one.
+	maxPaperWidth = 100
 )
 
-// a4PaperWidth returns the A4-portrait column width to render the paper at, given
-// the visible row count and the available pane content width.
+// paperColumnWidth returns the column width to render the paper at, given the
+// available pane content width.
 //
-//	a4Cols = round(visibleRows · paperCellAspect · a4PortraitWHRatio)  (≈ rows·1.414)
+//	paperWidth = min(paneW, maxPaperWidth)
 //
-// then clamped to [minPaperWidth, paneW]. The cap at paneW means a terminal
-// narrower than the A4 width simply uses the whole pane (and the caller pads 0 —
-// no centering). There is deliberately NO low hard max above the floor, so a tall
-// terminal keeps the true A4 proportion rather than being pinned to some arbitrary
-// "max reading width".
-func a4PaperWidth(visibleRows, paneW int) int {
+// A pane narrower than (or equal to) the cap uses its full width — the caller
+// then pads 0 and the paper fills the pane. Only a pane WIDER than the cap is
+// pinned to maxPaperWidth, leaving the caller centered side margins. The terminal
+// height never enters this computation.
+func paperColumnWidth(paneW int) int {
 	if paneW < 1 {
 		paneW = 1
 	}
-	a4Cols := int(math.Round(float64(visibleRows) * paperCellAspect * a4PortraitWHRatio))
-	w := a4Cols
-	if w < minPaperWidth {
-		w = minPaperWidth
-	}
-	if w > paneW {
-		w = paneW
-	}
-	if w < 1 {
-		w = 1
+	w := paneW
+	if w > maxPaperWidth {
+		w = maxPaperWidth
 	}
 	return w
 }
@@ -207,27 +193,26 @@ func isPaper(doc *Doc) bool {
 }
 
 // buildPaperContent renders the selected paper's block tree to width-fitted ANSI
-// lines through the shared registry + theme, capped to an A4-portrait column and
-// centered within the pane. The viewport handles scrolling and clipping, exactly
-// as it does for the field-form editor.
+// lines through the shared registry + theme, capped to a max-width reading column
+// and centered within the pane. The viewport handles scrolling and clipping,
+// exactly as it does for the field-form editor.
 //
 //	paneW (the width arg) is the full pane content width the editor/preview gives us.
-//	visibleRows is the paper viewport's interior height — every paper render path
-//	(viewport content, preview column, pre-vpReady fallback) sizes that interior to
-//	m.paneHeight(), so that single value is the visible-row count A4 is derived from.
+//	The column is derived from paneW ALONE — paperWidth = min(paneW, maxPaperWidth).
+//	Terminal HEIGHT plays no part; widening the terminal grows the column up to the
+//	cap, then the side margins grow instead.
 //
 // The render happens at paperWidth ≤ paneW (NOT paneW); when paperWidth < paneW the
 // rendered column is centered by prefixing leftPad spaces to every line. When the
-// terminal is too narrow for the A4 width, paperWidth == paneW and leftPad == 0 — the
-// unchanged full-width behaviour. Because leftPad + paperWidth ≤ paneW, no centered
-// line can exceed paneW (the View() clampBlock backstop still applies regardless).
+// terminal is no wider than the cap, paperWidth == paneW and leftPad == 0 — the
+// full-width behaviour. Because leftPad + paperWidth ≤ paneW, no centered line can
+// exceed paneW (the View() clampBlock backstop still applies regardless).
 func (m model) buildPaperContent(width int) string {
 	if m.paperRegistry == nil || len(m.selectedPaperBlocks) == 0 {
 		return ""
 	}
 	paneW := width
-	visibleRows := m.paneHeight() // viewport / preview interior height — the A4 height term
-	paperWidth := a4PaperWidth(visibleRows, paneW)
+	paperWidth := paperColumnWidth(paneW)
 
 	ctx := pdrender.RenderCtx{
 		Width:       paperWidth,
@@ -237,8 +222,9 @@ func (m model) buildPaperContent(width int) string {
 	}
 	rendered := m.paperRegistry.RenderDoc(m.selectedPaperBlocks, ctx)
 
-	// Center the A4 column in the pane. When paperWidth == paneW (narrow terminal),
-	// leftPad is 0 and the content is returned unchanged at full width.
+	// Center the reading column in the pane. When paperWidth == paneW (pane no
+	// wider than the cap), leftPad is 0 and the content is returned unchanged at
+	// full width.
 	leftPad := (paneW - paperWidth) / 2
 	if leftPad < 0 {
 		leftPad = 0
@@ -251,9 +237,9 @@ func (m model) buildPaperContent(width int) string {
 
 // centerPaperLines prefixes leftPad spaces to EVERY rendered line — a local mirror
 // of tui.go's indentLines, kept here so the paper render path is self-contained and
-// reads against the A4 centering intent (indentLines exists for the field-form box
-// idiom). The padding is plain leading spaces, which never disturb the ANSI styling
-// of the rendered content that follows.
+// reads against the reading-column centering intent (indentLines exists for the
+// field-form box idiom). The padding is plain leading spaces, which never disturb
+// the ANSI styling of the rendered content that follows.
 func centerPaperLines(s string, leftPad int) string {
 	pad := strings.Repeat(" ", leftPad)
 	parts := strings.Split(s, "\n")
