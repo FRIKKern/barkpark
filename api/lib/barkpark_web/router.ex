@@ -321,7 +321,12 @@ defmodule BarkparkWeb.Router do
   # multiple `scope "/v1"` blocks). Expands to nothing until a plugin contributes
   # an `auth: :token_root` route (dormant, like `:token`/`:ingest`/`:public_root`
   # were when first added).
-  scope "/v1", BarkparkWeb do
+  # NOTE: no `BarkparkWeb` scope alias here. Plugin route specs declare their
+  # controller fully-qualified (`BarkparkWeb.TasksController`); a scope alias
+  # would double-prefix it to `BarkparkWeb.BarkparkWeb.TasksController`. Same
+  # no-alias rationale as the `:ingest` (`/v1/plugins`) and `:public_root` (`/`)
+  # plugin wrappers.
+  scope "/v1" do
     pipe_through [:api, :require_token]
 
     plugin_routes(scope: :token_root)
@@ -522,31 +527,10 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Tasks API — paperflow bd-shim surface (W7b step 1 / paperflow-rx0) ──
-  # Five endpoints the `bin/bd-shim` translator hits to wrap `Tasks.*`. Auth
-  # is bearer-only (the shim runs out-of-band as a CLI helper, never a
-  # browser session). No `:require_write` gate — claim/close are workflow
-  # ops, not document mutations; their atomicity lives in `Tasks.claim/2` +
-  # `Tasks.close/3` (advisory lock + CAS + fencing epoch).
-  scope "/v1/tasks", BarkparkWeb do
-    pipe_through [:api, :require_token]
-
-    # w7-08c: list-all (the natural `GET /v1/tasks` root). Declared BEFORE
-    # the `/:doc_id` catchall so an empty path doesn't get matched as
-    # `:doc_id = ""` (Phoenix would actually 404 on that, but the order is
-    # the documented Phoenix idiom for static/dynamic disambiguation).
-    get "/", TasksController, :index
-    get "/ready", TasksController, :ready
-    post "/claim", TasksController, :claim
-    post "/edges", TasksController, :add_edge
-    get "/:doc_id", TasksController, :show
-    get "/:doc_id/edges", TasksController, :edges
-    post "/:doc_id/claim", TasksController, :claim_by_id
-    post "/:doc_id/close", TasksController, :close
-    # tt5: add/remove content.labels (file-claim:* support for the bd-shim).
-    post "/:doc_id/labels", TasksController, :relabel
-    # Phase A: add/remove content.papers (task→paper references).
-    post "/:doc_id/papers", TasksController, :papers
-  end
+  # The ten `bin/bd-shim` endpoints now live in `Barkpark.Plugins.Tasks`'
+  # `register_routes/1` (auth: :token_root) and mount via the dormant
+  # `scope "/v1" … plugin_routes(scope: :token_root)` wrapper above (C4-3b).
+  # The flat `scope "/v1/tasks"` block was deleted — the plugin OWNS its routes.
 
   scope "/v1/data", BarkparkWeb do
     pipe_through [:api, :require_admin]

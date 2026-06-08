@@ -29,8 +29,16 @@ defmodule Barkpark.Plugins.Tasks do
       `tasks_compact` queue declarations stay in config — only the worker
       *scheduling* moves here.
 
+    * `register_routes/1` — the ten `/v1/tasks` endpoints the `bin/bd-shim`
+      translator hits, declared with `auth: :token_root` so the dormant
+      host-level `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)`
+      wrapper mounts them at `/v1/tasks/*` behind the `[:api, :require_token]`
+      pipeline. Replaces the explicit `scope "/v1/tasks"` block that used to live
+      in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
+      plugin only owns the route declarations.
+
   The persisted `type` discriminator is still `"task"` and the API surface
-  (`/v1/tasks`, `/v1/rail`) is unchanged — only the registration/scheduling
+  (`/v1/tasks`, `/v1/rail`) is unchanged — only the registration/scheduling/routing
   wiring became a plugin.
   """
 
@@ -70,6 +78,37 @@ defmodule Barkpark.Plugins.Tasks do
     [
       {"* * * * *", Barkpark.Tasks.TtlSweeper},
       {"0 */6 * * *", Barkpark.Tasks.Compactor}
+    ]
+  end
+
+  @doc """
+  The ten `/v1/tasks` endpoints `bin/bd-shim` hits, mirroring — byte-identical,
+  order-preserving — the `scope "/v1/tasks"` block this replaces in `router.ex`
+  (C4-3b). Every spec carries `auth: :token_root`, so the dormant host-level
+  `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)` wrapper
+  mounts them at `/v1/tasks/*` behind the `[:api, :require_token]` pipeline
+  (authenticated bearer, NOT admin — claim/close are workflow ops, not document
+  mutations; their atomicity lives in `Tasks.claim/2` + `Tasks.close/3`).
+
+  Static routes are declared BEFORE the `/:doc_id` catchall so an empty path
+  doesn't match as `:doc_id = ""` — the documented Phoenix static/dynamic
+  disambiguation idiom. The `TasksController` stays in core; this plugin owns
+  only the route declarations.
+  """
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    [
+      {:get, "/tasks", BarkparkWeb.TasksController, :index, auth: :token_root},
+      {:get, "/tasks/ready", BarkparkWeb.TasksController, :ready, auth: :token_root},
+      {:post, "/tasks/claim", BarkparkWeb.TasksController, :claim, auth: :token_root},
+      {:post, "/tasks/edges", BarkparkWeb.TasksController, :add_edge, auth: :token_root},
+      {:get, "/tasks/:doc_id", BarkparkWeb.TasksController, :show, auth: :token_root},
+      {:get, "/tasks/:doc_id/edges", BarkparkWeb.TasksController, :edges, auth: :token_root},
+      {:post, "/tasks/:doc_id/claim", BarkparkWeb.TasksController, :claim_by_id,
+       auth: :token_root},
+      {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
+      {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
+      {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root}
     ]
   end
 end
