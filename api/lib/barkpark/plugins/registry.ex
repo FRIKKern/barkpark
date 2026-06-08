@@ -740,7 +740,16 @@ defmodule Barkpark.Plugins.Registry do
       Map.fetch!(@resolver_callbacks, callback_name)
 
     Enum.reduce(load_ordered_plugins(), baseline, fn entry, prev ->
-      apply_resolver(entry, callback_name, additive, additive_arity, default, lift_kind, prev, ctx)
+      apply_resolver(
+        entry,
+        callback_name,
+        additive,
+        additive_arity,
+        default,
+        lift_kind,
+        prev,
+        ctx
+      )
     end)
   end
 
@@ -1122,6 +1131,71 @@ defmodule Barkpark.Plugins.Registry do
         Logger.warning(
           "Barkpark.Plugins.Registry.collect_workers/1: #{inspect(module)}." <>
             "register_workers/1 threw #{kind} #{inspect(reason)}"
+        )
+
+        []
+    end
+  end
+
+  @doc """
+  Walks every plugin module and returns the flat union of their
+  `oban_crontab/0` callback results — the Oban Cron entries each plugin
+  contributes. The host (`Barkpark.Application.start/2`) appends this list
+  to the `Oban.Plugins.Cron` `:crontab` before starting Oban.
+
+  Pure function — does NOT require the Registry GenServer to be alive,
+  because it runs at boot BEFORE Oban (and the Registry GenServer is
+  itself a sibling child). Discovery reuses the same synchronous
+  `plugin_modules_sync/0` helper that powers `collect_workers/1`, so the
+  unset-vs-empty `:plugins` distinction is identical.
+
+  Per-plugin error isolation: a plugin that fails to load, doesn't export
+  `oban_crontab/0`, or whose callback raises contributes nothing — the
+  failure is logged at warning level and boot continues. This mirrors
+  `collect_workers/1` exactly.
+
+  Returns a flat list of Oban crontab elements: `{cron_expr, worker}` or
+  `{cron_expr, worker, opts}`.
+  """
+  @spec collect_oban_crontab() :: [
+          {String.t(), module()} | {String.t(), module(), keyword()}
+        ]
+  def collect_oban_crontab do
+    plugin_modules_sync()
+    |> Enum.flat_map(&safe_oban_crontab/1)
+  end
+
+  defp safe_oban_crontab(module) do
+    try do
+      if Code.ensure_loaded?(module) and function_exported?(module, :oban_crontab, 0) do
+        case module.oban_crontab() do
+          list when is_list(list) ->
+            list
+
+          other ->
+            Logger.warning(
+              "Barkpark.Plugins.Registry.collect_oban_crontab/0: #{inspect(module)}." <>
+                "oban_crontab/0 returned non-list #{inspect(other)} — skipping"
+            )
+
+            []
+        end
+      else
+        []
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_oban_crontab/0: #{inspect(module)}." <>
+            "oban_crontab/0 raised — #{Exception.message(e)}"
+        )
+
+        []
+    catch
+      kind, reason ->
+        Logger.warning(
+          "Barkpark.Plugins.Registry.collect_oban_crontab/0: #{inspect(module)}." <>
+            "oban_crontab/0 threw #{kind} #{inspect(reason)}"
         )
 
         []

@@ -17,6 +17,17 @@ defmodule Barkpark.Application do
     # compile-time static — hot-reload is out of scope for v1.
     plugin_children = Barkpark.Plugins.Registry.collect_workers(%{phase: :boot})
 
+    # C4-1: plugins may contribute Oban Cron entries via `oban_crontab/0`.
+    # Collect them here (a pure, GenServer-independent call, same as
+    # collect_workers/1 above) and fold them into the host's static Oban
+    # config BEFORE the Oban child below reads it. When NO plugin
+    # contributes, `merge_plugin_crontab/2` returns the base config
+    # unchanged (dormant — the Tasks TTL/Compactor crontab in config.exs
+    # is the only source of cron entries today).
+    base_oban = Application.fetch_env!(:barkpark, Oban)
+    plugin_crontab = Barkpark.Plugins.Registry.collect_oban_crontab()
+    oban_config = merge_plugin_crontab(base_oban, plugin_crontab)
+
     children =
       [
         Barkpark.RateLimiter,
@@ -50,7 +61,7 @@ defmodule Barkpark.Application do
           # schemas) before starting Oban, so Oban can never dequeue a job
           # against an unregistered schema. No paused queues, no resume loop.
           Barkpark.SchemaBootstrap,
-          {Oban, Application.fetch_env!(:barkpark, Oban)},
+          {Oban, oban_config},
           {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
           {Phoenix.PubSub, name: Barkpark.PubSub},
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
@@ -79,6 +90,44 @@ defmodule Barkpark.Application do
       other ->
         other
     end
+  end
+
+  # C4-1: fold plugin-contributed Oban Cron entries into the host's Oban
+  # keyword config. Pure, side-effect-free, and unit-testable (see
+  # registry_oban_crontab_test.exs). Dormant by construction: an empty
+  # `plugin_crontab` returns `oban_config` byte-for-byte unchanged.
+  #
+  # Behaviour:
+  #   * empty contribution → return config unchanged.
+  #   * Cron plugin already present in `:plugins` → append the entries to
+  #     its `:crontab` list (host's static entries come first).
+  #   * no Cron plugin entry but plugins DID contribute → add an
+  #     `{Oban.Plugins.Cron, crontab: plugin_crontab}` entry.
+  @doc false
+  @spec merge_plugin_crontab(keyword(), list()) :: keyword()
+  def merge_plugin_crontab(oban_config, []), do: oban_config
+
+  def merge_plugin_crontab(oban_config, plugin_crontab) when is_list(plugin_crontab) do
+    plugins = Keyword.get(oban_config, :plugins, [])
+
+    {merged_plugins, found?} =
+      Enum.map_reduce(plugins, false, fn
+        {Oban.Plugins.Cron, opts}, _found when is_list(opts) ->
+          base = Keyword.get(opts, :crontab, [])
+          {{Oban.Plugins.Cron, Keyword.put(opts, :crontab, base ++ plugin_crontab)}, true}
+
+        other, found ->
+          {other, found}
+      end)
+
+    merged_plugins =
+      if found? do
+        merged_plugins
+      else
+        merged_plugins ++ [{Oban.Plugins.Cron, crontab: plugin_crontab}]
+      end
+
+    Keyword.put(oban_config, :plugins, merged_plugins)
   end
 
   # Tell Phoenix to update the endpoint configuration

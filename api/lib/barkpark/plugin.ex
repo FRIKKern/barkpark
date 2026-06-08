@@ -416,6 +416,25 @@ defmodule Barkpark.Plugin do
   @callback register_routes(ctx :: map()) :: [route_spec()]
 
   @callback register_workers(any()) :: [Supervisor.child_spec()]
+
+  @doc """
+  Contribute Oban Cron entries to be merged into the host's Oban config
+  at boot.
+
+  Returns a list of crontab elements matching Oban's
+  `Oban.Plugins.Cron` `:crontab` shape — each is either a
+  `{cron_expr, worker_module}` pair or a `{cron_expr, worker_module, opts}`
+  triple, where `cron_expr` is a 5-field POSIX cron string (e.g.
+  `"* * * * *"`).
+
+  The default no-op returns `[]`; plugins opt in by overriding. The host
+  (`Barkpark.Application.start/2`) appends every plugin's contribution to
+  the `Oban.Plugins.Cron` entry's `:crontab` before starting Oban.
+  """
+  @callback oban_crontab() :: [
+              {String.t(), module()} | {String.t(), module(), keyword()}
+            ]
+
   @callback register_schemas(keyword()) :: [Barkpark.Content.SchemaDefinition.t()]
   @callback validate_settings(map()) :: :ok | {:error, [{atom(), String.t()}]}
 
@@ -693,6 +712,7 @@ defmodule Barkpark.Plugin do
 
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
+                      oban_crontab: 0,
                       register_schemas: 1,
                       validate_settings: 1,
                       checkers: 0,
@@ -747,6 +767,9 @@ defmodule Barkpark.Plugin do
 
       @impl Barkpark.Plugin
       def register_workers(_supervisor), do: []
+
+      @impl Barkpark.Plugin
+      def oban_crontab, do: []
 
       @impl Barkpark.Plugin
       def register_schemas(_opts), do: []
@@ -901,6 +924,7 @@ defmodule Barkpark.Plugin do
       defoverridable manifest: 0,
                      register_routes: 1,
                      register_workers: 1,
+                     oban_crontab: 0,
                      register_schemas: 1,
                      validate_settings: 1,
                      checkers: 0,
