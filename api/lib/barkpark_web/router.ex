@@ -517,6 +517,8 @@ defmodule BarkparkWeb.Router do
     post "/:doc_id/close", TasksController, :close
     # tt5: add/remove content.labels (file-claim:* support for the bd-shim).
     post "/:doc_id/labels", TasksController, :relabel
+    # Phase A: add/remove content.papers (task→paper references).
+    post "/:doc_id/papers", TasksController, :papers
   end
 
   scope "/v1/data", BarkparkWeb do
@@ -651,7 +653,11 @@ defmodule BarkparkWeb.Router do
     post "/:dataset/collections/:id/share", V1.MediaCollectionsController, :share
     delete "/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share
     post "/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member
-    delete "/:dataset/collections/:id/members/:asset_id", V1.MediaCollectionsController, :remove_member
+
+    delete "/:dataset/collections/:id/members/:asset_id",
+           V1.MediaCollectionsController,
+           :remove_member
+
     post "/:dataset/upload", V1.MediaController, :upload
     post "/:dataset/:id/checkout", V1.MediaController, :checkout
     post "/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
@@ -763,7 +769,11 @@ defmodule BarkparkWeb.Router do
     pipe_through [:scoped_api, :media_mutate]
 
     post "/v1/media/:dataset/collections/:id/share", V1.MediaCollectionsController, :share
-    delete "/v1/media/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share
+
+    delete "/v1/media/:dataset/collections/:id/share",
+           V1.MediaCollectionsController,
+           :revoke_share
+
     post "/v1/media/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member
 
     delete "/v1/media/:dataset/collections/:id/members/:asset_id",

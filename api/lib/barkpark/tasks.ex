@@ -79,6 +79,9 @@ defmodule Barkpark.Tasks do
   # tt5: file-claim label support. Emitted when content.labels changes via
   # relabel_by_id/3 (the bd-shim's `update --add-label/--remove-label` path).
   @event_task_relabeled "task.relabeled"
+  # Phase A: task→paper reference support. Emitted when content.papers changes
+  # via update_paper_refs_by_id/3 (the `/v1/tasks/:doc_id/papers` path).
+  @event_task_referenced "task.referenced"
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
 
@@ -348,9 +351,14 @@ defmodule Barkpark.Tasks do
 
   defp check_optional_priority(errors, content) do
     case Map.get(content, "priority") || Map.get(content, :priority) do
-      nil -> errors
-      v when is_integer(v) and v >= 0 and v <= 4 -> errors
-      other -> Map.put(errors, "priority", ["must be an integer 0..4 when set, got #{inspect(other)}"])
+      nil ->
+        errors
+
+      v when is_integer(v) and v >= 0 and v <= 4 ->
+        errors
+
+      other ->
+        Map.put(errors, "priority", ["must be an integer 0..4 when set, got #{inspect(other)}"])
     end
   end
 
@@ -712,8 +720,7 @@ defmodule Barkpark.Tasks do
   """
   @spec claim_by_id(String.t(), String.t(), keyword()) ::
           {:ok, Document.t()}
-          | {:error,
-             :not_found | :not_ready | :blocked_by_unsatisfied_deps | :stale_claim}
+          | {:error, :not_found | :not_ready | :blocked_by_unsatisfied_deps | :stale_claim}
   def claim_by_id(doc_id, worker_id, opts \\ [])
       when is_binary(doc_id) and is_binary(worker_id) do
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -808,7 +815,9 @@ defmodule Barkpark.Tasks do
     # update_all returns {rows_affected, _}. 0 → another caller won.
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()])
+      |> Repo.update_all(
+        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+      )
 
     case rows do
       1 ->
@@ -1008,6 +1017,78 @@ defmodule Barkpark.Tasks do
   defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
   defp labels_of(_), do: []
 
+  @doc """
+  Phase A: add/remove `content.papers` entries (paper slugs) on a single task,
+  advisory-lock + CAS-on-rev guarded, emitting a `task.referenced`
+  mutation_event. Mirrors `relabel_by_id/3` byte-for-byte — the only difference
+  is the content key (`"papers"`) and the event kind.
+
+  `add_slugs` and `remove_slugs` are lists of exact paper-slug strings. The
+  result is a union add (dedup-preserving) minus the remove set. Idempotent:
+  re-adding an existing paper ref or removing an absent one is a no-op on that
+  ref.
+
+  Returns `{:ok, doc}` (always re-reads + persists, even on a no-op set —
+  the rev bump + event keep the change observable), or `{:error, :not_found}`
+  / `{:error, :stale_claim}`.
+  """
+  @spec update_paper_refs_by_id(binary(), [binary()], [binary()]) ::
+          {:ok, Document.t()} | {:error, term()}
+  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs)
+      when is_binary(task_id) and is_list(add_slugs) and is_list(remove_slugs) do
+    result =
+      Repo.transaction(fn ->
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+
+        case Repo.get(Document, task_id) do
+          nil ->
+            {:error, :not_found}
+
+          %Document{} = doc ->
+            observed_rev = doc.rev
+            current = papers_of(doc.content)
+            add = Enum.filter(add_slugs, &is_binary/1)
+            remove = MapSet.new(Enum.filter(remove_slugs, &is_binary/1))
+
+            # Union add (append new, preserve order), then drop the remove set.
+            next =
+              (current ++ add)
+              |> Enum.uniq()
+              |> Enum.reject(&MapSet.member?(remove, &1))
+
+            new_content = Map.put(doc.content, "papers", next)
+            new_rev = generate_rev()
+
+            {rows, _} =
+              from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+              |> Repo.update_all(
+                set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+              )
+
+            case rows do
+              1 ->
+                updated = %{doc | content: new_content, rev: new_rev}
+                _ = insert_mutation_event!(updated, @event_task_referenced, observed_rev)
+                {:ok, updated}
+
+              0 ->
+                {:error, :stale_claim}
+            end
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, doc}} -> {:ok, doc}
+      {:ok, {:error, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # content.papers is a JSON array of paper slugs. Defensive: coerce non-list /
+  # missing to [].
+  defp papers_of(%{"papers" => papers}) when is_list(papers), do: papers
+  defp papers_of(_), do: []
+
   # Fencing applies only to docs that carry a claim lease. Work-tasks are
   # claimed before close, so they have `content.claim.epoch` and the observed
   # epoch must match (the dead-worker guard).
@@ -1060,7 +1141,9 @@ defmodule Barkpark.Tasks do
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()])
+      |> Repo.update_all(
+        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+      )
 
     case rows do
       1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
@@ -1151,14 +1234,16 @@ defmodule Barkpark.Tasks do
           claimed: String.t(),
           closed: String.t(),
           mutated: String.t(),
-          relabeled: String.t()
+          relabeled: String.t(),
+          referenced: String.t()
         }
   def event_kinds do
     %{
       claimed: @event_task_claimed,
       closed: @event_task_closed,
       mutated: @event_task_mutated,
-      relabeled: @event_task_relabeled
+      relabeled: @event_task_relabeled,
+      referenced: @event_task_referenced
     }
   end
 
@@ -1178,8 +1263,7 @@ defmodule Barkpark.Tasks do
         as: :doc,
         where: d.type == "task",
         where: fragment("?->>'kind'", d.content) == "task",
-        where:
-          fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
+        where: fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
         where:
           not exists(
             from e in Edge,

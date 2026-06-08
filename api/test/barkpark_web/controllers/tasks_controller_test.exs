@@ -521,6 +521,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert resp.status == 200
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
+
       statuses =
         payload["docs"]
         |> Enum.map(& &1["lifecycle_status"])
@@ -540,6 +541,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert resp.status == 200
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
+
       parents =
         payload["docs"]
         |> Enum.map(& &1["parent_id"])
@@ -670,6 +672,62 @@ defmodule BarkparkWeb.TasksControllerTest do
     Barkpark.Repo.exists?(
       from(e in Barkpark.Content.MutationEvent,
         where: e.doc_id == ^doc_id and e.mutation == "task.relabeled"
+      )
+    )
+  end
+
+  # ─── Phase A: POST /v1/tasks/:doc_id/papers add/remove mutation ────────
+  # Task→paper references stored on content.papers as paper slugs.
+
+  describe "POST /v1/tasks/:doc_id/papers" do
+    test "add: union-adds two paper refs, emits task.referenced; remove is idempotent",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("papers-add"), scope)
+      intro = "intro"
+      methodology = "methodology"
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/papers",
+          Jason.encode!(%{add: [intro, methodology]})
+        )
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      papers = payload["doc"]["papers"]
+      assert intro in papers
+      assert methodology in papers
+
+      # A task.referenced mutation_event was emitted for this doc.
+      assert referenced_event?(task.doc_id)
+
+      # Remove one ref; re-adding an existing ref + removing an absent one is a
+      # no-op set — only `intro` survives, with no duplicate.
+      resp2 =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/papers",
+          Jason.encode!(%{add: [intro], remove: [methodology, "never-referenced"]})
+        )
+
+      assert resp2.status == 200
+      payload2 = Jason.decode!(resp2.resp_body)
+      assert payload2["ok"] == true
+      assert payload2["doc"]["papers"] == [intro]
+    end
+  end
+
+  # A `task.referenced` mutation_event exists for `doc_id` in this tenant.
+  defp referenced_event?(doc_id) do
+    import Ecto.Query, only: [from: 2]
+
+    Barkpark.Repo.exists?(
+      from(e in Barkpark.Content.MutationEvent,
+        where: e.doc_id == ^doc_id and e.mutation == "task.referenced"
       )
     )
   end

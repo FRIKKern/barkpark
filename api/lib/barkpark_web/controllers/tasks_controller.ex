@@ -422,6 +422,31 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # Phase A: POST /v1/tasks/:doc_id/papers. Mirrors relabel/2 — reads add/remove
+  # paper slugs from params, finds the task scoped by workspace+project, then
+  # delegates to Tasks.update_paper_refs_by_id/3 (advisory-lock + CAS-on-rev +
+  # task.referenced mutation_event). Returns { ok, doc }.
+  def papers(conn, %{"doc_id" => doc_id} = params) do
+    add = string_list(params["add"])
+    remove = string_list(params["remove"])
+
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, task} ->
+        case Tasks.update_paper_refs_by_id(task.id, add, remove) do
+          {:ok, %Document{} = doc} ->
+            json(conn, %{ok: true, doc: render_doc(doc)})
+
+          {:error, reason} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: reason_to_string(reason)})
+        end
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
   # Coerce a body field into a list of strings. Accepts a list (filtering
   # non-strings), a bare string (wrapped), or nil/anything-else (→ []).
   defp string_list(v) when is_list(v), do: Enum.filter(v, &is_binary/1)
@@ -434,6 +459,9 @@ defmodule BarkparkWeb.TasksController do
   defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
   defp labels_of(_), do: []
 
+  # content.papers is a JSON array of paper slugs; coerce missing / non-list to [].
+  defp papers_of(%{"papers" => papers}) when is_list(papers), do: papers
+  defp papers_of(_), do: []
 
   # Look up a task by its `doc_id` string. We DO NOT route through
   # `Content.get_document/4` here on purpose — the dataset-string filter in
@@ -505,6 +533,9 @@ defmodule BarkparkWeb.TasksController do
       # `.labels[]` (used by `bd show .labels[]` + `bd list --label`) works
       # end-to-end. The shim reads `doc.labels`; without this it always saw [].
       labels: labels_of(content),
+      # Phase A: surface content.papers at the top level the same way labels
+      # are, so callers can read `doc.papers[]` without digging into content.
+      papers: papers_of(content),
       content: content,
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
