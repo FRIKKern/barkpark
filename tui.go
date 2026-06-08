@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
@@ -149,13 +150,19 @@ func (m model) calcEditorWidth() int {
 	return ew
 }
 
-// paneHeight returns the available height for pane/editor content.
+// paneHeight returns the interior content height passed to each column's
+// .Height(ph). The border adds +2 rows on top of ph (verified: lipgloss .Height
+// sets CONTENT height, then the border wraps outside it), so a border-wrapped
+// column is ph+2 physical and the joined frame is toolbar(1) + (ph+2) +
+// helpBar(1) = ph + 4. To keep the frame ≤ m.height we use ph = m.height - 4,
+// floored at 1 (NOT 4 — the old floor let a small terminal overflow). View()
+// short-circuits when the bounded frame still cannot fit (m.height < 5).
 func (m model) paneHeight() int {
-	h := m.height - 4 // toolbar + helpbar
-	if h < 4 {
-		h = 4
+	ph := m.height - 4 // toolbar(1) + 2 border rows + helpbar(1)
+	if ph < 1 {
+		ph = 1
 	}
-	return h
+	return ph
 }
 
 // rebuildPanes resolves the current path against the structure tree
@@ -381,6 +388,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showEditor && m.selectedDoc != nil {
 			m.viewport.SetContent(m.buildEditorContent(ew))
 		}
+		// Re-clamp every pane's persisted scroll against the new interior height
+		// so a shrink can't strand the window past the end. The window re-derives
+		// from Cursor next render anyway; this keeps Pane.Scroll honest meanwhile.
+		ih := m.listInteriorHeight(ph)
+		pw := m.paneWidth()
+		for i := range m.panes {
+			m.panes[i].Scroll = m.listScrollOffset(m.panes[i], pw, ih)
+		}
 	}
 	return m, nil
 }
@@ -538,6 +553,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					pane.Cursor = len(pane.Items) - 1
 				}
 			}
+			m.syncPaneScroll(pane)
 		} else if m.focus.Target == FocusEditor && m.editorSchema != nil {
 			if m.fieldCursor < len(m.editorSchema.Fields)-1 {
 				m.fieldCursor++
@@ -555,12 +571,40 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					pane.Cursor--
 				}
 			}
+			m.syncPaneScroll(pane)
 		} else if m.focus.Target == FocusEditor {
 			if m.fieldCursor > 0 {
 				m.fieldCursor--
 			}
 			m.scrollToField()
 			m.refreshViewport()
+		}
+
+	// ── Page / jump within a list pane (parity with the editor's scroll keys;
+	//    the FocusEditor paper-scroll branch above owns these when the editor is
+	//    focused, so there is no collision). ──
+	case "pgdown":
+		if m.focus.Target == FocusPane {
+			pane := &m.panes[m.focus.PaneIndex]
+			m.movePaneCursor(pane, +m.listInteriorHeight(m.paneHeight()))
+		}
+
+	case "pgup":
+		if m.focus.Target == FocusPane {
+			pane := &m.panes[m.focus.PaneIndex]
+			m.movePaneCursor(pane, -m.listInteriorHeight(m.paneHeight()))
+		}
+
+	case "home", "g":
+		if m.focus.Target == FocusPane {
+			pane := &m.panes[m.focus.PaneIndex]
+			m.jumpPaneCursor(pane, 0)
+		}
+
+	case "end", "G":
+		if m.focus.Target == FocusPane {
+			pane := &m.panes[m.focus.PaneIndex]
+			m.jumpPaneCursor(pane, len(pane.Items)-1)
 		}
 
 	// ── Drill in / start editing ──
@@ -775,6 +819,75 @@ func (m *model) scrollToField() {
 	}
 }
 
+// syncPaneScroll recomputes and persists the pane's scroll offset for the
+// current focused-pane box height, so cursor-follow windowing survives across
+// renders. Called after every cursor move in a list pane.
+func (m *model) syncPaneScroll(pane *Pane) {
+	ih := m.listInteriorHeight(m.paneHeight())
+	pane.Scroll = m.listScrollOffset(*pane, m.paneWidth(), ih)
+}
+
+// movePaneCursor moves the cursor by delta items (clamped, skipping dividers in
+// the direction of travel) and re-persists the scroll offset. Used by pgup/pgdn.
+func (m *model) movePaneCursor(pane *Pane, delta int) {
+	if len(pane.Items) == 0 {
+		return
+	}
+	target := pane.Cursor + delta
+	if target < 0 {
+		target = 0
+	}
+	if target > len(pane.Items)-1 {
+		target = len(pane.Items) - 1
+	}
+	// Skip a landing on a divider in the direction of travel.
+	step := 1
+	if delta < 0 {
+		step = -1
+	}
+	for target >= 0 && target < len(pane.Items) && pane.Items[target].IsDivider {
+		target += step
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target > len(pane.Items)-1 {
+		target = len(pane.Items) - 1
+	}
+	pane.Cursor = target
+	m.syncPaneScroll(pane)
+}
+
+// jumpPaneCursor sets the cursor to a specific index (clamped, skipping a
+// trailing/leading divider) and re-persists the scroll offset. Used by g/G.
+func (m *model) jumpPaneCursor(pane *Pane, target int) {
+	if len(pane.Items) == 0 {
+		return
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target > len(pane.Items)-1 {
+		target = len(pane.Items) - 1
+	}
+	// If the extreme is a divider, walk inward to the nearest real item.
+	step := 1
+	if target == len(pane.Items)-1 {
+		step = -1
+	}
+	for target >= 0 && target < len(pane.Items) && pane.Items[target].IsDivider {
+		target += step
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target > len(pane.Items)-1 {
+		target = len(pane.Items) - 1
+	}
+	pane.Cursor = target
+	m.syncPaneScroll(pane)
+}
+
 // drillIn selects the highlighted item in the focused pane, same as Enter.
 func (m model) drillIn() (tea.Model, tea.Cmd) {
 	if m.focus.Target != FocusPane || m.focus.PaneIndex >= len(m.panes) {
@@ -818,6 +931,13 @@ func (m model) drillIn() (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	// Terminal too small to host toolbar + a bordered body + helpbar (the
+	// smallest bounded frame is ph(1) + 2 border + 2 bars = 5): emit a single
+	// truncated line so the frame can never exceed m.height.
+	if m.height < 5 {
+		return truncate("terminal too small", m.width)
 	}
 
 	toolbar := m.renderToolbar()
@@ -881,8 +1001,9 @@ func (m model) renderToolbar() string {
 		activeTabStyle.Render("Structure") +
 		dimStyle.Render("] ") +
 		dimStyle.Render("Vision")
+	prefix := logo + "  " + tabs // highest-value left segment — kept longest
 
-	// Breadcrumbs
+	// Breadcrumbs (the elastic, lowest-priority left segment).
 	crumbs := make([]string, 0, len(m.panes)+1)
 	for _, p := range m.panes {
 		crumbs = append(crumbs, p.Node.Title)
@@ -903,15 +1024,47 @@ func (m model) renderToolbar() string {
 		}
 	}
 
-	left := logo + "  " + tabs + "  " + bc
 	scope := fmt.Sprintf("%s/%s/%s", m.ds.Workspace, m.ds.Project, m.ds.Dataset)
 	right := breadcrumbStyle.Render("⌗ "+scope) + dimStyle.Render("  s switch")
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
-	if gap < 1 {
-		gap = 1
+	// Assemble with graceful degradation so the content always fits on ONE line
+	// of width m.width — lipgloss soft-wraps any content wider than the style
+	// width, which would steal extra rows from the body budget (ph = h-4).
+	//
+	// Tier 1: prefix + breadcrumb + gap + right (full)
+	// Tier 2: prefix + gap + right            (drop breadcrumb)
+	// Tier 3: prefix + gap + "s switch"       (drop scope, keep switch hint)
+	// Tier 4: ansi.Truncate(prefix+breadcrumb, m.width)  (no room for the right rail)
+	// Backstop: ansi.Truncate the chosen line to m.width with an ellipsis.
+	const minGap = 2 // breathing room between left and right rails
+	rightW := lipgloss.Width(right)
+	switchOnly := dimStyle.Render("s switch")
+	switchW := lipgloss.Width(switchOnly)
+
+	var content string
+	switch {
+	case lipgloss.Width(prefix)+lipgloss.Width("  "+bc)+minGap+rightW <= m.width:
+		// Tier 1 — everything fits.
+		left := prefix + "  " + bc
+		gap := m.width - lipgloss.Width(left) - rightW
+		content = left + strings.Repeat(" ", gap) + right
+	case lipgloss.Width(prefix)+minGap+rightW <= m.width:
+		// Tier 2 — drop the breadcrumb, keep prefix + full right rail.
+		gap := m.width - lipgloss.Width(prefix) - rightW
+		content = prefix + strings.Repeat(" ", gap) + right
+	case lipgloss.Width(prefix)+minGap+switchW <= m.width:
+		// Tier 3 — drop the scope, keep prefix + the "s switch" affordance.
+		gap := m.width - lipgloss.Width(prefix) - switchW
+		content = prefix + strings.Repeat(" ", gap) + switchOnly
+	default:
+		// Tier 4 — no room for any right rail; show as much of the left as fits.
+		content = prefix + "  " + bc
 	}
-	return toolbarStyle.Width(m.width).Render(left + strings.Repeat(" ", gap) + right)
+
+	// Hard backstop: clamp to exactly m.width display columns (ANSI/width-aware,
+	// ellipsis tail). Guarantees one physical line ≤ m.width even at width=20.
+	content = ansi.Truncate(content, m.width, "…")
+	return toolbarStyle.Width(m.width).MaxHeight(1).Render(content)
 }
 
 // ── Help bar ─────────────────────────────────────────────────────────────────
@@ -926,8 +1079,11 @@ func (m model) renderHelpBar() string {
 			style = statusDraft // amber/red = error
 			prefix = "✕ "
 		}
-		msg := truncate(prefix+m.status, m.width-2)
-		return toolbarStyle.Width(m.width).Render(style.Bold(true).Render(" " + msg))
+		styled := style.Bold(true).Render(" " + prefix + m.status)
+		// Clamp the styled line to one physical row ≤ m.width (ANSI/width-aware)
+		// so a long status can never soft-wrap and steal a body row.
+		styled = ansi.Truncate(styled, m.width, "…")
+		return toolbarStyle.Width(m.width).MaxHeight(1).Render(styled)
 	}
 
 	var help string
@@ -942,10 +1098,211 @@ func (m model) renderHelpBar() string {
 	} else {
 		help = " j/k navigate  h/l switch pane  enter select  s scope  esc back  q quit"
 	}
-	return toolbarStyle.Width(m.width).Render(dimStyle.Render(help))
+	// Clamp to one physical row ≤ m.width before styling so the bar never
+	// soft-wraps at narrow widths; a shorter/elided help string is fine.
+	styled := ansi.Truncate(dimStyle.Render(help), m.width, "…")
+	return toolbarStyle.Width(m.width).MaxHeight(1).Render(styled)
 }
 
 // ── List / DocList pane ──────────────────────────────────────────────────────
+
+// maxInt returns the larger of two ints (avoids negative repeat counts).
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// renderListInterior is the single, line-accurate windowing primitive for every
+// list pane — both the focused renderPane and the right-pane previews route
+// through it so they can never diverge. It returns the exact interior lines for
+// the items (NOT the header/divider/border), windowed so pane.Cursor's full
+// rendered line span is always inside the window, with the partially-visible
+// trailing row hard-truncated so it NEVER emits more than interiorHeight lines.
+//
+// interiorHeight is the rows available for items PLUS the affordance row. When
+// the content is clipped (top or bottom hidden), one interior row is reserved
+// for the dim "↑ N more" / "↓ N more" counter; when the list fits, no row is
+// reserved and the output is byte-identical to the pre-change flush render.
+//
+// isActive drives the selected (active pane) vs dim-cursor (inactive/preview)
+// styling of the cursor row. above/below count items hidden above / below the
+// window (0/0 == the list fits and no affordance row is emitted).
+func (m model) renderListInterior(pane Pane, width, interiorHeight int, isActive bool) (lines []string, above, below int) {
+	if interiorHeight < 1 {
+		interiorHeight = 1
+	}
+
+	// Render every item to its physical lines once, recording each item's start
+	// line + span. Doc-list items are 2 lines (title + subtitle); structure
+	// items and dividers are 1 line — line-accurate, no item-vs-line miscount.
+	rsStart := make([]int, len(pane.Items))
+	rsLen := make([]int, len(pane.Items))
+	var allLines []string
+	for i, item := range pane.Items {
+		rsStart[i] = len(allLines)
+		var il []string
+		if item.IsDivider {
+			il = []string{dimStyle.Render("  " + strings.Repeat("─", maxInt(width-4, 0)))}
+		} else {
+			isSelected := i == pane.Cursor && isActive
+			isCursor := i == pane.Cursor && !isActive
+			il = m.renderPaneItem(item, width, isSelected, isCursor, pane.IsDocList)
+		}
+		rsLen[i] = len(il)
+		allLines = append(allLines, il...)
+	}
+	total := len(allLines)
+
+	// Short list: fits flush, no affordance — byte-identical to today.
+	if total <= interiorHeight {
+		return allLines, 0, 0
+	}
+
+	// Clipped: reserve one row for the affordance, so items get interiorHeight-1.
+	itemRows := interiorHeight - 1
+	if itemRows < 1 {
+		itemRows = 1
+	}
+
+	// Cursor-follow window: keep pane.Cursor's full line span inside the window.
+	cursor := pane.Cursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(pane.Items) {
+		cursor = len(pane.Items) - 1
+	}
+	cStart := rsStart[cursor]
+	cEnd := cStart + rsLen[cursor] // exclusive
+
+	// Start from the persisted offset, then nudge to satisfy cursor-follow.
+	scroll := pane.Scroll
+	if scroll < 0 {
+		scroll = 0
+	}
+	if cStart < scroll {
+		scroll = cStart // cursor above window → align top to cursor
+	}
+	if cEnd > scroll+itemRows {
+		scroll = cEnd - itemRows // cursor below window → align bottom to cursor
+	}
+	// Clamp so we never scroll past the end or below zero.
+	maxScroll := total - itemRows
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+
+	// Emit exactly itemRows lines from the window, hard-truncating any partial
+	// trailing row beyond the budget.
+	end := scroll + itemRows
+	if end > total {
+		end = total
+	}
+	out := append([]string(nil), allLines[scroll:end]...)
+
+	// Count items fully hidden above / below the window.
+	for i := range pane.Items {
+		if rsStart[i]+rsLen[i] <= scroll {
+			above++
+		} else if rsStart[i] >= end {
+			below++
+		}
+	}
+
+	// Affordance row (dim chrome). The bottom counter wins the single reserved
+	// row when both edges are clipped — it signals there is more to scroll into.
+	var aff string
+	if below > 0 {
+		aff = dimStyle.Render(fmt.Sprintf(" ↓ %d more", below))
+	} else if above > 0 {
+		aff = dimStyle.Render(fmt.Sprintf(" ↑ %d more", above))
+	}
+	out = append(out, aff)
+	if len(out) > interiorHeight {
+		out = out[:interiorHeight]
+	}
+	return out, above, below
+}
+
+// listScrollOffset recomputes the persisted Pane.Scroll for the given interior
+// height so cursor-follow windowing survives across renders and resizes. Mirrors
+// the windowing math in renderListInterior; called on cursor moves and resize.
+func (m model) listScrollOffset(pane Pane, width, interiorHeight int) int {
+	if interiorHeight < 1 {
+		interiorHeight = 1
+	}
+	// Total rendered lines (2 per doc-list item, 1 otherwise).
+	total := 0
+	starts := make([]int, len(pane.Items))
+	lens := make([]int, len(pane.Items))
+	for i, item := range pane.Items {
+		starts[i] = total
+		n := 1
+		if !item.IsDivider && pane.IsDocList {
+			n = 2
+		}
+		lens[i] = n
+		total += n
+	}
+	if total <= interiorHeight {
+		return 0
+	}
+	itemRows := interiorHeight - 1
+	if itemRows < 1 {
+		itemRows = 1
+	}
+	cursor := pane.Cursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(pane.Items) {
+		cursor = len(pane.Items) - 1
+	}
+	cStart := starts[cursor]
+	cEnd := cStart + lens[cursor]
+	scroll := pane.Scroll
+	if scroll < 0 {
+		scroll = 0
+	}
+	if cStart < scroll {
+		scroll = cStart
+	}
+	if cEnd > scroll+itemRows {
+		scroll = cEnd - itemRows
+	}
+	maxScroll := total - itemRows
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	return scroll
+}
+
+// listInteriorHeight returns the item+affordance budget for a list pane whose
+// content area is boxHeight lines (the lines slice is truncated to boxHeight
+// before the border wraps it). Header(1) + divider(1) are subtracted; the
+// border's +2 rows live outside the lines slice, so they are NOT subtracted
+// here. Floored at 1.
+func (m model) listInteriorHeight(boxHeight int) int {
+	ih := boxHeight - 2 // header + divider
+	if ih < 1 {
+		ih = 1
+	}
+	return ih
+}
 
 func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	var lines []string
@@ -962,24 +1319,13 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	lines = append(lines, headerStyle.Width(width).Render(headerText))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width)))
 
-	// Visible area
-	visibleHeight := height - 3
-	scroll := 0
-	if pane.Cursor >= visibleHeight {
-		scroll = pane.Cursor - visibleHeight + 1
-	}
-
-	for i := scroll; i < len(pane.Items) && i-scroll < visibleHeight; i++ {
-		item := pane.Items[i]
-		if item.IsDivider {
-			lines = append(lines, dimStyle.Render("  "+strings.Repeat("─", width-4)))
-			continue
-		}
-
-		isSelected := i == pane.Cursor && isActive
-		isCursor := i == pane.Cursor && !isActive // show dim cursor in inactive panes
-		lines = append(lines, m.renderPaneItem(item, width, isSelected, isCursor, pane.IsDocList)...)
-	}
+	// Interior: header + divider already consumed 2 of the box's content rows;
+	// the box is height tall (border counts toward .Height), so the item area is
+	// height - 4 (border 2 + header + divider). renderListInterior windows it,
+	// clips to budget, and reserves an affordance row only when actually clipped.
+	interiorHeight := m.listInteriorHeight(height)
+	interior, _, _ := m.renderListInterior(pane, width, interiorHeight, isActive)
+	lines = append(lines, interior...)
 
 	// Pad
 	for len(lines) < height {
@@ -1310,13 +1656,18 @@ func (m model) renderPreview(width, height int) string {
 		return ""
 	}
 
-	// Document list item → show document detail preview
+	// Document list item → show document detail preview. The doc-content preview
+	// reuses buildEditorContent, which for a long paper produces hundreds of
+	// lines; unlike the editor it is NOT viewport-clipped, and .Height() only
+	// pads. Clip to the box height so this preview column can never push the
+	// joined frame past the terminal. (The editor proper and the M2 read-only
+	// paper-scroll surface use the viewport and are untouched.)
 	if pane.IsDocList && item.Doc != nil {
 		schema := findSchema(pane.Node.TypeName)
 		if schema == nil {
 			return ""
 		}
-		content := m.buildDocPreview(item.Doc, schema, width)
+		content := clipContentToHeight(m.buildDocPreview(item.Doc, schema, width), height)
 		return paneBorder.Width(width).Height(height).Render(content)
 	}
 
@@ -1328,16 +1679,16 @@ func (m model) renderPreview(width, height int) string {
 
 	switch child.Type {
 	case NodeDocumentTypeList:
-		content := m.buildDocListPreview(child, width)
+		content := m.buildDocListPreview(child, width, height)
 		return paneBorder.Width(width).Height(height).Render(content)
 	case NodeList:
-		content := m.buildListPreview(child, width)
+		content := m.buildListPreview(child, width, height)
 		return paneBorder.Width(width).Height(height).Render(content)
 	case NodeDocument:
 		docs := m.ds.Query(child.TypeName, "")
 		schema := findSchema(child.TypeName)
 		if len(docs) > 0 && schema != nil {
-			content := m.buildDocPreview(&docs[0], schema, width)
+			content := clipContentToHeight(m.buildDocPreview(&docs[0], schema, width), height)
 			return paneBorder.Width(width).Height(height).Render(content)
 		}
 	}
@@ -1357,37 +1708,45 @@ func (m model) buildDocPreview(doc *Doc, schema *Schema, width int) string {
 	return m.buildEditorContent(width)
 }
 
-// buildDocListPreview renders a list of documents for a type, like the doc list pane.
-func (m model) buildDocListPreview(node *StructureNode, width int) string {
+// buildDocListPreview renders a list of documents for a type, like the doc list
+// pane. THE CORE FIX: it no longer emits an unclamped header + 2-lines-per-doc
+// (which fed an 83-doc, ~168-line body into a .Height(height) box that only pads
+// and never truncates, overflowing the terminal). It builds the same Pane the
+// focused doc-list pane uses and routes the interior through renderListInterior,
+// so the body is line-accurately clipped to the box height before the border
+// wraps it — the affordance row appears only when the list is actually clipped.
+func (m model) buildDocListPreview(node *StructureNode, width, height int) string {
 	var lines []string
 
-	// Header
+	// Header (preview headers use width-2, matching the pre-change layout).
 	icon := ""
 	if node.Icon != "" {
 		icon = node.Icon + " "
 	}
-	docs := m.ds.Query(node.TypeName, node.Filter)
-	headerText := icon + node.Title + dimStyle.Render(fmt.Sprintf(" %d", len(docs)))
+	pane := m.buildDocListPane(node)
+	headerText := icon + node.Title + dimStyle.Render(fmt.Sprintf(" %d", len(pane.Items)))
 	lines = append(lines, headerStyle.Width(width-2).Render(headerText))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
 
-	if len(docs) == 0 {
+	if len(pane.Items) == 0 {
 		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("   No documents yet"))
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
-	for _, doc := range docs {
-		dot := statusStyle(doc.Status).Render(statusIcon(doc.Status))
-		title := truncate(doc.Title, width-8)
-		lines = append(lines, fmt.Sprintf(" %s %s", dot, normalItemStyle.Render(title)))
-		lines = append(lines, fmt.Sprintf("     %s", dimStyle.Render(timeAgo(doc.UpdatedAt))))
-	}
+	// isActive=false: the preview is never the focused pane. Cursor defaults to
+	// the pane's Cursor (0 for a fresh preview), so the window starts at the top.
+	interior, _, _ := m.renderListInterior(pane, width-2, m.listInteriorHeight(height), false)
+	lines = append(lines, interior...)
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// buildListPreview renders a structure list's children as a summary.
-func (m model) buildListPreview(node *StructureNode, width int) string {
+// buildListPreview renders a structure list's children as a summary. Like
+// buildDocListPreview, it now routes the interior through renderListInterior so
+// a long structure list can never overflow the box (today these are short, so
+// this is behaviourally a no-op — but it removes the unclamped-emission
+// divergence between the two surfaces).
+func (m model) buildListPreview(node *StructureNode, width, height int) string {
 	var lines []string
 
 	icon := ""
@@ -1397,24 +1756,9 @@ func (m model) buildListPreview(node *StructureNode, width int) string {
 	lines = append(lines, headerStyle.Width(width-2).Render(icon+node.Title))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
 
-	for _, item := range node.Items {
-		if item.Type == NodeDivider {
-			lines = append(lines, dimStyle.Render("  "+strings.Repeat("─", width-6)))
-			continue
-		}
-		itemIcon := item.Icon
-		if itemIcon == "" {
-			itemIcon = " "
-		}
-		title := truncate(item.Title, width-8)
-		chevron := dimStyle.Render("›")
-		inner := fmt.Sprintf(" %s %s", itemIcon, title)
-		gap := width - 2 - lipgloss.Width(inner) - 2
-		if gap < 0 {
-			gap = 0
-		}
-		lines = append(lines, normalItemStyle.Render(inner+strings.Repeat(" ", gap)+chevron))
-	}
+	pane := m.buildListPane(node)
+	interior, _, _ := m.renderListInterior(pane, width-2, m.listInteriorHeight(height), false)
+	lines = append(lines, interior...)
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
@@ -1441,6 +1785,21 @@ func (m model) renderEmptyState(width, height int) string {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// clipContentToHeight truncates a multi-line content string to at most height
+// physical lines. Used to cap the doc-content preview column (which reuses the
+// unbounded editor content) so it can never push the joined frame past the
+// terminal. A no-op when the content already fits.
+func clipContentToHeight(content string, height int) string {
+	if height < 1 {
+		height = 1
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) <= height {
+		return content
+	}
+	return strings.Join(lines[:height], "\n")
+}
 
 func truncate(s string, max int) string {
 	if len(s) <= max {
