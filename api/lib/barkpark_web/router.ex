@@ -723,6 +723,23 @@ defmodule BarkparkWeb.Router do
     get "/tokens", ShareController, :list_tokens
     post "/tokens", ShareController, :mint_token
     delete "/tokens/:token_id", ShareController, :revoke_token
+
+    # P7 ITEM (per-document) share links — Google-Docs-style direct links to ONE
+    # paper/doc/media. Admin-only mint (raw token shown once) / list-per-item /
+    # revoke; the public reader is GET /s/:token below.
+    get "/links", ShareLinkController, :list
+    post "/links", ShareLinkController, :mint
+    delete "/links/:id", ShareLinkController, :revoke
+  end
+
+  # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound
+  # item, scoped to the LINK's own workspace (independent of section shares), and
+  # serves it: a paper renders its reader page, another doc returns published
+  # data, media serves the file. Browser pipeline for the paper HTML render.
+  scope "/", BarkparkWeb do
+    pipe_through :browser
+
+    get "/s/:token", ShareLinkController, :show
   end
 
   pipeline :media_processing_callback do
