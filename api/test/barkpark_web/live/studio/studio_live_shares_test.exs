@@ -165,4 +165,73 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       assert Sharing.shared?("keep", "default", "production", :papers)
     end
   end
+
+  # ── item (per-document) share popover (P7) ────────────────────────────────
+
+  describe "item share — Google-Docs-style per-document links" do
+    test "admin opens the popover, mints a stable link, then revokes it", %{conn: conn} do
+      {:ok, view, _html} = admin_view(conn)
+
+      # the paper Share button fires this with the item ref
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref_type" => "paper",
+        "ref_id" => "demo-paper",
+        "title" => "Demo Paper"
+      })
+
+      panel = render(view)
+      assert panel =~ "Demo Paper"
+      assert panel =~ "Create view link"
+
+      ws = Barkpark.Tenancy.get_default_workspace()
+      assert Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "demo-paper") == []
+
+      # create — a stable /s/<token> link appears
+      render_hook(view, "item-share-create", %{"access" => "read"})
+      assert render(view) =~ "/s/"
+      assert [link] = Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "demo-paper")
+
+      # revoke
+      render_hook(view, "item-share-revoke", %{"id" => link.id})
+
+      assert [%{revoked_at: revoked}] =
+               Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "demo-paper")
+
+      refute is_nil(revoked)
+    end
+
+    test "the per-paper Share button targets item-share, NOT the section modal", %{conn: conn} do
+      # Regression for the original complaint: pressing Share on a paper must open
+      # the item popover, not "Network shares".
+      {:ok, view, _html} = admin_view(conn)
+
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref_type" => "paper",
+        "ref_id" => "p"
+      })
+
+      html = render(view)
+      # the item popover is open...
+      assert html =~ "item-share-create"
+      # ...and the SECTION modal (its add form) is NOT.
+      refute html =~ ~s(phx-submit="shares-add")
+    end
+
+    test "a non-admin cannot mint an item link by pushing the event", %{conn: conn} do
+      {:ok, view, _html} = junior_view(conn)
+      ws = Barkpark.Tenancy.get_default_workspace()
+
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref_type" => "paper",
+        "ref_id" => "x"
+      })
+
+      render_hook(view, "item-share-create", %{"access" => "read"})
+
+      assert Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "x") == []
+    end
+  end
 end

@@ -194,6 +194,9 @@ defmodule BarkparkWeb.ShareLinkController do
       access: l.access,
       dataset: l.dataset,
       label: l.label,
+      # the STABLE, re-copyable link (P7 UX). Present whenever the raw token was
+      # stored; `token_hash` (the secret-at-rest digest) is never exposed.
+      url: l.token && "/s/#{l.token}",
       expires_at: l.expires_at,
       revoked_at: l.revoked_at,
       inserted_at: Map.get(l, :inserted_at)

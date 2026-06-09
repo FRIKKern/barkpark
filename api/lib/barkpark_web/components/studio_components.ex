@@ -1109,6 +1109,76 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
+  ITEM share popover (P7) — Google-Docs-style "share THIS one item" for a paper
+  or document. Distinct from `shares_modal` (which shares a whole workspace
+  SECTION): this mints a direct, stable `/s/<token>` link to the single open
+  item, with Copy + Revoke. Admin-only (the handlers re-check server-side).
+
+  `@links` is a pre-flattened list of `%{id, access, url}`.
+  """
+  attr :show, :boolean, default: false
+  attr :admin?, :boolean, default: false
+  attr :title, :string, default: "this item"
+  attr :links, :list, default: []
+  attr :error, :string, default: nil
+
+  def item_share_popover(assigns) do
+    ~H"""
+    <%= if @show do %>
+      <div class="image-picker-overlay" phx-click="item-share-close"></div>
+      <div class="image-picker item-share-modal">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Share &ldquo;<%= @title %>&rdquo;</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="item-share-close" aria-label="Close">x</button>
+        </div>
+
+        <%= if @admin? do %>
+          <div class="item-share-body">
+            <%= if @links == [] do %>
+              <p class="shares-note">No link yet — create one and anyone with it can open just this item.</p>
+            <% else %>
+              <div :for={link <- @links} class="item-share-link-row">
+                <span class={"item-share-access item-share-access-#{link.access}"}><%= String.capitalize(link.access) %></span>
+                <input type="text" readonly value={link.url} class="form-input item-share-url" onclick="this.select()" />
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  onclick={"if(navigator.clipboard){navigator.clipboard.writeText(window.location.origin + '#{link.url}')}"}
+                  title="Copy link"
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm item-share-revoke"
+                  phx-click="item-share-revoke"
+                  phx-value-id={link.id}
+                  title="Revoke this link"
+                >
+                  Revoke
+                </button>
+              </div>
+            <% end %>
+
+            <p :if={@error} class="shares-error"><%= @error %></p>
+
+            <div class="item-share-actions">
+              <button type="button" class="btn btn-primary btn-sm" phx-click="item-share-create" phx-value-access="read">
+                <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={14} /></span>
+                Create view link
+              </button>
+            </div>
+            <p class="shares-note">Anyone with a view link can open this item — no account needed. (Edit links are coming next.)</p>
+          </div>
+        <% else %>
+          <p class="shares-note" style="padding: 16px;">An admin token is required to share items.</p>
+        <% end %>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
   Reference-picker modal extracted from the legacy inline block at
   `studio_live.ex:1218-1240`. Shares the `.image-picker` overlay styling
   (deliberate — same modal chrome). Caller pre-filters candidates via

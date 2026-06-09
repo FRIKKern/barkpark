@@ -73,6 +73,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
        shares_scope_prefill: "",
        shares_prefill_surfaces: [],
        shares_error: nil,
+       # ── Item (per-document) share popover (P7) ────────────────────────
+       # Google-Docs-style "share THIS one item" — distinct from the section
+       # shares panel above. Mints a direct /s/<token> link to the open
+       # paper/doc via Barkpark.Sharing.Links (admin-only, re-checked here).
+       item_share_open: false,
+       item_share: nil,
+       item_share_links: [],
+       item_share_error: nil,
        validation_errors: %{},
        # ── Cross-field validations (Task barkpark-cgn) ──────────────────
        # Populated after every autosave by `Barkpark.Content.CrossValidator
@@ -1137,6 +1145,73 @@ defmodule BarkparkWeb.Studio.StudioLive do
       end
     else
       {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+    end
+  end
+
+  # ── Item (per-document) share popover (P7) ───────────────────────────────
+  # Google-Docs-style direct links to ONE open paper/doc, minted via
+  # Barkpark.Sharing.Links. Same admin gate as the section panel — re-checked
+  # in every handler, never trusting the (hidden-for-non-admins) button.
+
+  def handle_event("item-share-open", %{"kind" => kind} = params, socket) do
+    if socket.assigns[:shares_admin?] do
+      item = %{
+        kind: kind,
+        ref_type: params["ref_type"],
+        # read links resolve the PUBLISHED id — strip a drafts. prefix.
+        ref_id: params["ref_id"] |> to_string() |> String.replace_prefix("drafts.", ""),
+        title: params["title"] || params["ref_id"]
+      }
+
+      {:noreply,
+       assign(socket,
+         item_share_open: true,
+         item_share: item,
+         item_share_error: nil,
+         item_share_links: load_item_links(socket, item)
+       )}
+    else
+      {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
+    end
+  end
+
+  def handle_event("item-share-close", _params, socket) do
+    {:noreply, assign(socket, item_share_open: false, item_share_error: nil)}
+  end
+
+  def handle_event("item-share-create", %{"access" => access}, socket) do
+    item = socket.assigns[:item_share]
+
+    cond do
+      not socket.assigns[:shares_admin?] ->
+        {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
+
+      is_nil(item) or is_nil(socket.assigns[:current_workspace]) ->
+        {:noreply, assign(socket, item_share_error: "No item / workspace in context.")}
+
+      true ->
+        case Barkpark.Sharing.Links.create(item_link_attrs(socket, item, access)) do
+          {:ok, _} ->
+            {:noreply,
+             assign(socket,
+               item_share_links: load_item_links(socket, item),
+               item_share_error: nil
+             )}
+
+          {:error, _} ->
+            {:noreply, assign(socket, item_share_error: "Could not create the link.")}
+        end
+    end
+  end
+
+  def handle_event("item-share-revoke", %{"id" => id}, socket) do
+    if socket.assigns[:shares_admin?] do
+      Barkpark.Sharing.Links.revoke(id)
+
+      {:noreply,
+       assign(socket, item_share_links: load_item_links(socket, socket.assigns[:item_share]))}
+    else
+      {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
     end
   end
 
@@ -3634,16 +3709,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
           >
             <.icon name="external-link" size={14} /> Open standalone
           </a>
-          <%!-- Scope-level share: opens the panel with the papers surface
-                pre-selected for THIS workspace/project/dataset (P6b). Admin-only;
-                the handler re-checks admin server-side. --%>
+          <%!-- ITEM share (P7): a direct Google-Docs-style link to THIS paper,
+                not the whole papers section. Admin-only; the handler re-checks
+                admin server-side. --%>
           <button
             :if={@shares_admin?}
             type="button"
             class="btn btn-ghost btn-sm"
-            phx-click="shares-open"
-            phx-value-surface="papers"
-            title="Share this workspace's papers"
+            phx-click="item-share-open"
+            phx-value-kind="doc"
+            phx-value-ref-type="paper"
+            phx-value-ref-id={@slug}
+            phx-value-title={@title}
+            title="Share this paper (direct link)"
             data-test-id="paper-share"
           >
             <.icon name="share-2" size={14} /> Share
@@ -3994,6 +4072,32 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp scope_slug(%{slug: slug}, _default) when is_binary(slug), do: slug
   defp scope_slug(_, default), do: default
+
+  # The open item's links, flattened to {id, access, url} for the popover.
+  defp load_item_links(socket, %{kind: kind, ref_type: ref_type, ref_id: ref_id}) do
+    case socket.assigns[:current_workspace] do
+      %{id: ws_id} ->
+        Barkpark.Sharing.Links.list_for(ws_id, kind, ref_type, ref_id)
+        |> Enum.map(fn l -> %{id: l.id, access: l.access, url: l.token && "/s/#{l.token}"} end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp load_item_links(_socket, _), do: []
+
+  defp item_link_attrs(socket, item, access) do
+    %{
+      workspace_id: socket.assigns.current_workspace.id,
+      project_id: socket.assigns[:current_project] && socket.assigns.current_project.id,
+      dataset: socket.assigns[:dataset] || "production",
+      kind: item.kind,
+      ref_type: item.ref_type,
+      ref_id: item.ref_id,
+      access: access
+    }
+  end
 
   # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
   # carries a hidden `id` and submits its changed field(s); the handler maps
@@ -4638,6 +4742,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
         prefill_surfaces={@shares_prefill_surfaces}
         rows={@shares_rows}
         error={@shares_error}
+      />
+
+      <.item_share_popover
+        show={@item_share_open}
+        admin?={@shares_admin?}
+        title={(@item_share && @item_share.title) || "this item"}
+        links={@item_share_links}
+        error={@item_share_error}
       />
     </.pane_layout>
 

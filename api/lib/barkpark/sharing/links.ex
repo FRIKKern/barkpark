@@ -43,6 +43,7 @@ defmodule Barkpark.Sharing.Links do
       attrs
       |> Map.drop([:ttl, "ttl"])
       |> Map.put(:token_hash, hash_token(raw))
+      |> Map.put(:token, raw)
       |> Map.put(:expires_at, expires_at)
 
     %ShareLink{}

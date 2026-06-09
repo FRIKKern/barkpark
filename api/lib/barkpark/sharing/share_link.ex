@@ -20,6 +20,10 @@ defmodule Barkpark.Sharing.ShareLink do
 
   schema "share_links" do
     field :token_hash, :string
+    # P7 UX: the raw token, stored so the link is stable + re-copyable (see the
+    # add_token_to_share_links migration for the tradeoff). NOT a secret beyond
+    # the content it already grants in a self-hosted/LAN context.
+    field :token, :string
     field :dataset, :string, default: "production"
     field :kind, :string
     field :ref_type, :string
@@ -37,6 +41,7 @@ defmodule Barkpark.Sharing.ShareLink do
 
   @fields [
     :token_hash,
+    :token,
     :workspace_id,
     :project_id,
     :dataset,
