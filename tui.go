@@ -541,6 +541,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		default:
 			var cmd tea.Cmd
 			m.textInput, cmd = m.textInput.Update(msg)
+			// Re-render so the typed text appears LIVE in the field box. Without
+			// this the keystroke is captured (Enter would commit it) but the
+			// viewport is never rebuilt, so you can't see what you're typing.
+			m.refreshViewport()
 			return m, cmd
 		}
 		m.refreshViewport()
