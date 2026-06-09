@@ -63,6 +63,29 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ResolveProject
   end
 
+  # Public-share variant of :scoped_browser for the gated scoped paper reader
+  # at /w/:ws/p/:project/papers/:slug (P1b). RequireShareScope runs BEFORE the
+  # resolvers: when the scope is shared for the :papers surface (via
+  # Barkpark.Sharing) it pre-resolves the workspace+project and flags
+  # :share_public, so ResolveWorkspace SKIPS its membership gate (anonymous
+  # read of a shared scope). When the scope is NOT shared — the default
+  # everywhere — RequireShareScope is a pure no-op and ResolveWorkspace gates
+  # membership byte-identically to a normal scoped request. OptionalSessionToken
+  # still runs so a signed-in member reaches their own non-shared paper via the
+  # membership gate exactly as on :scoped_browser.
+  pipeline :shared_paper_browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+    plug BarkparkWeb.Plugs.OptionalSessionToken
+    plug BarkparkWeb.Plugs.RequireShareScope, surface: :papers
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
+  end
+
   pipeline :api_unlimited do
     plug :accepts, ["json"]
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
@@ -660,6 +683,20 @@ defmodule BarkparkWeb.Router do
     post "/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
     patch "/:dataset/:id", V1.MediaController, :update
     delete "/:dataset/:id", V1.MediaController, :delete
+  end
+
+  # ── Gated scoped paper reader (P1b) ─────────────────────────────────────
+  # Read-only HTML paper at /w/:ws/p/:project/papers/:slug, scoped to the
+  # resolved workspace/project. Anonymous access ONLY when that scope is shared
+  # for the :papers surface (Barkpark.Sharing); otherwise the :shared_paper_browser
+  # pipeline's membership gate (ResolveWorkspace) denies exactly as a normal
+  # scoped request. Placed BEFORE the broad scoped-data block — the `/papers/:slug`
+  # path doesn't collide with any of the `/v1/…` scoped routes, but keeping the
+  # dedicated-pipeline route ahead of the catch-alls keeps intent obvious.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through :shared_paper_browser
+
+    get "/papers/:slug", ScopedPaperController, :show
   end
 
   # ── Scoped tenancy routes ───────────────────────────────────────────────
