@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: js-docs-site | budget: 100tok -->
 # @barkpark/docs
 
 Barkpark documentation site — Next.js 15 + Fumadocs v14.
@@ -5,23 +6,13 @@ Barkpark documentation site — Next.js 15 + Fumadocs v14.
 ## Quickstart
 
 ```bash
-pnpm install
 pnpm --filter @barkpark/docs dev
 ```
 
 Open <http://localhost:3000>.
 
-## Production build
+## Information architecture (P0)
 
-```bash
-pnpm --filter @barkpark/docs build
-```
+`getting-started`, `concepts`, `reference/errors` are the highest-priority pages. Content lives in `content/docs/`.
 
-## Content
-
-Content lives in `content/docs/`. The information architecture (Getting Started,
-Concepts, Studio, Content Modeling, APIs and SDKs, Framework Guides, Task Guides,
-Reference, Templates) spans the doc set.
-
-The P0 pages (`getting-started`, `concepts`, `reference/errors`) are authored
-multi-section MDX.
+CI-generated API reference lands at `docs-site/reference/<pkg>/` (Track A consumer).

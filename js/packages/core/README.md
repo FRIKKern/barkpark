@@ -1,7 +1,6 @@
+<!-- doc-tier: human | canonical-for: core-package | budget: 60tok -->
 # @barkpark/core
 
-Runtime-agnostic HTTP client for the Barkpark Phoenix API. Zero runtime deps, fetch-only transport, works in Node, Bun, Deno, edge runtimes, and browsers.
+Runtime-agnostic HTTP client for the Barkpark Phoenix API. Zero runtime deps, fetch-only transport.
 
-Provides the client factory, filter-builder, fluent patch, transactions, `listen()`, and the full error taxonomy.
-
-See `docs/adr/` for architectural decision records.
+See `docs/decisions/0001-sdk-envelope.md` for the envelope contract (Phoenix canonical, SDK adapts).

@@ -1,126 +1,50 @@
+<!-- doc-tier: human | canonical-for: website-starter-template | budget: 500tok -->
 # {{projectName}}
 
-A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/barkpark) —
-a headless CMS with a Phoenix API, PostgreSQL backend, and Studio UI.
+A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/barkpark) — a headless CMS with a Phoenix API, PostgreSQL backend, and Studio UI.
 
 ## What's inside
 
 - Next.js 15 App Router, React 19, TypeScript
 - `@barkpark/nextjs` for server fetching + Server Actions
 - `@barkpark/react` for `PortableText` rendering
-- Tailwind CSS for styling
+- Tailwind CSS
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
-- Sample schemas (`page`, `post`, `author`) + a seed script
+- Sample schemas (`page`, `post`, `author`) + seed script
 
-## Getting started
-
-### 1. Start the API + database
+## Quick start
 
 ```sh
 cp .env.example .env.local
-docker compose up -d
-```
-
-This launches:
-
-- **Phoenix API** on `http://localhost:4000`
-- **PostgreSQL 14+ (tested 17)** on `localhost:5432`
-
-> To run the API from a local checkout of the barkpark repo instead of the
-> published image, copy `docker-compose.override.yml.example` to
-> `docker-compose.override.yml` and run `docker compose up -d --build`.
-
-### 2. Install dependencies
-
-```sh
+docker compose up -d          # Phoenix API on :4000, Postgres on :5432
 {{pmCommand}} install
+{{pmCommand}} codegen         # generate TypeScript types from schemas
+{{pmCommand}} seed            # 2 authors, 3 pages, 3 posts — all published
+{{pmCommand}} dev             # Next.js on :3000
 ```
 
-### 3. Generate types
-
-```sh
-{{pmCommand}} codegen
-```
-
-This runs the Barkpark CLI to generate TypeScript types from your schemas.
-
-### 4. Seed sample content
-
-```sh
-{{pmCommand}} seed
-```
-
-Creates 2 authors, 3 pages (home / about / pricing), and 3 posts — all published.
-
-### 5. Run the dev server
-
-```sh
-{{pmCommand}} dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
+Open http://localhost:3000 · Studio: http://localhost:4000/studio
 
 ## Auth
 
-The default development token is `barkpark-dev-token`. It has read + write + admin
-scopes and **must not be used in production** — rotate it before deploying.
-
-Set it via:
+Default dev token: `barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See `docs/auth.md` for the rotation rule.
 
 ```sh
 BARKPARK_TOKEN=barkpark-dev-token
 BARKPARK_SERVER_TOKEN=barkpark-dev-token
 ```
 
-## Project layout
+## Realtime revalidation
 
+Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is `v1=<hex>` over the raw request body. Tags follow `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`. See `docs/contracts/webhook-realtime.md` for the full wire contract.
+
+```sh
+BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
 ```
-app/
-  layout.tsx              root layout with top nav + HostedDemoBanner
-  page.tsx                home: hero + posts list
-  about/page.tsx          fetches page document "about"
-  pricing/page.tsx        fetches page document "pricing"
-  posts/[slug]/page.tsx   post detail with PortableText rendering
-  contact/page.tsx        contact form using Server Actions
-  contact/actions.ts      server action wrapping defineActions().createDoc
-  hosted-demo-banner.tsx  banner shown only on barkpark.dev hosted demo
-lib/
-  barkpark.ts             typed fetch helpers around /w/<ws>/p/<proj>/v1/data/query + /doc
-schemas/
-  page.ts post.ts author.ts
-seeds/
-  seed.ts                 POST /w/<ws>/p/<proj>/v1/data/mutate/production with Bearer token
-barkpark.config.ts        createClient() wiring from env (projectUrl, workspace, project, dataset)
-docker-compose.yml        Phoenix API + Postgres
-next.config.mjs tsconfig.json tailwind.config.ts postcss.config.js
-```
-
-## Studio
-
-Content editing happens in the Barkpark Studio that ships with the API:
-
-- http://localhost:4000/studio
 
 ## Deploy
 
 See the [Barkpark deployment guide](https://github.com/barkpark/barkpark#deploy-to-server).
-
-## Realtime revalidation
-
-This app ships with a Barkpark webhook handler at `app/api/barkpark/webhook/route.ts`.
-
-1. Set `BARKPARK_WEBHOOK_SECRET` in your environment (Vercel/Netlify/etc.):
-   ```bash
-   BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
-   ```
-2. In Barkpark Studio, register a webhook pointing at:
-   ```
-   https://<your-app>/api/barkpark/webhook
-   ```
-   with the same secret. HMAC signing is `v1=<hex>` over the raw request body.
-3. When a doc is created, published, unpublished, updated, or deleted in Studio, the handler calls `revalidateTag` for the canonical tags `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`, invalidating SDK-issued `barkparkFetch` caches automatically.
-
-See `docs/ops/realtime-webhook-setup.md` at the repo root for the full flow.
 
 ## License
 

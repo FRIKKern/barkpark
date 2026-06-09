@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: js-security-policy | budget: 150tok -->
 # Security Policy
 
 ## Reporting a Vulnerability

@@ -1,3 +1,4 @@
+<!-- doc-tier: cold | canonical-for: paperflow-cutover-legacy | budget: 1200tok -->
 # Barkpark as paperflow's Task Store — Integration & Cutover (W7)
 
 > Tested 2026-05-28 on Elixir 1.19.5 / Postgres 17.9 / macOS — the W7 flip, executed and verified live.

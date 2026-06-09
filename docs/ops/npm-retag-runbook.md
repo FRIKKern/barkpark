@@ -1,3 +1,5 @@
+<!-- doc-tier: cold | canonical-for: npm-retag-runbook-absorbed | budget: 40tok -->
+<!-- Absorbed into docs/ops/npm-rollback-playbook.md §Mechanism C — do not load this file -->
 # npm dist-tag Retag Runbook
 
 > Operator runbook for the `retag.yml` workflow. Use this AFTER the PR introducing

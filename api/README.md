@@ -1,9 +1,8 @@
+<!-- doc-tier: human | canonical-for: api-signpost | budget: 150tok -->
 # Barkpark — Phoenix API
 
-The Elixir/Phoenix backend for Barkpark — all CRUD, real-time, and the LiveView Studio. Runs on `:4000` in dev; the dev auth token is `barkpark-dev-token` (`Authorization: Bearer barkpark-dev-token`). See the guides:
+The Elixir/Phoenix backend: all CRUD, real-time, plugins, and the LiveView Studio. Dev: `mix deps.get && mix ecto.setup && mix phx.server` → [localhost:4000/studio](http://localhost:4000/studio).
 
-- [`../docs/SETUP.md`](../docs/SETUP.md) — standalone setup (deps, DB, running locally)
-- [`../docs/SETUP-WITH-PAPERFLOW.md`](../docs/SETUP-WITH-PAPERFLOW.md) — paperflow integration
-- [`CLAUDE.md`](CLAUDE.md) — architecture, key files, conventions
-
-Quick start: `mix deps.get && mix ecto.setup && mix phx.server`, then open [`localhost:4000/studio`](http://localhost:4000/studio).
+- [`CLAUDE.md`](CLAUDE.md) — surface card: key files, Bulldocs, schema registration, PubSub
+- [`../docs/api-v1.md`](../docs/api-v1.md) — HTTP API contract
+- [`../docs/setup/SETUP.md`](../docs/setup/SETUP.md) — full local setup (deps, DB, paperflow cutover lives alongside)

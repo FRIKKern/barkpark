@@ -1,3 +1,4 @@
+<!-- doc-tier: cold | canonical-for: studio-user-guide-legacy | budget: 1200tok -->
 # Barkpark — operator's guide
 
 For people who edit content in Barkpark Studio (not for developers). If you are setting up Barkpark, see `README.md` and `docs/plugins/INSTALL.md`. If you are integrating Bokbasen, see `docs/ops/bokbasen-go-live.md`.

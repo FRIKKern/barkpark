@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: codegen-package | budget: 200tok -->
 # @barkpark/codegen
 
 Schema-path helpers for codegen tooling (preview.0). Exports `defineConfig` (config helper) and `buildSchemaPath`, and ships a `barkpark` CLI whose `schema-path <dataset>` subcommand **prints** the schema-introspection path. It does NOT yet fetch the schema endpoint, does NOT emit `barkpark.types.ts`, and does NOT produce a `typedClient` — that helper is exported from `@barkpark/core` (`core/src/index.ts:63`).

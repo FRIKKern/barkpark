@@ -1,121 +1,68 @@
-# Barkpark — Phoenix Backend
+<!-- doc-tier: agent | canonical-for: api-surface | budget: 1600tok -->
+# api/ — Phoenix API + LiveView Studio
 
-## What this is
-
-Elixir/Phoenix API backend for Barkpark. Serves the Go TUI client.
-
-## Running
-
-```bash
-mix phx.server          # starts on :4000
-mix ecto.reset          # drop, create, migrate, seed
-mix run priv/repo/seeds.exs  # just reseed
-```
+Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.server` on `:4000`. Deep dives live in `docs/cards/` (studio · plugins · onix-bokbasen · search-media · cli · tui · js-sdk) — load via the root CLAUDE.md routing table. Plugin contract canon: `lib/barkpark/plugin.ex` @moduledoc.
 
 ## Key files
 
 | File | Purpose |
-|------|---------|
-| `lib/barkpark/content.ex` | Content context — all document + schema CRUD |
-| `lib/barkpark/content/document.ex` | Document Ecto schema |
-| `lib/barkpark/content/schema_definition.ex` | SchemaDefinition Ecto schema |
-| `lib/barkpark/auth.ex` | Token auth context |
-| `lib/barkpark_web/router.ex` | All routes |
-| `lib/barkpark_web/controllers/mutate_controller.ex` | Mutation endpoint (create/patch/publish/unpublish/delete) |
-| `lib/barkpark_web/controllers/query_controller.ex` | Public read endpoint with perspectives |
-| `lib/barkpark_web/controllers/schema_controller.ex` | Schema CRUD |
-| `lib/barkpark_web/controllers/legacy_controller.ex` | Go TUI backward compat |
-| `lib/barkpark_web/controllers/listen_controller.ex` | SSE real-time stream |
-| `lib/barkpark/tasks.ex` | W7 task substrate — everything is a `task` doc (a root task is a "goal", ordered siblings are "phases", nesting via `content.parent_id`), claim/close/relabel, `mutation_events` emit |
-| `lib/barkpark/tenancy.ex` | W2 workspace/project tenancy context |
-| `lib/barkpark/content/scope.ex` | `Barkpark.Content.Scope` — query-level tenant WHERE-clause scoping (`scope_to_workspace/3`); nil workspace fails CLOSED |
-| `lib/barkpark_web/plugs/scope_helpers.ex` | `BarkparkWeb.ScopeHelpers` — HTTP/LiveView scope extractor (`scope_opts/1`) every controller calls |
-| `lib/barkpark_web/controllers/tasks_controller.ex` | `/v1/tasks` — task index/ready/claim/edges; `GET /v1/tasks?parent=<doc_id>` lists a task's direct child tasks (its "rail") chronologically; `GET /v1/tasks/:doc_id` returns those inline as `children` (+ `child_count`); `POST /v1/tasks/:doc_id/papers {add,remove}` edits `content.papers[]`. Controller stays in core; the *routes* are owned by the `tasks` plugin (`auth: :token_root`). |
-| `lib/barkpark/plugins/tasks.ex` | **Tasks plugin** — `Barkpark.Plugins.Tasks` (`priv/plugins/tasks/plugin.json`). `register_schemas/1` declares the `task` type (via `Barkpark.Tasks.schema_definitions/1`); `register_routes/1` mounts the ten `/v1/tasks` routes (`auth: :token_root`); `oban_crontab/0` schedules the TTL sweep + compactor cron; `cli_commands/0` contributes the five `task.*` CLI verbs (`source: "plugin:tasks"`). Core `Barkpark.Tasks.*` machinery stays as reusable utilities. |
-| `lib/barkpark/plugins/bulldocs.ex` | **Bulldocs plugin** — the paper/document surface as a plugin. `register_schemas/1` declares the `paper` type; `register_routes/1` mounts the reader (`/papers/:slug`, `:public_root`) + ingest/intents API (`/v1/plugins/bulldocs/*`, `:ingest`). Reuses core modules as utilities — see "Bulldocs plugin" below. |
-| `priv/repo/seeds.exs` | Seed data — 8 core schema rows + ~27 docs + dev token; the `paper`, `task`, and other plugin schemas (e.g. `book`) auto-register via `Bootstrap.register_all_schemas/0`. See the seed's `IO.puts` summary lines (~:229/:545/:586/:601). |
+|---|---|
+| `lib/barkpark/content.ex` | Document + schema CRUD, publish/unpublish, perspectives, PubSub broadcasts |
+| `lib/barkpark/plugin.ex` | `Barkpark.Plugin` behaviour — CANONICAL plugin contract (@moduledoc) |
+| `lib/barkpark/plugins/` | Registry, resolver chain, Bootstrap, `tasks.ex`, `bulldocs.ex`, `onixedit/` |
+| `lib/barkpark/plugins/bulldocs.ex` | Bulldocs plugin — papers reader + ingest wiring (§Bulldocs below) |
+| `lib/barkpark/plugins/onixedit/export/*.ex` | ONIX 3.0 export submodules: `descriptive_detail`, `publishing_detail`, `collateral_detail`, `product_supply`, `header`, `message`, `codelists`, `validator` |
+| `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
+| `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:ws/p/:proj` mirror (~:672) |
+| `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
+| `lib/barkpark_web/live/studio/document_edit_live.ex`, `document_list_live.ex` | Editor pane / list pane LiveViews |
+| `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **NOTE: under `studio/`, NOT `live/studio/`** |
+| `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
+| `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |
+| `priv/repo/seeds.exs` | 8 core schemas + ~27 docs + dev token; plugin schemas via `Bootstrap.register_all_schemas/0` |
 
-Tenancy note: alongside the flat routes there is a scoped route family
-`/w/:workspace_slug/p/:project_slug/*` (router ~:672) mirroring the flat
-endpoints under explicit workspace/project slugs.
+## Bulldocs (the Papers surface)
 
-## Bulldocs plugin (the Papers surface)
+The built-in "Papers"/"paperflow" feature is now the **Bulldocs plugin**. Bulldocs is the plugin/producer brand; a **paper** is the artifact — persisted `type` stays `"paper"`, reader URL stays `/papers/:slug` (no data migration, no public-URL break). The split is deliberate: **core keeps the reusable machinery, the plugin is thin wiring.**
 
-What used to be the built-in "Papers"/"paperflow" feature is now the
-**Bulldocs plugin** (`lib/barkpark/plugins/bulldocs.ex`,
-`priv/plugins/bulldocs/`). **Bulldocs is the plugin/producer brand; a "paper" is
-the artifact it produces** — the persisted `type` is still `"paper"` and the
-reader URL is still `/papers/:slug` (no data migration, no public-URL break).
+- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
+- **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
+- **Plugin module:** `register_schemas/1` (the `paper` schema) + `register_routes/1` — reader on the `:public_root` bucket, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Any plugin needing a public reader page or token-gated ingest API reuses these buckets.
 
-The split is deliberate: **core stays the reusable machinery; Bulldocs is the
-thin wiring layer.**
+**Alias-drop gate:** `/v1/paperflow/*` remains an alias of `/v1/plugins/bulldocs/*` until paperflow's `event-on-save.sh` producers repoint — externally gated; do NOT drop unilaterally. `:paperflow_ingest_token` config / `PAPERFLOW_INGEST_TOKEN` env are unchanged. Tracked in `docs/decisions/deferred.md`.
 
-- **Core utilities (stay in `Barkpark.*` / `BarkparkWeb.*`):**
-  `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis}` (the block
-  engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`,
-  `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4` (generic
-  block-document write/stream paths);
-  the `BarkparkWeb.Plugs.RequireIngestToken` plug.
-- **Bulldocs-owned web/event modules** (live under `BarkparkWeb.Bulldocs*` /
-  `Barkpark.Plugins.Bulldocs.*`): `BarkparkWeb.BulldocsLive` (the reader
-  LiveView); `BulldocsIngestController` / `BulldocsIntentsController`;
-  `Barkpark.Plugins.Bulldocs.Events`; `layouts/bulldocs.html.heex`.
-- **Bulldocs plugin (`Barkpark.Plugins.Bulldocs`):** `register_schemas/1` (the
-  `paper` schema) + `register_routes/1` (reader via `:public_root`, ingest via
-  `:ingest`), pointing at those core modules.
+## Adding a document type: plugin-declared vs ad-hoc
 
-The plugin route highway grew two buckets to host this (see
-`BarkparkWeb.Router.Plugins`): **`:ingest`** (controller routes behind the
-shared-secret `:ingest` pipeline, under `/v1/plugins/<slug>`) and
-**`:public_root`** (a public LiveView at the host top-level scope with its own
-full-document `root_layout:`, no studio chrome). Any future plugin that needs a
-public reader page or a token-gated ingest API reuses these.
+Schemas are tenant-scoped (`workspace_id`/`project_id`; docs also carry `dataset_id`). Scoped reads filter `WHERE dataset_id = <id>` with NO NULL-fallback — a NULL-scope row is invisible.
 
-Back-compat: `/v1/paperflow/*` is kept as an alias of the canonical
-`/v1/plugins/bulldocs/*` ingest routes until producers repoint; the
-`:paperflow_ingest_token` config key / `PAPERFLOW_INGEST_TOKEN` env var are
-unchanged.
+| | Plugin-declared (preferred) | Ad-hoc (fallback) |
+|---|---|---|
+| When | the type belongs to a plugin's domain | one-off / user content type |
+| How | add to the plugin's `register_schemas/1` | `POST /v1/schemas/production` (admin auth) |
+| Registration | auto on every boot via `Bootstrap.register_all_schemas/0` (also seeds.exs); idempotent on `(name, dataset)` | endpoint stamps tenant from request scope |
+| Trap | never reintroduce the legacy `mix run -e "...register_schemas..."` workaround | never hand-insert rows with NULL scope |
 
-## Draft/Published model
+TUI picks up new schemas on restart; add to `structure.go` for TUI navigation.
 
-Documents use Sanity's `drafts.` prefix convention:
-- `doc_id = "p1"` is published
-- `doc_id = "drafts.p1"` is a draft
-- Creating always makes `drafts.{id}`
-- Publishing copies draft to published and deletes draft
-- See `Content.publish_document/3`, `Content.unpublish_document/3`, `Content.discard_draft/3`
+## Dev constants
 
-## Schema visibility
+Token `barkpark-dev-token` (all permissions) — `Authorization: Bearer barkpark-dev-token`. SHA256-hashed in `api_tokens` (`ApiToken.hash_token/1`). Rotate before any prod use — see `docs/auth.md`.
 
-`schema_definitions.visibility` is `"public"` or `"private"`.
-- Public: accessible via `/v1/data/query/` without auth
-- Private: returns 404 on public API, requires auth token
+## Document shape + draft/published
 
-## Auth
+```json
+{"_id":"p1","_type":"post","_draft":false,"_publishedId":"p1",
+ "title":"My Post","status":"published","content":{"author":"Knut"},
+ "_createdAt":"…","_updatedAt":"…"}
+```
 
-Dev token: `barkpark-dev-token` (all permissions)
-Header: `Authorization: Bearer barkpark-dev-token`
+Sanity's `drafts.` prefix convention: create → always `drafts.{id}`; publish → copies draft to `{id}`, deletes draft; unpublish → moves back to `drafts.{id}`. See `Content.publish_document/3`, `unpublish_document/3`, `discard_draft/3`. Perspectives: `published` (default public), `drafts` (Studio/TUI), `raw` (everything). Schema `visibility`: `"public"` = anonymous reads; `"private"` = 404 on public API, token required.
 
-Tokens are SHA256 hashed in the DB. See `ApiToken.hash_token/1`.
+## PubSub topics
 
-## Adding a new document type
+After every mutation `Content` broadcasts (content.ex ~:2153/:2172):
 
-Schemas are now **tenant-scoped** — every schema row is stamped with `workspace_id`/`project_id` (and documents additionally carry `dataset_id`). Scoped reads filter `WHERE dataset_id = <id>` with NO NULL-fallback, so a schema or doc inserted without a tenant lands invisible to scoped reads (the NULL-`dataset_id` trap). Pick the path that fits the type:
+- `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
+- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only when the doc carries a `workspace_id`)
 
-1. **Plugin-declared type (preferred).** Add the type to a plugin's `register_schemas/1` callback. It auto-registers on every server boot via `Barkpark.Plugins.Bootstrap.register_all_schemas/0` (also called by `seeds.exs`), correctly scoped, idempotent on `(name, dataset)`. No manual POST needed. See `docs/plugins/INSTALL.md`.
-2. **Ad-hoc type (fallback).** POST to `/v1/schemas/production` with admin auth. The endpoint stamps the tenant from the request scope — do not hand-insert rows with NULL scope, or the type is invisible to scoped reads. Seeded schemas go through `stamp_schema_scope` in `seeds.exs`.
-3. The Go TUI picks up new schemas on next restart (schemas loaded at startup).
-4. To make it appear in the TUI navigation, add it to `structure.go` in sanity-tui.
-
-## PubSub
-
-After every mutation, `Content` broadcasts to two topics (see `content.ex` ~:2153/:2172):
-- `"documents:#{dataset}"` — the global per-dataset stream (untouched legacy topic).
-- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream, broadcast only when the doc carries a `workspace_id`, so a subscriber can watch one workspace without filtering the global stream.
-
-The `/v1/data/listen/:dataset` endpoint streams these as SSE events.
-
-Task mutations (W7) emit `mutation_events` rows of kind `task.claimed` /
-`task.closed` / `task.mutated` / `task.relabeled` (`tasks.ex`), `task.lease_expired`
-(`tasks/ttl_sweeper.ex`), and `task.compacted` / `task.compaction_restored`
-(`tasks/compactor.ex`).
+`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows: `task.claimed/closed/mutated/relabeled` (`tasks.ex`), `task.lease_expired` (`tasks/ttl_sweeper.ex`), `task.compacted/compaction_restored` (`tasks/compactor.ex`).

@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: nextjs-query-package | budget: 100tok -->
 # @barkpark/nextjs-query
 
 **1.1 roadmap — npm name reserved. Deferred past 1.0.**

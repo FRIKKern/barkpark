@@ -1,6 +1,5 @@
+<!-- doc-tier: human | canonical-for: js-contributing | budget: 800tok -->
 # Contributing to Barkpark JS
-
-Thanks for helping build Barkpark. This guide covers the essentials.
 
 ## Workflow
 
@@ -18,7 +17,7 @@ pnpm build
 
 Requires Node 20+ and pnpm 9+.
 
-## How to add a changeset
+## Changesets
 
 Every PR that touches `packages/**` must include a changeset:
 
@@ -26,20 +25,19 @@ Every PR that touches `packages/**` must include a changeset:
 pnpm changeset
 ```
 
-Follow the prompts, then commit the generated `.changeset/*.md` file with your PR.
-CI's `changeset-check` job blocks merges that touch `packages/**` without one.
+Follow the prompts, then commit the generated `.changeset/*.md` file. CI's `changeset-check` job blocks merges that touch `packages/**` without one.
 
-## How to run tests
+## Tests
 
 ```bash
 pnpm test                              # all projects
 pnpm test --project=node               # single package (core, node env)
 pnpm test --project=core-workerd       # workerd parity
 pnpm test --project=react-browser      # DOM tests
-pnpm --filter @barkpark/core test:all   # core: node + workerd + browser
+pnpm --filter @barkpark/core test:all  # core: node + workerd + browser
 ```
 
-## Bundle budgets
+## Bundle budget
 
 ```bash
 pnpm size
@@ -47,15 +45,10 @@ pnpm size
 
 CI fails on > 2% regression.
 
-## ADRs
+## ADR amendment rule
 
-Architecture Decision Records live in `docs/adr/` (with backend ADRs in
-`api/docs/adr/`). Any change touching
-the **Decision** section of a locked ADR requires a follow-up amendment ADR.
+Architecture Decision Records live in `docs/adr/` (backend ADRs: `api/docs/adr/`). Any change touching the **Decision** section of a locked ADR requires a follow-up amendment ADR — not an in-place edit.
 
 ## No `node:` imports
 
-The `@barkpark/core` package and `@barkpark/nextjs` edge subpaths
-(`client`, `server`, `webhook`, `draft-mode`) must NOT import from `node:*`
-built-ins. This is enforced by `scripts/check-no-node-imports.sh` and runs
-in CI on every PR.
+`@barkpark/core` and `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`, `draft-mode`) must NOT import from `node:*` built-ins. Enforced by `scripts/check-no-node-imports.sh` in CI on every PR.

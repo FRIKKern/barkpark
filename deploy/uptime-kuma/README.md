@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: uptime-kuma-setup | budget: 800tok -->
 # Uptime Kuma — Barkpark hosted-demo status board
 
 Self-hosted status board colocated on the cax11 VPS (same host as

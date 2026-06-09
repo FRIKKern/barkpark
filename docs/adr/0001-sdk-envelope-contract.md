@@ -1,3 +1,5 @@
+<!-- doc-tier: cold | canonical-for: adr-0001-full-record | budget: 300tok -->
+<!-- Compressed canonical: docs/decisions/0001-sdk-envelope.md -->
 # ADR 0001 — SDK envelope contract: flat Phoenix shape
 
 **Status:** Accepted

@@ -1,13 +1,9 @@
-# Barkpark — Agent Guide
+<!-- doc-tier: agent | canonical-for: repo-router | budget: 2500tok -->
+# Barkpark — Router
 
-> Everything an AI agent needs to work with this repo without making mistakes.
+## Identity
 
-## What this is
-
-A headless CMS with three interfaces:
-- **Go TUI** (root) — terminal Studio client, connects to the API
-- **Phoenix API** (`api/`) — Elixir backend, PostgreSQL, all CRUD + real-time
-- **Web Studio** (`api/` LiveView) — browser UI at `/studio`, multi-pane like Sanity
+Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour (OnixEdit, Bulldocs, Tasks, Media, Frt) — with all plugins off, Barkpark still works. Prod runs on Hetzner ARM64.
 
 ## Golden Rules
 
@@ -19,217 +15,45 @@ A headless CMS with three interfaces:
 6. **ALWAYS test after deploy.** At minimum: `curl http://localhost:4000/api/schemas`
 7. **ALWAYS use `make rebuild` or `make deploy`** on the server. Never raw `mix compile`.
 
-## Production Server
+## Routing table
 
-- **IP:** 89.167.28.206
-- **Arch:** ARM64 (aarch64) — Hetzner cax11
-- **OS:** Ubuntu 22.04
-- **App dir:** /opt/barkpark
-- **Caddy:** reverse proxy on port 80 → localhost:4000 (Caddyfile at /etc/caddy/Caddyfile)
-- **URLs:**
-  - http://89.167.28.206/studio (web Studio)
-  - http://89.167.28.206/api/documents/post (API)
-  - http://89.167.28.206:4000 (direct Phoenix)
-- **Erlang/Elixir:** via ASDF (not system packages — no ARM support in Erlang Solutions)
-- **Go:** /usr/local/go/bin/go (official ARM64 binary)
-- **Env file:** /opt/barkpark/.env (DATABASE_URL, SECRET_KEY_BASE)
-- **Service:** systemd `barkpark.service`
-- **Start script:** `api/start.sh` (sources ASDF + .env for systemd)
-- **Logs:** `journalctl -u barkpark -f`
+Load exactly ONE card, read it fully, follow its Code anchors. Do not load a second card unless routed there. Never load `_attic/`.
 
-## Deploy to Server
+| Group | Task pattern | Load |
+|---|---|---|
+| Ops | deploy / migration / prod / rollback server | `docs/ops/PROD_OPS.md` |
+| Ops | npm release / npm rollback | `docs/ops/npm-rollback-playbook.md` |
+| Ops | domain / TLS / DNS | `docs/ops/adding-a-domain.md` |
+| Ops | CI / merge gates | `docs/ops/merge-gates.md` |
+| API/SDK | HTTP API contract | `docs/api-v1.md` |
+| API/SDK | auth / tokens | `docs/auth.md` |
+| API/SDK | webhooks / cache revalidation | `docs/contracts/webhook-realtime.md` |
+| API/SDK | consume from JS / Next.js | `docs/cards/js-sdk.md` |
+| Plugins/ONIX | build or modify a plugin | `docs/cards/plugins.md` |
+| Plugins/ONIX | schema v2 field types | `docs/contracts/schema-v2.md` |
+| Plugins/ONIX | Bokbasen / ONIX export | `docs/cards/onix-bokbasen.md` |
+| Plugins/ONIX | Papers / Bulldocs / PortableDoc / pdrender ingest | `api/CLAUDE.md` §Bulldocs |
+| CLI/TUI | bp CLI | `docs/cards/cli.md` |
+| CLI/TUI | Go TUI / pdrender | `docs/cards/tui.md` |
+| Studio | LiveView Studio UI | `docs/cards/studio.md` |
+| Search | search / media / analytics | `docs/cards/search-media.md` |
+| Meta | "is X deferred?" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |
 
-**Option 1: Auto-deploy (recommended)**
-```bash
-ssh root@89.167.28.206
-cd /opt/barkpark
-git pull    # post-merge hook auto-rebuilds and restarts
-```
+## Prod micro-block
 
-**Option 2: Manual**
-```bash
-ssh root@89.167.28.206
-cd /opt/barkpark
-make deploy   # git pull + clean + compile + restart
-```
+`89.167.28.206` · `/opt/barkpark` · systemd `barkpark.service` · `make deploy` — canonical: `docs/ops/PROD_OPS.md`.
 
-**Option 3: Fresh server**
-```bash
-ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
-```
+## Quick commands
 
-## Running Locally
+`make dev` (local tmux: Phoenix + TUI) · `make deploy` (server: pull + clean + compile + restart) · `make rebuild` (nuke `_build/prod` + recompile + restart) · `make logs`. Local setup: `docs/setup/SETUP.md`.
+
+Smoke test after any deploy:
 
 ```bash
-# Both in tmux
-make dev
-
-# Or separately
-cd api && mix phx.server    # terminal 1
-go run .                     # terminal 2
-
-# Connect TUI to remote server
-BARKPARK_API_URL=http://89.167.28.206:4000 go run .
+curl -s http://89.167.28.206/api/schemas | head -20    # API works
+curl -s http://89.167.28.206/studio | grep "pane-layout" # Studio renders
+curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Documents
 ```
-
-## Auth
-
-Dev token: `barkpark-dev-token` (read + write + admin)
-Header: `Authorization: Bearer barkpark-dev-token`
-Tokens hashed with SHA256 in `api_tokens` table.
-
-## API Quick Reference
-
-```bash
-TOKEN="barkpark-dev-token"
-
-# Read (public, no auth)
-curl localhost:4000/v1/data/query/production/post
-curl localhost:4000/v1/data/query/production/post?perspective=drafts
-curl localhost:4000/v1/data/doc/production/post/p1
-
-# Write (requires auth)
-curl -X POST localhost:4000/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"mutations":[{"create":{"_type":"post","_id":"x","title":"New"}}]}'
-
-# Publish/unpublish
--d '{"mutations":[{"publish":{"id":"x","type":"post"}}]}'
--d '{"mutations":[{"unpublish":{"id":"x","type":"post"}}]}'
-
-# Schemas (requires admin)
-curl -H "Authorization: Bearer $TOKEN" localhost:4000/v1/schemas/production
-
-# Media
-curl -X POST localhost:4000/media/upload -H "Authorization: Bearer $TOKEN" -F "file=@photo.jpg"
-curl localhost:4000/media
-```
-
-## Draft/Published Model
-
-- Create → `drafts.{id}` (always a draft)
-- Publish → copies `drafts.{id}` to `{id}`, deletes draft
-- Unpublish → moves `{id}` back to `drafts.{id}`
-- Perspectives: `published` (default public), `drafts` (studio view), `raw` (everything)
-
-## Document Shape
-
-```json
-{
-  "_id": "p1",
-  "_type": "post",
-  "_draft": false,
-  "_publishedId": "p1",
-  "title": "My Post",
-  "status": "published",
-  "content": {"category": "Tech", "author": "Knut"},
-  "_createdAt": "2026-04-12T09:11:20Z",
-  "_updatedAt": "2026-04-12T09:11:20Z"
-}
-```
-
-## Schema Visibility
-
-- `"public"` — accessible on public API without auth
-- `"private"` — returns 404 on public API, requires token
-
-## Field Types
-
-string, slug, text (rows), richText, image, select (options), boolean, datetime, color, reference (refType), array
-
-## Plugin schemas (Schema Definition v2 — TUI constraint)
-
-The Phase 0 plugin foundation introduces four nested field types beyond the v1 primitives above:
-
-- `composite` — object with named subfields
-- `arrayOf` — homogeneous array with `ordered: true|false`
-- `codelist` — registry-backed enum pinned to an `issue` version (e.g. ONIX issue 73)
-- `localizedText` — multi-language string with `languages`, `format`, and `fallbackChain`
-
-**The Go TUI is read-only for plugin schemas in v1.** Documents whose schema declares any of the four v2 types render as **JSON dumps** in the TUI; edits go through the LiveView Studio at `/studio`. The TUI editor menus skip composite / array / codelist / localizedText fields entirely — there is no inline form for them. (The original masterplan that recorded this as "decision 12" is no longer in the tree; the surviving design notes live under `_attic/.doey/plans/research/`.)
-
-This is a declared v1 constraint, NOT a missing feature. v2 may add TUI editing for these types once a publisher actually demands it; until then, Studio is the editing surface.
-
-Concrete example: when the OnixEdit plugin lands (Phase 4–5), its `book` schema (~200 fields, deeply nested composites + arrayOf contributors + Thema codelist + localizedText blurbs) will open in the TUI as a JSON view only. Editing happens in Studio.
-
-The legacy seed schemas (post, page, author, category, project, siteSettings, navigation, colors) use only v1 primitives and continue to work in the TUI exactly as before — they go through the validator's permanent `flat_mode` branch with no behavioural change. See `docs/plugins/SCHEMA_V2.md` for the full v2 reference.
-
-**Plugin schemas auto-install on every server start** via the post-boot Task in `Barkpark.Application` (helper: `Barkpark.Plugins.Bootstrap.register_all_schemas/0`); seeds.exs calls the same helper for fresh databases. Idempotent on `(name, dataset)`. Do NOT reintroduce the legacy `mix run -e "...register_schemas..."` workaround — `book` and any future plugin schemas now land automatically. Full reference: `docs/plugins/INSTALL.md`.
-
-**The paper/document surface is now the Bulldocs plugin** (`api/lib/barkpark/plugins/bulldocs.ex`) — reader at `/papers/:slug`, ingest at `/v1/plugins/bulldocs/*` (with a `/v1/paperflow/*` back-compat alias). Core keeps the PortableDoc block engine (`Barkpark.PortableDoc.*`) as reusable utilities; the plugin is the thin wiring layer. See `api/CLAUDE.md` "Bulldocs plugin".
-
-## Project Structure
-
-```
-barkpark/
-├── main.go              # TUI entry, connects to Phoenix
-├── tui.go               # Bubble Tea panes + editor
-├── store.go             # HTTP + SSE client to Phoenix
-├── schema.go            # Load schemas from API
-├── structure.go         # Auto-generate nav tree from schemas
-├── styles.go            # Lip Gloss styles
-├── api/                 # Phoenix API + Web Studio
-│   ├── lib/barkpark/
-│   │   ├── content.ex           # Document + schema CRUD, publish, perspectives
-│   │   ├── content/document.ex  # Ecto document schema
-│   │   ├── content/schema_definition.ex
-│   │   ├── structure.ex         # Navigation tree builder
-│   │   ├── media.ex             # File upload/storage
-│   │   └── auth.ex              # Token verification
-│   ├── lib/barkpark_web/
-│   │   ├── router.ex            # All routes (API + Studio + Media)
-│   │   ├── layouts/root.html.heex  # HTML shell, CSS, CDN scripts
-│   │   ├── layouts/app.html.heex   # Top bar (permanent)
-│   │   ├── live/studio/studio_live.ex  # Multi-pane Studio (main)
-│   │   ├── live/studio/media_live.ex   # Media library
-│   │   ├── controllers/            # Query, Mutate, Schema, Listen, Media, Legacy
-│   │   ├── plugs/require_token.ex  # Auth middleware
-│   │   └── components/icons.ex     # Lucide icon mapping
-│   ├── config/
-│   │   ├── prod.exs        # NO force_ssl (disabled)
-│   │   └── runtime.exs     # HTTP scheme by default (PHX_SCHEME env)
-│   ├── start.sh            # Systemd wrapper (sources ASDF + .env)
-│   ├── priv/repo/seeds.exs # 8 schemas, 27 docs, dev token
-│   └── Dockerfile          # For Docker deployment (alternative)
-├── .githooks/post-merge    # Auto-rebuild on git pull
-├── deploy.sh              # Fresh server setup (ARM + x86)
-├── Makefile               # All operations
-├── docker-compose.yml     # Docker alternative
-└── CLAUDE.md              # This file
-```
-
-## Web Studio (LiveView)
-
-- **URL:** `/studio` (single LiveView manages multi-pane layout)
-- **Phoenix + LiveView JS served locally** from `priv/static/assets/` (no asset pipeline, no Node.js, no CDN dependency):
-  - `/assets/phoenix.js`
-  - `/assets/phoenix_live_view.js` (bundled v1.1.28)
-  - Loaded near the bottom of `root.html.heex` (not in `<head>`).
-- **Lucide icons are inline SVG** served from `BarkparkWeb.Icons` (`api/lib/barkpark_web/components/icons.ex`, copied from Lucide v0.460) — no Lucide CDN, no MutationObserver, zero JS dependency.
-- **PubSub** updates panes in real-time when documents change
-
-## Database
-
-PostgreSQL with tables: `documents`, `schema_definitions`, `api_tokens`, `media_files`
-- Reset: `cd api && MIX_ENV=prod mix ecto.reset`
-- Migrate: `cd api && MIX_ENV=prod mix ecto.migrate`
-- Seed: `cd api && MIX_ENV=prod mix run priv/repo/seeds.exs`
-
-## Makefile Commands
-
-| Command | What it does |
-|---------|-------------|
-| `make rebuild` | Nuke _build, compile deps+app, restart service |
-| `make deploy` | git pull + rebuild (one command) |
-| `make restart` | Restart without rebuild |
-| `make status` | systemctl status |
-| `make logs` | journalctl -f |
-| `make seed` | Re-seed database |
-| `make migrate` | Run migrations |
-| `make reset-db` | Drop + create + migrate + seed |
-| `make dev` | Local tmux dev session |
-| `make api` | Local Phoenix only |
-| `make tui` | Local Go TUI only |
 
 ## Past Mistakes (NEVER REPEAT)
 
@@ -245,60 +69,28 @@ PostgreSQL with tables: `documents`, `schema_definitions`, `api_tokens`, `media_
 10. **Go binary committed** — `barkpark` binary accidentally committed. Added to .gitignore.
 11. **Phoenix check_origin drift after TLS cutover** — deploy.sh baked `PHX_HOST=<IP>` into .env. After TLS cutover, browser Origin `https://api.barkpark.cloud` did not match the http://<IP> whitelist → `/live/websocket` returned 403 → LiveView silently dropped → Studio became click-dead. Fix: set `PHX_HOST` to the public DNS hostname and `PHX_SCHEME=https`. See `docs/ops/studio-nav-bug-2026-04-19.md` for full diagnosis and `make domain-cutover DOMAIN=…` for the remediation workflow.
 
-## Testing
+## Task layer + session completion
 
-After any change, verify with:
-```bash
-curl -s http://89.167.28.206/api/schemas | head -20    # API works
-curl -s http://89.167.28.206/studio | grep "pane-layout" # Studio renders
-curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Documents
-```
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
+**Tasks are `type:task` documents in Barkpark's own Postgres.** `bd` is a shim over `/v1/tasks` — `.beads/` is FROZEN (since 2026-05-28): never edit it, never run Dolt sync, never `bd import`. Use `bd` (or `bp task`) for ALL task tracking — do NOT use TodoWrite or markdown TODO lists.
 
 ```bash
 bd ready              # Find available work
-bd show <id>          # View issue details
+bd show <id>          # View task details (carries children + child_count)
 bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
 ```
 
-### Rules
+**When ending a work session, work is NOT complete until `git push` succeeds:**
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+1. File tasks for remaining work
+2. Run quality gates if code changed (tests, linters, builds)
+3. Close finished tasks, update in-progress ones
+4. **PUSH TO REMOTE** — mandatory: `git pull --rebase && git push && git status` (must show "up to date with origin")
+5. Clean up stashes, prune remote branches
+6. Hand off context for the next session
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+NEVER stop before pushing — that strands work locally. NEVER say "ready to push when you are" — YOU push. If push fails, resolve and retry until it succeeds.
 
-## Session Completion
+## Doc contract
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
+Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (`_attic/` — never load). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per fact-topic. A new durable fact goes into its existing owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` fails. Byte budgets are CI-enforced (`scripts/check-doc-budgets.sh`) — on overflow, split to the owning contract/runbook or retire content; never raise the cap. Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.
