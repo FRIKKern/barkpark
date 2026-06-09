@@ -536,6 +536,7 @@ defmodule BarkparkWeb.StudioComponents do
   attr :status, :string, required: true
   attr :is_draft, :boolean, default: false
   attr :selected, :boolean, default: false
+
   # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────
   # When `selectable` is true, the row renders a left-anchored checkbox
   # whose `phx-click="toggle-doc-checkbox"` event toggles inclusion in
@@ -1005,6 +1006,109 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
+  Network shares panel (scoped-sharing P6).
+
+  Lists the live shares (env baseline + persisted) and, for an admin caller,
+  offers an add form pre-filled with the current scope plus a remove button per
+  STORED share. Follows the image-picker overlay idiom. The whole feature is
+  admin-only: `@admin?` gates the mutate UI here, and the StudioLive handlers
+  re-check admin server-side (the button being hidden is UX, not the security
+  boundary).
+
+  `@rows` is a pre-flattened list of maps (`:scope`, `:surfaces`, `:access`,
+  `:source`, `:url`) so this component stays presentation-only.
+  """
+  attr :show, :boolean, default: false
+  attr :admin?, :boolean, default: false
+  attr :scope_prefill, :string, default: ""
+  attr :prefill_surfaces, :list, default: []
+  attr :rows, :list, default: []
+  attr :error, :string, default: nil
+
+  def shares_modal(assigns) do
+    ~H"""
+    <%= if @show do %>
+      <div class="image-picker-overlay" phx-click="shares-close"></div>
+      <div class="image-picker shares-modal">
+        <div class="image-picker-header">
+          <span style="font-weight: 600; font-size: 14px;">Network shares</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="shares-close" aria-label="Close">x</button>
+        </div>
+
+        <%= if @admin? do %>
+          <form phx-submit="shares-add" class="shares-add-form">
+            <label class="shares-field">
+              <span class="shares-field-label">Scope</span>
+              <input
+                type="text"
+                name="scope"
+                value={@scope_prefill}
+                placeholder="workspace/project/dataset"
+                class="form-input"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <div class="shares-field">
+              <span class="shares-field-label">Surfaces</span>
+              <div class="shares-surfaces">
+                <label :for={surface <- ~w(papers docs media)}>
+                  <input
+                    type="checkbox"
+                    name="surfaces[]"
+                    value={surface}
+                    checked={surface in @prefill_surfaces}
+                  />
+                  <%= String.capitalize(surface) %>
+                </label>
+              </div>
+            </div>
+            <p class="shares-note">
+              Read-only — anyone on the local network can view this scope, not edit it.
+            </p>
+            <p :if={@error} class="shares-error"><%= @error %></p>
+            <div class="shares-add-actions">
+              <button type="submit" class="btn btn-primary btn-sm">Share</button>
+            </div>
+          </form>
+        <% else %>
+          <p class="shares-note" style="padding: 16px;">
+            An admin token is required to manage network shares.
+          </p>
+        <% end %>
+
+        <div class="shares-list">
+          <div class="shares-list-title">Active shares</div>
+          <%= if @rows == [] do %>
+            <div class="shares-empty">Nothing is shared — this scope is private.</div>
+          <% else %>
+            <div :for={row <- @rows} class="share-row">
+              <div class="share-row-main">
+                <div class="share-row-scope"><%= row.scope %></div>
+                <div class="share-row-meta">
+                  <%= row.surfaces %> · <%= row.access %> · <span class="share-row-source"><%= row.source %></span>
+                </div>
+                <div :if={row.url} class="share-row-url"><%= row.url %></div>
+              </div>
+              <button
+                :if={@admin? and row.source == "stored"}
+                type="button"
+                class="btn btn-ghost btn-sm share-row-remove"
+                phx-click="shares-remove"
+                phx-value-scope={row.scope}
+                title="Stop sharing this scope"
+              >
+                Remove
+              </button>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
   Reference-picker modal extracted from the legacy inline block at
   `studio_live.ex:1218-1240`. Shares the `.image-picker` overlay styling
   (deliberate — same modal chrome). Caller pre-filters candidates via
@@ -1416,6 +1520,7 @@ defmodule BarkparkWeb.StudioComponents do
   attr :presences, :list, default: []
   attr :parent_assigns, :map, default: %{}
   attr :nav_group, :string, default: nil
+
   # ── Cross-field validations (Task barkpark-cgn) ────────────────────
   # List of unsatisfied rule maps (string-keyed: name, title, level,
   # fields). Empty list → banner not rendered, no visual cost on
@@ -1427,6 +1532,7 @@ defmodule BarkparkWeb.StudioComponents do
   # AND the toggle is on — there is NO hardcoded doc-type gate.
   attr :content_preview_rendered, :any, default: nil
   attr :content_preview_visible, :boolean, default: true
+
   # ── Draft-vs-Published diff view (Task barkpark-uix) ───────────────
   # `diff_visible` flips the editor body between the form and the
   # field-level diff. `published_doc` is the published twin of the open
@@ -1466,6 +1572,7 @@ defmodule BarkparkWeb.StudioComponents do
       )
       |> assign(:show_diff_toggle, show_diff_toggle)
       |> assign(:show_diff, show_diff_toggle and assigns.diff_visible)
+
     ~H"""
     <%= if @editor_doc do %>
       <div class="editor-panel">
@@ -1701,7 +1808,9 @@ defmodule BarkparkWeb.StudioComponents do
 
   defp doc_action_test_id(action) do
     case action["opts"] do
-      %{"data_test_id" => id} when is_binary(id) -> id
+      %{"data_test_id" => id} when is_binary(id) ->
+        id
+
       _ ->
         case action["kind"] do
           k when k in ["modal", "link"] -> "schema-action-#{action["name"]}"

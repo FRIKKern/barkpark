@@ -39,6 +39,17 @@
         <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
       </div>
     </:actions>
+    <:actions :if={assigns[:shares_admin?]}>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        phx-click="shares-open"
+        title="Network shares"
+        aria-label="Network shares"
+      >
+        <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={16} /></span>
+      </button>
+    </:actions>
     <:actions>
       <.studio_theme_toggle />
     </:actions>

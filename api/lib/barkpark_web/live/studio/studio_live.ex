@@ -59,6 +59,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
        user_color: user_color,
        presences: [],
        show_profile: false,
+       # ── Network shares panel (scoped-sharing P6) ─────────────────────
+       # Admin-only. `shares_admin?` is resolved ONCE from the mounted
+       # api_token (StudioLive runs in :studio_public, so the token may be
+       # nil or non-admin); it both hides the top-bar Share button and is
+       # re-checked in every shares-* handler (the hidden button is UX, the
+       # handler gate is the security boundary). The panel calls
+       # Barkpark.Sharing.* in-process — the SAME registry the admin-only
+       # /v1/shares API and `bp share` CLI write.
+       shares_admin?: shares_admin?(socket),
+       show_shares: false,
+       shares_rows: [],
+       shares_scope_prefill: "",
+       shares_prefill_surfaces: [],
+       shares_error: nil,
        validation_errors: %{},
        # ── Cross-field validations (Task barkpark-cgn) ──────────────────
        # Populated after every autosave by `Barkpark.Content.CrossValidator
@@ -361,6 +375,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # (the patch may have removed it; the stream side already handled that).
   defp push_block_to_wc(socket, block_id) when is_binary(block_id) do
     paper = socket.assigns[:paper_doc]
+
     blocks =
       case paper && Map.get(paper, :content) do
         %{"blocks" => blocks} when is_list(blocks) -> blocks
@@ -1044,6 +1059,87 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, assign(socket, show_profile: false)}
   end
 
+  # ── Network shares panel (scoped-sharing P6) ─────────────────────────────
+  # Every mutate handler RE-CHECKS admin server-side via shares_admin?/1.
+  # StudioLive mounts in :studio_public (token may be nil / non-admin), and the
+  # panel calls Barkpark.Sharing.* in-process — bypassing the /v1/shares
+  # :require_admin gate — so this is the real authorization boundary, not the
+  # hidden top-bar button.
+
+  def handle_event("shares-open", params, socket) do
+    if socket.assigns[:shares_admin?] do
+      surfaces = List.wrap(params["surface"]) |> Enum.filter(&(&1 in ~w(papers docs media)))
+
+      {:noreply,
+       socket
+       |> assign(
+         show_shares: true,
+         shares_error: nil,
+         shares_rows: load_share_rows(),
+         shares_scope_prefill: shares_scope_prefill(socket),
+         shares_prefill_surfaces: surfaces
+       )}
+    else
+      {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+    end
+  end
+
+  def handle_event("shares-close", _params, socket) do
+    {:noreply, assign(socket, show_shares: false, shares_error: nil)}
+  end
+
+  def handle_event("shares-add", params, socket) do
+    if socket.assigns[:shares_admin?] do
+      scope = params["scope"] |> to_string() |> String.trim()
+      surfaces = params["surfaces"] |> List.wrap() |> Enum.join(",")
+
+      cond do
+        scope == "" ->
+          {:noreply, assign(socket, shares_error: "Scope is required.")}
+
+        surfaces == "" ->
+          {:noreply, assign(socket, shares_error: "Pick at least one surface.")}
+
+        true ->
+          # access is pinned to read until the edit path (P5) lands.
+          case Barkpark.Sharing.add_share("#{scope}:#{surfaces}:read") do
+            {:ok, _share} ->
+              {:noreply,
+               socket
+               |> assign(shares_rows: load_share_rows(), shares_error: nil)
+               |> put_flash(:info, "Shared #{scope}.")}
+
+            {:error, _reason} ->
+              {:noreply,
+               assign(socket,
+                 shares_error: "Invalid share — check the scope and surfaces."
+               )}
+          end
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+    end
+  end
+
+  def handle_event("shares-remove", %{"scope" => scope}, socket) do
+    if socket.assigns[:shares_admin?] do
+      case Barkpark.Sharing.scope_triple(scope) do
+        {:ok, {ws, proj, dataset}} ->
+          {:ok, _count} = Barkpark.Sharing.remove_share(ws, proj, dataset)
+
+          {:noreply,
+           socket
+           |> assign(shares_rows: load_share_rows(), shares_error: nil)
+           |> put_flash(:info, "Stopped sharing #{ws}/#{proj}/#{dataset}.")}
+
+        {:error, _} ->
+          {:noreply, assign(socket, shares_error: "Could not parse that scope.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+    end
+  end
+
   def handle_event("jump-to-user", %{"type" => type, "doc-id" => doc_id}, socket) do
     # Build the path to that document — need to find it in the structure
     structure = Structure.build(socket.assigns.dataset)
@@ -1621,7 +1717,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     dataset = socket.assigns.dataset
 
     with %{doc_id: doc_id} <- doc,
-         {:ok, fresh} <- Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
+         {:ok, fresh} <-
+           Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
       {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
 
       assign(socket,
@@ -2016,7 +2113,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # field-reference's refType is empty by default; the picker still browses all
   # types when ref-type is "". field-image's value is an empty image URL.
   defp default_block("field-reference", id),
-    do: %{"id" => id, "type" => "field-reference", "label" => "Reference", "refType" => "", "value" => ""}
+    do: %{
+      "id" => id,
+      "type" => "field-reference",
+      "label" => "Reference",
+      "refType" => "",
+      "value" => ""
+    }
 
   defp default_block("field-image", id),
     do: %{"id" => id, "type" => "field-image", "label" => "Image", "value" => ""}
@@ -3826,6 +3929,57 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp beta_node_text(_), do: ""
 
+  # ── Network shares panel helpers (scoped-sharing P6) ─────────────────────
+
+  # The single authorization predicate for the shares panel. StudioLive runs in
+  # :studio_public, so the mounted api_token may be nil or non-admin — a nil /
+  # non-struct token denies (never raises). Re-evaluated in every shares-*
+  # handler, not just at mount.
+  defp shares_admin?(socket) do
+    case socket.assigns[:api_token] do
+      %_{} = token -> Barkpark.Auth.has_permission?(token, "admin")
+      _ -> false
+    end
+  end
+
+  # The live shares — env baseline + persisted — flattened to presentation rows.
+  defp load_share_rows do
+    env = Enum.map(Barkpark.Sharing.shares_env(), &share_row(&1, "env"))
+    stored = Enum.map(Barkpark.Sharing.list_stored(), &share_row(&1, "stored"))
+    urls = share_url_index()
+
+    Enum.map(env ++ stored, fn row -> %{row | url: Map.get(urls, row.scope)} end)
+  end
+
+  defp share_row(%Barkpark.Sharing.Share{} = s, source) do
+    %{
+      scope: "#{s.workspace_slug}/#{s.project_slug}/#{s.dataset}",
+      surfaces: Enum.map_join(s.surfaces, ", ", &Atom.to_string/1),
+      access: Atom.to_string(s.access),
+      source: source,
+      url: nil
+    }
+  end
+
+  # scope -> LAN reader URL, only for shares that expose :papers (the only
+  # surface with a human-facing page). Empty when no LAN IP is detectable.
+  defp share_url_index do
+    Barkpark.Sharing.share_urls()
+    |> Map.new(fn {s, url} -> {"#{s.workspace_slug}/#{s.project_slug}/#{s.dataset}", url} end)
+  end
+
+  # The scope string the add form pre-fills: the Studio's current scope. Falls
+  # back to the canonical defaults when a slug is absent (flat /studio).
+  defp shares_scope_prefill(socket) do
+    ws = scope_slug(socket.assigns[:current_workspace], "default")
+    proj = scope_slug(socket.assigns[:current_project], "default")
+    dataset = socket.assigns[:dataset] || "production"
+    "#{ws}/#{proj}/#{dataset}"
+  end
+
+  defp scope_slug(%{slug: slug}, _default) when is_binary(slug), do: slug
+  defp scope_slug(_, default), do: default
+
   # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
   # carries a hidden `id` and submits its changed field(s); the handler maps
   # the params to a patch-block op. Paragraph/callout bodies are PLAIN TEXT in
@@ -4441,6 +4595,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
         show_delete={@show_delete}
         delete_refs={@delete_refs}
         editor_doc={@editor_doc}
+      />
+
+      <.shares_modal
+        show={@show_shares}
+        admin?={@shares_admin?}
+        scope_prefill={@shares_scope_prefill}
+        prefill_surfaces={@shares_prefill_surfaces}
+        rows={@shares_rows}
+        error={@shares_error}
       />
     </.pane_layout>
 
