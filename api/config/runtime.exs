@@ -92,6 +92,25 @@ case Barkpark.Plugins.EnvConfig.parse(System.get_env("BARKPARK_PLUGINS")) do
   plugins when is_list(plugins) -> config :barkpark, :plugins, plugins
 end
 
+# Scoped-sharing registry (P1a/P1c). Enable via the BARKPARK_SHARES env var.
+# Format: "ws/proj/dataset:papers,docs:read;acme/web/staging:media:edit".
+# See Barkpark.Sharing.parse/1 for full syntax.
+#
+# DEFAULT-OFF is paramount: with BARKPARK_SHARES unset/empty, `parse/1` returns
+# [], so :shares is set to the harmless empty list AND the Endpoint http binding
+# is left exactly as the env file configured it (dev.exs keeps ip: {127,0,0,1}).
+# Only when at least one share parses do we deep-merge `ip: {0,0,0,0}` over the
+# existing http config (preserving the port), making the reader reachable on the
+# LAN. The boot banner in Barkpark.Application logs the URLs + a trust warning.
+if Code.ensure_loaded?(Barkpark.Sharing) do
+  shares = Barkpark.Sharing.parse(System.get_env("BARKPARK_SHARES"))
+  config :barkpark, :shares, shares
+
+  if shares != [] do
+    config :barkpark, BarkparkWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
+  end
+end
+
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
     val when is_binary(val) and val != "" ->

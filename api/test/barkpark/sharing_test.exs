@@ -207,6 +207,60 @@ defmodule Barkpark.SharingTest do
     end
   end
 
+  # ── share_urls/0,2 + lan_ip/0 (P1c) ────────────────────────────────────
+
+  describe "share_urls/2" do
+    test "builds the /w/<ws>/p/<proj>/papers/ URL for a :papers share", ctx do
+      with_shares("gyldendal/books/production:papers,docs:read", ctx)
+
+      assert [{%Share{workspace_slug: "gyldendal", project_slug: "books"}, url}] =
+               Sharing.share_urls("10.0.0.5", 4000)
+
+      assert url == "http://10.0.0.5:4000/w/gyldendal/p/books/papers/"
+    end
+
+    test "honours a non-default port", ctx do
+      with_shares("gyldendal/books/production:papers:read", ctx)
+
+      assert [{_share, "http://192.168.1.2:8080/w/gyldendal/p/books/papers/"}] =
+               Sharing.share_urls("192.168.1.2", 8080)
+    end
+
+    test "a :docs-only share yields no papers URL", ctx do
+      with_shares("gyldendal/books/production:docs:read", ctx)
+      assert Sharing.share_urls("10.0.0.5", 4000) == []
+    end
+
+    test "only :papers shares contribute, in order, when surfaces are mixed", ctx do
+      with_shares(
+        "acme/web/staging:media:edit;gyldendal/books/production:papers:read",
+        ctx
+      )
+
+      assert [{%Share{workspace_slug: "gyldendal"}, url}] =
+               Sharing.share_urls("10.0.0.5", 4000)
+
+      assert url == "http://10.0.0.5:4000/w/gyldendal/p/books/papers/"
+    end
+
+    test "no shares (Default-OFF) yields no URLs" do
+      assert Sharing.share_urls("10.0.0.5", 4000) == []
+    end
+  end
+
+  describe "lan_ip/0" do
+    test "returns a binary IPv4 string or nil (never raises)" do
+      result = Sharing.lan_ip()
+      assert is_binary(result) or is_nil(result)
+
+      if is_binary(result) do
+        # A dotted-quad shape; we do NOT assert any specific address.
+        assert Regex.match?(~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, result)
+        refute String.starts_with?(result, "127.")
+      end
+    end
+  end
+
   # ── helpers ────────────────────────────────────────────────────────────
 
   defp with_shares(env_string, ctx) do

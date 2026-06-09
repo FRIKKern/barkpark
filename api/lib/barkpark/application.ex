@@ -5,6 +5,8 @@ defmodule Barkpark.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
@@ -85,6 +87,12 @@ defmodule Barkpark.Application do
         # before the Oban child above), so it has completed by the time the
         # supervisor returns {:ok, _pid} here. Nothing left to do post-boot.
 
+        # P1c LAN-sharing banner. DEFAULT-OFF: with no BARKPARK_SHARES, this is
+        # a no-op (active?/0 is false) and nothing is logged. When active, warn
+        # loudly with every reachable reader URL so the operator knows the box
+        # is now exposed on the local network.
+        log_sharing_banner()
+
         ok
 
       other ->
@@ -128,6 +136,34 @@ defmodule Barkpark.Application do
       end
 
     Keyword.put(oban_config, :plugins, merged_plugins)
+  end
+
+  # P1c: one-time post-boot banner for LAN sharing. No-op (and silent) unless
+  # at least one share is configured — preserving the Default-OFF invariant.
+  @spec log_sharing_banner() :: :ok
+  defp log_sharing_banner do
+    if Barkpark.Sharing.active?() do
+      urls = Barkpark.Sharing.share_urls()
+
+      url_lines =
+        case urls do
+          [] ->
+            "  (no LAN IPv4 detected — reader URLs unavailable; bind is still 0.0.0.0)"
+
+          list ->
+            list
+            |> Enum.map(fn {_share, url} -> "  • #{url}" end)
+            |> Enum.join("\n")
+        end
+
+      Logger.warning("""
+      [Sharing] LAN sharing is ACTIVE — the following paper readers are exposed:
+      #{url_lines}
+      These are reachable by anyone on this network — trusted networks only.
+      """)
+    end
+
+    :ok
   end
 
   # Tell Phoenix to update the endpoint configuration

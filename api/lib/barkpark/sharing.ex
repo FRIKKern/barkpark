@@ -178,6 +178,94 @@ defmodule Barkpark.Sharing do
 
   def access_for(_ws_slug, _proj_slug, _dataset), do: nil
 
+  # ── LAN discovery + reader URLs (P1c) ──────────────────────────────────
+
+  @doc """
+  The machine's primary LAN IPv4 address, as a binary like `"10.0.0.5"`, or
+  `nil` when none can be determined.
+
+  Reads the system via `:inet.getifaddrs/0`, skipping the loopback interface
+  (`127.0.0.0/8`). The first non-loopback IPv4 address wins. Never raises —
+  any error from the OS collapses to `nil`.
+
+  This is the ONLY function here that touches the system; everything else is
+  pure. It exists so the boot banner can print a copy-pasteable reader URL.
+  """
+  @spec lan_ip() :: binary() | nil
+  def lan_ip do
+    case :inet.getifaddrs() do
+      {:ok, ifaddrs} ->
+        ifaddrs
+        |> Enum.flat_map(fn {_ifname, opts} ->
+          for {:addr, {a, _, _, _} = ip} <- opts, a != 127, do: ip
+        end)
+        |> List.first()
+        |> ip_to_binary()
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  @spec ip_to_binary({integer(), integer(), integer(), integer()} | nil) :: binary() | nil
+  defp ip_to_binary(nil), do: nil
+
+  defp ip_to_binary({_, _, _, _} = ip) do
+    ip |> :inet.ntoa() |> to_string()
+  end
+
+  @doc """
+  Reader base URLs for every configured `:papers` share, using the detected
+  LAN IP and the configured HTTP port.
+
+  Returns a list of `{share, url}` tuples (one per `:papers` share). When the
+  LAN IP can't be determined, returns `[]`. Shares that do NOT expose `:papers`
+  contribute no URL. With no shares (Default-OFF) this is `[]`.
+
+  See `share_urls/2` for the pure derivation given an explicit `ip` + `port`.
+  """
+  @spec share_urls() :: [{Share.t(), binary()}]
+  def share_urls do
+    case lan_ip() do
+      nil -> []
+      ip -> share_urls(ip, http_port())
+    end
+  end
+
+  @doc """
+  PURE derivation of `:papers` reader base URLs from the configured shares,
+  given an explicit `ip` and `port`.
+
+  For each share that lists the `:papers` surface, builds
+  `http://<ip>:<port>/w/<ws>/p/<proj>/papers/`. Shares without `:papers`
+  yield nothing. Returns a list of `{share, url}` tuples, in `shares/0` order.
+  """
+  @spec share_urls(binary(), integer()) :: [{Share.t(), binary()}]
+  def share_urls(ip, port) when is_binary(ip) and is_integer(port) do
+    for %Share{surfaces: surfaces} = s <- shares(), :papers in surfaces do
+      url =
+        "http://#{ip}:#{port}/w/#{s.workspace_slug}/p/#{s.project_slug}/papers/"
+
+      {s, url}
+    end
+  end
+
+  # The configured HTTP port for the endpoint, defaulting to 4000. Reads the
+  # already-merged Endpoint config (runtime.exs sets `http: [port: …]`).
+  @spec http_port() :: integer()
+  defp http_port do
+    :barkpark
+    |> Application.get_env(BarkparkWeb.Endpoint, [])
+    |> Keyword.get(:http, [])
+    |> Keyword.get(:port, 4000)
+    |> case do
+      port when is_integer(port) -> port
+      _ -> 4000
+    end
+  end
+
   # ── parsing internals ─────────────────────────────────────────────────
 
   @spec parse_entry(String.t()) :: [Share.t()]
