@@ -82,7 +82,7 @@ defmodule BarkparkWeb.Plugs.RequireShareEditToken do
       Sharing.access_for(ws, proj, dataset) == :edit
   end
 
-  defp grant_if_resolvable(conn, ws, proj, dataset) do
+  defp grant_if_resolvable(conn, ws, proj, _dataset) do
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj) do
       conn

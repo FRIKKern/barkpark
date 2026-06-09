@@ -106,9 +106,13 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
       path =
         Path.join(System.tmp_dir!(), "barkpark-wi6-#{System.unique_integer([:positive])}.onix")
 
+      # Pin sent_at: each call stamps SentDateTime at render time, so two
+      # unpinned calls straddling a second boundary produce different bytes.
+      opts = [sent_at: ~U[2026-01-01 12:00:00Z]]
+
       try do
-        assert :ok = Export.to_file(book, path)
-        assert {:ok, expected} = Export.to_string(book)
+        assert :ok = Export.to_file(book, path, opts)
+        assert {:ok, expected} = Export.to_string(book, opts)
         assert File.read!(path) == expected
       after
         _ = File.rm(path)

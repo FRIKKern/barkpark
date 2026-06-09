@@ -167,10 +167,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   `{:error, {:xsd_invalid, reasons}}` on validation failure, or
   `{:error, posix_reason}` from `File.write/2`.
   """
-  @spec to_file(map(), Path.t()) ::
+  @spec to_file(map(), Path.t(), keyword()) ::
           :ok | {:error, {:xsd_invalid, [String.t()]}} | {:error, File.posix()}
-  def to_file(book_doc, path) when is_map(book_doc) and is_binary(path) do
-    with {:ok, binary} <- __MODULE__.to_string(book_doc),
+  def to_file(book_doc, path, opts \\ []) when is_map(book_doc) and is_binary(path) do
+    with {:ok, binary} <- __MODULE__.to_string(book_doc, opts),
          :ok <- File.write(path, binary) do
       :ok
     else

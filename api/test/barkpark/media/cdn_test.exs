@@ -10,7 +10,18 @@ defmodule Barkpark.Media.CdnTest do
 
   setup do
     original = Application.get_env(:barkpark, :media_cdn)
-    on_exit(fn -> Application.put_env(:barkpark, :media_cdn, original) end)
+
+    # When the key was never set, restore by DELETING it — put_env(..., nil)
+    # leaves a literal nil that crashes Cdn.base_url/0's Keyword.get in any
+    # later test (Application.get_env(:barkpark, :media_cdn, []) returns the
+    # stored nil, not the default).
+    on_exit(fn ->
+      case original do
+        nil -> Application.delete_env(:barkpark, :media_cdn)
+        val -> Application.put_env(:barkpark, :media_cdn, val)
+      end
+    end)
+
     :ok
   end
 
