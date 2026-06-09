@@ -631,12 +631,15 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "l", "right":
+		// → / l ENTERS the highlighted item (Miller-column navigation): drill into
+		// it exactly like Enter — open its children as the next column and move
+		// focus there, or open a document in the editor. Re-drilling after the
+		// cursor moved replaces any stale rightward columns (drillIn truncates the
+		// path at the focused pane). tab still cycles focus between already-open
+		// panes without drilling; ← / h leaves (focus to the parent column, pop at
+		// the root, exit the editor).
 		if m.focus.Target == FocusPane {
-			if m.focus.PaneIndex < len(m.panes)-1 {
-				m.focus.PaneIndex++
-			} else {
-				return m.drillIn()
-			}
+			return m.drillIn()
 		}
 
 	case "shift+tab":
