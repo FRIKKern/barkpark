@@ -40,6 +40,30 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ResolveProject
   end
 
+  # Public-share variant of :scoped_api for the scoped READ document routes
+  # (GET /w/:ws/p/:project/v1/data/query/:dataset/:type and
+  # GET .../v1/data/doc/:dataset/:type/:doc_id). Mirrors :scoped_api exactly,
+  # but inserts RequireShareScope(surface: :docs) between OptionalToken and the
+  # resolvers: when the scope is shared for the :docs surface (via
+  # Barkpark.Sharing) the plug pre-resolves workspace+project and flags
+  # :share_public, so ResolveWorkspace SKIPS its membership gate (anonymous read
+  # of a shared scope). When the scope is NOT shared — the default everywhere —
+  # RequireShareScope is a pure no-op and ResolveWorkspace gates membership
+  # byte-identically to a normal scoped request. RequireShareScope is method- +
+  # access-aware (a :read share serves only GET/HEAD), so these GET reads are
+  # the ONLY thing a :docs:read share opens — the POST mutate route lives in its
+  # own scope block on a different pipeline and is never reached from here.
+  pipeline :shared_docs_api do
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.OptionalToken
+    plug BarkparkWeb.Plugs.RequireShareScope, surface: :docs
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
+  end
+
   # Tenancy-aware variant of :browser for the path-scoped plugin LiveView
   # mounts at /w/:workspace_slug/p/:project_slug/{studio,admin}. The base
   # :browser plugs (session, flash, CSRF, secure headers, root layout), then
@@ -714,12 +738,22 @@ defmodule BarkparkWeb.Router do
     post "/v1/data/search/:dataset/interaction", SearchController, :search_interaction
     get "/v1/data/search/:dataset", SearchController, :search
     get "/v1/search/:dataset", FederatedSearchController, :search
-    get "/v1/data/query/:dataset/:type", QueryController, :index
-    get "/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show
 
     # Preview reads
     get "/v1/preview/query/:dataset/:type", QueryController, :index
     get "/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show
+  end
+
+  # Scoped READ document routes — share-aware via the :docs surface (P2). These
+  # GET reads sit on the :shared_docs_api pipeline so a `:docs`-shared scope is
+  # anonymous-readable; the method-aware RequireShareScope keeps a `:read` share
+  # from ever opening the separate POST mutate block. Without a matching :docs
+  # share (the default) this is byte-identical to :scoped_api.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through :shared_docs_api
+
+    get "/v1/data/query/:dataset/:type", QueryController, :index
+    get "/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show
   end
 
   # Token-required scoped reads (listen/export/analytics/history/revision).

@@ -34,7 +34,11 @@ defmodule BarkparkWeb.QueryController do
 
       rendered =
         Envelope.render_many(docs)
-        |> Expand.expand(expand_spec, dataset, scope_opts(conn))
+        |> Expand.expand(
+          expand_spec,
+          dataset,
+          [published_only: read_share?(conn)] ++ scope_opts(conn)
+        )
 
       inner = %{
         perspective: to_string(perspective),
@@ -52,22 +56,38 @@ defmodule BarkparkWeb.QueryController do
   end
 
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
-      t0 = System.monotonic_time(:microsecond)
-      expand_spec = parse_expand(params["expand"])
+    cond do
+      # A read-only public share must NEVER fetch a draft by id. A `drafts.`
+      # doc_id is rejected as not-found BEFORE any get_document call — the same
+      # 404 path the controller already returns for a missing doc.
+      read_share?(conn) and String.starts_with?(doc_id, "drafts.") ->
+        {:error, :not_found}
 
-      with {:ok, doc} <- Content.get_document(doc_id, type, dataset, scope_opts(conn)) do
-        rendered =
-          [Envelope.render(doc)]
-          |> Expand.expand(expand_spec, dataset, scope_opts(conn))
-          |> hd()
+      preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) ->
+        show_doc(conn, dataset, type, doc_id, params)
 
-        etag = doc_etag(doc)
-        sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
-        respond(conn, rendered, dataset, sync_tags, etag, t0)
-      end
-    else
-      {:error, :not_found}
+      true ->
+        {:error, :not_found}
+    end
+  end
+
+  defp show_doc(conn, dataset, type, doc_id, params) do
+    t0 = System.monotonic_time(:microsecond)
+    expand_spec = parse_expand(params["expand"])
+
+    with {:ok, doc} <- Content.get_document(doc_id, type, dataset, scope_opts(conn)) do
+      rendered =
+        [Envelope.render(doc)]
+        |> Expand.expand(
+          expand_spec,
+          dataset,
+          [published_only: read_share?(conn)] ++ scope_opts(conn)
+        )
+        |> hd()
+
+      etag = doc_etag(doc)
+      sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
+      respond(conn, rendered, dataset, sync_tags, etag, t0)
     end
   end
 
@@ -164,10 +184,24 @@ defmodule BarkparkWeb.QueryController do
   defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
 
   defp resolve_perspective(conn, params) do
-    case conn.assigns[:forced_perspective] do
-      nil -> parse_perspective(Map.get(params, "perspective", "published"))
-      forced -> parse_perspective(forced)
+    if read_share?(conn) do
+      # A read-only public share is pinned to the published perspective: the
+      # `?perspective=drafts|raw` param is IGNORED on this path so an anonymous
+      # share-reader can never pull unpublished/draft content. An :edit share or
+      # a normal request falls through to the unchanged forced/param logic.
+      :published
+    else
+      case conn.assigns[:forced_perspective] do
+        nil -> parse_perspective(Map.get(params, "perspective", "published"))
+        forced -> parse_perspective(forced)
+      end
     end
+  end
+
+  # True when the request is served via a PUBLIC share whose access is NOT
+  # `:edit` (i.e. a read-only share). Such a request must never see drafts.
+  defp read_share?(conn) do
+    conn.assigns[:share_public] == true and conn.assigns[:share_access] != :edit
   end
 
   defp parse_int(nil, d), do: d
