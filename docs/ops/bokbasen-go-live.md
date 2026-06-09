@@ -1,74 +1,23 @@
+<!-- doc-tier: agent | canonical-for: bokbasen-go-live-runbook | budget: 1200tok -->
+
 # Bokbasen go-live runbook
 
-How to wire Bokbasen credentials into a Barkpark instance and verify the publish pipeline end-to-end. Use when sandbox or production credentials arrive.
+Wire Bokbasen credentials into a Barkpark instance and verify the publish pipeline end-to-end. Use when sandbox or production credentials arrive. Contract facts (endpoints, lifecycle, redaction rule, gotchas): `docs/contracts/bokbasen.md`.
 
 ## Prerequisites
 
-- Bokbasen has issued you a `client_id` + `client_secret` (sandbox or prod)
-- `client_role` is known (typically `publisher`)
-- An admin-token Studio session (for Option A — recommended). SSH access is only needed for Option B (fallback).
+- Bokbasen-issued `client_id` + `client_secret` (sandbox or prod); `client_role` known (typically `publisher`)
+- Admin-token Studio session (Option A — recommended); SSH only for Option B
 - A draft `book` document with at least one valid `ProductIdentifier` (ISBN-13 minimum) — Bokbasen rejects books without identifiers
 
 ## Step 1 — set credentials
 
-Two equivalent paths. Pick one.
+Resolution order, key names, encryption, and `secrets/` handling: see **`docs/contracts/bokbasen.md` § Credentials**. In short:
 
-### Option A: admin Studio form (recommended)
+- **Option A (recommended):** Studio form at `http://89.167.28.206/studio/production/_plugins/onixedit/settings` — fill the five Bokbasen fields, **Save**, then **Test connection** (green flash = accepted). "Reveal" writes an audit row to `plugin_settings_audit`. No restart needed — credentials are read on every token fetch.
+- **Option B (fallback, e.g. first-boot):** append the five `BOKBASEN_*` vars to `/opt/barkpark/.env` over SSH, then `systemctl restart barkpark`. Env wins over the DB row — useful for one-off prod ↔ sandbox swaps.
 
-No SSH, no `mix run`. Browse to:
-
-```
-http://89.167.28.206/studio/production/_plugins/onixedit/settings
-```
-
-Fill in the five Bokbasen fields:
-
-| Field | Value |
-|---|---|
-| Bokbasen API base URL | `https://api.bokbasen.io` (sandbox: `https://api-sandbox.bokbasen.io`) |
-| OAuth token URL       | `https://login.bokbasen.io/oauth2/token` |
-| Client ID             | issued by Bokbasen |
-| Client secret         | issued by Bokbasen (stored encrypted at rest via `BARKPARK_CLOAK_KEY`) |
-| Client role           | `publisher` (default) or `distributor` |
-
-Click **Save**. Then click **Test connection** — a green flash confirms
-Bokbasen accepted the credentials. The secret never appears in the DOM
-again unless you explicitly click "Reveal" (which records a `"reveal"`
-audit row in `plugin_settings_audit`). "Clear" wipes a single field.
-
-No restart needed — `Bokbasen.Settings.get_credentials/0` reads the
-encrypted row on every token fetch, so the next publish picks up the
-new values immediately.
-
-### Option B: SSH + `.env` (fallback)
-
-If you can't reach Studio (e.g. first-boot before any admin token
-exists), set the five `BOKBASEN_*` env vars:
-
-```bash
-ssh root@89.167.28.206
-cd /opt/barkpark
-# Append the 5 BOKBASEN_* vars to the existing .env
-cat >> .env <<'EOF'
-BOKBASEN_API_BASE=https://api.bokbasen.io
-BOKBASEN_OAUTH_TOKEN_URL=https://login.bokbasen.io/oauth2/token
-BOKBASEN_CLIENT_ID=<your client_id>
-BOKBASEN_CLIENT_SECRET=<your client_secret>
-BOKBASEN_CLIENT_ROLE=publisher
-EOF
-
-# Sandbox? Use the test endpoints (Bokbasen will confirm exact URLs):
-# BOKBASEN_API_BASE=https://api-sandbox.bokbasen.io
-# BOKBASEN_OAUTH_TOKEN_URL=https://login-sandbox.bokbasen.io/oauth2/token
-
-systemctl restart barkpark
-```
-
-`runtime.exs` reads `BOKBASEN_*` at boot. Env wins over the
-plugin_settings row, so this is also useful for one-off overrides
-(e.g. swapping prod ↔ sandbox without touching the DB).
-
-## Step 2 — verify the client can fetch a token
+## Step 2 — verify token fetch
 
 ```bash
 cd /opt/barkpark/api
@@ -81,25 +30,16 @@ mix run -e '
 '
 ```
 
-Expected: `TOKEN OK: eyJhbGciOiJIUzI1NiIs…`.
-
-If you get `401 invalid_client` or `403`, the credentials are wrong or the role doesn't match. Bokbasen's support team can verify.
+Expected: `TOKEN OK: eyJ…`. A `401 invalid_client` / `403` means wrong credentials or role mismatch — Bokbasen support can verify.
 
 ## Step 3 — dry-run a single book
 
-Pick a book with valid identifiers. From the Studio UI:
+Open `http://89.167.28.206/studio/production/book/<your-book-id>` → "Publish to Bokbasen" (or ••• overflow). The modal has two stages:
 
-```
-http://89.167.28.206/studio/production/book/<your-book-id>
-```
+1. **Dry-run** — generates the ONIX XML in-memory, runs validation, returns structured valid/errors. Nothing submitted.
+2. **Confirm** — enqueues the Oban `PublishWorker` job: POSTs the ONIX, polls status, writes `bp_export_status`.
 
-In the editor header → "Publish to Bokbasen" button (or the ••• overflow if narrower viewport).
-
-The modal opens with two stages:
-1. **Dry-run** — generates the ONIX XML in-memory, runs Bokbasen's validation endpoint, returns a structured result (valid / errors). Nothing is submitted.
-2. **Confirm** — enqueues an `Oban` job (`Plugins.OnixEdit.Bokbasen.PublishWorker`) that POSTs the real ONIX XML to Bokbasen, polls for status, writes the final state back to `bp_export_status`.
-
-You can drive the same flow from a shell for repeatable testing:
+Shell equivalent for repeatable testing:
 
 ```bash
 mix run -e '
@@ -108,21 +48,19 @@ mix run -e '
 '
 ```
 
-## Step 4 — watch the live ONIX preview while the book is being edited
+## Step 4 — live ONIX preview
 
-`http://89.167.28.206/studio/production/book/<id>` has the right pane "ONIX 3.0 preview" — re-renders every autosave. If you see "export failed", the document is missing required ONIX elements (e.g. no ProductIdentifier). The cross-validation banner above the form names which validation rule fired.
+The book editor's right pane "ONIX 3.0 preview" re-renders on every autosave. "Export failed" = missing required ONIX elements (e.g. no ProductIdentifier); the cross-validation banner names the rule that fired.
 
-## Step 5 — submit for real and watch the status pill
+## Step 5 — submit for real, watch the pill
 
-After the dry-run is clean, click "Confirm" in the modal. The status pill at the top of the editor flows:
+After a clean dry-run, click "Confirm". Status pill flow:
 
 ```
 draft → queued → staging → staged → polling → accepted   (or rejected / failed)
 ```
 
-Each transition publishes on `Phoenix.PubSub` topic `external_sync:bokbasen:<doc_id>`. The `ExternalSyncPill` component subscribes; the editor live-updates without a refresh.
-
-If the state stays `polling` for more than ~5 minutes, check the Oban dashboard or:
+Each transition publishes on PubSub; the editor live-updates. Stuck in `polling` > ~5 min:
 
 ```bash
 psql "$PG_URL" -c "SELECT id, state, attempt, last_error FROM oban_jobs WHERE worker='Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker' ORDER BY id DESC LIMIT 5;"
@@ -130,7 +68,7 @@ psql "$PG_URL" -c "SELECT id, state, attempt, last_error FROM oban_jobs WHERE wo
 
 ## Step 6 — admin staleness dashboard
 
-`http://89.167.28.206/admin/onixedit/staleness` shows every book's Bokbasen status with last-success timestamps. Useful for spotting books that synced once and then quietly stopped (e.g. retries exhausted, schema changes invalidated the ONIX).
+`http://89.167.28.206/admin/onixedit/staleness` — every book's Bokbasen status with last-success timestamps. Spots books that synced once and quietly stopped (retries exhausted, schema changes invalidated the ONIX).
 
 ## Rolling back a stuck book
 
@@ -148,17 +86,14 @@ Then re-edit and re-publish.
 ## Production checklist before going live with real ISBNs
 
 - [ ] `mix onix.export_proof` produces byte-stable output (no drift)
-- [ ] `mix test` is green
-- [ ] `mix compile --warnings-as-errors` is green
-- [ ] DB has been backed up (`/root/backups/barkpark-pre-bokbasen-<ts>.sql`)
-- [ ] At least one dry-run has returned `valid: true` for a representative book
+- [ ] `mix test` green
+- [ ] `mix compile --warnings-as-errors` green
+- [ ] DB backed up (`/root/backups/barkpark-pre-bokbasen-<ts>.sql`)
+- [ ] At least one dry-run returned `valid: true` for a representative book
 - [ ] Bokbasen support has confirmed the client_role matches their account expectations
-- [ ] Oban job concurrency is set to 1 for the PublishWorker (default; verify in `config/runtime.exs` or `config/prod.exs`) — submitting multiple books in parallel can trip Bokbasen's rate limit
-- [ ] `BOKBASEN_RATE_LIMIT_MS` env var is set if you want to rate-limit per-doc submission spacing (default per Bokbasen.Client)
+- [ ] Duplicate-submission protection understood: the Oban `bokbasen` queue is concurrency **4** in `config.exs`; per-document serialization comes from PublishWorker's `unique: [keys: [:document_id]]` clause (see `docs/contracts/bokbasen.md` § Lifecycle). Don't mass-enqueue — Bokbasen rate limit is 1 req/sec.
+- [ ] `BOKBASEN_RATE_LIMIT_MS` set if you want per-doc submission spacing (default per Bokbasen.Client)
 
 ## Known gotchas
 
-- **Thema codes vs Subject codes**: book.json declares `themaSubjectCategory` as a separate field, but ONIX submits Thema codes as `<Subject>` with `<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>`. The exporter handles this hoisting. If you imported books that have Thema codes in the wrong field, re-import or run a one-off migration.
-- **Multi-language `localizedText`**: `contributor.biographicalNote` and `textContent.text` are localizedText with fallback chain `["nob", "eng", "first-non-empty"]`. The exporter emits ONE language per `<Text>` element (Bokbasen's preferred). Make sure the right language is populated.
-- **Date format**: ONIX `<Date>` is compact `YYYYMMDD`; book.json stores ISO `YYYY-MM-DD`. Exporter strips dashes. Importer rehydrates. If a date roundtrips wrong, it's a renderer-side bug, not a Bokbasen issue.
-- **Bokbasen-internal codelist values**: Bokbasen-specific extension codelists (e.g. their internal sales channels) are not in EDItEUR's issue 73. If a field expects one of these, the field will render as `<select>` with no options. Either seed the values via `plugin_settings` or coordinate with Bokbasen to confirm the accepted vocabulary.
+Moved to **`docs/contracts/bokbasen.md` § Known gotchas** (Thema hoisting, localizedText fallback chain, Bokbasen-internal codelist gap). One renderer-side note stays here: ONIX `<Date>` is compact `YYYYMMDD`, book.json stores ISO `YYYY-MM-DD`; the exporter strips dashes and the importer rehydrates — a wrong roundtrip is a renderer bug, not a Bokbasen issue.

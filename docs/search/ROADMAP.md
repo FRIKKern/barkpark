@@ -1,124 +1,21 @@
+<!-- doc-tier: agent | canonical-for: search-roadmap | budget: 500tok -->
 # Search Intelligence Roadmap
-
-Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and relevance-engineering research (May 2026). Builds on `Barkpark.Search.*`, `search_intel_*`, media + documents surfaces.
 
 **Principle:** Postgres remembers and explains; search engines retrieve. No Algolia/Typesense dependency until Postgres search latency fails SLA.
 
-**Detailed plan for next phases:** [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md)
+**Phases 0–8 shipped** (May 2026): surface-safe indexes; crystal-backed suggest (recent/popular/nohits, `min_search_count: 3`, `X-BP-Search-Disable`); click/CTR; quality gates + telemetry; synonym loop (`search_synonyms`, candidates, `searchCountDelta`); document FTS hybrid (`search_vector` + ILIKE + trgm); relevance (`QueryPipeline`, `QueryParser`, `Highlighter`, `SurfaceConfig`, zero-hit recovery); golden eval (`mix search.eval`); federated search + shared `bp-search-intel.js`. Retention: 90-day raw events, crystals indefinite. Architecture: [`INTELLIGENCE.md`](INTELLIGENCE.md); detail: [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
 
----
+## Phase 9 — Scale & ops (trigger-based)
 
-## Shipped (Phases 0–8 ✓)
+**Triggers: events > 5M/scope, prune > 30s, or suggest p95 > 50ms at 100k events.**
 
-| Phase | Summary | Commit / prod |
-|-------|---------|---------------|
-| **0** | Surface-safe unique indexes, suggest indexes, trgm on `query_normalized` | `cf5de75` |
-| **1** | Crystal-backed popular/nohits, `min_search_count`, `X-BP-Search-Disable` | `cf5de75` |
-| **2** | Click/select events, CTR on crystals, interaction API, JS wiring | `9052f95` |
-| **3** | Tags, test exclusion, 4-char suggest gate, exclude patterns, debounced record, telemetry | `69ce1bb` |
-| **4** | `search_synonyms`, admin CRUD, auto candidates, apply in search, `searchCountDelta` | `cdf6597` |
-| **5** | Document `search_vector` FTS + trgm hybrid; media synonym expansion | `cdf6597` |
-| **6** | Relevance: `QueryPipeline`, `QueryParser`, `Highlighter`, field weights, `SurfaceConfig`, zero-hit recovery | shipped |
-| **7** | Intelligence product: `mix search.eval` golden harness, synonym evidence, promote/preview | shipped |
-| **8** | Unified discovery: `FederatedSearchController`, shared `bp-search-intel.js` | shipped |
+Work: Oban async record (API returns immediately); monthly RANGE partitions on `inserted_at` (DROP not DELETE); crystal retention day 90d / week+month 2y; SQL crystallize (`INSERT…SELECT`) when >100k events/day.
 
-| Layer | Status |
-|-------|--------|
-| Core API | `Intelligence.record/suggestions/insights/prune/record_interaction` |
-| Surfaces | `media`, `documents` adapters |
-| Synonyms | `Barkpark.Search.Synonyms` + admin routes |
-| Suggestions | recent / popular / nohits |
-| Crystallization | day / week / month + merge patterns |
-| Quality gate | `Sanitizer` + `__quality__` crystal |
-| Client lineage | `X-BP-Search-*`, `searchEventId`, debounce, Studio pickers |
-| Retention | 90-day raw events; crystals indefinite |
+## Phase 10 — Optional external retriever (pain-gated)
 
----
+**Triggers: >500k media assets OR fuzzy p95 > 100ms.**
 
-## Up next (Phases 9–10)
-
-| Phase | Focus | Effort | Doc |
-|-------|-------|--------|-----|
-| **9** | Scale: async record, partitions, SQL crystallize | trigger-based | [PLAN §9](PLAN-PHASES-6-10.md#phase-9--scale--ops-p2-trigger-based) |
-| **10** | Optional Typesense retriever (intelligence stays Postgres) | pain-gated | [PLAN §10](PLAN-PHASES-6-10.md#phase-10--optional-external-retriever-p3-pain-gated) |
-
----
-
-## Phase archive (0–5 detail)
-
-<details>
-<summary>Phase 0 — Correctness (shipped)</summary>
-
-- Fix unique indexes with `surface`
-- Suggest indexes; trgm on `query_normalized`
-- Surface-isolation tests
-</details>
-
-<details>
-<summary>Phase 1 — Suggest read path (shipped)</summary>
-
-- Popular/nohits from day crystals
-- `min_search_count: 3`
-- `X-BP-Search-Disable`
-</details>
-
-<details>
-<summary>Phase 2 — Click & CTR (shipped)</summary>
-
-- `event_type` click/select
-- `POST …/interaction`
-- Crystal `click_count`, `ctr`
-</details>
-
-<details>
-<summary>Phase 3 — Quality & segmentation (shipped)</summary>
-
-- Event `tags[]`, test exclusion
-- 4-letter suggest prefix
-- Exclude patterns, debounced record, telemetry
-</details>
-
-<details>
-<summary>Phase 4 — Synonym loop (shipped)</summary>
-
-- `search_synonyms` table
-- Admin CRUD, `synonymCandidates`, apply at query time
-- `searchCountDelta` on week crystals
-</details>
-
-<details>
-<summary>Phase 5 — Document FTS (shipped)</summary>
-
-- Generated `search_vector` on title
-- Hybrid FTS + ILIKE + trgm
-</details>
-
----
-
-## Suggested execution order
-
-```
-[SHIPPED] Phase 0 ──► 1 ──► 2 ──► 3 ──► 4 ──► 5
-          Phase 6 (QueryPipeline) ──► 7 (eval + promote) ──► 8 (federated + JS)
-
-[LATER]   Phase 9 when events > 5M or prune > 30s
-          Phase 10 only on search latency pain
-```
-
----
-
-## Success metrics
-
-| Metric | Target |
-|--------|--------|
-| Suggest p95 | < 50ms at 100k events/scope |
-| Popular accuracy | Zero stale zero-hit terms in top 10 |
-| CTR coverage | >60% searches with click tracking (Phase 7+) |
-| Nohit rate | Downward trend after synonym + recovery loop |
-| Golden eval | No NDCG regression on ranking PRs (Phase 7+) |
-| Multi-surface | Zero crystal collisions |
-
----
+Typesense collection per surface; **intelligence stays in Postgres** (mirror hits to record events only); skip Algolia SaaS unless enterprise mandate. Spike doc only until a trigger fires.
 
 ## What we deliberately skip
 
@@ -128,12 +25,12 @@ Phased plan derived from Algolia, Typesense, Sanity, WoodWing, Postgres, and rel
 | Personalized suggestions | Needs click volume + user profiles |
 | Full Rules / merchandising engine | CMS editorial workflow differs |
 | Algolia SaaS | Postgres sufficient until Phase 10 trigger |
+| Vector semantic search | Defer until lexical ceiling hit; adds ops cost |
 | Redis for recent | Actor-key query fine until Phase 9 |
 
----
+## Code anchors
 
-## References
-
-- [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md) — detailed Phases 6–10
-- [`INTELLIGENCE.md`](INTELLIGENCE.md) — architecture
-- `docs/media/DISCOVERY.md` — media search surface
+- `api/lib/barkpark/search/query_pipeline.ex` — `Barkpark.Search.QueryPipeline`
+- `api/lib/mix/tasks/search.eval.ex` — `mix search.eval`
+- `api/lib/barkpark_web/controllers/federated_search_controller.ex` — federated endpoint
+- `api/priv/static/assets/bp-search-intel.js` — shared client module

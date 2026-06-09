@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
 Barkpark uses bearer-token API tokens (`Authorization: Bearer <token>`)
@@ -106,3 +107,10 @@ document and works on both the scoped and flat-alias routes. Production
 deployments should issue narrower tokens per persona (publisher gets
 `ops`; everyone else gets `read`/`write` without `admin` or `ops`), each
 bound to the workspace its principal belongs to.
+
+**MUST rotate before prod** (rescued from the `create-barkpark-app`
+starter templates): the dev token has read + write + admin scopes and
+**must not be used in production** — rotate it before deploying. The
+starter templates bake `barkpark-dev-token` into both `BARKPARK_TOKEN`
+and `BARKPARK_SERVER_TOKEN` env examples; a production deploy must
+replace **both** with freshly-issued tokens.

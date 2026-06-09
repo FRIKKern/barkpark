@@ -1,412 +1,153 @@
+<!-- doc-tier: agent | canonical-for: npm-rollback | budget: 2200tok -->
 # Rollback playbook — npm + git
 
-**Status:** Runbook. On-call-executed during post-GA incident window.
-**Owner:** Subtaskmaster (primary), Boss (approver for unpublish).
-**Scope covered:** npm registry rollbacks, git revert flow for the `@barkpark/*` scope + unscoped `create-barkpark-app`. Ties into §8.11 on-call from `.doey/plans/masterplan-phase8-20260418-190403-refined.v2.md`.
+**Scope:** npm rollbacks + git revert for `@barkpark/*` and unscoped
+`create-barkpark-app`. **NOT covered:** Phoenix/Caddy/DNS rollback
+(`PROD_OPS.md`, `vercel-dns-connect.md`) — deliberately separate runbooks
+(different blast radii + approvers). Owner: Subtaskmaster; Boss approves
+unpublish + dist-tag runs.
 
-**Scope NOT covered here:** Phoenix / Caddy / Vercel DNS rollback (see `caddy-api-tls.md` and `vercel-dns-connect.md`). Infra and SDK rollbacks are deliberately separate runbooks — they have different blast radii and different approvers.
+## Decision tree
 
----
+| Symptom | Window | Severity | Mechanism |
+|---|---|---|---|
+| Type-only regression (`.d.mts` breaks `tsc`, runtime works) | any | Medium | **deprecate + patch** |
+| Runtime regression — install works, app breaks | any | High | **deprecate + patch**; **unpublish** only if patch > 4h away AND <72h |
+| Install-time failure | <72h | High | **unpublish + patch** |
+| Install-time failure | ≥72h | High | **deprecate + patch** (unpublish blocked by policy) |
+| Security (credential leak, RCE, auth bypass) | any | **Critical** | **unpublish immediately** (within 72h) + patched release + public CVE |
+| Accidental debug/scratch publish | <72h | Low | **unpublish** |
+| Wrong dist-tag (`@latest` at a broken build) | any | High | **dist-tag reassign** (no unpublish) |
+| Wrong tarball contents entirely | <72h | High | **unpublish**, re-publish at the NEXT version |
 
-## Decision tree — which mechanism for which failure
-
-This is the single most important section. Read it first, act only after.
-
-| Symptom | Window since publish | Severity | Mechanism | Time-to-fix |
-|---|---|---|---|---|
-| Type-only regression (`.d.mts` breaks `tsc` but runtime works) | any | Medium | **`npm deprecate` + patch** | ~30 min (land patch, CI publishes `.N+1`) |
-| Runtime regression — install succeeds, app breaks | any | High | **`npm deprecate` + patch** (if fixable same-day) OR **`npm unpublish`** (if patch > 4h away AND within 72h window) | 30 min – 4h |
-| Install-time failure (`pnpm install` errors on the bad version) | <72h | High | **`npm unpublish` + patch** | 1–2h |
-| Install-time failure | ≥72h | High | **Deprecate + patch** (unpublish blocked by npm policy) | 30 min – 4h |
-| Security issue (credential leak, RCE, auth bypass) | any | **Critical** | **`npm unpublish` immediately** (within 72h if allowed) + patched major + public CVE | 2–6h |
-| Accidentally published a debug/scratch version | <72h | Low | **`npm unpublish`** | 5 min |
-| Wrong dist-tag moved (`@latest` pointing at a broken build) | any | High | **`npm dist-tag rm` + `npm dist-tag add`** (no unpublish needed) | 2 min |
-| Wrong package published entirely (tarball contents wrong) | <72h | High | **`npm unpublish`** and re-publish with same version *after* the re-publish-blocker window | see §Re-publish blocker below |
-
-**Default to `npm deprecate`. Reach for `npm unpublish` only when install is broken for users who would otherwise get the bad version.**
-
-### Why "deprecate first, unpublish last"
-
-`npm deprecate` is:
-- Reversible (deprecate with empty string to un-deprecate).
-- Non-destructive (the version stays installable; users just see a warning).
-- Zero-impact on anyone already pinned to that version — their installs still work.
-- Visible at install time — enough friction that most users upgrade.
-
-`npm unpublish` is:
-- **Irreversible** past the first re-publish attempt (see §Re-publish blocker).
-- Breaks every `package-lock.json` / `pnpm-lock.yaml` pinned to that version.
-- Allowed only within **72h** of publish, per npm [unpublish policy](https://docs.npmjs.com/policies/unpublish). Beyond 72h you must open a registry support ticket and argue your case.
-- Scoped packages (`@barkpark/*`) and unscoped (`create-barkpark-app`) follow the same rule.
-
----
+**Default to `npm deprecate`. Reach for `npm unpublish` only when install is
+broken for users who would otherwise get the bad version.** Deprecate is
+reversible (deprecate with `""` to undo), non-destructive (version stays
+installable; pinned users unaffected), visible at install time. Unpublish is
+**irreversible** past the first re-publish attempt, breaks every lockfile pinned
+to that version, and is allowed only within **72h** of publish
+([npm unpublish policy](https://docs.npmjs.com/policies/unpublish)); beyond 72h
+requires a registry support ticket. Same rule for scoped + unscoped.
 
 ## Mechanism A — `npm deprecate` (soft recall)
 
-### When to use
-
-- Buggy but installable version.
-- You will ship a patch within the hour.
-- You want `npm WARN deprecated` printed on every `npm install` / `pnpm install` referencing the bad version.
-
-### Usage
+For buggy-but-installable versions with a patch landing soon.
 
 ```sh
-# Mandatory: use a production-scoped token. 2FA on owner account must be automation-compatible.
-export NPM_TOKEN=<...>
-
-npm deprecate @barkpark/core@1.0.0 "broken TypeScript types — upgrade to 1.0.1 (see https://github.com/FRIKKern/barkpark/releases/tag/v1.0.1)"
-
-# Un-deprecate (rollback of the deprecation itself — rare, used if the replacement turned out worse):
-npm deprecate @barkpark/core@1.0.0 ""
-
-# Deprecate a range:
-npm deprecate "@barkpark/core@<1.0.1" "upgrade to 1.0.1 — see release notes"
+npm deprecate @barkpark/core@1.0.0 "broken types — upgrade to 1.0.1"
 ```
 
-### Verification
-
-```sh
-npm view @barkpark/core@1.0.0 deprecated
-# Expected: prints the deprecation message string
-
-npm view @barkpark/core versions --json | tail -5
-# Expected: 1.0.0 still present in the list (not removed)
-
-# Simulated end-user experience:
-mkdir /tmp/rollback-check && cd /tmp/rollback-check && npm init -y >/dev/null
-npm install @barkpark/core@1.0.0 2>&1 | grep -i deprecated
-# Expected: WARN about the deprecated version
-```
-
-### When it's insufficient
-
-- When the version is completely uninstallable (e.g. `postinstall` script crashes, malformed tarball). Users cannot even see the deprecation warning because the install fails first. Escalate to Mechanism B.
-
----
+Un-deprecate with message `""`; ranges work (`"@barkpark/core@<1.0.1"`).
+Verify: `npm view @barkpark/core@1.0.0 deprecated` prints the message; version
+still listed; a scratch install prints `npm WARN deprecated`. If the version is
+completely uninstallable the warning is never seen — escalate to B.
 
 ## Mechanism B — `npm unpublish` (hard recall)
 
-### When to use
+Only for: completely broken installs; security hazards where the artifact itself
+is the harm; accidental wrong-content publishes caught <72h.
 
-Only these cases:
-1. Install is completely broken for new installs.
-2. Security issue where leaving the artifact published is itself the hazard (leaked credential, backdoor).
-3. Accidental publish of wrong-content or debug version, caught within 72h.
-
-### Policy constraints
-
-- **72h window from publish.** `npm unpublish @barkpark/core@1.0.0 --force` after 72h returns `E403`. Support ticket required.
-- **Unpublishing a version that is depended on by another public package in the last 72h is blocked.** If any consumer on the public registry has already added us to their `package.json`, the unpublish may fail even within the window.
-- **2FA + token permissions.** Your token must have publish + unpublish scope; automation tokens created after npm's 2024 policy change default to publish-only.
-
-### Usage
+Constraints: **72h window** (`E403` after); blocked if another public package
+depended on the version in the last 72h; token needs publish + unpublish scope
+(post-2024 automation tokens default publish-only; 2FA device handy — unscoped
+packages may require account confirmation).
 
 ```sh
-# Single version unpublish:
-npm unpublish @barkpark/core@1.0.0 --force
-# --force is required. Without it npm refuses for scoped packages.
-
-# Unpublish the entire package (DO NOT do this post-GA — only for scratch publishes):
-# npm unpublish @barkpark/core --force
-
-# Unscoped package (e.g. create-barkpark-app) — same syntax:
-npm unpublish create-barkpark-app@1.0.0 --force
+npm unpublish @barkpark/core@1.0.0 --force   # --force required; unscoped same syntax
 ```
 
-### Verification
+Verify: `npm view @barkpark/core@1.0.0 version` → 404; version gone from
+`versions --json`; check `dist-tags --json` and reassign any tag pointing at the
+dead version BEFORE or IMMEDIATELY AFTER unpublish.
 
-```sh
-npm view @barkpark/core@1.0.0 version
-# Expected: HTTP 404 — "no such package available"
+**Re-publish blocker (critical):** after unpublishing `1.0.0` you **cannot
+publish a new artifact at `1.0.0` for 24h** (registry anti-replay). Always ship
+the fix as `1.0.1` — never re-use the number. This is why deprecate is the
+default: it doesn't burn a version.
 
-npm view @barkpark/core versions --json
-# Expected: the unpublished version is GONE from the array
-
-# Confirm dist-tags do not still point at the dead version:
-npm view @barkpark/core dist-tags --json
-# If any tag points at 1.0.0, reassign it BEFORE or IMMEDIATELY AFTER unpublish:
-npm dist-tag rm @barkpark/core latest
-npm dist-tag add @barkpark/core@0.9.5 latest  # or the last known good
-```
-
-### Re-publish blocker (critical)
-
-After `npm unpublish @barkpark/core@1.0.0`, **you cannot publish a new artifact at `1.0.0` for 24h**. The registry reserves the name to prevent supply-chain attacks via version replay.
-
-Practical consequence: if you unpublish 1.0.0, publish 1.0.1 as the patched version — **never** try to re-use 1.0.0. This is why `npm deprecate` is the default; it doesn't consume a version number.
-
-### Downstream impact
-
-- Every user with `@barkpark/core@1.0.0` in their lockfile will get an install failure next `npm ci`.
-- This will show up on GitHub Issues across downstream projects within hours. Pre-write a pinned issue comment: "Yes we unpublished; upgrade to 1.0.1 with `npm install @barkpark/core@latest`."
-- CI systems that cache npm metadata may keep serving the old manifest for up to 1h. Expect a long tail.
-
----
+**Downstream impact:** every lockfile pinned to the version fails next `npm ci`;
+pre-write a pinned GitHub issue comment with the upgrade line; CI metadata
+caches can serve the old manifest for up to 1h. Clear CI caches after any
+unpublish.
 
 ## Mechanism C — `npm dist-tag` rollback (reassign `@latest`)
 
-### When to use
-
-The artifact at version N is fine for people pinned to `@N`, but `@latest` should not point to it. Common cause: wrong version promoted to `@latest` via `promote-latest.yml` or `npm dist-tag add`.
-
-### Usage
+When the artifact is fine but `@latest` points at the wrong version.
 
 ```sh
-# Show current tags:
-npm view @barkpark/core dist-tags --json
-# { "latest": "1.0.0", "next": "1.0.0-rc.1", "preview": "1.0.0-preview.12" }
-
-# Move @latest back to the last good version:
-npm dist-tag add @barkpark/core@0.9.5 latest
-
-# Verify:
-npm view @barkpark/core dist-tags --json
-# { "latest": "0.9.5", ... }
-
-# Users installing with no tag (`npm install @barkpark/core`) will now resolve to 0.9.5.
-# The bad 1.0.0 is still installable for anyone who explicitly asks for it.
+npm dist-tag add @barkpark/core@0.9.5 latest   # move back to last good
 ```
 
-Dist-tag rollback is instant, non-destructive, and does not burn the version number. Prefer this over unpublish when the bug is "wrong version got promoted."
+Instant, non-destructive, burns no version number. Prefer over unpublish when
+the bug is "wrong version got promoted."
 
----
+### Dist-tag changes via CI (`retag.yml`) — absorbed retag runbook
+
+Local `npm dist-tag` returns **HTTP 403** — only the CI `NPM_TOKEN` holds
+publish/dist-tag scope on the `@barkpark` org. Dispatch through
+`.github/workflows/retag.yml` (`workflow_dispatch`, on `main` only; fails fast
+with `::error title=Missing NPM_TOKEN::` if the secret is unset). The
+protected-channel guard refuses `remove_tag` of `preview` or `next`. Reference
+incident: `release.yml` run **24627335562** (2026-04-19) published two
+`1.0.0-preview.1` packages to `latest` instead of `preview` — see
+`docs/adr/0002-npm-dist-tag-publish.md`.
+
+> **Approval gate (P0 guardrail):** **Boss must approve each
+> `workflow_dispatch` run separately before it executes.** Two packages = two
+> approvals; a re-run after a failure = a fresh approval. Dist-tag changes are
+> immediately live for every npm consumer — the approval cadence is the only
+> human gate.
+
+**Split-state rollback (run 1 succeeded, run 2 failed):** re-run **only run 2**
+with the same inputs — the `Add dist-tag` step is idempotent on npm. Full undo
+(restore the version to `latest`): dispatch with `add_tag=latest` and
+`remove_tag` **empty** — never strip `preview` on the way back (the guard
+refuses it anyway). If the workflow cannot start (token missing, not on `main`),
+fix the gating and re-dispatch — never improvise locally (403s).
+
+**404-is-intentional:** `npm dist-tag rm <pkg> latest` **deletes** the `latest`
+entry — it does not reassign. With no stable version published, a bare
+`npm install @barkpark/core` then **404s**. This is the intended interim state:
+fail-loud beats silently serving a pre-release on the stable channel. The 404
+persists until the first stable GA publish; `@preview` installs and explicit
+pins are unaffected.
+
+> **ADR divergence note:** ADR 0002 §Consequences suggests *not* stripping
+> `latest` mid-incident. The incident response deliberately **cleared** `latest`
+> (fail-loud). To reassert the ADR posture: dispatch `add_tag=preview`,
+> `remove_tag=` empty.
 
 ## Mechanism D — git revert (fix the source)
 
-Every npm rollback is a stopgap. The permanent fix is a git revert that ships as a new patch version.
+Every npm rollback is a stopgap; the permanent fix is a revert shipped as a new
+patch: `git revert <bad-sha>` on main → `pnpm changeset` (patch) → push → CI
+publishes. If the revert conflicts, abort and either revert the follow-ups too
+or forward-fix. **Never** force-push main to paper over a revert. Don't revert a
+whole multi-concern PR — undo just the broken piece. npm-side rollback runs in
+parallel, not after.
 
-### Usage
+## Incident checklist
 
-```sh
-cd /path/to/barkpark
-git checkout main && git pull
-
-# Identify the bad commit:
-git log --oneline | head -20
-
-# Revert:
-git revert <sha-of-bad-commit>
-# Editor opens with a default revert message. Edit if needed:
-#   revert: @barkpark/core broken types in 1.0.0 (#1234)
-#
-#   Breaks `tsc --noEmit` for consumers. Shipping 1.0.1 to restore types.
-#
-#   This reverts commit <sha>.
-# Save and exit.
-
-# Add a changeset:
-pnpm changeset
-# Select @barkpark/core → patch → write a user-facing line.
-
-git push origin main
-# CI runs release.yml, publishes 1.0.1 to @latest (or the appropriate dist-tag
-# for the current release phase).
-```
-
-### If revert creates merge conflicts
-
-- Conflicts mean subsequent commits built on the bad one.
-- Abort (`git revert --abort`), assess what downstream work depends on the reverted piece, and either:
-  - Revert the follow-ups too (clean history), or
-  - Forward-fix in a new commit (faster if follow-ups are independent).
-- **Never** force-push to main to paper over a revert. This breaks lockfiles and confuses consumers.
-
-### When to NOT revert
-
-- The bad commit is part of a merged PR touching unrelated files. Don't revert the whole PR; cherry-pick or manually undo just the broken piece in a new commit.
-- The commit is already past the GA cutoff (npm already has the bad version). Revert is still correct — you ship 1.0.1 — but the npm-side rollback (deprecate or unpublish) happens in parallel, not after.
-
----
-
-## Incident checklist (on-call playbook)
-
-Tied to §8.11 on-call in the v2 masterplan. Follow in order; don't skip.
-
-### 1. Detect (target: <30 min from publish)
-
-- Signals: GitHub Issues spike on `FRIKKern/barkpark`, Twitter mentions tagged `@barkpark`, HN comments on the launch thread, Uptime Kuma alert, beta-channel Slack/Discord message, CI failure on a downstream staging project.
-- First on-call action: acknowledge in `#incidents` (or Boss DM if pre-launch).
-
-### 2. Assess (target: <15 min)
-
-- Reproduce. Scratch dir, `npm init -y`, `npm install @barkpark/<pkg>@<bad-version>`, exercise the broken path.
-- Classify: type-only / runtime / install-time / security / dist-tag misroute.
-- Estimate blast radius: how many users have installed since publish (`npm view @barkpark/<pkg> downloads` is slow to update; use the launch thread velocity as a proxy).
-- Consult the decision tree at top. **Write the decision down** in the incident ticket before acting — it forces you to justify.
-
-### 3. Decide mechanism
-
-Use the decision-tree table. If severity is Critical, Boss is the approver (DM / phone). Otherwise Subtaskmaster can proceed.
-
-### 4. Execute
-
-- Follow the relevant mechanism (A, B, C, or D). Most incidents combine two: (A deprecate + D revert) OR (C dist-tag + D revert) OR (B unpublish + D revert). Only security incidents usually require B.
-- Every executed command goes into the incident ticket verbatim with timestamps.
-
-### 5. Verify
-
-- Run the verification snippet for whichever mechanism was used (see each section above).
-- Additional smoke-test: `npx create-barkpark-app@latest blog /tmp/rollback-smoke-$(date +%s)` — confirm the scaffold still works. This is the fresh-install invariant.
-- Verify from a **clean** npm cache: `npm cache clean --force` before re-testing. Registry metadata is cached aggressively.
-
-### 6. Communicate
-
-- Update the GitHub Release notes for the bad version with a "⚠️ rolled back" banner and a link to the patch.
-- Reply on the HN launch thread if the incident is during launch week.
-- Send a beta-channel note even if beta users weren't affected — transparency builds trust.
-
-### 7. Postmortem (within 48h)
-
-- **Record the postmortem as a task in the task system** — dogfood it; the
-  task is the durable postmortem record. Do **not** write to `.doey/plans/`
-  (that directory was archived to `_attic`, it is not a live destination).
-
-  A task is a `type:"task"` document created via the standard mutate endpoint
-  (`content.kind` must equal `"task"`) — there is no `POST /v1/tasks` create
-  verb; the `bp task` verbs are read/lifecycle only.
-
-  ```bash
-  TOKEN=barkpark-dev-token
-
-  # Create the postmortem task. Capture timeline, detection gap, decision
-  # rationale, fix, and prevention right in the content. Pick a stable doc id.
-  curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"mutations":[{"create":{
-          "_id": "postmortem-<incident>-<date>",
-          "_type": "task",
-          "title": "postmortem: <incident> (<date>)",
-          "content": {
-            "kind": "task",
-            "lifecycle_status": "open",
-            "timeline": "<…>",
-            "detection_gap": "<…>",
-            "decision_rationale": "<which mechanism + why>",
-            "fix": "<patch version shipped>",
-            "prevention": "<test we should have had, CI gate we should add>",
-            "labels": ["postmortem", "incident", "ops"]
-          }
-        }}]}'
-  # → the doc id you chose is <task_id> below.
-  ```
-
-  For a long-form write-up, author a Bulldocs paper and attach it to the task
-  (the task references the paper):
-
-  ```bash
-  curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"add": ["postmortem-<incident>-<date>"]}'
-  ```
-
-- File preventive tickets in the 1.0.1 backlog (each one its own task).
-- If the same class of bug has caused two incidents, the prevention task is upgraded to P0 for 1.0.1.
-
----
-
-## Sample timeline — hypothetical `@barkpark/core@1.0.0` broken TypeScript types
-
-Timestamps are fictional but proportions are realistic for a well-drilled response.
-
-| Time | Event | Who |
-|---|---|---|
-| 00:00 | `promote-latest.yml` publishes `@barkpark/core@1.0.0` to `@latest` | CI |
-| 00:05 | HN "Show HN" thread goes live | Boss |
-| 00:47 | GitHub issue opened: "1.0.0 breaks `tsc` for consumers — exports missing `PortableTextProps` type" | External user |
-| 00:49 | On-call (Subtaskmaster) sees issue, starts clock | SM |
-| 00:52 | Reproduces locally: `pnpm install @barkpark/core@1.0.0 && tsc --noEmit` errors | SM |
-| 00:55 | Classification: type-only regression. Decision: Mechanism A (deprecate) + D (revert + patch). **No unpublish** — 1.0.0 still installs and runs. | SM |
-| 00:58 | `npm deprecate @barkpark/core@1.0.0 "broken TypeScript types — upgrade to 1.0.1 when available (ETA ~30min)"` | SM |
-| 01:02 | Replies to GitHub issue with ETA; pins the issue | SM |
-| 01:05 | Replies on HN thread: acknowledging, patch in ~30 min | Boss |
-| 01:12 | `git revert <sha>` on main, changeset added | SM |
-| 01:15 | PR opened, auto-merges (green CI) | SM |
-| 01:28 | CI publishes `@barkpark/core@1.0.1` to `@latest` | CI |
-| 01:30 | Verifies: `npm view @barkpark/core@latest version` → `1.0.1`. Fresh install + `tsc` works. | SM |
-| 01:32 | Updates GitHub issue: closed with link to 1.0.1 | SM |
-| 01:33 | Replies on HN thread: "patched — `npm install @barkpark/core@latest`" | Boss |
-| 01:35 | Updates `npm deprecate` message on 1.0.0 to point to the now-released 1.0.1: `npm deprecate @barkpark/core@1.0.0 "broken types — upgrade to 1.0.1"` | SM |
-| 02:00 | Next HN check-in: no new complaints. Incident closes. | SM |
-| 24:00 | 48h later: postmortem written. Prevention: add `tsc --noEmit` on a downstream scratch project to `release.yml` pre-publish gate. | SM |
-
-Total blast radius: ~45 min from publish to patch availability. Most users installing between 00:00 and 01:28 hit the issue once, got a deprecation warning, upgraded on their next `npm install`.
-
----
-
-## Sample timeline — hypothetical security issue (leaked HMAC secret in `@barkpark/nextjs@1.0.2`)
-
-| Time | Event | Who |
-|---|---|---|
-| T+0 | Dependabot alert fires: a committed secret was bundled into `@barkpark/nextjs@1.0.2`'s tarball | Automation |
-| T+5m | On-call wakes Boss — this is Critical and requires Boss sign-off on unpublish | SM → Boss |
-| T+15m | Confirmed: `npm pack @barkpark/nextjs@1.0.2` tarball contains `.env` with live `BARKPARK_WEBHOOK_SECRET` | SM |
-| T+20m | **`npm unpublish @barkpark/nextjs@1.0.2 --force`** (within 72h window, approved by Boss) | SM |
-| T+22m | Rotate the leaked secret: Boss regenerates webhook secret on production Phoenix; updates `BARKPARK_WEBHOOK_SECRET` on Vercel; sets old value as `BARKPARK_WEBHOOK_PREVIOUS_SECRET` for dual-verify window | Boss |
-| T+30m | `git revert` the bad commit; changeset adds `@barkpark/nextjs` patch bump → 1.0.3; extra changeset note documents CVE ID placeholder | SM |
-| T+45m | CI publishes `@barkpark/nextjs@1.0.3`. Pre-publish gate (added post-Incident-1) scans tarball for common secret patterns before uploading — greenlit. | CI |
-| T+1h | Public GitHub Security Advisory drafted + published; CVE requested via GitHub's CNA | Boss |
-| T+2h | HN / Twitter / beta-channel comms: rolled back, rotated, upgrade path, no confirmed exploitation | Boss |
-| T+24h | Postmortem draft. Preventions: (i) tarball secret-scan on publish, (ii) `.npmignore` audit, (iii) require secrets-dry-run on every release PR. | SM |
-
-The unpublish here is non-negotiable. Even if downstream users get install failures, leaving a live-secret tarball on the registry is a larger harm.
-
----
+1. **Detect** (<30 min): GitHub Issues / Uptime Kuma / beta channel; acknowledge in `#incidents`.
+2. **Assess** (<15 min): reproduce in a scratch dir; classify (type-only / runtime / install-time / security / dist-tag); estimate blast radius.
+3. **Decide:** use the decision tree; **write the decision down** in the incident ticket before acting. Critical ⇒ Boss approves.
+4. **Execute:** most incidents combine two mechanisms (A+D, C+D, or B+D). Every command goes in the ticket verbatim with timestamps.
+5. **Verify:** mechanism checks above + fresh-install invariant: `npx create-barkpark-app@latest blog /tmp/rollback-smoke-$(date +%s)`. Re-test from a clean cache (`npm cache clean --force`).
+6. **Communicate:** "rolled back" banner on the GitHub Release; reply where users reported it.
+7. **Postmortem (48h):** record as a task in the task system — a `type:"task"` document via the standard mutate endpoint with `content.kind == "task"`; there is no `POST /v1/tasks` create verb (`bp task` verbs are read/lifecycle only). Capture timeline, detection gap, decision rationale, fix, prevention. Long-form: attach a Bulldocs paper via `POST /v1/tasks/<task_id>/papers`. Never write to `.doey/plans/` (archived to `_attic`). File preventive tickets; a same-class second incident upgrades prevention to P0.
 
 ## Known pitfalls
 
-- **Dist-tag leftovers after unpublish.** If you unpublish the version `@latest` pointed at, `npm view` still lists `latest` as the dead version until you move the tag. Always reassign dist-tags BEFORE or immediately after unpublish.
-- **Re-publish-blocker catches people by surprise.** If you unpublish `1.0.0` at 09:00 and try to publish a "fixed" `1.0.0` at 09:10, npm returns E403. Solution is always: publish `1.0.1`, not a "re-run" of `1.0.0`.
-- **`npm deprecate` does NOT update lockfiles.** Users with `1.0.0` in their lockfile keep getting `1.0.0` until they explicitly `npm update` or regenerate the lockfile. Communicate via release notes + the deprecation warning.
-- **Scoped vs unscoped unpublish error messages differ.** Scoped (`@barkpark/*`) works with `--force`. Unscoped (`create-barkpark-app`) sometimes requires the package author account to confirm; 2FA device must be handy.
-- **CI cached node_modules can re-publish a ghost version.** If your release workflow caches `.pnpm-store` and the cache somehow retains an unpublished tarball, it can't push it back — but some setups checksum-mismatch and fail the next publish. Clear CI cache after any unpublish.
-- **GitHub Packages mirror.** If we ever mirror to GHP, unpublishing on npm doesn't propagate. Handle separately. (Currently we do not mirror — 1.0 publishes only to npmjs.)
-- **Signed tags don't auto-revert.** If you `git revert` a commit, the `v1.0.0` signed tag still points at the bad SHA. Delete and re-create the tag if necessary: `git tag -d v1.0.0 && git push origin :refs/tags/v1.0.0`, then re-tag after the revert lands. Rare; mostly only matters if the tag is load-bearing (GitHub Release artifact).
-- **Concurrent publishes.** If two workers both `changeset publish` simultaneously, npm rejects the second with E409. Not a rollback scenario per se, but if it happens during an incident, wait 30s and retry — don't try to unpublish the half-failed one.
+- **`npm deprecate` does NOT update lockfiles** — pinned users keep the bad version until they update; communicate via release notes.
+- **GitHub Packages mirror** — we don't mirror; if we ever do, unpublish doesn't propagate.
+- **Signed tags don't auto-revert** — delete + re-create the tag after the revert lands, if the tag is load-bearing.
+- **Concurrent `changeset publish`** → E409; wait 30s and retry — don't unpublish the half-failed one.
 
 ## Drill cadence
 
-Per slice 8.0 preflight: this playbook must be **drilled at least once** before GA. The drill scenario is:
+Drill **at least once before GA**; annually after, sooner on on-call change:
 
-1. Publish `@barkpark/core@0.0.0-rollback-drill-<timestamp>` to `@preview` dist-tag.
-2. Deprecate it within 5 minutes.
-3. Unpublish it within 60 minutes (inside 72h window).
-4. **Record the drill as a task in the task system** — dogfood it; the task is
-   the durable drill record. Do **not** write to `.doey/plans/` (archived to
-   `_attic`, not a live destination). Capture timestamps and observed behavior
-   in the task body:
-
-   A task is a `type:"task"` document created via the standard mutate endpoint
-   (`content.kind` must equal `"task"`); the `bp task` verbs are read/lifecycle
-   only, so there is no `POST /v1/tasks` create verb.
-
-   ```bash
-   TOKEN=barkpark-dev-token
-
-   curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"mutations":[{"create":{
-           "_id": "rollback-drill-<date>",
-           "_type": "task",
-           "title": "rollback drill (<date>)",
-           "content": {
-             "kind": "task",
-             "lifecycle_status": "open",
-             "published_at": "<ts>",
-             "deprecated_at": "<ts> (target <5m)",
-             "unpublished_at": "<ts> (target <60m)",
-             "observed": "<observed behavior / deviations>",
-             "labels": ["rollback-drill", "ops"]
-           }
-         }}]}'
-   # → the doc id you chose is <task_id>; attach a written paper if a long-form
-   #   record is warranted:
-   #   curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
-   #     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-   #     -d '{"add": ["rollback-drill-<date>"]}'
-   ```
-
-After GA, annual re-drill. Sooner if on-call personnel change.
+1. Publish `@barkpark/core@0.0.0-rollback-drill-<timestamp>` to `@preview`.
+2. Deprecate within 5 min.
+3. Unpublish within 60 min (inside 72h window).
+4. Record the drill as a task (same task-system mechanics as the postmortem step): timestamps for published/deprecated/unpublished, observed deviations, labels `["rollback-drill", "ops"]`.

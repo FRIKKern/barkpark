@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: http-api-v1-contract | budget: 3500tok -->
 # Barkpark HTTP API — v1 Reference
 
 ## 1. Overview
@@ -508,3 +509,9 @@ Clients should honor the `Retry-After` header and back off.
 ## 13. Known Limitations (v1.0)
 
 - Reference expansion is **depth 1 only**: a referenced doc's own reference fields stay as raw id strings. Clients that need deeper chains issue multiple queries.
+
+---
+
+## 14. Open items
+
+- **Does `delete` require `type`? — needs-verification against prod.** In current code, `Content.apply_one/3` pattern-matches `%{"delete" => %{"id" => _, "type" => _}}`; a `delete` mutation without `type` falls through to the catch-all clause and returns `400 malformed`. That matches §6's documented shape (`{"delete": {"id": ..., "type": ...}}`). This has deliberately NOT been tested against the prod mutate endpoint (2026-06 doc refactor ran no prod requests) — confirm on prod before relying on the without-`type` error shape, and file a bd issue if prod diverges from the code reading.
