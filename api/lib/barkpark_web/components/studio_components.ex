@@ -1134,16 +1134,32 @@ defmodule BarkparkWeb.StudioComponents do
 
         <%= if @admin? do %>
           <div class="item-share-body">
+            <div class="item-share-lead">
+              <span class="item-share-lead-icon"><.icon name="share-2" size={18} /></span>
+              <div>
+                <div class="item-share-lead-title">Anyone with the link</div>
+                <div class="item-share-lead-sub">can open just this item — no account needed.</div>
+              </div>
+            </div>
+
             <%= if @links == [] do %>
-              <p class="shares-note">No link yet — create one and anyone with it can open just this item.</p>
+              <div class="item-share-empty">No link yet.</div>
             <% else %>
               <div :for={link <- @links} class="item-share-link-row">
-                <span class={"item-share-access item-share-access-#{link.access}"}><%= String.capitalize(link.access) %></span>
-                <input type="text" readonly value={link.url} class="form-input item-share-url" onclick="this.select()" />
+                <span class={"item-share-access item-share-access-#{link.access}"}>
+                  <%= String.capitalize(link.access) %>
+                </span>
+                <input
+                  type="text"
+                  readonly
+                  value={link.url}
+                  class="form-input item-share-url"
+                  onclick="this.select()"
+                />
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm"
-                  onclick={"if(navigator.clipboard){navigator.clipboard.writeText(window.location.origin + '#{link.url}')}"}
+                  onclick={"if(navigator.clipboard){navigator.clipboard.writeText(window.location.origin + '#{link.url}');this.textContent='Copied'}"}
                   title="Copy link"
                 >
                   Copy
@@ -1162,13 +1178,17 @@ defmodule BarkparkWeb.StudioComponents do
 
             <p :if={@error} class="shares-error"><%= @error %></p>
 
-            <div class="item-share-actions">
-              <button type="button" class="btn btn-primary btn-sm" phx-click="item-share-create" phx-value-access="read">
-                <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={14} /></span>
+            <div class="item-share-footer">
+              <span class="shares-note">Edit links are coming next.</span>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                phx-click="item-share-create"
+                phx-value-access="read"
+              >
                 Create view link
               </button>
             </div>
-            <p class="shares-note">Anyone with a view link can open this item — no account needed. (Edit links are coming next.)</p>
           </div>
         <% else %>
           <p class="shares-note" style="padding: 16px;">An admin token is required to share items.</p>

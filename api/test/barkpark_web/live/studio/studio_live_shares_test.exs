@@ -172,11 +172,13 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
     test "admin opens the popover, mints a stable link, then revokes it", %{conn: conn} do
       {:ok, view, _html} = admin_view(conn)
 
-      # the paper Share button fires this with the item ref
+      # the paper Share button fires this with DASH-keyed phx-value params
+      # (ref-type / ref-id) — match that exactly so the handler's param reads
+      # are exercised the way the real button drives them.
       render_hook(view, "item-share-open", %{
         "kind" => "doc",
-        "ref_type" => "paper",
-        "ref_id" => "demo-paper",
+        "ref-type" => "paper",
+        "ref-id" => "demo-paper",
         "title" => "Demo Paper"
       })
 
@@ -208,8 +210,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
 
       render_hook(view, "item-share-open", %{
         "kind" => "doc",
-        "ref_type" => "paper",
-        "ref_id" => "p"
+        "ref-type" => "paper",
+        "ref-id" => "p"
       })
 
       html = render(view)
@@ -225,8 +227,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
 
       render_hook(view, "item-share-open", %{
         "kind" => "doc",
-        "ref_type" => "paper",
-        "ref_id" => "x"
+        "ref-type" => "paper",
+        "ref-id" => "x"
       })
 
       render_hook(view, "item-share-create", %{"access" => "read"})

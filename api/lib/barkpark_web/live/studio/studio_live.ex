@@ -1155,12 +1155,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("item-share-open", %{"kind" => kind} = params, socket) do
     if socket.assigns[:shares_admin?] do
+      # phx-value-ref-type / phx-value-ref-id arrive DASH-keyed — Phoenix keeps
+      # the attribute suffix verbatim (the existing "doc-id" handler is the same).
+      ref_id = params["ref-id"] |> to_string() |> String.replace_prefix("drafts.", "")
+
       item = %{
         kind: kind,
-        ref_type: params["ref_type"],
+        ref_type: params["ref-type"],
         # read links resolve the PUBLISHED id — strip a drafts. prefix.
-        ref_id: params["ref_id"] |> to_string() |> String.replace_prefix("drafts.", ""),
-        title: params["title"] || params["ref_id"]
+        ref_id: ref_id,
+        title: params["title"] || ref_id
       }
 
       {:noreply,
