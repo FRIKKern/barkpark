@@ -88,7 +88,107 @@ defmodule BarkparkWeb.ShareController do
     end
   end
 
+  @doc """
+  `POST /v1/shares/tokens` — mint a scoped-share EDIT token (P5).
+
+  Body/params: `scope` (required), `surfaces` (required, comma list of
+  `docs,media`), `ttl` (optional seconds; default 7d, cap 1y), `label`
+  (optional). 201 with the RAW token shown ONCE; 422 if the scope is not
+  `:edit`-shared for the surfaces.
+  """
+  def mint_token(conn, params) do
+    scope = params["scope"]
+    surfaces = params["surfaces"]
+
+    with true <- is_binary(scope) and scope != "",
+         true <- is_binary(surfaces) and surfaces != "",
+         {:ok, {ws, proj, dataset}} <- Sharing.scope_triple(scope) do
+      surface_list =
+        surfaces |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+      opts = token_opts(params)
+
+      case Barkpark.Auth.create_share_token(ws, proj, dataset, surface_list, opts) do
+        {:ok, {raw, token}} ->
+          conn
+          |> put_status(:created)
+          |> json(%{token: raw, share_token: token_json(token)})
+
+        {:error, reason} ->
+          unprocessable(conn, "could not mint edit token: #{describe_token_error(reason)}")
+      end
+    else
+      _ -> unprocessable(conn, "scope and surfaces (comma list of docs,media) are required")
+    end
+  end
+
+  @doc """
+  `GET /v1/shares/tokens` — list share-edit tokens (optional `?scope=` filter).
+  Never returns the raw token or its hash.
+  """
+  def list_tokens(conn, params) do
+    scope = if is_binary(params["scope"]) and params["scope"] != "", do: params["scope"]
+    tokens = Barkpark.Auth.list_share_tokens(scope) |> Enum.map(&token_json/1)
+    json(conn, %{tokens: tokens})
+  end
+
+  @doc """
+  `DELETE /v1/shares/tokens/:token_id` — revoke one share-edit token.
+  """
+  def revoke_token(conn, %{"token_id" => token_id}) do
+    case Barkpark.Auth.revoke_token(token_id) do
+      {:ok, _} -> json(conn, %{revoked: true, token_id: token_id})
+      {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "token not found"})
+      {:error, _} -> unprocessable(conn, "could not revoke token")
+    end
+  end
+
   # ── helpers ────────────────────────────────────────────────────────────
+
+  defp token_opts(params) do
+    ttl =
+      case params["ttl"] do
+        t when is_integer(t) ->
+          t
+
+        t when is_binary(t) ->
+          case Integer.parse(t) do
+            {n, _} -> n
+            :error -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    [ttl: ttl, label: params["label"]]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  # The token row, MINUS the secret (token_hash never leaves the server).
+  defp token_json(token) do
+    %{
+      id: token.id,
+      label: token.label,
+      scope: token.share_scope,
+      surfaces:
+        token.permissions
+        |> List.wrap()
+        |> Enum.map(&String.replace_prefix(&1, "share-edit-", "")),
+      dataset: token.dataset,
+      expires_at: token.expires_at,
+      revoked_at: token.revoked_at,
+      inserted_at: Map.get(token, :inserted_at)
+    }
+  end
+
+  defp describe_token_error(:not_edit_shared), do: "the scope is not edit-shared"
+  defp describe_token_error(:surface_not_shared), do: "a requested surface is not edit-shared"
+  defp describe_token_error(:unsupported_surface), do: "only docs and media are editable surfaces"
+  defp describe_token_error(:no_surfaces), do: "no valid surfaces"
+  defp describe_token_error(:unknown_scope), do: "the workspace/project does not exist"
+  defp describe_token_error(%Ecto.Changeset{}), do: "validation failed"
+  defp describe_token_error(other), do: inspect(other)
 
   defp share_json(%Sharing.Share{} = s, source) do
     %{

@@ -255,6 +255,12 @@ defmodule Barkpark.Sharing do
       )
       |> Repo.delete_all()
 
+    # P5 belt-and-suspenders: removing a share hard-revokes any edit tokens bound
+    # to this scope. (Downgrading :edit→:read already makes them inert live, via
+    # RequireShareEditToken's access_for re-check; this also kills them on full
+    # removal so a re-added :read share can never resurrect a stale edit token.)
+    Barkpark.Auth.revoke_share_tokens(ws_slug, proj_slug, dataset)
+
     refresh()
     {:ok, count}
   end

@@ -12,6 +12,12 @@ defmodule Barkpark.Auth.ApiToken do
     field :revoked_at, :utc_datetime
     field :expires_at, :utc_datetime
 
+    # P5 scoped-share EDIT tokens: the one "ws/project/dataset" this token may
+    # write, NULL for every normal token. The OPAQUE `share-edit-*` permission +
+    # NO membership row keep the token inert everywhere except a live :edit-share
+    # at exactly this scope (enforced by RequireShareEditToken).
+    field :share_scope, :string
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
 
     # W2 additive seam. Association is `:dataset_entity` because the legacy
@@ -26,7 +32,16 @@ defmodule Barkpark.Auth.ApiToken do
 
   def changeset(token, attrs) do
     token
-    |> cast(attrs, [:token_hash, :label, :dataset, :permissions, :workspace_id, :revoked_at, :expires_at])
+    |> cast(attrs, [
+      :token_hash,
+      :label,
+      :dataset,
+      :permissions,
+      :workspace_id,
+      :revoked_at,
+      :expires_at,
+      :share_scope
+    ])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)
   end

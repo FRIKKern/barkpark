@@ -380,15 +380,25 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   defp require_write(conn) do
-    case conn.assigns[:api_token] do
-      token when not is_nil(token) ->
+    # P5: a scoped-share media-edit token proved its right to write THIS scope in
+    # RequireShareEditToken (opaque `share-edit-media` perm + live :edit-share +
+    # byte-exact scope) and carries no global :write perm — honor `share_writer`
+    # here, mirroring BarkparkWeb.Plugs.RequireWritePermission, or a media upload
+    # via a share token would 403 despite the plug grant.
+    cond do
+      conn.assigns[:share_writer] == true ->
+        :ok
+
+      not is_nil(conn.assigns[:api_token]) ->
+        token = conn.assigns[:api_token]
+
         if Auth.has_permission?(token, "write") or Auth.has_permission?(token, "admin") do
           :ok
         else
           {:error, :forbidden}
         end
 
-      _ ->
+      true ->
         {:error, :unauthorized}
     end
   end

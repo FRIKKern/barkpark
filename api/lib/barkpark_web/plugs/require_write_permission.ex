@@ -19,17 +19,29 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    with %{api_token: token} <- conn.assigns,
-         true <- TenancyAuth.permits?(token, :write) do
+    # P5: a scoped-share edit token already proved its right to write THIS scope
+    # in RequireShareEditToken (opaque perm + live :edit-share + byte-exact
+    # scope). It deliberately holds no global :write perm, so let `share_writer`
+    # short-circuit the permits?/2 check. Set ONLY by RequireShareEditToken.
+    if conn.assigns[:share_writer] == true do
       conn
     else
-      _ ->
-        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
-
+      with %{api_token: token} <- conn.assigns,
+           true <- TenancyAuth.permits?(token, :write) do
         conn
-        |> put_status(env.status)
-        |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
-        |> halt()
+      else
+        _ ->
+          forbidden(conn)
+      end
     end
+  end
+
+  defp forbidden(conn) do
+    env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
+
+    conn
+    |> put_status(env.status)
+    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
+    |> halt()
   end
 end

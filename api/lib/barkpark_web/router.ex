@@ -84,6 +84,56 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ResolveProject
   end
 
+  # P5 scoped-share EDIT pipelines. These serve the SAME scoped write routes to
+  # BOTH a member (via membership, exactly as today) AND a scope-bound edit-token
+  # holder. The ONLY addition over the existing member pipelines is
+  # RequireShareEditToken inserted right after token resolution and BEFORE
+  # ResolveWorkspace: it grants `:share_public` + `:share_writer` solely for a
+  # token whose opaque `share-edit-<surface>` permission + `share_scope` match a
+  # live :edit-share at this exact scope. On any other request it no-ops, so the
+  # member path + the anonymous-deny path are byte-identical to before. An
+  # anonymous write is denied by ResolveWorkspace (no token → membership gate
+  # 403) — writes ALWAYS require a presented token.
+
+  # Docs writes (mutate) — mirrors [:scoped_api, :require_token, :require_write,
+  # :idempotent] with the edit-token grant spliced in.
+  pipeline :scoped_mutate do
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.OptionalToken
+    plug BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
+    plug BarkparkWeb.Plugs.RequireToken
+    plug BarkparkWeb.Plugs.RequireWritePermission
+    plug BarkparkWeb.Plugs.Idempotency
+  end
+
+  # Media writes (upload/update/delete) — mirrors [:scoped_api, :media_mutate]
+  # (keeps the session-cookie branch + AssignDefaultScope for the browser
+  # Studio) with the edit-token grant spliced in before ResolveWorkspace.
+  pipeline :scoped_media_mutate do
+    plug :fetch_session
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RateLimit
+    # Cookie-aware soft-auth: bearer (API client / Web Component data-token) OR
+    # session (browser Studio member), so the membership gate below sees a
+    # session-only browser member too — and a bearer edit token reaches
+    # RequireShareEditToken. Anon passes through to be denied by ResolveWorkspace.
+    plug BarkparkWeb.Plugs.OptionalSessionToken
+    plug BarkparkWeb.Plugs.RequireShareEditToken, surface: :media
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
+    # Final gate: a credential MUST be present (halts anon), and the session
+    # branch is CSRF-checked here (bearer callers return before the CSRF check).
+    plug BarkparkWeb.Plugs.RequireBearerOrSessionToken
+    plug BarkparkWeb.Plugs.AssignDefaultScope
+  end
+
   # Tenancy-aware variant of :browser for the path-scoped plugin LiveView
   # mounts at /w/:workspace_slug/p/:project_slug/{studio,admin}. The base
   # :browser plugs (session, flash, CSRF, secure headers, root layout), then
@@ -665,6 +715,14 @@ defmodule BarkparkWeb.Router do
     get "/", ShareController, :index
     post "/", ShareController, :create
     delete "/", ShareController, :delete
+
+    # P5 edit-token management (admin-only minting, owner decision 2026-06-09).
+    # mint_token shows the raw token ONCE; list_tokens never returns it; revoke
+    # stamps revoked_at. The registry kill-switch (remove/downgrade the share)
+    # also disables tokens live + batch-revokes via Sharing.remove_share/3.
+    get "/tokens", ShareController, :list_tokens
+    post "/tokens", ShareController, :mint_token
+    delete "/tokens/:token_id", ShareController, :revoke_token
   end
 
   pipeline :media_processing_callback do
@@ -817,9 +875,10 @@ defmodule BarkparkWeb.Router do
     post "/v1/data/revision/:dataset/:id/restore", HistoryController, :restore
   end
 
-  # Scoped mutations — keep the :require_write gate (write-gate slice).
+  # Scoped mutations — the :scoped_mutate pipeline carries the member write-gate
+  # AND the P5 edit-token grant (a scope-bound edit token writes here too).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :require_token, :require_write, :idempotent]
+    pipe_through :scoped_mutate
 
     post "/v1/data/mutate/:dataset", MutateController, :mutate
   end
@@ -881,7 +940,9 @@ defmodule BarkparkWeb.Router do
     get "/v1/media/:dataset/:id", V1.MediaController, :show
   end
 
-  # Scoped v1 media — mutating (bearer-or-session).
+  # Scoped v1 media — collection + lock writes (member-only, bearer-or-session).
+  # Collections management + checkout stay membership-gated; they are NOT part of
+  # the shareable :media surface (P5 shares asset upload/update/delete only).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through [:scoped_api, :media_mutate]
 
@@ -897,9 +958,16 @@ defmodule BarkparkWeb.Router do
            V1.MediaCollectionsController,
            :remove_member
 
-    post "/v1/media/:dataset/upload", V1.MediaController, :upload
     post "/v1/media/:dataset/:id/checkout", V1.MediaController, :checkout
     post "/v1/media/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
+  end
+
+  # Scoped v1 media — asset upload/update/delete. The :scoped_media_mutate
+  # pipeline serves a member (membership) AND a :media-edit-token holder (P5).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through :scoped_media_mutate
+
+    post "/v1/media/:dataset/upload", V1.MediaController, :upload
     patch "/v1/media/:dataset/:id", V1.MediaController, :update
     delete "/v1/media/:dataset/:id", V1.MediaController, :delete
   end
