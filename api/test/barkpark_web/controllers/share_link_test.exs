@@ -121,7 +121,8 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token, "url" => url} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "paper", ref_id: "demo-paper"})
 
-    assert url == "/s/#{token}"
+    # url is absolute on the advertised share host (LAN IP in test) or relative.
+    assert String.ends_with?(url, "/s/#{token}")
     resp = get(build_conn(), "/s/#{token}")
     assert resp.status == 200
     assert resp.resp_body =~ "Shared via a direct link"

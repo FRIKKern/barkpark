@@ -97,7 +97,7 @@ defmodule BarkparkWeb.ShareLinkController do
         {:ok, {raw, link}} ->
           conn
           |> put_status(:created)
-          |> json(%{token: raw, url: "/s/#{raw}", link: link_json(link)})
+          |> json(%{token: raw, url: share_url(raw), link: link_json(link)})
 
         {:error, _changeset} ->
           unprocessable(conn, "could not create link")
@@ -194,14 +194,19 @@ defmodule BarkparkWeb.ShareLinkController do
       access: l.access,
       dataset: l.dataset,
       label: l.label,
-      # the STABLE, re-copyable link (P7 UX). Present whenever the raw token was
-      # stored; `token_hash` (the secret-at-rest digest) is never exposed.
-      url: l.token && "/s/#{l.token}",
+      # the STABLE, re-copyable link (P7 UX) on the advertised share host (tunnel
+      # / LAN / domain). Present whenever the raw token was stored; `token_hash`
+      # (the secret-at-rest digest) is never exposed.
+      url: l.token && share_url(l.token),
       expires_at: l.expires_at,
       revoked_at: l.revoked_at,
       inserted_at: Map.get(l, :inserted_at)
     }
   end
+
+  # The shareable absolute link on the advertised host (tunnel / domain / LAN),
+  # or relative when no share host is detectable (caller prepends its own host).
+  defp share_url(token), do: "#{Sharing.share_link_base() || ""}/s/#{token}"
 
   defp paper_body_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
   defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"

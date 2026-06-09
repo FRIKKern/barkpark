@@ -43,6 +43,12 @@ defmodule BarkparkWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # P7 safe external sharing: when BARKPARK_SHARE_HOST (a tunnel domain) is set,
+  # any request NOT from a local/LAN host may reach ONLY the public read/share
+  # surfaces; everything else 404s. No-op (default-OFF) when unset. Runs after
+  # Plug.Static (real assets served regardless) and before body parsing + Router.
+  plug BarkparkWeb.Plugs.PublicShareGuard
+
   plug :parse_body
 
   plug Plug.MethodOverride

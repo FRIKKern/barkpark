@@ -422,7 +422,25 @@ defmodule Barkpark.Sharing do
   """
   @spec share_link_base() :: binary() | nil
   def share_link_base do
-    configured_public_base() || lan_base_url()
+    configured_share_host() || configured_public_base() || lan_base_url()
+  end
+
+  # An explicit operator override (BARKPARK_SHARE_HOST, set in runtime.exs) — the
+  # public host share links should advertise, e.g. a tunnel domain
+  # (https://abc.trycloudflare.com) so a link reaches someone OUTSIDE the LAN
+  # with the firewall untouched. Accepts a bare host or a full URL; defaults the
+  # scheme to https and strips a trailing slash. Wins over the LAN IP / Endpoint
+  # url so the operator can point share links anywhere reachable.
+  @spec configured_share_host() :: binary() | nil
+  defp configured_share_host do
+    case Application.get_env(:barkpark, :share_host) do
+      host when is_binary(host) and host != "" ->
+        host = String.trim_trailing(host, "/")
+        if String.match?(host, ~r{^https?://}i), do: host, else: "https://#{host}"
+
+      _ ->
+        nil
+    end
   end
 
   @doc """

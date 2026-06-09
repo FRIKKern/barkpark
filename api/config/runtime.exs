@@ -122,6 +122,13 @@ if Code.ensure_loaded?(Barkpark.Sharing) do
   if shares != [] or lan_opt_in? do
     config :barkpark, BarkparkWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
   end
+
+  # P7: the public host SHARE LINKS advertise (Barkpark.Sharing.share_link_base/0
+  # prefers it). Set to a tunnel domain (e.g. https://abc.trycloudflare.com) to
+  # share OUTSIDE the LAN with the firewall untouched. Unset → LAN IP / Endpoint
+  # url. Pair with the public-share guard so the tunnel host exposes ONLY the
+  # read/share surfaces (see docs).
+  config :barkpark, :share_host, System.get_env("BARKPARK_SHARE_HOST")
 end
 
 media_signing_secret =
