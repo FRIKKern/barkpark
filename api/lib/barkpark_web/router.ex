@@ -64,6 +64,26 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.ResolveProject
   end
 
+  # Tenancy-aware READ pipeline for the scoped media surface (P3) — the
+  # :shared_docs_api shape but gated on the :media surface. A `:media`-shared
+  # scope is reachable by an anonymous caller (RequireShareScope is method-aware
+  # so only safe GET reads grant); otherwise it is byte-identical to a normal
+  # scoped request and ResolveWorkspace gates membership. The MediaController is
+  # already scope-aware (list_files / get_file / get_file_by_path all take the
+  # resolved workspace scope), so a media share serves ONLY its own workspace's
+  # files — a path that resolves to another workspace 404s. Per-asset
+  # `bp_visibility` still applies on serve (private bytes stay denied).
+  pipeline :shared_media_api do
+    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
+    plug :accepts, ["json"]
+    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug BarkparkWeb.Plugs.RateLimit
+    plug BarkparkWeb.Plugs.OptionalToken
+    plug BarkparkWeb.Plugs.RequireShareScope, surface: :media
+    plug BarkparkWeb.Plugs.ResolveWorkspace
+    plug BarkparkWeb.Plugs.ResolveProject
+  end
+
   # Tenancy-aware variant of :browser for the path-scoped plugin LiveView
   # mounts at /w/:workspace_slug/p/:project_slug/{studio,admin}. The base
   # :browser plugs (session, flash, CSRF, secure headers, root layout), then
@@ -754,6 +774,21 @@ defmodule BarkparkWeb.Router do
 
     get "/v1/data/query/:dataset/:type", QueryController, :index
     get "/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show
+  end
+
+  # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
+  # here; otherwise gated. Only the SCOPE-SAFE actions are exposed: index /
+  # show / serve all resolve files via the resolved workspace scope, so a share
+  # can never reach another workspace's media. Deliberately EXCLUDED: the
+  # rendition route (serve_rendition uses an UNSCOPED get_file/1 — a cross-scope
+  # leak under a share) and upload/delete (writes). Without a matching :media
+  # share this is byte-identical to a normal scoped request.
+  scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
+    pipe_through :shared_media_api
+
+    get "/", MediaController, :index
+    get "/:id/meta", MediaController, :show
+    get "/files/*path", MediaController, :serve
   end
 
   # Token-required scoped reads (listen/export/analytics/history/revision).
