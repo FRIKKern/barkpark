@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/bokbasen.md
 # OnixEdit — Phase 4-8 full pipeline demo
 
 This artifact walks the demo path that the plugin executes when a

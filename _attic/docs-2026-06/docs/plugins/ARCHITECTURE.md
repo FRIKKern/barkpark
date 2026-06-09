@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to api/lib/barkpark/plugin.ex @moduledoc
 # Plugin Architecture — formal contract
 
 > The forward-looking contract for building a new Barkpark plugin. Pair with

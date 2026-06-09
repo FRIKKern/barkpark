@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/bokbasen.md
 # OnixEdit Reference Plugin — Masterplan Close-Out
 
 The OnixEdit reference plugin is the end-to-end Barkpark plugin: a `book`

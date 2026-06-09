@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/search/INTELLIGENCE.md + docs/search/ROADMAP.md
 # Search Intelligence — Phases 6–10 (Relevance & Maturity Plan)
 
 > **Status:** Phases 0–8 are shipped to production; Phases 9–10 remain forward plan (May 2026).  

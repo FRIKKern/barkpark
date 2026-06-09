@@ -130,7 +130,7 @@ rebuild must be the full `make rebuild` clean path (nuke `api/_build/prod`)
 — a partial clean serves stale BEAM/HEEx (Past Mistakes #1–3). If the bad
 commit included a migration, rolling back code does NOT undo the schema;
 write a compensating migration if the schema change itself must be undone.
-npm/SDK rollback is a separate runbook: `docs/ops/rollback-playbook.md`.
+npm/SDK rollback is a separate runbook: `docs/ops/npm-rollback-playbook.md`.
 
 ## Code anchors
 

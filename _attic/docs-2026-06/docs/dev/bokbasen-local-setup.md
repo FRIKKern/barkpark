@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/bokbasen.md (creds section)
 # Bokbasen — local dev setup
 
 How to wire your local Phoenix server up to Bokbasen credentials for the

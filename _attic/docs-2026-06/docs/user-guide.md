@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/studio/user-guide.md
 <!-- doc-tier: cold | canonical-for: studio-user-guide-legacy | budget: 1200tok -->
 # Barkpark — operator's guide
 

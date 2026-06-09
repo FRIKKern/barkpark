@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/cli/error-exit-table.md (already there)
 # M0 CLI Contract — Sign-off
 
 > **Verdict: ON-PLAN WITH CORRECTIONS.**

@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/decisions/0003-sync-tags.md
 # Realtime Gap Analysis — Studio edit → Next.js auto-refresh
 
 > ⚠️ **SUPERSEDED by ADR-0003** (`api/docs/adr/ADR-0003-canonical-sync-tag-convention.md`).

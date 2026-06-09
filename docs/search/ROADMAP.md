@@ -3,7 +3,7 @@
 
 **Principle:** Postgres remembers and explains; search engines retrieve. No Algolia/Typesense dependency until Postgres search latency fails SLA.
 
-**Phases 0–8 shipped** (May 2026): surface-safe indexes; crystal-backed suggest (recent/popular/nohits, `min_search_count: 3`, `X-BP-Search-Disable`); click/CTR; quality gates + telemetry; synonym loop (`search_synonyms`, candidates, `searchCountDelta`); document FTS hybrid (`search_vector` + ILIKE + trgm); relevance (`QueryPipeline`, `QueryParser`, `Highlighter`, `SurfaceConfig`, zero-hit recovery); golden eval (`mix search.eval`); federated search + shared `bp-search-intel.js`. Retention: 90-day raw events, crystals indefinite. Architecture: [`INTELLIGENCE.md`](INTELLIGENCE.md); detail: [`PLAN-PHASES-6-10.md`](PLAN-PHASES-6-10.md).
+**Phases 0–8 shipped** (May 2026): surface-safe indexes; crystal-backed suggest (recent/popular/nohits, `min_search_count: 3`, `X-BP-Search-Disable`); click/CTR; quality gates + telemetry; synonym loop (`search_synonyms`, candidates, `searchCountDelta`); document FTS hybrid (`search_vector` + ILIKE + trgm); relevance (`QueryPipeline`, `QueryParser`, `Highlighter`, `SurfaceConfig`, zero-hit recovery); golden eval (`mix search.eval`); federated search + shared `bp-search-intel.js`. Retention: 90-day raw events, crystals indefinite. Architecture: [`INTELLIGENCE.md`](INTELLIGENCE.md); design notes attic'd: `_attic/docs-2026-06/docs/search/PLAN-PHASES-6-10.md`.
 
 ## Phase 9 — Scale & ops (trigger-based)
 

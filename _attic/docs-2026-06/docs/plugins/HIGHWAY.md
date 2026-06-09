@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to api/lib/barkpark/plugin.ex @moduledoc + docs/cards/plugins.md
 # Barkpark Plugin Highway
 
 > Public API surface for Barkpark plugin authors.

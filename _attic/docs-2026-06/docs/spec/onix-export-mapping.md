@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/onix-field-map.md
 # ONIX 3.0 export — book schema mapping
 
 > **Status:** Phase 6 WI1 deliverable. Spec phase only — no production code.

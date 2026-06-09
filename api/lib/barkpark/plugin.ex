@@ -1,7 +1,7 @@
 defmodule Barkpark.Plugin do
   @moduledoc """
   Behaviour + `use` macro for first-party Barkpark plugins — and the
-  CANONICAL plugin contract. (The former `docs/plugins/HIGHWAY.md` §8 and
+  CANONICAL plugin contract. (The former `_attic/docs-2026-06/docs/plugins/HIGHWAY.md` §8 and
   `ARCHITECTURE.md` contract sections are folded in here.)
 
   Compile-time discovery only. NO `Code.eval_*`, `Code.compile_string`, or any

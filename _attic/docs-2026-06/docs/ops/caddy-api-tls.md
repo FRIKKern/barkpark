@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/ops/adding-a-domain.md
 # Caddy TLS cutover for `api.barkpark.cloud`
 
 **Status:** Runbook. Boss-executed. No agent ever ssh's the prod box.

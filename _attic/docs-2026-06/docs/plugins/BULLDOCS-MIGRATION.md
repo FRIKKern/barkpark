@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to api/CLAUDE.md + docs/decisions/deferred.md
 # Bulldocs Migration — Handoff / PRD
 
 > **Status: ✅ SHIPPED to prod (2026-06-06).** Verified end-to-end: compiles

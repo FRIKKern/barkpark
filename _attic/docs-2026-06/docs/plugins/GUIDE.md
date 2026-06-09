@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/cards/plugins.md + api/lib/barkpark/plugin.ex @moduledoc
 # Building a Barkpark Plugin
 
 > The front door. Read this first; the rest of `docs/plugins/` are the

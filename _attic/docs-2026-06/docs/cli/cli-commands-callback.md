@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/cli/m0-decisions.md
 # Implementation Contract — `cli_commands/0` plugin callback + `collect_cli_commands/1` collector
 
 > **Status:** M0 contract for Wave 2 to follow. This specifies the new plugin

@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: schema-v2-field-types | budget: 1800tok -->
 # Schema Definition v2 — contract
 
-Source: `api/lib/barkpark/content/schema_definition.ex`. Full reference: `docs/plugins/SCHEMA_V2.md` (attic'd after Wave 4). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
+Source: `api/lib/barkpark/content/schema_definition.ex`. Full reference: `_attic/docs-2026-06/docs/plugins/SCHEMA_V2.md` (attic'd). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
 
 ## Four v2 field types
 

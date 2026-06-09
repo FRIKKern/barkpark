@@ -25,7 +25,7 @@ A root task is the hub: it lists its papers in `content.papers[]` (managed via `
 ## Prerequisites
 
 - Barkpark running on `:4000` — see [`./SETUP.md`](./SETUP.md).
-- The bd-shim integration installed and flipped on — see [`./SETUP-WITH-PAPERFLOW.md`](./SETUP-WITH-PAPERFLOW.md).
+- The bd-shim integration installed and flipped on — see [`./paperflow-cutover.md`](./paperflow-cutover.md).
 
 Confirm the shim is active:
 
@@ -235,4 +235,4 @@ bd list --json --label myproj > tasks.json
 
 ---
 
-See also: [`./SETUP.md`](./SETUP.md) · [`./SETUP-WITH-PAPERFLOW.md`](./SETUP-WITH-PAPERFLOW.md)
+See also: [`./SETUP.md`](./SETUP.md) · [`./paperflow-cutover.md`](./paperflow-cutover.md)

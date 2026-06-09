@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/api-v1.md (delete-requires-type resolution)
 # W4 Shakedown — Phoenix API + Studio Live Test
 
 **Worker:** W8.4 (b-t8-w4) · **Task:** 8 · **Subtask:** 4

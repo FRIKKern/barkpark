@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/schema-v2.md
 # Schema Definition v2 — Plugin author reference
 
 > Phase 0 deliverable. Source of truth: `api/lib/barkpark/content/schema_definition.ex`.

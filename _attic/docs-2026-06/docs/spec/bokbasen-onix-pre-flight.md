@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/bokbasen.md
 <!--
   Bokbasen ONIX 3.0 pre-flight audit
   Author: Worker_W3.1 (Task #43, Phase 6 WI7)

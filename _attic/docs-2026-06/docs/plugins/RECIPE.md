@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/cards/plugins.md + docs/ops/PROD_OPS.md
 # Plugin Recipe — building "Vlie" from scratch
 
 > A worked walkthrough. For the formal contract every file conforms to, see

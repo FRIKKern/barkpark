@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/ops/npm-rollback-playbook.md
 <!-- doc-tier: cold | canonical-for: npm-retag-runbook-absorbed | budget: 40tok -->
 <!-- Absorbed into docs/ops/npm-rollback-playbook.md §Mechanism C — do not load this file -->
 # npm dist-tag Retag Runbook

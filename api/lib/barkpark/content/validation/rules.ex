@@ -4,7 +4,7 @@ defmodule Barkpark.Content.Validation.Rules do
 
   ## Compilation
 
-  `compile/1` takes the JSON shape declared in `docs/plugins/SCHEMA_V2.md`:
+  `compile/1` takes the JSON shape declared in `docs/contracts/schema-v2.md`:
 
       %{
         "name" => "isbn-required",

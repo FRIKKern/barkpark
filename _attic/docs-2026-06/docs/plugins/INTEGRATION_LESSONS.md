@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/contracts/onix-field-map.md + docs/cards/plugins.md
 # Plugin integration — lessons from the OnixEdit refactor
 
 Retrospective from the ten-Goal arc that converted OnixEdit from a parallel-universe LiveView world into a thin plugin riding native Barkpark machinery.

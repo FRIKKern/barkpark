@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/cards/plugins.md
 # Plugin schema bootstrap
 
 How plugin-declared schemas land in the `schema_definitions` table.

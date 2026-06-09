@@ -6,7 +6,7 @@
 **Target project:** `demo` (builds from `web/`) in the `guerrilla` Vercel team.
 **Apex:** `barkpark.cloud` (production). **Subdomain:** `www.barkpark.cloud` (redirect to apex).
 
-Out of scope: API subdomain TLS (see `docs/ops/caddy-api-tls.md`), Phoenix-side CORS, deployment pipeline changes.
+Out of scope: API subdomain TLS (see `docs/ops/adding-a-domain.md`), Phoenix-side CORS, deployment pipeline changes.
 
 ---
 
@@ -64,7 +64,7 @@ These are the click paths as of 2026-04. Vercel UI changes periodically; if navi
 
   | Key | Value | Why |
   |---|---|---|
-  | `NEXT_PUBLIC_API_URL` | `https://api.barkpark.cloud` | SSR + client fetches target the TLS-terminated Phoenix (see `caddy-api-tls.md`). Must be `https://`; Vercel-origin mixed-content protection rejects `http://`. |
+  | `NEXT_PUBLIC_API_URL` | `https://api.barkpark.cloud` | SSR + client fetches target the TLS-terminated Phoenix (see `adding-a-domain.md`). Must be `https://`; Vercel-origin mixed-content protection rejects `http://`. |
   | `BARKPARK_API_TOKEN` | dev/prod token (server-only — do **NOT** prefix with `NEXT_PUBLIC_`) | Server Actions + webhook verifier. Do not check into git. |
   | `BARKPARK_WEBHOOK_SECRET` | current HMAC secret (see slice 8.6 security audit) | `@barkpark/nextjs/webhook` verifies inbound webhooks with this. |
   | `BARKPARK_WEBHOOK_PREVIOUS_SECRET` | prior HMAC secret during rotation window | `previousSecret` dual-verify path (slice 8.6, R-S5b). Leave empty when not rotating. |
@@ -160,7 +160,7 @@ Only if the Vercel project itself is corrupted (bad deployment loop, state poiso
 
 After 7 days of stable operation:
 
-- Remove the transitional `http://89.167.28.206` block from Caddy (see `caddy-api-tls.md` §Caddyfile diff).
+- Remove the transitional `http://89.167.28.206` block from Caddy (see `adding-a-domain.md`).
 - Raise DNS TTL back to 3600 for routine operations.
 - Add `barkpark.cloud` + `api.barkpark.cloud` to Uptime Kuma (per slice 8.0 preflight item, not this doc).
 

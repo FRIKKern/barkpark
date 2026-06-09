@@ -1,3 +1,4 @@
+ARCHIVED — do not load; facts moved to docs/setup/paperflow-cutover.md
 <!-- doc-tier: cold | canonical-for: paperflow-cutover-legacy | budget: 1200tok -->
 # Barkpark as paperflow's Task Store — Integration & Cutover (W7)
 
