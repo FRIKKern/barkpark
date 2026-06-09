@@ -99,14 +99,27 @@ end
 # DEFAULT-OFF is paramount: with BARKPARK_SHARES unset/empty, `parse/1` returns
 # [], so :shares is set to the harmless empty list AND the Endpoint http binding
 # is left exactly as the env file configured it (dev.exs keeps ip: {127,0,0,1}).
-# Only when at least one share parses do we deep-merge `ip: {0,0,0,0}` over the
-# existing http config (preserving the port), making the reader reachable on the
-# LAN. The boot banner in Barkpark.Application logs the URLs + a trust warning.
+#
+# P4: `:shares_env` is the STATIC env baseline. The live `:shares` starts equal
+# to it and is recomputed post-boot by `Barkpark.Sharing.refresh/0` as
+# `shares_env ++ <persisted shares table>`, so a `bp share add` survives a
+# restart. We seed `:shares` here too so the registry is correct even before the
+# Repo is up (refresh/0 is GUARDED and a no-op until it is).
+#
+# LAN binding: we deep-merge `ip: {0,0,0,0}` over the existing http config
+# (preserving the port) when EITHER at least one env share parses OR
+# BARKPARK_SHARE_LAN is truthy. The flag decouples "expose this box on the LAN"
+# from "which scopes" — set it to manage shares entirely via `bp share`/Studio
+# (the env list may be empty). With neither, the bind is untouched (127.0.0.1 in
+# dev). The boot banner in Barkpark.Application logs URLs + a trust warning.
 if Code.ensure_loaded?(Barkpark.Sharing) do
   shares = Barkpark.Sharing.parse(System.get_env("BARKPARK_SHARES"))
+  config :barkpark, :shares_env, shares
   config :barkpark, :shares, shares
 
-  if shares != [] do
+  lan_opt_in? = System.get_env("BARKPARK_SHARE_LAN") in ~w(1 true yes on)
+
+  if shares != [] or lan_opt_in? do
     config :barkpark, BarkparkWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
   end
 end

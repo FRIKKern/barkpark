@@ -1,14 +1,29 @@
 defmodule Barkpark.Sharing do
   @moduledoc """
-  Scoped-sharing registry — the PURE + INERT P1a foundation.
+  Scoped-sharing registry — the source of truth for which tenant scopes are
+  exposed on the network.
 
   Declares, in one place, which tenant scopes (workspace / project / dataset)
   expose which surfaces (`:papers`, `:docs`, `:media`) at which access level
-  (`:read` or `:edit`). Nothing in the app calls this yet: there is no plug, no
-  route, no transport. This module is just a value-object + parser + lookup
-  table.
+  (`:read` or `:edit`). `BarkparkWeb.Plugs.RequireShareScope` consults `shared?/4`
+  / `access_for/3` on the share-aware scoped read routes.
 
-  Two invariants are the whole point of this phase and must never regress:
+  ## Two sources, one live list (P4)
+
+  The live `:shares` list has TWO inputs, merged by `refresh/0`:
+
+    * the STATIC `BARKPARK_SHARES` env config (parsed once in `runtime.exs` into
+      `:shares_env`), and
+    * the PERSISTENT `shares` table (`StoredShare` rows), which `bp share add/rm`
+      and the Studio manage at runtime without a restart.
+
+  `refresh/0` recomputes `:shares = shares_env() ++ list_stored()` and is called
+  once post-boot and after every store write. `shares/0` (and therefore the
+  per-request `shared?/4`) reads only the in-memory `:shares`, so the hot path
+  never touches the DB. The store is purely ADDITIVE: with no rows and no env
+  config, `:shares` is `[]` and the whole feature is OFF.
+
+  Two invariants are the whole point of this module and must never regress:
 
     * **Default-OFF** — with no `:shares` configured, `active?/0` is `false`
       and every `shared?/4` query returns `false`.
@@ -38,6 +53,11 @@ defmodule Barkpark.Sharing do
   """
 
   require Logger
+
+  import Ecto.Query, only: [where: 3]
+
+  alias Barkpark.Repo
+  alias Barkpark.Sharing.StoredShare
 
   # The canonical Tenancy defaults (mirrors Barkpark.Tenancy's
   # @default_project_slug / @production_dataset_slug). Kept as literals here so
@@ -123,6 +143,129 @@ defmodule Barkpark.Sharing do
   """
   @spec active?() :: boolean()
   def active?, do: shares() != []
+
+  # ── persistent store + live merge (P4) ─────────────────────────────────
+
+  @doc """
+  The STATIC env-config baseline — the `parse/1` of `BARKPARK_SHARES`, stashed
+  under `:barkpark, :shares_env` by `runtime.exs`. Defensive: anything that is
+  not a list of `Share` structs collapses to `[]`. This is the half of the live
+  `:shares` list that the store NEVER overwrites.
+  """
+  @spec shares_env() :: [Share.t()]
+  def shares_env do
+    case Application.get_env(:barkpark, :shares_env, []) do
+      list when is_list(list) -> Enum.filter(list, &match?(%Share{}, &1))
+      _ -> []
+    end
+  end
+
+  @doc """
+  Every PERSISTED share, as validated `Share` structs.
+
+  Each `StoredShare` row is rebuilt through the SAME `parse/1` validation as an
+  env share, so a malformed/stale row is silently dropped — the store can never
+  widen access beyond what the one parser would grant.
+  """
+  @spec list_stored() :: [Share.t()]
+  def list_stored do
+    StoredShare
+    |> Repo.all()
+    |> Enum.flat_map(&stored_to_shares/1)
+  end
+
+  @doc """
+  Recompute the live `:shares` list = `shares_env/0` ++ `list_stored/0`.
+
+  Called once post-boot and after every store write. GUARDED: if the store is
+  unavailable (e.g. queried before the Repo/sandbox is ready, or the table is
+  missing), the live `:shares` is left exactly as it was — boot never crashes
+  and the env baseline is never lost. Returns `:ok` either way.
+  """
+  @spec refresh() :: :ok
+  def refresh do
+    stored = list_stored()
+    Application.put_env(:barkpark, :shares, shares_env() ++ stored)
+    :ok
+  rescue
+    e ->
+      Logger.warning("[Sharing] refresh skipped (store unavailable): #{inspect(e)}")
+      :ok
+  end
+
+  @doc """
+  Persist a share from a single env-entry string (`"<scope>:<surfaces>:<access>"`)
+  and `refresh/0` the live list.
+
+  The entry is validated through `parse/1` FIRST — exactly one valid `Share`
+  must result, or this is a no-op returning `{:error, :invalid}` (a multi-entry
+  string, a wildcard scope, an unknown surface-only entry, etc. all fail here).
+  A scope that already has a row is UPSERTED (its surfaces/access replaced).
+  Returns `{:ok, Share.t()}` on success.
+  """
+  @spec add_share(binary()) :: {:ok, Share.t()} | {:error, term()}
+  def add_share(entry) when is_binary(entry) do
+    case parse(entry) do
+      [%Share{} = share] ->
+        attrs = %{
+          workspace_slug: share.workspace_slug,
+          project_slug: share.project_slug,
+          dataset: share.dataset,
+          surfaces: Enum.map(share.surfaces, &Atom.to_string/1),
+          access: Atom.to_string(share.access)
+        }
+
+        %StoredShare{}
+        |> StoredShare.changeset(attrs)
+        |> Repo.insert(
+          on_conflict: {:replace, [:surfaces, :access, :updated_at]},
+          conflict_target: [:workspace_slug, :project_slug, :dataset]
+        )
+        |> case do
+          {:ok, _row} ->
+            refresh()
+            {:ok, share}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+
+      _ ->
+        {:error, :invalid}
+    end
+  end
+
+  def add_share(_other), do: {:error, :invalid}
+
+  @doc """
+  Delete the persisted share for the exact `(workspace, project, dataset)` triple
+  and `refresh/0` the live list. Returns `{:ok, count_deleted}` (0 if none).
+
+  This only removes STORED shares — a share declared via `BARKPARK_SHARES`
+  (the env baseline) is not in the table and is unaffected.
+  """
+  @spec remove_share(binary(), binary(), binary()) :: {:ok, non_neg_integer()}
+  def remove_share(ws_slug, proj_slug, dataset)
+      when is_binary(ws_slug) and is_binary(proj_slug) and is_binary(dataset) do
+    {count, _} =
+      StoredShare
+      |> where(
+        [s],
+        s.workspace_slug == ^ws_slug and s.project_slug == ^proj_slug and s.dataset == ^dataset
+      )
+      |> Repo.delete_all()
+
+    refresh()
+    {:ok, count}
+  end
+
+  @spec stored_to_shares(StoredShare.t()) :: [Share.t()]
+  defp stored_to_shares(%StoredShare{} = s) do
+    surfaces = s.surfaces |> List.wrap() |> Enum.join(",")
+
+    "#{s.workspace_slug}/#{s.project_slug}/#{s.dataset}:#{surfaces}:#{s.access}"
+    |> parse()
+  end
 
   @doc """
   STRICT DEFAULT-DENY surface check.

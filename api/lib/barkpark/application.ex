@@ -87,10 +87,17 @@ defmodule Barkpark.Application do
         # before the Oban child above), so it has completed by the time the
         # supervisor returns {:ok, _pid} here. Nothing left to do post-boot.
 
-        # P1c LAN-sharing banner. DEFAULT-OFF: with no BARKPARK_SHARES, this is
-        # a no-op (active?/0 is false) and nothing is logged. When active, warn
-        # loudly with every reachable reader URL so the operator knows the box
-        # is now exposed on the local network.
+        # P4: fold the persisted `shares` table into the live `:shares` list
+        # (= env baseline ++ stored rows). The Repo child is up by now, so the
+        # store query is safe; refresh/0 is self-guarded, so a not-yet-ready
+        # store (e.g. unmigrated DB at test boot) leaves the env baseline
+        # untouched. MUST run before the banner so it reports stored shares too.
+        Barkpark.Sharing.refresh()
+
+        # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
+        # this is a no-op (active?/0 is false) and nothing is logged. When
+        # active, warn loudly with every reachable reader URL so the operator
+        # knows the box is now exposed on the local network.
         log_sharing_banner()
 
         ok
