@@ -653,6 +653,20 @@ defmodule BarkparkWeb.Router do
     delete "/:dataset/:id", WebhookController, :delete
   end
 
+  # ── Scoped sharing — admin-only registry CRUD (P4b) ────────────────────
+  # The HTTP surface behind `bp share ls/add/rm` + the Studio Shares panel.
+  # DECLARING a share is admin-only; the surfaces a share then opens (the
+  # anonymous reader/query/media routes) are gated separately by
+  # RequireShareScope. Writes go through Barkpark.Sharing, which validates +
+  # refreshes the live list (no restart).
+  scope "/v1/shares", BarkparkWeb do
+    pipe_through [:api, :require_admin]
+
+    get "/", ShareController, :index
+    post "/", ShareController, :create
+    delete "/", ShareController, :delete
+  end
+
   pipeline :media_processing_callback do
     plug :accepts, ["json"]
     plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation

@@ -259,6 +259,17 @@ defmodule Barkpark.Sharing do
     {:ok, count}
   end
 
+  @doc """
+  Split a scope string into the canonical `{ws, project, dataset}` triple,
+  applying the default project (`"default"`) and dataset (`"production"`) — the
+  SAME rules `parse/1` uses. Returns `{:error, reason}` for a malformed or
+  wildcard scope. Used by the `/v1/shares` delete path.
+  """
+  @spec scope_triple(term()) ::
+          {:ok, {String.t(), String.t(), String.t()}} | {:error, String.t()}
+  def scope_triple(scope) when is_binary(scope), do: parse_scope(scope)
+  def scope_triple(_other), do: {:error, "invalid scope"}
+
   @spec stored_to_shares(StoredShare.t()) :: [Share.t()]
   defp stored_to_shares(%StoredShare{} = s) do
     surfaces = s.surfaces |> List.wrap() |> Enum.join(",")

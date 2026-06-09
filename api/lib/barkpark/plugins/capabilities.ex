@@ -416,7 +416,17 @@ defmodule Barkpark.Plugins.Capabilities do
         "plugin" => nil
       },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
-      %{"name" => "plugin", "summary" => "Installed plugins and their settings.", "plugin" => nil}
+      %{
+        "name" => "plugin",
+        "summary" => "Installed plugins and their settings.",
+        "plugin" => nil
+      },
+      %{
+        "name" => "share",
+        "summary" =>
+          "Scoped network shares — expose a workspace/project/dataset surface on the LAN.",
+        "plugin" => nil
+      }
     ]
   end
 
@@ -629,6 +639,49 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("plugin_name", true, "string", "Plugin name.")],
         flags: [flag("set", "string", "key=value setting to apply.", repeatable: true)],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "share.ls",
+        "share",
+        "ls",
+        "List scoped network shares (env baseline + persisted).",
+        "GET",
+        "/v1/shares",
+        "admin",
+        default_output: "table"
+      ),
+      core_cmd(
+        "share.add",
+        "share",
+        "add",
+        "Expose a scope's surface on the LAN (upsert a persisted share).",
+        "POST",
+        "/v1/shares",
+        "admin",
+        args: [
+          arg(
+            "scope",
+            true,
+            "string",
+            "ws[/project[/dataset]] — defaults project=default, dataset=production."
+          ),
+          arg("surfaces", true, "string", "Comma list: papers,docs,media.")
+        ],
+        flags: [flag("access", "string", "read | edit.", default: "read")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "share.rm",
+        "share",
+        "rm",
+        "Remove a persisted share by scope (env shares are unaffected).",
+        "DELETE",
+        "/v1/shares",
+        "admin",
+        args: [arg("scope", true, "string", "ws[/project[/dataset]] to stop sharing.")],
         writes: true,
         default_output: "minimal"
       )
