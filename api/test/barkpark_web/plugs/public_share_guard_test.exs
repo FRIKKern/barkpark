@@ -43,8 +43,15 @@ defmodule BarkparkWeb.Plugs.PublicShareGuardTest do
     end
 
     test "LOCAL / LAN hosts pass unrestricted (even /studio)" do
-      for host <- ~w(localhost 127.0.0.1 10.206.47.123 192.168.1.5 172.16.0.1 169.254.1.1) do
+      for host <- ~w(localhost 127.0.0.1 10.206.47.123 192.168.1.5 172.16.0.1 169.254.1.1 ::1) do
         refute call("GET", "/studio", host).halted, "#{host} must pass"
+      end
+    end
+
+    test "a DNS name that string-PREFIXES a private range is NOT local (guard bypass fix)" do
+      # "10.evil.com" must not be mistaken for the 10.0.0.0/8 operator LAN.
+      for host <- ~w(10.evil.com 127.0.0.1.evil.com 192.168.attacker.tld localhost.evil.com) do
+        assert call("GET", "/studio", host).status == 404, "#{host} must be guarded"
       end
     end
 
@@ -56,6 +63,7 @@ defmodule BarkparkWeb.Plugs.PublicShareGuardTest do
         "/w/ws/p/proj/v1/data/query/production/post",
         "/w/ws/p/proj/v1/data/doc/production/post/p1",
         "/w/ws/p/proj/media/files/a.png",
+        # only the SERVING paths — images embedded in shared papers
         "/media/files/a.png",
         "/media/renditions/x/thumb",
         "/v1/media/production/share/tok",
@@ -87,6 +95,10 @@ defmodule BarkparkWeb.Plugs.PublicShareGuardTest do
         # flat data reads are EXCLUDED (would expose the whole Default dataset)
         "/v1/data/query/production/post",
         "/v1/media/production",
+        # the flat media INDEX + meta are EXCLUDED (ungated library enumeration);
+        # only /media/files + /media/renditions serve embedded bytes
+        "/media",
+        "/media/some-id/meta",
         "/api/workspaces",
         "/live/websocket",
         "/dev/dashboard"

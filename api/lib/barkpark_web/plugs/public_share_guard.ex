@@ -20,17 +20,29 @@ defmodule BarkparkWeb.Plugs.PublicShareGuard do
       allow-list is default-DENY, so a future admin/write route is automatically
       blocked on the tunnel.
 
-  ## THE one footgun (cannot be defended internally)
+  ## THE residual risk (cannot be fully defended internally)
 
-  The guard's security rests on `conn.host` being the PUBLIC tunnel hostname for
-  tunnel traffic. cloudflared/ngrok forward the original public Host by default
-  (good). If the tunnel is run with Host-header REWRITE to the origin
-  (cloudflared `httpHostHeader: localhost`, ngrok `--host-header=rewrite`),
-  `conn.host` becomes "localhost", this plug treats the tunnel as the trusted
-  operator, and the full admin app is handed to the internet. RULE: never enable
-  Host rewriting; verify on the tunnel that `/studio` 404s before sharing a link.
-  With a 127.0.0.1-bound app the source IP is always loopback, so Host is the
-  only available signal.
+  Trust is decided from the Host header, because a 127.0.0.1-bound app sees a
+  loopback source IP for BOTH the operator's localhost request AND tunnel traffic
+  (the tunnel client is a local process) — so Host is the only available signal.
+  The perimeter holds only while the operator (Host = localhost / LAN) and the
+  public caller (Host = the tunnel domain) cannot be confused:
+
+    * **Host rewrite (operator footgun).** A tunnel run with Host rewrite to the
+      origin (cloudflared `httpHostHeader: localhost`, ngrok
+      `--host-header=rewrite`) makes every tunnel request arrive as `localhost`
+      → treated as the operator → full app exposed. NEVER enable Host rewrite.
+    * **Host forgery (attacker).** If the tunnel forwards a CLIENT-chosen Host
+      verbatim, an attacker could send `Host: localhost` to pass as the operator.
+      Use a Host-ROUTED tunnel — cloudflared routes `<x>.trycloudflare.com` by
+      that hostname and the edge pins the Host, so a forged `localhost` does not
+      reach your tunnel. Avoid tunnels that let a client pick the forwarded Host.
+
+  A DNS name is PARSED, not prefix-matched, so `Host: 10.evil.com` is never
+  trusted. MANDATORY before sharing any link: on the public URL confirm
+  `GET /studio` → 404 and `GET /s/<token>` → 200. (A hardened future option is a
+  dedicated always-guarded port that the tunnel forwards to, removing the Host
+  dependency entirely.)
 
   Mounted in the Endpoint after `Plug.Static` (real assets are served regardless)
   and before body parsing (a blocked POST is 404'd without buffering) and the
@@ -61,14 +73,33 @@ defmodule BarkparkWeb.Plugs.PublicShareGuard do
     end
   end
 
-  # Loopback + RFC-1918 private ranges + link-local ⇒ the operator's own box / LAN.
+  # The operator's own box / LAN. Decided by PARSING the Host as an IP literal —
+  # a string-prefix test would treat a DNS name like "10.evil.com" as local
+  # (`String.starts_with?(_, "10.")`), a trivial guard bypass. So a DNS name is
+  # NEVER local here; only "localhost" and actual loopback / RFC-1918 / link-local
+  # IP literals are. (Residual: a forged `Host: localhost`/loopback over a tunnel
+  # that lets a client choose the Host would still pass — see the moduledoc; use
+  # a Host-routed tunnel like cloudflared, where the edge pins the Host.)
   defp local_host?(host) do
-    h = host |> to_string() |> String.downcase()
+    case host |> to_string() |> String.downcase() do
+      "localhost" ->
+        true
 
-    h in ~w(localhost 127.0.0.1 0.0.0.0 ::1) or
-      String.starts_with?(h, ["127.", "10.", "192.168.", "169.254."]) or
-      Regex.match?(~r/^172\.(1[6-9]|2\d|3[01])\./, h)
+      h ->
+        case :inet.parse_address(String.to_charlist(h)) do
+          {:ok, ip} -> loopback_or_private?(ip)
+          _ -> false
+        end
+    end
   end
+
+  defp loopback_or_private?({127, _, _, _}), do: true
+  defp loopback_or_private?({10, _, _, _}), do: true
+  defp loopback_or_private?({192, 168, _, _}), do: true
+  defp loopback_or_private?({169, 254, _, _}), do: true
+  defp loopback_or_private?({172, b, _, _}) when b in 16..31, do: true
+  defp loopback_or_private?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp loopback_or_private?(_), do: false
 
   # Method gate FIRST — no writes ever leave the tunnel.
   defp allowed?(method, path) when method in @safe_methods, do: allowed_path?(path)
@@ -93,8 +124,12 @@ defmodule BarkparkWeb.Plugs.PublicShareGuard do
   # Share-GATED scoped media reads (index / meta / serve; RequireShareScope :media).
   defp allowed_path?(["w", _w, "p", _p, "media" | _]), do: true
 
-  # Public media serving — images embedded in shared papers/docs.
-  defp allowed_path?(["media" | _]), do: true
+  # Public media SERVING only — the bytes/thumbnails embedded in shared
+  # papers/docs. NOT the flat `/media` index or `/media/:id/meta`: those are
+  # UNGATED (no token, no share) and would enumerate the whole library +
+  # metadata over the tunnel with zero shares configured.
+  defp allowed_path?(["media", "files" | _]), do: true
+  defp allowed_path?(["media", "renditions" | _]), do: true
 
   # Media-collection public share link (token-scoped, analogous to /s/:token).
   defp allowed_path?(["v1", "media", _ds, "share", _token]), do: true
