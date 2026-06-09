@@ -3588,6 +3588,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   attr :paper_html, :string, default: ""
   attr :paper_block_mode, :boolean, default: false
   attr :paper_edit_mode, :boolean, default: false
+  attr :shares_admin?, :boolean, default: false
   attr :dataset, :string, required: true
   attr :api_token_raw, :string, default: ""
   attr :streams, :map, required: true
@@ -3633,6 +3634,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
           >
             <.icon name="external-link" size={14} /> Open standalone
           </a>
+          <%!-- Scope-level share: opens the panel with the papers surface
+                pre-selected for THIS workspace/project/dataset (P6b). Admin-only;
+                the handler re-checks admin server-side. --%>
+          <button
+            :if={@shares_admin?}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="shares-open"
+            phx-value-surface="papers"
+            title="Share this workspace's papers"
+            data-test-id="paper-share"
+          >
+            <.icon name="share-2" size={14} /> Share
+          </button>
         </:actions>
       </.document_header>
 
@@ -4465,6 +4480,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           paper_html={@paper_html}
           paper_block_mode={@paper_block_mode}
           paper_edit_mode={@paper_edit_mode}
+          shares_admin?={@shares_admin?}
           dataset={@dataset}
           streams={@streams}
         />
@@ -4472,14 +4488,32 @@ defmodule BarkparkWeb.Studio.StudioLive do
         <div
           id={"media-explorer-#{@nav_desk || "all"}"}
           class="editor-panel media-explorer-panel"
-          style="flex: 1; display: flex; min-height: 0; overflow: hidden;"
+          style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;"
         >
-          <bp-asset-explorer
-            dataset={@dataset}
-            data-token={Map.get(assigns, :api_token_raw, "")}
-            data-kind-filter={@media_kind_filter || "all"}
-            data-open-path={"/studio/#{@dataset}/" <> Enum.join(@nav_path, "/")}
-          />
+          <%!-- Scope-level share affordance for the media library (P6b). The
+                media panel is hand-rolled (no document_header), so the Share
+                button rides a thin header row. Admin-only; opens the panel with
+                the media surface pre-selected. --%>
+          <div :if={@shares_admin?} class="media-explorer-bar">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="shares-open"
+              phx-value-surface="media"
+              title="Share this workspace's media library"
+              data-test-id="media-share"
+            >
+              <.icon name="share-2" size={14} /> Share media
+            </button>
+          </div>
+          <div style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
+            <bp-asset-explorer
+              dataset={@dataset}
+              data-token={Map.get(assigns, :api_token_raw, "")}
+              data-kind-filter={@media_kind_filter || "all"}
+              data-open-path={"/studio/#{@dataset}/" <> Enum.join(@nav_path, "/")}
+            />
+          </div>
         </div>
         <% true -> %>
         <%!-- Per-document Classic <-> Beta editor (Exp-P3.2, barkpark-g2ql).

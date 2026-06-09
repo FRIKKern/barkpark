@@ -105,6 +105,27 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       refute Sharing.active?()
       assert render(view) =~ "at least one surface"
     end
+
+    test "opening with a surface pre-selects only that checkbox (P6b contextual buttons)", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = admin_view(conn)
+
+      # The media / paper Share buttons fire shares-open with phx-value-surface.
+      render_hook(view, "shares-open", %{"surface" => "media"})
+
+      assert has_element?(view, ~s(input[value="media"][checked]))
+      refute has_element?(view, ~s(input[value="papers"][checked]))
+      refute has_element?(view, ~s(input[value="docs"][checked]))
+    end
+
+    test "opening from the top bar pre-selects no surface", %{conn: conn} do
+      {:ok, view, _html} = admin_view(conn)
+      view |> element("button[phx-click=shares-open]") |> render_click()
+
+      refute has_element?(view, ~s(input[value="media"][checked]))
+      refute has_element?(view, ~s(input[value="papers"][checked]))
+    end
   end
 
   # ── privilege-escalation guard (the security core) ────────────────────────
