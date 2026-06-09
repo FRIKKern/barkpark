@@ -1159,7 +1159,7 @@ defmodule BarkparkWeb.StudioComponents do
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm"
-                  onclick={"if(navigator.clipboard){navigator.clipboard.writeText(window.location.origin + '#{link.url}');this.textContent='Copied'}"}
+                  onclick={"if(navigator.clipboard){var u='#{link.url}';navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent='Copied'}"}
                   title="Copy link"
                 >
                   Copy

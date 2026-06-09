@@ -412,6 +412,48 @@ defmodule Barkpark.Sharing do
     end
   end
 
+  @doc """
+  The base URL a SHARE LINK should advertise so it works for someone ELSE — a
+  configured public host (the Endpoint `:url` host, e.g. a domain in prod) when
+  one is set, else the detected LAN IPv4 (`http://<ip>:<port>`), else `nil`.
+
+  This is what a Studio share link uses instead of `localhost` (which only
+  resolves on the host machine). The caller appends `/s/<token>`.
+  """
+  @spec share_link_base() :: binary() | nil
+  def share_link_base do
+    configured_public_base() || lan_base_url()
+  end
+
+  @doc """
+  `http://<lan-ipv4>:<port>` for the machine, or `nil` when no LAN IPv4 is
+  detectable. The LAN fallback for `share_link_base/0`.
+  """
+  @spec lan_base_url() :: binary() | nil
+  def lan_base_url do
+    case lan_ip() do
+      nil -> nil
+      ip -> "http://#{ip}:#{http_port()}"
+    end
+  end
+
+  # The Endpoint's configured public URL when its host is a REAL host (not a
+  # loopback/wildcard) — that is the right share base in production (a domain),
+  # where the LAN IP would be wrong. Returns nil in dev (host "localhost") so the
+  # LAN IP is used instead.
+  @spec configured_public_base() :: binary() | nil
+  defp configured_public_base do
+    url = :barkpark |> Application.get_env(BarkparkWeb.Endpoint, []) |> Keyword.get(:url, [])
+    host = Keyword.get(url, :host)
+
+    if is_binary(host) and host not in ~w(localhost 127.0.0.1 0.0.0.0) do
+      scheme = to_string(Keyword.get(url, :scheme, "http"))
+      port = Keyword.get(url, :port)
+      suffix = if port in [nil, 80, 443], do: "", else: ":#{port}"
+      "#{scheme}://#{host}#{suffix}"
+    end
+  end
+
   # The configured HTTP port for the endpoint, defaulting to 4000. Reads the
   # already-merged Endpoint config (runtime.exs sets `http: [port: …]`).
   @spec http_port() :: integer()

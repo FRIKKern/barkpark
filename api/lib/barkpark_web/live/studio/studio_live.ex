@@ -4077,12 +4077,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp scope_slug(%{slug: slug}, _default) when is_binary(slug), do: slug
   defp scope_slug(_, default), do: default
 
-  # The open item's links, flattened to {id, access, url} for the popover.
+  # The open item's links, flattened to {id, access, url} for the popover. The
+  # url advertises a SHAREABLE host (LAN IP / configured domain), never the
+  # localhost the operator happens to be on — that link works for nobody else.
   defp load_item_links(socket, %{kind: kind, ref_type: ref_type, ref_id: ref_id}) do
     case socket.assigns[:current_workspace] do
       %{id: ws_id} ->
+        base = Barkpark.Sharing.share_link_base()
+
         Barkpark.Sharing.Links.list_for(ws_id, kind, ref_type, ref_id)
-        |> Enum.map(fn l -> %{id: l.id, access: l.access, url: l.token && "/s/#{l.token}"} end)
+        |> Enum.map(fn l ->
+          %{id: l.id, access: l.access, url: l.token && link_url(base, l.token)}
+        end)
 
       _ ->
         []
@@ -4090,6 +4096,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp load_item_links(_socket, _), do: []
+
+  # Absolute when a shareable base is known; relative otherwise (the popover's
+  # Copy then prepends the browser origin as a last resort).
+  defp link_url(nil, token), do: "/s/#{token}"
+  defp link_url(base, token), do: "#{base}/s/#{token}"
 
   defp item_link_attrs(socket, item, access) do
     %{
