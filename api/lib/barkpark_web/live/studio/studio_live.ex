@@ -2,6 +2,47 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @moduledoc """
   Multi-pane studio — mirrors the TUI's pane drill-down.
   Structure → Type → Documents → Editor
+
+  ## Section index (~4,800-line file — navigate by grepping the `# ──` banners)
+
+  Lifecycle: `mount/3` (assigns init, banner-grouped: Network shares P6 ·
+  Item share popover P7 · Cross-field validations · Content preview
+  side-pane · Document actions · Draft-vs-Published diff · In-Studio live
+  paper view · In-Studio paper block editor · Switcher create affordances)
+  → `handle_params/3` + `finish_handle_params/5` → `render/1` (at the very
+  bottom, under "Render").
+
+  `handle_info/2` clauses: `:doc_updated`, `:paper_block`, `:paper_updated`,
+  `presence_diff`, `:document_changed`, `:autosave_form`, `:paper_op`,
+  `:tree_codelist_change`.
+
+  `handle_event/3` groups, in file order: pane nav (`select`, `select-group`,
+  `select-desk`, `expand-pane`) · Workspace/Project scope switch
+  (`switch-workspace`, `switch-project`) · Dataset scope switch
+  (`switch-dataset`) · Switcher create affordances (`toggle-create`,
+  `create-workspace`, `create-project`) · doc lifecycle (`new-document`,
+  `save`, `autosave`, `publish`, `unpublish`) · editor toggles
+  (`toggle-content-preview`, `toggle-diff`, `editor-set-mode`) · ArrayField
+  (`array_op`) · Image field (`*-image-picker`, `select-media`,
+  `upload-image`) · Reference field (`*-ref-picker`, `ref-search`,
+  `select-ref`, `clear-ref`) · History (`show-history`, `restore-revision`) ·
+  Delete with reference check (`delete-doc`, `confirm-delete`) · Profile
+  edit · Network shares panel (`shares-*`) · Item share popover
+  (`item-share-*`, `jump-to-user`) · E1 Duplicate (`duplicate-doc`) ·
+  E2 secondary pane (`*-secondary*`) · E3 Bulk publish (`bulk-*`,
+  `toggle-doc-checkbox`) · Schema-declared document actions
+  (`schema_action`, `confirm-modal-*`) · In-Studio paper block editor
+  (`paper-*`).
+
+  Helper sections (private, banner-named): paper editor helpers · EX2
+  expectation-aware slash menu · block-patch builders + `default_block/2`
+  catalog (rich-text / visual / article-chrome / leaf `field-*` blocks) ·
+  Content preview side-pane · Bulk publish helpers · Tenancy scope ·
+  Project → Dataset cascade · Schema-action helpers · Doc-actions registry ·
+  ArrayField helpers · path-based navigation for nested arrayOf · Pane
+  builder · In-Studio live paper view (+ function component) · Classic <->
+  Beta toggle · Cross-field validations · Paper block editor (function
+  component) · Network shares panel helpers.
   """
   use BarkparkWeb, :live_view
 

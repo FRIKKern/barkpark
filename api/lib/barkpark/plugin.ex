@@ -1,13 +1,128 @@
 defmodule Barkpark.Plugin do
   @moduledoc """
-  Behaviour + `use` macro for first-party Barkpark plugins.
+  Behaviour + `use` macro for first-party Barkpark plugins — and the
+  CANONICAL plugin contract. (The former `docs/plugins/HIGHWAY.md` §8 and
+  `ARCHITECTURE.md` contract sections are folded in here.)
 
   Compile-time discovery only. NO `Code.eval_*`, `Code.compile_string`, or any
-  runtime macro evaluation (decision D7 from
-  `.doey/plans/masterplan-20260425-085425.md`). Plugins are first-party trusted
-  Elixir modules — the manifest JSON is read at compile time of the plugin
-  module via `__using__/1`, validated, and frozen as a literal in
-  `manifest/0`.
+  runtime macro evaluation (decision D7; the original masterplan is archived —
+  surviving design notes live under `_attic/.doey/plans/research/`). Plugins
+  are first-party trusted Elixir modules — the manifest JSON is read at
+  compile time of the plugin module via `__using__/1`, validated, and frozen
+  as a literal in `manifest/0`.
+
+  ## The plugin contract
+
+  A plugin is **schemas + business logic — never UI**. The host owns Studio
+  chrome, every field renderer, every pill, every modal, every route table.
+  Plugins extend the host by declaring metadata on schemas and exporting
+  pure-function modules the host calls into.
+
+  A plugin **MUST**:
+
+    * Ship a manifest at `priv/plugins/<plugin_name>/plugin.json` declaring
+      `plugin_name`, `module`, `version`, `capabilities`.
+    * Implement a top-level module that `use Barkpark.Plugin`s the manifest
+      and exports `register_schemas/1` (possibly returning `[]`).
+    * Use the `<plugin_name>:<list_id>` codelist naming convention
+      (e.g. `vlie:status_code`).
+    * Use the `bp_<field>` prefix for non-standard fields stashed on
+      documents (e.g. `bp_export_status`).
+
+  A plugin **MUST NOT** (forbidden surfaces — boot-test enforced, see below):
+
+    * Import or alias `Barkpark.Repo` directly — use `Barkpark.Content.*`.
+      Direct `Repo` calls bypass the draft-prefix logic, the lifecycle-hook
+      dispatcher, the PubSub broadcast, the deferred-broadcast queue, and the
+      webhook dispatcher — they WILL break user-facing behaviour.
+    * Define modules in `BarkparkWeb.*` or mount LiveViews under
+      `lib/barkpark_web/live/`. That namespace is host-only; plugin web
+      modules live at `Barkpark.Plugins.<Slug>.Web.*` and mount via
+      `register_routes/1`.
+    * Ship LiveViews, HEEx templates, or components into the Studio surface
+      (`/studio`), nor CSS files, JavaScript, or Web Components.
+    * Ship plugin-specific field renderers — extend the native v2 field
+      components so all plugins benefit.
+    * Add routes at runtime via `Phoenix.Router` — routes are compile-time
+      only, through `register_routes/1`.
+    * Reach into `Barkpark.Plugins.Registry` internals (GenServer state,
+      `:persistent_term` snapshot) — use the public `collect_*` / `lookup/1`.
+    * Mutate `Application.put_env(:barkpark, :plugins, …)` at runtime — the
+      registry reads it on every chain walk; mutating it silently breaks
+      sibling plugins.
+    * Reach into another plugin's modules — cross-plugin coordination flows
+      through the resolver chain only.
+    * Broadcast plugin-specific PubSub messages when the generic
+      `external_sync:<system>:<doc_id>` topic fits.
+    * Reach into StudioLive assigns or socket state — use schema-declared
+      actions, never a `phx-click` rooted in plugin code.
+
+  ## Fresh-install invariant
+
+  With `Application.put_env(:barkpark, :plugins, [])`, Barkpark must still
+  boot, Studio must load, the public API must serve exactly the 8 seed
+  schemas, and host code under `lib/barkpark` + `lib/barkpark_web`
+  (excluding `lib/barkpark/plugins/`) must not name any plugin module.
+  Regression bar: `api/test/barkpark/plugin_free_boot_test.exs` (tagged
+  `:boot_test`, excluded from default runs — invoke with
+  `mix test --only boot_test test/barkpark/plugin_free_boot_test.exs`).
+
+  ## Route buckets
+
+  `register_routes/1` specs carry an `auth:` opt that buckets each route into
+  a host router scope (`BarkparkWeb.Router.Plugins.plugin_routes/1`). Beyond
+  the studio-scoped basics (`:admin` default under `/studio`, `:ops` under
+  `/admin`, `:public`/`:none`, `:api` and `:token` under `/v1/plugins`):
+
+    * `:token_root` — `[:api, :require_token]` pipeline mounted at the host
+      `/v1` top level (the tasks plugin's `"/tasks/ready"` lands at
+      `/v1/tasks/ready`).
+    * `:ingest` — `RequireIngestToken` shared-secret pipeline under
+      `/v1/plugins/<slug>` (the Bulldocs paper-ingest API).
+    * `:public_root` — public LiveView at the host top-level scope with its
+      OWN `root_layout:` and no studio chrome (the Bulldocs reader at
+      `/papers/:slug`).
+
+  Full per-bucket semantics in the `route_spec()` typedoc below.
+
+  ## Schema registration is idempotent
+
+  `Barkpark.Plugins.Bootstrap.register_all_schemas/0` (post-boot Task in
+  `Barkpark.Application.start/2`; also called by `seeds.exs`) invokes every
+  plugin's `register_schemas/1` and upserts via `Content.upsert_schema/2` —
+  **idempotent on `(name, dataset)`**. A raise inside one plugin's callback
+  logs and skips that plugin; sibling schemas still install. Never
+  reintroduce manual `mix run -e "...register_schemas..."` registration.
+
+  ## Schema-metadata columns a plugin can populate
+
+  The host reads these `Barkpark.Content.SchemaDefinition` columns
+  declaratively and renders generically:
+
+  | Column | Type | What it drives |
+  |---|---|---|
+  | `fields` | `{:array, :map}` | Field definitions — v1 primitives + v2 nested types (composite, arrayOf, codelist, localizedText) |
+  | `groups` | `{:array, :map}` | Tab bar in the editor pane (`%{"name", "title"}`; fields tag one `group`) |
+  | `desk_groups` | `{:array, :map}` | Filter chips on the document-list pane; bookmarkable via `?desk=...` |
+  | `actions` | `{:array, :map}` | Action-bar buttons in the editor header; kinds `link` / `event` / `modal` |
+  | `initial_values` | `:map` | Deep-merged into new documents at create time; resolves `$today.year` |
+  | `cross_validations` | `{:array, :map}` | `any`/`all` predicate rules; banner in the editor header |
+  | `visibility` | `:string` | `"public"` (unauthenticated query API) or `"private"` (admin token) |
+
+  ## Compile-cache gotcha (.beam)
+
+  Mix does not reliably pick up `register_routes/1` changes: it tracks the
+  plugin module's source mtime, but the router's `plugin_routes/1` macro
+  reads the plugin's compiled `.beam` via `Application.app_dir/2`, and
+  Phoenix's recompilation tracking doesn't see through that indirection.
+  After editing a plugin's `register_routes/1`, nuke the router beam and
+  recompile:
+
+      cd api
+      trash _build/dev/lib/barkpark/ebin/Elixir.BarkparkWeb.Router.beam
+      mix compile
+
+  Same dance for tests with `_build/test/...` + `MIX_ENV=test mix compile`.
 
   ## Usage
 
