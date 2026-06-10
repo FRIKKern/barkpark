@@ -23,6 +23,7 @@ const (
 	FieldColor     = apiclient.FieldColor
 	FieldReference = apiclient.FieldReference
 	FieldArray     = apiclient.FieldArray
+	FieldRaw       = apiclient.FieldRaw
 )
 
 // schemas is the TUI's caller-owned schema slice, populated at startup and on

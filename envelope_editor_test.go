@@ -2,10 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
@@ -97,5 +102,112 @@ func TestSaveDocumentPatchesEnvelopeID(t *testing.T) {
 	}
 	if p.Type != "post" || p.Set["category"] != "Updated" {
 		t.Errorf("patch payload wrong: type=%q set=%v", p.Type, p.Set)
+	}
+}
+
+// TestEditorRendersRawObjectFields pins the read-only raw-JSON surface for
+// non-scalar fields: a task's claim {worker, epoch, resources} must be
+// VISIBLE in the editor (clamped pretty JSON), not a bare "..." placeholder —
+// the terminal shows the same truth Studio's read-only panels do.
+func TestEditorRendersRawObjectFields(t *testing.T) {
+	docJSON := `{
+		"_id": "drafts.task-9", "_type": "task", "_draft": true,
+		"title": "Claimed task",
+		"claim": {"worker": "agent-a", "epoch": 2, "resources": ["lib/render.ex"]}
+	}`
+	var d Doc
+	if err := json.Unmarshal([]byte(docJSON), &d); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	m := model{
+		width:       120,
+		height:      40,
+		selectedDoc: &d,
+		editorSchema: &Schema{
+			Name: "task",
+			Fields: []Field{
+				{Name: "title", Title: "Title", Type: FieldString},
+				{Name: "claim", Title: "Claim", Type: FieldRaw},
+			},
+		},
+	}
+
+	out := m.buildEditorContent(100)
+	for _, want := range []string{`"worker"`, "agent-a", "lib/render.ex"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("editor must render the claim's %q, got no match", want)
+		}
+	}
+}
+
+// TestEditorEmptyObjectFieldKeepsPlaceholder: no data → the dim placeholder,
+// not empty JSON noise.
+func TestEditorEmptyObjectFieldKeepsPlaceholder(t *testing.T) {
+	var d Doc
+	_ = json.Unmarshal([]byte(`{"_id":"drafts.t1","_type":"task","title":"x"}`), &d)
+
+	m := model{
+		width: 120, height: 40, selectedDoc: &d,
+		editorSchema: &Schema{Name: "task", Fields: []Field{
+			{Name: "claim", Title: "Claim", Type: FieldRaw},
+		}},
+	}
+	out := m.buildEditorContent(100)
+	if strings.Contains(out, "{") {
+		t.Errorf("empty object field must not render JSON, got: %q", out)
+	}
+}
+
+// TestEditorScrollReachesTailFields drives j through handleKey across a long
+// (24-field, task-dossier-shaped) form and asserts the viewport follows the
+// cursor all the way down. The old ~3-lines-per-field scroll heuristic
+// undershot boxed fields (~5-6 real lines), so the viewport stopped following
+// around field 13 and the tail (claim/dependencies) was keyboard-unreachable.
+func TestEditorScrollReachesTailFields(t *testing.T) {
+	fields := make([]Field, 0, 24)
+	for i := 0; i < 19; i++ {
+		fields = append(fields, Field{Name: fmt.Sprintf("f%d", i), Title: fmt.Sprintf("F%d", i), Type: FieldString})
+	}
+	fields = append(fields, Field{Name: "claim", Title: "Claim", Type: FieldRaw})
+	for i := 20; i < 24; i++ {
+		fields = append(fields, Field{Name: fmt.Sprintf("f%d", i), Title: fmt.Sprintf("F%d", i), Type: FieldRaw})
+	}
+
+	var d Doc
+	_ = json.Unmarshal([]byte(`{"_id":"drafts.t1","_type":"task","title":"x",
+		"claim":{"worker":"agent-a","epoch":1,"resources":["lib/render.ex"]}}`), &d)
+
+	m := model{
+		width: 140, height: 40,
+		selectedDoc:  &d,
+		editorSchema: &Schema{Name: "task", Title: "Task", Fields: fields},
+		showEditor:   true,
+		focus:        focusState{Target: FocusEditor},
+	}
+	m.viewport = viewport.New(100, 30)
+	m.vpReady = true
+	m.refreshViewport()
+
+	for i := 0; i < 19; i++ {
+		mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m = mm.(model)
+	}
+	if m.fieldCursor != 19 {
+		t.Fatalf("fieldCursor = %d, want 19 (the claim field)", m.fieldCursor)
+	}
+
+	// The claim field's REAL first line must be inside the visible window.
+	fieldWidth := m.calcEditorWidth() - 4
+	if fieldWidth < 20 {
+		fieldWidth = 20
+	}
+	target := 4
+	for i := 0; i < 19; i++ {
+		target += len(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
+	}
+	top, bottom := m.viewport.YOffset, m.viewport.YOffset+m.viewport.Height
+	if target < top || target > bottom {
+		t.Errorf("claim line %d outside visible window [%d, %d] — scroll did not follow", target, top, bottom)
 	}
 }

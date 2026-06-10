@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -1359,14 +1360,27 @@ func (m *model) clearStatus() {
 
 // scrollToField adjusts viewport to keep the focused field visible.
 func (m *model) scrollToField() {
-	// Approximate: each field takes ~3 lines, header takes ~4
-	targetLine := 4 + m.fieldCursor*3
-	if m.vpReady {
-		if targetLine > m.viewport.YOffset+m.viewport.Height-3 {
-			m.viewport.SetYOffset(targetLine - m.viewport.Height + 5)
-		} else if targetLine < m.viewport.YOffset+2 {
-			m.viewport.SetYOffset(targetLine - 2)
-		}
+	// EXACT line offset, mirroring buildEditorContent's assembly: 4 header
+	// lines, then each field's real rendered height + 1 separator. The old
+	// ~3-lines-per-field approximation undershot badly on boxed fields
+	// (label + 3 box rows + gap ≈ 5–6 lines), so the viewport stopped
+	// following around field ~13 and the tail of a long form (a task's
+	// claim/dependencies) was unreachable by keyboard.
+	if !m.vpReady || m.editorSchema == nil {
+		return
+	}
+	targetLine := 4
+	fieldWidth := m.calcEditorWidth() - 4
+	if fieldWidth < 20 {
+		fieldWidth = 20
+	}
+	for i := 0; i < m.fieldCursor && i < len(m.editorSchema.Fields); i++ {
+		targetLine += len(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
+	}
+	if targetLine > m.viewport.YOffset+m.viewport.Height-6 {
+		m.viewport.SetYOffset(targetLine - m.viewport.Height + 8)
+	} else if targetLine < m.viewport.YOffset+2 {
+		m.viewport.SetYOffset(maxInt(targetLine-2, 0))
 	}
 }
 
@@ -2355,18 +2369,68 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")), 2))
 
 	case FieldArray:
-		lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
+		// An array WITH data shows it (clamped raw JSON) — "[ ] No items yet"
+		// over a populated dependencies list was a lie.
+		if raw := m.rawFieldJSON(field.Name); raw != "" {
+			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(raw)), 2))
+		} else {
+			lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
+		}
+
+	case FieldRaw:
+		// D12 (masterplan-20260425-085425): the Go TUI is read-only for v2 /
+		// non-scalar field types — object, composite, arrayOf, codelist,
+		// localizedText. Editing happens in the LiveView Studio.
+		//
+		// Read-only ≠ invisible: when the document CARRIES data for the field
+		// — a task's claim {worker, epoch, resources}, its history — the raw
+		// value renders as clamped pretty JSON, so the terminal shows the
+		// same truth Studio's read-only panels do. Empty stays a placeholder.
+		if raw := m.rawFieldJSON(field.Name); raw != "" {
+			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(raw)), 2))
+		} else {
+			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render("— (edit in Studio)")), 2))
+		}
 
 	default:
-		// D12 (masterplan-20260425-085425): the Go TUI is read-only for v2
-		// plugin schema field types — composite, arrayOf, codelist, localizedText.
-		// Documents whose schema declares any v2 type render through this
-		// default branch (no panic, no editor surface). Editing happens in the
-		// LiveView Studio at /studio via BarkparkWeb.Studio.Plugins.Adapter.
 		lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(placeholder("...")), 2))
 	}
 
 	return lines
+}
+
+// rawFieldJSON renders a doc's raw NON-SCALAR field value (claim,
+// dependencies, history, …) as pretty JSON for the read-only editor surface.
+// Returns "" when there is no open doc, the field is absent/null/empty, or
+// the bytes fail to parse — the caller then falls back to the placeholder.
+// Clamped to a few lines so a deep history object cannot flood the form;
+// the full value is one `bp task get` away.
+func (m model) rawFieldJSON(name string) string {
+	if m.selectedDoc == nil || m.selectedDoc.Extra == nil {
+		return ""
+	}
+	raw, ok := m.selectedDoc.Extra[name]
+	if !ok {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" || trimmed == "{}" || trimmed == "[]" || trimmed == `""` {
+		return ""
+	}
+	var v any
+	if json.Unmarshal([]byte(trimmed), &v) != nil {
+		return ""
+	}
+	pretty, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return ""
+	}
+	const maxRawJSONLines = 8
+	lines := strings.Split(string(pretty), "\n")
+	if len(lines) > maxRawJSONLines {
+		lines = append(lines[:maxRawJSONLines], "…")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ── Preview pane ────────────────────────────────────────────────────────────

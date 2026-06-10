@@ -21,6 +21,12 @@ const (
 	FieldColor
 	FieldReference
 	FieldArray
+	// FieldRaw marks non-scalar / v2 plugin field types (object, composite,
+	// arrayOf, codelist, localizedText): READ-ONLY in the TUI (D12). Before
+	// this, parseFieldType's default mapped them to FieldString — an EDITABLE
+	// text box over structured data, where one careless enter+save would
+	// overwrite a task's claim object with a typed scalar.
+	FieldRaw
 )
 
 // Field defines a single form field inside a document schema.
@@ -203,7 +209,12 @@ func parseFieldType(s string) FieldType {
 		return FieldReference
 	case "array":
 		return FieldArray
+	case "object", "composite", "arrayOf", "codelist", "localizedText":
+		// The v2 / non-scalar types: read-only render, never an editable box.
+		return FieldRaw
 	default:
+		// Unknown-but-scalar types (e.g. a future "number" alias) keep the
+		// permissive string-box fallback.
 		return FieldString
 	}
 }
