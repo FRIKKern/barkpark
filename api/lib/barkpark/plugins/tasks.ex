@@ -65,6 +65,44 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   @doc """
+  Contributes the Tasks desk group to the Studio Structure pane via the
+  plugin desk-item highway (`Barkpark.Plugin.desk_items/1`, collected by
+  `Barkpark.Plugins.Registry.collect_desk_items/1` after the host's
+  built-in groups — see `Barkpark.Structure.build_desk_items/3`).
+
+  One `:document_list` entry for the `task` type, gated on the `task`
+  schema actually existing in the requested dataset — mirroring how the
+  host groups gate on `Map.has_key?(schemas, name)`, so a dataset that
+  never registered the task schema (e.g. a clean `bp setup` profile on a
+  non-production dataset) gets no dead "Tasks" row. The list pane opens
+  each task in the regular Studio form editor
+  (`PaneBuilder`'s `:plugin_document_list` branch).
+  """
+  @impl Barkpark.Plugin
+  def desk_items(dataset) do
+    if task_schema_present?(dataset) do
+      [%{type: :document_list, label: "Tasks", doc_type: "task", icon: "✅"}]
+    else
+      []
+    end
+  end
+
+  # Failure-safe schema probe. The rescue/catch matters beyond defensive
+  # style: the Registry's `resolver_is_default_lift?/4` fingerprint RUNS
+  # `desk_items("production")` once at registration time — a context with
+  # no DB sandbox ownership (tests) and possibly no Repo yet (boot). A
+  # raise there would mis-fingerprint the default resolver as an author
+  # override and log a spurious "defines both" warning on every
+  # registration. No schema reachable → no desk entry, never a crash.
+  defp task_schema_present?(dataset) do
+    match?({:ok, _}, Barkpark.Content.get_schema("task", dataset))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @doc """
   Contributes the two task Oban cron entries, moved verbatim from
   `config/config.exs`:
 

@@ -179,6 +179,28 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # v1 "array" / "object" fields (e.g. the task schema's `dependencies`
+  # and `claim`): structured data with no Classic leaf editor. Render the
+  # current value as read-only pretty-printed JSON and emit NO form
+  # input — submitting these through a text input would round-trip a
+  # structured value as a string and corrupt it. Because the field is
+  # absent from the submitted `doc[...]` params, the save path
+  # (`Content.classic_save_content/4`) preserves the stored value
+  # byte-identically. Edits go through the API (`/v1/tasks`, mutate
+  # endpoints), not the Studio form.
+  def input(%{field: %{"type" => t, "name" => name}} = assigns)
+      when t in ["array", "object"] do
+    val = Map.get(assigns.editor_form, name)
+    assigns = assign(assigns, n: name, v: readonly_json(val))
+
+    ~H"""
+    <div data-readonly-field={@n}>
+      <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — managed via API</span>
+    </div>
+    """
+  end
+
   def input(%{field: %{"name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val, numeric: numeric_name?(name))
@@ -208,4 +230,18 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   defp numeric_name?(_), do: false
+
+  # Pretty-print a structured (array/object) field value for the
+  # read-only display. nil / "" → an em-dash placeholder; values that
+  # cannot JSON-encode (shouldn't happen for jsonb-sourced content)
+  # fall back to `inspect/1` rather than crash the editor pane.
+  defp readonly_json(nil), do: "—"
+  defp readonly_json(""), do: "—"
+
+  defp readonly_json(value) do
+    case Jason.encode(value, pretty: true) do
+      {:ok, json} -> json
+      {:error, _} -> inspect(value)
+    end
+  end
 end

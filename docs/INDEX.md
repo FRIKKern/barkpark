@@ -9,9 +9,9 @@ Decisions: decisions/0001-sdk-envelope.md · decisions/0002-npm-dist-tag.md · d
 
 Runbooks: ops/PROD_OPS.md · ops/npm-rollback-playbook.md · ops/merge-gates.md · ops/adding-a-domain.md · ops/bokbasen-go-live.md · ops/realtime-webhook-setup.md
 
-Setup: setup/QUICKSTART.md · setup/SETUP.md · setup/personal-local.md
+Setup: setup/{QUICKSTART,SETUP,TASK-SYSTEM,personal-local}.md
 
-Cheatsheets: cheatsheets/bp.md · cheatsheets/http-api.md · cheatsheets/papers.md
+Cheatsheets: cheatsheets/{bp,tasks,http-api,papers}.md
 
 Frozen paths: api-v1.md · auth.md · cli/error-exit-table.md · cli/m0-decisions.md · cli/HANDBOOK.md · spec/bokbasen-api-contract.md
 

@@ -13,7 +13,7 @@ import (
 // brands documented in the repo. Disk discovery, when it finds anything, is
 // unioned with this list so a newly-added plugin dir shows up without a code
 // change here.
-var knownPlugins = []string{"bulldocs", "onixedit", "frt", "indx"}
+var knownPlugins = []string{"bulldocs", "onixedit", "frt", "indx", "tasks"}
 
 // pluginSearchDirs are the candidate locations of the plugin schema tree,
 // relative to the working directory. DiscoverPlugins walks up from cwd looking

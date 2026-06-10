@@ -19,6 +19,10 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp media ls/upload` | assets | `bp media upload photo.jpg` |
 | `bp search query <q>` | full-text search | `bp search query norway --engine indx` |
 | `bp paper view <slug>` | render a paper in the terminal | `bp paper view welcome --theme dark` |
+| `bp task ls` / `ready` | all tasks / unblocked queue | `bp task ready --limit 5` |
+| `bp task get <id>` | one task + child rail | `bp task get t1` |
+| `bp task claim <id>` | atomic fenced claim | `bp task claim t1 --set worker_id=a1` |
+| `bp task close <id>` | close, CAS on claim epoch | `bp task close t1 --set worker_id=a1 --set observed_epoch=1` |
 | `bp migrate <from> <to>` | copy docs between saved servers | `bp migrate prod local --type post --yes` |
 | `bp upgrade` | self-update from `cli-v*` releases | `bp upgrade --check` (exit 1 when behind) |
 | `bp uninstall` | remove config; `--local` adds dev stack | `bp uninstall --local --dry-run` |
@@ -27,4 +31,4 @@ Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml
 
 Exit codes: `docs/cli/error-exit-table.md` (0 ok · 2 usage · 3 auth · 4 not-found · 5 validation · 6 conflict).
 
-Canon: [`../cli/HANDBOOK.md`](../cli/HANDBOOK.md).
+Canon: [`../cli/HANDBOOK.md`](../cli/HANDBOOK.md) · tasks: [`tasks.md`](tasks.md).
