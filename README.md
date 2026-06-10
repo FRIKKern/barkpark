@@ -34,7 +34,7 @@ One call spins up a **workspace** — it arrives with you as owner, a Default pr
 
 ```bash
 bp workspace create Spike
-bp workspace project-create spike agents-v2
+bp -w spike workspace project-create agents-v2
 ```
 
 ## Four ways in

@@ -545,6 +545,18 @@ func renderMinimal(out *writer, payload []byte) {
 				}
 			}
 		}
+		// Workspace/project create receipts ({"workspace":{…}} / {"project":
+		// {…}}): the actionable handle is the SLUG — the -w/-p globals take
+		// slugs, not row uuids — so the receipt prints it. A bare "ok" here
+		// forced a second call just to learn the handle the next command needs.
+		for _, k := range []string{"workspace", "project"} {
+			if obj, ok := m[k].(map[string]any); ok {
+				if slug, ok := obj["slug"].(string); ok && slug != "" {
+					out.outf("%s: %s", k, slug)
+					return
+				}
+			}
+		}
 	}
 	ids := collectIDs(v)
 	rev := findRev(v)

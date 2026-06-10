@@ -13,6 +13,7 @@
 | search Phase 10 (retriever) | spike doc only; intelligence stays Postgres | >500k media assets OR fuzzy p95 > 100ms |
 | `/v1/paperflow/*` alias | back-compat alias of `/v1/plugins/bulldocs/*`; `PAPERFLOW_INGEST_TOKEN` unchanged | drop only after paperflow `event-on-save.sh` repoints |
 | TUI media browse + sharing UI | parity sprint closed gaps 1–7 (publish/create/delete/task c·x/ref picker//search/y dup, cli-v1.4.0); media + share management stay Studio/`bp` | demand — terminal-niche |
+| workspace/project delete | `workspace create / project-create` exist; no delete verb — spikes accumulate (server-side cascade: projects, datasets, docs, media, tokens) | demand — first user drowning in spikes |
 
 ## Code anchors
 

@@ -964,3 +964,21 @@ func TestRenderListEnvelopes(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderMinimalWorkspaceProjectSlug pins the create receipts: the -w/-p
+// globals take SLUGS, so {"workspace":{…}}/{"project":{…}} must print the
+// slug — a bare "ok" forced a second call just to learn the handle.
+func TestRenderMinimalWorkspaceProjectSlug(t *testing.T) {
+	for payload, want := range map[string]string{
+		`{"workspace":{"id":"u1","name":"Spike","slug":"spike"}}`:       "workspace: spike",
+		`{"project":{"id":"u2","name":"agents-v2","slug":"agents-v2"}}`: "project: agents-v2",
+	} {
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		w.output = "minimal"
+		renderMinimal(w, []byte(payload))
+		if got := strings.TrimSpace(stdout.String()); got != want {
+			t.Errorf("minimal %s = %q, want %q", payload, got, want)
+		}
+	}
+}
