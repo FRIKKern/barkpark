@@ -154,10 +154,10 @@ func TestWizardConnectSkipsProfileStage(t *testing.T) {
 	}
 }
 
-// TestWizardProfileDefaultCleanPrechecksBulldocs: leaving the profile stage on
-// the default (clean) pre-checks ONLY bulldocs in the plugin multi-select, and
-// the assembled plan carries Profile=clean.
-func TestWizardProfileDefaultCleanPrechecksBulldocs(t *testing.T) {
+// TestWizardProfileDefaultCleanPrechecksBulldocsAndTasks: leaving the profile
+// stage on the default (clean) pre-checks bulldocs and tasks in the plugin
+// multi-select, and the assembled plan carries Profile=clean.
+func TestWizardProfileDefaultCleanPrechecksBulldocsAndTasks(t *testing.T) {
 	m := newWizardModel(nil)
 	m = drive(m, "down", "enter", "enter", "enter") // local → inputs → profile → plugins
 
@@ -165,7 +165,7 @@ func TestWizardProfileDefaultCleanPrechecksBulldocs(t *testing.T) {
 		t.Fatalf("expected plugins stage, got %d", m.stage)
 	}
 	for i, p := range m.plugins {
-		want := p == "bulldocs"
+		want := p == "bulldocs" || p == "tasks"
 		if m.pluginPick[i] != want {
 			t.Fatalf("clean precheck: plugin %q picked=%v, want %v", p, m.pluginPick[i], want)
 		}
@@ -174,8 +174,16 @@ func TestWizardProfileDefaultCleanPrechecksBulldocs(t *testing.T) {
 	if plan.Profile != ProfileClean {
 		t.Fatalf("plan.Profile = %q, want %q", plan.Profile, ProfileClean)
 	}
-	if got := plan.Plugins; len(got) != 1 || got[0] != "bulldocs" {
-		t.Fatalf("clean precheck should whitelist bulldocs only, got %v", got)
+	got := plan.Plugins
+	if len(got) != 2 {
+		t.Fatalf("clean precheck should whitelist bulldocs+tasks (2 plugins), got %v", got)
+	}
+	pluginSet := map[string]bool{}
+	for _, p := range got {
+		pluginSet[p] = true
+	}
+	if !pluginSet["bulldocs"] || !pluginSet["tasks"] {
+		t.Fatalf("clean precheck should whitelist bulldocs and tasks, got %v", got)
 	}
 }
 

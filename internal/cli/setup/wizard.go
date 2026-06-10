@@ -357,8 +357,8 @@ func (m wizardModel) profile() string {
 }
 
 // applyProfilePrecheck aligns the plugin pre-selection with the chosen profile
-// — clean pre-checks only bulldocs (the whitelist matches the clean desk; the
-// server unions media in), demo restores the all-checked default. It never
+// — clean pre-checks bulldocs and tasks (the whitelist matches the clean desk;
+// the server unions media in), demo restores the all-checked default. It never
 // overrides a selection the user already touched.
 func (m *wizardModel) applyProfilePrecheck() {
 	if m.pluginsTouched {
@@ -366,7 +366,7 @@ func (m *wizardModel) applyProfilePrecheck() {
 	}
 	for i := range m.pluginPick {
 		if m.profile() == ProfileClean {
-			m.pluginPick[i] = m.plugins[i] == "bulldocs"
+			m.pluginPick[i] = m.plugins[i] == "bulldocs" || m.plugins[i] == "tasks"
 		} else {
 			m.pluginPick[i] = true
 		}
