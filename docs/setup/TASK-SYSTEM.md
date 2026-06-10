@@ -161,7 +161,8 @@ Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data 
 | `400 worker_id is required` | Claim/close need `worker_id` in the JSON body (`--set worker_id=…` via bp). |
 | `409 fenced_off` | Your `observed_epoch` is stale — the lease was swept and re-claimed. Re-claim, then close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
-| `409 not_ready` | Targeted claim on a task that's `in_progress`/`done`/`cancelled`, or its blockers aren't all `done`. |
+| `409 not_ready` | Targeted claim on a task that is `in_progress`/`done`/`cancelled`. |
+| `409 blocked_by_unsatisfied_deps` | Targeted claim while a `blocks` edge points at a non-`done` task. |
 | `{"ok":false,"reason":"no_ready"}` | Not an error — the queue is empty (HTTP 200). |
 | Task invisible in Studio but in API | Tenancy: the doc carries a different workspace/project scope than the Studio you're looking at. |
 

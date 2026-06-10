@@ -3,9 +3,10 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paperflow-rx0 / w7-07a) — HTTP surface for paperflow's
   bd-compatible shim (`bin/bd-shim`, paperflow side).
 
-  Eight endpoints, all bearer-token gated via the existing `:api` +
+  Ten endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
+    * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
@@ -13,6 +14,8 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/close`      — `Tasks.close/3`
     * `GET    /v1/tasks/:doc_id/edges`      — `Tasks.dependencies/2` + `dependents/2`
     * `POST   /v1/tasks/edges`              — `Tasks.add_dep/3`
+    * `POST   /v1/tasks/:doc_id/labels`     — `Tasks.relabel_by_id/3`
+    * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
 
   ## Shape contract
 
