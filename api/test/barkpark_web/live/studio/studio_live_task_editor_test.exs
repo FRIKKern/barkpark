@@ -65,8 +65,21 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     {:ok, conn: conn}
   end
 
+  # The dossier schema declares editor groups (Brief/Work/Close/System), so
+  # the editor renders a tab bar and only the active tab's fields emit form
+  # inputs. Tests switch tabs via the `select-group` event the tab buttons
+  # fire; `title` is special-cased ABOVE the tab bar and always renders.
+  defp select_tab(view, group) do
+    view
+    |> element(~s(.bp-tab-bar button[phx-value-group="#{group}"]))
+    |> render_click()
+  end
+
   test "lifecycle_status renders as a select with the five lifecycle options", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/task/tsk1")
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/task/tsk1")
+
+    # lifecycle_status lives on the Work tab.
+    html = select_tab(view, "work")
 
     assert html =~
              ~r{<select[^>]*name="doc\[lifecycle_status\]"[^>]*class="form-input"}
@@ -80,7 +93,11 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test "dependencies/claim render read-only JSON with no form input", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/task/tsk1")
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/task/tsk1")
+
+    # The engine ledger lives on the System tab; claim/dependencies are
+    # non-empty here so their visibleWhen non_empty gates pass.
+    html = select_tab(view, "system")
 
     # No input that would submit the structured values as strings.
     refute html =~ ~s(name="doc[dependencies]")
@@ -94,8 +111,24 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     assert html =~ "read-only — managed via API"
   end
 
+  test "empty engine fields hide behind visibleWhen non_empty", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/task/tsk1")
+
+    html = select_tab(view, "system")
+
+    # tsk1 has never been compacted: history / history_summary are absent,
+    # so their visibleWhen non_empty gates hide the empty JSON stubs.
+    refute html =~ ~s(data-readonly-field="history")
+    refute html =~ ~s(data-readonly-field="history_summary")
+  end
+
   test "a Studio save preserves dependencies and claim byte-identically", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/studio/#{@dataset}/task/tsk1")
+
+    # lifecycle_status renders on the Work tab; dependencies/claim live on
+    # the System tab — so this save also proves CROSS-TAB preservation
+    # (fields whose inputs are not rendered survive the merge-save).
+    select_tab(view, "work")
 
     view
     |> form("#editor-form", %{
