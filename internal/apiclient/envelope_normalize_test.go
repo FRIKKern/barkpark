@@ -139,3 +139,32 @@ func TestUpsertRoundTripsEnvelopeID(t *testing.T) {
 		t.Errorf("createOrReplace must carry Values fields, got category=%v", cr["category"])
 	}
 }
+
+// Status gap-fill: the envelope carries publish state as the "_draft" boolean;
+// the legacy "status" string wins when present (liveEnvelope above carries
+// both — pinned in TestDocNormalizesLiveV1Envelope's sibling here).
+func TestDocStatusFromDraftFlag(t *testing.T) {
+	var d Doc
+	if err := json.Unmarshal([]byte(`{"_id":"x","_draft":false,"title":"t"}`), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if d.Status != "published" {
+		t.Fatalf("Status = %q, want published (from _draft:false)", d.Status)
+	}
+
+	var d2 Doc
+	if err := json.Unmarshal([]byte(`{"_id":"y","_draft":true,"title":"t"}`), &d2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if d2.Status != "draft" {
+		t.Fatalf("Status = %q, want draft (from _draft:true)", d2.Status)
+	}
+
+	var d3 Doc
+	if err := json.Unmarshal([]byte(`{"_id":"z","_draft":true,"status":"archived"}`), &d3); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if d3.Status != "archived" {
+		t.Fatalf("Status = %q, want archived (explicit status wins)", d3.Status)
+	}
+}

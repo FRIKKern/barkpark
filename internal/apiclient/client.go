@@ -120,6 +120,18 @@ func (d *Doc) normalizeEnvelope() {
 			}
 		}
 	}
+	if d.Status == "" {
+		// The envelope carries publish state as the "_draft" boolean, not the
+		// legacy "status" string the TUI's header/icons key off.
+		var draft bool
+		if json.Unmarshal(d.Extra["_draft"], &draft) == nil {
+			if draft {
+				d.Status = "draft"
+			} else {
+				d.Status = "published"
+			}
+		}
+	}
 	if len(d.Values) == 0 {
 		values := make(map[string]string)
 		for k, raw := range d.Extra {

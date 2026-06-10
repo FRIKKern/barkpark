@@ -1651,8 +1651,11 @@ func (m model) buildEditorContent(width int) string {
 	// Header
 	dot := statusStyle(m.selectedDoc.Status).Render(statusIcon(m.selectedDoc.Status))
 	title := truncate(m.selectedDoc.Title, width-20)
-	badge := dimStyle.Render("[" + m.selectedDoc.Status + "]")
-	lines = append(lines, fmt.Sprintf(" %s %s %s", dot, headerStyle.Render(title), badge))
+	header := fmt.Sprintf(" %s %s", dot, headerStyle.Render(title))
+	if m.selectedDoc.Status != "" {
+		header += " " + dimStyle.Render("["+m.selectedDoc.Status+"]")
+	}
+	lines = append(lines, header)
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", maxInt(width-2, 0))))
 
 	// Schema info
