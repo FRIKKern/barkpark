@@ -37,7 +37,7 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
-    * `cli_commands/0` — the six `task.*` CLI verbs (`ls`, `ready`, `get`,
+    * `cli_commands/0` — the seven `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
       `claim`, `close`, `next`) the `/v1/capabilities` manifest exposes. Five
       moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry;
       `next` (the queue-based atomic claim) was added later. `task` is no
@@ -145,6 +145,8 @@ defmodule Barkpark.Plugins.Tasks do
     [
       {:get, "/tasks", BarkparkWeb.TasksController, :index, auth: :token_root},
       {:get, "/tasks/ready", BarkparkWeb.TasksController, :ready, auth: :token_root},
+      # prime must mount BEFORE /tasks/:doc_id or it resolves as a doc id.
+      {:get, "/tasks/prime", BarkparkWeb.TasksController, :prime, auth: :token_root},
       {:post, "/tasks/claim", BarkparkWeb.TasksController, :claim, auth: :token_root},
       {:post, "/tasks/edges", BarkparkWeb.TasksController, :add_edge, auth: :token_root},
       {:get, "/tasks/:doc_id", BarkparkWeb.TasksController, :show, auth: :token_root},
@@ -166,7 +168,7 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Six verbs over six routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Seven verbs over seven routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
   not document mutations):
 
@@ -217,6 +219,26 @@ defmodule Barkpark.Plugins.Tasks do
         paginated: true,
         dry_run: false,
         default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.prime",
+        noun: "task",
+        verb: "prime",
+        summary:
+          "One-call agent rehydration: my in-progress claims, the ready head, recent events, lifecycle counts.",
+        http: %{method: "GET", path_template: "/v1/tasks/prime"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{name: "worker", type: "string", summary: "Narrow in_progress to this worker's claims."},
+          %{name: "limit", type: "int", summary: "Ready-head and event-window size.", default: 10}
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
         scoped_prefix: nil
       },
       %{

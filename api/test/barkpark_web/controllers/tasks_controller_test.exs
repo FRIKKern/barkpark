@@ -855,4 +855,67 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert explicit_payload["doc"]["doc_id"] == bare_payload["doc"]["doc_id"]
     end
   end
+
+  describe "GET /v1/tasks/prime — one-call agent rehydration" do
+    test "composes in_progress (worker-narrowed), ready head, events, counts", %{
+      conn: conn,
+      scope: scope
+    } do
+      ready_id = uniq("prime-ready")
+      mine_id = uniq("prime-mine")
+      other_id = uniq("prime-other")
+      mk_task!(ready_id, scope)
+      mk_task!(mine_id, scope)
+      mk_task!(other_id, scope)
+
+      # Claim two tasks under different workers — claims also seed
+      # task.claimed mutation_events for the recent_events slice.
+      {:ok, _} = Tasks.claim_by_id(mine_id, "agent-prime", scope)
+      {:ok, _} = Tasks.claim_by_id(other_id, "someone-else", scope)
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/prime?worker=agent-prime")
+        |> json_response(200)
+
+      assert payload["ok"] == true
+      assert payload["worker"] == "agent-prime"
+
+      # in_progress narrowed to MY claims only.
+      mine = Enum.map(payload["in_progress"], & &1["doc_id"])
+      assert Enum.any?(mine, &String.contains?(&1, mine_id))
+      refute Enum.any?(mine, &String.contains?(&1, other_id))
+
+      # The ready head carries the unclaimed task.
+      ready = Enum.map(payload["ready"], & &1["doc_id"])
+      assert Enum.any?(ready, &String.contains?(&1, ready_id))
+
+      # Recent events include the claims, newest first, lean rows.
+      assert [%{"event" => _, "doc_id" => _, "at" => _} | _] = payload["recent_events"]
+      assert Enum.any?(payload["recent_events"], &(&1["event"] == "task.claimed"))
+
+      # Lifecycle counts orient without another list call.
+      assert payload["counts"]["in_progress"] >= 2
+      assert payload["counts"]["open"] >= 1
+    end
+
+    test "without ?worker, in_progress carries ALL live claims", %{conn: conn, scope: scope} do
+      a = uniq("prime-all-a")
+      mk_task!(a, scope)
+      {:ok, _} = Tasks.claim_by_id(a, "w-anyone", scope)
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/prime")
+        |> json_response(200)
+
+      assert Enum.any?(payload["in_progress"], &String.contains?(&1["doc_id"], a))
+    end
+
+    test "401 with no token", %{conn: conn} do
+      conn |> get("/v1/tasks/prime") |> json_response(401)
+    end
+  end
 end

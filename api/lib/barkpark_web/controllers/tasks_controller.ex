@@ -3,11 +3,12 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paperflow-rx0 / w7-07a) — HTTP surface for paperflow's
   bd-compatible shim (`bin/bd-shim`, paperflow side).
 
-  Ten endpoints, all bearer-token gated via the existing `:api` +
+  Eleven endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
+    * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts)
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
@@ -56,6 +57,82 @@ defmodule BarkparkWeb.TasksController do
     counts = batch_edge_counts(docs)
     json(conn, %{ok: true, docs: Enum.map(docs, &render_doc_with_counts(&1, counts))})
   end
+
+  # ─── GET /v1/tasks/prime ────────────────────────────────────────────────
+  # One-call agent rehydration — the `bd prime` lesson from the Beads
+  # retrospective (2026-06-11). After compaction / a fresh session, an agent
+  # needs its working context in ONE response instead of four calls:
+  #
+  #   * `in_progress` — live claims, narrowed to `?worker=<id>` when given
+  #     (an agent resuming asks "what am I holding?"); all live claims
+  #     otherwise (an orchestrator asks "who holds what?").
+  #   * `ready` — the head of the unblocked queue (`?limit=`, default 10).
+  #   * `recent_events` — the last `limit` task mutation_events, newest
+  #     first, as lean {event, doc_id, at} rows (full docs ride the SSE
+  #     stream; prime is orientation, not replay).
+  #   * `counts` — open/in_progress/blocked/done/cancelled totals for the
+  #     scope, so "how big is the board?" needs no extra list call.
+  def prime(conn, params) do
+    scope = scope_opts(conn)
+    worker = params["worker"]
+    limit = params["limit"] |> parse_int(10) |> min(100) |> max(1)
+
+    in_progress =
+      from(d in Document,
+        where: d.type == "task",
+        where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
+        order_by: [desc: d.updated_at],
+        limit: 100
+      )
+      |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+      |> maybe_filter_project(Keyword.get(scope, :project_id))
+      |> maybe_filter_claim_worker(worker)
+      |> Repo.all()
+
+    ready = Tasks.ready([limit: limit] ++ scope)
+    counts = batch_edge_counts(in_progress ++ ready)
+
+    events =
+      from(e in Barkpark.Content.MutationEvent,
+        where: e.type == "task" and like(e.mutation, "task.%"),
+        order_by: [desc: e.inserted_at],
+        limit: ^limit,
+        select: %{event: e.mutation, doc_id: e.doc_id, at: e.inserted_at}
+      )
+      |> maybe_filter_event_workspace(Keyword.get(scope, :workspace_id))
+      |> Repo.all()
+
+    lifecycle_counts =
+      from(d in Document,
+        where: d.type == "task",
+        group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
+        select:
+          {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
+      )
+      |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+      |> maybe_filter_project(Keyword.get(scope, :project_id))
+      |> Repo.all()
+      |> Map.new()
+
+    json(conn, %{
+      ok: true,
+      worker: worker,
+      in_progress: Enum.map(in_progress, &render_doc_with_counts(&1, counts)),
+      ready: Enum.map(ready, &render_doc_with_counts(&1, counts)),
+      recent_events: events,
+      counts: lifecycle_counts
+    })
+  end
+
+  defp maybe_filter_claim_worker(query, nil), do: query
+
+  defp maybe_filter_claim_worker(query, worker) when is_binary(worker),
+    do: from(d in query, where: fragment("?->'claim'->>'worker'", d.content) == ^worker)
+
+  defp maybe_filter_event_workspace(query, nil), do: query
+
+  defp maybe_filter_event_workspace(query, ws_id),
+    do: from(e in query, where: e.workspace_id == ^ws_id)
 
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
   # w7-08c (paperflow-y1c): list-all endpoint. Returns every task doc in the
