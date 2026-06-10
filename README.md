@@ -33,7 +33,7 @@ The wizard covers every route: local stack (native or Docker), SSH deploy to any
 One call spins up a **workspace** — it arrives with you as owner, a Default project, and a production dataset. Experiments live in their own workspace with their own schemas, tasks, papers, and media; when the spike is done, nothing leaks back into your real work:
 
 ```bash
-curl -X POST $API/api/workspaces -H "Authorization: Bearer $TOKEN" -d '{"name":"Spike"}'
+bp workspace create Spike
 bp workspace project-create spike agents-v2
 ```
 

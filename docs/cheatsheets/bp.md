@@ -17,6 +17,7 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp doc mutate` | atomic batch (create/patch/publish/…) | `bp doc mutate --file muts.json` |
 | `bp schema get/apply` | read / upsert a schema | `bp schema apply --file post.json` |
 | `bp media ls/upload` | assets | `bp media upload photo.jpg` |
+| `bp workspace create/ls` | sandbox workspace, ready to use | `bp workspace create Spike` |
 | `bp search query <q>` | full-text search | `bp search query norway --engine indx` |
 | `bp paper view <slug>` | render a paper in the terminal | `bp paper view welcome --theme dark` |
 | `bp task ls` / `ready` | all tasks / unblocked queue | `bp task ready --limit 5` |

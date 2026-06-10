@@ -136,18 +136,17 @@ Goal → phases → leaf tasks, with `blocks` edges sequencing the phases, gives
 
 ## Workspaces, projects, datasets — experiment without mess
 
-Spin up an isolated sandbox in one call; throw the whole thing away later. Any authenticated token may create a workspace — it arrives ready to use:
+Spin up an isolated sandbox in one command; throw the whole thing away later. Any write-tier token may create a workspace — it arrives ready to use:
 
 ```bash
-curl -X POST $API/api/workspaces -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"name":"Spike"}'
+bp workspace create Spike
 # → workspace + you as owner-member + a Default project + a production dataset
+#   (slug derived from the name; explicit: --slug spike)
 
-curl -X POST $API/api/workspaces/spike/projects -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"name":"agents-v2"}'   # member-gated
-
+bp workspace project-create spike agents-v2       # member-gated
 bp workspace ls                                   # what your token can reach
-bp workspace project-create spike agents-v2       # same, via bp
+# Raw HTTP equivalents: POST /api/workspaces {"name":…} and
+# POST /api/workspaces/:slug/projects {"name":…} — see docs/cheatsheets/http-api.md
 ```
 
 Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror under the same prefix. The flat `/v1/tasks/*` surface operates on the server's default (unscoped) tenancy — under scoped pipelines, task reads and claims filter hard by workspace + project. Membership is the boundary: non-members get 404, never an existence leak.

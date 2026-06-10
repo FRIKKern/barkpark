@@ -586,6 +586,19 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table"
       ),
       core_cmd(
+        "workspace.create",
+        "workspace",
+        "create",
+        "Create a new workspace owned by the caller (+ Default project + production dataset).",
+        "POST",
+        "/api/workspaces",
+        "write",
+        args: [arg("name", true, "string", "Workspace name (slug derived when omitted).")],
+        flags: [flag("slug", "string", "Explicit slug (derived from name when absent).")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
         "workspace.project-create",
         "workspace",
         "project-create",

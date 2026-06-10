@@ -31,6 +31,8 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
         cmd("doc.mutate", "doc", "write"),
         cmd("schema.apply", "schema", "admin"),
         cmd("webhook.create", "webhook", "write"),
+        cmd("workspace.ls", "workspace", "read"),
+        cmd("workspace.create", "workspace", "write"),
         cmd("workspace.project-create", "workspace", "scoped_admin"),
         cmd("bulldocs.publish", "bulldocs", "ingest")
       ]
@@ -112,6 +114,8 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
       assert "doc.mutate" in ids(admin)
       assert "schema.apply" in ids(admin)
       assert "webhook.create" in ids(admin)
+      # workspace.create (write-tier) is visible to admin (rank >= write).
+      assert "workspace.create" in ids(admin)
       # contract rule #2: scoped_admin is visible to an authenticated caller,
       # never blanket client-side denied.
       assert "workspace.project-create" in ids(admin)
@@ -127,9 +131,19 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
       # scoped_admin is NOT blanket-hidden from an authenticated (>= read) token.
       assert "workspace.project-create" in ids(read)
 
+      # workspace.create is write-tier — NOT visible to a read-only token.
+      refute "workspace.create" in ids(read)
       refute "doc.mutate" in ids(read)
       refute "schema.apply" in ids(read)
       refute "bulldocs.publish" in ids(read)
+    end
+
+    test "write tier sees workspace.create but anon does not" do
+      write = Capabilities.project(superset(), "write")
+      anon = Capabilities.project(superset(), "none")
+
+      assert "workspace.create" in ids(write)
+      refute "workspace.create" in ids(anon)
     end
 
     test "etag is recomputed and differs between tiers (drives 304 + tier-keyed cache)" do
