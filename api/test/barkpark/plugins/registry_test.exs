@@ -13,6 +13,76 @@ defmodule Barkpark.Plugins.RegistryTest do
     end
   end
 
+  describe "baseline capture + reset isolation (regression: lazy-capture poison)" do
+    # Regression for the flake described in the fix commit:
+    # When baseline_plugins was captured lazily inside reset/0 (nil -> state.plugins),
+    # the FIRST reset call would capture whatever plugins were currently registered —
+    # including any test stub that had registered before the first reset arrived.
+    # Subsequent resets would then restore that poisoned baseline into every test,
+    # producing order-dependent failures (seed-dependent on which on_exit fired first).
+    #
+    # The fix: discover_and_register/0 calls capture_baseline/0 immediately after the
+    # disk walk, so the frozen baseline is always the post-discovery "real" set.
+    # This test simulates the old poison order without relying on on_exit ordering.
+
+    test "reset/0 does not restore a stub registered before the first explicit reset" do
+      # Simulate the poisoning scenario: register a stub, then call reset().
+      # Under the old lazy logic, this first reset would freeze the stub into
+      # the baseline. Under the fix, capture_baseline/0 ran at boot (after
+      # discover_and_register/0), so the baseline is already frozen before we
+      # register anything here — reset() restores the pre-stub set.
+      stub_name = "baseline_poison_regression_stub_#{System.unique_integer([:positive])}"
+
+      assert :ok =
+               Registry.register(
+                 __MODULE__.BaselinePoisonStub,
+                 %{"plugin_name" => stub_name, "version" => "0.0.0"}
+               )
+
+      # Confirm the stub is visible before reset.
+      assert {:ok, _} = Registry.lookup(stub_name)
+
+      # Now call reset() — this is the exact call pattern from on_exit/cleanup_stub.
+      Registry.reset()
+
+      # The stub must be absent after reset. Under the old lazy capture this
+      # would have PASSED only if another reset had already run before this one;
+      # with the lazy baseline it would sometimes fail (stub reappears after reset).
+      assert :error = Registry.lookup(stub_name),
+             "stub #{stub_name} survived reset() — baseline was poisoned at capture time"
+
+      # Sanity: the well-known bundled plugin (onixedit / book schema) must
+      # survive the reset, confirming the baseline holds the real boot set.
+      bundled = Registry.all()
+
+      assert Enum.any?(bundled, fn p -> p.name == "onixedit" end),
+             "onixedit missing from post-reset Registry.all() — baseline may be empty; plugins: #{inspect(Enum.map(bundled, & &1.name))}"
+    end
+
+    test "capture_baseline/0 is idempotent — a second call does not overwrite a frozen baseline" do
+      # Capture the baseline once (already done at boot by discover_and_register/0).
+      # Register a stub, then call capture_baseline() again — it must NOT re-freeze
+      # the stub into the baseline.
+      stub_name = "capture_idempotent_stub_#{System.unique_integer([:positive])}"
+
+      assert :ok =
+               Registry.register(
+                 __MODULE__.BaselinePoisonStub,
+                 %{"plugin_name" => stub_name, "version" => "0.0.0"}
+               )
+
+      # Second capture_baseline call — must be a no-op because baseline is
+      # already frozen.
+      Registry.capture_baseline()
+
+      # Reset must NOT include the stub.
+      Registry.reset()
+
+      assert :error = Registry.lookup(stub_name),
+             "stub survived after idempotent capture_baseline() + reset() — second capture overwrote frozen baseline"
+    end
+  end
+
   describe "register/2 + lookup/1 + all/0" do
     test "round-trips a manifest map" do
       manifest = %{"plugin_name" => "round_trip", "version" => "0.0.0"}
@@ -153,6 +223,15 @@ defmodule Barkpark.Plugins.RegistryTest do
        do: true
 
   defp valid_route_spec?(_), do: false
+end
+
+# ── Inline stub for baseline-capture regression tests ────────────────────
+#
+# Defined at module top level so `Code.ensure_loaded?/1` returns true
+# if any code path needs it.
+
+defmodule Barkpark.Plugins.RegistryTest.BaselinePoisonStub do
+  @moduledoc false
 end
 
 # ── Inline fake plugins for collect_routes/1 ─────────────────────────────

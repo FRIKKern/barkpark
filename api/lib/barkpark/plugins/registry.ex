@@ -167,6 +167,24 @@ defmodule Barkpark.Plugins.Registry do
     GenServer.call(@name, :reset)
   end
 
+  @doc """
+  Eagerly freezes the current plugin set as the baseline for `reset/0`.
+
+  Called automatically at the end of `discover_and_register/0` (the
+  zero-arg boot-path arity) so the baseline is captured BEFORE any test
+  stub is ever registered — eliminating the race where a lazy first-reset
+  could capture a stub into the baseline.
+
+  Idempotent: if a baseline has already been frozen, this is a no-op.
+  Safe to call from tests that re-run discovery and want an updated
+  baseline, but under normal operation the single call from
+  `discover_and_register/0` is sufficient.
+  """
+  @spec capture_baseline() :: :ok
+  def capture_baseline do
+    GenServer.call(@name, :capture_baseline)
+  end
+
   @spec all() :: [%{module: module(), manifest: map(), name: String.t()}]
   def all do
     case :persistent_term.get(@snapshot_key, nil) do
@@ -1341,6 +1359,13 @@ defmodule Barkpark.Plugins.Registry do
         # to disk discovery rather than silently swallowing.
         discover_and_register(default_paths())
     end
+
+    # Eagerly freeze the post-discovery plugin set as the reset baseline.
+    # Must come AFTER the inner discover_and_register variants above have
+    # finished registering plugins, so the baseline captures the real boot
+    # set — not an empty map and not a test-stub-polluted set.
+    # Idempotent: a second call is a no-op (baseline already frozen).
+    capture_baseline()
   end
 
   @doc """
@@ -1509,10 +1534,12 @@ defmodule Barkpark.Plugins.Registry do
 
   @impl true
   def init(_opts) do
-    # `baseline_plugins` is captured lazily on the first `reset/0` call —
-    # at boot we have nothing registered yet (discovery runs after the
-    # supervisor comes up, via SchemaBootstrap). `nil` means "not yet
-    # frozen". See `handle_call(:reset, …)`.
+    # `baseline_plugins` starts nil and is frozen eagerly by the
+    # `:capture_baseline` call at the end of `discover_and_register/0`.
+    # `nil` means "not yet frozen" — `reset/0` falls back to `state.plugins`
+    # as a safety net for callers that skip discovery entirely (e.g. tests
+    # that set the kill-switch env before any reset). See
+    # `handle_call(:capture_baseline, …)` and `handle_call(:reset, …)`.
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 
@@ -1542,6 +1569,20 @@ defmodule Barkpark.Plugins.Registry do
 
   def handle_call(:all, _from, state) do
     {:reply, Map.values(state.plugins), state}
+  end
+
+  # Eagerly freeze the current plugin set as the baseline.
+  # Called at the end of discover_and_register/0 so the baseline is always
+  # the post-discovery set, never a test-polluted set.
+  # Idempotent: a second call is a no-op (baseline already frozen).
+  def handle_call(:capture_baseline, _from, state) do
+    new_state =
+      case state.baseline_plugins do
+        nil -> %{state | baseline_plugins: state.plugins}
+        _already_frozen -> state
+      end
+
+    {:reply, :ok, new_state}
   end
 
   # Test-isolation reset. Two phases:
