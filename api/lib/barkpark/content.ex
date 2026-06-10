@@ -1380,9 +1380,15 @@ defmodule Barkpark.Content do
 
   defp from_envelope(attrs) do
     cond do
-      # Already legacy shape — pass through unchanged
+      # Already legacy shape — pass through, but honor a Sanity-style "_id"
+      # when no "doc_id" was given. Mixing `_id` with a nested `content` map
+      # used to silently DROP the supplied id (create fell back to a generated
+      # task-### id), which broke every doc example that followed the id.
       Map.has_key?(attrs, "content") and is_map(Map.get(attrs, "content")) ->
-        attrs
+        case {Map.get(attrs, "doc_id"), Map.get(attrs, "_id")} do
+          {nil, id} when is_binary(id) and id != "" -> Map.put(attrs, "doc_id", id)
+          _ -> attrs
+        end
 
       true ->
         id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")

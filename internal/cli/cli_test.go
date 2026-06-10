@@ -557,6 +557,80 @@ func TestBuildBodyFromArgs(t *testing.T) {
 	}
 }
 
+// TestBuildBodyTaskClaimClose asserts that task.claim and task.close build
+// request bodies containing the required worker_id (and observed_epoch for
+// close), and that the optional lifecycle_status is included only when supplied.
+// doc_id is a path placeholder, so it must NOT appear in the body.
+func TestBuildBodyTaskClaimClose(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+
+	claim, ok := tree.Lookup("task", "claim")
+	if !ok {
+		t.Fatal("task claim missing from full-manifest fixture")
+	}
+	close, ok := tree.Lookup("task", "close")
+	if !ok {
+		t.Fatal("task close missing from full-manifest fixture")
+	}
+
+	// task claim <doc_id> <worker_id> — doc_id is the path arg, worker_id is body.
+	claimArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paperflow-agent"}
+	body, ct, err := buildBody(*claim, map[string][]string{}, claimArgs)
+	if err != nil {
+		t.Fatalf("buildBody task claim: %v", err)
+	}
+	if ct != "application/json" {
+		t.Errorf("claim content-type = %q, want application/json", ct)
+	}
+	var claimObj map[string]any
+	if json.Unmarshal(body, &claimObj) != nil {
+		t.Fatalf("claim body not valid JSON: %s", body)
+	}
+	if claimObj["worker_id"] != "paperflow-agent" {
+		t.Errorf("claim body worker_id = %v, want paperflow-agent; body = %s", claimObj["worker_id"], body)
+	}
+	if _, leaked := claimObj["doc_id"]; leaked {
+		t.Errorf("path arg doc_id must not appear in claim body: %s", body)
+	}
+
+	// task close <doc_id> <worker_id> <observed_epoch> — all body args except doc_id.
+	closeArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paperflow-agent", "observed_epoch": "42"}
+	body2, _, err := buildBody(*close, map[string][]string{}, closeArgs)
+	if err != nil {
+		t.Fatalf("buildBody task close: %v", err)
+	}
+	var closeObj map[string]any
+	if json.Unmarshal(body2, &closeObj) != nil {
+		t.Fatalf("close body not valid JSON: %s", body2)
+	}
+	if closeObj["worker_id"] != "paperflow-agent" {
+		t.Errorf("close body worker_id = %v; body = %s", closeObj["worker_id"], body2)
+	}
+	if closeObj["observed_epoch"] != "42" {
+		t.Errorf("close body observed_epoch = %v; body = %s", closeObj["observed_epoch"], body2)
+	}
+	if _, leaked := closeObj["doc_id"]; leaked {
+		t.Errorf("path arg doc_id must not appear in close body: %s", body2)
+	}
+	if _, present := closeObj["lifecycle_status"]; present {
+		t.Errorf("omitted lifecycle_status must not appear in close body: %s", body2)
+	}
+
+	// Optional lifecycle_status is included when supplied as a positional arg.
+	closeArgsWithStatus := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paperflow-agent", "observed_epoch": "42", "lifecycle_status": "done"}
+	body3, _, err := buildBody(*close, map[string][]string{}, closeArgsWithStatus)
+	if err != nil {
+		t.Fatalf("buildBody task close with status: %v", err)
+	}
+	var closeObj3 map[string]any
+	if json.Unmarshal(body3, &closeObj3) != nil {
+		t.Fatalf("close+status body not valid JSON: %s", body3)
+	}
+	if closeObj3["lifecycle_status"] != "done" {
+		t.Errorf("close+status body lifecycle_status = %v; body = %s", closeObj3["lifecycle_status"], body3)
+	}
+}
+
 // TestBuildBodyMediaMultipart asserts media.upload serialises the file as
 // multipart/form-data with a "file" form field, not a JSON body.
 func TestBuildBodyMediaMultipart(t *testing.T) {

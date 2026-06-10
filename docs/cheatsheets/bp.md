@@ -22,8 +22,8 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp paper view <slug>` | render a paper in the terminal | `bp paper view welcome --theme dark` |
 | `bp task ls` / `ready` | all tasks / unblocked queue | `bp task ready --limit 5` |
 | `bp task get <id>` | one task + child rail | `bp task get t1` |
-| `bp task claim <id>` | atomic fenced claim | `bp task claim t1 --set worker_id=a1` |
-| `bp task close <id>` | close, CAS on claim epoch | `bp task close t1 --set worker_id=a1 --set observed_epoch=1` |
+| `bp task claim <id> <worker>` | atomic fenced claim | `bp task claim t1 a1` |
+| `bp task close <id> <worker> <epoch> [status]` | close, CAS on claim epoch | `bp task close t1 a1 1` |
 | `bp migrate <from> <to>` | copy docs between saved servers | `bp migrate prod local --type post --yes` |
 | `bp upgrade` | self-update from `cli-v*` releases | `bp upgrade --check` (exit 1 when behind) |
 | `bp uninstall` | remove config; `--local` adds dev stack | `bp uninstall --local --dry-run` |

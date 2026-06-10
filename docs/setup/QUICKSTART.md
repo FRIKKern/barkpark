@@ -102,8 +102,8 @@ The clean profile ships the Tasks plugin enabled — your AI gets a claimable, d
 
 ```bash
 bp task ready                                    # unblocked queue, priority-ordered
-bp task claim t1 --set worker_id=agent-1         # atomic, fenced claim
-bp task close t1 --set worker_id=agent-1 --set observed_epoch=1
+bp task claim t1 agent-1                         # atomic, fenced claim
+bp task close t1 agent-1 1                       # <id> <worker> <observed_epoch>
 ```
 
 Full guide — agent loop, Studio collaboration, goals/phases, troubleshooting: [TASK-SYSTEM.md](TASK-SYSTEM.md).

@@ -67,12 +67,12 @@ curl -X POST $API/v1/tasks/claim \
 # → {"ok":false,"reason":"no_ready"} when the queue is empty
 
 # Targeted claim: name the row
-bp task claim drafts.t1 --set worker_id=agent-1
+bp task claim t1 agent-1            # args: <doc_id> <worker_id>
 
 # ... do the work ...
 
 # Close: CAS on the fencing epoch you were handed at claim time
-bp task close drafts.t1 --set worker_id=agent-1 --set observed_epoch=1
+bp task close t1 agent-1 1          # args: <doc_id> <worker_id> <observed_epoch> [lifecycle_status]
 ```
 
 The contract, precisely:
@@ -158,7 +158,7 @@ Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data 
 | No **Tasks** pane in Studio | Plugin not whitelisted (`BARKPARK_PLUGINS` set without `tasks`) **or** the `task` schema isn't registered in this dataset. Fix env, restart; the schema auto-registers on boot. |
 | `404` on `/v1/tasks/*` | Plugin disabled — routes only mount when the tasks plugin is registered. |
 | `404 task not found` on an id you just created | Rare — the endpoints resolve bare `t1` to `drafts.t1` automatically. Check that the task plugin is enabled and the token has access. |
-| `400 worker_id is required` | Claim/close need `worker_id` in the JSON body (`--set worker_id=…` via bp). |
+| `400 worker_id is required` | Claim/close need `worker_id` — positional via bp (`bp task claim <id> <worker>`), JSON body via curl. |
 | `409 fenced_off` | Your `observed_epoch` is stale — the lease was swept and re-claimed. Re-claim, then close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
 | `409 not_ready` | Targeted claim on a task that is `in_progress`/`done`/`cancelled`. |

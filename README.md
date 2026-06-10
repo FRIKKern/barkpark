@@ -11,8 +11,8 @@ Task management is the headline use case. Tasks are plain documents with a lifec
 
 ```bash
 bp task ready                                     # what's unblocked, priority-ordered
-bp task claim t1 --set worker_id=agent-1          # atomic, fenced claim
-bp task close t1 --set worker_id=agent-1 --set observed_epoch=1
+bp task claim t1 agent-1                          # atomic, fenced claim
+bp task close t1 agent-1 1                        # CAS on the claim epoch
 bp task ls --limit 20                             # everything, goals included
 ```
 

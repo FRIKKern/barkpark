@@ -448,6 +448,12 @@
           "required": true,
           "summary": "Task document id to claim.",
           "type": "string"
+        },
+        {
+          "name": "worker_id",
+          "required": true,
+          "summary": "Worker identity claiming the task.",
+          "type": "string"
         }
       ],
       "auth_tier": "read",
@@ -473,6 +479,24 @@
           "name": "doc_id",
           "required": true,
           "summary": "Task document id to close.",
+          "type": "string"
+        },
+        {
+          "name": "worker_id",
+          "required": true,
+          "summary": "Worker identity that holds the claim.",
+          "type": "string"
+        },
+        {
+          "name": "observed_epoch",
+          "required": true,
+          "summary": "Claim epoch returned at claim time (optimistic concurrency guard).",
+          "type": "int"
+        },
+        {
+          "name": "lifecycle_status",
+          "required": false,
+          "summary": "done | cancelled | blocked (defaults to done when omitted).",
           "type": "string"
         }
       ],

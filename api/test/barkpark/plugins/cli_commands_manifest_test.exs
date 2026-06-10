@@ -101,6 +101,28 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert claim.writes
       assert close.writes
       assert claim.default_output == "minimal"
+
+      # task.claim declares required worker_id body arg (server requires it).
+      claim_arg_names = Enum.map(claim.args, & &1.name)
+      assert "doc_id" in claim_arg_names
+      assert "worker_id" in claim_arg_names
+      worker_id_arg = Enum.find(claim.args, &(&1.name == "worker_id"))
+      assert worker_id_arg.required
+
+      # task.close declares worker_id + observed_epoch (required) and
+      # lifecycle_status (optional) as body args.
+      close_arg_names = Enum.map(close.args, & &1.name)
+      assert "doc_id" in close_arg_names
+      assert "worker_id" in close_arg_names
+      assert "observed_epoch" in close_arg_names
+      assert "lifecycle_status" in close_arg_names
+
+      close_worker = Enum.find(close.args, &(&1.name == "worker_id"))
+      close_epoch = Enum.find(close.args, &(&1.name == "observed_epoch"))
+      close_status = Enum.find(close.args, &(&1.name == "lifecycle_status"))
+      assert close_worker.required
+      assert close_epoch.required
+      refute close_status.required
     end
 
     test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do

@@ -240,7 +240,8 @@ defmodule Barkpark.Plugins.Tasks do
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/claim"},
         auth_tier: "read",
         args: [
-          %{name: "doc_id", required: true, type: "string", summary: "Task document id to claim."}
+          %{name: "doc_id", required: true, type: "string", summary: "Task document id to claim."},
+          %{name: "worker_id", required: true, type: "string", summary: "Worker identity claiming the task."}
         ],
         flags: [],
         writes: true,
@@ -258,7 +259,10 @@ defmodule Barkpark.Plugins.Tasks do
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
-          %{name: "doc_id", required: true, type: "string", summary: "Task document id to close."}
+          %{name: "doc_id", required: true, type: "string", summary: "Task document id to close."},
+          %{name: "worker_id", required: true, type: "string", summary: "Worker identity that holds the claim."},
+          %{name: "observed_epoch", required: true, type: "int", summary: "Claim epoch returned at claim time (optimistic concurrency guard)."},
+          %{name: "lifecycle_status", required: false, type: "string", summary: "done | cancelled | blocked (defaults to done when omitted)."}
         ],
         flags: [],
         writes: true,
