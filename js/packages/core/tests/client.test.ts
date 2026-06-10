@@ -37,6 +37,25 @@ describe('createClient', () => {
     )
   })
 
+  it("warns on perspective 'drafts'/'raw' without a token (server pins anon reads to published)", () => {
+    const calls: unknown[][] = []
+    const orig = console.warn
+    console.warn = (...args: unknown[]) => {
+      calls.push(args)
+    }
+    try {
+      createClient({ ...validConfig, perspective: 'drafts' })
+      expect(calls.length).toBe(1)
+      expect(String(calls[0][0])).toContain('pins anonymous reads to published')
+
+      // With a token: no warning.
+      createClient({ ...validConfig, perspective: 'drafts', token: 't' })
+      expect(calls.length).toBe(1)
+    } finally {
+      console.warn = orig
+    }
+  })
+
   it('withConfig returns a new client with merged config', () => {
     const c1 = createClient(validConfig)
     const c2 = c1.withConfig({ perspective: 'drafts' })

@@ -115,6 +115,20 @@ function validateConfig(config: BarkparkClientConfig): void {
       { field: 'useCdn' },
     )
   }
+
+  // Not a throw — withConfig({perspective:'drafts'}) before setting a token is
+  // a legitimate construction order — but it must be LOUD: the server pins
+  // anonymous reads to the published perspective, so a drafts/raw client
+  // without a token doesn't error, it silently reads published documents.
+  if (
+    (config.perspective === 'drafts' || config.perspective === 'raw') &&
+    config.token === undefined
+  ) {
+    console.warn(
+      `[barkpark] perspective '${config.perspective}' without a token: ` +
+        'the server pins anonymous reads to published — set `token` to read drafts',
+    )
+  }
 }
 
 // Convert the structured QueryOptions filter array into the flat Record<string,unknown>

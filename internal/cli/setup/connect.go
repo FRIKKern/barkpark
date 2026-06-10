@@ -69,6 +69,17 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		}
 		return fmt.Errorf("connect to %s failed: %w\n  hint: check the URL is reachable and the token (if any) is valid", server, err)
 	}
+	// /v1/capabilities is a public endpoint: an INVALID token never 401s, it
+	// just resolves to the anonymous tier. When the user explicitly supplied a
+	// token, connecting "as none" is a failure — saving that token would make
+	// every later write 401 — so refuse with the same hint the 401 path gives.
+	// A tokenless connect resolving to the anonymous tier stays legitimate
+	// (public read-only server).
+	if plan.Token != "" && (tier == "none" || tier == "anonymous") {
+		return fmt.Errorf(
+			"connect to %s failed: the server is reachable but the token resolved to tier %q\n  hint: check the token — it was not accepted (tier must be at least read)",
+			server, tier)
+	}
 	meta := probeMeta(server, plan.Token) // best-effort; summary still renders without it
 
 	if opts.Store == nil {

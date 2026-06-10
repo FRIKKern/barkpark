@@ -96,3 +96,41 @@ func TestExecuteConnectClosedPortHintMentionsReachability(t *testing.T) {
 		t.Fatalf("closed-port error must NOT mention token rejection, got: %s", msg)
 	}
 }
+
+// TestExecuteConnectTierNoneWithTokenFails: /v1/capabilities is public, so an
+// invalid token never 401s — it resolves to the anonymous tier. When the user
+// EXPLICITLY supplied a token, "connected as none" is a failure (every later
+// write would 401), and connect must refuse with the token hint. A tokenless
+// connect to the same server stays a legitimate anonymous connect.
+func TestExecuteConnectTierNoneWithTokenFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth_tier":"none","manifest_version":"1","server":{"name":"barkpark","version":"0.1.0"},"commands":[]}`))
+	}))
+	defer srv.Close()
+
+	err := executeConnect(SetupPlan{Server: srv.URL, Token: "stale-token"}, Options{})
+	if err == nil {
+		t.Fatal("expected error when a supplied token resolves to tier none, got nil")
+	}
+	if !strings.Contains(err.Error(), "was not accepted") {
+		t.Fatalf("error must say the token was not accepted, got: %s", err.Error())
+	}
+
+	// Tokenless: anonymous connect to the same server stays legitimate.
+	store := &memConfigStore{}
+	if err := executeConnect(SetupPlan{Server: srv.URL}, Options{Store: store}); err != nil {
+		t.Fatalf("tokenless anonymous connect must succeed, got: %v", err)
+	}
+	if store.saved == nil || store.saved.Tier != "none" {
+		t.Fatalf("anonymous connect must save with the resolved tier, got %+v", store.saved)
+	}
+}
+
+// memConfigStore is the minimal in-memory ConfigStore for connect tests.
+type memConfigStore struct{ saved *SavedConfig }
+
+func (m *memConfigStore) Save(c SavedConfig) error {
+	m.saved = &c
+	return nil
+}
