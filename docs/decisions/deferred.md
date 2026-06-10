@@ -12,6 +12,7 @@
 | search Phase 9 (scale) | not started | events > 5M/scope OR prune > 30s OR suggest p95 > 50ms at 100k events |
 | search Phase 10 (retriever) | spike doc only; intelligence stays Postgres | >500k media assets OR fuzzy p95 > 100ms |
 | `/v1/paperflow/*` alias | back-compat alias of `/v1/plugins/bulldocs/*`; `PAPERFLOW_INGEST_TOKEN` unchanged | drop only after paperflow `event-on-save.sh` repoints |
+| TUI media browse + sharing UI | parity sprint closed gaps 1–7 (publish/create/delete/task c·x/ref picker//search/y dup, cli-v1.4.0); media + share management stay Studio/`bp` | demand — terminal-niche |
 
 ## Code anchors
 

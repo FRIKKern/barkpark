@@ -1702,7 +1702,13 @@ func (m model) renderHelpBar() string {
 	} else if m.focus.Target == FocusEditor && m.isCurrentPaper() {
 		help = " j/k scroll  ctrl+d/u half-page  g/G top/bottom  read-only  esc back"
 	} else if m.focus.Target == FocusEditor {
-		help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  y dup  s scope  esc back"
+		if m.editorSchema != nil && m.editorSchema.Name == "task" {
+			// Editor holding a task: the c/x quick actions work here too (see
+			// taskTarget) — advertise them where they apply, like the task list does.
+			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  esc back"
+		} else {
+			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  y dup  s scope  esc back"
+		}
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
 		if node := m.panes[m.focus.PaneIndex].Node; node != nil && node.TypeName == "task" {
