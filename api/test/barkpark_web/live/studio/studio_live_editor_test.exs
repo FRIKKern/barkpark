@@ -58,6 +58,16 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
             },
             %{"name" => "cover", "title" => "Cover", "type" => "image"},
             %{"name" => "publishedAt", "title" => "Published at", "type" => "datetime"}
+          ],
+          # Explicit Expectation layout — the gate for create_document's
+          # portable-doc scaffold path (scaffold_or_initial_values requires a
+          # STORED non-empty layout). Declared here so the test is hermetic:
+          # it used to lean on a committed demo-seed `post` row whose layout
+          # survived the in-sandbox upsert (changeset keeps an uncast column).
+          "layout" => [
+            %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => true},
+            %{"kind" => "field", "name" => "slug", "max" => 1, "enforce" => true},
+            %{"kind" => "region", "name" => "body"}
           ]
         },
         @dataset
@@ -160,11 +170,12 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       assert html =~
                ~r{<textarea[^>]*name="doc\[body\]"[^>]*class="form-input"[^>]*rows="3"[^>]*phx-debounce="500"}
 
-      # The `post` schema carries a richText field, so the document is stored
-      # via the portable-doc path: the plain `body` string is normalized into
-      # a block with an `html` render (`<span>…</span>`), and the text-fallback
-      # textarea shows that HTML escaped. (The text-only `page` schema below
-      # keeps the bare string — see "page editor mounts".)
+      # The `post` schema carries an explicit Expectation layout, so the
+      # document is stored via the portable-doc path: the plain `body` string
+      # lands in the body REGION as a free block with an `html` render
+      # (`<span>…</span>`), and the text-fallback textarea shows that HTML
+      # escaped. (The layout-less `page` schema below keeps the bare string —
+      # see "page editor mounts".)
       assert html =~ ">&lt;span&gt;the quick brown fox&lt;/span&gt;</textarea>"
 
       # ── richText clause: bp-rich-text-editor Web Component bridged via
