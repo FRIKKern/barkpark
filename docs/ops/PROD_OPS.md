@@ -11,7 +11,7 @@
 | Proxy | Caddy on :80 → `localhost:4000` (`/etc/caddy/Caddyfile`) |
 | Erlang/Elixir | via ASDF (Erlang Solutions has no ARM packages) |
 | Go | `/usr/local/go/bin/go` (official ARM64 binary) |
-| Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`) |
+| Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`, `BARKPARK_EXTRA_ORIGINS` ws origins) |
 | Logs | `journalctl -u barkpark -f` |
 
 Deploy: `ssh root@89.167.28.206`, `cd /opt/barkpark`, `git pull` (post-merge hook auto-rebuilds + restarts) or `make deploy`. Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.

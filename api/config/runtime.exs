@@ -282,12 +282,22 @@ if config_env() == :prod do
   # whitelists only "#{scheme}://#{host}", which silently blocks the Vercel
   # apex demo and preview URLs (LiveView /live/websocket → 403).
   # cross-link: docs/ops/studio-nav-bug-2026-04-19.md (these origins are load-bearing for Vercel apex)
-  check_origin = [
-    "#{scheme}://#{host}",
-    "https://barkpark.cloud",
-    "https://www.barkpark.cloud",
-    "https://*.vercel.app"
-  ]
+  # BARKPARK_EXTRA_ORIGINS: CSV of additional allowed origins, per-box. The
+  # demo server sets http://<ip> here — operators reach Studio by IP out of
+  # habit and a silent websocket 403 click-kills the panes (the journal shows
+  # the rejects). Explicit env beats silently widening the default list.
+  extra_origins =
+    (System.get_env("BARKPARK_EXTRA_ORIGINS") || "")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+
+  check_origin =
+    [
+      "#{scheme}://#{host}",
+      "https://barkpark.cloud",
+      "https://www.barkpark.cloud",
+      "https://*.vercel.app"
+    ] ++ extra_origins
 
   config :barkpark, BarkparkWeb.Endpoint,
     url: [host: host, port: String.to_integer(System.get_env("PORT", "4000")), scheme: scheme],
