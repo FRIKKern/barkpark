@@ -61,3 +61,11 @@ Thumbs.db
 *.db
 .beads-credential-key
 .paperflow/
+
+# Working artifacts — never commit (swept in accidentally by docs-refactor merge, removed 2026-06-10)
+.artifacts/
+api/.artifacts/
+.fidelity-captures/
+.visual-runtime/
+.claude/scheduled_tasks.lock
+.beads/FROZEN
