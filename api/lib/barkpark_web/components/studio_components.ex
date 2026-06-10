@@ -1377,6 +1377,51 @@ defmodule BarkparkWeb.StudioComponents do
   end
 
   @doc """
+  Confirmation modal for "Discard draft". Shown only when the editor is on
+  a draft that has a published twin. Two-step: user clicks the overflow-menu
+  action → this modal appears; clicking Discard fires `confirm-discard`.
+
+  Guard semantics: the button that opens this modal is already gated on
+  `has_published_twin` in `default_doc_actions/2`, so the modal itself is
+  always reached with a valid published twin in scope. The handler adds a
+  second server-side guard via `editor_has_published`.
+
+  Events bubble to StudioLive: close-discard, confirm-discard.
+  """
+  attr :show_discard, :boolean, default: false
+  attr :editor_doc, :map, default: nil
+
+  def discard_modal(assigns) do
+    ~H"""
+    <%= if @show_discard do %>
+      <div class="image-picker-overlay" phx-click="close-discard"></div>
+      <div class="delete-modal" data-test-id="discard-draft-modal">
+        <div class="delete-modal-header">
+          <span style="font-weight: 600; font-size: 16px;">Discard draft</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-discard">x</button>
+        </div>
+        <div class="delete-modal-body">
+          <p class="text-sm">
+            Discard all unsaved changes to <strong><%= @editor_doc && @editor_doc.title %></strong>?
+            The published version will remain untouched.
+          </p>
+          <div class="delete-modal-actions">
+            <button class="btn btn-sm" phx-click="close-discard">Cancel</button>
+            <button
+              class="btn btn-destructive btn-sm"
+              phx-click="confirm-discard"
+              data-test-id="confirm-discard"
+            >
+              Discard draft
+            </button>
+          </div>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
   Profile-edit modal extracted from `studio_live.ex:986-1025`. Shown
   when `show_profile` is true. Form `phx-change="preview-profile"` lets
   StudioLive preview the new color/name before commit; `phx-submit="save-profile"`
@@ -1463,6 +1508,7 @@ defmodule BarkparkWeb.StudioComponents do
   attr :show_delete, :boolean, default: false
   attr :delete_refs, :list, default: []
   attr :editor_doc, :map, default: nil
+  attr :show_discard, :boolean, default: false
 
   def studio_modals(assigns) do
     ~H"""
@@ -1487,6 +1533,7 @@ defmodule BarkparkWeb.StudioComponents do
       delete_refs={@delete_refs}
       editor_doc={@editor_doc}
     />
+    <.discard_modal show_discard={@show_discard} editor_doc={@editor_doc} />
     """
   end
 

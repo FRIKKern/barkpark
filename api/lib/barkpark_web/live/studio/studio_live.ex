@@ -26,7 +26,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   (`array_op`) · Image field (`*-image-picker`, `select-media`,
   `upload-image`) · Reference field (`*-ref-picker`, `ref-search`,
   `select-ref`, `clear-ref`) · History (`show-history`, `restore-revision`) ·
-  Delete with reference check (`delete-doc`, `confirm-delete`) · Profile
+  Delete with reference check (`delete-doc`, `confirm-delete`) ·
+  Discard draft (`discard-draft`, `close-discard`, `confirm-discard`) · Profile
   edit · Network shares panel (`shares-*`) · Item share popover
   (`item-share-*`, `jump-to-user`) · E1 Duplicate (`duplicate-doc`) ·
   E2 secondary pane (`*-secondary*`) · E3 Bulk publish (`bulk-*`,
@@ -95,6 +96,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
        revisions: [],
        show_delete: false,
        delete_refs: [],
+       show_discard: false,
        user_id: user_id,
        user_name: user_name,
        user_color: user_color,
@@ -1095,6 +1097,61 @@ defmodule BarkparkWeb.Studio.StudioLive do
       end
     else
       {:noreply, socket}
+    end
+  end
+
+  # ── Discard draft ────────────────────────────────────────────────────────────
+  # Visible ONLY when the editor is on a draft that has a published twin.
+  # `discard-draft`  → opens the confirmation modal.
+  # `close-discard`  → cancels without change.
+  # `confirm-discard` → calls Content.discard_draft/3, then navigates to the
+  #                    published doc so the editor stays open and useful.
+
+  def handle_event("discard-draft", _, socket) do
+    doc = socket.assigns[:editor_doc]
+    is_draft = socket.assigns[:editor_is_draft] == true
+    has_published = socket.assigns[:editor_has_published] == true
+
+    if doc && is_draft && has_published do
+      {:noreply, assign(socket, show_discard: true)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close-discard", _, socket) do
+    {:noreply, assign(socket, show_discard: false)}
+  end
+
+  def handle_event("confirm-discard", _, socket) do
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
+    is_draft = socket.assigns[:editor_is_draft] == true
+    has_published = socket.assigns[:editor_has_published] == true
+
+    if doc && type && is_draft && has_published do
+      pub_id = Content.published_id(doc.doc_id)
+
+      case Content.discard_draft(pub_id, type, socket.assigns.dataset, hook_opts(socket)) do
+        {:ok, _} ->
+          # Navigate to the published twin so the editor stays open.
+          base = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+          new_path = base ++ [pub_id]
+
+          {:noreply,
+           socket
+           |> assign(show_discard: false)
+           |> put_flash(:info, "Draft discarded")
+           |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+
+        {:error, _} ->
+          {:noreply,
+           socket
+           |> assign(show_discard: false)
+           |> put_flash(:error, "Failed to discard draft")}
+      end
+    else
+      {:noreply, assign(socket, show_discard: false)}
     end
   end
 
@@ -2942,6 +2999,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
           }
         }
       end,
+      if has_published_twin do
+        %{
+          "name" => "discard-draft",
+          "label" => "Discard draft",
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "discard-draft",
+            "class" => "btn btn-ghost btn-sm",
+            "style" => "color: var(--destructive);",
+            "data_test_id" => "discard-draft",
+            "icon" => "rotate-ccw"
+          }
+        }
+      end,
       if editor_doc do
         %{
           "name" => "duplicate-doc",
@@ -4785,7 +4857,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         />
       <% end %>
 
-      <!-- Profile + 4 content modals; all gated by their show/picker assigns -->
+      <!-- Profile + content modals; all gated by their show/picker assigns -->
       <.studio_modals
         show_profile={@show_profile}
         user_name={@user_name}
@@ -4801,6 +4873,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         show_delete={@show_delete}
         delete_refs={@delete_refs}
         editor_doc={@editor_doc}
+        show_discard={@show_discard}
       />
 
       <.shares_modal
