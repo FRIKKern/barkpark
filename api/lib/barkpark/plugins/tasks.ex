@@ -37,9 +37,10 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
-    * `cli_commands/0` — the five `task.*` CLI verbs (`ls`, `ready`, `get`,
-      `claim`, `close`) the `/v1/capabilities` manifest exposes, moved verbatim
-      from `Barkpark.Plugins.Capabilities`'s core verb registry. `task` is no
+    * `cli_commands/0` — the six `task.*` CLI verbs (`ls`, `ready`, `get`,
+      `claim`, `close`, `next`) the `/v1/capabilities` manifest exposes. Five
+      moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry;
+      `next` (the queue-based atomic claim) was added later. `task` is no
       longer a core noun: the capabilities controller now derives
       `source: "plugin:tasks"` provenance for these commands.
 
@@ -165,7 +166,7 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Five verbs over five routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Six verbs over six routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
   not document mutations):
 
@@ -174,6 +175,10 @@ defmodule Barkpark.Plugins.Tasks do
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
+    * `next` — `POST /v1/tasks/claim` (queue-based: atomically hand me the next
+      ready task in priority order). WRITES, minimal receipt. Returns
+      `{"ok":false,"reason":"no_ready"}` with HTTP 200 when the queue is empty —
+      a valid outcome, not an error.
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -263,6 +268,25 @@ defmodule Barkpark.Plugins.Tasks do
           %{name: "worker_id", required: true, type: "string", summary: "Worker identity that holds the claim."},
           %{name: "observed_epoch", required: true, type: "int", summary: "Claim epoch returned at claim time (optimistic concurrency guard)."},
           %{name: "lifecycle_status", required: false, type: "string", summary: "done | cancelled | blocked (defaults to done when omitted)."}
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.next",
+        noun: "task",
+        verb: "next",
+        summary: "Atomically claim the next ready task (priority order).",
+        http: %{method: "POST", path_template: "/v1/tasks/claim"},
+        auth_tier: "read",
+        args: [
+          %{name: "worker_id", required: true, type: "string", summary: "Worker identity claiming the task."},
+          %{name: "phase_id", required: false, type: "string", summary: "Restrict the claim to tasks under this phase id."}
         ],
         flags: [],
         writes: true,

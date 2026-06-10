@@ -8,6 +8,7 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 | `bp task ls` | `GET /v1/tasks` | list; filters `kind/lifecycle_status/phase_id/parent/label/limit` · `parent=` = child rail, oldest first |
 | `bp task ready` | `GET /v1/tasks/ready` | unblocked queue, priority ASC then oldest · `bp task ready --limit 5` |
 | `bp task get <id>` | `GET /v1/tasks/:id` | doc + one level of `children` inline |
+| `bp task next <worker>` | `POST /v1/tasks/claim` | queue claim · no_ready if empty |
 | `bp task claim <id> <worker>` | `POST /v1/tasks/:id/claim` | targeted claim · `bp task claim t1 agent-1` |
 | `bp task close <id> <worker> <epoch> [status]` | `POST /v1/tasks/:id/close` | close · `bp task close t1 agent-1 1 done` |
 | — | `POST /v1/tasks/claim` | queue claim: `{"worker_id":"agent-1"}` → next ready doc, or `{"ok":false,"reason":"no_ready"}` |

@@ -33,6 +33,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   @tasks_paths MapSet.new([
                  "/v1/tasks",
                  "/v1/tasks/ready",
+                 "/v1/tasks/claim",
                  "/v1/tasks/:doc_id",
                  "/v1/tasks/:doc_id/claim",
                  "/v1/tasks/:doc_id/close"
@@ -75,7 +76,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the five task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the six task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -84,7 +85,8 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.get" in ids
       assert "task.claim" in ids
       assert "task.close" in ids
-      assert length(cmds) == 5
+      assert "task.next" in ids
+      assert length(cmds) == 6
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
@@ -123,6 +125,20 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert close_worker.required
       assert close_epoch.required
       refute close_status.required
+
+      # task.next is the queue-based atomic claim (POST /v1/tasks/claim):
+      # worker_id required, phase_id optional — both body args (no path
+      # placeholder on the route).
+      next = Enum.find(cmds, &(&1.id == "task.next"))
+      assert next.writes
+      assert next.default_output == "minimal"
+      assert next.http.path_template == "/v1/tasks/claim"
+
+      next_worker = Enum.find(next.args, &(&1.name == "worker_id"))
+      next_phase = Enum.find(next.args, &(&1.name == "phase_id"))
+      assert next_worker.required
+      refute next_phase.required
+      refute Enum.any?(next.args, &(&1.name == "doc_id"))
     end
 
     test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do

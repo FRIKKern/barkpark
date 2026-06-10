@@ -631,6 +631,149 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	}
 }
 
+// TestBuildBodyTaskNext asserts that task.next (the queue-based atomic claim,
+// POST /v1/tasks/claim — no path placeholders) puts worker_id in the body, has
+// no doc_id at all, and includes the optional phase_id only when supplied. It
+// also pins the URL: /v1/tasks/claim verbatim, nothing interpolated.
+func TestBuildBodyTaskNext(t *testing.T) {
+	m, tree := loadTreeFrom(t, fullManifest)
+
+	next, ok := tree.Lookup("task", "next")
+	if !ok {
+		t.Fatal("task next missing from full-manifest fixture")
+	}
+	if next.HTTP.Method != "POST" || next.HTTP.PathTemplate != "/v1/tasks/claim" {
+		t.Fatalf("task next http = %s %s, want POST /v1/tasks/claim", next.HTTP.Method, next.HTTP.PathTemplate)
+	}
+
+	// bp task next w1 → body {"worker_id":"w1"}.
+	args, err := bindArgs(*next, []string{"w1"})
+	if err != nil {
+		t.Fatalf("bindArgs task next: %v", err)
+	}
+	body, ct, err := buildBody(*next, map[string][]string{}, args)
+	if err != nil {
+		t.Fatalf("buildBody task next: %v", err)
+	}
+	if ct != "application/json" {
+		t.Errorf("next content-type = %q, want application/json", ct)
+	}
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		t.Fatalf("next body not valid JSON: %s", body)
+	}
+	if obj["worker_id"] != "w1" {
+		t.Errorf("next body worker_id = %v, want w1; body = %s", obj["worker_id"], body)
+	}
+	if _, present := obj["doc_id"]; present {
+		t.Errorf("task next must not carry doc_id: %s", body)
+	}
+	if _, present := obj["phase_id"]; present {
+		t.Errorf("omitted phase_id must not appear in body: %s", body)
+	}
+
+	// Missing required worker_id is a bind error, not a silent empty body.
+	if _, err := bindArgs(*next, []string{}); err == nil {
+		t.Error("bindArgs accepted missing required worker_id; want error")
+	}
+
+	// bp task next w1 ph-1 → phase_id included.
+	args2, err := bindArgs(*next, []string{"w1", "ph-1"})
+	if err != nil {
+		t.Fatalf("bindArgs task next with phase: %v", err)
+	}
+	body2, _, _ := buildBody(*next, map[string][]string{}, args2)
+	var obj2 map[string]any
+	_ = json.Unmarshal(body2, &obj2)
+	if obj2["phase_id"] != "ph-1" {
+		t.Errorf("next body phase_id = %v, want ph-1; body = %s", obj2["phase_id"], body2)
+	}
+
+	// The URL is the verbatim flat route — no placeholders to fill.
+	ctx := manifest.Context{Server: "http://localhost:4000"}
+	url, err := m.BuildURL(*next, ctx, args)
+	if err != nil {
+		t.Fatalf("BuildURL task next: %v", err)
+	}
+	if want := "http://localhost:4000/v1/tasks/claim"; url != want {
+		t.Errorf("task next url = %q, want %q", url, want)
+	}
+}
+
+// TestRenderMinimalOkFalse pins the empty-queue receipt: the tasks queue-claim
+// returns {"ok":false,"reason":"no_ready"} with HTTP 200, which rides the 2xx
+// success path. Minimal output must surface the reason token — NOT the bare
+// "ok" receipt, which would be indistinguishable from a successful claim.
+func TestRenderMinimalOkFalse(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "minimal"
+
+	renderMinimal(w, []byte(`{"ok":false,"reason":"no_ready"}`))
+	if got := strings.TrimSpace(stdout.String()); got != "no_ready" {
+		t.Errorf("minimal ok:false output = %q, want no_ready", got)
+	}
+
+	// ok:false with no reason still must not print "ok".
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":false}`))
+	if got := strings.TrimSpace(stdout.String()); got != "not ok" {
+		t.Errorf("minimal ok:false (no reason) output = %q, want \"not ok\"", got)
+	}
+
+	// ok:true WITHOUT a doc keeps today's bare-ok receipt path untouched.
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true}`))
+	if got := strings.TrimSpace(stdout.String()); got != "ok" {
+		t.Errorf("minimal ok:true (no doc) output = %q, want ok", got)
+	}
+}
+
+// TestRenderMinimalDocReceipt pins the claim-shaped success receipt: a 2xx
+// {"ok":true,"doc":{…}} body prints the doc's identifying line instead of a
+// bare "ok" — the caller needs the doc_id (and the fencing epoch, when the doc
+// carries a claim) to act on what it just claimed. Shape-keyed: no task
+// special-casing anywhere in the renderer.
+func TestRenderMinimalDocReceipt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "minimal"
+
+	// Claim-shaped doc (task next / task claim success): doc_id + epoch.
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-992199","rev":7,"claim":{"worker":"agent-1","ts_iso":"2026-06-10T08:00:00Z","epoch":2}}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-992199 epoch=2" {
+		t.Errorf("claim receipt = %q, want \"drafts.task-992199 epoch=2\"", got)
+	}
+
+	// Doc without a claim: just the id line.
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-1","title":"x"}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-1" {
+		t.Errorf("no-claim receipt = %q, want \"drafts.task-1\"", got)
+	}
+
+	// Doc with a claim that lacks an epoch: id only, no dangling "epoch=".
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-2","claim":{"worker":"a1"}}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-2" {
+		t.Errorf("claim-without-epoch receipt = %q, want \"drafts.task-2\"", got)
+	}
+
+	// Doc with no recognisable id falls through to the generic receipt ("ok").
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"title":"anonymous"}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "ok" {
+		t.Errorf("id-less doc receipt = %q, want fall-through ok", got)
+	}
+
+	// A doc whose only id key is "id" (no doc_id) still receipts.
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"id":"3f1c0d4e"}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "3f1c0d4e" {
+		t.Errorf("id-fallback receipt = %q, want \"3f1c0d4e\"", got)
+	}
+}
+
 // TestBuildBodyMediaMultipart asserts media.upload serialises the file as
 // multipart/form-data with a "file" form field, not a JSON body.
 func TestBuildBodyMediaMultipart(t *testing.T) {

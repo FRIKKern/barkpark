@@ -515,6 +515,37 @@ func renderMinimal(out *writer, payload []byte) {
 		out.outf("%s", strings.TrimSpace(string(payload)))
 		return
 	}
+	// Shape-keyed receipts for {"ok":…} envelopes (e.g. the tasks endpoints) —
+	// keyed off the response shape, never off a verb:
+	//
+	//   * {"ok":false,"reason":…} on a 2xx (the tasks queue-claim returns
+	//     {"ok":false,"reason":"no_ready"} with HTTP 200 on an empty queue — a
+	//     valid outcome, not an error; exit stays 0 and non-2xx ok:false shapes
+	//     still route through classifyError) prints the reason token. A bare
+	//     "ok" there would be actively misleading.
+	//   * {"ok":true,"doc":{…}} (a claim-style write returning the affected
+	//     doc) prints the doc's identifying line — doc_id plus the fencing
+	//     epoch when the doc carries a claim — because the caller needs both
+	//     to act on what it just claimed. Falls through to the generic
+	//     rev/ids/ok receipt when the doc has no recognisable id.
+	if m, isMap := v.(map[string]any); isMap {
+		if okv, present := m["ok"].(bool); present {
+			if !okv {
+				if reason, _ := m["reason"].(string); reason != "" {
+					out.outf("%s", reason)
+				} else {
+					out.outf("not ok")
+				}
+				return
+			}
+			if doc, isDoc := m["doc"].(map[string]any); isDoc {
+				if line := docReceiptLine(doc); line != "" {
+					out.outf("%s", line)
+					return
+				}
+			}
+		}
+	}
 	ids := collectIDs(v)
 	rev := findRev(v)
 	if rev != "" {
@@ -526,6 +557,31 @@ func renderMinimal(out *writer, payload []byte) {
 	if rev == "" && len(ids) == 0 {
 		out.outf("ok")
 	}
+}
+
+// docReceiptLine renders the one-line minimal receipt for a single returned
+// doc object: its doc_id (falling back to _id / id), plus the fencing epoch
+// when the doc carries a claim — "<doc_id> epoch=<n>". Returns "" when no id
+// is found, so the caller falls through to the generic rev/ids receipt.
+func docReceiptLine(doc map[string]any) string {
+	id := ""
+	for _, k := range []string{"doc_id", "_id", "id"} {
+		if s, ok := doc[k].(string); ok && s != "" {
+			id = s
+			break
+		}
+	}
+	if id == "" {
+		return ""
+	}
+	if claim, ok := doc["claim"].(map[string]any); ok {
+		// JSON numbers decode to float64; the epoch is an integer by contract
+		// (content.claim.epoch, bumped on every claim).
+		if e, ok := claim["epoch"].(float64); ok {
+			return fmt.Sprintf("%s epoch=%d", id, int64(e))
+		}
+	}
+	return id
 }
 
 func findRev(v any) string {

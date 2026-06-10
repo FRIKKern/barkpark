@@ -60,6 +60,7 @@ curl -X POST $API/v1/data/mutate/production \
 
 ```bash
 # Queue claim: atomically take the NEXT ready task (priority ASC, then oldest)
+bp task next agent-1                # prints the claimed doc_id + epoch; no_ready on empty queue
 curl -X POST $API/v1/tasks/claim \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"worker_id":"agent-1"}'

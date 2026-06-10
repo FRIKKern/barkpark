@@ -518,6 +518,38 @@
       "writes": true
     },
     {
+      "args": [
+        {
+          "name": "worker_id",
+          "required": true,
+          "summary": "Worker identity claiming the task.",
+          "type": "string"
+        },
+        {
+          "name": "phase_id",
+          "required": false,
+          "summary": "Restrict the claim to tasks under this phase id.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/claim"
+      },
+      "id": "task.next",
+      "noun": "task",
+      "paginated": false,
+      "source": "plugin:tasks",
+      "summary": "Atomically claim the next ready task (priority order).",
+      "verb": "next",
+      "writes": true
+    },
+    {
       "args": [],
       "auth_tier": "admin",
       "batch": false,

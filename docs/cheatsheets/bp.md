@@ -7,7 +7,7 @@ bp [globals] <noun> <verb> [args] [flags]
 
 | Command | Effect | Example |
 |---|---|---|
-| `bp setup` | wizard (TTY) / scripted via `--target` | `bp setup --target connect --server URL --token $TOKEN` |
+| `bp setup` | wizard (TTY) / scripted | `bp setup --target connect --server URL --token $TOKEN` |
 | `bp servers` / `bp use <name>` | list / switch saved servers | `bp use prod` |
 | `bp whoami` | active server + auth tier | `bp whoami` |
 | `bp capabilities` | the whole API surface, one call | `bp capabilities -o json` |
@@ -17,13 +17,14 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp doc mutate` | atomic batch (create/patch/publish/…) | `bp doc mutate --file muts.json` |
 | `bp schema get/apply` | read / upsert a schema | `bp schema apply --file post.json` |
 | `bp media ls/upload` | assets | `bp media upload photo.jpg` |
-| `bp workspace create/ls` | sandbox workspace, ready to use | `bp workspace create Spike` |
+| `bp workspace create/ls` | sandbox workspace | `bp workspace create Spike` |
 | `bp search query <q>` | full-text search | `bp search query norway --engine indx` |
-| `bp paper view <slug>` | render a paper in the terminal | `bp paper view welcome --theme dark` |
-| `bp task ls` / `ready` | all tasks / unblocked queue | `bp task ready --limit 5` |
+| `bp paper view <slug>` | render a paper in terminal | `bp paper view welcome` |
+| `bp task ls` / `ready` | all / unblocked tasks | `bp task ready --limit 5` |
+| `bp task next <worker>` | claim the NEXT ready task | `bp task next agent-1` |
 | `bp task get <id>` | one task + child rail | `bp task get t1` |
 | `bp task claim <id> <worker>` | atomic fenced claim | `bp task claim t1 a1` |
-| `bp task close <id> <worker> <epoch> [status]` | close, CAS on claim epoch | `bp task close t1 a1 1` |
+| `bp task close <id> <worker> <epoch>` | close, CAS on epoch | `bp task close t1 a1 1` |
 | `bp migrate <from> <to>` | copy docs between saved servers | `bp migrate prod local --type post --yes` |
 | `bp upgrade` | self-update from `cli-v*` releases | `bp upgrade --check` (exit 1 when behind) |
 | `bp uninstall` | remove config; `--local` adds dev stack | `bp uninstall --local --dry-run` |

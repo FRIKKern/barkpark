@@ -102,7 +102,8 @@ The clean profile ships the Tasks plugin enabled — your AI gets a claimable, d
 
 ```bash
 bp task ready                                    # unblocked queue, priority-ordered
-bp task claim t1 agent-1                         # atomic, fenced claim
+bp task next agent-1                             # atomically claim the next ready task
+bp task claim t1 agent-1                         # …or claim a specific one
 bp task close t1 agent-1 1                       # <id> <worker> <observed_epoch>
 ```
 

@@ -64,11 +64,13 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp plugin ls/settings` | read / admin |
 | `bp bulldogs publish/patch/intents` | ingest |
 | `bp onixedit export` | admin |
-| `bp task ls/ready/get/claim/close` | read (plugin:tasks) |
+| `bp task ls/ready/get/claim/close/next` | read (plugin:tasks) |
 
 ## Output
 
 `-o table|json|yaml|minimal` (or `--json`, `-q`). Default: `table` on TTY, `json` piped. The CLI **unwraps** `{"result":…}` envelopes.
+
+Minimal receipts (writes, shape-keyed — never per-verb): `rev:`/`id:` lines when the body carries them; an `{"ok":true,"doc":{…}}` body prints the doc's identity line — `<doc_id>` plus `epoch=<n>` when the doc carries a claim (e.g. `drafts.task-992199 epoch=2`); a 2xx `{"ok":false,"reason":…}` prints the reason token (e.g. `no_ready`, exit 0); otherwise a bare `ok`.
 
 ## `--dry-run` (client-side only in v1)
 

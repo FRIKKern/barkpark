@@ -10,10 +10,10 @@
 Task management is the headline use case. Tasks are plain documents with a lifecycle (`open → in_progress → done`, plus `blocked`/`cancelled`), a dependency graph, priorities, labels, and an atomic claim/close contract built for concurrent workers (fencing epochs, 300s lease sweeps):
 
 ```bash
-bp task ready                                     # what's unblocked, priority-ordered
-bp task claim t1 agent-1                          # atomic, fenced claim
-bp task close t1 agent-1 1                        # CAS on the claim epoch
-bp task ls --limit 20                             # everything, goals included
+bp task ready                # what's unblocked, priority-ordered
+bp task next agent-1         # atomically claim the next ready task
+bp task close t1 agent-1 1   # CAS on the claim epoch
+bp task ls --limit 20        # everything, goals included
 ```
 
 Open `/studio` and the same queue is the **Tasks ✅** pane: you flip lifecycle states and set priority/assignee while the agent claims and closes over HTTP (claims and dependencies render read-only — the API owns them). A root task is a goal; subtasks nest under it via `parent_id`. Guide: [`docs/setup/TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) · cheatsheet: [`docs/cheatsheets/tasks.md`](docs/cheatsheets/tasks.md).
