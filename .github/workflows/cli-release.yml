@@ -1,0 +1,58 @@
+name: cli-release
+
+# Cuts a `bp` CLI release from a cli-v<semver> tag (e.g. cli-v1.0.1,
+# prerelease cli-v1.2.0-rc.1 → --prerelease, which `releases/latest` skips).
+#
+# Tag namespace is cli-v* ON PURPOSE — v1.* is reserved by release.yml
+# (Changesets/npm). The npm pipeline creates no GitHub Releases, so CLI
+# releases own `releases/latest`, which scripts/install-cli.sh and
+# `bp upgrade` resolve against.
+#
+# workflow_dispatch with a tag input covers "re-cut a botched release"
+# without re-tagging.
+
+on:
+  push:
+    tags: ["cli-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing cli-v* tag to (re)build and release"
+        required: true
+        type: string
+
+permissions:
+  contents: write # gh release create
+
+concurrency:
+  group: cli-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod # honors the pinned go 1.24.2 (chroma)
+      - run: go test ./...
+      - name: Derive version from tag
+        run: echo "VERSION=${TAG#cli-v}" >> "$GITHUB_ENV"
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+      - run: make cli-release VERSION="$VERSION"
+      - run: make cli-checksums
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease";; esac
+          gh release create "cli-v$VERSION" $prerelease --generate-notes \
+            --title "bp $VERSION" \
+            dist/bp-darwin-arm64 dist/bp-darwin-amd64 \
+            dist/bp-linux-arm64 dist/bp-linux-amd64 \
+            dist/checksums.txt
