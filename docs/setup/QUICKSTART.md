@@ -95,6 +95,18 @@ bp setup --target local --profile demo --yes    # via bp
 BARKPARK_SEED_PROFILE=demo mix ecto.reset       # raw mix, in api/
 ```
 
+## Use it as a task system
+
+The clean profile ships the Tasks plugin enabled — your AI gets a claimable, dependency-aware work queue out of the box:
+
+```bash
+bp task ready                                    # unblocked queue, priority-ordered
+bp task claim t1 --set worker_id=agent-1         # atomic, fenced claim
+bp task close t1 --set worker_id=agent-1 --set observed_epoch=1
+```
+
+Full guide — agent loop, Studio collaboration, goals/phases, troubleshooting: [TASK-SYSTEM.md](TASK-SYSTEM.md).
+
 ## Golden path
 
 - `--dry-run` before `--yes`, always.
