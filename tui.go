@@ -36,6 +36,12 @@ type PaneItem struct {
 	IsDivider  bool
 	SourceNode *StructureNode
 	Doc        *Doc
+	// Badge / Meta are the schema's list_preview values for this document
+	// (Studio parity: badge right-aligned on the title row, meta dimmed on the
+	// subtitle row). Empty ("" — no declaration or no value) renders the row
+	// byte-identically to the pre-list_preview TUI.
+	Badge string
+	Meta  string
 }
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -61,6 +67,10 @@ type focusState struct {
 const (
 	// borderCost is the number of terminal columns added by paneBorder's right border.
 	borderCost = 1
+	// minTitleWithBadge is the minimum column budget a doc-list row's TITLE must
+	// keep for the right-aligned list_preview badge to render at all — below it
+	// the badge is dropped first (the toolbar's tiered-degradation convention).
+	minTitleWithBadge = 10
 	// minEditorWidth is the PREFERRED minimum interior content width for the editor
 	// column in the multi-pane (Miller-columns) layout. When the budget can host at
 	// least one list column plus an editor this wide, we stay multi-pane.
@@ -368,6 +378,7 @@ func (m *model) buildListPane(node *StructureNode) Pane {
 
 func (m *model) buildDocListPane(node *StructureNode) Pane {
 	docs := m.ds.Query(node.TypeName, node.Filter)
+	preview := schemaListPreview(node.TypeName)
 	var items []PaneItem
 	for i := range docs {
 		items = append(items, PaneItem{
@@ -377,6 +388,8 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 			Status:   docs[i].Status,
 			Subtitle: timeAgo(docs[i].UpdatedAt),
 			Doc:      &docs[i],
+			Badge:    previewValue(docs[i], preview.Badge),
+			Meta:     previewValue(docs[i], preview.Meta),
 		})
 	}
 	return Pane{Node: node, Items: items, IsDocList: true}
@@ -1523,16 +1536,56 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 	}
 
 	if isDocList {
+		// list_preview extras (schema-declared; Studio parity). The meta value
+		// joins the subtitle row (dim, " · "-separated); the badge right-aligns
+		// on the title row, bracketed dim like the editor header's "[status]"
+		// badge. Degradation order mirrors the toolbar tiers: the badge is the
+		// FIRST thing dropped when the pane narrows — the title keeps at least
+		// minTitleWithBadge columns or the badge goes. With no declaration
+		// (item.Badge == "" and item.Meta == "") every string below is
+		// byte-identical to the pre-list_preview rendering.
+		sub := item.Subtitle
+		if item.Meta != "" {
+			if sub == "" {
+				sub = item.Meta
+			} else {
+				sub += " · " + item.Meta
+			}
+		}
+		titleMax := width - 6
+		badge := ""
+		if item.Badge != "" {
+			b := "[" + item.Badge + "]"
+			if titleMax-(lipgloss.Width(b)+1) >= minTitleWithBadge {
+				badge = b
+				titleMax -= lipgloss.Width(b) + 1
+			}
+		}
+
 		dot := statusStyle(item.Status).Render(item.Icon)
-		title := truncate(item.Title, width-6)
+		title := truncate(item.Title, titleMax)
+		pad := ""
+		if badge != "" {
+			// Right-align the badge: leading " %s %s" is 2 cols + icon + title.
+			gap := width - 2 - lipgloss.Width(item.Icon) - lipgloss.Width(title) -
+				lipgloss.Width(badge) - 1
+			if gap < 1 {
+				gap = 1
+			}
+			pad = strings.Repeat(" ", gap)
+		}
+
 		line1 := fmt.Sprintf(" %s %s", dot, style.Render(title))
-		line2 := fmt.Sprintf("     %s", dimStyle.Render(item.Subtitle))
+		if badge != "" {
+			line1 += pad + dimStyle.Render(badge)
+		}
+		line2 := fmt.Sprintf("     %s", dimStyle.Render(sub))
 		if selected {
-			line1 = selectedItemStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
-			line2 = selectedItemStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
+			line1 = selectedItemStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title) + pad + badge)
+			line2 = selectedItemStyle.Width(width).Render(fmt.Sprintf("     %s", sub))
 		} else if isCursor {
-			line1 = inactiveCursorStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title))
-			line2 = inactiveCursorStyle.Width(width).Render(fmt.Sprintf("     %s", item.Subtitle))
+			line1 = inactiveCursorStyle.Width(width).Render(fmt.Sprintf(" %s %s", dot, title) + pad + badge)
+			line2 = inactiveCursorStyle.Width(width).Render(fmt.Sprintf("     %s", sub))
 		}
 		return []string{line1, line2}
 	}

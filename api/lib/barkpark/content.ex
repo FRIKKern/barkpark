@@ -1999,7 +1999,10 @@ defmodule Barkpark.Content do
       actions: schema.actions || [],
       groups: schema.groups || [],
       deskGroups: schema.desk_groups || [],
-      crossValidations: schema.cross_validations || []
+      crossValidations: schema.cross_validations || [],
+      # Generic list-row preview declaration (badge + meta content fields);
+      # empty map == no declaration, SDK/TUI rows render unchanged.
+      listPreview: schema.list_preview || %{}
     }
   end
 

@@ -114,6 +114,35 @@ defmodule BarkparkWeb.Contract.SchemaEnvelopeTest do
     assert author["to"] == [%{"type" => "person"}]
   end
 
+  test "schema list_preview surfaces as listPreview in the SDK envelope", %{conn: conn} do
+    Content.upsert_schema(
+      %{
+        "name" => "task",
+        "title" => "Task",
+        "visibility" => "public",
+        "list_preview" => %{
+          "badge" => "lifecycle_status",
+          "meta" => %{"field" => "priority", "prefix" => "P"}
+        },
+        "fields" => [%{"name" => "title", "type" => "string"}]
+      },
+      "test"
+    )
+
+    body = get_json(conn, "/v1/schemas/test")
+    task = Enum.find(body["schemas"], &(&1["name"] == "task"))
+
+    assert task
+    assert task["listPreview"] == %{
+             "badge" => "lifecycle_status",
+             "meta" => %{"field" => "priority", "prefix" => "P"}
+           }
+
+    # No declaration → empty map (SDK/TUI treat {} as "render unchanged").
+    post = Enum.find(body["schemas"], &(&1["name"] == "post"))
+    assert post["listPreview"] == %{}
+  end
+
   test "legacy /api/schemas retains the original bare-array shape", %{conn: conn} do
     body =
       conn

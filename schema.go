@@ -39,3 +39,29 @@ func findSchema(name string) *Schema {
 	}
 	return nil
 }
+
+// schemaListPreview returns the named schema's list_preview declaration, or
+// the zero ListPreview (no badge, no meta) when the schema is unknown or
+// declares none — doc-list rows then render exactly as before.
+func schemaListPreview(typeName string) apiclient.ListPreview {
+	if s := findSchema(typeName); s != nil {
+		return s.ListPreview
+	}
+	return apiclient.ListPreview{}
+}
+
+// previewValue resolves one list_preview spec against a document: the named
+// content field's scalar value with the spec's prefix, or "" when the spec is
+// absent or the value is missing/non-scalar. Mirrors the Studio PaneBuilder's
+// format_preview degradation — a misdeclared field means "no badge", never an
+// error row.
+func previewValue(doc Doc, spec *apiclient.PreviewSpec) string {
+	if spec == nil || spec.Field == "" {
+		return ""
+	}
+	v := doc.ContentString(spec.Field)
+	if v == "" {
+		return ""
+	}
+	return spec.Prefix + v
+}
