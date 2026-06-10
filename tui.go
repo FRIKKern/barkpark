@@ -880,6 +880,17 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	// ── Duplicate (`y` — yank a copy): clones the highlighted doc-list row or
+	//    the open editor doc into a fresh draft titled "<title> (copy)",
+	//    matching Studio's Duplicate header action, then drills into the new
+	//    draft. Same target resolution as delete; inert on other surfaces.
+	//    The paper viewer never reaches here (its branch above owns its keys),
+	//    and Duplicate refuses papers anyway. ──
+	case "y":
+		if doc, typeName := m.deleteTarget(); doc != nil {
+			return m.performDuplicate(doc, typeName)
+		}
+
 	// ── Task quick actions (task doc-lists + an editor holding a task only;
 	//    inert on every other surface) ──
 	case "c":
@@ -1152,30 +1163,57 @@ func (m model) commitCreateDoc() (tea.Model, tea.Cmd) {
 	// Optimistic refresh: re-query the panes NOW (the SSE refresh will also
 	// fire) so the new doc appears in its list, then select + drill in.
 	m.rebuildPanes()
-	if doc := m.findDocInPanes(id, m.creatingType); doc != nil {
-		// Park the doc-list cursor on the new doc so esc-back lands on it.
-		for pi := range m.panes {
-			pane := &m.panes[pi]
-			if !pane.IsDocList {
-				continue
-			}
-			for ii := range pane.Items {
-				if pane.Items[ii].Doc != nil && pane.Items[ii].Doc.ID == id {
-					pane.Cursor = ii
-					m.focus = focusState{Target: FocusPane, PaneIndex: pi}
-					m.syncPaneScroll(pane)
-				}
+	m.selectAndOpenDoc(id, m.creatingType)
+	m.setStatus("created "+title, false)
+	return m, nil
+}
+
+// selectAndOpenDoc parks the doc-list cursor on the (just re-queried) doc and
+// drills into its editor — the shared landing for create and duplicate. A doc
+// not found in any pane (e.g. filtered out) is a no-op; the status line still
+// reports the outcome.
+func (m *model) selectAndOpenDoc(id, typeName string) {
+	doc := m.findDocInPanes(id, typeName)
+	if doc == nil {
+		return
+	}
+	// Park the doc-list cursor on the new doc so esc-back lands on it.
+	for pi := range m.panes {
+		pane := &m.panes[pi]
+		if !pane.IsDocList {
+			continue
+		}
+		for ii := range pane.Items {
+			if pane.Items[ii].Doc != nil && pane.Items[ii].Doc.ID == id {
+				pane.Cursor = ii
+				m.focus = focusState{Target: FocusPane, PaneIndex: pi}
+				m.syncPaneScroll(pane)
 			}
 		}
-		m.selectedDoc = doc
-		m.editorSchema = findSchema(m.creatingType)
-		m.showEditor = true
-		m.focus.Target = FocusEditor
-		m.fieldCursor = 0
-		m.syncSelectedPaper()
-		m.resetViewport()
 	}
-	m.setStatus("created "+title, false)
+	m.selectedDoc = doc
+	m.editorSchema = findSchema(typeName)
+	m.showEditor = true
+	m.focus.Target = FocusEditor
+	m.fieldCursor = 0
+	m.syncSelectedPaper()
+	m.resetViewport()
+}
+
+// performDuplicate clones the doc via Client.Duplicate — the same shape
+// Studio's duplicate-doc lands server-side (fresh draft, " (copy)" title,
+// content copied verbatim) — then re-queries and drills into the new draft,
+// mirroring Studio's push_patch onto the duplicate. Papers refuse inside
+// Duplicate with a pointer to Studio.
+func (m model) performDuplicate(src *Doc, typeName string) (tea.Model, tea.Cmd) {
+	id, err := m.ds.Duplicate(typeName, src.ID)
+	if err != nil {
+		m.setStatus(fmt.Sprintf("duplicate failed: %v", err), true)
+		return m, nil
+	}
+	m.rebuildPanes()
+	m.selectAndOpenDoc(id, typeName)
+	m.setStatus("duplicated as "+id, false)
 	return m, nil
 }
 
@@ -1664,15 +1702,15 @@ func (m model) renderHelpBar() string {
 	} else if m.focus.Target == FocusEditor && m.isCurrentPaper() {
 		help = " j/k scroll  ctrl+d/u half-page  g/G top/bottom  read-only  esc back"
 	} else if m.focus.Target == FocusEditor {
-		help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  s scope  esc back"
+		help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  y dup  s scope  esc back"
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
 		if node := m.panes[m.focus.PaneIndex].Node; node != nil && node.TypeName == "task" {
 			// Task list: the quick-action verbs lead — claim/close at terminal speed.
-			help = " j/k navigate  c claim  x close  D delete  n new  / search  enter select  esc back"
+			help = " j/k navigate  c claim  x close  y dup  D delete  n new  / search  enter select  esc back"
 		} else {
 			// Doc-list pane: surface the n-new / D-delete affordances, subtle, in hint order.
-			help = " j/k navigate  n new  D delete  / search  h/l switch pane  enter select  s scope  esc back  q quit"
+			help = " j/k navigate  n new  y dup  D delete  / search  h/l switch pane  enter select  s scope  esc back  q quit"
 		}
 	} else {
 		help = " j/k navigate  / search  h/l switch pane  enter select  s scope  esc back  q quit"

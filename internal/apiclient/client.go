@@ -544,6 +544,58 @@ func (c *Client) Create(typeName, title string) (string, error) {
 	return results[0].ID, nil
 }
 
+// duplicateSkipKeys are the legacy-envelope top-level keys that are document
+// METADATA, not content — they must not be copied into a duplicate's create
+// payload. ("status" is server-assigned: a create is always a fresh draft,
+// exactly like Studio's clone_document forcing status "draft".)
+var duplicateSkipKeys = map[string]bool{
+	"id": true, "status": true, "updatedAt": true, "createdAt": true, "values": true,
+}
+
+// Duplicate clones a document into a fresh draft with a server-assigned id,
+// matching Studio's duplicate-doc action (Content.clone_document): the title
+// gets a " (copy)" suffix and every content field is copied VERBATIM as raw
+// JSON — not the editor's scalar projection — so nested objects and arrays
+// survive the round-trip. The create mutation carries no _id, so the server
+// generates "<type>-<n>" and the assigned "drafts.<id>" comes back like
+// Create's. Papers are refused up front: a block tree cannot ride the generic
+// mutate path (the paper schema has no blocks field — paper writes go through
+// the paper-ingest API), and cloning one without its blocks would be silent
+// data loss.
+func (c *Client) Duplicate(typeName, id string) (string, error) {
+	doc, ok := c.Get(typeName, id)
+	if !ok {
+		return "", fmt.Errorf("duplicate: source document %s not found", id)
+	}
+	if blocks := bytes.TrimSpace(doc.Blocks); len(blocks) > 0 && string(blocks) != "null" {
+		return "", fmt.Errorf("papers cannot be duplicated here — use Studio")
+	}
+
+	title := doc.Title
+	if title == "" {
+		title = "Untitled"
+	}
+	create := map[string]interface{}{
+		"_type": typeName,
+		"title": title + " (copy)",
+	}
+	for k, raw := range doc.Extra {
+		if envelopeMetaKeys[k] || duplicateSkipKeys[k] {
+			continue
+		}
+		create[k] = raw
+	}
+
+	results, err := c.MutateResults([]map[string]interface{}{{"create": create}})
+	if err != nil {
+		return "", err
+	}
+	if len(results) == 0 || results[0].ID == "" {
+		return "", fmt.Errorf("duplicate: server returned no document id")
+	}
+	return results[0].ID, nil
+}
+
 // Query fetches documents from the API by type, with optional filter.
 //
 // When Client.Perspective is non-empty it is appended as ?perspective=<p>,
@@ -635,6 +687,14 @@ func (c *Client) Search(query string, limit int) ([]Doc, error) {
 }
 
 // Get fetches a single document by type and ID.
+//
+// The doc-show endpoint wraps the document in the v1 response envelope —
+// {"result":{…doc…},"schemaHash":…,"etag":…} (QueryController.show via
+// respond_json; verified live) — so the doc must be decoded from "result".
+// Decoding the WHOLE body as a Doc silently produced an empty document
+// (Title "", Extra = the envelope's own keys) because the response is valid
+// JSON either way: 200-with-wrong-data, no error anywhere. A body with no
+// "result" object (legacy/flat shape) still decodes directly.
 func (c *Client) Get(typeName, id string) (Doc, bool) {
 	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + typeName + "/" + id)
 
@@ -648,8 +708,21 @@ func (c *Client) Get(typeName, id string) (Doc, bool) {
 		return Doc{}, false
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Doc{}, false
+	}
+
+	var wrapped struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if json.Unmarshal(body, &wrapped) == nil && len(bytes.TrimSpace(wrapped.Result)) > 0 &&
+		bytes.HasPrefix(bytes.TrimSpace(wrapped.Result), []byte("{")) {
+		body = wrapped.Result
+	}
+
 	var doc Doc
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+	if err := json.Unmarshal(body, &doc); err != nil {
 		return Doc{}, false
 	}
 	return doc, true
