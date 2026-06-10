@@ -4597,6 +4597,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
                     doc_id={item.id}
                     status={item.status || ""}
                     is_draft={item.is_draft}
+                    badge={item[:badge]}
+                    meta={item[:meta]}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}

@@ -15,6 +15,14 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :actions, {:array, :map}, default: []
     field :groups, {:array, :map}, default: []
     field :desk_groups, {:array, :map}, default: []
+
+    # Generic list-row preview (additive, SOFT — pure render metadata).
+    # Names 1–2 content fields the Studio list panes show per row:
+    #   %{"badge" => <field-or-spec>, "meta" => <field-or-spec>}
+    # where a spec is a field-name string or %{"field" => f, "prefix" => p}.
+    # Consumed generically by `BarkparkWeb.Studio.PaneBuilder` for every
+    # doc type; empty map (default) → rows render unchanged.
+    field :list_preview, :map, default: %{}
     field :initial_values, :map, default: %{}
     field :cross_validations, {:array, :map}, default: []
 
@@ -53,6 +61,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :actions,
       :groups,
       :desk_groups,
+      :list_preview,
       :initial_values,
       :cross_validations,
       :layout,

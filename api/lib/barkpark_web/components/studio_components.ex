@@ -521,6 +521,14 @@ defmodule BarkparkWeb.StudioComponents do
                           "draft" regardless of status
     * `:selected`       — optional boolean, adds `.selected` modifier
     * `:id`             — optional HTML id
+    * `:badge`          — optional string; renders right-aligned as a
+                          `.pane-doc-badge` pill (with a generic
+                          value-derived modifier class). nil → no markup.
+                          Fed by the schema's `list_preview` declaration
+                          via PaneBuilder — generic for every doc type.
+    * `:meta`           — optional string; renders as a dimmed
+                          `.pane-doc-meta` suffix right after the title.
+                          nil → no markup.
 
   ## Slots
 
@@ -536,6 +544,8 @@ defmodule BarkparkWeb.StudioComponents do
   attr :status, :string, required: true
   attr :is_draft, :boolean, default: false
   attr :selected, :boolean, default: false
+  attr :badge, :string, default: nil
+  attr :meta, :string, default: nil
 
   # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────
   # When `selectable` is true, the row renders a left-anchored checkbox
@@ -580,14 +590,31 @@ defmodule BarkparkWeb.StudioComponents do
         <div class="pane-doc-title">
           <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
           <%= @title %>
+          <%= if @meta do %>
+            <span class="pane-doc-meta"><%= @meta %></span>
+          <% end %>
           <%= if @trailing != [] do %>
             <%= render_slot(@trailing) %>
+          <% end %>
+          <%= if @badge do %>
+            <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge)}"}><%= @badge %></span>
           <% end %>
         </div>
         <div class="pane-doc-id"><%= @doc_id %></div>
       </div>
     </div>
     """
+  end
+
+  # Generic CSS-modifier slug for a badge value: downcase, any run of
+  # non-alphanumerics → "-" (e.g. "in_progress" → "in-progress"). Lets a
+  # stylesheet color badge values without the component ever branching
+  # on a specific document type's vocabulary.
+  defp badge_slug(value) do
+    value
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
   end
 
   # ── Chrome components (Task #11 WI2) ────────────────────────────────

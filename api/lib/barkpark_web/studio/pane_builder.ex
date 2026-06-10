@@ -111,18 +111,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           type_name: type_name,
           desk_groups: [],
           active_desk: nil,
-          items:
-            Enum.map(docs, fn doc ->
-              pub_id = Content.published_id(doc.doc_id)
-
-              %{
-                type: :doc,
-                id: pub_id,
-                title: doc.title || "Untitled",
-                is_draft: Content.draft?(doc.doc_id),
-                status: doc.status
-              }
-            end),
+          items: doc_items(docs, schema),
           selected: Enum.at(rest, 0)
         }
 
@@ -202,18 +191,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           type_name: type_name,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
-          items:
-            Enum.map(docs, fn doc ->
-              pub_id = Content.published_id(doc.doc_id)
-
-              %{
-                type: :doc,
-                id: pub_id,
-                title: doc.title || "Untitled",
-                is_draft: Content.draft?(doc.doc_id),
-                status: doc.status
-              }
-            end),
+          items: doc_items(docs, schema),
           selected: Enum.at(rest, 0)
         }
 
@@ -320,6 +298,76 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> []
     end
   end
+
+  # ── doc-row items + list_preview ───────────────────────────────────────────
+  #
+  # Shared row builder for BOTH document-list branches
+  # (`:document_type_list` and `:plugin_document_list`). When the schema
+  # declares `list_preview` — `%{"badge" => <spec>, "meta" => <spec>}`,
+  # each spec a content-field name string or `%{"field" => f, "prefix"
+  # => p}` — the named content values ride along on each row map as
+  # `:badge` / `:meta` strings. No declaration → both keys are `nil` and
+  # the row renders exactly as before (post/page/paper back-compat lock).
+  # Generic by construction: any schema (host seed, plugin, ad-hoc) can
+  # declare it; PaneBuilder never branches on the document type.
+
+  defp doc_items(docs, schema) do
+    preview = schema_list_preview(schema)
+
+    Enum.map(docs, fn doc ->
+      pub_id = Content.published_id(doc.doc_id)
+
+      %{
+        type: :doc,
+        id: pub_id,
+        title: doc.title || "Untitled",
+        is_draft: Content.draft?(doc.doc_id),
+        status: doc.status,
+        badge: preview_value(doc, Map.get(preview, "badge")),
+        meta: preview_value(doc, Map.get(preview, "meta"))
+      }
+    end)
+  end
+
+  defp schema_list_preview(nil), do: %{}
+
+  defp schema_list_preview(schema) do
+    case Map.get(schema, :list_preview) || Map.get(schema, "list_preview") do
+      m when is_map(m) -> m
+      _ -> %{}
+    end
+  end
+
+  defp preview_value(_doc, nil), do: nil
+
+  defp preview_value(doc, field) when is_binary(field),
+    do: format_preview(content_value(doc, field), "")
+
+  defp preview_value(doc, %{} = spec) do
+    field = Map.get(spec, "field") || Map.get(spec, :field)
+    prefix = Map.get(spec, "prefix") || Map.get(spec, :prefix) || ""
+
+    if is_binary(field), do: format_preview(content_value(doc, field), prefix)
+  end
+
+  defp preview_value(_doc, _spec), do: nil
+
+  defp content_value(doc, field) do
+    case Map.get(doc, :content) do
+      %{} = content -> Map.get(content, field)
+      _ -> nil
+    end
+  end
+
+  # Only scalar values render; nil / "" / structured values are skipped
+  # so a misdeclared field degrades to "no badge", never a crash.
+  defp format_preview(nil, _prefix), do: nil
+  defp format_preview("", _prefix), do: nil
+
+  defp format_preview(value, prefix) when is_binary(value) or is_number(value),
+    do: prefix <> to_string(value)
+
+  defp format_preview(_value, _prefix), do: nil
 
   # ── desk_groups helpers ────────────────────────────────────────────────────
   #

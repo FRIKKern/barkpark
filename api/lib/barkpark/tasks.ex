@@ -124,6 +124,15 @@ defmodule Barkpark.Tasks do
       icon: "✅",
       visibility: "public",
       dataset: dataset,
+      # Generic list-row preview (host affordance, plugin-declared data):
+      # Studio list panes render `content.lifecycle_status` as a
+      # right-aligned badge and `content.priority` as a dimmed "P<n>"
+      # suffix on every task row. Types without a `list_preview`
+      # declaration render exactly as before.
+      list_preview: %{
+        "badge" => "lifecycle_status",
+        "meta" => %{"field" => "priority", "prefix" => "P"}
+      },
       fields: [
         %{"name" => "title", "title" => "Title", "type" => "string"},
         %{"name" => "kind", "title" => "Kind", "type" => "string"},

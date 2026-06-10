@@ -586,6 +586,18 @@
     .pane-doc-dot.completed { background: var(--success); }
     .pane-doc-dot.planning { background: var(--fg-dim); }
     .pane-doc-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); margin-top: 2px; margin-left: 15px; }
+    /* Generic list_preview row extras (schema-declared, host-rendered):
+       right-aligned value badge + dimmed inline suffix. The
+       .pane-doc-badge--<slug> modifier is emitted per value for optional
+       theming; the host defines only the neutral base. */
+    .pane-doc-badge {
+      margin-left: auto; flex-shrink: 0;
+      padding: 1px 7px; border-radius: 999px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+      background: var(--bg-muted); color: var(--fg-dim);
+      border: 1px solid var(--border-muted);
+    }
+    .pane-doc-meta { font-size: 11px; color: var(--fg-dim); flex-shrink: 0; }
 
     /* Collapsed pane: narrow strip shown when the user has drilled past
        this pane and needs the viewport for the rightmost focus pane.

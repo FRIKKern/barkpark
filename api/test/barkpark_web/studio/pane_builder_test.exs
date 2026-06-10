@@ -130,6 +130,82 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
     end
   end
 
+  describe "list_preview row badge + meta" do
+    # Insert the REAL plugin-declared task schema (incl. its
+    # `list_preview` declaration) so this pins the shipped shape, the
+    # same way structure_tasks_desk_test derives from task_schema/1.
+    defp insert_task_schema!(dataset) do
+      schema = Barkpark.Tasks.task_schema(dataset)
+
+      insert_schema!(%{
+        name: schema.name,
+        title: schema.title,
+        icon: schema.icon,
+        visibility: schema.visibility,
+        dataset: schema.dataset,
+        fields: schema.fields,
+        list_preview: schema.list_preview
+      })
+    end
+
+    defp create_task!(dataset, doc_id, content) do
+      {:ok, doc} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+          dataset
+        )
+
+      doc
+    end
+
+    test "task rows carry the lifecycle badge and P-prefixed priority meta" do
+      dataset = "pb_preview_task"
+      insert_task_schema!(dataset)
+
+      create_task!(dataset, "t1", %{
+        "kind" => "task",
+        "lifecycle_status" => "in_progress",
+        "priority" => 1
+      })
+
+      create_task!(dataset, "t2", %{"kind" => "task", "lifecycle_status" => "open"})
+
+      # The Tasks plugin contributes the list via the desk-item highway —
+      # nav by type_name resolves the :plugin_document_list node.
+      {panes, _editor} = PaneBuilder.build(dataset, ["task"])
+
+      task_pane = List.last(panes)
+      assert task_pane.type_name == "task"
+
+      t1 = Enum.find(task_pane.items, &(&1.id == "t1"))
+      assert t1.badge == "in_progress"
+      assert t1.meta == "P1"
+
+      # Declared meta field absent on the doc → nil, never a crash.
+      t2 = Enum.find(task_pane.items, &(&1.id == "t2"))
+      assert t2.badge == "open"
+      assert t2.meta == nil
+    end
+
+    test "a schema without list_preview renders rows unchanged (regression pin)" do
+      seed_basic("pb_preview_none")
+      {panes, _editor} = PaneBuilder.build("pb_preview_none", ["post"])
+
+      [_, post_pane] = panes
+      assert post_pane.items != []
+
+      for item <- post_pane.items do
+        assert item.badge == nil
+        assert item.meta == nil
+        # Pre-existing row keys are intact.
+        assert Map.has_key?(item, :title)
+        assert Map.has_key?(item, :status)
+        assert Map.has_key?(item, :is_draft)
+      end
+    end
+  end
+
   describe "mediaAsset explorer view" do
     test "browsing mediaAsset list without a doc opens the media explorer editor" do
       dataset = "pb_media_explorer"
