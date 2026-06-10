@@ -450,7 +450,10 @@ AUTOMATION / AI
   bp setup --target provision --provider hetzner --region nbg1 --server-type cax11 --dry-run -o json
 
   # Without --target on a non-interactive stdin/stdout, setup errors (exit 2)
-  # instead of prompting — pass --target so an agent is never blocked.`
+  # instead of prompting — pass --target so an agent is never blocked.
+
+SEE ALSO
+  bp uninstall    remove bp's local state (config; --local also the dev stack)`
 	out.outf("%s", help)
 }
 
