@@ -37,6 +37,16 @@ var codeExit = map[string]int{
 	"rev_mismatch":        exitConflict,
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
+	// Task claim/close contention — all 409 shapes from /v1/tasks/*. Absent
+	// from this table they fell to the unknown-reason usage bucket (exit 2),
+	// so `bp task close` with a stale epoch exited as if the COMMAND LINE were
+	// wrong. The cheatsheet's contract is 6 = conflict.
+	"fenced_off":                  exitConflict,
+	"stale_claim":                 exitConflict,
+	"not_ready":                   exitConflict,
+	"blocked_by_unsatisfied_deps": exitConflict,
+	"already_claimed":             exitConflict,
+	"resource_conflict":           exitConflict,
 	"rate_limited":        exitRateLimit,
 	"internal_error":      exitServer,
 }

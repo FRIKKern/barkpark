@@ -270,7 +270,14 @@ defmodule Barkpark.Plugins.Tasks do
           %{name: "doc_id", required: true, type: "string", summary: "Task document id to claim."},
           %{name: "worker_id", required: true, type: "string", summary: "Worker identity claiming the task."}
         ],
-        flags: [],
+        flags: [
+          %{
+            name: "resources",
+            type: "string",
+            summary:
+              "Comma-separated resource strings (e.g. file paths) to fence while this claim is live; 409 resource_conflict if another live claim holds any."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,

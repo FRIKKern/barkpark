@@ -6,15 +6,15 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 | bp | HTTP | Effect · example |
 |---|---|---|
 | `bp task ls` | `GET /v1/tasks` | list; filters `kind/lifecycle_status/phase_id/parent/label/limit` · `parent=` = child rail, oldest first |
-| `bp task ready` | `GET /v1/tasks/ready` | unblocked queue, priority ASC then oldest · `bp task ready --limit 5` |
-| `bp task prime` | `GET /v1/tasks/prime` | one-call rehydration: in-progress (`--worker W`), ready head, recent events, counts |
+| `bp task ready` | `GET /v1/tasks/ready` | unblocked queue, priority ASC then oldest |
+| `bp task prime` | `GET /v1/tasks/prime` | one-call rehydration: in-progress (`--worker W`) + ready head + events + counts |
 | `bp task get <id>` | `GET /v1/tasks/:id` | doc + one level of `children` inline |
 | `bp task next <worker>` | `POST /v1/tasks/claim` | queue claim · no_ready if none |
-| `bp task claim <id> <worker>` | `POST /v1/tasks/:id/claim` | targeted claim · ids via `bp task ready` |
+| `bp task claim <id> <worker>` | `POST /v1/tasks/:id/claim` | targeted · `--resources a.go,b.go` fences files: 409 `resource_conflict` names holders; freed on close/sweep |
 | `bp task close <id> <worker> <epoch> [status]` | `POST /v1/tasks/:id/close` | close, CAS on the claim epoch |
 | — | `POST /v1/tasks/claim` | queue claim body: `{"worker_id":"agent-1"}` |
 | — | `GET /v1/tasks/:id/edges` | dependencies + dependents (`?kind=all`) |
-| — | `POST /v1/tasks/edges` | `{"from_id":"t2","to_id":"t1"}` — t2 waits on t1 (kind default `blocks`) |
+| — | `POST /v1/tasks/edges` | `{"from_id":"t2","to_id":"t1"}` — t2 waits on t1 |
 | — | `POST /v1/tasks/:id/labels` | `{"add":["sprint-3"],"remove":[]}` |
 | — | `POST /v1/tasks/:id/papers` | link paper slugs: `{"add":["notes"]}` |
 

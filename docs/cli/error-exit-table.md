@@ -79,6 +79,7 @@ is the status the API actually returns for that code.
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
+| `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `already_claimed` · `resource_conflict` | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
 | `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone (not-found bucket). |
 | `rate_limited` | 429 | `7` | Throttled. | `rate limited; retry after <Retry-After>s`. |
 | `rate_limited` (+`details.retry_after`) | 429 | `7` | Throttled with explicit retry hint. | Same; use `details.retry_after` for the backoff. |

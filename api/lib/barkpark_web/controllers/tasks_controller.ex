@@ -386,7 +386,11 @@ defmodule BarkparkWeb.TasksController do
   def claim_by_id(conn, %{"doc_id" => doc_id} = params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        opts = Keyword.merge([], scope_opts(conn))
+        # `resources` rides as a JSON list (curl) or a comma-separated string
+        # (the bp `--set resources=a.go,b.go` path) — Tasks normalizes both.
+        opts =
+          [resources: params["resources"] || []]
+          |> Keyword.merge(scope_opts(conn))
 
         case Tasks.claim_by_id(doc_id, worker_id, opts) do
           {:ok, %Document{} = doc} ->
@@ -394,6 +398,14 @@ defmodule BarkparkWeb.TasksController do
 
           {:error, :not_found} ->
             not_found(conn, "task not found")
+
+          {:error, {:resource_conflict, conflicts}} ->
+            # 409 with the HOLDERS: each conflict names the in-progress task,
+            # its worker, and the overlapping resource strings — enough for
+            # the caller to wait, renegotiate, or pick other files.
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
 
           {:error, reason} ->
             conn

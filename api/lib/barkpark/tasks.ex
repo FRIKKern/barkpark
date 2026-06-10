@@ -1201,6 +1201,7 @@ defmodule Barkpark.Tasks do
       when is_binary(doc_id) and is_binary(worker_id) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    resources = opts |> Keyword.get(:resources, []) |> normalize_resources()
 
     result =
       Repo.transaction(fn ->
@@ -1208,12 +1209,20 @@ defmodule Barkpark.Tasks do
         #    claims for the same row. Matches the close-side lock key shape:
         #    `"task:" <> task_id`. We don't yet know the row's uuid so the
         #    key is keyed off doc_id, which is unique within tenancy.
+        #    Resource-carrying claims ALSO take a global resources lock so two
+        #    concurrent claims of different tasks cannot both pass the overlap
+        #    scan and land conflicting resource sets.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
+
+        if resources != [] do
+          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task-resources"])
+        end
 
         with {:ok, doc} <- fetch_task_by_doc_id(doc_id, workspace_id, project_id),
              :ok <- check_ready_for_targeted_claim(doc),
-             :ok <- check_deps_satisfied(doc) do
-          do_claim(doc, worker_id)
+             :ok <- check_deps_satisfied(doc),
+             :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
+          do_claim(doc, worker_id, resources)
         end
       end)
 
@@ -1298,17 +1307,91 @@ defmodule Barkpark.Tasks do
     if all_done?, do: :ok, else: {:error, :blocked_by_unsatisfied_deps}
   end
 
-  defp do_claim(%Document{} = doc, worker_id) do
+  # ─── Resource claims (the Beads file-claim successor, 2026-06-11) ─────────
+  #
+  # The single biggest label family in the frozen Beads corpus was
+  # `file-claim:<path>` (275 of 436 issues) — parallel writers fencing off
+  # files. The port rides the EXISTING claim object: a targeted claim may
+  # carry `resources: ["a.go", …]` (arbitrary opaque strings; exact-match
+  # semantics, no globbing in v1). The overlap scan refuses the claim with
+  # `resource_conflict` + the holders when any requested string is held by
+  # another LIVE (in_progress) claim in the same tenancy. Because resources
+  # live INSIDE content.claim, every existing release path frees them for
+  # free: close clears the claim, the 300s lease sweep clears the claim —
+  # no manual label cleanup, which was Beads' file-claim weak spot.
+
+  # Accepts a list, or a single comma-separated string — the latter is what
+  # `bp task claim <id> <w> --set resources=a.go,b.go` delivers today via the
+  # generic --set body mechanism (string-valued), so resource claims work
+  # from every shipped binary with no client change.
+  defp normalize_resources(resources) when is_binary(resources),
+    do: resources |> String.split(",") |> normalize_resources()
+
+  defp normalize_resources(resources) when is_list(resources) do
+    resources
+    |> Enum.filter(&is_binary/1)
+    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp normalize_resources(_), do: []
+
+  defp check_resources_free([], _doc_uuid, _workspace_id, _project_id), do: :ok
+
+  defp check_resources_free(resources, doc_uuid, workspace_id, project_id) do
+    holders =
+      from(d in Document,
+        where: d.type == "task" and d.id != ^doc_uuid,
+        where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
+        where: fragment("jsonb_exists_any(?->'claim'->'resources', ?)", d.content, ^resources),
+        select: %{doc_id: d.doc_id, content: d.content}
+      )
+      |> then(fn q ->
+        if is_nil(workspace_id), do: q, else: from(d in q, where: d.workspace_id == ^workspace_id)
+      end)
+      |> then(fn q ->
+        if is_nil(project_id), do: q, else: from(d in q, where: d.project_id == ^project_id)
+      end)
+      |> Repo.all()
+
+    case holders do
+      [] ->
+        :ok
+
+      holders ->
+        conflicts =
+          Enum.map(holders, fn %{doc_id: did, content: c} ->
+            claim = Map.get(c || %{}, "claim") || %{}
+            held = Map.get(claim, "resources") || []
+
+            %{
+              doc_id: did,
+              worker: Map.get(claim, "worker"),
+              resources: Enum.filter(resources, &(&1 in held))
+            }
+          end)
+
+        {:error, {:resource_conflict, conflicts}}
+    end
+  end
+
+  defp do_claim(%Document{} = doc, worker_id, resources \\ []) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     next_epoch = current_epoch(doc) + 1
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    new_claim = %{
-      "worker" => worker_id,
-      "ts_iso" => ts_iso,
-      "epoch" => next_epoch
-    }
+    new_claim =
+      %{
+        "worker" => worker_id,
+        "ts_iso" => ts_iso,
+        "epoch" => next_epoch
+      }
+      |> then(fn claim ->
+        if resources == [], do: claim, else: Map.put(claim, "resources", resources)
+      end)
 
     new_content =
       doc.content

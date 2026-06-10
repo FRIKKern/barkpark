@@ -856,6 +856,110 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  describe "POST /v1/tasks/:doc_id/claim — resource claims (file-claim successor)" do
+    test "overlapping resources refuse with resource_conflict + holders", %{
+      conn: conn,
+      scope: scope
+    } do
+      a = uniq("res-a")
+      b = uniq("res-b")
+      mk_task!(a, scope)
+      mk_task!(b, scope)
+
+      # Worker 1 claims task a holding two files.
+      resp1 =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{a}/claim",
+          Jason.encode!(%{worker_id: "w1", resources: ["lib/x.ex", "lib/y.ex"]})
+        )
+
+      payload1 = json_response(resp1, 200)
+      assert payload1["ok"] == true
+      assert payload1["doc"]["claim"]["resources"] == ["lib/x.ex", "lib/y.ex"]
+
+      # Worker 2 wants task b but overlaps on lib/y.ex → 409 naming the holder.
+      resp2 =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{b}/claim",
+          Jason.encode!(%{worker_id: "w2", resources: ["lib/y.ex", "lib/z.ex"]})
+        )
+
+      payload2 = json_response(resp2, 409)
+      assert payload2["ok"] == false
+      assert payload2["reason"] == "resource_conflict"
+      assert [conflict] = payload2["conflicts"]
+      assert String.contains?(conflict["doc_id"], a)
+      assert conflict["worker"] == "w1"
+      assert conflict["resources"] == ["lib/y.ex"]
+
+      # Disjoint resources on the same board claim fine.
+      resp3 =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{b}/claim",
+          Jason.encode!(%{worker_id: "w2", resources: ["lib/z.ex"]})
+        )
+
+      assert json_response(resp3, 200)["ok"] == true
+    end
+
+    test "closing the holder frees its resources (no manual cleanup)", %{
+      conn: conn,
+      scope: scope
+    } do
+      a = uniq("res-free-a")
+      b = uniq("res-free-b")
+      mk_task!(a, scope)
+      mk_task!(b, scope)
+
+      claim =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{a}/claim", Jason.encode!(%{worker_id: "w1", resources: ["f.go"]}))
+        |> json_response(200)
+
+      epoch = claim["doc"]["claim"]["epoch"]
+      claimed_id = claim["doc"]["doc_id"]
+
+      conn
+      |> authed()
+      |> post("/v1/tasks/#{claimed_id}/close", Jason.encode!(%{worker_id: "w1", observed_epoch: epoch}))
+      |> json_response(200)
+
+      # f.go is free again the moment the claim is gone.
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{b}/claim", Jason.encode!(%{worker_id: "w2", resources: ["f.go"]}))
+
+      assert json_response(resp, 200)["ok"] == true
+    end
+
+    test "comma-separated STRING resources normalize (the bp --set path)", %{
+      conn: conn,
+      scope: scope
+    } do
+      a = uniq("res-str")
+      mk_task!(a, scope)
+
+      payload =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{a}/claim",
+          Jason.encode!(%{worker_id: "w1", resources: " a.go, b.go ,,a.go "})
+        )
+        |> json_response(200)
+
+      assert payload["doc"]["claim"]["resources"] == ["a.go", "b.go"]
+    end
+  end
+
   describe "GET /v1/tasks/prime — one-call agent rehydration" do
     test "composes in_progress (worker-narrowed), ready head, events, counts", %{
       conn: conn,
