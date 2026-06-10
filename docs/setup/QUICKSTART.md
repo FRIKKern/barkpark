@@ -38,7 +38,7 @@ With no config and a real terminal, bare `bp` launches the wizard and falls thro
 bp setup --target local --yes
 ```
 
-**Destructive: runs `mix ecto.reset`.** Native `mix` by default; `--docker` uses compose. With no existing checkout in a parent directory, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
+**Destructive: runs `mix ecto.reset`.** A running dev server holds DB connections and blocks the reset (`object_in_use`) — stop it first, or use `--target connect`. Native `mix` by default; `--docker` uses compose. With no existing checkout in a parent directory, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
 
 | Need | Why |
 |---|---|

@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp            # no config + TTY → the setup wizard, then the TUI
 ```
 
-The wizard's **clean profile pre-checks the `bulldocs` and `tasks` plugins** (the server unions `media` in on its own). Accept, and the task schema, routes, and cron workers are live on first boot.
+The wizard's **clean profile pre-checks the `bulldocs` and `tasks` plugins** (the server unions `media` in on its own). Accept, and the task schema, routes, and cron workers are live on first boot. Already running a dev server on `:4000`? It blocks the local target's DB reset — stop it first, or pick **connect** instead.
 
 **Existing installs** — enable via env and restart:
 

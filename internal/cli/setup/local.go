@@ -1,10 +1,13 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +81,14 @@ func executeLocal(plan SetupPlan, opts Options) error {
 			c.missing, c.action+":", c.hint(), "then re-run:", dockerFlagSuffix(plan))
 	}
 
+	// Inverse preflight: a Barkpark server ALREADY answering on the local port
+	// holds database connections, so the destructive reset step would die with
+	// postgres ERROR 55006 (object_in_use). Fail early with the two ways out —
+	// bp NEVER auto-kills a running server.
+	if err := checkNoRunningServer(localServerURL, plan); err != nil {
+		return err
+	}
+
 	// Clean profile: mint the admin token NOW (execute time, never plan time)
 	// so the seed installs it and the chained connect persists it verified.
 	adminToken := ""
@@ -97,6 +108,15 @@ func executeLocal(plan SetupPlan, opts Options) error {
 			// closure is the real action (background start, health poll, …).
 			if err := s.WaitFor(ctx, w); err != nil {
 				return err
+			}
+			continue
+		}
+		if s.MapErr != nil {
+			// Tee the step's output so the mapper can pattern-match it (e.g. the
+			// reset step's object_in_use) while the user still sees it live.
+			var buf bytes.Buffer
+			if err := runStep(ctx, io.MultiWriter(w, &buf), s.step); err != nil {
+				return s.MapErr(err, buf.String())
 			}
 			continue
 		}
@@ -230,6 +250,11 @@ func planCommand(s step) string {
 type localStep struct {
 	step
 	WaitFor func(ctx context.Context, w writerLike) error
+
+	// MapErr, when set, post-processes a failed runStep with the step's captured
+	// output so a raw "exit status 1" can become an actionable error (e.g. the
+	// reset step mapping postgres object_in_use onto "stop the dev server").
+	MapErr func(err error, output string) error
 }
 
 // writerLike is the minimal writer the wait closures need (io.Writer).
@@ -412,6 +437,61 @@ func dockerDaemonUp() bool {
 	return err == nil
 }
 
+// checkNoRunningServer is the inverse server preflight: it FAILS when a
+// Barkpark server already answers at baseURL, because that server holds
+// database connections and the destructive reset step would die with postgres
+// ERROR 55006 (object_in_use). The error spells out the only two ways forward;
+// bp never kills the running server itself.
+func checkNoRunningServer(baseURL string, plan SetupPlan) error {
+	if !barkparkAnswering(baseURL) {
+		return nil
+	}
+	host := baseURL
+	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return fmt.Errorf("setup local: a Barkpark dev server is already running on %s and holds database connections — `%s` would fail (object_in_use)\n  %-13s stop it (Ctrl-C in its terminal), then re-run: bp setup --target local%s --yes\n  %-13s use the running server instead: bp setup --target connect --server %s",
+		host, destructiveStepName(plan), "option 1:", dockerFlagSuffix(plan), "option 2:", baseURL)
+}
+
+// barkparkAnswering reports whether something that LOOKS like Barkpark answers
+// at baseURL: a 2xx JSON body on /v1/capabilities (the same endpoint
+// waitServerUp gates on) or on /api/schemas. A connection refused, a non-2xx,
+// or a non-JSON body all read as "no server".
+func barkparkAnswering(baseURL string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	for _, path := range []string{"/v1/capabilities", "/api/schemas"} {
+		resp, err := client.Get(baseURL + path)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			continue
+		}
+		trimmed := bytes.TrimSpace(body)
+		if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+			return true
+		}
+	}
+	return false
+}
+
+// wrapEctoResetErr maps a failed reset step onto an actionable error when its
+// output shows postgres refused the drop because live sessions hold the
+// database (ERROR 55006 object_in_use). checkNoRunningServer catches the
+// dev-server-on-:4000 case before any step runs; this covers every other
+// holder — an `iex -S mix` shell, a psql session, a server on a non-default
+// port. Unrelated failures pass through untouched.
+func wrapEctoResetErr(err error, output string) error {
+	if !strings.Contains(output, "object_in_use") && !strings.Contains(output, "is being accessed by other users") {
+		return err
+	}
+	return fmt.Errorf("%w\n  the database is held by other sessions (object_in_use) — a running dev server or iex shell?\n  %-13s stop them (Ctrl-C in their terminals), then re-run\n  %-13s if a dev server is already up, use it instead: bp setup --target connect --server %s",
+		err, "option 1:", "option 2:", localServerURL)
+}
+
 // ── step plans ───────────────────────────────────────────────────────────────
 
 // cloneStep is the prepended bring-up step when no checkout exists: a fresh
@@ -496,7 +576,7 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 				Cmd:   seedCmd,
 				Argv:  seedArgv,
 				Dir:   lc.root,
-			}},
+			}, MapErr: wrapEctoResetErr},
 			localStep{
 				step: step{Title: "wait for the API to answer on " + localServerURL},
 				WaitFor: func(ctx context.Context, w writerLike) error {
@@ -526,7 +606,7 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 			Dir:     lc.apiDir,
 			EnvLine: seedEnvLine,
 			Env:     seedEnv,
-		}},
+		}, MapErr: wrapEctoResetErr},
 		localStep{
 			step: step{
 				Title:   "start Phoenix in the background on :4000 (logs: " + phxLogPath() + ")",
