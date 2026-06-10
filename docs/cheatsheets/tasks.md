@@ -9,7 +9,7 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 | `bp task ready` | `GET /v1/tasks/ready` | unblocked queue, priority ASC then oldest · `bp task ready --limit 5` |
 | `bp task get <id>` | `GET /v1/tasks/:id` | doc + one level of `children` inline |
 | `bp task next <worker>` | `POST /v1/tasks/claim` | queue claim · no_ready if none |
-| `bp task claim <id> <worker>` | `POST /v1/tasks/:id/claim` | targeted claim · ids from `bp task ready` |
+| `bp task claim <id> <worker>` | `POST /v1/tasks/:id/claim` | targeted claim · ids via `bp task ready` |
 | `bp task close <id> <worker> <epoch> [status]` | `POST /v1/tasks/:id/close` | close · `bp task close task-992199 agent-1 1 done` |
 | — | `POST /v1/tasks/claim` | queue claim: `{"worker_id":"agent-1"}` → next ready doc, or `{"ok":false,"reason":"no_ready"}` |
 | — | `GET /v1/tasks/:id/edges` | dependencies + dependents (`?kind=all`) |
