@@ -7,7 +7,7 @@ Barkpark as your AI's task board: the agent claims work over HTTP, you steer the
 
 | Surface | What |
 |---|---|
-| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` (plugin desk item). Open any task in the form editor: `lifecycle_status` dropdown, priority, assignee, title — editable. `dependencies` and `claim` render read-only ("managed via API"). |
+| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` (plugin desk item), with lifecycle tabs (open · in_progress · blocked · closed · all). The editor is a full dossier in four groups — **brief** (description, design notes, an expandable `design_doc` paper reference, checkable acceptance criteria with met/evidence), **work** (priority, assignee, estimate, due date, labels), **close** (outcome, reason), **system** — plus soft validations (e.g. closing `done` without an outcome warns). `dependencies` and `claim` render read-only ("managed via API"). |
 | **`bp` verbs** | `bp task ls / ready / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
 | **HTTP API** | Ten bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
 | **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired` — streamed over SSE at `/v1/data/listen/:dataset`. |
@@ -45,7 +45,7 @@ The `task` schema auto-registers on every boot (idempotent on `(name, dataset)`)
 bp capabilities -o json          # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
 ```
 
-**3. Create tasks.** Tasks are documents — create them through the standard mutation envelope. Required content: `kind: "task"` and a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`.
+**3. Create tasks.** Tasks are documents — create them through the standard mutation envelope. Required content: `kind: "task"` and a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, plus the dossier fields (`description`, `design`, `design_doc` paper slug, `acceptance_criteria` list, `estimate`, `due_at`, `outcome`, …) — the schema (`GET /v1/schemas/:dataset`, name `task`) is the authoritative field list.
 
 ```bash
 curl -X POST $API/v1/data/mutate/production \
@@ -122,7 +122,7 @@ Open `/studio` → the **Tasks ✅** group. The division of labour:
 | Flip `lifecycle_status` (5-state dropdown), set `priority`, `assignee`, edit titles/descriptions | `claim` / `close` with fencing, add edges, relabel, link papers |
 | Triage: open new tasks, cancel dead ones | Drain the ready queue in priority order |
 
-`dependencies` and `claim` show as read-only pretty-printed JSON in the editor — round-tripping structured values through a text input would corrupt them, so the form simply never submits those fields and the API stays the single writer. Everything updates live via PubSub: when the agent claims a task, your pane reflects it without a refresh.
+The terminal TUI edits the flat fields (title, description, lifecycle, priority, …); composite dossier fields like `acceptance_criteria` are Studio- and API-editable only (the documented v1 TUI constraint). `dependencies` and `claim` show as read-only pretty-printed JSON in the editor — round-tripping structured values through a text input would corrupt them, so the form simply never submits those fields and the API stays the single writer. Everything updates live via PubSub: when the agent claims a task, your pane reflects it without a refresh.
 
 ## Goals and phases
 
