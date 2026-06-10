@@ -23,12 +23,13 @@ curl -X POST $API/v1/data/mutate/production \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"mutations":[{"create":{"_type":"post","_id":"x","title":"New"}}]}'
 
-curl "$API/v1/data/query/production/post?perspective=drafts&limit=2"
+curl -H "Authorization: Bearer $TOKEN" \
+  "$API/v1/data/query/production/post?perspective=drafts&limit=2"
 
 curl -H "Authorization: Bearer $TOKEN" -F "file=@photo.jpg" \
   $API/v1/media/production/upload
 ```
 
-Draft model: create writes `drafts.{id}`; publish copies it to `{id}` and deletes the draft; perspectives gate what reads see.
+Draft model: create writes `drafts.{id}`; publish copies it to `{id}` and deletes the draft; perspectives gate what reads see. Anonymous reads are pinned to `published` — `drafts`/`raw` need a token.
 
 Canon: [`../api-v1.md`](../api-v1.md).

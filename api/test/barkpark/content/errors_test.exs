@@ -35,6 +35,19 @@ defmodule Barkpark.Content.ErrorsTest do
     assert %{code: "rev_mismatch", status: 409} = Errors.to_envelope({:error, :rev_mismatch})
   end
 
+  test "maps invalid_task_content to a 422 with the field errors" do
+    Logger.metadata(request_id: nil)
+
+    # Regression: a task create missing kind/lifecycle_status fell through to
+    # the catch-all and surfaced as a 500 "unknown error" — a validation
+    # failure with no signal about what to fix.
+    errors = %{"kind" => ["is required"]}
+    env = Errors.to_envelope({:error, {:invalid_task_content, errors}})
+    assert env.code == "validation_failed"
+    assert env.status == 422
+    assert env.details == errors
+  end
+
   test "to_envelope/2 with nil conn omits request_id when Logger metadata empty" do
     Logger.metadata(request_id: nil)
     env = Errors.to_envelope({:error, :not_found}, nil)

@@ -37,7 +37,7 @@ defmodule BarkparkWeb.QueryController do
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: read_share?(conn)] ++ scope_opts(conn)
+          [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
         )
 
       inner = %{
@@ -57,10 +57,13 @@ defmodule BarkparkWeb.QueryController do
 
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     cond do
-      # A read-only public share must NEVER fetch a draft by id. A `drafts.`
-      # doc_id is rejected as not-found BEFORE any get_document call — the same
-      # 404 path the controller already returns for a missing doc.
-      read_share?(conn) and String.starts_with?(doc_id, "drafts.") ->
+      # NO anonymous caller may fetch a draft by id — neither a read-only
+      # public share nor a plain tokenless read of a public schema (publish is
+      # the act of making content public; a `drafts.` id is unpublished by
+      # definition). Rejected as not-found BEFORE any get_document call — the
+      # same 404 path the controller already returns for a missing doc. An
+      # `:edit` share and any token/preview caller pass through unchanged.
+      anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
         {:error, :not_found}
 
       preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) ->
@@ -81,7 +84,7 @@ defmodule BarkparkWeb.QueryController do
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: read_share?(conn)] ++ scope_opts(conn)
+          [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
         )
         |> hd()
 
@@ -184,11 +187,14 @@ defmodule BarkparkWeb.QueryController do
   defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
 
   defp resolve_perspective(conn, params) do
-    if read_share?(conn) do
-      # A read-only public share is pinned to the published perspective: the
-      # `?perspective=drafts|raw` param is IGNORED on this path so an anonymous
-      # share-reader can never pull unpublished/draft content. An :edit share or
-      # a normal request falls through to the unchanged forced/param logic.
+    if anon_pinned?(conn) do
+      # EVERY plain anonymous caller is pinned to the published perspective:
+      # the `?perspective=drafts|raw` param is IGNORED so a tokenless reader
+      # can never pull unpublished/draft content — neither via a read-only
+      # public share NOR via an ordinary public-visibility schema read (found
+      # live 2026-06-10: `curl …?perspective=drafts` with no token returned
+      # every draft). A token, a preview token (forced_perspective) or an
+      # `:edit` share falls through to the unchanged forced/param logic.
       :published
     else
       case conn.assigns[:forced_perspective] do
@@ -198,10 +204,16 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  # True when the request is served via a PUBLIC share whose access is NOT
-  # `:edit` (i.e. a read-only share). Such a request must never see drafts.
-  defp read_share?(conn) do
-    conn.assigns[:share_public] == true and conn.assigns[:share_access] != :edit
+  # True when the caller is pinned to published-only reads: no token, no
+  # preview token, and not an `:edit` share. This covers BOTH the read-only
+  # public share AND the plain tokenless read of a public-visibility schema —
+  # the two anonymous read paths must enforce the same invariant (an anonymous
+  # caller can never pull drafts; publish is the act of making content
+  # public). An `:edit` share is deliberately exempt: it is an anonymous
+  # editing surface, and its draft visibility is part of that contract.
+  defp anon_pinned?(conn) do
+    not authed?(conn) and not preview?(conn) and
+      not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit)
   end
 
   defp parse_int(nil, d), do: d

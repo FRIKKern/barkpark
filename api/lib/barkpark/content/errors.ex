@@ -72,6 +72,21 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # Task content validation (Content.validate_task_kind → Tasks.
+  # validate_kind_content): a per-field errors map, e.g. %{"kind" => ["is
+  # required"]}. Before this clause it fell through to the catch-all and a
+  # missing `kind` surfaced as a bare 500 "unknown error" — a validation
+  # failure with ZERO signal about what to fix (found by the typed-verbatim
+  # cheatsheet pass, 2026-06-10).
+  defp build({:error, {:invalid_task_content, errors}}) when is_map(errors) do
+    %{
+      code: "validation_failed",
+      message: "task content failed validation",
+      status: 422,
+      details: errors
+    }
+  end
+
   defp build({:error, :rate_limited}),
     do: %{code: "rate_limited", message: "rate limit exceeded", status: 429}
 
