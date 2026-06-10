@@ -90,3 +90,37 @@ func TestDuplicateKeyInertOnStructurePane(t *testing.T) {
 		t.Errorf("inert y must set no status, got %q", m.status)
 	}
 }
+
+// TestSSERefreshKeepsEditorFocus pins the focus-restore in refreshDocViews:
+// rebuildPanes nils the editor state before its focus clamp runs, so a
+// DataStoreRefreshMsg (the SSE echo of any mutation — including one's OWN
+// create/save) demoted FocusEditor to the pane. The user's next ctrl+p /
+// ctrl+s then landed on the pane and silently did nothing.
+func TestSSERefreshKeepsEditorFocus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/v1/data/query/") {
+			_, _ = w.Write([]byte(`{"result":{"documents":[` + postDocJSON + `]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	m := listModel(t, srv.URL, "post")
+	// Drill into the doc's editor (enter on the highlighted row).
+	m = press(t, m, "enter")
+	if m.focus.Target != FocusEditor || m.selectedDoc == nil {
+		t.Fatalf("setup: expected editor focus on the drilled doc, got %+v", m.focus)
+	}
+
+	mm, _ := m.Update(DataStoreRefreshMsg{})
+	m = mm.(model)
+
+	if m.focus.Target != FocusEditor {
+		t.Errorf("SSE refresh must keep editor focus, got %+v", m.focus)
+	}
+	if !m.showEditor || m.selectedDoc == nil || m.selectedDoc.ID != "drafts.post-1" {
+		t.Errorf("editor doc must survive the refresh, got showEditor=%v doc=%+v",
+			m.showEditor, m.selectedDoc)
+	}
+}

@@ -550,6 +550,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // shared by the DataStoreRefreshMsg handler and the task quick-actions.
 func (m *model) refreshDocViews() {
 	prevID, prevType, hadEditor := "", "", m.showEditor
+	prevFocus := m.focus
 	if m.selectedDoc != nil {
 		prevID, prevType = m.selectedDoc.ID, m.selectedDoc.Type
 	}
@@ -563,6 +564,16 @@ func (m *model) refreshDocViews() {
 			m.editorSchema = findSchema(prevType)
 			m.showEditor = true
 			m.syncSelectedPaper()
+			// Restore editor focus too: rebuildPanes nils the editor state
+			// before its focus clamp runs, so the clamp demoted FocusEditor to
+			// the pane. Without this, EVERY SSE refresh while a doc is open
+			// silently kicked focus out of the editor — the next ctrl+p/ctrl+s
+			// landed on the pane and did nothing (caught live: publish right
+			// after n-create no-opped because the create's own SSE echo had
+			// stolen focus).
+			if prevFocus.Target == FocusEditor {
+				m.focus = prevFocus
+			}
 		}
 	}
 	if m.showEditor && m.selectedDoc != nil {
