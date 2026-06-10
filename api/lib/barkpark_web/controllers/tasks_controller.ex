@@ -134,8 +134,10 @@ defmodule BarkparkWeb.TasksController do
 
   defp maybe_filter_parent(query, nil), do: query
 
-  # phase_id matches `content.parent_id` (work-tasks → phase) OR
-  # `content.parent` (phases → goal). Both schemas are in play.
+  # phase_id matches `content.parent_id` — the ONE parent pointer (the
+  # legacy `content.parent` arm from the retired goal/phase model matched
+  # a key nothing writes for `type:task` rows; killed with the parent vs
+  # parent_id split — parent_id is a schema `reference` to another task).
   #
   # Prefix-agnostic parent↔doc_id matching (#7): the stored parent may be bare
   # (`phase-448247`) while the caller passes the draft id (`drafts.phase-448247`)
@@ -146,9 +148,7 @@ defmodule BarkparkWeb.TasksController do
     from(d in query,
       where:
         fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
-          fragment("regexp_replace(?, '^drafts\\.', '')", ^p) or
-          fragment("regexp_replace(?->>'parent', '^drafts\\.', '')", d.content) ==
-            fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
+          fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
     )
   end
 
@@ -158,18 +158,16 @@ defmodule BarkparkWeb.TasksController do
   # `parent` param so it reads as "the child tasks of ANY task" — realizing
   # "a goal is just a root task" and "a rail is the chronological child tasks of
   # a task". Mirrors `maybe_filter_parent/2` EXACTLY (prefix-agnostic match on
-  # both `parent_id` and `parent`); the index applies chronological ordering
-  # (inserted_at ASC) when this filter is active so the result reads as that
-  # task's timeline/rail.
+  # `parent_id` — the one parent pointer); the index applies chronological
+  # ordering (inserted_at ASC) when this filter is active so the result reads
+  # as that task's timeline/rail.
   defp maybe_filter_parent_id(query, nil), do: query
 
   defp maybe_filter_parent_id(query, p) when is_binary(p) do
     from(d in query,
       where:
         fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
-          fragment("regexp_replace(?, '^drafts\\.', '')", ^p) or
-          fragment("regexp_replace(?->>'parent', '^drafts\\.', '')", d.content) ==
-            fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
+          fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
     )
   end
 
@@ -577,7 +575,6 @@ defmodule BarkparkWeb.TasksController do
       priority: Map.get(content, "priority"),
       assignee: Map.get(content, "assignee"),
       parent_id: Map.get(content, "parent_id"),
-      parent: Map.get(content, "parent"),
       claim: Map.get(content, "claim"),
       # tt5: surface content.labels at the top level so the bd-shim's
       # `.labels[]` (used by `bd show .labels[]` + `bd list --label`) works
