@@ -57,6 +57,29 @@ type SetupPlan struct {
 
 	// shared
 	Plugins []string // plugin slugs to enable post-setup
+
+	// Profile is the seed content profile for the targets that seed a database
+	// (local/deploy/provision): "clean" (papers + media + one welcome paper —
+	// the premium default on every bp-driven path) or "demo" (the 8-schema /
+	// 27-doc kitchen-sink fixture). Empty defaults to clean; connect ignores it
+	// (a pure upsert never seeds).
+	Profile string
+}
+
+// Seed content profiles. Clean is the default on every bp-driven path; demo
+// stays reachable via --profile demo (or raw mix/make seed, which never set
+// BARKPARK_SEED_PROFILE and therefore keep today's behaviour byte-identical).
+const (
+	ProfileClean = "clean"
+	ProfileDemo  = "demo"
+)
+
+// profileOrDefault resolves the plan's seed profile, defaulting empty to clean.
+func (p SetupPlan) profileOrDefault() string {
+	if strings.TrimSpace(p.Profile) == "" {
+		return ProfileClean
+	}
+	return strings.TrimSpace(p.Profile)
 }
 
 // Validate checks the plan is internally consistent for its Target before any
@@ -64,6 +87,11 @@ type SetupPlan struct {
 // path) and lenient for the stubbed targets (their full validation lands with
 // the modes step), only checking the Target itself is known.
 func (p SetupPlan) Validate() error {
+	switch strings.TrimSpace(p.Profile) {
+	case "", ProfileClean, ProfileDemo:
+	default:
+		return fmt.Errorf("setup: --profile %q must be clean or demo", p.Profile)
+	}
 	switch p.Target {
 	case TargetConnect:
 		if strings.TrimSpace(p.Server) == "" {

@@ -160,6 +160,7 @@ func buildDeployPlan(plan SetupPlan, _ Options) (Plan, error) {
 		Destructive:     true, // provisions/restarts a live server
 		RequiresConfirm: true,
 		Plugins:         planPlugins(plan.Plugins),
+		Profile:         plan.profileOrDefault(),
 		ConnectTo:       publicURL,
 		Env:             map[string]string{"DOMAIN": plan.Domain, "PHX_SCHEME": scheme},
 	}

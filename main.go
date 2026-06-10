@@ -5,6 +5,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/cli"
@@ -25,6 +26,17 @@ func main() {
 // the structure tree, and run the Bubble Tea program with the live-refresh SSE
 // wiring intact. Returns the process exit code.
 func runTUI() int {
+	// First run (no config.json, no BARKPARK_* env) on a genuine terminal:
+	// route into the setup wizard before touching the network, then fall
+	// through into the TUI against the freshly-saved server. Non-TTY callers
+	// keep the old behaviour (never prompts).
+	if cli.FirstRun() && isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()) {
+		configured, code := cli.RunFirstTimeSetup()
+		if !configured {
+			return code
+		}
+	}
+
 	// Follow the SAME active server the `bp` CLI uses: resolved through
 	// flags(none here) > explicitly-set BARKPARK_* env > saved-config active
 	// server > baked defaults. So `bp use prod` moves the TUI too, and an
@@ -39,7 +51,11 @@ func runTUI() int {
 	loaded, err := ds.LoadSchemas()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
+		if cli.FirstRun() {
+			fmt.Fprintf(os.Stderr, "No server is configured yet — run `bp setup` to connect to one or bring one up.\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
+		}
 		return 1
 	}
 	schemas = loaded

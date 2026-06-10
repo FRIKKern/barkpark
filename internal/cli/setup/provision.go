@@ -279,6 +279,7 @@ func buildProvisionPlan(plan SetupPlan, _ Options) (Plan, error) {
 		Destructive:     true, // creates a billable cloud host, then chains into deploy
 		RequiresConfirm: true,
 		Plugins:         planPlugins(plan.Plugins),
+		Profile:         plan.profileOrDefault(),
 		Provider:        plan.Provider,
 		Region:          region,
 		ServerType:      serverType,

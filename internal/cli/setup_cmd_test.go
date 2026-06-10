@@ -97,6 +97,81 @@ func TestSetupConnectNoServerNoSaved(t *testing.T) {
 	}
 }
 
+// TestSetupLocalDryRunDefaultsProfileClean: the JSON dry-run plan for local
+// carries profile=clean by default and the redacted seed-token env.
+func TestSetupLocalDryRunDefaultsProfileClean(t *testing.T) {
+	withTempConfigHome(t)
+
+	env, code := runSetupJSON(t, globals{dryRun: true},
+		[]string{"--target", "local"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d (%v)", code, exitOK, env)
+	}
+	if got := env["profile"]; got != "clean" {
+		t.Fatalf("profile = %v, want \"clean\"", got)
+	}
+	envMap, _ := env["env"].(map[string]any)
+	if envMap["BARKPARK_SEED_PROFILE"] != "clean" {
+		t.Fatalf("env.BARKPARK_SEED_PROFILE = %v, want \"clean\"", envMap["BARKPARK_SEED_PROFILE"])
+	}
+	if envMap["BARKPARK_SEED_ADMIN_TOKEN"] != "****" {
+		t.Fatalf("env.BARKPARK_SEED_ADMIN_TOKEN = %v, want \"****\"", envMap["BARKPARK_SEED_ADMIN_TOKEN"])
+	}
+}
+
+// TestSetupProfileDemoFlag: --profile demo flips the plan's profile.
+func TestSetupProfileDemoFlag(t *testing.T) {
+	withTempConfigHome(t)
+
+	env, code := runSetupJSON(t, globals{dryRun: true},
+		[]string{"--target", "local", "--profile", "demo"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d (%v)", code, exitOK, env)
+	}
+	if got := env["profile"]; got != "demo" {
+		t.Fatalf("profile = %v, want \"demo\"", got)
+	}
+}
+
+// TestSetupProfileUnknownIsUsageError: --profile x is a clean usage error (2).
+func TestSetupProfileUnknownIsUsageError(t *testing.T) {
+	withTempConfigHome(t)
+
+	env, code := runSetupJSON(t, globals{dryRun: true},
+		[]string{"--target", "local", "--profile", "x"})
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d (%v)", code, exitUsage, env)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "usage" {
+		t.Fatalf("error.code = %v, want \"usage\" (%v)", errObj["code"], env)
+	}
+}
+
+// TestFirstRunDetection: empty temp config home + no BARKPARK_* env => first
+// run; a saved config flips it; a set env var flips it too.
+func TestFirstRunDetection(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv("BARKPARK_API_URL", "")
+	t.Setenv("BARKPARK_SERVER", "")
+	t.Setenv("BARKPARK_API_TOKEN", "")
+
+	if !FirstRun() {
+		t.Fatalf("empty config home + no env should be a first run")
+	}
+
+	t.Setenv("BARKPARK_API_URL", "http://localhost:4000")
+	if FirstRun() {
+		t.Fatalf("a set BARKPARK_API_URL must not count as a first run")
+	}
+	t.Setenv("BARKPARK_API_URL", "")
+
+	seedActiveServer(t)
+	if FirstRun() {
+		t.Fatalf("a saved config must not count as a first run")
+	}
+}
+
 // TestSetupConnectExplicitServerOverridesSaved confirms an explicit --server still
 // wins over the saved active server.
 func TestSetupConnectExplicitServerOverridesSaved(t *testing.T) {

@@ -17,6 +17,11 @@ type Plan struct {
 	Needs           []PlanNeed        `json:"needs,omitempty"`
 	ConnectTo       string            `json:"connect_to,omitempty"`
 
+	// Profile is the resolved seed content profile ("clean" | "demo") for the
+	// seeding targets (local/deploy/provision); empty for connect, which never
+	// seeds. The matching env rides in Env as BARKPARK_SEED_PROFILE.
+	Profile string `json:"profile,omitempty"`
+
 	// KnownServers is the connect history surfaced to a JSON dry-run so an agent
 	// can see the cached servers (and which is active) before connecting. Only
 	// populated for the connect target.
@@ -90,4 +95,11 @@ type Result struct {
 	Tier       string `json:"tier,omitempty"`
 	ConfigPath string `json:"config_path,omitempty"`
 	Message    string `json:"message,omitempty"`
+
+	// Profile echoes the seed profile that ran for the seeding targets
+	// ("clean" | "demo"); empty on a pure connect. StudioURL and Next are the
+	// machine form of the human done-screen (additive — existing keys untouched).
+	Profile   string   `json:"profile,omitempty"`
+	StudioURL string   `json:"studio_url,omitempty"`
+	Next      []string `json:"next,omitempty"`
 }
