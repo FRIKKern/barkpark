@@ -25,8 +25,8 @@ func renderTable(out *writer, payload []byte) {
 
 	switch t := v.(type) {
 	case map[string]any:
-		if docs, ok := t["documents"].([]any); ok {
-			renderRows(out, docs, t)
+		if rows, ok := envelopeRows(t); ok {
+			renderRows(out, rows, t)
 			return
 		}
 		renderKV(out, t)
@@ -35,6 +35,24 @@ func renderTable(out *writer, payload []byte) {
 	default:
 		out.renderRaw(payload)
 	}
+}
+
+// listEnvelopeKeys are the keys the API's list envelopes carry their rows
+// under: query/search use "documents", the tasks endpoints "docs", media
+// "assets". Before this, table/minimal only knew "documents" — `bp task ls -o
+// table` crammed the whole docs array into ONE key/value cell and minimal
+// printed a bare "ok": valid output, zero information.
+var listEnvelopeKeys = []string{"documents", "docs", "assets"}
+
+// envelopeRows finds the row list of a list-envelope payload, trying the known
+// envelope keys in order. ok=false when none holds a JSON array.
+func envelopeRows(m map[string]any) ([]any, bool) {
+	for _, k := range listEnvelopeKeys {
+		if rows, ok := m[k].([]any); ok {
+			return rows, true
+		}
+	}
+	return nil, false
 }
 
 // renderKV prints a single object as aligned key: value lines.

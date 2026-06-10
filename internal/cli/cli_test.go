@@ -903,3 +903,64 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// TestRenderListEnvelopes pins the list-envelope unwrap across the API's three
+// row keys — query "documents", tasks "docs", media "assets". Before this,
+// table output crammed the whole array into one key/value cell and minimal
+// printed a bare "ok" (valid output, zero information). Minimal must print
+// exactly ONE id line per row, preferring the actionable key: _id (documents),
+// doc_id (task rows — their "id" is the row uuid; every task verb takes
+// doc_id), then id (media assets).
+func TestRenderListEnvelopes(t *testing.T) {
+	cases := []struct {
+		name     string
+		payload  string
+		wantIDs  []string
+		tableHas string
+	}{
+		{
+			name:     "documents",
+			payload:  `{"documents":[{"_id":"p1","title":"A"},{"_id":"drafts.p2","title":"B"}],"count":2}`,
+			wantIDs:  []string{"id: p1", "id: drafts.p2"},
+			tableHas: "p1",
+		},
+		{
+			name:     "task docs prefer doc_id over row uuid",
+			payload:  `{"ok":true,"docs":[{"id":"11111111-0000-0000-0000-000000000000","doc_id":"drafts.task-1","title":"T"}]}`,
+			wantIDs:  []string{"id: drafts.task-1"},
+			tableHas: "drafts.task-1",
+		},
+		{
+			name:     "media assets",
+			payload:  `{"assets":[{"id":"asset-uuid-1","filename":"a.png"}],"count":1}`,
+			wantIDs:  []string{"id: asset-uuid-1"},
+			tableHas: "a.png",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			w := newWriter(&stdout, &stderr)
+			w.output = "minimal"
+			renderMinimal(w, []byte(tc.payload))
+			got := strings.TrimSpace(stdout.String())
+			want := strings.Join(tc.wantIDs, "\n")
+			if got != want {
+				t.Errorf("minimal output = %q, want %q", got, want)
+			}
+
+			var tout, terr bytes.Buffer
+			tw := newWriter(&tout, &terr)
+			tw.output = "table"
+			renderTable(tw, []byte(tc.payload))
+			ts := tout.String()
+			if !strings.Contains(ts, tc.tableHas) {
+				t.Errorf("table output missing %q:\n%s", tc.tableHas, ts)
+			}
+			if strings.Contains(ts, `[{"`) {
+				t.Errorf("table output still crams the row array into a cell:\n%s", ts)
+			}
+		})
+	}
+}

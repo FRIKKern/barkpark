@@ -9,6 +9,7 @@ Barkpark as your AI's task board: the agent claims work over HTTP, you steer the
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` (plugin desk item), with lifecycle tabs (open · in_progress · blocked · closed · all). The editor is a full dossier in four groups — **brief** (description, design notes, an expandable `design_doc` paper reference, checkable acceptance criteria with met/evidence), **work** (priority, assignee, estimate, due date, labels), **close** (outcome, reason), **system** — plus soft validations (e.g. closing `done` without an outcome warns). `dependencies` and `claim` render read-only ("managed via API"). |
 | **`bp` verbs** | `bp task ls / ready / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
+| **Terminal TUI** | Task lists carry quick actions: `c` claims the highlighted task, `x` closes it (same fenced endpoints; worker id from `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Plus the standard desk keys — `/` search, `n` new, `y` duplicate, `D`×2 delete. |
 | **HTTP API** | Ten bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
 | **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired` — streamed over SSE at `/v1/data/listen/:dataset`. |
 
@@ -122,7 +123,7 @@ Open `/studio` → the **Tasks ✅** group. The division of labour:
 | Flip `lifecycle_status` (5-state dropdown), set `priority`, `assignee`, edit titles/descriptions | `claim` / `close` with fencing, add edges, relabel, link papers |
 | Triage: open new tasks, cancel dead ones | Drain the ready queue in priority order |
 
-The terminal TUI edits the flat fields (title, description, lifecycle, priority, …); composite dossier fields like `acceptance_criteria` are Studio- and API-editable only (the documented v1 TUI constraint). `dependencies` and `claim` show as read-only pretty-printed JSON in the editor — round-tripping structured values through a text input would corrupt them, so the form simply never submits those fields and the API stays the single writer. Everything updates live via PubSub: when the agent claims a task, your pane reflects it without a refresh.
+The terminal TUI edits the flat fields (title, description, lifecycle, priority, …) and carries the claim/close quick actions (`c` / `x` on a task list or in a task's editor — same fenced endpoints the agent uses); composite dossier fields like `acceptance_criteria` are Studio- and API-editable only (the documented v1 TUI constraint). `dependencies` and `claim` show as read-only pretty-printed JSON in the editor — round-tripping structured values through a text input would corrupt them, so the form simply never submits those fields and the API stays the single writer. Everything updates live via PubSub: when the agent claims a task, your pane reflects it without a refresh.
 
 ## Goals and phases
 

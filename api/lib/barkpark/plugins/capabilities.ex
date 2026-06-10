@@ -460,7 +460,8 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("limit", "int", "Max rows to return.", default: 50),
           flag("offset", "int", "Rows to skip.", default: 0),
-          flag("all", "bool", "Fetch every page.", default: false)
+          flag("all", "bool", "Fetch every page.", default: false),
+          flag("perspective", "string", "published | drafts | raw.", default: "published")
         ],
         paginated: true,
         default_output: "table",
@@ -478,7 +479,8 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("filter", "string", "Equality filter: field=value or field==value.", repeatable: false),
           flag("limit", "int", "Max rows to return.", default: 50),
-          flag("offset", "int", "Rows to skip.", default: 0)
+          flag("offset", "int", "Rows to skip.", default: 0),
+          flag("perspective", "string", "published | drafts | raw.", default: "published")
         ],
         paginated: true,
         default_output: "table",

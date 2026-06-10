@@ -10,10 +10,10 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp setup` | wizard (TTY) / scripted | `bp setup --target connect --server URL --token $TOKEN` |
 | `bp servers` / `bp use <name>` | list / switch saved servers | `bp use prod` |
 | `bp whoami` | active server + auth tier | `bp whoami` |
-| `bp capabilities` | the whole API surface, one call | `bp capabilities -o json` |
-| `bp doc ls <type>` | list documents | `bp doc ls post --limit 10` |
+| `bp capabilities` | the whole API surface, one call | `bp capabilities` |
+| `bp doc ls <type>` | list documents | `bp doc ls post` |
 | `bp doc get <type> <id>` | one document | `bp doc get post p1 --perspective drafts` |
-| `bp doc query <type>` | filtered read | `bp doc query post --filter 'status=draft'` |
+| `bp doc query <type>` | filtered read | `bp doc query post --filter 'status=draft' --perspective raw` |
 | `bp doc mutate` | atomic batch (create/patch/publish/…) | `bp doc mutate --file muts.json` |
 | `bp schema get/apply` | read / upsert schema | `bp schema apply --file post.json` |
 | `bp media ls/upload` | assets | `bp media upload photo.jpg` |

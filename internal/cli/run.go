@@ -602,15 +602,20 @@ func collectIDs(v any) []string {
 	var ids []string
 	switch t := v.(type) {
 	case map[string]any:
-		for _, k := range []string{"_id", "id"} {
+		// ONE id per object, first match wins: _id (documents), doc_id (task
+		// rows — their "id" is the row uuid, but every task verb takes the
+		// doc_id), then id (media assets). Appending every present key printed
+		// two lines per task row.
+		for _, k := range []string{"_id", "doc_id", "id"} {
 			if val, ok := t[k]; ok {
-				if s, ok := val.(string); ok {
+				if s, ok := val.(string); ok && s != "" {
 					ids = append(ids, s)
+					break
 				}
 			}
 		}
-		if docs, ok := t["documents"].([]any); ok {
-			for _, d := range docs {
+		if rows, ok := envelopeRows(t); ok {
+			for _, d := range rows {
 				ids = append(ids, collectIDs(d)...)
 			}
 		}
