@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: tasks-cheatsheet | budget: 600tok -->
 # tasks — cheatsheet
 
-Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Create via mutate (admin) — stored id is `drafts.<id>`; use that everywhere. All `/v1/tasks/*` routes bearer-token (read tier). Plugin must be on (`BARKPARK_PLUGINS` unset or contains `tasks`).
+Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Create via mutate (admin) — stored id is `drafts.<id>`; task endpoints resolve bare `<id>` automatically (explicit `drafts.` prefix always exact). All `/v1/tasks/*` routes bearer-token (read tier). Plugin must be on (`BARKPARK_PLUGINS` unset or contains `tasks`).
 
 | bp | HTTP | Effect · example |
 |---|---|---|

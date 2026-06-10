@@ -495,14 +495,39 @@ defmodule BarkparkWeb.TasksController do
   # `(workspace, project, type=task)` and the dataset string is incidental,
   # so we filter directly on the workspace + project ids (the hard tenant
   # boundary) and skip the dataset coalescence entirely.
+  #
+  # Resolution rule: try the exact `doc_id` first. When no row is found AND
+  # the caller did NOT already supply a `drafts.` prefix, retry with
+  # `"drafts." <> doc_id`. This covers the common case where a task was
+  # created via the mutate endpoint (which always stores `drafts.<id>`) and
+  # the caller uses the bare id. An explicit `drafts.` prefix is always
+  # treated as exact — the fallback is never applied in reverse.
+  #
+  # Disambiguation: if BOTH `t1` and `drafts.t1` exist (a task that was
+  # published and still has a live draft), the exact match on `t1` wins —
+  # the caller gets the published row, consistent with "exact match first".
   defp find_task_by_doc_id(doc_id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
-    # Everything is a task — `bd show <id>` resolves any doc_id on the single
-    # `type == "task"` filter. The tenancy filters below remain the hard
-    # boundary.
+    case fetch_task_exact(doc_id, workspace_id, project_id) do
+      {:ok, _} = hit ->
+        hit
+
+      {:error, :not_found} ->
+        if String.starts_with?(doc_id, "drafts.") do
+          {:error, :not_found}
+        else
+          fetch_task_exact("drafts." <> doc_id, workspace_id, project_id)
+        end
+    end
+  end
+
+  # Single-doc fetch by exact doc_id string, scoped to workspace + project.
+  # Everything is a task — the single `type == "task"` filter covers root
+  # tasks (goals), phases, and leaf work-tasks.
+  defp fetch_task_exact(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
         where: d.doc_id == ^doc_id and d.type == "task"

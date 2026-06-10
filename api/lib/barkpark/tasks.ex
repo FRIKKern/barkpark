@@ -669,7 +669,31 @@ defmodule Barkpark.Tasks do
   # doc_id on `type == "task"`. Root/container tasks (a former "goal"/"phase")
   # are tasks too, so a single type filter covers them. The READY-QUEUE claim
   # (`claim/2` → `ready_query/1`) shares this `type == "task"` filter.
+  #
+  # Resolution rule: try the exact `doc_id` first. When no row is found AND
+  # the caller did NOT already supply a `drafts.` prefix, retry with
+  # `"drafts." <> doc_id`. Tasks created via the mutate endpoint always land
+  # as `drafts.<id>`; the fallback lets callers use the bare id without
+  # publishing first. An explicit `drafts.` prefix is treated as exact —
+  # the fallback is never applied in reverse.
+  #
+  # Disambiguation: if both `t1` and `drafts.t1` exist (published + live
+  # draft), the exact match on `t1` wins — the caller gets the published row.
   defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+    case fetch_task_exact_locked(doc_id, workspace_id, project_id) do
+      {:ok, _} = hit ->
+        hit
+
+      {:error, :not_found} ->
+        if String.starts_with?(doc_id, "drafts.") do
+          {:error, :not_found}
+        else
+          fetch_task_exact_locked("drafts." <> doc_id, workspace_id, project_id)
+        end
+    end
+  end
+
+  defp fetch_task_exact_locked(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
         where: d.doc_id == ^doc_id and d.type == "task",

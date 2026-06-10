@@ -54,7 +54,7 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix gotcha:** `create` always lands as a draft, so the stored doc id is `drafts.t1` — use *that* id with every task verb (`bp task get drafts.t1`). Task lifecycle is orthogonal to draft/publish; publishing a task is optional.
+> **Draft prefix note:** `create` always lands as a draft (stored id `drafts.t1`). The task endpoints resolve the bare id `t1` automatically — you can use either `t1` or `drafts.t1`. If both a published `t1` and a draft `drafts.t1` exist, `t1` matches the published row (exact match wins). Task lifecycle is orthogonal to draft/publish; publishing a task is optional.
 
 **4. The claim → work → close loop.** Pick a stable `worker_id` per agent.
 
@@ -157,7 +157,7 @@ Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data 
 |---|---|
 | No **Tasks** pane in Studio | Plugin not whitelisted (`BARKPARK_PLUGINS` set without `tasks`) **or** the `task` schema isn't registered in this dataset. Fix env, restart; the schema auto-registers on boot. |
 | `404` on `/v1/tasks/*` | Plugin disabled — routes only mount when the tasks plugin is registered. |
-| `404 task not found` on an id you just created | You used `t1`; the stored draft id is `drafts.t1`. |
+| `404 task not found` on an id you just created | Rare — the endpoints resolve bare `t1` to `drafts.t1` automatically. Check that the task plugin is enabled and the token has access. |
 | `400 worker_id is required` | Claim/close need `worker_id` in the JSON body (`--set worker_id=…` via bp). |
 | `409 fenced_off` | Your `observed_epoch` is stale — the lease was swept and re-claimed. Re-claim, then close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |

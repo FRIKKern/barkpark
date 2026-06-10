@@ -188,12 +188,16 @@ tripwire() {
   done
 }
 
+# Allowlist rationale: copy-paste-ready examples beat pointers in user-facing
+# setup guides and starter templates — those files legitimately repeat the dev
+# token / signature shape. README carries the live-demo IP; studio-nav-bug is
+# path-frozen history. The tripwire still catches NEW files repeating these.
 tripwire '89.167.28.206' \
-  "docs/ops/PROD_OPS.md CLAUDE.md docs/ops/bokbasen-go-live.md docs/ops/adding-a-domain.md docs/ops/vercel-dns-connect.md deploy/uptime-kuma/README.md deploy/systemd/README.md"
+  "docs/ops/PROD_OPS.md CLAUDE.md docs/ops/bokbasen-go-live.md docs/ops/adding-a-domain.md docs/ops/vercel-dns-connect.md deploy/uptime-kuma/README.md deploy/systemd/README.md README.md docs/studio/user-guide.md docs/ops/studio-nav-bug-2026-04-19.md"
 tripwire 'v1=<hex>' \
-  "docs/contracts/webhook-realtime.md"
+  "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \
-  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md"
+  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/AI-CLI-TASK-WORKFLOW.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 
 # --- summary ------------------------------------------------------------------
 echo ""
