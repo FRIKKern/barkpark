@@ -16,34 +16,17 @@
 
 Deploy: `ssh root@89.167.28.206`, `cd /opt/barkpark`, `git pull` (post-merge hook auto-rebuilds + restarts) or `make deploy`. Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.
 
-## Why the postcheck exists
+## The postcheck rule
 
-Any `systemctl` operation on production — `restart`, `stop`, `reload`,
-`daemon-reload`, even an interrupted `start` — can leave the service in a
-state the operator did not intend. Without a verification step, a stopped
-or misbooted Phoenix node looks identical to a healthy one from outside
-the box: the systemd command returned, the SSH session closed, no error
-surfaced. The only signal is users hitting an empty API or a blank
-Studio.
+A misbooted or stopped Phoenix node looks identical to a healthy one from
+outside the box — systemd returned, SSH closed, no error surfaced. So any
+workflow that touches `systemctl barkpark` on production **must** end with
+`api/scripts/prod-postcheck.sh`, which probes the public HTTP surface.
 
-`api/scripts/prod-postcheck.sh` closes that gap. It guarantees that every
-ops workflow ends with a probe of the public HTTP surface, so an
-unhealthy node is detected at the moment it happens, not when traffic
-discovers it.
-
-## The rule
-
-Any workflow that touches `systemctl barkpark` on production **must** end
-with a run of `api/scripts/prod-postcheck.sh`.
-
-Two corollaries:
-
-- **Use atomic transitions.** Prefer `systemctl restart barkpark` over
-  `stop` followed by a separate `start`. If a maintenance window genuinely
-  requires a stop without a restart, document it before running the stop —
-  do not assume someone else will start it back up.
-- **No silent ops.** If you SSH in to apply a patch, run the script before
-  you log out. The whole point is to refuse "looks fine, didn't check."
+- **Atomic transitions:** prefer `systemctl restart` over stop-then-start;
+  a deliberate stop without restart gets documented before you run it.
+- **No silent ops:** SSH'd in to patch something? Run the script before
+  you log out. The point is to refuse "looks fine, didn't check."
 
 ## How to run
 
@@ -89,26 +72,32 @@ immediate diagnostic without a second SSH round-trip.
   then `journalctl -u barkpark -n 200 --no-pager` for the surrounding
   context. Do not retry the same `systemctl` invocation blindly.
 
-## Prod migrations — **DRAFT, untested until next deploy window**
+## Prod migrations — validated live 2026-06-10 (95-commit deploy, 5 migrations)
 
 The post-merge hook compiles and restarts but does **NOT** run migrations.
-A deploy that ships a migration is a manual two-step:
+Additive migrations (the normal case): migrate FIRST — old code ignores new
+columns, but new code selecting an unmigrated column 500s on every request:
 
 ```bash
-ssh root@89.167.28.206
-cd /opt/barkpark
-git pull                 # hook rebuilds + restarts (new code may briefly boot on old schema)
-make migrate             # = cd api && bash start.sh mix ecto.migrate (start.sh sources ASDF + .env)
-make restart             # re-boot the BEAM on the migrated schema
+ssh root@89.167.28.206 && cd /opt/barkpark
+set -a; . ./.env; set +a                    # backup: ecto:// -> postgresql://
+pg_dump "${DATABASE_URL/ecto:/postgresql:}" | gzip > /root/pre-deploy.sql.gz
+git checkout -- bin/barkpark go.mod         # build-dirtied artifacts abort the pull
+git -c core.hooksPath=/dev/null pull --ff-only   # NO hook — old code keeps serving
+make migrate                                # bash start.sh mix ecto.migrate (ASDF + .env)
+bash .githooks/post-merge                   # clean rebuild + restart
 ./api/scripts/prod-postcheck.sh
 ```
+
+Destructive migrations (drop/rename) have no zero-downtime order — schedule
+a window: stop, migrate, deploy, start.
 
 Never run `make reset-db` (drop + recreate) or `mix ecto.reset` on production.
 If a migration fails mid-way, stop — read `journalctl -u barkpark -n 200`,
 do not retry blindly, and prefer a forward-fix migration over editing an
 applied one.
 
-## Phoenix server rollback — **DRAFT, untested until next deploy window**
+## Phoenix server rollback
 
 Roll back by reverting source, never by resetting the server checkout:
 
