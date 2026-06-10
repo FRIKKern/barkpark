@@ -53,7 +53,7 @@ depended on the version in the last 72h; token needs publish + unpublish scope
 packages may require account confirmation).
 
 ```sh
-npm unpublish @barkpark/core@1.0.0 --force   # --force required; unscoped same syntax
+npm unpublish @barkpark/core@1.0.0 --force # --force required; unscoped same syntax
 ```
 
 Verify: `npm view @barkpark/core@1.0.0 version` → 404; version gone from
@@ -75,7 +75,7 @@ unpublish.
 When the artifact is fine but `@latest` points at the wrong version.
 
 ```sh
-npm dist-tag add @barkpark/core@0.9.5 latest   # move back to last good
+npm dist-tag add @barkpark/core@0.9.5 latest # move back to last good
 ```
 
 Instant, non-destructive, burns no version number. Prefer over unpublish when
