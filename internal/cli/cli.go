@@ -80,6 +80,11 @@ func Execute(args []string) int {
 	switch noun {
 	case "version":
 		return runVersion(out, g)
+	case "upgrade":
+		// `bp upgrade [--check]` — self-update from the cli-v* GitHub releases.
+		// --check is not a global flag, so parseGlobals passed it through into
+		// rest. Hand upgrade everything after the noun.
+		return runUpgrade(out, g, rest[1:])
 	case "completion":
 		return runCompletion(out)
 	case "login":
