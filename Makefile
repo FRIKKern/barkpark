@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -67,22 +67,42 @@ clean: ## Remove build artifacts
 # ── bp CLI release (M4 GA) ───────────────────────────────────────────────────
 # Cross-compile the single `bp` binary (root package main: CLI + TUI) for the
 # four supported targets into dist/. dist/ is gitignored — these are build
-# artifacts consumed by scripts/install-cli.sh (curl|sh installer).
-# -s -w strips symbol tables + DWARF to slim each binary.
+# artifacts consumed by scripts/install-cli.sh (curl|sh installer) and the
+# cli-release.yml workflow (cli-v* tags).
+# -s -w strips symbol tables + DWARF; -trimpath strips builder paths from
+# panics; CGO_ENABLED=0 keeps cross-compiles static (dep tree is pure Go).
+# VERSION/COMMIT/DATE are injected into internal/cli via -ldflags -X — plain
+# `go build` stays "dev".
+
+VERSION ?= dev
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+MODULE  := github.com/FRIKKern/barkpark
+GOFLAGS_RELEASE := -trimpath
+LDFLAGS := -s -w \
+  -X $(MODULE)/internal/cli.cliVersion=$(VERSION) \
+  -X $(MODULE)/internal/cli.cliCommit=$(COMMIT) \
+  -X $(MODULE)/internal/cli.cliDate=$(DATE)
+CLI_TARGETS := bp-darwin-arm64 bp-darwin-amd64 bp-linux-arm64 bp-linux-amd64
 
 cli-build: ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
-	@echo ">> Building native bp -> dist/bp..."
-	go build -ldflags "-s -w" -o dist/bp .
+	@echo ">> Building native bp $(VERSION) -> dist/bp..."
+	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp .
 	@echo ">> Done: dist/bp"
 
 cli-release: ## Cross-compile bp for darwin/linux × arm64/amd64 into dist/
-	@echo ">> Cross-compiling bp for 4 targets into dist/..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/bp-darwin-arm64 .
-	GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w" -o dist/bp-darwin-amd64 .
-	GOOS=linux  GOARCH=arm64 go build -ldflags "-s -w" -o dist/bp-linux-arm64 .
-	GOOS=linux  GOARCH=amd64 go build -ldflags "-s -w" -o dist/bp-linux-amd64 .
+	@echo ">> Cross-compiling bp $(VERSION) for 4 targets into dist/..."
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-arm64 .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-amd64 .
+	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-arm64 .
+	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-amd64 .
 	@echo ">> Done. Artifacts:"
 	@ls -lh dist/bp-*
+
+cli-checksums: ## Write dist/checksums.txt (sha256 of the 4 release binaries)
+	@echo ">> Writing dist/checksums.txt..."
+	cd dist && { command -v sha256sum >/dev/null 2>&1 && sha256sum $(CLI_TARGETS) || shasum -a 256 $(CLI_TARGETS); } > checksums.txt
+	@cat dist/checksums.txt
 
 # ── Docker (alternative to native) ──────────────────────────────────────────
 

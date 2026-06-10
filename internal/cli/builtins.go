@@ -11,7 +11,14 @@ import (
 // runVersion prints the CLI version. -o json emits a small object.
 func runVersion(out *writer, g globals) int {
 	if out.output == "json" {
-		out.renderJSON(map[string]string{"cli_version": cliVersion})
+		v := map[string]string{"cli_version": cliVersion}
+		if cliCommit != "" {
+			v["commit"] = cliCommit
+		}
+		if cliDate != "" {
+			v["build_date"] = cliDate
+		}
+		out.renderJSON(v)
 		return exitOK
 	}
 	out.outf("barkpark %s", cliVersion)
