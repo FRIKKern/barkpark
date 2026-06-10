@@ -75,7 +75,8 @@ defmodule Barkpark.Seeds.Clean do
             "dataset" => scope.dataset,
             "workspace_id" => scope.workspace_id,
             "project_id" => scope.project_id,
-            "blocks" => @welcome_blocks
+            "blocks" => @welcome_blocks,
+            "style" => "article"
           })
 
         IO.puts("Seeded welcome paper (/papers/#{@welcome_slug})")

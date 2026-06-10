@@ -70,6 +70,8 @@ defmodule Barkpark.SeedsCleanTest do
     assert [%Document{doc_id: "welcome", type: "paper"} = paper] = docs
     assert is_list(get_in(paper.content, ["blocks"]))
     assert paper.title == "Welcome to Barkpark"
+    # Article typography, so /papers/welcome shows off the article palette.
+    assert get_in(paper.content, ["style"]) == "article"
 
     # No barkpark-dev-token.
     assert {:error, :unauthorized} = Auth.verify_token("barkpark-dev-token")
