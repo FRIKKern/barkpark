@@ -127,7 +127,17 @@ defmodule Barkpark.Tasks do
       fields: [
         %{"name" => "title", "title" => "Title", "type" => "string"},
         %{"name" => "kind", "title" => "Kind", "type" => "string"},
-        %{"name" => "lifecycle_status", "title" => "Lifecycle", "type" => "string"},
+        # `select` so the Studio Classic editor renders a dropdown
+        # (`FieldInputs.input/1`'s select clause matches on `"type" =>
+        # "select"` + an `"options"` list). Options derive from
+        # `lifecycle_statuses/0` — the single source of truth the
+        # validator (`require_string_in/4`) also reads.
+        %{
+          "name" => "lifecycle_status",
+          "title" => "Lifecycle",
+          "type" => "select",
+          "options" => lifecycle_statuses()
+        },
         %{"name" => "priority", "title" => "Priority", "type" => "number"},
         %{"name" => "assignee", "title" => "Assignee", "type" => "string"},
         %{"name" => "dependencies", "title" => "Dependencies", "type" => "array"},

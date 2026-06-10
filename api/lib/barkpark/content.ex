@@ -512,9 +512,42 @@ defmodule Barkpark.Content do
     Enum.reduce(schema.fields, %{}, fn field, acc ->
       key = field["name"]
       val = Map.get(params, key, "")
-      if key in ["title", "status"] or val == "", do: acc, else: Map.put(acc, key, val)
+
+      if key in ["title", "status"] or val == "" do
+        acc
+      else
+        Map.put(acc, key, coerce_field_value(field, val))
+      end
     end)
   end
+
+  # Schema `"number"` fields arrive from the Classic form as STRINGS (the
+  # numeric field renders as a text input with inputmode="numeric"), but
+  # the API contract stores numbers — e.g. the task validator's
+  # integer-0..4 `priority` check hard-rejects the string and fails the
+  # save. Coerce at the save boundary so the API contract stays the
+  # source of truth: integer parse first, float fallback. An unparseable
+  # value is kept AS-IS so the schema/kind validator rejects it loudly
+  # instead of the save path silently corrupting it. Empty strings never
+  # reach here (build_content/2 drops them — the existing field-clearing
+  # semantics). Non-binary values (API callers already sending numbers)
+  # pass through unchanged.
+  defp coerce_field_value(%{"type" => "number"}, val) when is_binary(val) do
+    trimmed = String.trim(val)
+
+    case Integer.parse(trimmed) do
+      {int, ""} ->
+        int
+
+      _ ->
+        case Float.parse(trimmed) do
+          {float, ""} -> float
+          _ -> val
+        end
+    end
+  end
+
+  defp coerce_field_value(_field, val), do: val
 
   # ── Exp-P3.2 — Classic-save content (the data-loss guard) ─────────────────
   #
@@ -538,7 +571,19 @@ defmodule Barkpark.Content do
         |> Projection.project(new_blocks, render_opts(dataset))
 
       _ ->
-        build_content(params, schema)
+        # Merge over the existing content instead of replacing it: a key
+        # PRESENT in the submitted params is form-managed — its new value
+        # (or its removal, via build_content/2's empty-string drop) wins.
+        # A key ABSENT from params is one the form does not manage — v1
+        # "array"/"object" fields render read-only with no input (the task
+        # schema's `dependencies`/`claim`), and non-schema keys like the
+        # task substrate's `labels`/`papers` never render at all. Those
+        # survive a Classic save byte-identical instead of being silently
+        # dropped. (The blocks branch above already preserves base_content.)
+        base_content
+        |> Map.drop(Map.keys(params))
+        |> Map.drop(["title", "status"])
+        |> Map.merge(build_content(params, schema))
     end
   end
 

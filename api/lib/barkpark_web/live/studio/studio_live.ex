@@ -2336,7 +2336,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
             panes: panes,
             editor_doc: saved_doc,
             editor_is_draft: Content.draft?(saved_doc.doc_id),
-            editor_form: params,
+            # Merge over the previous form state instead of replacing it:
+            # fields the form does not render an input for (v1
+            # "array"/"object" — read-only in FieldInputs) are absent from
+            # params, and a plain replace would blank their display until
+            # the next full doc_to_form rebuild.
+            editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
             validation_errors: errs,
             cross_violations: compute_cross_violations(schema, params)
