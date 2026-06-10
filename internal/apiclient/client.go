@@ -592,6 +592,48 @@ func (c *Client) Query(typeName, filter string) []Doc {
 	return result.Documents
 }
 
+// Search runs the scoped full-text search endpoint
+//
+//	GET /w/<ws>/p/<proj>/v1/data/search/<dataset>?q=…[&limit=…][&perspective=…]
+//
+// (SearchController.search). q is required server-side; limit > 0 caps the
+// page (server default 50); the Client's Perspective rides along exactly as
+// in Query. The engine param is deliberately NOT sent — the server default
+// ("postgres") applies. The response carries the matching document envelopes
+// at top-level "documents" ({"documents":[…],"count":…,"query":…,…}), which
+// decode through the same envelope normalization Query's docs use.
+func (c *Client) Search(query string, limit int) ([]Doc, error) {
+	endpoint := c.scopedURL("/v1/data/search/" + c.Dataset)
+	params := url.Values{}
+	params.Set("q", query)
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	if c.Perspective != "" {
+		params.Set("perspective", c.Perspective)
+	}
+	endpoint += "?" + params.Encode()
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var out struct {
+		Documents []Doc `json:"documents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("parse search response: %w", err)
+	}
+	return out.Documents, nil
+}
+
 // Get fetches a single document by type and ID.
 func (c *Client) Get(typeName, id string) (Doc, bool) {
 	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + typeName + "/" + id)

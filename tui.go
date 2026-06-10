@@ -127,6 +127,22 @@ type model struct {
 	statusErr bool
 	// Scope selector (workspace/project/dataset picker)
 	selector selectorState
+	// Reference-field picker (enter on a focused reference field — refpicker.go).
+	refPicker refPickerState
+	// refTitles caches referenced-doc titles keyed by their BARE published id
+	// (the stored wire value), so a reference field renders the target's TITLE
+	// with the id dim beside it. Populated by the picker's fetch and by
+	// cacheRefTitlesFor on editor open; never invalidated mid-session (titles
+	// are display sugar — a stale one re-resolves on the next picker open).
+	refTitles map[string]string
+	// Search (`/` on a focused pane — search.go): searching gates the help-bar
+	// query input (reuses m.textInput, the n-prompt mechanics); searchOpen +
+	// searchHits/searchCursor/searchQuery hold the transient results modal.
+	searching    bool
+	searchOpen   bool
+	searchQuery  string
+	searchHits   []Doc
+	searchCursor int
 	// ── Paper rendering (pdrender) ──────────────────────────────────────────
 	// paperRegistry/paperTheme/paperProfile are built ONCE in runTUI and reused
 	// for every paper render. selectedPaperBlocks holds the decoded block tree of
@@ -566,6 +582,32 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSelectorKey(msg)
 	}
 
+	// ── Reference picker modal: all input goes to the picker ──
+	if m.refPicker.active {
+		return m.handleRefPickerKey(msg)
+	}
+
+	// ── Search results modal: j/k/enter/esc on the transient hit list ──
+	if m.searchOpen {
+		return m.handleSearchResultsKey(msg)
+	}
+
+	// ── Search query prompt: all input goes to the text input ──
+	if m.searching {
+		switch key {
+		case "esc":
+			// Cancel the prompt, discard the typed query.
+			m.searching = false
+		case "enter":
+			return m.commitSearch()
+		default:
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	// ── New-document title prompt: all input goes to the text input ──
 	if m.creating {
 		switch key {
@@ -815,6 +857,16 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 
+	// ── Search (`/` on a focused pane only — never while editing text: the
+	//    editing/creating/search-prompt branches above own those keystrokes,
+	//    and the editor surfaces don't bind it). Opens the help-bar query
+	//    input; enter runs the scoped search (see search.go). ──
+	case "/":
+		if m.focus.Target == FocusPane {
+			m.startSearch()
+			return m, textinput.Blink
+		}
+
 	// ── Delete (two-press confirm): the first D arms the status-bar prompt
 	//    for the highlighted doc-list row or the open editor doc; the armed
 	//    branch above handles the second press. ctrl+d was deliberately NOT
@@ -895,6 +947,10 @@ func (m *model) startFieldEdit() {
 		m.toggleField()
 	case FieldBoolean:
 		m.toggleField()
+	case FieldReference:
+		// Enter on a reference field opens the picker modal (refpicker.go)
+		// instead of a text input — the value is a document id, never typed.
+		m.openRefPicker(field)
 	}
 }
 
@@ -1354,6 +1410,7 @@ func (m model) drillIn() (tea.Model, tea.Cmd) {
 		m.focus.Target = FocusEditor
 		m.fieldCursor = 0
 		m.syncSelectedPaper()
+		m.cacheRefTitlesFor(m.editorSchema)
 		m.resetViewport()
 	} else {
 		m.path = m.path[:m.focus.PaneIndex]
@@ -1427,10 +1484,15 @@ func (m model) View() string {
 	}
 
 	var body string
-	if m.selector.active {
+	switch {
+	case m.selector.active:
 		// Replace the column body with the centred scope-selector modal.
 		body = m.renderSelector(m.width, ph)
-	} else {
+	case m.refPicker.active:
+		body = m.renderRefPicker(m.width, ph)
+	case m.searchOpen:
+		body = m.renderSearchResults(m.width, ph)
+	default:
 		body = lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	}
 
@@ -1567,6 +1629,13 @@ func (m model) renderHelpBar() string {
 		return toolbarStyle.Width(m.width).MaxHeight(1).Render(prompt)
 	}
 
+	// Search query prompt — same vim-command-line takeover as the n-prompt.
+	if m.searching {
+		prompt := dimStyle.Render(" Search: ") + m.textInput.View()
+		prompt = ansi.Truncate(prompt, m.width, "…")
+		return toolbarStyle.Width(m.width).MaxHeight(1).Render(prompt)
+	}
+
 	// A pending status message takes over the bar — a failed save (red) or a
 	// "saved" confirmation (green) must be impossible to miss.
 	if m.status != "" {
@@ -1586,6 +1655,10 @@ func (m model) renderHelpBar() string {
 	var help string
 	if m.selector.active {
 		help = " tab/j/k move  enter next/apply  ctrl+s apply  esc cancel"
+	} else if m.refPicker.active {
+		help = " j/k move  enter select  esc cancel"
+	} else if m.searchOpen {
+		help = " j/k move  enter open  esc dismiss"
 	} else if m.editing {
 		help = " type to edit  enter confirm  esc cancel"
 	} else if m.focus.Target == FocusEditor && m.isCurrentPaper() {
@@ -1596,13 +1669,13 @@ func (m model) renderHelpBar() string {
 		m.panes[m.focus.PaneIndex].IsDocList {
 		if node := m.panes[m.focus.PaneIndex].Node; node != nil && node.TypeName == "task" {
 			// Task list: the quick-action verbs lead — claim/close at terminal speed.
-			help = " j/k navigate  c claim  x close  D delete  n new  enter select  esc back"
+			help = " j/k navigate  c claim  x close  D delete  n new  / search  enter select  esc back"
 		} else {
 			// Doc-list pane: surface the n-new / D-delete affordances, subtle, in hint order.
-			help = " j/k navigate  n new  D delete  h/l switch pane  enter select  s scope  esc back  q quit"
+			help = " j/k navigate  n new  D delete  / search  h/l switch pane  enter select  s scope  esc back  q quit"
 		}
 	} else {
-		help = " j/k navigate  h/l switch pane  enter select  s scope  esc back  q quit"
+		help = " j/k navigate  / search  h/l switch pane  enter select  s scope  esc back  q quit"
 	}
 	// Clamp to one physical row ≤ m.width before styling so the bar never
 	// soft-wraps at narrow widths; a shorter/elided help string is fine.
@@ -2210,9 +2283,19 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		lines = append(lines, indentLines(composite, 2))
 
 	case FieldReference:
-		rv := val
-		if rv == "" {
+		// The stored value is the referenced doc's BARE published id (the
+		// Studio's select-ref wire format). Render the resolved TITLE with the
+		// id dim beside it when the cache knows it (picker fetch / editor-open
+		// resolve); fall back to the bare id, and to the dim placeholder when
+		// unset. Enter opens the picker (startFieldEdit's FieldReference case).
+		var rv string
+		switch {
+		case val == "":
 			rv = dimStyle.Render("Select " + field.RefType + "...")
+		case m.refTitles[val] != "":
+			rv = m.refTitles[val] + " " + dimStyle.Render(val)
+		default:
+			rv = val
 		}
 		lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(rv+"  "+dimStyle.Render(">")), 2))
 
