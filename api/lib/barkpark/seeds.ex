@@ -15,7 +15,7 @@ defmodule Barkpark.Seeds do
   body cannot forget them.
   """
 
-  alias Barkpark.Seeds.{Demo, Shared}
+  alias Barkpark.Seeds.{Clean, Demo, Shared}
 
   @doc "Read `BARKPARK_SEED_PROFILE` (default: demo) and dispatch to `run/1`."
   def run do
@@ -36,6 +36,13 @@ defmodule Barkpark.Seeds do
     # pre-extraction console order: schemas → docs → token → plugin schemas →
     # codelists → Thema → search defaults.
     Demo.seed_codelists()
+    seed_search_defaults()
+  end
+
+  def run(:clean) do
+    scope = Shared.ensure_default_scope()
+    Clean.seed(scope)
+    register_plugin_schemas()
     seed_search_defaults()
   end
 
