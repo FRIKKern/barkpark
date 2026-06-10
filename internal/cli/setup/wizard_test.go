@@ -115,3 +115,123 @@ func TestWizardNoKnownServersSkipsPickList(t *testing.T) {
 		t.Fatalf("expected the server text input on the no-history path, keys=%v", m.inputKeys)
 	}
 }
+
+// TestWizardLocalFlowEntersProfileStage pins the C1 stage sequence for a
+// seeding target: target → inputs (docker toggle) → PROFILE → plugins.
+func TestWizardLocalFlowEntersProfileStage(t *testing.T) {
+	m := newWizardModel(nil)
+	// down to Local (index 1), enter → inputs (docker toggle), enter → profile.
+	m = drive(m, "down", "enter", "enter")
+
+	if m.stage != stageProfile {
+		t.Fatalf("local inputs should advance to the profile stage, got %d", m.stage)
+	}
+	view := m.View()
+	for _, want := range []string{"content profile", "Clean", "Demo", "BARKPARK_SEED_PROFILE=demo make seed"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("profile view missing %q:\n%s", want, view)
+		}
+	}
+
+	// Enter on the default (clean) row advances to plugins.
+	m = drive(m, "enter")
+	if m.stage != stagePlugins {
+		t.Fatalf("profile select should advance to plugins, got %d", m.stage)
+	}
+}
+
+// TestWizardConnectSkipsProfileStage: connect never seeds, so the inputs stage
+// jumps straight to plugins and the plan carries no profile.
+func TestWizardConnectSkipsProfileStage(t *testing.T) {
+	m := newWizardModel(nil)
+	m = drive(m, "enter", "enter") // connect → inputs → (enter) next stage
+
+	if m.stage != stagePlugins {
+		t.Fatalf("connect should skip the profile stage, got %d", m.stage)
+	}
+	if p := m.plan(); p.Profile != "" {
+		t.Fatalf("connect plan should carry no profile, got %q", p.Profile)
+	}
+}
+
+// TestWizardProfileDefaultCleanPrechecksBulldocs: leaving the profile stage on
+// the default (clean) pre-checks ONLY bulldocs in the plugin multi-select, and
+// the assembled plan carries Profile=clean.
+func TestWizardProfileDefaultCleanPrechecksBulldocs(t *testing.T) {
+	m := newWizardModel(nil)
+	m = drive(m, "down", "enter", "enter", "enter") // local → inputs → profile → plugins
+
+	if m.stage != stagePlugins {
+		t.Fatalf("expected plugins stage, got %d", m.stage)
+	}
+	for i, p := range m.plugins {
+		want := p == "bulldocs"
+		if m.pluginPick[i] != want {
+			t.Fatalf("clean precheck: plugin %q picked=%v, want %v", p, m.pluginPick[i], want)
+		}
+	}
+	plan := m.plan()
+	if plan.Profile != ProfileClean {
+		t.Fatalf("plan.Profile = %q, want %q", plan.Profile, ProfileClean)
+	}
+	if got := plan.Plugins; len(got) != 1 || got[0] != "bulldocs" {
+		t.Fatalf("clean precheck should whitelist bulldocs only, got %v", got)
+	}
+}
+
+// TestWizardProfileDemoKeepsAllPlugins: choosing demo leaves the all-checked
+// default and the plan carries Profile=demo (Plugins nil = all bundled).
+func TestWizardProfileDemoKeepsAllPlugins(t *testing.T) {
+	m := newWizardModel(nil)
+	m = drive(m, "down", "enter", "enter", "down", "enter") // profile: down → Demo
+
+	plan := m.plan()
+	if plan.Profile != ProfileDemo {
+		t.Fatalf("plan.Profile = %q, want %q", plan.Profile, ProfileDemo)
+	}
+	if plan.Plugins != nil {
+		t.Fatalf("demo should keep the all-bundled default (nil), got %v", plan.Plugins)
+	}
+}
+
+// TestWizardProfilePrecheckNeverOverridesTouchedPlugins: a deliberate plugin
+// toggle survives even when the user navigates the profile stage afterwards.
+func TestWizardProfilePrecheckNeverOverridesTouchedPlugins(t *testing.T) {
+	m := newWizardModel(nil)
+	m = drive(m, "down", "enter", "enter", "enter") // land on plugins (clean precheck)
+	m = drive(m, "a")                               // user checks ALL — a deliberate touch
+	if !m.pluginsTouched {
+		t.Fatalf("toggling should mark pluginsTouched")
+	}
+	m.applyProfilePrecheck() // a later precheck must be a no-op
+	for i, on := range m.pluginPick {
+		if !on {
+			t.Fatalf("touched selection was overridden for %q", m.plugins[i])
+		}
+	}
+}
+
+// TestWizardConfirmShowsProfileLine: the confirm screen renders the profile
+// line for a seeding target.
+func TestWizardConfirmShowsProfileLine(t *testing.T) {
+	m := newWizardModel(nil)
+	m = drive(m, "down", "enter", "enter", "enter", "enter") // through to confirm
+
+	if m.stage != stageConfirm {
+		t.Fatalf("expected confirm stage, got %d", m.stage)
+	}
+	view := m.View()
+	if !strings.Contains(view, "profile:") || !strings.Contains(view, "clean (papers + media)") {
+		t.Fatalf("confirm view missing the profile line:\n%s", view)
+	}
+}
+
+// TestWizardTargetContextLine: a re-run with an active saved server shows the
+// "currently connected to …" context line under the title.
+func TestWizardTargetContextLine(t *testing.T) {
+	m := newWizardModel(twoKnownServers())
+	view := m.View()
+	if !strings.Contains(view, "currently connected to https://api.barkpark.cloud (★)") {
+		t.Fatalf("target view missing the currently-connected context line:\n%s", view)
+	}
+}

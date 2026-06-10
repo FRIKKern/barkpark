@@ -8,6 +8,10 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// init stamps the setup package's BPVersion with the ldflags-injected CLI
+// version so the deploy dry-run's "(embedded in bp <version>)" label is honest.
+func init() { setup.BPVersion = cliVersion }
+
 // configStoreAdapter bridges the cli package's on-disk Config persistence onto
 // the setup package's ConfigStore seam, breaking the would-be import cycle
 // (cli imports setup; setup must not import cli). It loads the existing config
@@ -245,6 +249,35 @@ func runSetup(out *writer, g globals, tail []string) int {
 	return exitOK
 }
 
+// RunFirstTimeSetup is the bare-`bp` first-run path: print the welcome banner,
+// run the interactive setup wizard against the same store/wizard wiring
+// runSetup uses, and report whether a server actually got configured so main
+// can fall through into the TUI. An abort is a clean exit 0 (configured=false);
+// a failed execute is exit 1. The caller is responsible for the TTY check —
+// this never opens /dev/tty on its own beyond the Bubble Tea program itself.
+func RunFirstTimeSetup() (configured bool, exit int) {
+	out := newWriter(os.Stdout, os.Stderr)
+	out.outf("Welcome to Barkpark — no server is configured yet.")
+	out.outf("")
+	out.outf("  bp can connect to an existing server, bring one up on this")
+	out.outf("  machine, or install one on a server you own.")
+	out.outf("")
+
+	opts := setup.Options{
+		Out:          os.Stdout,
+		Store:        configStoreAdapter{},
+		Wizard:       setup.Wizard,
+		KnownServers: loadKnownServers(),
+	}
+	if err := setup.RunInteractive(opts); err != nil {
+		out.errf("barkpark: %v", err)
+		return false, exitGeneric
+	}
+	// RunInteractive returns nil on both success and a clean abort; a config on
+	// disk is the success signal (the connect chain persisted it).
+	return !FirstRun(), exitOK
+}
+
 // canRunWizard reports whether the interactive wizard may launch: a genuine
 // interactive terminal (BOTH stdin and stdout are a TTY) AND not a machine-output
 // request (-o json) AND not a pre-confirmed run (--yes). Any false here routes to
@@ -282,6 +315,7 @@ func setupPlanEnvelope(p setup.Plan) map[string]any {
 		"needs":            planNeedsJSON(p.Needs),
 		"connect_to":       p.ConnectTo,
 		"known_servers":    planKnownServersJSON(p.KnownServers),
+		"profile":          emptyToOmit(p.Profile),
 		"provider":         emptyToOmit(p.Provider),
 		"region":           emptyToOmit(p.Region),
 		"server_type":      emptyToOmit(p.ServerType),
@@ -391,6 +425,8 @@ FLAGS
   -p, --project <p>   project scope (default: default)
   -d, --dataset <ds>  dataset scope (default: production)
   --docker            local: bring up via docker compose (else native mix)
+  --profile <p>       seed content profile for local/deploy/provision:
+                      clean (papers + media, default) | demo (8 schemas, 27 docs)
   --ssh-host <h>      deploy: user@host (bare host defaults to root@)
   --domain <d>        deploy: public DNS hostname (required for deploy)
   --scheme <http|https>  deploy: public scheme (default: https)
@@ -409,11 +445,15 @@ AUTOMATION / AI
   bp setup --target connect --server https://api.example.com --yes -o json
 
   bp setup --target local --docker --plugins bulldocs,onixedit --dry-run -o json
+  bp setup --target local --profile demo --dry-run -o json
   bp setup --target deploy --ssh-host root@1.2.3.4 --domain d.example.com --dry-run -o json
   bp setup --target provision --provider hetzner --region nbg1 --server-type cax11 --dry-run -o json
 
   # Without --target on a non-interactive stdin/stdout, setup errors (exit 2)
-  # instead of prompting — pass --target so an agent is never blocked.`
+  # instead of prompting — pass --target so an agent is never blocked.
+
+SEE ALSO
+  bp uninstall    remove bp's local state (config; --local also the dev stack)`
 	out.outf("%s", help)
 }
 
@@ -441,6 +481,7 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 		"provider":    &plan.Provider,
 		"region":      &plan.Region,
 		"server-type": &plan.ServerType,
+		"profile":     &plan.Profile,
 	}
 
 	i := 0

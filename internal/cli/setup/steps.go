@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -22,6 +23,12 @@ type step struct {
 	Dir     string   // working dir for the argv (empty = inherit)
 	EnvLine string   // env prefix shown before Cmd in the rendered plan
 	Stdin   string   // optional path/contents fed on stdin (display hint only)
+
+	// Env is the REAL KEY=VALUE pairs applied to the child process on a real
+	// run (appended to os.Environ()). It is deliberately separate from EnvLine:
+	// EnvLine is the display form and may redact secrets (e.g. the generated
+	// BARKPARK_SEED_ADMIN_TOKEN shows as ****), Env carries the live values.
+	Env []string
 }
 
 // rendered returns the display string for a step: "$ ENV cmd" or just the
@@ -65,6 +72,9 @@ func runStep(ctx context.Context, w io.Writer, s step) error {
 	if s.Dir != "" {
 		cmd.Dir = s.Dir
 	}
+	if len(s.Env) > 0 {
+		cmd.Env = append(os.Environ(), s.Env...)
+	}
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -83,6 +93,9 @@ func runStepWithStdin(ctx context.Context, w io.Writer, s step, stdin io.Reader)
 	cmd := exec.CommandContext(ctx, s.Argv[0], s.Argv[1:]...)
 	if s.Dir != "" {
 		cmd.Dir = s.Dir
+	}
+	if len(s.Env) > 0 {
+		cmd.Env = append(os.Environ(), s.Env...)
 	}
 	cmd.Stdin = stdin
 	cmd.Stdout = w
@@ -106,6 +119,18 @@ func lookExec(name string) bool {
 // the output rather than streaming it.
 func runCapture(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+// runCaptureDir is runCapture scoped to a working directory — the compose
+// health poll runs `docker compose ps` from the resolved repo root, not cwd.
+func runCaptureDir(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

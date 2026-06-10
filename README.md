@@ -26,19 +26,12 @@ Reference plugins: **OnixEdit** (ONIX 3.0 book metadata + Bokbasen submission) �
 ## Quickstart
 
 ```bash
-git clone https://github.com/FRIKKern/barkpark.git
-cd barkpark
-cd api && mix deps.get && mix ecto.setup && cd ..   # create + migrate + seed
-make dev                                            # tmux: Phoenix + TUI side by side
-# open http://localhost:4000/studio
-make cli-build && dist/bp doc ls post               # build + try the CLI
-# or install the released bp:
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp capabilities -o json                             # discover the whole surface
-export BARKPARK_API_URL=http://89.167.28.206:4000   # …or point it at the live demo
+bp setup        # wizard: local dev · deploy a server · connect to one
+bp doc ls paper # you're in
 ```
 
-Local DB ops use `mix` directly in `api/` (`mix ecto.setup` / `reset` / `migrate`) — `make seed/migrate/reset-db` are prod-only. Full guide: [`docs/setup/SETUP.md`](docs/setup/SETUP.md).
+`bp setup` covers every route: local stack (native or Docker), SSH deploy to any Ubuntu 22.04+ box (ARM64 or x86_64), or connect to a running server. Each ends in a clean **paper + media** workspace; demo content is opt-in. Walkthrough: [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md). Hacking on Barkpark itself (clone, `mix ecto.setup`): [`docs/setup/SETUP.md`](docs/setup/SETUP.md).
 
 ## v1 scope, honestly
 
@@ -58,6 +51,8 @@ One command on any Ubuntu 22.04+ box (ARM64 or x86_64). `deploy.sh` **requires**
 DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy.sh
 ```
 
+Or let the wizard drive it: `bp setup --target deploy`.
+
 Updates: `ssh` in, `cd /opt/barkpark && git pull` (post-merge hook rebuilds + restarts) or `make deploy`. Ops canon: [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md).
 
 ## Documentation
@@ -66,6 +61,7 @@ Updates: `ssh` in, `cd /opt/barkpark && git pull` (post-merge hook rebuilds + re
 |---|---|
 | [`docs/INDEX.md`](docs/INDEX.md) | Catalog of every card, contract, and runbook |
 | [`docs/cli/HANDBOOK.md`](docs/cli/HANDBOOK.md) | Full `bp` CLI manual — grammar, flags, auth tiers, batch, exit codes, `bp setup` |
+| [`docs/cheatsheets/`](docs/cheatsheets/) | One-pagers: `bp` commands, HTTP API, paper authoring |
 | [`docs/api-v1.md`](docs/api-v1.md) | HTTP API contract |
 | [`docs/auth.md`](docs/auth.md) | Tokens, tiers, browser sessions |
 | [`docs/cards/plugins.md`](docs/cards/plugins.md) | Build a plugin (contract: `api/lib/barkpark/plugin.ex` moduledoc) |

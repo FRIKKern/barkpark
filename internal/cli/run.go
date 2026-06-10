@@ -19,8 +19,18 @@ import (
 )
 
 // cliVersion is the binary's CLI version, surfaced by `barkpark version` and
-// used for the manifest's min_cli gate when present.
-const cliVersion = "1.0.0"
+// used for the manifest's min_cli gate when present. Injected at release time
+// via -ldflags -X (see Makefile LDFLAGS); "dev" for plain `go build` builds,
+// which makes untagged binaries self-evident in bug reports.
+var cliVersion = "dev"
+
+// cliCommit and cliDate are release-build provenance, injected alongside
+// cliVersion. Empty on dev builds; surfaced only in `bp version -o json` so the
+// human output shape stays `barkpark <version>`.
+var (
+	cliCommit = ""
+	cliDate   = ""
+)
 
 // runCommand executes one manifest command: resolves positional args + flags,
 // builds the request via manifest.BuildURL, applies the tier-appropriate

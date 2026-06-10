@@ -23,6 +23,14 @@ func loadManifest(g globals, ctx manifest.Context) (*manifest.Manifest, error) {
 		return loadManifestFile(path)
 	}
 
+	// First run (no config, no BARKPARK_* env) with no explicit -s flag: refuse
+	// to silently fall through to the baked localhost default — even one that
+	// happens to answer — so a fresh install always lands on `bp setup` instead
+	// of whatever dev server is listening on this machine. Never prompts.
+	if FirstRun() && g.server == "" {
+		return nil, fmt.Errorf("no server configured.\n  run `bp setup` to connect to a server or bring one up,\n  or pass -s <url> / set BARKPARK_API_URL for a one-off call")
+	}
+
 	client := apiclient.New(apiclient.Config{
 		BaseURL: ctx.Server,
 		Token:   ctx.Token,
@@ -30,6 +38,12 @@ func loadManifest(g globals, ctx manifest.Context) (*manifest.Manifest, error) {
 	cache := manifest.NewCache("")
 	m, err := manifest.Fetch(client, cache)
 	if err != nil {
+		// First run (no config, no BARKPARK_* env): the failure is almost always
+		// "nothing is configured yet", so point at bp setup instead of the
+		// manifest plumbing. Exit class stays 1 (network); never prompts.
+		if FirstRun() {
+			return nil, fmt.Errorf("no server configured and %s is not answering.\n  run `bp setup` to connect to a server or bring one up,\n  or pass -s <url> / set BARKPARK_API_URL for a one-off call", ctx.Server)
+		}
 		return nil, fmt.Errorf("acquire manifest from %s%s: %w (hint: set BARKPARK_MANIFEST=<file> or pass --manifest <file> to run before /v1/capabilities is deployed)",
 			ctx.Server, manifest.CapabilitiesPath, err)
 	}

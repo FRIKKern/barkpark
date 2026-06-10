@@ -117,6 +117,25 @@ func ConfigPath() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
+// FirstRun reports whether bp has never been configured: no config file on
+// disk AND no BARKPARK_* server env actually set (the same actually-set test
+// envContext applies — an unset var is unset, never the baked localhost floor).
+// It routes first-run UX only (the bare-`bp` wizard, the friendlier manifest
+// error) and never changes command semantics.
+func FirstRun() bool {
+	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" || os.Getenv("BARKPARK_API_TOKEN") != "" {
+		return false
+	}
+	path, err := ConfigPath()
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return false
+	}
+	return true
+}
+
 // LoadConfig reads the persisted config. A MISSING file is not an error — it
 // returns an empty &Config{} so a first run resolves purely off env/defaults.
 // Only a present-but-unreadable or present-but-malformed file errors.

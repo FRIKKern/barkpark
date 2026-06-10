@@ -13,12 +13,23 @@ defmodule Barkpark.Plugins.EnvConfigTest do
     end
 
     test "comma list -> trimmed, blank-stripped name list (whitelist)" do
-      assert EnvConfig.parse("a, b") == ["a", "b"]
-      assert EnvConfig.parse("bulldocs,onixedit") == ["bulldocs", "onixedit"]
+      assert EnvConfig.parse("a, b") == ["a", "b", "media"]
+      assert EnvConfig.parse("bulldocs,onixedit") == ["bulldocs", "onixedit", "media"]
     end
 
     test "drops blank entries and trims surrounding whitespace" do
-      assert EnvConfig.parse("  bulldocs ,, onixedit ,") == ["bulldocs", "onixedit"]
+      assert EnvConfig.parse("  bulldocs ,, onixedit ,") == ["bulldocs", "onixedit", "media"]
+    end
+
+    test "non-empty whitelist implicitly unions media (deduped); kill switch stays empty" do
+      # The bp picker hides media as core, so emitted whitelists never name
+      # it — omitting the union would silently kill the media schemas.
+      assert EnvConfig.parse("bulldocs") == ["bulldocs", "media"]
+      # Already listed -> no duplicate, position preserved.
+      assert EnvConfig.parse("media,bulldocs") == ["media", "bulldocs"]
+      # The kill switch must NOT gain media.
+      assert EnvConfig.parse("") == []
+      assert EnvConfig.parse(" , ") == []
     end
 
     test "whitespace-only string collapses to the kill switch []" do

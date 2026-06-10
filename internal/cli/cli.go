@@ -80,6 +80,11 @@ func Execute(args []string) int {
 	switch noun {
 	case "version":
 		return runVersion(out, g)
+	case "upgrade":
+		// `bp upgrade [--check]` — self-update from the cli-v* GitHub releases.
+		// --check is not a global flag, so parseGlobals passed it through into
+		// rest. Hand upgrade everything after the noun.
+		return runUpgrade(out, g, rest[1:])
 	case "completion":
 		return runCompletion(out)
 	case "login":
@@ -104,6 +109,10 @@ func Execute(args []string) int {
 		// setup's own --flags are not global flags, so parseGlobals passed them
 		// through into rest as verb+tail. Hand setup everything after the noun.
 		return runSetup(out, g, rest[1:])
+	case "uninstall":
+		// `bp uninstall [--local]` — remove bp's local state (config, optionally
+		// the local dev stack). Never the binary, never a remote server.
+		return runUninstall(out, g, rest[1:])
 	case "migrate":
 		// `bp migrate <from> <to> [flags]` — server-to-server data copy. A
 		// built-in (not a manifest command) because it spans TWO servers and

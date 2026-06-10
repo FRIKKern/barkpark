@@ -58,6 +58,7 @@ const (
 	stageTarget wizardStage = iota
 	stageServerPick // connect-only: pick a remembered server or "enter a new server…"
 	stageInputs
+	stageProfile // local/deploy/provision only: clean vs demo seed content
 	stagePlugins
 	stageConfirm
 	stageDone
@@ -102,10 +103,16 @@ type wizardModel struct {
 	inputIdx  int
 	docker    bool // local: docker vs native
 
-	// plugin multi-select
-	plugins    []string
-	pluginPick []bool
-	pluginIdx  int
+	// profile select (local/deploy/provision; connect never seeds).
+	// 0 = clean (default), 1 = demo.
+	profileIdx int
+
+	// plugin multi-select. pluginsTouched flips once the user toggles anything,
+	// so the profile stage's precheck never overrides a deliberate selection.
+	plugins        []string
+	pluginPick     []bool
+	pluginIdx      int
+	pluginsTouched bool
 
 	confirmYes bool
 }
@@ -151,13 +158,13 @@ func (m *wizardModel) buildInputs() {
 		// no text inputs — docker toggle only
 	case TargetDeploy:
 		add("ssh-host", "root@1.2.3.4", "")
-		add("domain", "demo.example.com", "")
+		add("domain", "demo.example.com  (or the server IP + scheme http)", "")
 		add("scheme", "https", "https")
 	case TargetProvision:
 		add("provider", "hetzner | azure", "hetzner")
 		add("region", "nbg1", "")
 		add("server-type", "cax11", "")
-		add("domain", "demo.example.com", "")
+		add("domain", "demo.example.com  (or the server IP + scheme http)", "")
 	}
 	m.inputIdx = 0
 	if len(m.inputs) > 0 {
@@ -188,12 +195,24 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateServerPick(key)
 	case stageInputs:
 		return m.updateInputs(key)
+	case stageProfile:
+		return m.updateProfile(key)
 	case stagePlugins:
 		return m.updatePlugins(key)
 	case stageConfirm:
 		return m.updateConfirm(key)
 	}
 	return m, nil
+}
+
+// afterInputs is the stage that follows the inputs screen: the profile select
+// for the seeding targets (local/deploy/provision), plugins for connect (a
+// pure upsert never seeds, so it never asks).
+func (m wizardModel) afterInputs() wizardStage {
+	if m.target() == TargetConnect {
+		return stagePlugins
+	}
+	return stageProfile
 }
 
 func (m wizardModel) updateTarget(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -266,7 +285,7 @@ func (m wizardModel) updateInputs(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.docker = !m.docker
 			return m, nil
 		case "enter":
-			m.stage = stagePlugins
+			m.stage = m.afterInputs()
 			return m, nil
 		}
 		return m, nil
@@ -284,7 +303,7 @@ func (m wizardModel) updateInputs(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focusInput(m.inputIdx + 1)
 			return m, nil
 		}
-		m.stage = stagePlugins
+		m.stage = m.afterInputs()
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -309,6 +328,51 @@ func (m *wizardModel) focusInput(idx int) {
 	m.inputIdx = idx
 }
 
+// updateProfile drives the content-profile select: row 0 is clean (the
+// recommended default), row 1 is demo. Enter applies the profile's plugin
+// precheck and advances to the plugin multi-select.
+func (m wizardModel) updateProfile(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "up", "k":
+		if m.profileIdx > 0 {
+			m.profileIdx--
+		}
+	case "down", "j":
+		if m.profileIdx < 1 {
+			m.profileIdx++
+		}
+	case "enter":
+		m.applyProfilePrecheck()
+		m.stage = stagePlugins
+	}
+	return m, nil
+}
+
+// profile returns the selected seed profile.
+func (m wizardModel) profile() string {
+	if m.profileIdx == 1 {
+		return ProfileDemo
+	}
+	return ProfileClean
+}
+
+// applyProfilePrecheck aligns the plugin pre-selection with the chosen profile
+// — clean pre-checks only bulldocs (the whitelist matches the clean desk; the
+// server unions media in), demo restores the all-checked default. It never
+// overrides a selection the user already touched.
+func (m *wizardModel) applyProfilePrecheck() {
+	if m.pluginsTouched {
+		return
+	}
+	for i := range m.pluginPick {
+		if m.profile() == ProfileClean {
+			m.pluginPick[i] = m.plugins[i] == "bulldocs"
+		} else {
+			m.pluginPick[i] = true
+		}
+	}
+}
+
 func (m wizardModel) updatePlugins(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "up", "k":
@@ -322,15 +386,18 @@ func (m wizardModel) updatePlugins(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ", "x":
 		if len(m.pluginPick) > 0 {
 			m.pluginPick[m.pluginIdx] = !m.pluginPick[m.pluginIdx]
+			m.pluginsTouched = true
 		}
 	case "a":
 		for i := range m.pluginPick {
 			m.pluginPick[i] = true
 		}
+		m.pluginsTouched = true
 	case "n":
 		for i := range m.pluginPick {
 			m.pluginPick[i] = false
 		}
+		m.pluginsTouched = true
 	case "enter":
 		m.stage = stageConfirm
 	}
@@ -394,6 +461,9 @@ func (m wizardModel) plan() SetupPlan {
 	if m.target() == TargetLocal {
 		p.Docker = m.docker
 	}
+	if m.target() != TargetConnect {
+		p.Profile = m.profile()
+	}
 	if m.pickedServer != nil {
 		p.Server = m.pickedServer.Server
 		p.Token = m.pickedServer.Token
@@ -414,6 +484,8 @@ func (m wizardModel) View() string {
 		return m.viewServerPick()
 	case stageInputs:
 		return m.viewInputs()
+	case stageProfile:
+		return m.viewProfile()
 	case stagePlugins:
 		return m.viewPlugins()
 	case stageConfirm:
@@ -425,6 +497,13 @@ func (m wizardModel) View() string {
 func (m wizardModel) viewTarget() string {
 	var b strings.Builder
 	b.WriteString(wzTitle.Render("bp setup") + wzDim.Render(" — choose a target") + "\n\n")
+	// Context line on a re-run: show which server bp currently defaults to.
+	for _, s := range m.knownServers {
+		if s.Active {
+			b.WriteString(wzDim.Render("currently connected to "+s.Server+" (★)") + "\n\n")
+			break
+		}
+	}
 	for i, c := range targetChoices {
 		cursor := "  "
 		label := c.label
@@ -501,6 +580,29 @@ func (m wizardModel) viewInputs() string {
 	return b.String()
 }
 
+// viewProfile renders the content-profile select (local/deploy/provision only).
+func (m wizardModel) viewProfile() string {
+	var b strings.Builder
+	b.WriteString(wzTitle.Render("bp setup → content profile") + "\n\n")
+
+	rows := []struct{ label, blurb string }{
+		{"Clean", "papers + media only — the recommended starting point"},
+		{"Demo", "8 example schemas + 27 documents (kitchen-sink dev fixture)"},
+	}
+	for i, r := range rows {
+		cursor := "  "
+		label := r.label
+		if i == m.profileIdx {
+			cursor = wzSel.Render("▸ ")
+			label = wzSel.Render(label)
+		}
+		b.WriteString(fmt.Sprintf("%s%-10s %s\n", cursor, label, wzDim.Render(r.blurb)))
+	}
+	b.WriteString("\n" + wzDim.Render("the demo profile is always available later: BARKPARK_SEED_PROFILE=demo make seed") + "\n")
+	b.WriteString("\n" + wzDim.Render("↑/↓ move · enter select · esc quit") + "\n")
+	return b.String()
+}
+
 func (m wizardModel) viewPlugins() string {
 	var b strings.Builder
 	b.WriteString(wzTitle.Render("bp setup → plugins") + "\n\n")
@@ -546,6 +648,9 @@ func (m wizardModel) viewConfirm() string {
 		b.WriteString(wzLabel.Render("region:  ") + " " + dash(p.Region) + "\n")
 		b.WriteString(wzLabel.Render("type:    ") + " " + dash(p.ServerType) + "\n")
 		b.WriteString(wzLabel.Render("domain:  ") + " " + dash(p.Domain) + "\n")
+	}
+	if p.Target != TargetConnect {
+		b.WriteString(wzLabel.Render("profile: ") + " " + profileSummary(p.profileOrDefault()) + "\n")
 	}
 	b.WriteString(wzLabel.Render("plugins: ") + " " + PluginsSummary(p.Plugins) + "\n")
 

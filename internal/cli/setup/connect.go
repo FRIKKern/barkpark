@@ -88,6 +88,9 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		Tier:       tier,
 		ConfigPath: configHint(),
 		Message:    "connected to " + server + " as " + tier + "; bp now defaults here",
+		Profile:    plan.Profile,
+		StudioURL:  server + "/studio",
+		Next:       nextSteps(plan.Profile),
 	})
 	if opts.json() {
 		return nil
@@ -112,7 +115,32 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		fmt.Fprintf(w, "  api:    %s..%s\n", meta.MinAPIVersion, meta.MaxAPIVersion)
 	}
 	writeKnownServersLine(w, opts.KnownServers)
+	writeNextSteps(w, server, plan.Profile)
 	return nil
+}
+
+// writeNextSteps prints the done-screen tail of a successful connect: the
+// Studio URL plus the next-steps cheat block. The welcome-paper line renders
+// only when this connect followed a clean-profile seed (the chaining executor
+// stamps plan.Profile); a pure `--target connect` has no profile and omits it.
+func writeNextSteps(w interface{ Write([]byte) (int, error) }, server, profile string) {
+	fmt.Fprintf(w, "\n  studio:  %s/studio\n", server)
+	fmt.Fprintf(w, "\nnext steps\n")
+	fmt.Fprintf(w, "  bp doc ls                    list documents\n")
+	if profile == ProfileClean {
+		fmt.Fprintf(w, "  bp paper view welcome        read the welcome paper in your terminal\n")
+	}
+	fmt.Fprintf(w, "  bp setup                     re-run this wizard any time\n")
+	fmt.Fprintf(w, "  bp help                      every command (manifest-driven)\n")
+}
+
+// nextSteps is the machine form of the next-steps block for the JSON Result.
+func nextSteps(profile string) []string {
+	next := []string{"bp doc ls"}
+	if profile == ProfileClean {
+		next = append(next, "bp paper view welcome")
+	}
+	return append(next, "bp setup", "bp help")
 }
 
 // writeKnownServersLine prints a tight one-line summary of the connect history.

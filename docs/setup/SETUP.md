@@ -1,6 +1,8 @@
 <!-- doc-tier: human | canonical-for: standalone-setup | budget: 1700tok -->
 # Barkpark — Standalone Setup
 
+> **Installing Barkpark to *use* it?** Start at [`QUICKSTART.md`](QUICKSTART.md) — `curl | sh` + `bp setup`. This guide is for running the Phoenix API **from a clone** (contributors, plugin authors).
+
 > Tested 2026-05-28 on Elixir 1.19.5 / Postgres 17.9 / macOS.
 
 Barkpark is a Phoenix API backed by a PostgreSQL document substrate. This guide takes you from a clean clone to a running server on `localhost:4000`, with a seeded database you can verify. Every command below was run and returned exit 0 in test.
@@ -68,7 +70,16 @@ Locally, always run bare `mix` commands inside `api/`.
 
 ## What seeding produces
 
-Verified counts from a clean database:
+`priv/repo/seeds.exs` dispatches on `BARKPARK_SEED_PROFILE` (`Barkpark.Seeds.run/0`). Raw `mix` defaults to `demo` (everything below); `bp setup` defaults to `clean`:
+
+| | `demo` (mix default) | `clean` (bp setup default) |
+|---|---|---|
+| Schemas | 8 legacy types + plugin schemas | plugin schemas only (paper, media) |
+| Documents | 27 demo docs | 1 welcome paper (`/papers/welcome`) |
+| Token | `barkpark-dev-token` | one admin token, printed ONCE (or minted from `BARKPARK_SEED_ADMIN_TOKEN`) |
+| Codelists | EDItEUR + Thema | none |
+
+Both profiles bootstrap tenancy and are idempotent on re-run. Demo counts, verified from a clean database:
 
 | Object | Count | Notes |
 |---|---|---|
