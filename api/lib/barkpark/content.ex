@@ -460,8 +460,8 @@ defmodule Barkpark.Content do
   by field name with string values, including `"title"` and `"status"`
   baseline keys. Returns `%{}` when `doc` is nil. Used by StudioLive's
   native editor pane — consolidated in Task #11 WI3 from prior
-  duplicates in StudioLive (`doc_to_form`, `doc_data_to_form`),
-  DocumentEditLive (orphan), and the deleted plugin BookEditor.
+  duplicates in StudioLive (`doc_to_form`, `doc_data_to_form`) and the
+  deleted plugin BookEditor.
   """
   @spec doc_to_form(map() | nil, map() | nil) :: map()
   def doc_to_form(nil, _schema), do: %{}

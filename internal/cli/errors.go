@@ -178,7 +178,7 @@ func (e apiError) errorMessage() string {
 		}
 		return "not found"
 	case "unauthorized":
-		return "authentication required (try: barkpark login)"
+		return "authentication required — set BARKPARK_API_TOKEN or run: bp setup --target connect --server <url> --token <token>"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		if e.message != "" {
 			return "forbidden: " + e.message

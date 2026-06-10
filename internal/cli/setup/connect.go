@@ -64,6 +64,9 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	// Reachability + tier probe.
 	tier, srvName, srvVersion, err := probeCapabilities(server, plan.Token)
 	if err != nil {
+		if probe, ok := err.(*probeError); ok && probe.unauthorized {
+			return fmt.Errorf("connect to %s failed: %w\n  hint: the server is reachable but rejected the token — check the token (tier must be at least read)", server, err)
+		}
 		return fmt.Errorf("connect to %s failed: %w\n  hint: check the URL is reachable and the token (if any) is valid", server, err)
 	}
 	meta := probeMeta(server, plan.Token) // best-effort; summary still renders without it
@@ -202,14 +205,31 @@ func knownServersForPlan(known []KnownServerInfo) []PlanKnownServer {
 	return out
 }
 
+// probeError is a typed error returned by probeCapabilities so callers can
+// distinguish a token rejection (HTTP 401) from a general reachability failure.
+type probeError struct {
+	msg         string
+	unauthorized bool // true when the server returned HTTP 401
+}
+
+func (e *probeError) Error() string { return e.msg }
+
 // probeCapabilities GETs /v1/capabilities and returns the caller's resolved tier
 // plus the server identity. A non-2xx or unparseable body is an error — that is
 // the "server unreachable / not a barkpark server" signal connect surfaces.
+// A 401 is returned as a *probeError with unauthorized=true so executeConnect
+// can emit a more specific hint.
 func probeCapabilities(server, token string) (tier, name, version string, err error) {
 	client := apiclient.New(apiclient.Config{BaseURL: server, Token: token})
 	res, gerr := client.GetConditional(server+"/v1/capabilities", "")
 	if gerr != nil {
 		return "", "", "", gerr
+	}
+	if res.StatusCode == 401 {
+		return "", "", "", &probeError{
+			msg:         fmt.Sprintf("GET /v1/capabilities returned status %d", res.StatusCode),
+			unauthorized: true,
+		}
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", "", "", fmt.Errorf("GET /v1/capabilities returned status %d", res.StatusCode)

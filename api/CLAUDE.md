@@ -15,7 +15,6 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 | `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
 | `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:ws/p/:proj` mirror (~:672) |
 | `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
-| `lib/barkpark_web/live/studio/document_edit_live.ex`, `document_list_live.ex` | Editor pane / list pane LiveViews |
 | `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **NOTE: under `studio/`, NOT `live/studio/`** |
 | `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
 | `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |

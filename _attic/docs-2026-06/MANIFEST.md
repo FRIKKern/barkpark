@@ -46,3 +46,5 @@ Gate: no file may move while its row is unchecked.
 | `proof/onix-sample.xml` | ONIX XML sample used in demos; attic with parent `proof/onixedit-full-demo.md` | `_attic/docs-2026-06/` | [x] |
 | `proof/task-38/` (4 files: `allow_with_flag.txt`, `block_no_flag.txt`, `syntax.txt`, `unsafe_still_blocked.txt`) | smoke-test outputs; attic with parent shakedown docs | `_attic/docs-2026-06/` | [x] |
 | `docs/ops/shakedown/remediation-b-smoke/` (3 files: `build.log`, `dev.log`, `install.log`) | remediation smoke logs; attic with parent `docs/ops/shakedown/w4-api-studio.md` | `_attic/docs-2026-06/` | [x] |
+
+| docs/setup/AI-CLI-TASK-WORKFLOW.md | bd/bd-shim-era agent workflow guide; task lifecycle concepts live on in TASK-SYSTEM.md; no unique surviving facts (commands all superseded) | docs/setup/TASK-SYSTEM.md | [x] archived 2026-06-10 |

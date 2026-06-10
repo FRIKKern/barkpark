@@ -81,9 +81,9 @@ Every target supports `--dry-run` (plan only, runs nothing) and `-o json` (one m
 ## Verify
 
 ```bash
-bp whoami
-bp capabilities -o json | head
-curl -s localhost:4000/api/schemas | head -c 200
+bp whoami                                   # active server + auth tier
+bp capabilities -o json | head -c 400       # the API surface, via your saved config
+curl -s localhost:4000/api/schemas | head -c 200   # local target only
 ```
 
 ## Demo data

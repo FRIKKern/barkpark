@@ -144,7 +144,7 @@ bp workspace create Spike
 # → workspace + you as owner-member + a Default project + a production dataset
 #   (slug derived from the name; explicit: --slug spike)
 
-bp workspace project-create spike agents-v2       # member-gated
+bp -w spike workspace project-create agents-v2    # member-gated; -w names the workspace
 bp workspace ls                                   # what your token can reach
 # Raw HTTP equivalents: POST /api/workspaces {"name":…} and
 # POST /api/workspaces/:slug/projects {"name":…} — see docs/cheatsheets/http-api.md

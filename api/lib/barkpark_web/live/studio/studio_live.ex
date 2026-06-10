@@ -4557,6 +4557,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
           <% end %>
 
           <div class="pane-body">
+            <%= if pane.items == [] and pane[:type_name] != nil do %>
+              <div class="text-sm text-muted" style="padding: 20px; text-align: center;">
+                No documents yet — press + to create one
+              </div>
+            <% end %>
             <%= for item <- pane.items do %>
               <%= case item.type do %>
                 <% :divider -> %>

@@ -1,4 +1,5 @@
-<!-- doc-tier: human | canonical-for: ai-cli-task-workflow | budget: 2200tok -->
+ARCHIVED — do not load; superseded by docs/setup/TASK-SYSTEM.md (bd/bd-shim era — every command here predates the bp task verbs and the bulldocs ingest path)
+
 # AI CLI Task Workflow — Paperflow + PortableDoc + Barkpark
 
 > **Tested 2026-05-28 against the live system (bd-shim → barkpark :4000).** Every command and output below was really run against the running stack — nothing is invented. Real `retest-945e28c-*` ids were generalized to `<placeholder>`; the structure is identical to what was tested.

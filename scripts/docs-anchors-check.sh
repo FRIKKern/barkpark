@@ -197,7 +197,7 @@ tripwire '89.167.28.206' \
 tripwire 'v1=<hex>' \
   "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \
-  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/AI-CLI-TASK-WORKFLOW.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
+  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 
 # --- summary ------------------------------------------------------------------
 echo ""

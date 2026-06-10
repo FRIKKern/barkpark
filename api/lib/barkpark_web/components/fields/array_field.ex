@@ -41,10 +41,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :path, :string, default: ""
   attr :readonly, :boolean, default: false
   # Optional `phx-target` for the reorder/add/remove buttons. Defaults to nil —
-  # buttons then bubble to the enclosing LiveView (the original contract used
-  # by DocumentEditLive). When a `Phoenix.LiveComponent.CID` is passed (e.g.
-  # `@myself` from PaperFieldBlock), the buttons target that component so their
-  # `phx-click` events route there instead of the parent LiveView.
+  # buttons then bubble to the enclosing LiveView (StudioLive). When a
+  # `Phoenix.LiveComponent.CID` is passed (e.g. `@myself` from PaperFieldBlock),
+  # the buttons target that component so their `phx-click` events route there
+  # instead of the parent LiveView.
   attr :target, :any, default: nil
 
   def array_field(assigns) do

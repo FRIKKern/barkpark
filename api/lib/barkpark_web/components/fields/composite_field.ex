@@ -358,8 +358,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   defp select_options(_), do: []
 
-  # `text` fields may declare a `rows:` option (see Sanity-style schema and
-  # DocumentEditLive). Falls back to 3 when absent.
+  # `text` fields may declare a `rows:` option (see Sanity-style schema).
+  # Falls back to 3 when absent.
   defp text_rows(%{options: %{"rows" => r}}) when is_integer(r) and r > 0, do: r
   defp text_rows(%{options: %{rows: r}}) when is_integer(r) and r > 0, do: r
   defp text_rows(%{rows: r}) when is_integer(r) and r > 0, do: r

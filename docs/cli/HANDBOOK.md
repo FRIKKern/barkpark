@@ -62,7 +62,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp workspace ls/project-create` | read / scoped_admin |
 | `bp webhook ls/create` | admin / write |
 | `bp plugin ls/settings` | read / admin |
-| `bp bulldogs publish/patch/intents` | ingest |
+| `bp bulldocs publish/patch/intents` | ingest |
 | `bp onixedit export` | admin |
 | `bp task ls/ready/get/claim/close/next` | read (plugin:tasks) |
 
