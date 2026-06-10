@@ -598,7 +598,7 @@ func (m wizardModel) viewProfile() string {
 		}
 		b.WriteString(fmt.Sprintf("%s%-10s %s\n", cursor, label, wzDim.Render(r.blurb)))
 	}
-	b.WriteString("\n" + wzDim.Render("the demo profile is always available later: BARKPARK_SEED_PROFILE=demo make seed") + "\n")
+	b.WriteString("\n" + wzDim.Render("the demo profile is always available later: BARKPARK_SEED_PROFILE=demo mix run priv/repo/seeds.exs (in api/)") + "\n")
 	b.WriteString("\n" + wzDim.Render("↑/↓ move · enter select · esc quit") + "\n")
 	return b.String()
 }

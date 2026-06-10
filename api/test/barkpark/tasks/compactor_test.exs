@@ -458,9 +458,21 @@ defmodule Barkpark.Tasks.CompactorTest do
       new_content = Map.put(claimed.content, "history", gen_history(60))
       _ = set_content!(claimed, new_content)
 
-      # Concurrent compact + close. Compact will see in_progress and skip
-      # (current cycle); close will flip to done. After they both finish,
-      # a fresh compact cycle picks up the now-done row.
+      # Concurrent compact + close. Two interleavings are valid
+      # serializations and the scheduler picks one nondeterministically:
+      #
+      #   (a) compact's eligibility scan runs BEFORE close commits — it
+      #       sees in_progress, selects nothing (0 compacted); the
+      #       follow-up cycle below compacts the now-done row.
+      #   (b) close commits BEFORE compact's scan — the racing cycle
+      #       already sees done+big and compacts it (1 compacted); the
+      #       follow-up cycle finds nothing eligible.
+      #
+      # The invariant under EITHER order: close succeeds, the doc ends
+      # done, and exactly ONE compaction ever happens (one snapshot
+      # revision, one task.compacted event, compacted_at stamped).
+      # Asserting a specific interleaving here was the source of a
+      # seed-dependent flake (e.g. --seed 499257 produced order (b)).
       tasks = [
         fn -> {:compact, Compactor.compact()} end,
         fn ->
@@ -480,13 +492,30 @@ defmodule Barkpark.Tasks.CompactorTest do
       close_result = Enum.find(results, &match?({:close, _}, &1)) |> elem(1)
       assert match?({:ok, _}, close_result), "close must succeed; got #{inspect(close_result)}"
 
+      {:compact, race_compact} = Enum.find(results, &match?({:compact, _}, &1))
+      assert %{skipped: 0} = race_compact
+
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "done"
 
-      # Next compaction cycle picks it up.
-      assert %{compacted: 1, skipped: 0} = Compactor.compact()
+      # A follow-up compaction cycle. If the racing cycle already won
+      # (order (b) above) this finds nothing eligible; otherwise (order
+      # (a)) it performs the one compaction. Exactly one total — never
+      # zero, never two.
+      final_compact = Compactor.compact()
+      assert %{skipped: 0} = final_compact
+
+      assert race_compact.compacted + final_compact.compacted == 1,
+             "exactly one compaction must happen across both cycles; " <>
+               "racing=#{inspect(race_compact)} follow_up=#{inspect(final_compact)}"
+
       final = Repo.get!(Document, task.id)
       assert is_binary(final.content["compacted_at"])
+
+      # Double-compaction guard: one snapshot revision, one event — under
+      # either interleaving.
+      assert length(snapshot_revisions(task.doc_id)) == 1
+      assert length(events_for(task.doc_id, Compactor.event_kinds().compacted)) == 1
     end
   end
 

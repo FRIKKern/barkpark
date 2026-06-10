@@ -15,7 +15,7 @@ bp version
 | `BARKPARK_BIN_DIR` | install dir (default `/usr/local/bin`, fallback `~/.local/bin`) |
 | `BARKPARK_CLI_VERSION` | pin a release, e.g. `1.0.1` (default: latest `cli-v*`) |
 
-Binaries are sha256-verified against the release's `checksums.txt`.
+Binaries are sha256-verified against the release's `checksums.txt` (hard-fail on mismatch; if a release ships no checksums the installer warns and continues).
 
 ## First run
 
@@ -23,7 +23,7 @@ Binaries are sha256-verified against the release's `checksums.txt`.
 bp
 ```
 
-With no config and a real terminal, bare `bp` (or `bp setup`) launches the wizard, then falls through into the TUI. Non-TTY / `-o json` / `--yes` never prompt — `bp setup` without `--target` exits 2 with instructions.
+With no config and a real terminal, bare `bp` launches the wizard and falls through into the TUI; `bp setup` runs the same wizard and exits when done. Non-TTY / `-o json` / `--yes` never prompt — `bp setup` without `--target` exits 2 pointing at `bp setup -h`.
 
 | Target | Effect |
 |---|---|
@@ -91,8 +91,9 @@ curl -s localhost:4000/api/schemas | head -c 200
 Fresh installs seed the clean profile (wizard): a welcome paper at `/papers/welcome`, one admin token, the paper/media schemas — nothing else. The 8-schema / 27-document demo set is opt-in:
 
 ```bash
-bp setup --target local --profile demo --yes    # via bp
-BARKPARK_SEED_PROFILE=demo mix ecto.reset       # raw mix, in api/
+bp setup --target local --profile demo --yes              # via bp
+BARKPARK_SEED_PROFILE=demo mix run priv/repo/seeds.exs    # raw mix, in api/ — additive,
+                                                          # keeps your admin token (ecto.reset would wipe it)
 ```
 
 ## Use it as a task system
@@ -112,7 +113,7 @@ Full guide — agent loop, Studio collaboration, goals/phases, troubleshooting: 
 - `--dry-run` before `--yes`, always.
 - Local DB ops are bare `mix` in `api/` — never `make seed/migrate` (prod wrappers).
 - Deploys take a DNS name in `--domain`, never an IP.
-- The clean seed prints its admin token ONCE — store it (bp saves it to `~/.config/barkpark/config.json`, 0600).
+- The clean seed prints its admin token ONCE — store it (bp saves it to `$XDG_CONFIG_HOME/barkpark/config.json` — default `~/.config` — 0600).
 - Server updates: ssh in, `git pull` (the post-merge hook rebuilds + restarts).
 - Reconfigure by re-running `bp setup`, not by hand-editing `config.json`.
 

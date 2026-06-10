@@ -127,7 +127,7 @@ func TestWizardLocalFlowEntersProfileStage(t *testing.T) {
 		t.Fatalf("local inputs should advance to the profile stage, got %d", m.stage)
 	}
 	view := m.View()
-	for _, want := range []string{"content profile", "Clean", "Demo", "BARKPARK_SEED_PROFILE=demo make seed"} {
+	for _, want := range []string{"content profile", "Clean", "Demo", "BARKPARK_SEED_PROFILE=demo mix run priv/repo/seeds.exs"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("profile view missing %q:\n%s", want, view)
 		}

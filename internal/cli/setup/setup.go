@@ -67,7 +67,7 @@ type SetupPlan struct {
 }
 
 // Seed content profiles. Clean is the default on every bp-driven path; demo
-// stays reachable via --profile demo (or raw mix/make seed, which never set
+// stays reachable via --profile demo (or a raw mix seed run, which never sets
 // BARKPARK_SEED_PROFILE and therefore keep today's behaviour byte-identical).
 const (
 	ProfileClean = "clean"

@@ -29,7 +29,7 @@ The wizard's **clean profile pre-checks the `bulldocs` and `tasks` plugins** (th
 BARKPARK_PLUGINS=bulldocs,tasks    # CSV whitelist · unset = all plugins · empty = kill switch
 ```
 
-- **Server (`deploy.sh` / `bp setup --target deploy`):** pass `BARKPARK_PLUGINS=bulldocs,tasks` in the deploy env — it persists into `/opt/barkpark/.env`, which the systemd unit sources.
+- **Server (`deploy.sh` / `bp setup --target deploy`):** pass `BARKPARK_PLUGINS=bulldocs,tasks` in the deploy env — it persists into `/opt/barkpark/.env`, sourced by `api/start.sh` (the systemd unit's ExecStart).
 - **Docker:** `docker-compose.yml` passes the variable through as a bare `- BARKPARK_PLUGINS` entry — export it in the invoking shell before `docker compose up`.
 - **Local mix:** `BARKPARK_PLUGINS=bulldocs,tasks mix phx.server`.
 
@@ -108,7 +108,7 @@ curl "$API/v1/tasks?lifecycle_status=open&label=sprint-3" -H "Authorization: Bea
 curl "$API/v1/tasks?parent=drafts.g1" -H "Authorization: Bearer $TOKEN"   # a goal's rail, oldest first
 ```
 
-Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit` (default 1000).
+Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit` (index default 1000; `ready` and the bp verbs default 50).
 
 **7. Watch the stream.** Subscribe to `/v1/data/listen/:dataset` (SSE) and react to `task.claimed`, `task.closed`, `task.lease_expired`, etc. — no polling.
 

@@ -41,7 +41,7 @@ bp workspace project-create spike agents-v2
 
 | Surface | What it is |
 |---|---|
-| **`bp` CLI** | One static binary that **is** the whole API — `bp <noun> <verb>`, assembled live from `GET /v1/capabilities`. Same binary as the TUI. |
+| **`bp` CLI** | One static binary that speaks the whole API — `bp <noun> <verb>`, assembled live from `GET /v1/capabilities`. Same binary as the TUI. |
 | **Web Studio** | Multi-pane LiveView desk at `/studio` — drill, filter, edit-with-autosave, publish. Real-time across tabs. |
 | **Terminal TUI** | The same desk in your terminal, keyboard-driven (`barkpark` with no args). |
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutation envelope, SSE change stream. |
