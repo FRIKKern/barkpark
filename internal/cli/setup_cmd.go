@@ -8,6 +8,10 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// init stamps the setup package's BPVersion with the ldflags-injected CLI
+// version so the deploy dry-run's "(embedded in bp <version>)" label is honest.
+func init() { setup.BPVersion = cliVersion }
+
 // configStoreAdapter bridges the cli package's on-disk Config persistence onto
 // the setup package's ConfigStore seam, breaking the would-be import cycle
 // (cli imports setup; setup must not import cli). It loads the existing config

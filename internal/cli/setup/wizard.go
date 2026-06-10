@@ -158,13 +158,13 @@ func (m *wizardModel) buildInputs() {
 		// no text inputs — docker toggle only
 	case TargetDeploy:
 		add("ssh-host", "root@1.2.3.4", "")
-		add("domain", "demo.example.com", "")
+		add("domain", "demo.example.com  (or the server IP + scheme http)", "")
 		add("scheme", "https", "https")
 	case TargetProvision:
 		add("provider", "hetzner | azure", "hetzner")
 		add("region", "nbg1", "")
 		add("server-type", "cax11", "")
-		add("domain", "demo.example.com", "")
+		add("domain", "demo.example.com  (or the server IP + scheme http)", "")
 	}
 	m.inputIdx = 0
 	if len(m.inputs) > 0 {

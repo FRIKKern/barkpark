@@ -39,6 +39,10 @@ jobs:
         with:
           go-version-file: go.mod # honors the pinned go 1.24.2 (chroma)
       - run: go test ./...
+      # Drift guard: the committed go:embed copy of deploy.sh must match the
+      # repo-root canonical script (make cli-build syncs it locally; a hand-run
+      # `go build` from a dirty tree is what this catches).
+      - run: make cli-assets-check
       - name: Derive version from tag
         run: echo "VERSION=${TAG#cli-v}" >> "$GITHUB_ENV"
         env:

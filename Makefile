@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums
+.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -85,12 +85,22 @@ LDFLAGS := -s -w \
   -X $(MODULE)/internal/cli.cliDate=$(DATE)
 CLI_TARGETS := bp-darwin-arm64 bp-darwin-amd64 bp-linux-arm64 bp-linux-amd64
 
-cli-build: ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
+# deploy.sh is go:embedded into bp (internal/cli/setup/assets/) so a
+# curl-installed binary can deploy without a checkout. The canonical script
+# stays at the repo root; sync copies it in before every build, and check is
+# the CI drift guard (cli-release.yml runs it against the committed asset).
+cli-assets-sync: ## Sync deploy.sh into the go:embed asset (internal/cli/setup/assets/)
+	cp deploy.sh internal/cli/setup/assets/deploy.sh
+
+cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root copy
+	cmp deploy.sh internal/cli/setup/assets/deploy.sh
+
+cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
 	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp .
 	@echo ">> Done: dist/bp"
 
-cli-release: ## Cross-compile bp for darwin/linux × arm64/amd64 into dist/
+cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux × arm64/amd64 into dist/
 	@echo ">> Cross-compiling bp $(VERSION) for 4 targets into dist/..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-arm64 .
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-amd64 .

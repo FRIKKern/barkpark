@@ -6,7 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/cli/setup/assets"
 )
+
+// BPVersion is the bp binary version the deploy dry-run shows on the
+// "(embedded in bp <version>)" label. The cli package stamps it from its
+// ldflags-injected cliVersion at init; "dev" for plain go-build binaries.
+var BPVersion = "dev"
 
 // executeDeploy deploys Barkpark to a server the operator already owns over SSH,
 // by streaming the repo's deploy.sh into `bash -s` on the remote with the
@@ -27,27 +34,37 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 	host := normalizeSSHHost(plan.SSHHost)
 	scheme := firstNonEmpty(plan.Scheme, "https")
 	envValue, envSet := PluginsEnvValue(plan.Plugins)
+	profile := plan.profileOrDefault()
 
-	scriptPath, scriptErr := locateDeployScript()
-	// In dry-run we still render even if the script isn't located from cwd —
-	// show the canonical relative path so the plan is informative offline.
+	scriptPath, _ := locateDeployScript()
+	// A checkout's script wins (operators testing local edits); a curl-installed
+	// bp falls back to the go:embedded copy. The dry-run labels the fallback.
 	displayScript := scriptPath
+	embedded := false
 	if displayScript == "" {
-		displayScript = "deploy.sh"
+		displayScript = fmt.Sprintf("deploy.sh (embedded in bp %s)", BPVersion)
+		embedded = true
 	}
 
-	// Build the env prefix the remote bash sees.
+	// Build the env prefix the remote bash sees: the display form (token
+	// redacted) and, on a real clean run, the live form with the generated
+	// admin token. The seed step inherits BARKPARK_SEED_* from this prefix —
+	// deploy.sh itself never generates tokens.
 	envParts := []string{
 		"DOMAIN=" + plan.Domain,
 		"PHX_SCHEME=" + scheme,
+		"BARKPARK_SEED_PROFILE=" + profile,
+	}
+	if profile == ProfileClean {
+		envParts = append(envParts, "BARKPARK_SEED_ADMIN_TOKEN=****")
 	}
 	if envSet {
 		envParts = append(envParts, "BARKPARK_PLUGINS="+envValue)
 	}
-	envPrefix := strings.Join(envParts, " ")
+	displayPrefix := strings.Join(envParts, " ")
 
 	// The remote command: `ssh <host> '<env> bash -s' < deploy.sh`.
-	sshArgv := []string{"ssh", host, envPrefix + " bash -s"}
+	sshArgv := []string{"ssh", host, displayPrefix + " bash -s"}
 	rendered := shJoin(sshArgv) + " < " + displayScript
 
 	publicURL := scheme + "://" + plan.Domain
@@ -61,6 +78,10 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 			fmt.Fprintf(w, "  2. env handed to the remote bash:\n")
 			fmt.Fprintf(w, "      DOMAIN=%s\n", plan.Domain)
 			fmt.Fprintf(w, "      PHX_SCHEME=%s\n", scheme)
+			fmt.Fprintf(w, "      BARKPARK_SEED_PROFILE=%s\n", profile)
+			if profile == ProfileClean {
+				fmt.Fprintf(w, "      BARKPARK_SEED_ADMIN_TOKEN=**** (generated at run time, never shown in a plan)\n")
+			}
 			if envSet {
 				fmt.Fprintf(w, "      BARKPARK_PLUGINS=%s\n", envValue)
 			} else {
@@ -69,7 +90,8 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 			fmt.Fprintf(w, "  3. installer script: %s\n", displayScript)
 			fmt.Fprintf(w, "  4. verify %s/v1/capabilities + %s/studio\n", publicURL, publicURL)
 			fmt.Fprintf(w, "  5. connect bp to %s\n", publicURL)
-			fmt.Fprintf(w, "\n  plugins: %s\n", PluginsSummary(plan.Plugins))
+			fmt.Fprintf(w, "\n  profile: %s\n", profileSummary(profile))
+			fmt.Fprintf(w, "  plugins: %s\n", PluginsSummary(plan.Plugins))
 			fmt.Fprintf(w, "  (no execution — dry run; nothing was sent to %s)\n", host)
 		}
 		return nil
@@ -82,18 +104,44 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 	if !lookExec("ssh") {
 		return fmt.Errorf("setup deploy: `ssh` not found on PATH")
 	}
-	if scriptErr != nil || scriptPath == "" {
-		return fmt.Errorf("setup deploy: could not locate deploy.sh from the working directory\n  run `bp setup --target deploy` from within a barkpark checkout, or cd to the repo root")
+	if embedded {
+		tmp, cleanup, werr := writeEmbeddedDeployScript()
+		if werr != nil {
+			return fmt.Errorf("setup deploy: %w", werr)
+		}
+		defer cleanup()
+		scriptPath = tmp
 	}
 
-	// Stream the installer.
+	// Clean profile: mint the admin token at execute time and thread it into
+	// the seed via the ssh env prefix; the chained connect persists it verified.
+	adminToken := ""
+	realPrefix := displayPrefix
+	if profile == ProfileClean {
+		tok, terr := GenerateAdminToken()
+		if terr != nil {
+			return fmt.Errorf("setup deploy: %w", terr)
+		}
+		adminToken = tok
+		realPrefix = strings.Replace(displayPrefix, "BARKPARK_SEED_ADMIN_TOKEN=****", "BARKPARK_SEED_ADMIN_TOKEN="+adminToken, 1)
+	}
+
+	// Stream the installer (the rendered line keeps the redacted prefix).
 	if !opts.json() {
 		fmt.Fprintf(w, ">> Deploying to %s\n", host)
 		fmt.Fprintf(w, "   %s\n", rendered)
 	}
 	ctx := context.Background()
-	if err := streamSSHInstaller(ctx, w, host, envPrefix, scriptPath); err != nil {
+	if err := streamSSHInstaller(ctx, w, host, realPrefix, scriptPath); err != nil {
 		return fmt.Errorf("setup deploy: installer failed: %w", err)
+	}
+
+	// One-time admin-token banner — before verify/connect so a flaky network
+	// never swallows the only echo of the credential the seed installed.
+	if adminToken != "" && !opts.json() {
+		fmt.Fprintf(w, "\n  admin token (shown once — store it now):\n")
+		fmt.Fprintf(w, "    %s\n", adminToken)
+		fmt.Fprintf(w, "  it is also saved to %s (0600) by the connect step below\n", configHint())
 	}
 
 	// Verify the new server.
@@ -117,14 +165,53 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 		Workspace: plan.Workspace,
 		Project:   plan.Project,
 		Dataset:   plan.Dataset,
+		Profile:   profile,
 	}
-	if err := executeConnect(connectPlan, opts); err != nil {
+	if adminToken != "" {
+		connectPlan.Token = adminToken
+	}
+	connOpts := opts
+	var connResult Result
+	if connOpts.Result == nil {
+		connOpts.Result = &connResult
+	}
+	if err := executeConnect(connectPlan, connOpts); err != nil {
 		return err
+	}
+	if adminToken != "" {
+		if tier := connOpts.Result.Tier; tier != "admin" {
+			return fmt.Errorf("setup deploy: generated admin token resolved tier %q, want admin — the seed may have skipped the token bootstrap (an unrevoked admin token already exists on %s?)", tier, host)
+		}
 	}
 	if opts.Result != nil {
 		opts.Result.Target = TargetDeploy
 	}
 	return nil
+}
+
+// writeEmbeddedDeployScript materialises the go:embedded deploy.sh into a 0700
+// temp file for the ssh stream and returns its path plus the remover.
+func writeEmbeddedDeployScript() (string, func(), error) {
+	f, err := os.CreateTemp("", "bp-deploy-*.sh")
+	if err != nil {
+		return "", nil, fmt.Errorf("write embedded deploy.sh: %w", err)
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := f.Write(assets.DeployScript); err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write embedded deploy.sh: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("write embedded deploy.sh: %w", err)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("chmod embedded deploy.sh: %w", err)
+	}
+	return path, cleanup, nil
 }
 
 // buildDeployPlan builds the structured dry-run plan for deploy. It re-derives
@@ -138,14 +225,18 @@ func buildDeployPlan(plan SetupPlan, _ Options) (Plan, error) {
 	host := normalizeSSHHost(plan.SSHHost)
 	scheme := firstNonEmpty(plan.Scheme, "https")
 	envValue, envSet := PluginsEnvValue(plan.Plugins)
+	profile := plan.profileOrDefault()
 
 	scriptPath, _ := locateDeployScript()
 	displayScript := scriptPath
 	if displayScript == "" {
-		displayScript = "deploy.sh"
+		displayScript = fmt.Sprintf("deploy.sh (embedded in bp %s)", BPVersion)
 	}
 
-	envParts := []string{"DOMAIN=" + plan.Domain, "PHX_SCHEME=" + scheme}
+	envParts := []string{"DOMAIN=" + plan.Domain, "PHX_SCHEME=" + scheme, "BARKPARK_SEED_PROFILE=" + profile}
+	if profile == ProfileClean {
+		envParts = append(envParts, "BARKPARK_SEED_ADMIN_TOKEN=****")
+	}
 	if envSet {
 		envParts = append(envParts, "BARKPARK_PLUGINS="+envValue)
 	}
@@ -160,9 +251,17 @@ func buildDeployPlan(plan SetupPlan, _ Options) (Plan, error) {
 		Destructive:     true, // provisions/restarts a live server
 		RequiresConfirm: true,
 		Plugins:         planPlugins(plan.Plugins),
-		Profile:         plan.profileOrDefault(),
+		Profile:         profile,
 		ConnectTo:       publicURL,
-		Env:             map[string]string{"DOMAIN": plan.Domain, "PHX_SCHEME": scheme},
+		Env: map[string]string{
+			"DOMAIN":                plan.Domain,
+			"PHX_SCHEME":            scheme,
+			"BARKPARK_SEED_PROFILE": profile,
+		},
+	}
+	if profile == ProfileClean {
+		// Generated at execute time; the plan only ever shows the redaction.
+		p.Env["BARKPARK_SEED_ADMIN_TOKEN"] = "****"
 	}
 	if envSet {
 		p.Env["BARKPARK_PLUGINS"] = envValue
