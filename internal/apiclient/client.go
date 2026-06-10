@@ -194,6 +194,24 @@ func (d Doc) ContentString(field string) string {
 	return ""
 }
 
+// ClaimEpoch returns the fencing epoch of this task document's claim object
+// (content.claim.epoch, flattened to the envelope top level as "claim") and
+// whether a live claim is present. Epochs start at 1 on first claim, so 0
+// never names a real claim — absent / unparseable / zero all report ok=false.
+func (d Doc) ClaimEpoch() (int, bool) {
+	raw, ok := d.Extra["claim"]
+	if !ok {
+		return 0, false
+	}
+	var c struct {
+		Epoch int `json:"epoch"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil || c.Epoch <= 0 {
+		return 0, false
+	}
+	return c.Epoch, true
+}
+
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,
 // preferring the top-level "blocks" the live API emits and falling back to a
 // nested "content":{"blocks":[…]} envelope if one is ever present. It returns
@@ -638,6 +656,93 @@ func (c *Client) Delete(typeName, id string) bool {
 		},
 	}
 	return c.Mutate([]map[string]interface{}{mutation}) == nil
+}
+
+// ── Task quick-actions (flat /v1/tasks endpoints) ─────────────────────────────
+
+// taskEnvelope is the {ok, reason, doc} shape every /v1/tasks endpoint returns
+// — on success AND on failure. ok:false rides a 200 (no_ready), a 409
+// (already_claimed / fenced_off), a 404 (not_found) or a 400; the reason
+// string is the contract, not the HTTP status.
+type taskEnvelope struct {
+	OK     bool            `json:"ok"`
+	Reason string          `json:"reason"`
+	Doc    json.RawMessage `json:"doc"`
+}
+
+// taskPost POSTs a JSON payload to a FLAT /v1/tasks path. The task routes are
+// plugin-mounted at the host's TOP-LEVEL /v1 scope (auth: :token_root in
+// plugins/tasks.ex) — NOT under the /w/:workspace/p/:project prefix scopedURL
+// builds; tenancy comes from the bearer token. An ok:false envelope surfaces
+// the server's reason string VERBATIM as the error.
+func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnvelope, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var env taskEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		// Not the envelope (proxy error page, empty body) — fall back to the
+		// HTTP status so the caller still sees something actionable.
+		return nil, fmt.Errorf("task endpoint error %d", resp.StatusCode)
+	}
+	if !env.OK {
+		reason := env.Reason
+		if reason == "" {
+			reason = fmt.Sprintf("task endpoint error %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("%s", reason)
+	}
+	return &env, nil
+}
+
+// TaskClaim claims a task by doc id for workerID via the targeted
+// POST /v1/tasks/:doc_id/claim ({"worker_id": …}). On success it returns the
+// claim's fencing epoch (content.claim.epoch on the returned doc) — the token
+// TaskClose must echo back as observed_epoch.
+func (c *Client) TaskClaim(docID, workerID string) (int, error) {
+	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/claim",
+		map[string]interface{}{"worker_id": workerID})
+	if err != nil {
+		return 0, err
+	}
+	var doc struct {
+		Claim struct {
+			Epoch int `json:"epoch"`
+		} `json:"claim"`
+	}
+	_ = json.Unmarshal(env.Doc, &doc)
+	return doc.Claim.Epoch, nil
+}
+
+// TaskClose closes a claimed task via POST /v1/tasks/:doc_id/close. The server
+// fences on observed_epoch (the epoch the worker saw at claim time — a
+// mismatch returns reason "fenced_off"); lifecycle lands on "done" (the server
+// default, sent explicitly).
+func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
+	_, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
+		map[string]interface{}{
+			"worker_id":        workerID,
+			"observed_epoch":   observedEpoch,
+			"lifecycle_status": "done",
+		})
+	return err
 }
 
 // ListWorkspaces fetches the workspaces the bearer token is a member of via

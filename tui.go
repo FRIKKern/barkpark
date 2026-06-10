@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -108,6 +109,17 @@ type model struct {
 	// from. The prompt reuses m.textInput — the field-edit input mechanics.
 	creating     bool
 	creatingType string
+	// Delete confirm (`D`, two-press arming): the first D on a doc-list row or
+	// an open editor doc arms the confirm (status-bar prompt); the second D
+	// within the armed state deletes. esc disarms silently; any other key
+	// disarms and then handles normally. The target is resolved at ARM time —
+	// the id/type pair below — so the confirm always deletes what was prompted.
+	deleteArmed   bool
+	deleteDocID   string
+	deleteDocType string
+	// workerID is this TUI's task-claim worker identity (BARKPARK_WORKER_ID,
+	// default "tui-<hostname>"), computed once in initialModel.
+	workerID string
 	// Transient status line — surfaces save outcomes (errors + confirmations).
 	// status holds the message; statusErr flags it as a failure (red vs green).
 	// Both are cleared by the next key action so the line stays ephemeral.
@@ -136,6 +148,7 @@ func initialModel(ds *DataStore) model {
 		ds:            ds,
 		width:         120,
 		height:        40,
+		workerID:      workerIdentity(),
 		paperTheme:    theme,
 		paperProfile:  detectPaperProfile(),
 		paperRegistry: pdrender.DefaultRegistry(theme),
@@ -482,28 +495,7 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case DataStoreRefreshMsg:
-		// Remember which document was open so a paper drilled in from a doc-list
-		// survives the rebuild (rebuildPanes nils selectedDoc; the doc-list case
-		// does not restore it). This is what lets a Studio edit re-render live.
-		prevID, prevType, hadEditor := "", "", m.showEditor
-		if m.selectedDoc != nil {
-			prevID, prevType = m.selectedDoc.ID, m.selectedDoc.Type
-		}
-		m.rebuildPanes()
-		// Re-resolve the previously-selected doc against the freshly-queried panes
-		// so its (possibly edited) blocks re-parse. Only needed when rebuildPanes
-		// did not itself restore a selection (the doc-list drill-in case).
-		if hadEditor && m.selectedDoc == nil && prevID != "" {
-			if doc := m.findDocInPanes(prevID, prevType); doc != nil {
-				m.selectedDoc = doc
-				m.editorSchema = findSchema(prevType)
-				m.showEditor = true
-				m.syncSelectedPaper()
-			}
-		}
-		if m.showEditor && m.selectedDoc != nil {
-			m.refreshViewport()
-		}
+		m.refreshDocViews()
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -533,6 +525,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// refreshDocViews re-queries every pane and re-points an open editor at the
+// freshly-fetched copy of the same document. rebuildPanes nils selectedDoc and
+// the doc-list case does not restore it, so the restore here is what lets a
+// Studio edit (or a TUI mutation's optimistic re-query) re-render live —
+// shared by the DataStoreRefreshMsg handler and the task quick-actions.
+func (m *model) refreshDocViews() {
+	prevID, prevType, hadEditor := "", "", m.showEditor
+	if m.selectedDoc != nil {
+		prevID, prevType = m.selectedDoc.ID, m.selectedDoc.Type
+	}
+	m.rebuildPanes()
+	// Re-resolve the previously-selected doc against the freshly-queried panes
+	// so its (possibly edited) blocks re-parse. Only needed when rebuildPanes
+	// did not itself restore a selection (the doc-list drill-in case).
+	if hadEditor && m.selectedDoc == nil && prevID != "" {
+		if doc := m.findDocInPanes(prevID, prevType); doc != nil {
+			m.selectedDoc = doc
+			m.editorSchema = findSchema(prevType)
+			m.showEditor = true
+			m.syncSelectedPaper()
+		}
+	}
+	if m.showEditor && m.selectedDoc != nil {
+		m.refreshViewport()
+	}
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -584,6 +603,21 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshViewport()
 		return m, nil
+	}
+
+	// ── Armed delete confirm: the second D deletes the doc resolved at ARM
+	//    time; esc disarms silently (swallowed — it must not also navigate
+	//    back); any other key disarms and then handles normally below. ──
+	if m.deleteArmed {
+		armedID, armedType := m.deleteDocID, m.deleteDocType
+		m.deleteArmed = false
+		m.deleteDocID, m.deleteDocType = "", ""
+		switch key {
+		case "D":
+			return m.performDelete(armedID, armedType)
+		case "esc":
+			return m, nil
+		}
 	}
 
 	// ── Read-only paper: the editor is a scroll surface, not a field form ──
@@ -779,6 +813,33 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.panes[m.focus.PaneIndex].IsDocList {
 			m.startCreateDoc()
 			return m, textinput.Blink
+		}
+
+	// ── Delete (two-press confirm): the first D arms the status-bar prompt
+	//    for the highlighted doc-list row or the open editor doc; the armed
+	//    branch above handles the second press. ctrl+d was deliberately NOT
+	//    used — it is the paper viewer's half-page-down. ──
+	case "D":
+		if doc, typeName := m.deleteTarget(); doc != nil {
+			m.deleteArmed = true
+			m.deleteDocID = doc.ID
+			m.deleteDocType = typeName
+			m.setStatus(fmt.Sprintf("delete %q? press D again to confirm · esc cancel", doc.Title), true)
+		}
+		return m, nil
+
+	// ── Task quick actions (task doc-lists + an editor holding a task only;
+	//    inert on every other surface) ──
+	case "c":
+		if doc := m.taskTarget(); doc != nil {
+			m.claimTask(doc)
+			return m, nil
+		}
+
+	case "x":
+		if doc := m.taskTarget(); doc != nil {
+			m.closeTask(doc)
+			return m, nil
 		}
 
 	// ── Drill in / start editing ──
@@ -1060,6 +1121,120 @@ func (m model) commitCreateDoc() (tea.Model, tea.Cmd) {
 	}
 	m.setStatus("created "+title, false)
 	return m, nil
+}
+
+// deleteTarget resolves the document a D-press would delete: the highlighted
+// row of the focused doc-list pane, or the open editor doc when the editor has
+// focus. Returns (nil, "") on every other surface (structure panes, dividers,
+// no selection) so D stays inert there.
+func (m model) deleteTarget() (*Doc, string) {
+	if m.focus.Target == FocusEditor && m.selectedDoc != nil && m.editorSchema != nil {
+		return m.selectedDoc, m.editorSchema.Name
+	}
+	if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) {
+		pane := m.panes[m.focus.PaneIndex]
+		if pane.IsDocList && pane.Node != nil && pane.Cursor < len(pane.Items) {
+			if doc := pane.Items[pane.Cursor].Doc; doc != nil {
+				return doc, pane.Node.TypeName
+			}
+		}
+	}
+	return nil, ""
+}
+
+// performDelete deletes the armed document via the delete mutation
+// ({"delete":{"id":…,"type":…}}, matching Content.apply_one's delete arm).
+// The id goes over the wire EXACTLY as listed — drafts. prefix included — per
+// the API contract for drafts vs published rows. If the deleted doc is open
+// in the editor we pop out first; either way the panes re-query so the row
+// disappears now (the SSE refresh will confirm).
+func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
+	if !m.ds.Delete(typeName, docID) {
+		m.setStatus("delete failed", true)
+		return m, nil
+	}
+	if m.showEditor && m.selectedDoc != nil && m.selectedDoc.ID == docID {
+		// Pop out of the deleted doc's editor — there is nothing left to show.
+		m.showEditor = false
+		m.selectedDoc = nil
+		m.editorSchema = nil
+		m.dirty = false
+		m.dirtyValues = nil
+		m.focus = focusState{Target: FocusPane, PaneIndex: maxInt(len(m.panes)-1, 0)}
+		m.rebuildPanes()
+	} else {
+		// Keep any open editor pointed at its (unrelated) doc across the re-query.
+		m.refreshDocViews()
+	}
+	m.setStatus("deleted", false)
+	return m, nil
+}
+
+// taskTarget resolves the doc the task quick-actions (c claim / x close)
+// operate on: the highlighted row of a doc-list pane whose type is "task", or
+// the open editor doc when the editor holds a task. nil everywhere else, so
+// c/x stay inert outside task contexts.
+func (m model) taskTarget() *Doc {
+	if m.focus.Target == FocusEditor && m.selectedDoc != nil &&
+		m.editorSchema != nil && m.editorSchema.Name == "task" {
+		return m.selectedDoc
+	}
+	if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) {
+		pane := m.panes[m.focus.PaneIndex]
+		if pane.IsDocList && pane.Node != nil && pane.Node.TypeName == "task" &&
+			pane.Cursor < len(pane.Items) {
+			return pane.Items[pane.Cursor].Doc
+		}
+	}
+	return nil
+}
+
+// claimTask claims the targeted task for this TUI's worker identity via the
+// flat POST /v1/tasks/:doc_id/claim endpoint. On success the panes re-query
+// (so the fresh doc carries the server's claim object — what closeTask reads
+// the epoch from) and the status bar shows the fencing epoch; an ok:false
+// envelope surfaces the server's reason string verbatim.
+func (m *model) claimTask(doc *Doc) {
+	epoch, err := m.ds.TaskClaim(doc.ID, m.workerID)
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return
+	}
+	m.refreshDocViews()
+	m.setStatus(fmt.Sprintf("claimed (epoch %d)", epoch), false)
+}
+
+// closeTask closes the targeted task via the flat POST /v1/tasks/:doc_id/close
+// endpoint, echoing the claim-time fencing epoch read from the doc's claim
+// object (Extra["claim"].epoch). An unclaimed task errors LOCALLY — the server
+// would only fence it off anyway — and an ok:false envelope surfaces the
+// server's reason verbatim (fenced_off, not_claimed, …).
+func (m *model) closeTask(doc *Doc) {
+	epoch, ok := doc.ClaimEpoch()
+	if !ok {
+		m.setStatus("not claimed — claim first (c)", true)
+		return
+	}
+	if err := m.ds.TaskClose(doc.ID, m.workerID, epoch); err != nil {
+		m.setStatus(err.Error(), true)
+		return
+	}
+	m.refreshDocViews()
+	m.setStatus("closed", false)
+}
+
+// workerIdentity computes the TUI's task-claim worker id once per process:
+// BARKPARK_WORKER_ID when set, else "tui-<hostname>" ("tui-unknown" when the
+// hostname is unreadable).
+func workerIdentity() string {
+	if v := os.Getenv("BARKPARK_WORKER_ID"); v != "" {
+		return v
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return "tui-unknown"
+	}
+	return "tui-" + host
 }
 
 // setStatus stores a transient status-line message. ok=false marks it an error
@@ -1419,8 +1594,13 @@ func (m model) renderHelpBar() string {
 		help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  s scope  esc back"
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
-		// Doc-list pane: surface the n-new affordance, subtle, in hint order.
-		help = " j/k navigate  n new  h/l switch pane  enter select  s scope  esc back  q quit"
+		if node := m.panes[m.focus.PaneIndex].Node; node != nil && node.TypeName == "task" {
+			// Task list: the quick-action verbs lead — claim/close at terminal speed.
+			help = " j/k navigate  c claim  x close  D delete  n new  enter select  esc back"
+		} else {
+			// Doc-list pane: surface the n-new / D-delete affordances, subtle, in hint order.
+			help = " j/k navigate  n new  D delete  h/l switch pane  enter select  s scope  esc back  q quit"
+		}
 	} else {
 		help = " j/k navigate  h/l switch pane  enter select  s scope  esc back  q quit"
 	}
