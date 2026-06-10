@@ -102,6 +102,12 @@ type model struct {
 	textInput   textinput.Model   // text input for current field
 	dirtyValues map[string]string // unsaved field changes (fieldName -> value)
 	dirty       bool              // has unsaved changes
+	// New-document prompt (`n` in a doc-list pane): creating gates the one-line
+	// title input (rendered in the help bar, like a vim command line) and
+	// creatingType holds the schema type of the doc-list pane it was opened
+	// from. The prompt reuses m.textInput — the field-edit input mechanics.
+	creating     bool
+	creatingType string
 	// Transient status line — surfaces save outcomes (errors + confirmations).
 	// status holds the message; statusErr flags it as a failure (red vs green).
 	// Both are cleared by the next key action so the line stays ephemeral.
@@ -541,6 +547,22 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSelectorKey(msg)
 	}
 
+	// ── New-document title prompt: all input goes to the text input ──
+	if m.creating {
+		switch key {
+		case "esc":
+			// Cancel the prompt, discard the typed title.
+			m.creating = false
+		case "enter":
+			return m.commitCreateDoc()
+		default:
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	// ── Editing mode: all input goes to the text input ──
 	if m.editing {
 		switch key {
@@ -623,6 +645,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── Save ──
 	if key == "ctrl+s" && m.focus.Target == FocusEditor && m.dirty {
 		m.saveDocument()
+		m.refreshViewport()
+		return m, nil
+	}
+
+	// ── Publish (publish-only by design: ctrl+p never unpublishes) ──
+	if key == "ctrl+p" && m.focus.Target == FocusEditor {
+		m.publishDocument()
 		m.refreshViewport()
 		return m, nil
 	}
@@ -741,6 +770,15 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus.Target == FocusPane {
 			pane := &m.panes[m.focus.PaneIndex]
 			m.jumpPaneCursor(pane, len(pane.Items)-1)
+		}
+
+	// ── New document (doc-list panes only — a pane that lists documents of a
+	//    type, never a structure pane). Opens the one-line title prompt. ──
+	case "n":
+		if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
+			m.panes[m.focus.PaneIndex].IsDocList {
+			m.startCreateDoc()
+			return m, textinput.Blink
 		}
 
 	// ── Drill in / start editing ──
@@ -925,6 +963,103 @@ func (m *model) saveDocument() {
 	m.dirtyValues = nil
 	m.dirty = false
 	m.setStatus("saved", false)
+}
+
+// publishDocument promotes the selected DRAFT to published via the publish
+// mutation. Publish-only by design: a non-draft document is a silent no-op
+// (the footer renders "published ✓" with no action). Unsaved changes block the
+// publish — the server copies ITS draft to the published id, so unsaved local
+// edits would silently miss the published document.
+func (m *model) publishDocument() {
+	if m.selectedDoc == nil || m.editorSchema == nil || m.selectedDoc.Status != "draft" {
+		return
+	}
+	if m.dirty {
+		m.setStatus("save first (ctrl+s)", true)
+		return
+	}
+	// The mutate contract takes the BARE published id ({"publish":{"id":"x",
+	// "type":"post"}}) — strip the drafts. prefix; the server derives the
+	// drafts. twin itself.
+	id := strings.TrimPrefix(m.selectedDoc.ID, "drafts.")
+	if err := m.ds.Publish(m.editorSchema.Name, id); err != nil {
+		m.setStatus(fmt.Sprintf("publish failed: %v", err), true)
+		return
+	}
+	// Optimistic flip, like saveDocument's in-memory apply — the SSE refresh
+	// will re-query and confirm. The published doc now lives at the bare id.
+	m.selectedDoc.Status = "published"
+	m.selectedDoc.ID = id
+	m.setStatus("published", false)
+}
+
+// startCreateDoc opens the one-line title prompt for a new document of the
+// focused doc-list pane's type. Reuses the field-edit textinput mechanics;
+// the input renders in the help bar (see renderHelpBar's creating branch).
+func (m *model) startCreateDoc() {
+	pane := m.panes[m.focus.PaneIndex]
+	m.creating = true
+	m.creatingType = pane.Node.TypeName
+	m.textInput = textinput.New()
+	m.textInput.Focus()
+	m.textInput.CharLimit = 200
+	m.textInput.Width = maxInt(m.width-30, 20)
+	m.textInput.Prompt = ""
+}
+
+// creatingTypeTitle returns the human title of the schema being created
+// ("Post"), falling back to the machine type name when the schema is unknown.
+func (m model) creatingTypeTitle() string {
+	if s := findSchema(m.creatingType); s != nil && s.Title != "" {
+		return s.Title
+	}
+	return m.creatingType
+}
+
+// commitCreateDoc sends the create mutation for the typed title — with NO _id,
+// so the server assigns drafts.<type>-<n> — then re-queries the panes and
+// drills into the new document's editor. Esc never reaches here (the creating
+// branch handles it); an empty title cancels with an error status.
+func (m model) commitCreateDoc() (tea.Model, tea.Cmd) {
+	m.creating = false
+	title := strings.TrimSpace(m.textInput.Value())
+	if title == "" {
+		m.setStatus("title required", true)
+		return m, nil
+	}
+	id, err := m.ds.Create(m.creatingType, title)
+	if err != nil {
+		m.setStatus(fmt.Sprintf("create failed: %v", err), true)
+		return m, nil
+	}
+	// Optimistic refresh: re-query the panes NOW (the SSE refresh will also
+	// fire) so the new doc appears in its list, then select + drill in.
+	m.rebuildPanes()
+	if doc := m.findDocInPanes(id, m.creatingType); doc != nil {
+		// Park the doc-list cursor on the new doc so esc-back lands on it.
+		for pi := range m.panes {
+			pane := &m.panes[pi]
+			if !pane.IsDocList {
+				continue
+			}
+			for ii := range pane.Items {
+				if pane.Items[ii].Doc != nil && pane.Items[ii].Doc.ID == id {
+					pane.Cursor = ii
+					m.focus = focusState{Target: FocusPane, PaneIndex: pi}
+					m.syncPaneScroll(pane)
+				}
+			}
+		}
+		m.selectedDoc = doc
+		m.editorSchema = findSchema(m.creatingType)
+		m.showEditor = true
+		m.focus.Target = FocusEditor
+		m.fieldCursor = 0
+		m.syncSelectedPaper()
+		m.resetViewport()
+	}
+	m.setStatus("created "+title, false)
+	return m, nil
 }
 
 // setStatus stores a transient status-line message. ok=false marks it an error
@@ -1249,6 +1384,14 @@ func (m model) renderToolbar() string {
 // ── Help bar ─────────────────────────────────────────────────────────────────
 
 func (m model) renderHelpBar() string {
+	// New-document title prompt takes over the bar (vim-command-line style):
+	// the one-line input lives HERE, in the chrome row, not in a pane.
+	if m.creating {
+		prompt := dimStyle.Render(" Title for new "+m.creatingTypeTitle()+": ") + m.textInput.View()
+		prompt = ansi.Truncate(prompt, m.width, "…")
+		return toolbarStyle.Width(m.width).MaxHeight(1).Render(prompt)
+	}
+
 	// A pending status message takes over the bar — a failed save (red) or a
 	// "saved" confirmation (green) must be impossible to miss.
 	if m.status != "" {
@@ -1273,7 +1416,11 @@ func (m model) renderHelpBar() string {
 	} else if m.focus.Target == FocusEditor && m.isCurrentPaper() {
 		help = " j/k scroll  ctrl+d/u half-page  g/G top/bottom  read-only  esc back"
 	} else if m.focus.Target == FocusEditor {
-		help = " j/k fields  enter edit  space toggle  ctrl+s save  s scope  esc back"
+		help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  s scope  esc back"
+	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
+		m.panes[m.focus.PaneIndex].IsDocList {
+		// Doc-list pane: surface the n-new affordance, subtle, in hint order.
+		help = " j/k navigate  n new  h/l switch pane  enter select  s scope  esc back  q quit"
 	} else {
 		help = " j/k navigate  h/l switch pane  enter select  s scope  esc back  q quit"
 	}
@@ -1684,15 +1831,30 @@ func (m model) buildEditorContent(width int) string {
 	lines = append(lines, dividerStyle.Render(" "+strings.Repeat("─", maxInt(width-4, 0))))
 
 	footerLeft := dimStyle.Render(fmt.Sprintf("  Edited %s", timeAgo(m.selectedDoc.UpdatedAt)))
+
+	// Publish affordance reflects the doc's real state (the old static
+	// "Publish" button was wired to nothing): a draft advertises the ctrl+p
+	// binding; a published doc shows a dim, action-free checkmark; any other
+	// status (e.g. a select-field "active") shows neither.
+	var publishBtn string
+	switch m.selectedDoc.Status {
+	case "draft":
+		publishBtn = publishBtnStyle.Render("Ctrl+P publish")
+	case "published":
+		publishBtn = dimStyle.Render("published ✓")
+	}
+
 	var footerRight string
 	if m.dirty {
 		footerRight = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f59e0b")).Bold(true).
 			Render("* Unsaved") + "  " +
-			dimStyle.Render("Ctrl+S save") + "  " +
-			publishBtnStyle.Render("Publish")
+			dimStyle.Render("Ctrl+S save")
+		if publishBtn != "" {
+			footerRight += "  " + publishBtn
+		}
 	} else {
-		footerRight = publishBtnStyle.Render("Publish")
+		footerRight = publishBtn
 	}
 	gap := width - lipgloss.Width(footerLeft) - lipgloss.Width(footerRight) - 4
 	if gap < 0 {

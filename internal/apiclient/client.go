@@ -434,17 +434,37 @@ func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult,
 	return res, nil
 }
 
+// MutationResult is one entry of the mutate endpoint's "results" array: the
+// (possibly server-assigned) document id, the applied operation, and the
+// resulting document envelope. The mutate controller responds with
+// {"transactionId": …, "results": [{"id": …, "operation": …, "document": …}]}.
+type MutationResult struct {
+	ID        string          `json:"id"`
+	Operation string          `json:"operation"`
+	Document  json.RawMessage `json:"document"`
+}
+
 // Mutate sends a mutation to the Phoenix API (Sanity format).
 func (c *Client) Mutate(mutations []map[string]interface{}) error {
+	_, err := c.MutateResults(mutations)
+	return err
+}
+
+// MutateResults sends a mutation batch and returns the per-mutation results.
+// Callers that need the server's outcome (e.g. Create, which needs the
+// generated drafts.<type>-<n> id back) use this; Mutate keeps the legacy
+// error-only signature. A success response whose body fails to decode returns
+// nil results, not an error — the mutation itself committed.
+func (c *Client) MutateResults(mutations []map[string]interface{}) ([]MutationResult, error) {
 	endpoint := c.scopedURL("/v1/data/mutate/" + c.Dataset)
 	body, err := json.Marshal(map[string]interface{}{"mutations": mutations})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
@@ -453,15 +473,57 @@ func (c *Client) Mutate(mutations []map[string]interface{}) error {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("mutation error %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("mutation error %d: %s", resp.StatusCode, string(respBody))
 	}
-	return nil
+
+	var out struct {
+		Results []MutationResult `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, nil
+	}
+	return out.Results, nil
+}
+
+// Publish promotes a document's draft to published via the publish mutation.
+// id is the BARE published id (no "drafts." prefix), matching the documented
+// mutate contract ({"publish":{"id":"x","type":"post"}}); the server's
+// Content.publish_document derives the drafts. twin itself.
+func (c *Client) Publish(typeName, id string) error {
+	mutation := map[string]interface{}{
+		"publish": map[string]interface{}{
+			"id":   id,
+			"type": typeName,
+		},
+	}
+	return c.Mutate([]map[string]interface{}{mutation})
+}
+
+// Create creates a NEW draft document with a server-assigned id: a create
+// mutation carrying no _id makes Content.create_document generate
+// "<type>-<n>" and prefix "drafts.". The assigned draft id is returned from
+// the mutate results so the caller can select the new document.
+func (c *Client) Create(typeName, title string) (string, error) {
+	mutation := map[string]interface{}{
+		"create": map[string]interface{}{
+			"_type": typeName,
+			"title": title,
+		},
+	}
+	results, err := c.MutateResults([]map[string]interface{}{mutation})
+	if err != nil {
+		return "", err
+	}
+	if len(results) == 0 || results[0].ID == "" {
+		return "", fmt.Errorf("create: server returned no document id")
+	}
+	return results[0].ID, nil
 }
 
 // Query fetches documents from the API by type, with optional filter.

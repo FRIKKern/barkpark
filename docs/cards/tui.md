@@ -10,6 +10,8 @@ Constraint (D12): documents whose schema uses v2 field types (composite / arrayO
 - **Parity rule:** a new block type must land in all three renderers — `Barkpark.PortableDoc.Render.render_html/2` (server HTML), the paper-surface CSS in `api/lib/barkpark_web/layouts/root.html.heex` (`.bp-paper-surface`), and pdrender (terminal). Don't ship one without the others.
 - **HARD pin: `go.mod` stays `go 1.24.2`** — chroma is pinned v2.20.0, and the prod post-merge hook builds the Go TUI on the server. Do not bump.
 
+Editing: v1 fields inline; `ctrl+s` save · `ctrl+p` publish (drafts) · `n` new doc (list panes).
+
 ## Code anchors
 - tui.go — func Update, func buildEditorContent
 - paper.go — func buildPaperContent, func isPaper
