@@ -45,7 +45,18 @@ Endpoints marked **[public]** work without a token (restricted by schema visibil
 
 ## 3. Document Envelope
 
-Every document is returned as a flat JSON object. Reserved keys:
+Every response body wraps its payload under a `result` key, alongside four outer metadata keys:
+
+| Outer key | Type | Description |
+|-----------|------|-------------|
+| `schemaHash` | string | Hex digest of the dataset's schema at response time; changes when any schema changes. Use for schema-sensitive cache keys. |
+| `etag` | string | Content fingerprint; use with `If-None-Match` for conditional GET (304 Not Modified). |
+| `ms` | integer | Server processing time in milliseconds. |
+| `syncTags` | string[] | Cache-tag hints for on-demand ISR revalidation (e.g. `["bp:ds:production:type:post","bp:ds:production:doc:p1"]`). |
+
+For query responses, `result` is an object `{count, offset, limit, perspective, documents:[...]}`. For single-doc responses, `result` is the document envelope object. See Sections 4 and 5 for examples.
+
+**Document envelope keys** (the object inside `result` for a single doc, or each element of `result.documents` for queries):
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -59,26 +70,7 @@ Every document is returned as a flat JSON object. Reserved keys:
 
 All other keys come from stored document content plus `title`. User fields cannot override reserved keys — they are silently dropped on write.
 
-**Example:**
-
-```bash
-curl localhost:4000/w/acme/p/web/v1/data/doc/production/post/p1 | jq
-```
-
-```json
-{
-  "_id": "p1",
-  "_type": "post",
-  "_rev": "a3f8c2d1e9b04567f2a1c3e5d7890abc",
-  "_draft": false,
-  "_publishedId": "p1",
-  "_createdAt": "2026-04-12T09:11:20Z",
-  "_updatedAt": "2026-04-12T10:03:45Z",
-  "title": "Hello World",
-  "status": "published",
-  "category": "Tech"
-}
-```
+See Section 5 for a concrete single-doc response example.
 
 ---
 
@@ -104,15 +96,21 @@ List documents. Returns 404 if the schema's `visibility` is `"private"` (and 404
 
 ```json
 {
-  "perspective": "published",
-  "documents": [ /* array of envelopes */ ],
-  "count": 3,
-  "limit": 100,
-  "offset": 0
+  "result": {
+    "perspective": "published",
+    "documents": [ /* array of document envelopes */ ],
+    "count": 3,
+    "limit": 100,
+    "offset": 0
+  },
+  "schemaHash": "a96f9af3ab66badc",
+  "etag": "b0c8615a3f8ce2363e3d64725adb2736",
+  "ms": 2,
+  "syncTags": ["bp:ds:production:type:post"]
 }
 ```
 
-`count` is the number of documents returned in this response (not the total in the dataset).
+`result.count` is the number of documents returned in this response (not the total in the dataset). The outer `schemaHash`, `etag`, `ms`, and `syncTags` are described in Section 3.
 
 **Example:**
 
@@ -122,32 +120,18 @@ curl "localhost:4000/w/acme/p/web/v1/data/query/production/post?limit=2&order=_c
 
 ```json
 {
-  "perspective": "published",
-  "documents": [
-    {
-      "_id": "p2",
-      "_type": "post",
-      "_rev": "b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6",
-      "_draft": false,
-      "_publishedId": "p2",
-      "_createdAt": "2026-04-13T08:00:00Z",
-      "_updatedAt": "2026-04-13T08:00:00Z",
-      "title": "Second Post"
-    },
-    {
-      "_id": "p1",
-      "_type": "post",
-      "_rev": "a3f8c2d1e9b04567f2a1c3e5d7890abc",
-      "_draft": false,
-      "_publishedId": "p1",
-      "_createdAt": "2026-04-12T09:11:20Z",
-      "_updatedAt": "2026-04-12T10:03:45Z",
-      "title": "Hello World"
-    }
-  ],
-  "count": 2,
-  "limit": 2,
-  "offset": 0
+  "result": {
+    "perspective": "published",
+    "documents": [{ "_id": "p2", "_type": "post", "title": "Second Post", "..." : "..." },
+                  { "_id": "p1", "_type": "post", "title": "Hello World", "..." : "..." }],
+    "count": 2,
+    "limit": 2,
+    "offset": 0
+  },
+  "schemaHash": "a96f9af3ab66badc",
+  "etag": "b0c8615a3f8ce2363e3d64725adb2736",
+  "ms": 1,
+  "syncTags": ["bp:ds:production:type:post", "bp:ds:production:doc:p2", "bp:ds:production:doc:p1"]
 }
 ```
 
@@ -157,7 +141,7 @@ curl "localhost:4000/w/acme/p/web/v1/data/query/production/post?limit=2&order=_c
 
 > Flat alias: `GET /v1/data/doc/:dataset/:type/:doc_id` → resolves the `Default` workspace + project.
 
-Fetch a single document by id. Returns the envelope directly at the top level (no wrapper object). Returns 404 if not found or if the schema's `visibility` is `"private"`.
+Fetch a single document by id. Returns the document envelope inside `result`, with the same outer metadata keys (`schemaHash`, `etag`, `ms`, `syncTags`) as every other endpoint. Returns 404 if not found or if the schema's `visibility` is `"private"`.
 
 **Example:**
 
@@ -181,19 +165,14 @@ When a query or doc request carries `?expand=true` (or `?expand=author,category`
 
 ```json
 {
-  "documents": [
-    {
-      "_id": "p1",
-      "_type": "post",
-      "title": "Hello",
-      "author": {
-        "_id": "a1",
-        "_type": "author",
-        "title": "Jane",
-        "category": "c1"
-      }
-    }
-  ]
+  "result": {
+    "documents": [{
+      "_id": "p1", "_type": "post", "title": "Hello",
+      "author": { "_id": "a1", "_type": "author", "title": "Jane", "category": "c1" }
+    }],
+    "count": 1, "limit": 1, "offset": 0, "perspective": "published"
+  },
+  "schemaHash": "...", "etag": "...", "ms": 2, "syncTags": ["..."]
 }
 ```
 

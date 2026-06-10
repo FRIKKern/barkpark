@@ -13,12 +13,28 @@ const DATASET = barkparkClient.config.dataset
 // '/w/<workspace>/p/<project>' when both are set on the client, else '' (flat /v1).
 const SCOPE = scopePrefix(barkparkClient.config)
 
+export interface QueryResult<T> {
+  count: number
+  offset: number
+  limit: number
+  perspective: string
+  documents: T[]
+}
+
 export interface DocEnvelope<T> {
   result: T | null
+  schemaHash?: string
+  etag?: string
+  ms?: number
+  syncTags?: string[]
 }
 
 export interface QueryEnvelope<T> {
-  result: T[]
+  result: QueryResult<T>
+  schemaHash?: string
+  etag?: string
+  ms?: number
+  syncTags?: string[]
 }
 
 async function fetchJson<T>(path: string, tags: string[], draft = false): Promise<T> {
@@ -50,7 +66,7 @@ export async function getDocs<T>(
     [`bp:ds:${DATASET}:type:${type}`],
     opts.perspective === 'drafts' || opts.perspective === 'raw',
   )
-  return env.result ?? []
+  return env.result?.documents ?? []
 }
 
 export async function countDocs(type: string): Promise<number> {
@@ -75,5 +91,5 @@ export async function getDocBySlug<T>(type: string, slug: string, draft = false)
     [`bp:ds:${DATASET}:type:${type}`],
     draft,
   )
-  return env.result?.[0] ?? null
+  return env.result?.documents?.[0] ?? null
 }
