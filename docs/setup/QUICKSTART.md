@@ -1,0 +1,107 @@
+<!-- doc-tier: human | canonical-for: quickstart | budget: 1400tok -->
+# Quickstart
+
+From nothing to a running Barkpark with a clean paper + media workspace. Three routes, one wizard. Written 2026-06-10 against the premium-setup branch; commands marked (wizard) ship with that train.
+
+## Install bp
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp version
+```
+
+| Env | Effect |
+|---|---|
+| `BARKPARK_BIN_DIR` | install dir (default `/usr/local/bin`, fallback `~/.local/bin`) |
+| `BARKPARK_CLI_VERSION` | pin a release, e.g. `1.0.1` (default: latest `cli-v*`) |
+
+Binaries are sha256-verified against the release's `checksums.txt`.
+
+## First run
+
+```bash
+bp
+```
+
+With no config and a real terminal, bare `bp` (or `bp setup`) launches the wizard, then falls through into the TUI. Non-TTY / `-o json` / `--yes` never prompt — `bp setup` without `--target` exits 2 with instructions.
+
+| Target | Effect |
+|---|---|
+| `connect` | point bp at an existing server (non-destructive) |
+| `local` | bring up a dev server on this machine |
+| `deploy` | install on a server you own over SSH |
+| `provision` | create a cloud host (hetzner / azure), then deploy |
+
+## Local
+
+```bash
+bp setup --target local --yes
+```
+
+**Destructive: runs `mix ecto.reset`.** Native `mix` by default; `--docker` uses compose. With no checkout above the cwd, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
+
+| Need | Why |
+|---|---|
+| Elixir/mix + git | build + clone |
+| Postgres on `:5432` | the store — role gotcha: [SETUP.md](SETUP.md) |
+| libvips | media probing (warn-only) |
+
+## Deploy
+
+```bash
+bp setup --target deploy --ssh-host root@VPS_IP --domain api.example.com --yes
+```
+
+`--domain` must be the public DNS name — baking an IP behind an HTTPS name click-kills the Studio (`check_origin`; see [../ops/PROD_OPS.md](../ops/PROD_OPS.md)). Lands on the box: ASDF Erlang/Elixir, Postgres, the systemd `barkpark` unit.
+
+## Connect
+
+```bash
+bp setup --target connect --server https://api.example.com --token $TOKEN
+```
+
+Re-running connect with no `--server` reconnects to the active saved server. `bp servers` lists saved servers; `bp use <name>` switches; `--name` saves a handle.
+
+## Provision
+
+```bash
+bp setup --target provision --provider hetzner --dry-run
+```
+
+Staged: plans only unless the provider CLI (`hcloud` / `az`), a credential, and `--yes` are all present. Chains into deploy.
+
+## Headless / CI
+
+```bash
+bp setup --target local --dry-run -o json | jq .profile   # → "clean"
+```
+
+Every target supports `--dry-run` (plan only, runs nothing) and `-o json` (one machine-readable object).
+
+## Verify
+
+```bash
+bp whoami
+bp capabilities -o json | head
+curl -s localhost:4000/api/schemas | head -c 200
+```
+
+## Demo data
+
+Fresh installs seed the clean profile (wizard): a welcome paper at `/papers/welcome`, one admin token, the paper/media schemas — nothing else. The 8-schema / 27-document demo set is opt-in:
+
+```bash
+bp setup --target local --profile demo --yes    # via bp
+BARKPARK_SEED_PROFILE=demo mix ecto.reset       # raw mix, in api/
+```
+
+## Golden path
+
+- `--dry-run` before `--yes`, always.
+- Local DB ops are bare `mix` in `api/` — never `make seed/migrate` (prod wrappers).
+- Deploys take a DNS name in `--domain`, never an IP.
+- The clean seed prints its admin token ONCE — store it (bp saves it to `~/.config/barkpark/config.json`, 0600).
+- Server updates: ssh in, `git pull` (the post-merge hook rebuilds + restarts).
+- Reconfigure by re-running `bp setup`, not by hand-editing `config.json`.
+
+Canon: [`../cli/HANDBOOK.md`](../cli/HANDBOOK.md) (bp semantics) · [`SETUP.md`](SETUP.md) (from-source) · [`../ops/PROD_OPS.md`](../ops/PROD_OPS.md) (server ops).

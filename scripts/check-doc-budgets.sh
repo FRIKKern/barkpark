@@ -48,6 +48,10 @@ docs/contracts/webhook-realtime.md 3200
 docs/contracts/schema-v2.md 7200
 README.md 6000
 docs/ops/PROD_OPS.md 6000
+docs/setup/QUICKSTART.md 6000
+docs/cheatsheets/bp.md 2400
+docs/cheatsheets/http-api.md 2400
+docs/cheatsheets/papers.md 2400
 CAPS
 
 # --- cards: each <= 2400 B, count must equal exactly 7 (G2, A6) -------------
