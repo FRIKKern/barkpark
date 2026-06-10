@@ -33,7 +33,10 @@ on:
 
 concurrency:
   group: elixir-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
+  # otherwise starves the suite (2026-06-10: 19 consecutive main runs
+  # cancelled, zero completions all day). Queued main runs collapse to one.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   format:
