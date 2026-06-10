@@ -46,7 +46,7 @@ bp workspace project-create spike agents-v2
 | **Terminal TUI** | The same desk in your terminal, keyboard-driven (`barkpark` with no args). |
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutation envelope, SSE change stream. |
 
-Stack: Elixir 1.15+ / Phoenix LiveView 1.1 / PostgreSQL / Oban · Go 1.24+ (CLI + TUI, one binary) · Caddy. 2300+ mix tests, 89 HTTP integration tests.
+Stack: Elixir 1.15+ / Phoenix LiveView 1.1 / PostgreSQL / Oban · Go 1.24+ (CLI + TUI, one binary) · Caddy. 2400+ mix tests, 89 HTTP integration tests.
 
 ## Design philosophy
 
