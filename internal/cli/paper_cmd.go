@@ -154,11 +154,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 	})
 
 	// Fetch every paper, then match the slug. The query endpoint's `filter` param
-	// is a no-op on this server, and apiclient.Doc decodes only "id" (the API
-	// emits "_id"), so we go through the RAW query body to get the real _id/slug/
-	// title for matching and the not-found slug list. The matched raw doc is then
-	// decoded into an apiclient.Doc so Doc.PaperBlocks() drives the render, per
-	// the M0 client contract.
+	// is a no-op on this server, so we go through the RAW query body to get the
+	// _id/slug/title for matching and the not-found slug list. (apiclient.Doc now
+	// also normalizes "_id" into Doc.ID, but the raw path stays — it needs every
+	// doc's slug, not just the typed subset.) The matched raw doc is then decoded
+	// into an apiclient.Doc so Doc.PaperBlocks() drives the render, per the M0
+	// client contract.
 	raws, qerr := paperFetchAll(client, perspective)
 	if qerr != nil {
 		return paperError(out, jsonOut, "query", fmt.Sprintf("query papers failed: %v", qerr), exitGeneric)
@@ -406,8 +407,9 @@ func paperTermenvProfile(p pdrender.Profile) termenv.Profile {
 
 // paperRefResolver is the field-reference seam: given a referenced doc id and
 // its refType it returns that doc's TITLE for display, falling back to the raw
-// id on any miss. It resolves through the RAW query body (apiclient.Doc loses
-// the _id — the API emits "_id", Doc decodes "id"), keyed by the real _id. Each
+// id on any miss. It resolves through the RAW query body, keyed by the real
+// _id. (Predates Doc's "_id" normalization; kept — it is correct and avoids
+// decoding every doc through the typed seam just for an id→title map.) Each
 // distinct refType is fetched once and memoised into an id→title map, so a paper
 // with many references to the same type costs one query. A nil-safe, never-block
 // render: an unreachable server or unknown type just yields the id.
