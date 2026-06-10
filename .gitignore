@@ -17,7 +17,6 @@ bin/*
 erl_crash.dump
 
 # Go
-go.sum
 vendor/
 
 # bp CLI release binaries (cross-compile artifacts — `make cli-release`)
