@@ -138,7 +138,7 @@ Goal → phases → leaf tasks, with `blocks` edges sequencing the phases, gives
 
 ## Workspaces, projects, datasets — experiment without mess
 
-Spin up an isolated sandbox in one command; throw the whole thing away later. Any write-tier token may create a workspace — it arrives ready to use:
+Spin up an isolated sandbox in one command — experiments stay fully isolated from your real work (deleting a whole workspace is on the [deferred ledger](../decisions/deferred.md); today spikes are abandoned in place, never leaked). Any write-tier token may create a workspace — it arrives ready to use:
 
 ```bash
 bp workspace create Spike
