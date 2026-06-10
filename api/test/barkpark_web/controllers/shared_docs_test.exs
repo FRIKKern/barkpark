@@ -511,4 +511,72 @@ defmodule BarkparkWeb.SharedDocsTest do
       assert result["related"]["title"] == "Draft Target Body"
     end
   end
+
+  describe "(f) an AUTHENTICATED member is NEVER downgraded by a read share" do
+    # Regression for the live 2026-06-10 finding: with a `:docs:read` share on
+    # the scope, the share grant fired for EVERY safe-read — including the
+    # scope's own members carrying a valid token — so `read_share?/1` pinned
+    # their reads to published and 404'd `drafts.` ids. The TUI (perspective=
+    # drafts on the scoped routes) lost every draft the moment a share existed.
+    # A verified token must now bypass the grant entirely; the membership gate
+    # decides, with full drafts visibility.
+
+    test "authed GET query ?perspective=drafts STILL surfaces the draft", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:docs:read")
+      raw = with_token(ws)
+
+      body =
+        conn
+        |> authed(raw)
+        |> get(query_path(ws, project) <> "?perspective=drafts")
+        |> json_response(200)
+
+      ids = Enum.map(body["result"]["documents"], & &1["_id"])
+      assert "drafts.d1" in ids
+    end
+
+    test "authed GET doc by `drafts.<id>` STILL returns 200", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:docs:read")
+      raw = with_token(ws)
+
+      body =
+        conn
+        |> authed(raw)
+        |> get(doc_path(ws, project, "drafts.d1"))
+        |> json_response(200)
+
+      assert body["result"]["_id"] == "drafts.d1"
+      assert body["result"]["title"] == "Draft Only Post"
+    end
+
+    test "the ANONYMOUS caller on the same share stays pinned to published", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:docs:read")
+
+      # The token-bypass must not widen anonymous access one inch: no token ⇒
+      # the grant still fires ⇒ drafts stay invisible on both read shapes.
+      body =
+        conn
+        |> get(query_path(ws, project) <> "?perspective=drafts")
+        |> json_response(200)
+
+      ids = Enum.map(body["result"]["documents"], & &1["_id"])
+      refute "drafts.d1" in ids
+
+      conn
+      |> get(doc_path(ws, project, "drafts.d1"))
+      |> json_response(404)
+    end
+  end
 end

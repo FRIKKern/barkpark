@@ -97,10 +97,22 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
     project_slug = conn.path_params["project_slug"]
     dataset = conn.path_params["dataset"] || @default_dataset
 
+    # An AUTHENTICATED caller never takes the share grant: a verified token
+    # (assigned by OptionalToken, which runs before this plug in every
+    # pipeline that mounts it) means the normal membership gate decides
+    # access — with full drafts/raw visibility for a member. Without this
+    # guard, creating a `:read` share silently DOWNGRADED the scope's own
+    # members on these routes: `read_share?/1` pinned their reads to the
+    # published perspective and 404'd every `drafts.` doc-id (found live
+    # 2026-06-10 — the TUI lost all drafts the moment a share existed). An
+    # invalid/revoked token gets no :api_token assign, so it still reads at
+    # anonymous share grade.
+    #
     # `Sharing.shared?/4` is strict default-deny: a nil/garbage slug, an
     # unconfigured registry, or a non-matching scope all return false, and it
     # never raises. Only a true result even considers granting.
-    if Sharing.shared?(ws_slug, project_slug, dataset, surface) do
+    if is_nil(conn.assigns[:api_token]) and
+         Sharing.shared?(ws_slug, project_slug, dataset, surface) do
       grant_if_resolvable(conn, ws_slug, project_slug, dataset)
     else
       conn
