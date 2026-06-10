@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: quickstart | budget: 1400tok -->
 # Quickstart
 
-From nothing to a running Barkpark with a clean paper + media workspace. Three routes, one wizard. Written 2026-06-10 against the premium-setup branch; commands marked (wizard) ship with that train.
+From nothing to a running Barkpark with a clean paper + media workspace. Three routes, one wizard. Written 2026-06-10 against the premium-setup branch; commands marked (wizard) ship with that release.
 
 ## Install bp
 
@@ -23,7 +23,7 @@ Binaries are sha256-verified against the release's `checksums.txt` (hard-fail on
 bp
 ```
 
-With no config and a real terminal, bare `bp` launches the wizard and falls through into the TUI; `bp setup` runs the same wizard and exits when done. Non-TTY / `-o json` / `--yes` never prompt — `bp setup` without `--target` exits 2 pointing at `bp setup -h`.
+With no config and a real terminal, bare `bp` launches the wizard and falls through into the TUI; `bp setup` runs the same wizard and exits when done. Non-TTY / `-o json` / `--yes` never prompt — `bp setup` without `--target` exits with code 2 and directs you to `bp setup -h`.
 
 | Target | Effect |
 |---|---|
@@ -38,7 +38,7 @@ With no config and a real terminal, bare `bp` launches the wizard and falls thro
 bp setup --target local --yes
 ```
 
-**Destructive: runs `mix ecto.reset`.** Native `mix` by default; `--docker` uses compose. With no checkout above the cwd, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
+**Destructive: runs `mix ecto.reset`.** Native `mix` by default; `--docker` uses compose. With no existing checkout in a parent directory, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
 
 | Need | Why |
 |---|---|
@@ -52,7 +52,7 @@ bp setup --target local --yes
 bp setup --target deploy --ssh-host root@VPS_IP --domain api.example.com --yes
 ```
 
-`--domain` must be the public DNS name — baking an IP behind an HTTPS name click-kills the Studio (`check_origin`; see [../ops/PROD_OPS.md](../ops/PROD_OPS.md)). Lands on the box: ASDF Erlang/Elixir, Postgres, the systemd `barkpark` unit.
+`--domain` must be the public DNS name — baking an IP behind an HTTPS name will break the Studio (`check_origin`; see [../ops/PROD_OPS.md](../ops/PROD_OPS.md)). Lands on the box: ASDF Erlang/Elixir, Postgres, the systemd `barkpark` unit.
 
 ## Connect
 
@@ -114,7 +114,7 @@ Full guide — agent loop, Studio collaboration, goals/phases, troubleshooting: 
 - `--dry-run` before `--yes`, always.
 - Local DB ops are bare `mix` in `api/` — never `make seed/migrate` (prod wrappers).
 - Deploys take a DNS name in `--domain`, never an IP.
-- The clean seed prints its admin token ONCE — store it (bp saves it to `$XDG_CONFIG_HOME/barkpark/config.json` — default `~/.config` — 0600).
+- The clean seed prints its admin token **once** — store it (bp saves it to `$XDG_CONFIG_HOME/barkpark/config.json` — default `~/.config` — 0600).
 - Server updates: ssh in, `git pull` (the post-merge hook rebuilds + restarts).
 - Reconfigure by re-running `bp setup`, not by hand-editing `config.json`.
 

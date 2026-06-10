@@ -25,4 +25,4 @@ Publish payload: `{"slug":…,"blocks":[…]}` or `{"body_html":…}`. Patch pay
 
 The paper schema uses v2 field types, so the TUI renders papers read-only — edit in Studio. Clean installs ship one paper at `/papers/welcome`.
 
-Canon: `api/CLAUDE.md` (Bulldocs section) · [`../cards/tui.md`](../cards/tui.md).
+Canon: [`api/CLAUDE.md`](../../api/CLAUDE.md) (Bulldocs section) · [`../cards/tui.md`](../cards/tui.md).

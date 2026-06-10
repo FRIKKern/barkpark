@@ -23,7 +23,7 @@ bp            # no config + TTY → the setup wizard, then the TUI
 
 The wizard's **clean profile pre-checks the `bulldocs` and `tasks` plugins** (the server unions `media` in on its own). Accept, and the task schema, routes, and cron workers are live on first boot.
 
-**Existing installs** — whitelist via env and restart:
+**Existing installs** — enable via env and restart:
 
 ```bash
 BARKPARK_PLUGINS=bulldocs,tasks    # CSV whitelist · unset = all plugins · empty = kill switch
@@ -54,7 +54,7 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix note:** `create` always lands as a draft (stored id `drafts.t1`). The task endpoints resolve the bare id `t1` automatically — you can use either `t1` or `drafts.t1`. If both a published `t1` and a draft `drafts.t1` exist, `t1` matches the published row (exact match wins). Task lifecycle is orthogonal to draft/publish; publishing a task is optional.
+> **Draft prefix note:** `create` always lands as a draft (stored id `drafts.t1`). The task endpoints resolve the bare id `t1` automatically — you can use either `t1` or `drafts.t1`. If both a published `t1` and a draft `drafts.t1` exist, `t1` matches the published row (exact match wins). Task lifecycle is independent of draft/publish; publishing a task is optional.
 
 **4. The claim → work → close loop.** Pick a stable `worker_id` per agent.
 
@@ -78,7 +78,7 @@ bp task close t1 agent-1 1          # args: <doc_id> <worker_id> <observed_epoch
 
 The contract, precisely:
 
-- **Claim** flips `lifecycle_status` to `in_progress` and stamps `content.claim = {worker, ts_iso, epoch}`. The epoch bumps on **every** claim (rev-CAS underneath; losing a race → 409 `stale_claim`).
+- **Claim** flips `lifecycle_status` to `in_progress` and stamps `content.claim = {worker, ts_iso, epoch}`. The epoch bumps on **every** claim (losing a race → 409 `stale_claim`).
 - **Close** requires `worker_id` + `observed_epoch` (string ints accepted). Epoch mismatch → 409 `fenced_off` — the only protection against a stale-but-alive worker writing after its lease was swept. Optional body: `lifecycle_status` (`done` | `cancelled` | `blocked`, default `done`) and `observed_rev`.
 - **Leases expire.** A sweeper runs every minute; claims idle past `task_lease_ttl_seconds` (default **300**) are released and emit `task.lease_expired`. Finish or re-claim.
 - **Ready** means: `lifecycle_status` ∈ {`open`, `blocked`} **and** every outbound `blocks` edge points at a `done` task. Closing a task `done` auto-flips dependents from `blocked` → `open` when their full blocker set is done.
@@ -133,7 +133,7 @@ Everything is a task. The pattern:
 - **Rail** = a task's chronological children: `GET /v1/tasks?parent=<id>` (oldest first), and `GET /v1/tasks/:id` returns one level of `children` summaries inline (`doc_id`, `title`, `lifecycle_status`) plus `child_count`.
 - Scope a worker to one phase: `POST /v1/tasks/claim` with `{"worker_id":"agent-1","phase_id":"<phase-doc-id>"}`, or `GET /v1/tasks/ready?phase_id=…`.
 
-Goal → phases → leaf tasks, with `blocks` edges sequencing the phases, gives you a paperflow/Beads-style board on stock Barkpark.
+Goal → phases → leaf tasks, with `blocks` edges sequencing the phases, gives you a multi-phase project board in a standard Barkpark install.
 
 ## Workspaces, projects, datasets — experiment without mess
 
@@ -150,7 +150,7 @@ bp workspace ls                                   # what your token can reach
 # POST /api/workspaces/:slug/projects {"name":…} — see docs/cheatsheets/http-api.md
 ```
 
-Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror under the same prefix. The flat `/v1/tasks/*` surface operates on the server's default (unscoped) tenancy — under scoped pipelines, task reads and claims filter hard by workspace + project. Membership is the boundary: non-members get 404, never an existence leak.
+Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror under the same prefix. The flat `/v1/tasks/*` surface operates on the server's default (unscoped) scope — under scoped pipelines, task reads and claims are strictly filtered by workspace + project. Membership is the boundary: non-members get 404, never an existence leak.
 
 ## Troubleshooting
 

@@ -59,7 +59,7 @@ Bundled plugins: **Tasks** (the `/v1/tasks/*` board above) · **Bulldocs** (port
 
 ## v1 scope, honestly
 
-No MCP server yet (deferred); `bp login`/`completion` are stubs; `scoped_prefix` is inert; `--dry-run` is a client-side preview. The TUI edits v1 primitive fields natively — v2 plugin types render as JSON there (edit in Studio). Plugins disable, never delete. Ledger: [`docs/decisions/deferred.md`](docs/decisions/deferred.md).
+No MCP server yet (deferred); `bp login`/`completion` are stubs; `scoped_prefix` has no effect yet; `--dry-run` is a client-side preview. The TUI edits v1 primitive fields natively — v2 plugin types render as JSON there (edit in Studio). Plugins disable, never delete. Ledger: [`docs/decisions/deferred.md`](docs/decisions/deferred.md).
 
 ## Deploy
 

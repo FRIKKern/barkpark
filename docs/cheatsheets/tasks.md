@@ -8,7 +8,7 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 | `bp task ls` | `GET /v1/tasks` | list; filters `kind/lifecycle_status/phase_id/parent/label/limit` · `parent=` = child rail, oldest first |
 | `bp task ready` | `GET /v1/tasks/ready` | unblocked queue, priority ASC then oldest · `bp task ready --limit 5` |
 | `bp task get <id>` | `GET /v1/tasks/:id` | doc + one level of `children` inline |
-| `bp task next <worker>` | `POST /v1/tasks/claim` | queue claim · no_ready if empty |
+| `bp task next <worker>` | `POST /v1/tasks/claim` | queue claim · no_ready if none |
 | `bp task claim <id> <worker>` | `POST /v1/tasks/:id/claim` | targeted claim · ids from `bp task ready` |
 | `bp task close <id> <worker> <epoch> [status]` | `POST /v1/tasks/:id/close` | close · `bp task close task-992199 agent-1 1 done` |
 | — | `POST /v1/tasks/claim` | queue claim: `{"worker_id":"agent-1"}` → next ready doc, or `{"ok":false,"reason":"no_ready"}` |
@@ -17,7 +17,7 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 | — | `POST /v1/tasks/:id/labels` | `{"add":["sprint-3"],"remove":[]}` |
 | — | `POST /v1/tasks/:id/papers` | link paper slugs: `{"add":["notes"]}` |
 
-**Lifecycle:** `open · in_progress · blocked · done · cancelled`. Ready = open/blocked AND every `blocks` target `done`. Closing `done` auto-flips dependents blocked→open.
+**Lifecycle:** `open · in_progress · blocked · done · cancelled`. Ready = open/blocked AND every `blocks` target `done`. Closing `done` auto-flips dependents blocked → open.
 
 **Claim/close contract:** claim → `lifecycle_status=in_progress`, stamps `content.claim {worker, ts_iso, epoch}`; epoch bumps every claim. Close needs `worker_id` + `observed_epoch` (CAS — mismatch → 409 `fenced_off`; race → `stale_claim`); optional `lifecycle_status` done|cancelled|blocked (default done), `observed_rev`. Leases sweep after 300s (`task_lease_ttl_seconds`) → `task.lease_expired`.
 
