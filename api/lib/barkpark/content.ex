@@ -2174,6 +2174,92 @@ defmodule Barkpark.Content do
   # (no ghost events on the SSE stream). Direct writes outside a
   # transaction broadcast immediately — same behaviour as before.
 
+  @doc """
+  Broadcast an ALREADY-PERSISTED document mutation on the canonical PubSub
+  topics — the public seam for writers that bypass `tap_broadcast/5` (the
+  task lifecycle paths in `Barkpark.Tasks`, `Tasks.TtlSweeper`,
+  `Tasks.Compactor`, which mutate `documents` rows via CAS-guarded
+  `Repo.update_all` and write their own `mutation_events` rows).
+
+  Emits the SAME message shape `tap_broadcast/5` emits, on the SAME three
+  topics, so every existing subscriber (the `/v1/data/listen/:dataset` SSE
+  controller, StudioLive's list + per-doc handlers, the nextjs revalidate
+  consumer) consumes task-op events with zero changes:
+
+    * `documents:<dataset>`                      — `{:document_changed, msg}`
+    * `doc:ws:<ws>:<dataset>:<type>:<pubid>`     — `{:doc_updated, msg}`
+    * `documents:ws:<workspace_id>:<dataset>`    — `{:document_changed, msg}`
+      (only when the doc carries a workspace_id)
+
+  This module stays the single owner of the topic shapes — callers never
+  build topic strings themselves.
+
+  ## Options
+    * `:event_id` — the caller's `mutation_events` row id. REQUIRED for the
+      SSE path: the listen controller pattern-matches on `event_id` and
+      drops messages without one (it's also the SSE `id:` used for
+      Last-Event-ID resume).
+    * `:previous_rev` — the rev the caller observed before its CAS write.
+
+  `mutation` is the caller's mutation kind string (e.g. `"task.claimed"`) —
+  it matches the `mutation` column of the caller's `mutation_events` row, so
+  a live SSE frame and a Last-Event-ID replayed frame carry the same kind.
+
+  IMPORTANT: call AFTER the writing transaction commits. This broadcasts
+  immediately (no transaction-deferral) — firing it inside an open
+  transaction would let subscribers read state that may still roll back.
+  """
+  @spec broadcast_document_mutation(Document.t(), String.t(), keyword()) :: :ok
+  def broadcast_document_mutation(%Document{} = doc, mutation, opts \\ [])
+      when is_binary(mutation) do
+    event_id = Keyword.get(opts, :event_id)
+    previous_rev = Keyword.get(opts, :previous_rev)
+    dataset = doc.dataset
+
+    msg = %{
+      event_id: event_id,
+      type: doc.type,
+      mutation: mutation,
+      action: :mutate,
+      doc_id: doc.doc_id,
+      rev: doc.rev,
+      previous_rev: previous_rev,
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id,
+      document: Envelope.render(doc),
+      doc: %{
+        doc_id: doc.doc_id,
+        title: doc.title,
+        status: doc.status,
+        content: doc.content,
+        updated_at: doc.updated_at
+      },
+      sender: self()
+    }
+
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      "documents:#{dataset}",
+      {:document_changed, msg}
+    )
+
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      doc_topic(published_id(doc.doc_id), doc.type, doc.workspace_id, dataset),
+      {:doc_updated, msg}
+    )
+
+    if doc.workspace_id do
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:ws:#{doc.workspace_id}:#{dataset}",
+        {:document_changed, msg}
+      )
+    end
+
+    :ok
+  end
+
   defp tap_broadcast(result, dataset, type, action, prev_rev) do
     case result do
       {:ok, doc} ->

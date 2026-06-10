@@ -617,7 +617,144 @@ defmodule Barkpark.TasksClaimTest do
     end
   end
 
-  # ─── (5) Regression — W7-03 burst test still drains correctly ─────────────
+  # ─── (5) Realtime PubSub — task ops broadcast like document writes ────────
+  #
+  # The lifecycle write paths mutate `documents` rows via CAS
+  # `Repo.update_all`, bypassing Content's `tap_broadcast/5`. Without an
+  # explicit post-commit broadcast the `/v1/data/listen/:dataset` SSE stream
+  # and StudioLive never see a claim/close live (diagnosed against prod).
+  # These tests pin the contract: every task op announces on the canonical
+  # `documents:<dataset>` topic with the SAME message shape a document
+  # update broadcast carries — including the `event_id` the SSE listen
+  # controller requires to forward the frame.
+
+  describe "realtime PubSub — task ops broadcast on documents:<dataset>" do
+    test "claim_by_id/3 broadcasts {:document_changed, …} with task.claimed + the updated doc",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-ps-claim")
+      task = mk_task!(uniq("ps-claim"), scope, %{"parent_id" => phase_id})
+
+      # Subscribe AFTER creation so the create_document broadcast cannot
+      # satisfy the assertion below.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+
+      assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "w-ps", scope)
+
+      assert_receive {:document_changed, msg}, 1_000
+      assert msg.doc_id == claimed.doc_id
+      assert msg.mutation == Tasks.event_kinds().claimed
+      assert msg.rev == claimed.rev
+      assert msg.previous_rev == task.rev
+
+      # The SSE listen controller forwards ONLY messages carrying the
+      # mutation_events row id (its `event_id` pattern-match) — assert the
+      # broadcast rides the durable event written in the claim txn.
+      [ev] = events_for(claimed.doc_id, Tasks.event_kinds().claimed)
+      assert msg.event_id == ev.id
+
+      # Envelope payload reflects the POST-claim state (flat envelope:
+      # content keys are spread top-level).
+      assert msg.document["lifecycle_status"] == "in_progress"
+      assert msg.document["_rev"] == claimed.rev
+    end
+
+    test "queue claim/2 broadcasts too", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-ps-q")
+      task = mk_task!(uniq("ps-q"), scope, %{"parent_id" => phase_id})
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+
+      claim_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
+      assert {:ok, %Document{} = claimed} = Tasks.claim("w-psq", claim_opts)
+      assert claimed.id == task.id
+
+      assert_receive {:document_changed, msg}, 1_000
+      assert msg.doc_id == task.doc_id
+      assert msg.mutation == Tasks.event_kinds().claimed
+      assert is_integer(msg.event_id)
+    end
+
+    test "close/3 broadcasts task.closed AND task.mutated for each unblocked dependent",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-ps-close")
+      blocker = mk_task!(uniq("ps-blk"), scope, %{"parent_id" => phase_id})
+
+      blocked =
+        mk_task!(uniq("ps-bkd"), scope, %{
+          "parent_id" => phase_id,
+          "lifecycle_status" => "blocked"
+        })
+
+      {:ok, _} = Tasks.add_dep(blocked.id, blocker.id, :blocks)
+
+      {:ok, claimed} = Tasks.claim_by_id(blocker.doc_id, "w-psc", scope)
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+
+      assert {:ok, closed} =
+               Tasks.close(blocker.id, "w-psc",
+                 observed_epoch: claimed.content["claim"]["epoch"],
+                 lifecycle_status: "done"
+               )
+
+      # The close itself.
+      assert_receive {:document_changed, %{doc_id: closed_doc_id} = close_msg}, 1_000
+      assert closed_doc_id == closed.doc_id
+      assert close_msg.mutation == Tasks.event_kinds().closed
+      assert close_msg.rev == closed.rev
+      assert is_integer(close_msg.event_id)
+      assert close_msg.document["lifecycle_status"] == "done"
+
+      # The cascade-unblocked dependent announces as task.mutated.
+      assert_receive {:document_changed, %{doc_id: dep_doc_id} = dep_msg}, 1_000
+      assert dep_doc_id == blocked.doc_id
+      assert dep_msg.mutation == Tasks.event_kinds().mutated
+      assert dep_msg.document["lifecycle_status"] == "open"
+    end
+
+    test "relabel_by_id/3 and update_paper_refs_by_id/3 broadcast", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-ps-lbl")
+      task = mk_task!(uniq("ps-lbl"), scope, %{"parent_id" => phase_id})
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+
+      assert {:ok, relabeled} = Tasks.relabel_by_id(task.id, ["file-claim:a.ex"], [])
+      assert_receive {:document_changed, msg}, 1_000
+      assert msg.doc_id == task.doc_id
+      assert msg.mutation == Tasks.event_kinds().relabeled
+      assert msg.rev == relabeled.rev
+
+      assert {:ok, referenced} = Tasks.update_paper_refs_by_id(task.id, ["paper-x"], [])
+      assert_receive {:document_changed, msg2}, 1_000
+      assert msg2.doc_id == task.doc_id
+      assert msg2.mutation == Tasks.event_kinds().referenced
+      assert msg2.rev == referenced.rev
+    end
+
+    test "workspace-scoped topic documents:ws:<ws>:<dataset> fires too", %{
+      scope: scope,
+      workspace: ws
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      phase_id = uniq("phase-ps-ws")
+      task = mk_task!(uniq("ps-ws"), scope, %{"parent_id" => phase_id})
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{ws.id}:#{@dataset}")
+
+      assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "w-psw", scope)
+
+      assert_receive {:document_changed, msg}, 1_000
+      assert msg.doc_id == claimed.doc_id
+      assert msg.mutation == Tasks.event_kinds().claimed
+      assert msg.workspace_id == ws.id
+    end
+  end
+
+  # ─── (6) Regression — W7-03 burst test still drains correctly ─────────────
 
   describe "regression — full primitives do not break W7-03 burst" do
     test "5 workers, 5 rows, 5 iterations: every row goes to exactly one worker",

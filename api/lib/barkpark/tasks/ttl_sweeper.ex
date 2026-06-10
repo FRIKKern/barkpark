@@ -194,6 +194,17 @@ defmodule Barkpark.Tasks.TtlSweeper do
       end)
 
     case result do
+      {:ok, {:swept, doc, event_id, previous_rev}} ->
+        # Post-commit PubSub — same canonical topics/shape every document
+        # write broadcasts (SSE listen endpoint + StudioLive parity). Fired
+        # AFTER the reap transaction commits, never inside it.
+        Barkpark.Content.broadcast_document_mutation(doc, @event_task_lease_expired,
+          event_id: event_id,
+          previous_rev: previous_rev
+        )
+
+        :swept
+
       {:ok, outcome} -> outcome
       {:error, _} -> :skipped
     end
@@ -262,7 +273,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
 
-        _ =
+        ev =
           insert_lease_expired_event!(
             updated,
             observed_rev,
@@ -271,7 +282,9 @@ defmodule Barkpark.Tasks.TtlSweeper do
             previous_worker
           )
 
-        :swept
+        # Bundle for the post-commit broadcast in reap_one/2 — the event id
+        # is required by the SSE listen controller's forward gate.
+        {:swept, updated, ev.id, observed_rev}
 
       0 ->
         # CAS failed — extremely rare under the advisory lock (we held

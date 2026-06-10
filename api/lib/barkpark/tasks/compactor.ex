@@ -233,6 +233,16 @@ defmodule Barkpark.Tasks.Compactor do
       end)
 
     case result do
+      {:ok, {:compacted, doc, event_id, previous_rev}} ->
+        # Post-commit PubSub — same canonical topics/shape every document
+        # write broadcasts (SSE listen endpoint + StudioLive parity).
+        Barkpark.Content.broadcast_document_mutation(doc, @event_task_compacted,
+          event_id: event_id,
+          previous_rev: previous_rev
+        )
+
+        :compacted
+
       {:ok, outcome} -> outcome
       {:error, _} -> :skipped
     end
@@ -292,7 +302,7 @@ defmodule Barkpark.Tasks.Compactor do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
 
-        _ =
+        ev =
           insert_compacted_event!(
             updated,
             observed_rev,
@@ -300,7 +310,8 @@ defmodule Barkpark.Tasks.Compactor do
             snapshot.id
           )
 
-        :compacted
+        # Bundle for the post-commit broadcast in compact_one/2.
+        {:compacted, updated, ev.id, observed_rev}
 
       0 ->
         # CAS failed under the lock — extremely rare (we held it through
@@ -427,9 +438,21 @@ defmodule Barkpark.Tasks.Compactor do
       end)
 
     case result do
-      {:ok, {:ok, doc}} -> {:ok, doc}
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      {:ok, {:ok, doc, event_id, previous_rev}} ->
+        # Post-commit PubSub — restore mutates the live row exactly like the
+        # other task lifecycle writers, so it announces the same way.
+        Barkpark.Content.broadcast_document_mutation(doc, @event_task_compaction_restored,
+          event_id: event_id,
+          previous_rev: previous_rev
+        )
+
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -469,8 +492,8 @@ defmodule Barkpark.Tasks.Compactor do
     case rows do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
-        _ = insert_restored_event!(updated, observed_rev, rev.id)
-        {:ok, updated}
+        ev = insert_restored_event!(updated, observed_rev, rev.id)
+        {:ok, updated, ev.id, observed_rev}
 
       0 ->
         {:error, :stale_claim}

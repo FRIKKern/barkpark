@@ -63,6 +63,7 @@ defmodule Barkpark.Tasks do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
@@ -608,9 +609,18 @@ defmodule Barkpark.Tasks do
       end)
 
     case result do
-      {:ok, {:ok, value}} -> {:ok, value}
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      {:ok, {:ok, nil}} ->
+        {:ok, nil}
+
+      {:ok, {:ok, doc, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -668,9 +678,15 @@ defmodule Barkpark.Tasks do
       end)
 
     case result do
-      {:ok, {:ok, doc}} -> {:ok, doc}
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      {:ok, {:ok, doc, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -771,12 +787,36 @@ defmodule Barkpark.Tasks do
     case rows do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
-        _ = insert_mutation_event!(updated, @event_task_claimed, observed_rev)
-        {:ok, updated}
+        ev = insert_mutation_event!(updated, @event_task_claimed, observed_rev)
+        {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
 
       0 ->
         {:error, :stale_claim}
     end
+  end
+
+  # ─── Post-commit PubSub (barkpark realtime parity for task ops) ────────────
+  #
+  # Every CAS write path in this module bypasses Content's canonical write
+  # path (`tap_broadcast/5`), so without these the SSE listen endpoint and
+  # StudioLive never see a claim/close/relabel live — only doc CRUD
+  # broadcast. The fix: build a broadcast bundle INSIDE the transaction
+  # (where the freshly-inserted `mutation_events` row id is known — the
+  # listen controller drops messages without an `event_id`), and fire it via
+  # `Content.broadcast_document_mutation/3` AFTER the transaction commits
+  # (broadcasting inside the txn would let subscribers read uncommitted
+  # state). Content stays the single owner of the topic shapes.
+
+  defp task_broadcast(%Document{} = doc, kind, %MutationEvent{} = ev, previous_rev) do
+    %{doc: doc, kind: kind, event_id: ev.id, previous_rev: previous_rev}
+  end
+
+  defp emit_broadcasts(broadcasts) when is_list(broadcasts) do
+    Enum.each(broadcasts, fn %{doc: doc, kind: kind, event_id: eid, previous_rev: prev} ->
+      Content.broadcast_document_mutation(doc, kind, event_id: eid, previous_rev: prev)
+    end)
+
+    :ok
   end
 
   @doc """
@@ -879,18 +919,26 @@ defmodule Barkpark.Tasks do
                 with :ok <- check_fencing(doc, observed_epoch),
                      {:ok, updated} <-
                        apply_close_update(doc, worker_id, observed_rev, new_status) do
-                  _ = insert_mutation_event!(updated, @event_task_closed, observed_rev)
-                  _ = cascade_unblock_dependents!(updated)
-                  {:ok, updated}
+                  ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
+                  unblocked = cascade_unblock_dependents!(updated)
+
+                  {:ok, updated,
+                   [task_broadcast(updated, @event_task_closed, ev, observed_rev) | unblocked]}
                 end
             end
         end
       end)
 
     case result do
-      {:ok, {:ok, doc}} -> {:ok, doc}
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      {:ok, {:ok, doc, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -944,8 +992,10 @@ defmodule Barkpark.Tasks do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
-                _ = insert_mutation_event!(updated, @event_task_relabeled, observed_rev)
-                {:ok, updated}
+                ev = insert_mutation_event!(updated, @event_task_relabeled, observed_rev)
+
+                {:ok, updated,
+                 [task_broadcast(updated, @event_task_relabeled, ev, observed_rev)]}
 
               0 ->
                 {:error, :stale_claim}
@@ -954,9 +1004,15 @@ defmodule Barkpark.Tasks do
       end)
 
     case result do
-      {:ok, {:ok, doc}} -> {:ok, doc}
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      {:ok, {:ok, doc, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -1017,8 +1073,10 @@ defmodule Barkpark.Tasks do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
-                _ = insert_mutation_event!(updated, @event_task_referenced, observed_rev)
-                {:ok, updated}
+                ev = insert_mutation_event!(updated, @event_task_referenced, observed_rev)
+
+                {:ok, updated,
+                 [task_broadcast(updated, @event_task_referenced, ev, observed_rev)]}
 
               0 ->
                 {:error, :stale_claim}
@@ -1027,9 +1085,15 @@ defmodule Barkpark.Tasks do
       end)
 
     case result do
-      {:ok, {:ok, doc}} -> {:ok, doc}
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      {:ok, {:ok, doc, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -1100,11 +1164,14 @@ defmodule Barkpark.Tasks do
   # ITS blockers is now `done`. We do this in the same advisory-lock-guarded
   # transaction so two concurrent closes that both unblock the same
   # dependent can't double-flip it.
+  #
+  # Returns one broadcast bundle per flipped dependent (possibly []) so the
+  # caller can announce the unblocks on PubSub after its transaction commits.
   defp cascade_unblock_dependents!(%Document{content: %{"lifecycle_status" => "done"}} = parent) do
     parent
     |> Map.fetch!(:id)
     |> dependents(kind: :blocks)
-    |> Enum.each(fn %Document{} = dep ->
+    |> Enum.flat_map(fn %Document{} = dep ->
       if all_blockers_done?(dep) and Map.get(dep.content, "lifecycle_status") == "blocked" do
         new_rev = generate_rev()
         new_content = Map.put(dep.content, "lifecycle_status", "open")
@@ -1116,14 +1183,15 @@ defmodule Barkpark.Tasks do
           )
 
         unblocked = %{dep | content: new_content, rev: new_rev}
-        _ = insert_mutation_event!(unblocked, @event_task_mutated, dep.rev)
+        ev = insert_mutation_event!(unblocked, @event_task_mutated, dep.rev)
+        [task_broadcast(unblocked, @event_task_mutated, ev, dep.rev)]
+      else
+        []
       end
     end)
-
-    :ok
   end
 
-  defp cascade_unblock_dependents!(_non_done_parent), do: :ok
+  defp cascade_unblock_dependents!(_non_done_parent), do: []
 
   defp all_blockers_done?(%Document{} = dep) do
     dep.id

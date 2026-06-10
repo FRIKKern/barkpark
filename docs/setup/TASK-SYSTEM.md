@@ -8,7 +8,7 @@ Barkpark as your AI's task board: the agent claims work over HTTP, you steer the
 | Surface | What |
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` (plugin desk item). Open any task in the form editor: `lifecycle_status` dropdown, priority, assignee, title — editable. `dependencies` and `claim` render read-only ("managed via API"). |
-| **`bp` verbs** | `bp task ls / ready / get / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
+| **`bp` verbs** | `bp task ls / ready / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
 | **HTTP API** | Ten bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
 | **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired` — streamed over SSE at `/v1/data/listen/:dataset`. |
 
