@@ -8,7 +8,7 @@ Browser LiveViews read the same token from `session["api_token"]` via the
 
 ## Tenancy — token ↔ workspace
 
-The principal of a request is the API token, and every token is bound to
+The principal of a request is the API token; every token is bound to
 exactly one **workspace** (the tenancy boundary; see the
 Workspace → Project → Dataset hierarchy in `docs/api-v1.md` §1a). The
 binding is two facts that must agree:
@@ -37,16 +37,14 @@ cross-workspace read.
 The core mutate endpoint
 (`POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset`)
 enforces the `write` permission **after** tenancy passes. A token that is a
-valid member of the workspace but lacks `write` (a read-only token) gets
-`403 forbidden` on mutate. Reads remain available to such a token.
+valid member lacking `write` (a read-only token) gets `403 forbidden` on
+mutate; reads remain available.
 
 ### Default workspace + flat alias
 
-The old flat content paths (`/v1/data/:dataset/*`, etc.) still work and
-resolve to a `"Default"` workspace + `"Default"` project. Existing content
-was auto-backfilled into `Default`/`Default` with zero data loss. The dev
-token (below) is a member of `Default`, so flat-route callers keep working
-unchanged.
+Flat content paths (`/v1/data/:dataset/*`, etc.) still work, resolving to
+the `"Default"` workspace/project (existing content auto-backfilled). The
+dev token below is a `Default` member, so flat-route callers work unchanged.
 
 ## Roles (permissions list on `ApiToken.permissions`)
 

@@ -48,6 +48,10 @@ docs/contracts/webhook-realtime.md 3200
 docs/contracts/schema-v2.md 7200
 README.md 6000
 docs/ops/PROD_OPS.md 6000
+
+docs/api-v1.md 14000
+
+docs/auth.md 5600
 docs/setup/QUICKSTART.md 6000
 docs/setup/TASK-SYSTEM.md 16000
 docs/cheatsheets/bp.md 2400
