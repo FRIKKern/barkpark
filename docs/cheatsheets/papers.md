@@ -16,7 +16,7 @@ Ingest is tier `ingest` — token read from `BARKPARK_INGEST_TOKEN` (bearer fall
 |---|---|---|
 | Publish / upsert | `bp bulldocs publish <slug> --file paper.json` | `POST /v1/plugins/bulldocs/papers` |
 | Patch blocks (atomic ops) | `bp bulldocs patch <slug> --file ops.json --if-rev N` | `POST /v1/plugins/bulldocs/papers/:slug/ops` |
-| Pending intents | `bp bulldocs intents` | `GET /v1/plugins/bulldocs/intents` |
+| Pending intents | `BARKPARK_INGEST_TOKEN=… bp bulldocs intents` | `GET /v1/plugins/bulldocs/intents` (ingest tier, not your admin token) |
 | Drain one intent | `bp bulldocs intent-processed <id>` | `POST /v1/plugins/bulldocs/intents/:id/processed` |
 
 `/v1/paperflow/*` is a back-compat alias of `/v1/plugins/bulldocs/*`.

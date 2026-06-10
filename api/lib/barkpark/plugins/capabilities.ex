@@ -476,7 +476,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "none",
         args: [arg("type", true, "string", "Document type to query.")],
         flags: [
-          flag("query", "string", "Filter expression.", repeatable: false),
+          flag("filter", "string", "Equality filter: field=value or field==value.", repeatable: false),
           flag("limit", "int", "Max rows to return.", default: 50),
           flag("offset", "int", "Rows to skip.", default: 0)
         ],
@@ -548,7 +548,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "upload",
         "Upload a media asset.",
         "POST",
-        "/v1/media/:dataset",
+        "/v1/media/:dataset/upload",
         "write",
         args: [arg("file", true, "file", "File to upload.")],
         writes: true,

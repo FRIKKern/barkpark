@@ -1,6 +1,8 @@
 <!-- doc-tier: human | canonical-for: http-api-cheatsheet | budget: 600tok -->
 # HTTP API — cheatsheet
 
+`$API` = your server (local: `http://localhost:4000`).
+
 Writes need `Authorization: Bearer $TOKEN`; public-schema reads need nothing. Flat paths resolve the Default workspace/project; the scoped prefix is `/w/:ws/p/:proj/…`.
 
 | Call | Endpoint |
@@ -17,14 +19,14 @@ Writes need `Authorization: Bearer $TOKEN`; public-schema reads need nothing. Fl
 Mutation kinds: `create` · `createOrReplace` · `createIfNotExists` · `patch` (with `ifRevisionID`) · `publish` · `unpublish` · `discardDraft` · `delete`.
 
 ```bash
-curl -X POST localhost:4000/v1/data/mutate/production \
+curl -X POST $API/v1/data/mutate/production \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"mutations":[{"create":{"_type":"post","_id":"x","title":"New"}}]}'
 
-curl "localhost:4000/v1/data/query/production/post?perspective=drafts&limit=2"
+curl "$API/v1/data/query/production/post?perspective=drafts&limit=2"
 
 curl -H "Authorization: Bearer $TOKEN" -F "file=@photo.jpg" \
-  localhost:4000/v1/media/production/upload
+  $API/v1/media/production/upload
 ```
 
 Draft model: create writes `drafts.{id}`; publish copies it to `{id}` and deletes the draft; perspectives gate what reads see.

@@ -73,7 +73,7 @@ Staged: plans only unless the provider CLI (`hcloud` / `az`), a credential, and 
 ## Headless / CI
 
 ```bash
-bp setup --target local --dry-run -o json | jq .profile   # → "clean"
+bp setup --target local --dry-run -o json | head -c 400   # plan shows profile: clean
 ```
 
 Every target supports `--dry-run` (plan only, runs nothing) and `-o json` (one machine-readable object).

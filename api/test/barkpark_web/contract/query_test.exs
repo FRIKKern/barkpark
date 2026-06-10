@@ -43,6 +43,69 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert hd(body["documents"])["title"] == "T3"
   end
 
+  # BUG 1 regression: scalar ?filter=field=value must NOT be silently ignored.
+  # Both `field=value` and `field==value` forms are accepted so the CLI flag
+  # (--filter 'title=T2') and the TUI apiclient (params.Set("filter", "title==T2"))
+  # both filter instead of returning all documents.
+  test "scalar filter=title=T2 filters documents (field=value form)", %{conn: conn} do
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter=title%3DT2") |> json_response(200)
+
+    assert body["count"] == 1
+    assert hd(body["documents"])["title"] == "T2"
+  end
+
+  test "scalar filter=title==T4 filters documents (field==value form)", %{conn: conn} do
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter=title%3D%3DT4") |> json_response(200)
+
+    assert body["count"] == 1
+    assert hd(body["documents"])["title"] == "T4"
+  end
+
+  test "scalar filter with no match returns empty result, not all documents", %{conn: conn} do
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter=title%3Dnonexistent") |> json_response(200)
+
+    assert body["count"] == 0
+    assert body["documents"] == []
+  end
+
+  # TUI wire form (authoritative): apiclient's Client.Query sends
+  # params.Set("filter", `title == "T3"`) — spaces around `==`, value wrapped
+  # in ONE pair of double-quotes. The quotes must be stripped and only the
+  # matching document returned.
+  test ~s(TUI wire form: filter=title == "T3" filters to the single match), %{conn: conn} do
+    query = URI.encode_query(%{"filter" => ~s(title == "T3")})
+
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?" <> query) |> json_response(200)
+
+    assert body["count"] == 1
+    assert hd(body["documents"])["title"] == "T3"
+  end
+
+  test "value with inner quotes keeps them; only ONE surrounding pair is stripped", %{
+    conn: conn
+  } do
+    # A document whose title literally contains double-quotes. The wire string
+    # `title == "say "hi""` must strip ONLY the outer pair, leaving the
+    # inner-quoted literal `say "hi"` to match this doc — a positive match
+    # proves the stripping is exactly one pair, not greedy.
+    {:ok, _} =
+      Content.create_document("post", %{"_id" => "qq", "title" => ~s(say "hi")}, "test")
+
+    {:ok, _} = Content.publish_document("qq", "post", "test")
+
+    query = URI.encode_query(%{"filter" => ~s(title == "say "hi"")})
+
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?" <> query) |> json_response(200)
+
+    assert body["count"] == 1
+    assert hd(body["documents"])["title"] == ~s(say "hi")
+  end
+
   test "order=_createdAt:asc reverses default", %{conn: conn} do
     %{"result" => desc} = conn |> get("/v1/data/query/test/post") |> json_response(200)
 

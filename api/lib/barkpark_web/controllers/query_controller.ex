@@ -244,7 +244,50 @@ defmodule BarkparkWeb.QueryController do
     end)
   end
 
+  # Accept a flat scalar string as a simple equality filter.
+  # Supports `field=value`, `field==value`, and the TUI apiclient's GROQ-ish
+  # `field == "value"` wire form (Client.Query has shipped that for months and
+  # is authoritative for it) — so both the CLI (`--filter 'status=draft'`) and
+  # the TUI work without needing Plug's nested bracket syntax.
+  # Only the first `==`/`=` is split on so values that contain `=` are
+  # preserved. After the split both sides are whitespace-trimmed and ONE pair
+  # of surrounding double-quotes is stripped from the value
+  # (`status == "published"` → %{"status" => "published"}); a bare value or a
+  # value with only inner quotes is left untouched.
+  defp normalize_filter_map(s) when is_binary(s) and byte_size(s) > 0 do
+    # Split on `==` first (handles `field==value` / `field == "value"`), then
+    # fall back to a single `=`.
+    s
+    |> String.trim()
+    |> then(fn str ->
+      case String.split(str, "==", parts: 2) do
+        [field, value] ->
+          %{String.trim(field) => unquote_filter_value(value)}
+
+        _ ->
+          case String.split(str, "=", parts: 2) do
+            [field, value] -> %{String.trim(field) => unquote_filter_value(value)}
+            _ -> %{}
+          end
+      end
+    end)
+  end
+
   defp normalize_filter_map(_), do: %{}
+
+  # Trim whitespace, then strip exactly ONE pair of surrounding double-quotes
+  # when both ends carry one (`"published"` → `published`). Inner quotes are
+  # kept (`say "hi"` unchanged); a lone quote char is not stripped.
+  defp unquote_filter_value(v) do
+    trimmed = String.trim(v)
+
+    with <<?", rest::binary>> when byte_size(rest) >= 1 <- trimmed,
+         true <- String.ends_with?(rest, "\"") do
+      binary_part(rest, 0, byte_size(rest) - 1)
+    else
+      _ -> trimmed
+    end
+  end
 
   defp normalize_filter_op({"in", csv}) when is_binary(csv) do
     {"in", csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)}
