@@ -3,7 +3,7 @@
 
 **The workspace your AI works in.** Barkpark is a headless CMS built for AI agents: a place where an AI stores, sorts, and structures content — **tasks, papers, media** — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes; both see every change in real time.
 
-**Live demo:** http://89.167.28.206/studio
+**Live demo:** https://api.barkpark.cloud/studio
 
 ## Your AI's task board
 

@@ -33,6 +33,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | Plugins/ONIX | schema v2 field types | `docs/contracts/schema-v2.md` |
 | Plugins/ONIX | Bokbasen / ONIX export | `docs/cards/onix-bokbasen.md` |
 | Plugins/ONIX | Papers / Bulldocs / PortableDoc / pdrender ingest | `api/CLAUDE.md` §Bulldocs |
+| Tasks | task system / task board / claim queue / bp task | `docs/setup/TASK-SYSTEM.md` |
 | CLI/TUI | bp CLI | `docs/cards/cli.md` |
 | CLI/TUI | Go TUI / pdrender | `docs/cards/tui.md` |
 | Studio | LiveView Studio UI | `docs/cards/studio.md` |

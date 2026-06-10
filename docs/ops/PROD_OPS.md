@@ -92,6 +92,10 @@ bash .githooks/post-merge                   # clean rebuild + restart
 Destructive migrations (drop/rename) have no zero-downtime order — schedule
 a window: stop, migrate, deploy, start.
 
+Known transient: in the rebuild window, error-path requests on the old BEAM
+can crash (`Plug.Exception is undefined` — lazy-loading from the deleted
+`_build`). Self-heals at restart; deploy in quiet moments, don't chase it.
+
 Never run `make reset-db` (drop + recreate) or `mix ecto.reset` on production.
 If a migration fails mid-way, stop — read `journalctl -u barkpark -n 200`,
 do not retry blindly, and prefer a forward-fix migration over editing an
