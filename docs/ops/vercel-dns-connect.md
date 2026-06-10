@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: vercel-dns-cutover | budget: 2900tok -->
 # Vercel custom domain attach for `barkpark.cloud`
 
 **Status:** Runbook. Boss-executed via Vercel dashboard + registrar.

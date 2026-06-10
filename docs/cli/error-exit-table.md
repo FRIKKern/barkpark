@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: cli-error-exit-mapping | budget: 2500tok -->
 # Barkpark CLI — Error-code ↔ Exit-code Table (M0 frozen)
 
 > **Status:** DECIDED at M0. This is the single canonical mapping. The CLI maps the

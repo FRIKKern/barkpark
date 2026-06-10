@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: standalone-setup | budget: 1700tok -->
 # Barkpark — Standalone Setup
 
 > Tested 2026-05-28 on Elixir 1.19.5 / Postgres 17.9 / macOS.

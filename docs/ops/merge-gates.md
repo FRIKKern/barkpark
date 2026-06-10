@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: merge-gates | budget: 800tok -->
 # Merge Gates (Phase 2 onward)
 
 > Why a PR cannot be merged until every gate below is green, and how to run
@@ -143,6 +144,28 @@ curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
 
 Any merge that lands without the gate green must be reverted within 24h
 unless that override task exists.
+
+## Documentation review rules (doc-gates)
+
+PRs touching `*.md` also run `.github/workflows/doc-gates.yml` —
+`scripts/check-doc-budgets.sh` (byte caps + 7-card cap) and
+`scripts/docs-anchors-check.sh` (routing/INDEX targets, card Code anchors,
+G1 doc-tier headers, canonical-for uniqueness, ARCHIVED banners). Both are
+**blocking**. Reviewer rules on top of the scripts:
+
+a. A new top-level feature requires a routing-table row or a card update in
+   the **same PR**.
+b. A new card requires retiring or merging one (G2 — hard cap at 7 cards;
+   enforced as a count in `check-doc-budgets.sh`).
+c. A PR touching a file that a card anchors must update the card, or the
+   anchor check fails.
+d. Golden Rules and Past Mistakes in root `CLAUDE.md` are verbatim-exempt —
+   any edit to them requires explicit owner sign-off.
+e. `_attic/` is append-only; restoring a doc is a `git mv` back plus a
+   MANIFEST note.
+
+On byte-cap overflow: split to the owning contract/runbook or retire
+content — never raise the cap.
 
 ## Quick reference
 

@@ -1,3 +1,4 @@
+<!-- doc-tier: agent | canonical-for: bokbasen-wire-api-spec | budget: 9800tok -->
 <!--
   Bokbasen wire-level API contract (Phase 7 WI1)
   Author: Worker_W2.1 (Task #1, Phase 7 WI1)

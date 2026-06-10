@@ -1,0 +1,39 @@
+name: doc-gates
+
+# Documentation spine enforcement (docs-refactor wave 5).
+# Blocking: byte budgets + 7-card cap, routing/INDEX/anchor resolution,
+# G1 doc-tier headers, canonical-for uniqueness, ARCHIVED banners.
+# See docs/ops/merge-gates.md §"Documentation review rules".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - "scripts/check-doc-budgets.sh"
+      - "scripts/docs-anchors-check.sh"
+      - ".github/workflows/doc-gates.yml"
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "scripts/check-doc-budgets.sh"
+      - "scripts/docs-anchors-check.sh"
+      - ".github/workflows/doc-gates.yml"
+
+concurrency:
+  group: doc-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  doc-gates:
+    name: Doc budgets + anchors
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Doc byte budgets (blocking)
+        run: bash scripts/check-doc-budgets.sh
+
+      - name: Doc anchors + headers (blocking)
+        run: bash scripts/docs-anchors-check.sh

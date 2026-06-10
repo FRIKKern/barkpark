@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: sdk-envelope-contract | budget: 300tok -->
 # 0001 — SDK envelope contract: flat Phoenix shape
 
-**Status:** Accepted 2026-04-19. Full record attic'd: `_attic/docs-2026-06/docs/adr/0001-sdk-envelope-contract.md`.
+**Status:** Accepted 2026-04-19. Full record attic'd under `_attic/docs-2026-06/docs/adr/` (file `0001-sdk-envelope-contract.md`).
 
 **The SDK is wrong; the API is canonical.** Phoenix returns flat envelopes and the SDK adapts to them — never the reverse:
 

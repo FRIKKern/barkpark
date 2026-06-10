@@ -5,6 +5,7 @@ author: Worker W4.1 (Task #9 / Subtask 1)
 status: diagnosed, fix not applied (research-only scope)
 severity: P0 — Studio is interactively unusable in production
 ---
+<!-- doc-tier: human | canonical-for: studio-nav-incident-2026-04-19 | budget: 4400tok -->
 
 # Studio navigation bug (`https://api.barkpark.cloud/studio/production`)
 
@@ -181,7 +182,7 @@ fine. The regression is a **configuration drift**, introduced by
 **a95c6b1 — feat(demo+ops): Phase 7 Track D — hosted demo + hardening (#8)**
 and its follow-ups (caddy TLS evidence commits) which cut `api.barkpark.cloud`
 over to HTTPS via Caddy without running Step 3 of
-`docs-site/ops/adding-a-domain.md` on the production `.env`:
+`docs/ops/adding-a-domain.md` on the production `.env`:
 
 ```markdown
 ## Step 3 — Phoenix env
@@ -280,7 +281,7 @@ PHX_SCHEME=https
 
 **Why this is the right fix:**
 
-- It matches `docs-site/ops/adding-a-domain.md` Step 3 to the letter — the
+- It matches `docs/ops/adding-a-domain.md` Step 3 to the letter — the
   runbook that was supposed to run during Phase 7 Track D but didn't.
 - Phoenix's `check_origin` will then advertise `https://api.barkpark.cloud`,
   accepting browser WebSocket upgrades from the production URL.
@@ -406,9 +407,9 @@ curl -sI https://api.barkpark.cloud/v1/data/query/production/post
 ## Follow-ups to file (out of scope for this report)
 
 - **`deploy.sh` hardening:** when `.env` exists, re-align `PHX_HOST`/`PHX_SCHEME` the same way it re-aligns `DATABASE_URL`, so re-running `deploy.sh` on a host that has since been put behind a domain self-corrects.
-- **Post-domain runbook checklist:** promote `docs-site/ops/adding-a-domain.md` Step 3 to a `Makefile` target (`make domain-cutover DOMAIN=foo`) so it cannot be skipped.
+- **Post-domain runbook checklist:** promote `docs/ops/adding-a-domain.md` Step 3 to a `Makefile` target (`make domain-cutover DOMAIN=foo`) so it cannot be skipped.
 - **Add a boot-time self-check:** in `Barkpark.Application.start/2`, log a warning if `PHX_HOST` resolves to a literal IPv4 address while `PHX_SCHEME == "https"` — an early signal that origin config is mis-shaped.
 - **CI smoke:** after deploy, hit `/live/websocket` with a real browser `Origin` header and fail the job on 403. A single `curl` assertion would have caught this within a minute of the Phase 7 Track D cutover.
 
 ROOT_CAUSE: production `/opt/barkpark/.env` still has `PHX_HOST=89.167.28.206` and no `PHX_SCHEME=https`, so Phoenix `check_origin` 403-rejects the LiveView WebSocket from `https://api.barkpark.cloud`, leaving every `phx-click` silently dead.
-FIX: `/opt/barkpark/.env` → `PHX_HOST=api.barkpark.cloud` + `PHX_SCHEME=https`, then `systemctl restart barkpark.service` (no code change; matches `docs-site/ops/adding-a-domain.md` Step 3).
+FIX: `/opt/barkpark/.env` → `PHX_HOST=api.barkpark.cloud` + `PHX_SCHEME=https`, then `systemctl restart barkpark.service` (no code change; matches `docs/ops/adding-a-domain.md` Step 3).

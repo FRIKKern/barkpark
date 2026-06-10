@@ -1,3 +1,5 @@
+ARCHIVED — do not load; this is the attic index (old path → rescued facts → new home).
+
 # Attic Manifest — docs-refactor 2026-06
 
 Wave 0 freeze. One row per attic candidate. Checked box = rescue committed to new home.

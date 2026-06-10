@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: personal-local-stack | budget: 800tok -->
 # Personal-local Barkpark (`barkpark up`)
 
 Wave 5 of the convergence project: run the whole stack with one command, no
