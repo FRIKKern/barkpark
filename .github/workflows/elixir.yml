@@ -240,7 +240,12 @@ jobs:
     # drift. Runs the synthetic 200-field / 100-rule bench, takes the median
     # of 5 timed runs, fails the job if median > 100ms.
     name: Validation perf bench (median-of-5, alarm >100ms)
-    runs-on: ubuntu-latest-4-core
+    # ubuntu-latest-4-core is a PAID larger-runner label — on this personal
+    # account it never gets a runner, so every run containing this job sat
+    # queued forever (no completed elixir run since 2026-04-26, masked by
+    # cancel-in-progress until that was fixed). Standard runner + the bench's
+    # median-of-5 absorbs the slower hardware; threshold unchanged.
+    runs-on: ubuntu-latest
     env:
       MIX_ENV: test
     strategy:
