@@ -105,14 +105,14 @@ defmodule Barkpark.PortableDoc.Synthesis do
   @spec synthesize([map()], map(), [map()]) :: [block()]
   def synthesize(layout, content, fields)
       when is_list(layout) and is_map(content) and is_list(fields) do
-    type_by_name = field_type_index(fields)
+    field_by_name = field_index(fields)
 
     layout
     |> Enum.with_index()
     |> Enum.flat_map(fn {entry, idx} ->
       case entry do
         %{"kind" => "field", "name" => name} ->
-          synth_field_block(name, content, type_by_name, idx)
+          synth_field_block(name, content, field_by_name, idx)
 
         %{"kind" => "region", "name" => region} ->
           synth_body_blocks(Map.get(content, region), idx)
@@ -128,18 +128,22 @@ defmodule Barkpark.PortableDoc.Synthesis do
   # block would project an empty value back, which is a no-op, but skipping
   # keeps the synthesized list minimal and the round-trip exact: a field that
   # was absent stays absent after project, never written as nil/"").
-  defp synth_field_block(name, content, type_by_name, idx) do
+  defp synth_field_block(name, content, field_by_name, idx) do
     case Map.fetch(content, name) do
       {:ok, value} ->
-        block_type = field_block_type(Map.get(type_by_name, name))
+        field = Map.get(field_by_name, name, %{})
+        block_type = field_block_type(fget(field, "type"))
 
         [
-          %{
-            "id" => synth_id("f", name, idx),
-            "type" => block_type,
-            "fieldName" => name,
-            "value" => value
-          }
+          Map.merge(
+            %{
+              "id" => synth_id("f", name, idx),
+              "type" => block_type,
+              "fieldName" => name,
+              "value" => value
+            },
+            v2_block_config(block_type, field)
+          )
         ]
 
       :error ->
@@ -163,13 +167,66 @@ defmodule Barkpark.PortableDoc.Synthesis do
 
   defp synth_body_blocks(_other, _idx), do: []
 
-  defp field_type_index(fields) do
+  defp field_index(fields) do
     Enum.reduce(fields, %{}, fn f, acc ->
       name = f["name"] || f[:name]
-      type = f["type"] || f[:type]
-      if is_binary(name), do: Map.put(acc, name, type), else: acc
+      if is_binary(name), do: Map.put(acc, name, f), else: acc
     end)
   end
+
+  # Schema fields arrive string-keyed from plugin JSON / DB rows but may be
+  # atom-keyed from in-memory builders — mirror the dual access the name/type
+  # index always used. The atom fallback is guarded: a key with no existing
+  # atom (e.g. "codelistId" in a release that never declared it) is just nil.
+  defp fget(f, key), do: Map.get(f, key) || Map.get(f, safe_atom(key))
+
+  defp safe_atom(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  # The four v2 nested block types render through `PaperFieldBlock`, whose
+  # `build_field/1` reads the structural config OFF THE BLOCK ("of" /
+  # "fields" / "codelistId" / "languages"…). A bound block synthesized
+  # without that config loses the element shape: an arrayOf-of-composite
+  # degrades to string rows and ArrayField's `leaf_input` crashes the
+  # LiveView calling `to_string/1` on the row maps (first hit: the task
+  # schema's `acceptance_criteria` in the Beta editor). Carry the schema
+  # field's structural keys (+ a human label) onto the block verbatim.
+  # v1 `field-*` blocks are untouched — empty merge.
+  defp v2_block_config("composite", f) do
+    %{"label" => block_label(f), "fields" => fget(f, "fields") || []}
+  end
+
+  defp v2_block_config("arrayOf", f) do
+    %{
+      "label" => block_label(f),
+      "of" => fget(f, "of") || %{"type" => "string"},
+      "ordered" => fget(f, "ordered") == true
+    }
+  end
+
+  defp v2_block_config("codelist", f) do
+    %{
+      "label" => block_label(f),
+      "codelistId" => fget(f, "codelistId"),
+      "version" => fget(f, "version")
+    }
+  end
+
+  defp v2_block_config("localizedText", f) do
+    %{
+      "label" => block_label(f),
+      "languages" => fget(f, "languages") || [],
+      "format" => fget(f, "format") || "plain",
+      "fallbackChain" => fget(f, "fallbackChain") || []
+    }
+  end
+
+  defp v2_block_config(_block_type, _f), do: %{}
+
+  defp block_label(f), do: fget(f, "title") || fget(f, "name") || ""
 
   # Deterministic, collision-free synthetic ids so a re-synthesis of the same
   # doc yields identical block ids (idempotent in-memory open).
@@ -211,14 +268,14 @@ defmodule Barkpark.PortableDoc.Synthesis do
   @spec scaffold([map()], map(), map(), [map()]) :: [block()]
   def scaffold(layout, values, prefill, fields)
       when is_list(layout) and is_map(values) and is_map(prefill) and is_list(fields) do
-    type_by_name = field_type_index(fields)
+    field_by_name = field_index(fields)
 
     layout
     |> Enum.with_index()
     |> Enum.flat_map(fn {entry, idx} ->
       case entry do
         %{"kind" => "field", "name" => name} ->
-          scaffold_field_block(name, values, prefill, type_by_name, idx)
+          scaffold_field_block(name, values, prefill, field_by_name, idx)
 
         %{"kind" => "region", "name" => region} ->
           scaffold_body_blocks(Map.get(values, region), idx)
@@ -232,17 +289,23 @@ defmodule Barkpark.PortableDoc.Synthesis do
   # One bound field-block per field layout entry, ALWAYS emitted (unlike
   # synthesis, which skips value-less fields). The value is resolved from the
   # provided values, then prefill, then an empty default by block type.
-  defp scaffold_field_block(name, values, prefill, type_by_name, idx) do
-    block_type = field_block_type(Map.get(type_by_name, name))
+  # Carries the same v2 structural config as synthesis — a scaffolded
+  # arrayOf/composite block must know its element shape too.
+  defp scaffold_field_block(name, values, prefill, field_by_name, idx) do
+    field = Map.get(field_by_name, name, %{})
+    block_type = field_block_type(fget(field, "type"))
     value = scaffold_value(name, values, prefill, block_type)
 
     [
-      %{
-        "id" => synth_id("f", name, idx),
-        "type" => block_type,
-        "fieldName" => name,
-        "value" => value
-      }
+      Map.merge(
+        %{
+          "id" => synth_id("f", name, idx),
+          "type" => block_type,
+          "fieldName" => name,
+          "value" => value
+        },
+        v2_block_config(block_type, field)
+      )
     ]
   end
 

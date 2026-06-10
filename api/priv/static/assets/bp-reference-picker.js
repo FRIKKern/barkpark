@@ -4,11 +4,16 @@
 // (target schema) attributes; optional `dataset` (default "production").
 // Search uses `/v1/data/search/:dataset` with optional `type=` filter and
 // feeds Barkpark core search intelligence via X-BP-Search-* headers.
+// Searches the AUTHORING set (perspective=raw, draft/published pairs
+// deduped, drafts badged) — Sanity reference-search semantics, so
+// draft-only docs (tasks especially) are pickable.
 //
 // Selected state renders a Sanity-style pill (.ref-selected) with the
 // referenced doc's title and a Remove button. The hidden input value
-// is always the doc id string (matches v1 reference-field persistence
-// model) — no JSON, no `_ref`/`_type` envelope.
+// is always the CANONICAL doc id string (a picked draft stores its id
+// without the `drafts.` prefix — Sanity `_ref` semantics; matches v1
+// reference-field persistence model) — no JSON, no `_ref`/`_type`
+// envelope.
 //
 // Emits CustomEvent("bp-change", {bubbles:true, detail:{value: docId | ""}})
 // caught by BarkparkFieldBridge on the wrapper div.
@@ -38,6 +43,11 @@ class BpReferencePicker extends HTMLElement {
     this._suggestNohits = [];
     this._searchIntel = { clientId: null, parentEventId: null };
     this._lastSearchMatches = [];
+    // Per-instance dropdown id — an editor can hold SEVERAL reference
+    // fields (the task schema has design_doc + parent_id); a shared
+    // hardcoded id duplicates DOM ids and breaks LiveView DOM patching.
+    BpReferencePicker._seq = (BpReferencePicker._seq || 0) + 1;
+    this._listId = "bp-ref-suggest-list-" + BpReferencePicker._seq;
   }
 
   connectedCallback() {
@@ -120,7 +130,7 @@ class BpReferencePicker extends HTMLElement {
     input.placeholder = `Search ${this._refType || "documents"}…`;
     input.autocomplete = "off";
     input.setAttribute("aria-expanded", "false");
-    input.setAttribute("aria-controls", "bp-ref-suggest-list");
+    input.setAttribute("aria-controls", this._listId);
     input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
@@ -130,7 +140,7 @@ class BpReferencePicker extends HTMLElement {
 
     const dropdown = document.createElement("div");
     dropdown.className = "bp-ref-dropdown";
-    dropdown.id = "bp-ref-suggest-list";
+    dropdown.id = this._listId;
     dropdown.hidden = true;
     dropdown.setAttribute("role", "listbox");
     wrap.appendChild(dropdown);
@@ -157,7 +167,12 @@ class BpReferencePicker extends HTMLElement {
   _select(doc) {
     const idx = this._lastSearchMatches.findIndex((d) => d.id === doc.id);
     this._recordSearchInteraction(doc.id, idx >= 0 ? idx : null);
-    this._value = doc.id;
+    // Store the CANONICAL id even when the picked row is a draft — Sanity's
+    // `_ref` semantics: the reference resolves once the target publishes,
+    // and never dangles on a `drafts.` id after publish deletes the draft.
+    this._value = doc.id.startsWith("drafts.")
+      ? doc.id.slice("drafts.".length)
+      : doc.id;
     this._selectedTitle = doc.title || doc.id;
     this._hideDropdown();
     this._render();
@@ -210,9 +225,13 @@ class BpReferencePicker extends HTMLElement {
   }
 
   _searchUrl(query) {
+    // Sanity-style reference search: the AUTHORING set, not just published.
+    // `raw` sees both drafts.* and published rows (most docs in an authoring
+    // workspace — tasks especially — only exist as drafts); the fetch path
+    // dedupes draft/published pairs of the same doc, draft state preferred.
     const params = new URLSearchParams({
       q: query,
-      perspective: "published",
+      perspective: "raw",
       limit: "50"
     });
     if (this._refType) params.set("type", this._refType);
@@ -233,9 +252,25 @@ class BpReferencePicker extends HTMLElement {
     const body = await res.json();
     this._captureSearchEventId(body);
     const docs = body.documents || [];
-    this._lastSearchMatches = docs
-      .map((d) => ({ id: d._id || d.id || "", title: d.title || d._id || "" }))
-      .filter((d) => d.id);
+    // One row per document: a doc mid-edit exists as BOTH drafts.<id> and
+    // <id>; key on the canonical id and prefer the draft row (the authoring
+    // state — what Sanity's reference search shows).
+    const byCanonical = new Map();
+    for (const d of docs) {
+      const rawId = d._id || d.id || "";
+      if (!rawId) continue;
+      const draft = rawId.startsWith("drafts.");
+      const canonical = draft ? rawId.slice("drafts.".length) : rawId;
+      const prev = byCanonical.get(canonical);
+      if (!prev || (draft && !prev.draft)) {
+        byCanonical.set(canonical, {
+          id: canonical,
+          title: d.title || rawId,
+          draft: draft
+        });
+      }
+    }
+    this._lastSearchMatches = Array.from(byCanonical.values());
     return this._lastSearchMatches;
   }
 
@@ -373,6 +408,13 @@ class BpReferencePicker extends HTMLElement {
       btn.className = "bp-ref-dropdown-item";
       btn.setAttribute("role", "option");
       btn.textContent = doc.title || doc.id;
+      if (doc.draft) {
+        // Sanity-style draft indicator on unpublished candidates.
+        const badge = document.createElement("span");
+        badge.className = "bp-ref-suggest-meta";
+        badge.textContent = "draft";
+        btn.appendChild(badge);
+      }
       btn.addEventListener("mousedown", (e) => {
         e.preventDefault();
         this._select(doc);
@@ -405,7 +447,13 @@ class BpReferencePicker extends HTMLElement {
         "/" +
         encodeURIComponent(this._value);
       const res = await fetch(url, { credentials: "same-origin" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // A canonical id whose target only exists as a draft (the common
+        // case for tasks) 404s on the published doc endpoint — resolve the
+        // pill title through the raw-perspective search instead.
+        await this._loadSelectedTitleViaSearch();
+        return;
+      }
       const body = await res.json();
       const doc = (body && body.result) || body || {};
       const title = doc.title || doc._id || "";
@@ -429,7 +477,12 @@ class BpReferencePicker extends HTMLElement {
       if (!res.ok) return;
       const body = await res.json();
       const docs = body.documents || [];
-      const match = docs.find((d) => (d._id || d.id) === id) || docs[0] || null;
+      // Prefix-agnostic: the stored value is canonical, the matching row
+      // may be its drafts.* counterpart (or vice versa).
+      const canon = (v) =>
+        v && v.startsWith("drafts.") ? v.slice("drafts.".length) : v || "";
+      const match =
+        docs.find((d) => canon(d._id || d.id) === canon(id)) || docs[0] || null;
       const title = match && (match.title || match._id || match.id);
       if (title && this._value) {
         this._selectedTitle = title;

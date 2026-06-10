@@ -245,12 +245,22 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       class="bp-input"
       id={@input_id}
       name={@input_name}
-      value={to_string(@row_value || "")}
+      value={leaf_display(@row_value)}
       phx-change={@on_change}
       disabled={@readonly}
     />
     """
   end
+
+  # Never let a structured row value crash the render: a map/list reaching the
+  # leaf fallback (e.g. a block missing its `of` descriptor) has no
+  # String.Chars impl — `to_string/1` here used to take down the whole
+  # LiveView. Render it as JSON so the row stays visible and editable-adjacent
+  # instead of fatal.
+  defp leaf_display(nil), do: ""
+  defp leaf_display(v) when is_binary(v), do: v
+  defp leaf_display(v) when is_number(v) or is_boolean(v) or is_atom(v), do: to_string(v)
+  defp leaf_display(v), do: Jason.encode!(v)
 
   # The arrayOf parser stores the element shape on `field.of` (a `%Field{}`).
   defp element_field(%{of: %{} = of}), do: of
