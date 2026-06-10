@@ -75,7 +75,7 @@ func TestLocalSeedStepThreadsRealEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateAdminToken: %v", err)
 	}
-	steps := localSteps(SetupPlan{Target: TargetLocal}, "", false, tok)
+	steps := localSteps(SetupPlan{Target: TargetLocal}, resolveLocalContext(), "", false, tok)
 	var seed *localStep
 	for i := range steps {
 		if strings.Contains(steps[i].Title, "reset + seed") {

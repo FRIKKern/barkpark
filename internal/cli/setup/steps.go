@@ -126,6 +126,18 @@ func runCapture(ctx context.Context, name string, args ...string) (string, error
 	return buf.String(), err
 }
 
+// runCaptureDir is runCapture scoped to a working directory — the compose
+// health poll runs `docker compose ps` from the resolved repo root, not cwd.
+func runCaptureDir(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
 // asWriter narrows a writerLike back to io.Writer for fmt.Fprintln. writerLike
 // is exactly io.Writer's method set, so this is a safe assertion that keeps the
 // wait closures' signatures free of an io import.

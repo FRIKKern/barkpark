@@ -19,10 +19,14 @@ services:
     ports:
       - "${PORT:-4000}:4000"
     environment:
-      DATABASE_URL: ecto://postgres:postgres@db/barkpark_prod
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-$(openssl rand -base64 48)}
-      PHX_HOST: ${PHX_HOST:-localhost}
-      PORT: "4000"
+      - DATABASE_URL=ecto://postgres:postgres@db/barkpark_prod
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE:-$(openssl rand -base64 48)}
+      - PHX_HOST=${PHX_HOST:-localhost}
+      - PORT=4000
+      # Bare passthrough on purpose: only set in the container when set in the
+      # invoking shell. NEVER ${BARKPARK_PLUGINS:-} — that expands an unset var
+      # to the empty string, which is the plugin KILL SWITCH server-side.
+      - BARKPARK_PLUGINS
     volumes:
       - uploads:/app/uploads
     depends_on:
