@@ -18,6 +18,22 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
   @token "barkpark-dev-token"
 
+  setup do
+    # CI boots a COLD test DB (`mix ecto.create && mix ecto.migrate` — seeds
+    # never run), so no api_tokens row exists unless the test inserts one.
+    # Without it the Bearer header resolves to no token, the caller projects
+    # at tier "none", and existence-hiding strips media.upload (auth_tier
+    # "write") from the manifest — doc.query (tier "none") still passes, which
+    # is exactly the asymmetric CI failure this setup prevents. Locally a
+    # committed dev-token row may already exist in barkpark_test; this insert
+    # then fails on the token_hash unique constraint and the committed row
+    # serves the same role (same tolerant pattern as the sibling contract
+    # tests, e.g. search_settings_test.exs). Sandboxed, so seed-order and
+    # async-safe.
+    Barkpark.Auth.create_token(@token, "dev", "test", ["read", "write", "admin"])
+    :ok
+  end
+
   defp capabilities(conn) do
     conn
     |> put_req_header("authorization", "Bearer #{@token}")
