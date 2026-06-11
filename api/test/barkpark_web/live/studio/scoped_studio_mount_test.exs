@@ -203,9 +203,9 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
     } do
       {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
 
-      view
-      |> element(~s{form[phx-change="switch-workspace"]})
-      |> render_change(%{"workspace" => ws_b.slug})
+      # The scope menu replaced the bar's inline selects — fire the event
+      # directly (StudioLive's switch-workspace semantics are unchanged).
+      render_change(view, "switch-workspace", %{"workspace" => ws_b.slug})
 
       # The switch is a push_patch to the NEW workspace's canonical URL —
       # no more socket-state-only switching (reload amnesia).

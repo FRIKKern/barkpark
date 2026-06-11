@@ -39,8 +39,11 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       assert html =~ ~s|class="sidebar-brand-icon"|
       assert html =~ ~s|class="scope-switcher"|
 
-      # Dataset switcher (rendered when @dataset is assigned)
-      assert html =~ ~s|class="dataset-switcher-select"|
+      # Scope title (Sanity-style): ONE bar button opens the scope menu; the
+      # active dataset rides the title trail as its slug. Markup-only
+      # anchors — the page <style> block also mentions .scope-title*.
+      assert html =~ ~s|phx-click="scope-menu-toggle"|
+      assert html =~ ~r|scope-title-trail">\s*[^<]+ / production\s*<|
 
       # Nav tabs (Structure active for StudioLive) — hrefs are scoped (P3)
       assert html =~ ~s|<a href="#{scoped_studio("/studio/production")}"| and

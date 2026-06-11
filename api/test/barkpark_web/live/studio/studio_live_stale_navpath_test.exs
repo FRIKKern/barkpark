@@ -25,9 +25,10 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
     2. a save right after the switch lands in the NEW project's scope (never the
        old project, never a duplicate row under the wrong project).
 
-  Single member workspace (Default), so the switcher collapses the Workspace
-  control to a static label and only the Project `<select>` renders — the switch
-  is driven through it. Navigation into a doc uses `render_patch` so the socket
+  Single member workspace (Default); the project switch is driven by firing
+  `switch-project` directly (the Sanity-style scope menu replaced the bar's
+  inline selects — StudioLive's handler semantics are unchanged).
+  Navigation into a doc uses `render_patch` so the socket
   scope (current_project) is preserved across the patch (a fresh `live/2` would
   remount to the default project). LiveViewTest + compile; the live-browser
   round-trip is the orchestrator's integration gate.
@@ -101,9 +102,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
   defp open_doc_under_a(conn, project_a) do
     {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
 
-    render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-      "project" => project_a.slug
-    })
+    render_change(view, "switch-project", %{"project" => project_a.slug})
 
     # Navigate into the doc WITHOUT remounting — keeps current_project == A.
     # On the scoped surface (P3) the URL pins the scope, so the patch must stay
@@ -134,9 +133,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
       # NOW switch to Project B. Its default dataset slug is also "production", so
       # rescope_dataset_for_project hits the `slug == dataset` branch — the bug
       # path that used to rebuild with the stale nav_path.
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-        "project" => project_b.slug
-      })
+      render_change(view, "switch-project", %{"project" => project_b.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -166,9 +163,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
       a_before = doc_count(default_ws.id, project_a.id)
       b_before = doc_count(default_ws.id, project_b.id)
 
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-        "project" => project_b.slug
-      })
+      render_change(view, "switch-project", %{"project" => project_b.slug})
 
       # Fire a save with edited params. With the stale editor_doc the pre-fix code
       # would upsert_draft(doc_a, ...) under Project B's scope — writing the old
@@ -196,9 +191,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
          %{conn: conn, default_ws: default_ws, project_a: project_a, project_b: project_b} do
       view = open_doc_under_a(conn, project_a)
 
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-        "project" => project_b.slug
-      })
+      render_change(view, "switch-project", %{"project" => project_b.slug})
 
       a_before = doc_count(default_ws.id, project_a.id)
       b_before = doc_count(default_ws.id, project_b.id)

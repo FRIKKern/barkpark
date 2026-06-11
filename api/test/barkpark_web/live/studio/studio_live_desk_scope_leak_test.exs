@@ -99,11 +99,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
   } do
     {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
 
-    # Switch the socket scope to workspace A (mirrors the s5 switcher click).
+    # Switch the socket scope to workspace A (mirrors a scope-menu pick;
+    # fired directly — the bar's select form is gone, the handler isn't).
     # P3: the switch is a push_patch to the NEW scope's canonical URL.
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-      "workspace" => ws_a.slug
-    })
+    render_change(view, "switch-workspace", %{"workspace" => ws_a.slug})
 
     patched = assert_patch(view)
     assert patched =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/"
@@ -144,9 +143,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
   } do
     {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
 
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-      "workspace" => ws_a.slug
-    })
+    render_change(view, "switch-workspace", %{"workspace" => ws_a.slug})
 
     # P3: the switch navigates — follow the patch so handle_params +
     # LiveScope have re-resolved the scope from the new URL before we

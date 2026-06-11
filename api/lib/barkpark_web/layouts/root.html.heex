@@ -1443,42 +1443,59 @@
     .dataset-switcher-select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; cursor: pointer; }
     .dataset-switcher-select:hover { border-color: var(--fg-muted); }
 
-    /* Workspace + Project switcher (BarkparkWeb.Studio.WorkspaceSwitcher) */
-    /* One calm grouped scope path: [ws ▾] / [proj ▾] / [ds ▾] — uniform
-       segments inside a single bordered pill, labels sr-only (the values
-       are self-evident; the group carries a tooltip). */
-    /* Sanity-style: borderless ghost path; the workspace segment is the
-       studio's TITLE (bold, full color), project/dataset trail muted. */
-    .scope-switcher {
-      display: inline-flex; align-items: center; gap: 2px; margin-left: 6px;
-      height: 30px; font-size: 12px;
+    /* Scope title + menu (BarkparkWeb.Studio.WorkspaceSwitcher) */
+    /* Sanity-style: ONE title button — bold workspace name, muted
+       project/dataset trail, caret — opening a single popover where
+       workspace, project and dataset are picked together as three
+       Miller columns. Picking a dataset navigates to the triple URL. */
+    .scope-switcher { position: relative; display: inline-flex; align-items: center; margin-left: 6px; height: 30px; }
+    .scope-title {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: transparent; border: none; border-radius: 6px;
+      padding: 4px 8px; font-family: inherit; cursor: pointer; color: var(--fg);
     }
-    .scope-switcher > .workspace-switcher:first-of-type .workspace-switcher-select,
-    .scope-switcher > .workspace-switcher:first-of-type .workspace-switcher-static {
-      font-size: 13px; font-weight: 600; color: var(--fg);
-    }
-    .scope-switcher .workspace-switcher-select:not(:hover),
-    .scope-switcher .dataset-switcher-select:not(:hover) { color: var(--fg-muted); }
-    .scope-switcher > .workspace-switcher:first-of-type .workspace-switcher-select:not(:hover) {
-      color: var(--fg);
-    }
-    .scope-sep { color: var(--fg-dim); padding: 0 1px; user-select: none; }
+    .scope-title:hover { background: var(--bg-muted); }
+    .scope-title-ws { font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .scope-title-trail { font-size: 12px; color: var(--fg-muted); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+    .scope-title-caret { color: var(--fg-dim); display: inline-flex; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
-    .workspace-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
-    .workspace-switcher-select, .dataset-switcher-select {
-      background: transparent; color: var(--fg); border: none; border-radius: 4px;
-      padding: 4px 4px; font-size: 12px; font-family: inherit; cursor: pointer; max-width: 180px;
+    .scope-menu {
+      position: absolute; top: calc(100% + 6px); left: 0; z-index: 80;
+      display: flex; align-items: stretch;
+      background: var(--bg-elevated, var(--bg)); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.35));
+      padding: 6px; min-width: 480px;
     }
-    .workspace-switcher-select:hover, .dataset-switcher-select:hover { background: var(--bg-muted); }
-    .workspace-switcher-static, .dataset-switcher-static { padding: 4px 4px; color: var(--fg); }
-    .dataset-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
-    .workspace-switcher-add { background: transparent; color: var(--fg-dim); border: none; border-radius: 4px; width: 18px; height: 18px; line-height: 1; padding: 0; font-size: 12px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-    .workspace-switcher-add:hover { background: var(--bg-muted); color: var(--fg); }
-    .workspace-switcher-create { display: inline-flex; align-items: center; gap: 4px; }
-    .workspace-switcher-create-input { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; width: 140px; }
+    .scope-menu-col { display: flex; flex-direction: column; min-width: 160px; max-width: 220px; padding: 2px 4px; }
+    .scope-menu-col + .scope-menu-col { border-left: 1px solid var(--border); }
+    .scope-menu-col-title {
+      font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--fg-dim); padding: 4px 8px 6px;
+    }
+    .scope-menu-col-items { display: flex; flex-direction: column; gap: 1px; max-height: 320px; overflow-y: auto; }
+    .scope-menu-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: transparent; border: none; border-radius: 5px; text-align: left;
+      padding: 5px 8px; font-size: 12px; font-family: inherit; color: var(--fg);
+      cursor: pointer; white-space: nowrap;
+    }
+    .scope-menu-item:hover { background: var(--bg-muted); }
+    .scope-menu-item.is-previewed { background: var(--bg-muted); }
+    .scope-menu-item.is-current .scope-menu-item-name { font-weight: 600; }
+    .scope-menu-item-name { overflow: hidden; text-overflow: ellipsis; }
+    .scope-menu-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent, var(--fg)); flex-shrink: 0; }
+    .scope-menu-empty { padding: 5px 8px; font-size: 12px; color: var(--fg-dim); font-style: italic; }
+    .scope-menu-create {
+      margin-top: 4px; background: transparent; border: none; border-radius: 5px;
+      text-align: left; padding: 5px 8px; font-size: 12px; font-family: inherit;
+      color: var(--fg-dim); cursor: pointer; white-space: nowrap;
+    }
+    .scope-menu-create:hover { background: var(--bg-muted); color: var(--fg); }
+    .scope-menu-create-form { display: flex; align-items: center; gap: 4px; padding: 4px 8px 2px; }
+    .workspace-switcher-create-input { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; width: 140px; min-width: 0; }
     .workspace-switcher-create-submit { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; font-family: inherit; cursor: pointer; }
     .workspace-switcher-create-submit:hover { border-color: var(--fg-muted); }
 

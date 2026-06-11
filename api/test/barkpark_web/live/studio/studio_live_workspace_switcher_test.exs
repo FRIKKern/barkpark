@@ -1,16 +1,30 @@
 defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   @moduledoc """
   Task barkpark-k86v: the Studio LiveView workspace/project switcher.
-  Task barkpark-g4a7: the switcher is now MEMBERSHIP-AWARE — it lists only the
+  Task barkpark-g4a7: the switcher is MEMBERSHIP-AWARE — it offers only the
   mounted principal's member workspaces (never the unscoped `list_workspaces/0`),
   and `switch-workspace` / `switch-project` reject a switch to a workspace the
   principal isn't a member of.
 
+  UI shape (Sanity-style scope menu): the bar renders ONE title button
+  (`phx-click="scope-menu-toggle"`) showing the current workspace name plus a
+  muted "project / dataset-slug" trail. Clicking it opens a single popover
+  (`role="menu"`, aria-label "Switch workspace, project and dataset") with
+  three Miller columns — Workspace / Project / Dataset — listing membership
+  workspaces only; a dataset pick navigates. The old inline `<select>` forms
+  are gone from the bar, but StudioLive still owns the `switch-*` /
+  `toggle-create` / `create-*` handlers with IDENTICAL semantics — behaviour
+  is driven by firing those events directly
+  (`render_change(view, "switch-workspace", …)`), while markup assertions
+  target the title button and the OPEN popover. NB the page `<style>` block
+  contains `.scope-menu*` / `.scope-title*` CSS selectors, so open/closed
+  assertions use markup-only strings (`aria-label=…`, `phx-click=…`,
+  `scope-title-ws">…`), never bare class-name substrings.
+
   Covers:
-    * the switcher renders both selects (Workspace + Project) in the topbar,
-      defaulting to the principal's first member workspace;
-    * the workspace `<select>` lists ONLY member workspaces — a foreign
-      workspace the principal has no membership in never appears;
+    * the title button renders with the current (member) workspace; the open
+      menu lists ONLY member workspaces — a foreign workspace the principal
+      has no membership in never appears;
     * `switch-workspace` to a MEMBER workspace re-assigns `:current_workspace`
       (and re-defaults the project); a switch to a NON-MEMBER workspace is
       rejected (scope unchanged);
@@ -38,6 +52,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @dataset "production"
+  @menu_open ~s{aria-label="Switch workspace, project and dataset"}
 
   setup %{conn: conn} do
     # The migration backfill seeds the Default workspace/project into the test
@@ -49,14 +64,12 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
     {:ok, acme_ws} = Tenancy.create_workspace(%{slug: "acme", name: "Acme"})
     {:ok, acme_blog} = Tenancy.create_project(acme_ws, %{slug: "blog", name: "Blog"})
-    # A SECOND Acme project so the Project level has >1 option and renders a
-    # `<select>` (the single-option→static-label rule, Task barkpark-dgpf, only
-    # collapses to static text when exactly one option exists). "blog" stays
-    # slug-first, so the mount default project is unchanged.
+    # A SECOND Acme project so the Project column has more than one option.
+    # "blog" stays slug-first, so the mount default project is unchanged.
     {:ok, _acme_zine} = Tenancy.create_project(acme_ws, %{slug: "zine", name: "Zine"})
 
     # Datasets under the Acme/Blog project — the controlled data for the
-    # project-scoped Dataset select (Task barkpark-dgpf). Mirrors the real
+    # project-scoped Dataset column (Task barkpark-dgpf). Mirrors the real
     # Default-project shape (production/paperflow/reftest_16835): "production"
     # is the auto-select default; "staging"/"reftest" are the alternates.
     {:ok, acme_production} =
@@ -101,82 +114,80 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   end
 
   describe "switcher render" do
-    test "renders the Workspace + Project selects defaulting to a member workspace", %{
-      conn: conn,
-      default_ws: default_ws,
-      acme_ws: acme_ws,
-      acme_blog: acme_blog
-    } do
+    test "renders the scope title for a member workspace; the open menu offers both member workspaces",
+         %{conn: conn, default_ws: default_ws, acme_ws: acme_ws, acme_blog: acme_blog} do
       {:ok, view, html} = mount_studio(conn)
 
-      # Both selects present, wired to the switch events.
-      assert html =~ ~s(phx-change="switch-workspace")
-      assert html =~ ~s(phx-change="switch-project")
+      # ONE title button in the bar; the popover is CLOSED by default (its
+      # markup is absent — asserted via the aria-label, not class names).
+      assert html =~ ~s{phx-click="scope-menu-toggle"}
+      refute html =~ @menu_open
 
       # The initial scope is the principal's slug-FIRST member workspace
       # (`list_workspaces_for/1` is slug-ordered, "acme" < "default"), with
-      # its first project — not the seeded Default. Both member workspaces
-      # are offered in the workspace select.
+      # its first project — not the seeded Default.
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
       assert assigns.current_project.slug == acme_blog.slug
 
-      ws_select = view |> element(~s(select[name="workspace"])) |> render()
-      assert ws_select =~ acme_ws.name
-      assert ws_select =~ default_ws.name
+      # The title shows the workspace name + the "project / dataset" trail
+      # (dataset rides the trail as its SLUG).
+      assert html =~ ~s{scope-title-ws">#{acme_ws.name}</span>}
+      assert html =~ ~r{scope-title-trail">\s*#{acme_blog.name} / #{@dataset}\s*<}
+
+      # Open the menu: BOTH member workspaces are offered.
+      open = render_click(view, "scope-menu-toggle", %{})
+      assert open =~ @menu_open
+      assert open =~ ~s{scope-menu-item-name">#{acme_ws.name}</span>}
+      assert open =~ ~s{scope-menu-item-name">#{default_ws.name}</span>}
+
+      # The current workspace's row carries the is-current marker.
+      assert open =~ ~r{is-current[^>]*phx-value-id="#{acme_ws.id}"}
     end
 
-    # ── Task barkpark-gtmi: each switcher select must live inside a <form> ──────
+    # ── Task barkpark-gtmi: form events must be bound on a <form> ──────────────
     #
-    # LiveView's phx-change on an input REQUIRES an enclosing <form>; a bare
-    # <select phx-change> logs "form events require the input to be inside a
-    # form" (×N across render/patch cycles) and the change payload is
-    # unreliable. The fix moves the binding onto a wrapping <form phx-change>
-    # and drops phx-change from the <select> (the select keeps its name= so the
-    # param key is unchanged). This proves the structural fix: every switch
-    # binding is on a <form>, and no select/input carries a bare phx-change.
-    test "each switcher select is wrapped in a <form phx-change>, no bare phx-change on an input",
+    # The original bug shape: a bare `<select phx-change>` outside a <form> logs
+    # "form events require the input to be inside a form" (×N across
+    # render/patch cycles) and the change payload is unreliable. The select-
+    # based bar is gone; this guards that the scope chrome never reintroduces
+    # the broken shape, and that the create affordance binds submit on the
+    # FORM with the named input INSIDE it (so the "name" param arrives).
+    test "no bare phx-change select anywhere; the create form binds on the <form>",
          %{conn: conn} do
       {:ok, view, _html} = mount_studio(conn)
 
-      # The binding lives on a <form> for all three switch events — these are the
-      # selectors the switch tests drive through, so render_change resolves them.
-      for event <- ~w(switch-workspace switch-project switch-dataset) do
-        assert view |> element(~s(form[phx-change="#{event}"])) |> has_element?(),
-               "switch event #{event} must be bound on a <form>, not a bare <select>"
-      end
-
-      # And the binding must NOT remain on any select/input — that is the exact
-      # shape that triggers the "form events require the input to be inside a
-      # form" console error.
       refute view |> element(~s(select[phx-change])) |> has_element?(),
-             "no <select> may carry a bare phx-change — the binding belongs on the <form>"
+             "no <select> may carry a bare phx-change — that is the exact shape that " <>
+               "triggers the 'form events require the input to be inside a form' error"
 
-      # The selects still carry their name= attributes so the handler param keys
-      # (workspace / project / dataset) are unchanged.
-      assert view
-             |> element(~s(form[phx-change="switch-workspace"] select[name="workspace"]))
-             |> has_element?()
+      # Open the scope menu and the workspace create row: the input lives
+      # inside a <form phx-submit="create-workspace">.
+      render_click(view, "scope-menu-toggle", %{})
+      render_click(view, "toggle-create", %{"target" => "workspace"})
 
       assert view
-             |> element(~s(form[phx-change="switch-dataset"] select[name="dataset"]))
-             |> has_element?()
+             |> element(~s(form[phx-submit="create-workspace"] input[name="name"]))
+             |> has_element?(),
+             "the create-workspace input must live INSIDE the phx-submit form"
     end
 
-    test "the workspace select lists ONLY member workspaces — no foreign tenant", %{
+    test "the open menu lists ONLY member workspaces — no foreign tenant", %{
       conn: conn,
       foreign_ws: foreign_ws
     } do
       {:ok, view, _html} = mount_studio(conn)
 
-      ws_select = view |> element(~s(select[name="workspace"])) |> render()
+      html = render_click(view, "scope-menu-toggle", %{})
+      assert html =~ @menu_open
 
       # Member workspaces present.
-      assert ws_select =~ "Acme"
-      # The foreign workspace (no membership row) MUST NOT appear/be selectable.
-      refute ws_select =~ foreign_ws.name,
-             "TENANT LEAK: a non-member workspace appeared in the switcher — " <>
-               "the switcher must use list_workspaces_for/1, not list_workspaces/0"
+      assert html =~ ~s{scope-menu-item-name">Acme</span>}
+
+      # The foreign workspace (no membership row) MUST NOT appear/be pickable.
+      refute html =~ foreign_ws.name,
+             "TENANT LEAK: a non-member workspace appeared in the scope menu — " <>
+               "the menu must use list_workspaces_for/1, not list_workspaces/0"
     end
   end
 
@@ -188,9 +199,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     } do
       {:ok, view, _html} = mount_studio(conn)
 
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => acme_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => acme_ws.slug})
 
       # P3: an honoured switch is URL-real — a push_patch to the NEW scope's
       # canonical URL (handle_params + LiveScope re-resolve from it).
@@ -201,8 +210,8 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       # Project re-defaulted to the new workspace's first project.
       assert assigns.current_project.slug == acme_blog.slug
 
-      # The Project select now shows the new workspace's project.
-      assert view |> element(~s(select[name="project"])) |> render() =~ acme_blog.name
+      # The scope title now shows the new workspace's project in its trail.
+      assert render(view) =~ ~r{scope-title-trail">\s*#{acme_blog.name} / }
     end
 
     test "switch-workspace to a NON-MEMBER workspace is REJECTED (scope unchanged)", %{
@@ -213,11 +222,9 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       before = :sys.get_state(view.pid).socket.assigns.current_workspace.slug
 
-      # Forge a switch to the foreign workspace's slug (the option isn't even
-      # rendered, but a crafted phx-change must still be refused server-side).
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => foreign_ws.slug
-      })
+      # Forge a switch to the foreign workspace's slug (the menu doesn't even
+      # offer it, but a crafted event must still be refused server-side).
+      render_change(view, "switch-workspace", %{"workspace" => foreign_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -239,15 +246,11 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       # Switch into Default (a member workspace), then change project within it.
       # P3: each honoured switch patches to its NEW scope's canonical URL —
       # consume the patches in order.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => default_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => default_ws.slug})
 
       assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/"
 
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-        "project" => second_project.slug
-      })
+      render_change(view, "switch-project", %{"project" => second_project.slug})
 
       assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/studio/"
 
@@ -262,42 +265,42 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     } do
       {:ok, view, _html} = mount_studio(conn)
 
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => "does-not-exist"
-      })
+      render_change(view, "switch-workspace", %{"workspace" => "does-not-exist"})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
     end
   end
 
-  # ── Task barkpark-dgpf: project-scoped Dataset select, far-right control ─────
+  # ── Task barkpark-dgpf: project-scoped Dataset column, far-right ────────────
   #
-  # The switcher now renders THREE controls left→right: Workspace · Project ·
+  # The scope menu renders THREE columns left→right: Workspace · Project ·
   # Dataset. The Dataset (rightmost) is populated from the CURRENT project's
-  # datasets (`Tenancy.list_datasets/1`), `selected` = the active dataset slug.
+  # datasets (`Tenancy.list_datasets/1`), the active one marked `is-current`.
   # Switching the project cascades: reload the dataset list + auto-select the
   # project's default (production-first, else first) + re-scope to it.
-  describe "dataset select (barkpark-dgpf)" do
-    test "renders Workspace → Project → Dataset in DOM order, dataset is the far-right control",
+  describe "dataset column (barkpark-dgpf)" do
+    test "the menu renders Workspace → Project → Dataset columns in DOM order, dataset rightmost",
          %{conn: conn} do
-      {:ok, _view, html} = mount_studio(conn)
+      {:ok, view, html} = mount_studio(conn)
 
-      # All three controls are present, wired to their switch events.
-      assert html =~ ~s(phx-change="switch-workspace") or html =~ "workspace-switcher-static"
-      assert html =~ ~s(phx-change="switch-dataset")
+      # The bar carries ONE title button; the three controls live in the popover.
+      assert html =~ ~s{phx-click="scope-menu-toggle"}
 
-      # DOM order: the Workspace label precedes the Project label precedes the
-      # Dataset label. The Dataset is LAST (far right).
+      html = render_click(view, "scope-menu-toggle", %{})
+      assert html =~ @menu_open
+
+      # DOM order: the Workspace column title precedes the Project column
+      # title precedes the Dataset column title. Dataset is LAST (far right).
       ws_at = ws_label_pos(html)
       proj_at = label_pos(html, "Project")
       ds_at = label_pos(html, "Dataset")
 
       assert ws_at < proj_at,
-             "Workspace must render before Project"
+             "Workspace column must render before Project"
 
       assert proj_at < ds_at,
-             "Project must render before Dataset (Dataset is the far-right control)"
+             "Project column must render before Dataset (Dataset is the rightmost column)"
     end
 
     test "mount comes up with workspace + project + dataset auto-selected (not empty)", %{
@@ -317,7 +320,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       refute assigns.dataset in [nil, ""]
     end
 
-    test "dataset options equal the CURRENT project's datasets, current selected", %{
+    test "dataset column offers the CURRENT project's datasets, current marked", %{
       conn: conn,
       acme_production: acme_production,
       acme_staging: acme_staging,
@@ -325,15 +328,19 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     } do
       {:ok, view, _html} = mount_studio(conn)
 
-      ds_select = view |> element(~s(select[name="dataset"])) |> render()
+      html = render_click(view, "scope-menu-toggle", %{})
+      assert html =~ @menu_open
 
-      # Exactly the Acme/Blog project's datasets are offered.
-      assert ds_select =~ acme_production.name
-      assert ds_select =~ acme_staging.name
-      assert ds_select =~ acme_reftest.name
+      # Exactly the Acme/Blog project's datasets are offered as picks (the
+      # dataset buttons carry the phx-value-ds slug for scope-open).
+      for ds <- [acme_production, acme_staging, acme_reftest] do
+        assert html =~ ~s{phx-value-ds="#{ds.slug}"}
+        assert html =~ ~s{scope-menu-item-name">#{ds.name}</span>}
+      end
 
-      # The current dataset (production, the URL leaf) is the selected option.
-      assert ds_select =~ ~r/<option value="production"[^>]*selected/
+      # The current dataset (production, the URL leaf) carries the marker.
+      assert html =~ ~r{is-current[^>]*phx-value-ds="production"},
+             "the active dataset must be marked is-current in the menu"
     end
 
     test "switch-project reloads dataset options + auto-selects the project's default", %{
@@ -354,15 +361,11 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       # Move into Default (a member workspace) — its first project may differ;
       # then switch explicitly to `secondary`, whose datasets we control.
       # P3: consume each switch's canonical-URL patch in order.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => default_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => default_ws.slug})
 
       assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/"
 
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-        "project" => second_project.slug
-      })
+      render_change(view, "switch-project", %{"project" => second_project.slug})
 
       assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/studio/"
 
@@ -373,10 +376,10 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.dataset == "production",
              "switch-project must auto-select the new project's default dataset (production-first)"
 
-      # The Dataset select now lists the NEW project's datasets.
-      ds_select = view |> element(~s(select[name="dataset"])) |> render()
-      assert ds_select =~ "Prod2"
-      assert ds_select =~ "Archive2"
+      # The dataset column now lists the NEW project's datasets.
+      html = render_click(view, "scope-menu-toggle", %{})
+      assert html =~ ~s{scope-menu-item-name">Prod2</span>}
+      assert html =~ ~s{scope-menu-item-name">Archive2</span>}
     end
 
     test "switch-project to a single-dataset project auto-selects that one dataset", %{
@@ -390,15 +393,11 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # P3: consume each switch's canonical-URL patch in order — the project
       # switch patches to the new project's URL with the cascaded dataset leaf.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => default_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => default_ws.slug})
 
       assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/"
 
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
-        "project" => solo_project.slug
-      })
+      render_change(view, "switch-project", %{"project" => solo_project.slug})
 
       assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{solo_project.slug}/studio/only-ds"
 
@@ -413,9 +412,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       assert :sys.get_state(view.pid).socket.assigns.dataset == "production"
 
-      render_change(element(view, ~s(form[phx-change="switch-dataset"])), %{
-        "dataset" => "staging"
-      })
+      render_change(view, "switch-dataset", %{"dataset" => "staging"})
 
       # P3: the dataset is the URL leaf under the scoped prefix.
       assert assert_patch(view) =~ ~r{/w/[^/]+/p/[^/]+/studio/staging}
@@ -431,29 +428,31 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       before = :sys.get_state(view.pid).socket.assigns.dataset
 
-      render_change(element(view, ~s(form[phx-change="switch-dataset"])), %{
-        "dataset" => "not-a-real-dataset"
-      })
+      render_change(view, "switch-dataset", %{"dataset" => "not-a-real-dataset"})
 
       assert :sys.get_state(view.pid).socket.assigns.dataset == before,
              "switch-dataset must refuse a slug that isn't one of the current project's datasets"
     end
   end
 
-  # ── Task barkpark-ylrw: "+ New workspace" / "+ New project" affordances ─────
+  # ── Task barkpark-ylrw: "＋ New workspace" / "＋ New project" affordances ────
   #
-  # The switcher exposes a "＋" button on the Workspace + Project controls that
-  # toggles a tiny inline name form. Submitting reuses the atomic create-with-
-  # bootstrap context (create_workspace_with_owner / create_project_with_dataset)
-  # and auto-switches the whole scope to the new workspace/project + its
-  # production dataset. A blank name flashes an error + creates nothing. An
-  # anonymous session (no token, no dev fallback) never renders the affordance.
+  # The affordances live INSIDE the scope popover, at the column feet: a "＋"
+  # button toggles a tiny inline name form. Submitting reuses the atomic
+  # create-with-bootstrap context (create_workspace_with_owner /
+  # create_project_with_dataset) and auto-switches the whole scope to the new
+  # workspace/project + its production dataset. A blank name flashes an error +
+  # creates nothing. An anonymous session (no token, no dev fallback) never
+  # renders the affordance — not even with the popover open.
   describe "create affordances (barkpark-ylrw)" do
     test "create-workspace builds ws + owner membership + Default project + production dataset, switches to it",
          %{conn: conn} do
       {:ok, view, _html} = mount_studio(conn)
 
-      # The "＋ New workspace" button is present (token-backed session).
+      # The "＋ New workspace" button lives in the open popover (token-backed
+      # session ⇒ can_create).
+      render_click(view, "scope-menu-toggle", %{})
+
       assert view
              |> element(~s(button[phx-click="toggle-create"][phx-value-target="workspace"]))
              |> has_element?()
@@ -519,8 +518,11 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
          %{conn: conn, acme_ws: acme_ws} do
       {:ok, view, _html} = mount_studio(conn)
 
-      # Mount scope is the slug-first member workspace (acme). Open the Project
-      # create form and submit.
+      # Mount scope is the slug-first member workspace (acme). The project
+      # create affordance renders in the open popover (the previewed workspace
+      # IS the current one on open). Open the form and submit.
+      render_click(view, "scope-menu-toggle", %{})
+
       render_click(
         element(view, ~s(button[phx-click="toggle-create"][phx-value-target="project"]))
       )
@@ -561,6 +563,8 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       before = Tenancy.list_workspaces_for(:sys.get_state(view.pid).socket.assigns.api_token)
 
+      render_click(view, "scope-menu-toggle", %{})
+
       render_click(
         element(view, ~s(button[phx-click="toggle-create"][phx-value-target="workspace"]))
       )
@@ -588,8 +592,14 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       assert :sys.get_state(view.pid).socket.assigns.api_token == nil
 
+      refute html =~ ~s(phx-click="toggle-create")
+
+      # The affordance lives in the popover — open it and look there too.
+      html = render_click(view, "scope-menu-toggle", %{})
+      assert html =~ @menu_open
+
       refute html =~ ~s(phx-click="toggle-create"),
-             "anonymous (no-token) session must not expose the + New create affordance"
+             "anonymous (no-token) session must not expose the ＋ New create affordance"
 
       refute view
              |> element(~s(button[phx-click="toggle-create"]))
@@ -623,10 +633,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       before_ws = :sys.get_state(view.pid).socket.assigns.current_workspace.slug
 
-      html =
-        render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-          "workspace" => empty_ws.slug
-        })
+      html = render_change(view, "switch-workspace", %{"workspace" => empty_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -656,9 +663,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       {:ok, view, _html} = mount_studio(conn)
 
       # Attempt the bad switch (refused), then fire a real scoped write.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => empty_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => empty_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       # Scope stayed on the prior (acme) workspace — NOT the empty one, NOT Default.
@@ -687,13 +692,9 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # Move to Default first, then switch to acme so the handler runs for a
       # workspace with projects (initial_project must be non-nil + chosen).
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => default_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => default_ws.slug})
 
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
-        "workspace" => acme_ws.slug
-      })
+      render_change(view, "switch-workspace", %{"workspace" => acme_ws.slug})
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -740,14 +741,16 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   # The raw token the setup conn carries (to mint additional memberships).
   defp session_raw(conn), do: Plug.Conn.get_session(conn, "api_token")
 
-  # First index of the Workspace label — tolerates either the <select> chrome
-  # or the single-option static-label rendering.
+  # First index of the Workspace column title in the OPEN scope menu —
+  # the column titles render as `<div class="scope-menu-col-title">…</div>`,
+  # so `>Label<` is exact (pane-item labels carry surrounding whitespace and
+  # never collide).
   defp ws_label_pos(html), do: label_pos(html, "Workspace")
 
   defp label_pos(html, label) do
     case :binary.match(html, ">#{label}<") do
       {pos, _} -> pos
-      :nomatch -> raise "label #{inspect(label)} not found in switcher markup"
+      :nomatch -> raise "label #{inspect(label)} not found in the scope menu markup"
     end
   end
 end

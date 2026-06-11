@@ -37,18 +37,34 @@ defmodule BarkparkWeb.StudioChrome do
       nil-safe defaults so the layout never KeyErrors on a surface that
       doesn't care.
 
-  For every view EXCEPT StudioLive it also attaches a `handle_event`
-  hook giving the switcher NAVIGATION semantics: a workspace/project/
-  dataset switch is a `push_navigate` to the target scope's canonical
-  Studio URL (Scoped-by-URL: a switch IS a navigation), and Share opens
-  the Studio with `?shares=open`. StudioLive keeps its own richer
-  in-socket handlers — the hook is never attached there.
+  It also attaches a `handle_event` hook to EVERY chrome surface:
+
+    * The **scope menu** (`scope-menu-*` / `scope-open`) is handled here
+      for all views — the Sanity-style title button opens ONE popover
+      where workspace, project and dataset are picked together; choosing
+      a dataset is a `push_navigate` to the triple's canonical Studio URL
+      (Scoped-by-URL: a scope pick IS a navigation). Menu state lives in
+      the `:scope_menu` assign (nil = closed); the preview columns only
+      ever list membership workspaces, and `scope-open` re-gates the
+      target server-side regardless of what the client claims.
+    * The **legacy single-axis events** (`switch-*`, `shares-open`,
+      `toggle-create`, `create-*`) pass through (`:cont`) on StudioLive —
+      it keeps its richer in-socket handlers — and get NAVIGATION
+      semantics here on every other view (they used to crash
+      MediaLive/ApiTesterLive, which never defined them).
   """
 
   import Phoenix.Component, only: [assign: 2, assign: 3, assign_new: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, put_flash: 3]
 
   alias Barkpark.{Content, Tenancy}
+
+  @studio_live BarkparkWeb.Studio.StudioLive
+
+  # Events StudioLive handles itself — the hook only intercepts them on
+  # surfaces that would otherwise crash (no handler defined).
+  @per_view_events ~w(switch-workspace switch-project switch-dataset shares-open
+                      toggle-create create-workspace create-project)
 
   def on_mount(:default, params, _session, socket) do
     socket =
@@ -62,32 +78,205 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:nav_section, fn -> nil end)
       |> assign_new(:current_path, fn -> nil end)
       |> assign_new(:create_open, fn -> nil end)
+      |> assign_new(:scope_menu, fn -> nil end)
 
-    socket =
-      if socket.view == BarkparkWeb.Studio.StudioLive do
-        socket
-      else
-        attach_hook(socket, :studio_chrome_nav, :handle_event, &chrome_event/3)
-      end
-
-    {:cont, socket}
+    {:cont, attach_hook(socket, :studio_chrome_nav, :handle_event, &chrome_event/3)}
   end
 
-  # ── chrome-level switcher events (non-StudioLive surfaces) ───────────────
+  # ── scope menu (ALL chrome surfaces — StudioLive included) ───────────────
 
-  defp chrome_event("switch-workspace", %{"workspace" => slug}, socket),
-    do: {:halt, nav_to_workspace(socket, slug)}
+  defp chrome_event("scope-menu-toggle", _params, socket) do
+    if socket.assigns[:scope_menu] do
+      {:halt, assign(socket, :scope_menu, nil)}
+    else
+      {:halt, open_scope_menu(socket)}
+    end
+  end
 
-  defp chrome_event("switch-project", %{"project" => slug}, socket),
-    do: {:halt, nav_to_project(socket, slug)}
+  defp chrome_event("scope-menu-close", _params, socket),
+    do: {:halt, assign(socket, :scope_menu, nil)}
 
-  defp chrome_event("switch-dataset", %{"dataset" => slug}, socket),
-    do: {:halt, nav_to_dataset(socket, slug)}
+  defp chrome_event("scope-menu-ws", %{"id" => id}, socket),
+    do: {:halt, preview_menu_workspace(socket, id)}
 
-  defp chrome_event("shares-open", _params, socket),
-    do: {:halt, nav_to_shares(socket)}
+  defp chrome_event("scope-menu-proj", %{"id" => id}, socket),
+    do: {:halt, preview_menu_project(socket, id)}
+
+  defp chrome_event("scope-open", params, socket),
+    do: {:halt, open_scope(socket, params)}
+
+  # ── legacy single-axis events (non-StudioLive surfaces) ──────────────────
+
+  defp chrome_event(event, params, socket) when event in @per_view_events do
+    if socket.view == @studio_live do
+      {:cont, socket}
+    else
+      {:halt, chrome_fallback(event, params, socket)}
+    end
+  end
 
   defp chrome_event(_event, _params, socket), do: {:cont, socket}
+
+  defp chrome_fallback("switch-workspace", %{"workspace" => slug}, socket),
+    do: nav_to_workspace(socket, slug)
+
+  defp chrome_fallback("switch-project", %{"project" => slug}, socket),
+    do: nav_to_project(socket, slug)
+
+  defp chrome_fallback("switch-dataset", %{"dataset" => slug}, socket),
+    do: nav_to_dataset(socket, slug)
+
+  defp chrome_fallback("shares-open", _params, socket),
+    do: nav_to_shares(socket)
+
+  # The popover's create affordances fire the same events StudioLive
+  # already handles; here they get the chrome's navigation semantics —
+  # create, then push_navigate into the new scope's canonical URL.
+  defp chrome_fallback("toggle-create", %{"target" => target}, socket)
+       when target in ["workspace", "project"] do
+    next = if socket.assigns[:create_open] == target, do: nil, else: target
+    assign(socket, :create_open, next)
+  end
+
+  defp chrome_fallback("create-workspace", %{"name" => name}, socket) do
+    case socket.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token ->
+        case Tenancy.create_workspace_with_owner(%{name: name}, token) do
+          {:ok, ws} ->
+            case project_for(ws) do
+              %{} = project ->
+                push_navigate(socket, to: studio_root(ws, project, dataset_for(project, socket)))
+
+              _ ->
+                put_flash(socket, :error, "Workspace created without a project")
+            end
+
+          {:error, _changeset} ->
+            put_flash(socket, :error, "Could not create workspace")
+        end
+
+      _ ->
+        put_flash(socket, :error, "Sign in to create a workspace")
+    end
+  end
+
+  defp chrome_fallback("create-project", %{"name" => name}, socket) do
+    ws = socket.assigns[:current_workspace]
+
+    cond do
+      not match?(%Barkpark.Auth.ApiToken{}, socket.assigns[:api_token]) ->
+        put_flash(socket, :error, "Sign in to create a project")
+
+      is_nil(ws) or not can_reach?(socket, ws) ->
+        socket
+
+      true ->
+        case Tenancy.create_project_with_dataset(ws, %{name: name}) do
+          {:ok, created} ->
+            project = Tenancy.get_project_by_id(created.id) || created
+            push_navigate(socket, to: studio_root(ws, project, dataset_for(project, socket)))
+
+          {:error, _changeset} ->
+            put_flash(socket, :error, "Could not create project")
+        end
+    end
+  end
+
+  defp chrome_fallback(_event, _params, socket), do: socket
+
+  # ── scope-menu state ──────────────────────────────────────────────────────
+  #
+  # The menu previews a (workspace, project) pair without navigating; only
+  # `scope-open` — a dataset pick — leaves the page. The workspace column is
+  # the same membership-gated list the old select used
+  # (`list_workspaces_for/1` + union-in the current workspace for the
+  # anonymous/dev session), so a preview can never reach a foreign tenant,
+  # and `open_scope/2` independently re-gates the final triple anyway.
+
+  defp open_scope_menu(socket) do
+    ws = socket.assigns[:current_workspace]
+    proj = socket.assigns[:current_project]
+
+    workspaces =
+      socket.assigns[:api_token]
+      |> Tenancy.list_workspaces_for()
+      |> ensure_current(ws)
+
+    assign(socket, :scope_menu, %{
+      ws: ws,
+      proj: proj,
+      workspaces: workspaces,
+      projects: menu_projects(ws),
+      datasets: menu_datasets(proj)
+    })
+  end
+
+  defp preview_menu_workspace(socket, id) do
+    with %{} = menu <- socket.assigns[:scope_menu],
+         %{} = ws <- Enum.find(menu.workspaces, &(&1.id == id)) do
+      proj = project_for(ws)
+
+      assign(socket, :scope_menu, %{
+        menu
+        | ws: ws,
+          proj: proj,
+          projects: menu_projects(ws),
+          datasets: menu_datasets(proj)
+      })
+    else
+      _ -> socket
+    end
+  end
+
+  defp preview_menu_project(socket, id) do
+    with %{} = menu <- socket.assigns[:scope_menu],
+         %{} = proj <- Enum.find(menu.projects, &(&1.id == id)) do
+      assign(socket, :scope_menu, %{menu | proj: proj, datasets: menu_datasets(proj)})
+    else
+      _ -> socket
+    end
+  end
+
+  defp menu_projects(%{id: ws_id}) when is_binary(ws_id), do: Tenancy.list_projects(ws_id)
+  defp menu_projects(_), do: []
+
+  defp menu_datasets(%{id: proj_id}) when is_binary(proj_id), do: Tenancy.list_datasets(proj_id)
+  defp menu_datasets(_), do: []
+
+  # A dataset pick: navigate to the triple's canonical Studio URL. Every
+  # level is re-resolved and re-gated server-side — membership for the
+  # workspace, containment for project and dataset — so forged
+  # phx-value-* can never re-scope across the tenant boundary.
+  defp open_scope(socket, %{"ws" => ws_slug, "proj" => proj_slug, "ds" => ds}) do
+    with %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
+         true <- can_reach?(socket, ws),
+         %Tenancy.Project{} = project <- Tenancy.get_project(ws.slug, proj_slug),
+         true <- is_binary(ds) and ds != "",
+         true <- Enum.any?(Tenancy.list_datasets(project.id), &(&1.slug == ds)) do
+      socket
+      |> assign(:scope_menu, nil)
+      |> push_navigate(to: studio_root(ws, project, ds))
+    else
+      _ -> assign(socket, :scope_menu, nil)
+    end
+  end
+
+  defp open_scope(socket, _params), do: assign(socket, :scope_menu, nil)
+
+  # Keep the active workspace visible in the menu even when it isn't in the
+  # membership list — the anonymous/dev session seeds `current_workspace`
+  # from the Default backfill (no membership row). Never exposes a FOREIGN
+  # workspace: only the one already on the socket, which `open_scope/2`
+  # independently re-checks.
+  defp ensure_current(workspaces, %{id: id} = current) do
+    if Enum.any?(workspaces, &(&1.id == id)) do
+      workspaces
+    else
+      Enum.sort_by([current | workspaces], & &1.slug)
+    end
+  end
+
+  defp ensure_current(workspaces, _), do: workspaces
 
   # Same hard tenant boundary as StudioLive's switch handler: a principal
   # may switch only into a membership workspace; the anonymous/dev session

@@ -135,6 +135,7 @@ defmodule BarkparkWeb.LiveScope do
   @readonly_events ~w(
     select select-group select-desk select-pane
     switch-workspace switch-project switch-dataset
+    scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
     jump-to-user show-profile preview-profile close-profile
     toggle-content-preview toggle-diff toggle-category
     editor-set-mode search ref-search validate-upload
