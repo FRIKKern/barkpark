@@ -174,6 +174,37 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
     end
   end
 
+  # Member token with a :read membership in the workspace — the credential a
+  # signed-in browser user carries in `session["api_token"]` (or an API
+  # client presents as Bearer).
+  defp member_token!(ws) do
+    raw_token = "p4-rendition-member-#{System.unique_integer([:positive])}"
+
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token(raw_token),
+        label: "p4-rendition-member",
+        dataset: @dataset,
+        permissions: ["read"]
+      })
+      |> Repo.insert()
+
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, token.id, "member")
+    raw_token
+  end
+
+  # Pre-seed the on-disk rendition cache so serve_rendition short-circuits at
+  # the File.exists? check — no vips needed in test.
+  defp seed_thumb_cache!(file) do
+    rel = Path.join(["_renditions", file.id, "thumb.jpg"])
+    full = Media.file_path(rel)
+    File.mkdir_p!(Path.dirname(full))
+    File.write!(full, "JPGBYTES")
+    on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
+    :ok
+  end
+
   describe "scoped renditions" do
     setup %{ws: ws, proj: proj} do
       name = "p4-#{System.unique_integer([:positive])}.png"
@@ -208,6 +239,38 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
     } do
       conn = get(conn, "/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
       assert conn.status == 403
+    end
+
+    test "a member's session cookie serves the scoped rendition (browser <img> path)", %{
+      ws: ws,
+      proj: proj,
+      media_file: file
+    } do
+      raw_token = member_token!(ws)
+      seed_thumb_cache!(file)
+
+      conn =
+        build_conn()
+        |> init_test_session(%{"api_token" => raw_token})
+        |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
+
+      assert conn.status == 200
+    end
+
+    test "a member's Bearer header serves the scoped rendition", %{
+      ws: ws,
+      proj: proj,
+      media_file: file
+    } do
+      raw_token = member_token!(ws)
+      seed_thumb_cache!(file)
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
+
+      assert conn.status == 200
     end
 
     test "a foreign workspace's file id 404s within the scope (scope-bounded)", %{

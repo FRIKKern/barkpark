@@ -73,12 +73,23 @@ defmodule BarkparkWeb.Router do
   # resolved workspace scope), so a media share serves ONLY its own workspace's
   # files — a path that resolves to another workspace 404s. Per-asset
   # `bp_visibility` still applies on serve (private bytes stay denied).
+  #
+  # Session-aware (like :scoped_browser): these routes are loaded by bare
+  # browser `<img>` tags from the scoped Studio media library, which carry
+  # the session cookie but can never attach a Bearer header. Plain
+  # OptionalToken left those conns anonymous, so ResolveWorkspace's
+  # membership gate 403'd every thumbnail for a logged-in member.
+  # OptionalSessionToken resolves the member's token from EITHER the Bearer
+  # header (wins when present — API clients unchanged) OR
+  # `session["api_token"]`; anonymous still passes through untouched, so the
+  # :media share path and the fail-closed default are byte-identical.
   pipeline :shared_media_api do
+    plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :media)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
