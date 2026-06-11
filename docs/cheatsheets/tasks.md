@@ -5,7 +5,7 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 
 | bp | HTTP | Effect · example |
 |---|---|---|
-| `bp task ls` | `GET /v1/tasks` | list; filters `kind/lifecycle_status/phase_id/parent/label/limit` · `parent=` = child rail, oldest first |
+| `bp task ls` | `GET /v1/tasks` | list; filters `kind/lifecycle_status/phase_id/parent/label` · `parent=` = child rail |
 | `bp task ready` | `GET /v1/tasks/ready` | unblocked queue, priority ASC |
 | `bp task prime` | `GET /v1/tasks/prime` | one-call rehydration: in-progress (`--worker W`) + ready head + events + counts |
 | `bp task get <id>` | `GET /v1/tasks/:id` | doc + one level of `children` inline |
