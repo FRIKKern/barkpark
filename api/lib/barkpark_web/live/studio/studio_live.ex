@@ -83,6 +83,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # ensure_tenancy_scope runs there.
     {:ok,
      socket
+     # LiveScope (scoped mount) assigns the real prefix BEFORE mount runs;
+     # assign_new keeps it. The flat mount lands here unset → "" → every
+     # studio_path stays byte-identical to the pre-scoped era.
+     |> assign_new(:scope_prefix, fn -> "" end)
      |> assign(
        nav_section: :structure,
        page_title: "Studio",
@@ -255,7 +259,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # patched navigation never loops.
     case redirect_dataset_leaf(socket, dataset) do
       {:redirect, slug} ->
-        {:noreply, push_patch(socket, to: studio_path(path, slug, desk: desk))}
+        {:noreply, push_patch(socket, to: studio_path(socket, path, slug, desk: desk))}
 
       :ok ->
         finish_handle_params(socket, dataset, path, desk, uri)
@@ -598,7 +602,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("select", %{"pane" => pane_str, "id" => id}, socket) do
     pane_idx = String.to_integer(pane_str)
     new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
-    {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
+    {:noreply, push_patch(socket, to: studio_path(socket, new_path, socket.assigns.dataset))}
   end
 
   # Schema-driven field-group tabs (Sanity Studio parity). Pure LV state —
@@ -618,7 +622,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     {:noreply,
      push_patch(socket,
-       to: studio_path(socket.assigns.nav_path, socket.assigns.dataset, desk: desk)
+       to: studio_path(socket, socket.assigns.nav_path, socket.assigns.dataset, desk: desk)
      )}
   end
 
@@ -672,6 +676,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
             {:noreply,
              socket
              |> assign(current_workspace: workspace, current_project: project)
+             |> sync_scope_prefix()
              |> rescope_dataset_for_project(project)}
         end
     end
@@ -694,6 +699,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       {:noreply,
        socket
        |> assign(current_project: project)
+       |> sync_scope_prefix()
        |> rescope_dataset_for_project(project)}
     else
       _ -> {:noreply, socket}
@@ -721,7 +727,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, socket}
 
       project_has_dataset?(project, slug) ->
-        {:noreply, push_patch(socket, to: studio_path([], slug))}
+        {:noreply, push_patch(socket, to: studio_path(socket, [], slug))}
 
       true ->
         {:noreply, socket}
@@ -830,7 +836,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # away, matching Sanity's breadcrumb-jump behavior.
     idx = String.to_integer(idx_str)
     new_path = Enum.take(socket.assigns.nav_path, idx)
-    {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
+    {:noreply, push_patch(socket, to: studio_path(socket, new_path, socket.assigns.dataset))}
   end
 
   def handle_event("new-document", %{"type" => type}, socket) do
@@ -851,7 +857,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         # filter segment and produced a dead /post/<id> URL.
         pub_id = Content.published_id(doc.doc_id)
         new_path = socket.assigns.nav_path ++ [pub_id]
-        {:noreply, push_patch(socket, to: studio_path(new_path, socket.assigns.dataset))}
+        {:noreply, push_patch(socket, to: studio_path(socket, new_path, socket.assigns.dataset))}
 
       {:error, {:halted, reason}} ->
         {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
@@ -1144,7 +1150,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
-           |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+           |> push_patch(to: studio_path(socket, new_path, socket.assigns.dataset))}
       end
     else
       {:noreply, socket}
@@ -1193,7 +1199,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
            socket
            |> assign(show_discard: false)
            |> put_flash(:info, "Draft discarded")
-           |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+           |> push_patch(to: studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, _} ->
           {:noreply,
@@ -1372,7 +1378,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # Build the path to that document — need to find it in the structure
     structure = Structure.build(socket.assigns.dataset)
     path = PaneBuilder.find_doc_path(structure, type, doc_id)
-    {:noreply, push_patch(socket, to: studio_path(path, socket.assigns.dataset))}
+    {:noreply, push_patch(socket, to: studio_path(socket, path, socket.assigns.dataset))}
   end
 
   def handle_event("preview-profile", %{"name" => name, "color" => color}, socket) do
@@ -1484,7 +1490,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           {:noreply,
            socket
            |> put_flash(:info, "Duplicated as #{pub_id}")
-           |> push_patch(to: studio_path(new_path, socket.assigns.dataset))}
+           |> push_patch(to: studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, {:halted, reason}} ->
           {:noreply, put_flash(socket, :error, "Duplicate cancelled: #{reason}")}
@@ -2678,48 +2684,70 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     case default_dataset_for_project(project) do
       %{slug: slug} when is_binary(slug) and slug != "" ->
-        if slug == socket.assigns[:dataset] do
-          # Same dataset slug as the old project — handle_params won't fire (no
-          # URL change), so the reset above is what rebuilds from the new scope.
-          # The owning workspace may have flipped though, so re-point the
-          # list subscription at the new scope's topic (barkpark-fe2k) before
-          # rebuilding — otherwise live updates would still arrive on the OLD
-          # workspace's topic (or not at all). Presence re-keys + re-tracks for
-          # the same reason (tsk-url-p0): the avatar must move workspaces.
-          socket
-          |> ensure_list_subscription(slug)
-          |> ensure_presence_subscription()
-          |> track_presence()
-          |> rebuild_panes()
-        else
-          # Different slug — push_patch runs handle_params, re-asserting nav_path
-          # from the new URL. The synchronous clear above still matters: it nils
-          # editor_doc before the round-trip so an in-flight save can't target the
-          # old project's doc.
-          push_patch(socket, to: studio_path([], slug))
+        cond do
+          slug == socket.assigns[:dataset] and (socket.assigns[:scope_prefix] || "") != "" ->
+            # Scoped surface (tsk-url-p1): the ws/proj flip changed the
+            # CANONICAL URL even though the dataset slug didn't — patch to it
+            # (sync_scope_prefix already updated the prefix) so the address
+            # bar tells the truth and LiveScope's handle_params hook
+            # re-authorizes the new scope. handle_params then re-subscribes
+            # list + presence and rebuilds — no in-place shortcut.
+            push_patch(socket, to: studio_path(socket, [], slug))
+
+          slug == socket.assigns[:dataset] ->
+            # Flat surface, same dataset slug — handle_params won't fire (no
+            # URL change), so the reset above is what rebuilds from the new
+            # scope. The owning workspace may have flipped though, so re-point
+            # the list subscription at the new scope's topic (barkpark-fe2k)
+            # before rebuilding — otherwise live updates would still arrive on
+            # the OLD workspace's topic (or not at all). Presence re-keys +
+            # re-tracks for the same reason (tsk-url-p0).
+            socket
+            |> ensure_list_subscription(slug)
+            |> ensure_presence_subscription()
+            |> track_presence()
+            |> rebuild_panes()
+
+          true ->
+            # Different slug — push_patch runs handle_params, re-asserting
+            # nav_path from the new URL. The synchronous clear above still
+            # matters: it nils editor_doc before the round-trip so an
+            # in-flight save can't target the old project's doc.
+            push_patch(socket, to: studio_path(socket, [], slug))
         end
 
       _ ->
         # Project has no dataset rows — the current slug stays authoritative,
-        # but the workspace may have flipped, so re-point the list subscription
+        # but the workspace may have flipped. Scoped surface: the canonical
+        # URL changed with the prefix — patch to it (handle_params + LiveScope
+        # re-auth do the rest). Flat surface: re-point the list subscription
         # at the new scope's topic before rebuilding (barkpark-fe2k); presence
         # re-keys + re-tracks alongside (tsk-url-p0).
-        socket
-        |> ensure_list_subscription(socket.assigns[:dataset])
-        |> ensure_presence_subscription()
-        |> track_presence()
-        |> rebuild_panes()
+        if (socket.assigns[:scope_prefix] || "") != "" do
+          push_patch(socket, to: studio_path(socket, [], socket.assigns[:dataset]))
+        else
+          socket
+          |> ensure_list_subscription(socket.assigns[:dataset])
+          |> ensure_presence_subscription()
+          |> track_presence()
+          |> rebuild_panes()
+        end
     end
   end
 
-  defp rescope_dataset_for_project(socket, _),
-    do:
+  defp rescope_dataset_for_project(socket, _) do
+    socket = reset_nav_for_switch(socket)
+
+    if (socket.assigns[:scope_prefix] || "") != "" do
+      push_patch(socket, to: studio_path(socket, [], socket.assigns[:dataset]))
+    else
       socket
-      |> reset_nav_for_switch()
       |> ensure_list_subscription(socket.assigns[:dataset])
       |> ensure_presence_subscription()
       |> track_presence()
       |> rebuild_panes()
+    end
+  end
 
   # Reset navigation + open-document state for a workspace/project switch.
   #
@@ -2856,6 +2884,23 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # Keep the URL prefix in lockstep with the socket scope on the SCOPED
+  # surface (tsk-url-p1): after a switch handler reassigns
+  # current_workspace/current_project, the prefix must follow so the very
+  # next studio_path/push_patch addresses the NEW tenant — a stale prefix
+  # would patch back into the old workspace and LiveScope would silently
+  # revert the switch. Flat surface (prefix "") stays flat: its switchers
+  # remain socket-state-only until the P3 cutover.
+  defp sync_scope_prefix(socket) do
+    with prefix when is_binary(prefix) and prefix != "" <- socket.assigns[:scope_prefix],
+         %{slug: ws_slug} when is_binary(ws_slug) <- socket.assigns[:current_workspace],
+         %{slug: proj_slug} when is_binary(proj_slug) <- socket.assigns[:current_project] do
+      assign(socket, :scope_prefix, "/w/#{ws_slug}/p/#{proj_slug}")
+    else
+      _ -> socket
+    end
+  end
+
   # The default dataset for a bare `/studio` mount. The `dataset` string stays
   # the leaf discriminator and is ORTHOGONAL to workspace/project (per
   # Content.Scope) — the Default-tenancy backfill assigned the seeded Default
@@ -2866,7 +2911,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # includes "production", so this is stable on a fresh DB.
   def default_dataset, do: Content.default_dataset()
 
-  defp studio_path(path, dataset, opts \\ []), do: studio_path_for(path, dataset, opts)
+  # Socket-aware URL builder — THE single choke point for every push_patch
+  # and chip href. On the scoped mount (tsk-url-p1) LiveScope assigns
+  # `scope_prefix: "/w/<ws>/p/<proj>"`; the flat mount carries "" and emits
+  # byte-identical URLs to the pre-scoped era, so flat bookmarks/tests stay
+  # untouched until the deliberate P3 cutover.
+  defp studio_path(socket, path, dataset, opts \\ []) do
+    (socket.assigns[:scope_prefix] || "") <> studio_path_for(path, dataset, opts)
+  end
 
   defp studio_path_for([], dataset, opts),
     do: append_desk_query("/studio/#{dataset}", opts)
@@ -2890,8 +2942,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # land on if they clicked. (The actual navigation goes through
   # `phx-click="select-desk"` → `push_patch`, so JS isn't required;
   # the href makes the chip bookmarkable + middle-clickable.)
-  defp desk_chip_href(nav_path, dataset, desk) do
-    studio_path(nav_path, dataset, desk: desk)
+  defp desk_chip_href(scope_prefix, nav_path, dataset, desk) do
+    (scope_prefix || "") <> studio_path_for(nav_path, dataset, desk: desk)
   end
 
   # ── Schema-action helpers (Task #16 — action registry) ─────────────────────
@@ -4679,7 +4731,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   class={"bp-desk-chip " <> if(active, do: "is-active", else: "")}
                   role="tab"
                   aria-selected={active}
-                  href={desk_chip_href(@nav_path, @dataset, gname)}
+                  href={desk_chip_href(@scope_prefix, @nav_path, @dataset, gname)}
                   phx-click="select-desk"
                   phx-value-desk={gname}
                 ><%= gtitle %></a>

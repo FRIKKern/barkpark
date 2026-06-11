@@ -541,6 +541,35 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :api)
   end
 
+  # ── Scoped Studio (P1 of Scoped-by-URL — tsk-url-p1) ─────────────────────
+  # THE canonical Studio address: workspace + project are URL segments, not
+  # socket state. The :scoped_browser conn resolvers gate the DEAD render
+  # only (plugs never run for live navigation), so the LiveScope on_mount
+  # resolves + authorizes from URL params AND re-authorizes on every
+  # scope-changing live patch — see BarkparkWeb.LiveScope.
+  #
+  # ORDERING (route-swallow guard): this scope's `:dataset` wildcard MUST
+  # register AFTER the scoped plugin `/studio` scopes above — otherwise a
+  # plugin path like /w/x/p/y/studio/onixedit/ping would parse here as
+  # dataset="onixedit". Same reasoning as the flat `_plugins`-before-
+  # `:studio_public` ordering below.
+  scope "/w/:workspace_slug/p/:project_slug/studio/:dataset", BarkparkWeb.Studio do
+    pipe_through :scoped_browser
+
+    live_session :scoped_studio,
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :fetch_api_token},
+        {BarkparkWeb.LiveScope, :resolve}
+      ],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      live "/", StudioLive
+      live "/media", MediaLive
+      live "/api-tester", ApiTesterLive
+
+      live "/*path", StudioLive
+    end
+  end
+
   # ── Studio admin LV — dataset-scoped, admin-gated ─────────────────────
   # Task barkpark-otv: plugin admin LV at `/studio/:dataset/_plugins`.
   # MUST come before the studio_public scope below — the catch-all
