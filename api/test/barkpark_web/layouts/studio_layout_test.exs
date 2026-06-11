@@ -32,7 +32,12 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
 
       # Brand
       assert html =~ ~s|<div class="sidebar-brand-icon">B</div>|
-      assert html =~ ~s|<span style="font-weight: 700; font-size: 15px;">Barkpark</span>|
+      # Sanity-style brand: the logo mark + the workspace title (scope
+      # switcher) ARE the identity; the "Barkpark" wordmark renders only
+      # when no workspace resolves (StudioChrome gives every studio-layout
+      # surface one, so effectively never).
+      assert html =~ ~s|class="sidebar-brand-icon"|
+      assert html =~ ~s|class="scope-switcher"|
 
       # Dataset switcher (rendered when @dataset is assigned)
       assert html =~ ~s|class="dataset-switcher-select"|
@@ -66,7 +71,12 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       assert html =~ ~s|<div class="studio-shell">|
       assert html =~ ~s|<div class="studio-bar">|
       assert html =~ ~s|<div class="sidebar-brand-icon">B</div>|
-      assert html =~ ~s|<span style="font-weight: 700; font-size: 15px;">Barkpark</span>|
+      # Sanity-style brand: the logo mark + the workspace title (scope
+      # switcher) ARE the identity; the "Barkpark" wordmark renders only
+      # when no workspace resolves (StudioChrome gives every studio-layout
+      # surface one, so effectively never).
+      assert html =~ ~s|class="sidebar-brand-icon"|
+      assert html =~ ~s|class="scope-switcher"|
 
       # Sign-out form is conditional on @api_token, which the :ops
       # on_mount assigns. It must be present for admin routes too.

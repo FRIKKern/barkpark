@@ -3,7 +3,9 @@
     <:brand>
       <div class="studio-bar-brand">
         <div class="sidebar-brand-icon">B</div>
-        <span style="font-weight: 700; font-size: 15px;">Barkpark</span>
+        <%!-- Sanity-style: the WORKSPACE is the studio's identity — the
+              wordmark only shows when no workspace is resolved. --%>
+        <span :if={!assigns[:current_workspace]} style="font-weight: 700; font-size: 15px;">Barkpark</span>
         <%= if assigns[:current_workspace] do %>
           <BarkparkWeb.Studio.WorkspaceSwitcher.switcher
             current_workspace={assigns[:current_workspace]}
@@ -45,18 +47,6 @@
           </form>
           <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
         </div>
-        <%= if assigns[:presences] do %>
-          <.presence_nav
-            user_id={@user_id}
-            user_name={@user_name}
-            user_color={@user_color}
-            presences={@presences}
-            editor_doc={assigns[:editor_doc]}
-            dataset={assigns[:dataset]}
-            current_workspace={assigns[:current_workspace]}
-            current_project={assigns[:current_project]}
-          />
-        <% end %>
         <button
           :if={assigns[:shares_admin?]}
           type="button"
@@ -70,6 +60,19 @@
         <.studio_theme_toggle />
         <%= if assigns[:api_token] do %>
           <.studio_signout_button />
+        <% end %>
+        <%!-- Sanity-style: the avatar sits at the far right edge. --%>
+        <%= if assigns[:presences] do %>
+          <.presence_nav
+            user_id={@user_id}
+            user_name={@user_name}
+            user_color={@user_color}
+            presences={@presences}
+            editor_doc={assigns[:editor_doc]}
+            dataset={assigns[:dataset]}
+            current_workspace={assigns[:current_workspace]}
+            current_project={assigns[:current_project]}
+          />
         <% end %>
       </div>
     </:actions>

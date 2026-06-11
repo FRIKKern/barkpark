@@ -442,9 +442,9 @@
       border-bottom: 1px solid var(--border-muted);
     }
     .studio-bar-brand { display: flex; align-items: center; gap: 8px; }
-    .studio-bar-tabs { display: flex; gap: 2px; }
+    .studio-bar-tabs { display: flex; gap: 6px; }
     .studio-tab {
-      padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500;
+      padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 400;
       color: var(--fg-muted); transition: all 0.1s;
     }
     .studio-tab:hover { color: var(--fg); background: var(--bg-muted); text-decoration: none; }
@@ -1402,7 +1402,9 @@
       transition: background 0.1s; margin-left: 4px;
     }
     .presence-me-group:hover { background: var(--bg-muted); }
-    .presence-me-info { text-align: right; }
+    /* Sanity-style: the bar shows ONLY the avatar; name/location live in
+       the hover tooltip + the profile popover the avatar opens. */
+    .presence-me-info { display: none; }
     .presence-me-name { font-size: 12px; font-weight: 600; display: block; line-height: 1.2; }
     .presence-me-location { font-size: 10px; color: var(--fg-dim); display: block; line-height: 1.2; }
     .presence-me {
@@ -1445,11 +1447,20 @@
     /* One calm grouped scope path: [ws ▾] / [proj ▾] / [ds ▾] — uniform
        segments inside a single bordered pill, labels sr-only (the values
        are self-evident; the group carries a tooltip). */
+    /* Sanity-style: borderless ghost path; the workspace segment is the
+       studio's TITLE (bold, full color), project/dataset trail muted. */
     .scope-switcher {
-      display: inline-flex; align-items: center; gap: 2px; margin-left: 10px;
-      height: 30px; padding: 0 4px;
-      border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
-      font-size: 12px;
+      display: inline-flex; align-items: center; gap: 2px; margin-left: 6px;
+      height: 30px; font-size: 12px;
+    }
+    .scope-switcher > .workspace-switcher:first-of-type .workspace-switcher-select,
+    .scope-switcher > .workspace-switcher:first-of-type .workspace-switcher-static {
+      font-size: 13px; font-weight: 600; color: var(--fg);
+    }
+    .scope-switcher .workspace-switcher-select:not(:hover),
+    .scope-switcher .dataset-switcher-select:not(:hover) { color: var(--fg-muted); }
+    .scope-switcher > .workspace-switcher:first-of-type .workspace-switcher-select:not(:hover) {
+      color: var(--fg);
     }
     .scope-sep { color: var(--fg-dim); padding: 0 1px; user-select: none; }
     .sr-only {

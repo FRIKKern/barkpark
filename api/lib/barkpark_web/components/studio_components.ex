@@ -584,9 +584,10 @@ defmodule BarkparkWeb.StudioComponents do
     ~H"""
     <div class="studio-bar-actions">
       <.form :let={_f} for={%{}} as={:session} action={@logout_path} method="post">
-        <button type="submit" class="btn btn-ghost btn-sm" aria-label="Sign out">
-          <.icon name="log-out" size={14} />
-          Sign out
+        <%!-- Icon-only (Sanity-style right rail); the accessible name and
+              tooltip both say "Sign out". --%>
+        <button type="submit" class="btn btn-ghost btn-sm" aria-label="Sign out" title="Sign out">
+          <.icon name="log-out" size={15} />
         </button>
       </.form>
     </div>
@@ -1527,7 +1528,7 @@ defmodule BarkparkWeb.StudioComponents do
           </div>
         <% end %>
       <% end %>
-      <div class="presence-me-group" phx-click="show-profile">
+      <div class="presence-me-group" phx-click="show-profile" title={"#{@user_name} — profile"}>
         <div class="presence-me-info">
           <span class="presence-me-name"><%= @user_name %></span>
           <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
