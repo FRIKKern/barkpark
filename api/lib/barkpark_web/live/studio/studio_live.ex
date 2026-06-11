@@ -262,11 +262,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, push_patch(socket, to: studio_path(socket, path, slug, desk: desk))}
 
       :ok ->
-        finish_handle_params(socket, dataset, path, desk, uri)
+        finish_handle_params(socket, dataset, path, desk, uri, params)
     end
   end
 
-  defp finish_handle_params(socket, dataset, path, desk, uri) do
+  defp finish_handle_params(socket, dataset, path, desk, uri, params) do
     socket =
       socket
       |> ensure_list_subscription(dataset)
@@ -292,12 +292,33 @@ defmodule BarkparkWeb.Studio.StudioLive do
         nav_desk: desk,
         current_path: current_path
       )
+      |> maybe_open_shares(params)
       |> rebuild_panes()
       |> subscribe_to_doc()
       |> track_presence()
 
     {:noreply, socket}
   end
+
+  # ?shares=open — the chrome-level Share button on non-Studio surfaces
+  # (MediaLive, plugin pages) navigates here with this param so the panel
+  # opens on arrival (StudioChrome.nav_to_shares). Admin-gated exactly
+  # like the in-page shares-open handler; non-admins just land in Studio.
+  defp maybe_open_shares(socket, %{"shares" => "open"}) do
+    if shares_admin?(socket) do
+      assign(socket,
+        show_shares: true,
+        shares_error: nil,
+        shares_rows: load_share_rows(),
+        shares_scope_prefill: shares_scope_prefill(socket),
+        shares_prefill_surfaces: []
+      )
+    else
+      socket
+    end
+  end
+
+  defp maybe_open_shares(socket, _params), do: socket
 
   # Doc-specific update — just patch the editor form, no rebuild
   @impl true

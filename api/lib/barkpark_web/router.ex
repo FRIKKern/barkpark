@@ -6,24 +6,24 @@ defmodule BarkparkWeb.Router do
   import BarkparkWeb.Router.Plugins
 
   pipeline :browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
   end
 
   pipeline :api do
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.OptionalToken
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.OptionalToken)
     # Back-compat tenancy shim: flat routes (no /w/:ws/p/:project slugs in the
     # path) infer the seeded Default Workspace/Project so downstream code always
     # has a scope. No-op once a resolver has already set the assigns.
-    plug BarkparkWeb.Plugs.AssignDefaultScope
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
   # Tenancy-aware variant of :api for the path-scoped
@@ -31,13 +31,13 @@ defmodule BarkparkWeb.Router do
   # (sans AssignDefaultScope — the resolvers set the real scope), then
   # resolves + membership-gates the workspace and resolves the project.
   pipeline :scoped_api do
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.OptionalToken
-    plug BarkparkWeb.Plugs.ResolveWorkspace
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
   # Public-share variant of :scoped_api for the scoped READ document routes
@@ -54,14 +54,14 @@ defmodule BarkparkWeb.Router do
   # the ONLY thing a :docs:read share opens — the POST mutate route lives in its
   # own scope block on a different pipeline and is never reached from here.
   pipeline :shared_docs_api do
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.OptionalToken
-    plug BarkparkWeb.Plugs.RequireShareScope, surface: :docs
-    plug BarkparkWeb.Plugs.ResolveWorkspace
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
   # Tenancy-aware READ pipeline for the scoped media surface (P3) — the
@@ -74,14 +74,14 @@ defmodule BarkparkWeb.Router do
   # files — a path that resolves to another workspace 404s. Per-asset
   # `bp_visibility` still applies on serve (private bytes stay denied).
   pipeline :shared_media_api do
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.OptionalToken
-    plug BarkparkWeb.Plugs.RequireShareScope, surface: :media
-    plug BarkparkWeb.Plugs.ResolveWorkspace
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :media)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
   # P5 scoped-share EDIT pipelines. These serve the SAME scoped write routes to
@@ -98,40 +98,40 @@ defmodule BarkparkWeb.Router do
   # Docs writes (mutate) — mirrors [:scoped_api, :require_token, :require_write,
   # :idempotent] with the edit-token grant spliced in.
   pipeline :scoped_mutate do
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.OptionalToken
-    plug BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs
-    plug BarkparkWeb.Plugs.ResolveWorkspace
-    plug BarkparkWeb.Plugs.ResolveProject
-    plug BarkparkWeb.Plugs.RequireToken
-    plug BarkparkWeb.Plugs.RequireWritePermission
-    plug BarkparkWeb.Plugs.Idempotency
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.RequireWritePermission)
+    plug(BarkparkWeb.Plugs.Idempotency)
   end
 
   # Media writes (upload/update/delete) — mirrors [:scoped_api, :media_mutate]
   # (keeps the session-cookie branch + AssignDefaultScope for the browser
   # Studio) with the edit-token grant spliced in before ResolveWorkspace.
   pipeline :scoped_media_mutate do
-    plug :fetch_session
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
+    plug(:fetch_session)
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
     # Cookie-aware soft-auth: bearer (API client / Web Component data-token) OR
     # session (browser Studio member), so the membership gate below sees a
     # session-only browser member too — and a bearer edit token reaches
     # RequireShareEditToken. Anon passes through to be denied by ResolveWorkspace.
-    plug BarkparkWeb.Plugs.OptionalSessionToken
-    plug BarkparkWeb.Plugs.RequireShareEditToken, surface: :media
-    plug BarkparkWeb.Plugs.ResolveWorkspace
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :media)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
     # Final gate: a credential MUST be present (halts anon), and the session
     # branch is CSRF-checked here (bearer callers return before the CSRF check).
-    plug BarkparkWeb.Plugs.RequireBearerOrSessionToken
-    plug BarkparkWeb.Plugs.AssignDefaultScope
+    plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
   # Tenancy-aware variant of :browser for the path-scoped plugin LiveView
@@ -146,18 +146,18 @@ defmodule BarkparkWeb.Router do
   # cookie resolves their token and clears the gate instead of 403'ing
   # before mount. The LV's own on_mount admin/ops hook is the UI auth gate.
   pipeline :scoped_browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
-    plug BarkparkWeb.Plugs.OptionalSessionToken
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
     # Anonymous resolves the DEFAULT workspace only (P3 cutover — the flat
     # Studio's public-demo/dev posture carried onto the scoped surface);
     # every other anonymous scope still fails closed, token paths unchanged.
-    plug BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
+    plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
   # Optional token resolution for browser routes that only REDIRECT (the
@@ -165,7 +165,7 @@ defmodule BarkparkWeb.Router do
   # session/dev token the scope-resolution rule keys off. No gating —
   # anonymous passes through and resolves to the Default workspace.
   pipeline :soft_token do
-    plug BarkparkWeb.Plugs.OptionalSessionToken
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
   end
 
   # :scoped_browser + the :docs share gate (P4) — the scoped STUDIO pipeline.
@@ -174,16 +174,16 @@ defmodule BarkparkWeb.Router do
   # gate at mount); otherwise byte-identical to :scoped_browser — members via
   # membership, anonymous via the Default allowance, everything else closed.
   pipeline :shared_studio_browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
-    plug BarkparkWeb.Plugs.OptionalSessionToken
-    plug BarkparkWeb.Plugs.RequireShareScope, surface: :docs
-    plug BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
+    plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
   # Public-share variant of :scoped_browser for the gated scoped paper reader
@@ -197,52 +197,52 @@ defmodule BarkparkWeb.Router do
   # still runs so a signed-in member reaches their own non-shared paper via the
   # membership gate exactly as on :scoped_browser.
   pipeline :shared_paper_browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
-    plug BarkparkWeb.Plugs.OptionalSessionToken
-    plug BarkparkWeb.Plugs.RequireShareScope, surface: :papers
-    plug BarkparkWeb.Plugs.ResolveWorkspace
-    plug BarkparkWeb.Plugs.ResolveProject
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :papers)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
   pipeline :api_unlimited do
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
   end
 
   pipeline :api_preview do
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.PreviewToken
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.PreviewToken)
     # Tenancy shim: the flat /v1/preview/* routes carry no /w/:ws/p/:project
     # slugs, so without this the preview-JWT draft reads ran UNSCOPED across
     # every workspace (B9/barkpark-6xd9). Mirror :api — infer the seeded
     # Default workspace/project. A path-scoped preview route (under
     # /w/:ws/p/:project) sets the real scope via the resolvers, and
     # AssignDefaultScope no-ops once an assign is already present.
-    plug BarkparkWeb.Plugs.AssignDefaultScope
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
   pipeline :require_token do
-    plug BarkparkWeb.Plugs.RequireToken
+    plug(BarkparkWeb.Plugs.RequireToken)
   end
 
   # Browser Studio uploads send `credentials: same-origin` with the session
   # cookie; API clients still use Bearer. Requires `:fetch_session` upstream.
   pipeline :media_mutate do
-    plug :fetch_session
-    plug BarkparkWeb.Plugs.AcceptBarkparkVendor
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RateLimit
-    plug BarkparkWeb.Plugs.RequireBearerOrSessionToken
-    plug BarkparkWeb.Plugs.AssignDefaultScope
+    plug(:fetch_session)
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
   # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
@@ -250,13 +250,13 @@ defmodule BarkparkWeb.Router do
   # `auth: :ingest` route via the plugin highway. (Convergence MVP — masterplan
   # Figure 6 — originally `:paperflow_ingest`.)
   pipeline :ingest do
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.RequireIngestToken
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.RequireIngestToken)
   end
 
   pipeline :require_admin do
-    plug BarkparkWeb.Plugs.RequireToken
-    plug BarkparkWeb.Plugs.RequireAdmin
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.RequireAdmin)
   end
 
   # Scoped admin gate (barkpark-23yi / barkpark-fsko P0 fix). For the
@@ -268,18 +268,18 @@ defmodule BarkparkWeb.Router do
   # The FLAT admin routes keep :require_admin (global-perm gate) — the Default
   # workspace + the dev token's owner/admin Default membership keep them green.
   pipeline :scoped_admin do
-    plug BarkparkWeb.Plugs.RequireToken
-    plug BarkparkWeb.Plugs.RequireWorkspaceRole
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.RequireWorkspaceRole)
   end
 
   pipeline :idempotent do
-    plug BarkparkWeb.Plugs.Idempotency
+    plug(BarkparkWeb.Plugs.Idempotency)
   end
 
   # Write-gate: rejects tokens lacking "write"/"admin" with 403 before the
   # mutation reaches the controller. Must run after :require_token.
   pipeline :require_write do
-    plug BarkparkWeb.Plugs.RequireWritePermission
+    plug(BarkparkWeb.Plugs.RequireWritePermission)
   end
 
   # Bare /studio and / redirect to the session-resolved SCOPED Studio
@@ -287,18 +287,18 @@ defmodule BarkparkWeb.Router do
   # resolution rule). The :soft_token pipeline supplies the optional
   # session/dev token the resolution keys off.
   scope "/", BarkparkWeb do
-    pipe_through [:browser, :soft_token]
-    get "/", PageController, :redirect_to_studio
-    get "/studio", PageController, :redirect_to_studio
+    pipe_through([:browser, :soft_token])
+    get("/", PageController, :redirect_to_studio)
+    get("/studio", PageController, :redirect_to_studio)
   end
 
   # ── Session login (paste API token) ─────────────────────────────────
   scope "/", BarkparkWeb do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/login", SessionController, :new
-    post "/login", SessionController, :create
-    post "/logout", SessionController, :delete
+    get("/login", SessionController, :new)
+    post("/login", SessionController, :create)
+    post("/logout", SessionController, :delete)
   end
 
   # ── Bulldocs paper reader (LiveView) ────────────────────────────────────
@@ -320,26 +320,26 @@ defmodule BarkparkWeb.Router do
   # repointed — same controllers, same `:ingest` (RequireIngestToken) pipeline.
   # Remove once every producer posts to the plugin URL.
   scope "/v1/paperflow", BarkparkWeb do
-    pipe_through :ingest
+    pipe_through(:ingest)
 
-    post "/papers", BulldocsIngestController, :ingest
+    post("/papers", BulldocsIngestController, :ingest)
     # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
     # auth; applies via Content.apply_paper_block_op, broadcasts a delta frame.
-    post "/papers/:slug/ops", BulldocsIngestController, :apply_op
+    post("/papers/:slug/ops", BulldocsIngestController, :apply_op)
     # P6.U6a loop-closer (barkpark-jwai): the paperflow-side reader loop (U6b)
     # drains pending action:*/simplify-* intents here, then marks each done.
-    get "/intents", BulldocsIntentsController, :index
-    post "/intents/:id/processed", BulldocsIntentsController, :mark_processed
+    get("/intents", BulldocsIntentsController, :index)
+    post("/intents/:id/processed", BulldocsIntentsController, :mark_processed)
   end
 
   # ── Studio admin (LiveView) — admin-gated via on_mount ──────────────────
   scope "/studio", BarkparkWeb.Studio do
-    pipe_through :browser
+    pipe_through(:browser)
 
     live_session :admin_studio,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
-      live "/settings", SettingsLive
+      live("/settings", SettingsLive)
     end
   end
 
@@ -351,9 +351,9 @@ defmodule BarkparkWeb.Router do
   # only get an entry when the URL prefix genuinely changes — when the
   # original URL already includes the plugin slug, no redirect is needed.
   scope "/admin", BarkparkWeb do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/bokbasen", LegacyRedirectController, :bokbasen
+    get("/bokbasen", LegacyRedirectController, :bokbasen)
   end
 
   # ── Back-compat redirects (must come BEFORE the StudioLive catch-all) ───
@@ -362,10 +362,10 @@ defmodule BarkparkWeb.Router do
   # `/studio/:dataset/book/:doc_id`. These two redirects keep old deep links
   # working — including the `?tab=…` query string the old editor used.
   scope "/studio/:dataset", BarkparkWeb do
-    pipe_through [:browser, :soft_token]
+    pipe_through([:browser, :soft_token])
 
-    get "/onixedit/book/:doc_id", LegacyRedirectController, :onixedit_book
-    get "/onixedit/book/:doc_id/view", LegacyRedirectController, :onixedit_book
+    get("/onixedit/book/:doc_id", LegacyRedirectController, :onixedit_book)
+    get("/onixedit/book/:doc_id/view", LegacyRedirectController, :onixedit_book)
   end
 
   # ── Plugin-contributed routes — admin-gated (Goal barkpark-G2 s3) ─────
@@ -385,10 +385,10 @@ defmodule BarkparkWeb.Router do
   # macro to prepend `BarkparkWeb.` to those names, breaking module
   # resolution.
   scope "/studio" do
-    pipe_through :browser
+    pipe_through(:browser)
 
     live_session :plugin_admin,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :admin)
     end
@@ -401,9 +401,10 @@ defmodule BarkparkWeb.Router do
   # their own auth inside the LV. Same no-alias rationale as the
   # `:plugin_admin` scope above.
   scope "/studio" do
-    pipe_through :browser
+    pipe_through(:browser)
 
     live_session :plugin_public,
+      on_mount: [{BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :public)
     end
@@ -421,10 +422,10 @@ defmodule BarkparkWeb.Router do
   # Same no-alias rationale as the `:plugin_admin` scope above —
   # plugin LV modules are fully qualified.
   scope "/admin" do
-    pipe_through :browser
+    pipe_through(:browser)
 
     live_session :plugin_ops,
-      on_mount: [{BarkparkWeb.LiveAuth, :ops}],
+      on_mount: [{BarkparkWeb.LiveAuth, :ops}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :ops)
     end
@@ -441,7 +442,7 @@ defmodule BarkparkWeb.Router do
   # Same no-alias rationale as the `:plugin_admin` scope — plugin
   # controller modules are fully qualified.
   scope "/v1/plugins" do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
     plugin_routes(scope: :api)
   end
@@ -454,7 +455,7 @@ defmodule BarkparkWeb.Router do
   # live_session. Expands to nothing until a plugin contributes an `auth: :token`
   # route (dormant, like `:ingest`/`:public_root` were when first added).
   scope "/v1/plugins" do
-    pipe_through [:api, :require_token]
+    pipe_through([:api, :require_token])
 
     plugin_routes(scope: :token)
   end
@@ -476,7 +477,7 @@ defmodule BarkparkWeb.Router do
   # no-alias rationale as the `:ingest` (`/v1/plugins`) and `:public_root` (`/`)
   # plugin wrappers.
   scope "/v1" do
-    pipe_through [:api, :require_token]
+    pipe_through([:api, :require_token])
 
     plugin_routes(scope: :token_root)
   end
@@ -493,7 +494,7 @@ defmodule BarkparkWeb.Router do
   # modules are fully qualified. Expands to nothing until a plugin contributes
   # a `:public_root` route.
   scope "/" do
-    pipe_through :browser
+    pipe_through(:browser)
 
     plugin_routes(scope: :public_root)
   end
@@ -506,7 +507,7 @@ defmodule BarkparkWeb.Router do
   # live_session. Expands to nothing until a plugin contributes an `:ingest`
   # route.
   scope "/v1/plugins" do
-    pipe_through :ingest
+    pipe_through(:ingest)
 
     plugin_routes(scope: :ingest)
   end
@@ -535,10 +536,14 @@ defmodule BarkparkWeb.Router do
   # `scoped_plugin_*` prefix. Same no-alias rationale as the flat plugin
   # scopes — plugin modules are fully qualified by their route specs.
   scope "/w/:workspace_slug/p/:project_slug/studio" do
-    pipe_through :scoped_browser
+    pipe_through(:scoped_browser)
 
     live_session :scoped_plugin_admin,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.PluginScopeSession, :scope}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.PluginScopeSession, :scope},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :admin)
@@ -546,10 +551,10 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/p/:project_slug/studio" do
-    pipe_through :scoped_browser
+    pipe_through(:scoped_browser)
 
     live_session :scoped_plugin_public,
-      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}],
+      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}, {BarkparkWeb.StudioChrome, :default}],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :public)
@@ -557,10 +562,14 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/p/:project_slug/admin" do
-    pipe_through :scoped_browser
+    pipe_through(:scoped_browser)
 
     live_session :scoped_plugin_ops,
-      on_mount: [{BarkparkWeb.LiveAuth, :ops}, {BarkparkWeb.PluginScopeSession, :scope}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :ops},
+        {BarkparkWeb.PluginScopeSession, :scope},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :ops)
@@ -568,7 +577,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1/plugins" do
-    pipe_through [:scoped_api, :scoped_admin]
+    pipe_through([:scoped_api, :scoped_admin])
 
     plugin_routes(scope: :api)
   end
@@ -586,19 +595,20 @@ defmodule BarkparkWeb.Router do
   # dataset="onixedit". Same reasoning as the flat `_plugins`-before-
   # `:studio_public` ordering below.
   scope "/w/:workspace_slug/p/:project_slug/studio/:dataset", BarkparkWeb.Studio do
-    pipe_through :shared_studio_browser
+    pipe_through(:shared_studio_browser)
 
     live_session :scoped_studio,
       on_mount: [
         {BarkparkWeb.LiveAuth, :fetch_api_token},
-        {BarkparkWeb.LiveScope, :resolve}
+        {BarkparkWeb.LiveScope, :resolve},
+        {BarkparkWeb.StudioChrome, :default}
       ],
       layout: {BarkparkWeb.Layouts, :studio} do
-      live "/", StudioLive
-      live "/media", MediaLive
-      live "/api-tester", ApiTesterLive
+      live("/", StudioLive)
+      live("/media", MediaLive)
+      live("/api-tester", ApiTesterLive)
 
-      live "/*path", StudioLive
+      live("/*path", StudioLive)
     end
   end
 
@@ -611,13 +621,13 @@ defmodule BarkparkWeb.Router do
   # CMSes) and keeps the namespace clear of any future schema-named
   # path collisions.
   scope "/studio/:dataset", BarkparkWeb.Admin do
-    pipe_through :browser
+    pipe_through(:browser)
 
     live_session :admin_studio_dataset,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}],
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
-      live "/_plugins", PluginsLive
-      live "/_plugins/:plugin/settings", PluginSettingsLive
+      live("/_plugins", PluginsLive)
+      live("/_plugins/:plugin/settings", PluginSettingsLive)
     end
   end
 
@@ -630,17 +640,17 @@ defmodule BarkparkWeb.Router do
   # visible and correctable in the address bar. 302 (never 301): the
   # resolution is session-dependent and must not be browser-cached.
   scope "/studio/:dataset", BarkparkWeb do
-    pipe_through [:browser, :soft_token]
+    pipe_through([:browser, :soft_token])
 
-    get "/", StudioRedirectController, :studio
-    get "/*path", StudioRedirectController, :studio
+    get("/", StudioRedirectController, :studio)
+    get("/*path", StudioRedirectController, :studio)
   end
 
   # ── Meta (SDK handshake) — no auth, no rate limit ───────────────────────
   scope "/v1", BarkparkWeb do
-    pipe_through :api_unlimited
+    pipe_through(:api_unlimited)
 
-    get "/meta", MetaController, :index
+    get("/meta", MetaController, :index)
   end
 
   # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────
@@ -648,56 +658,56 @@ defmodule BarkparkWeb.Router do
   # caller's tier (none when anonymous) and projects the manifest through the
   # existence-hiding allow-list keyed on it.
   scope "/v1", BarkparkWeb do
-    pipe_through :api
+    pipe_through(:api)
 
-    get "/capabilities", CapabilitiesController, :index
+    get("/capabilities", CapabilitiesController, :index)
   end
 
   # ── Federated discovery ─────────────────────────────────────────────────
   scope "/v1", BarkparkWeb do
-    pipe_through :api
+    pipe_through(:api)
 
-    get "/search/:dataset", FederatedSearchController, :search
+    get("/search/:dataset", FederatedSearchController, :search)
   end
 
   # ── Public API — read-only, respects schema visibility ──────────────────
   scope "/v1/data", BarkparkWeb do
-    pipe_through :api
+    pipe_through(:api)
 
-    get "/search/:dataset/suggestions", SearchController, :search_suggestions
-    post "/search/:dataset/interaction", SearchController, :search_interaction
-    get "/search/:dataset", SearchController, :search
-    get "/query/:dataset/:type", QueryController, :index
-    get "/doc/:dataset/:type/:doc_id", QueryController, :show
+    get("/search/:dataset/suggestions", SearchController, :search_suggestions)
+    post("/search/:dataset/interaction", SearchController, :search_interaction)
+    get("/search/:dataset", SearchController, :search)
+    get("/query/:dataset/:type", QueryController, :index)
+    get("/doc/:dataset/:type/:doc_id", QueryController, :show)
   end
 
   # ── Preview — same reads, forces perspective=drafts via preview JWT ─────
   scope "/v1/preview", BarkparkWeb do
-    pipe_through :api_preview
+    pipe_through(:api_preview)
 
-    get "/query/:dataset/:type", QueryController, :index
-    get "/doc/:dataset/:type/:doc_id", QueryController, :show
+    get("/query/:dataset/:type", QueryController, :index)
+    get("/doc/:dataset/:type/:doc_id", QueryController, :show)
   end
 
   # ── Private API — full CRUD, requires token ─────────────────────────────
   scope "/v1/data", BarkparkWeb do
-    pipe_through [:api, :require_token]
+    pipe_through([:api, :require_token])
 
-    get "/listen/:dataset", ListenController, :listen
-    get "/export/:dataset", ExportController, :export
+    get("/listen/:dataset", ListenController, :listen)
+    get("/export/:dataset", ExportController, :export)
 
-    get "/analytics/:dataset", AnalyticsController, :index
+    get("/analytics/:dataset", AnalyticsController, :index)
 
-    get "/history/:dataset/:type/:doc_id", HistoryController, :index
-    get "/revision/:dataset/:id", HistoryController, :show
-    post "/revision/:dataset/:id/restore", HistoryController, :restore
+    get("/history/:dataset/:type/:doc_id", HistoryController, :index)
+    get("/revision/:dataset/:id", HistoryController, :show)
+    post("/revision/:dataset/:id/restore", HistoryController, :restore)
   end
 
   # ── Mutations — token + idempotency dedup ──────────────────────────────
   scope "/v1/data", BarkparkWeb do
-    pipe_through [:api, :require_token, :require_write, :idempotent]
+    pipe_through([:api, :require_token, :require_write, :idempotent])
 
-    post "/mutate/:dataset", MutateController, :mutate
+    post("/mutate/:dataset", MutateController, :mutate)
   end
 
   # ── Tasks API — paperflow bd-shim surface (W7b step 1 / paperflow-rx0) ──
@@ -707,26 +717,26 @@ defmodule BarkparkWeb.Router do
   # The flat `scope "/v1/tasks"` block was deleted — the plugin OWNS its routes.
 
   scope "/v1/data", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/search/:dataset/insights", SearchController, :search_insights
-    get "/search/:dataset/settings", SearchController, :search_settings
-    put "/search/:dataset/settings", SearchController, :update_search_settings
-    get "/search/:dataset/synonyms", SearchController, :search_synonyms
-    get "/search/:dataset/synonyms/preview", SearchController, :preview_search_synonym
-    post "/search/:dataset/synonyms", SearchController, :create_search_synonym
-    post "/search/:dataset/synonyms/promote", SearchController, :promote_search_synonym
-    delete "/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym
+    get("/search/:dataset/insights", SearchController, :search_insights)
+    get("/search/:dataset/settings", SearchController, :search_settings)
+    put("/search/:dataset/settings", SearchController, :update_search_settings)
+    get("/search/:dataset/synonyms", SearchController, :search_synonyms)
+    get("/search/:dataset/synonyms/preview", SearchController, :preview_search_synonym)
+    post("/search/:dataset/synonyms", SearchController, :create_search_synonym)
+    post("/search/:dataset/synonyms/promote", SearchController, :promote_search_synonym)
+    delete("/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
   # ── Schema management — requires admin token ────────────────────────────
   scope "/v1/schemas", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/:dataset", SchemaController, :index
-    get "/:dataset/:name", SchemaController, :show
-    post "/:dataset", SchemaController, :upsert
-    delete "/:dataset/:name", SchemaController, :delete
+    get("/:dataset", SchemaController, :index)
+    get("/:dataset/:name", SchemaController, :show)
+    post("/:dataset", SchemaController, :upsert)
+    delete("/:dataset/:name", SchemaController, :delete)
   end
 
   # ── Plugin roster — admin-only installed-plugin index ──────────────────
@@ -735,29 +745,29 @@ defmodule BarkparkWeb.Router do
   # `/v1/plugins/<slug>/…` plugin-contributed `:api` / `:ingest` route buckets
   # nor the `/v1/plugins/settings/:plugin_name` CRUD scope below.
   scope "/v1/plugins", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/", PluginsController, :index
+    get("/", PluginsController, :index)
   end
 
   # ── Plugin settings — admin-only encrypted-JSON CRUD ───────────────────
   scope "/v1/plugins/settings", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/:plugin_name", PluginSettingsController, :show
-    put "/:plugin_name", PluginSettingsController, :update
-    delete "/:plugin_name", PluginSettingsController, :delete
+    get("/:plugin_name", PluginSettingsController, :show)
+    put("/:plugin_name", PluginSettingsController, :update)
+    delete("/:plugin_name", PluginSettingsController, :delete)
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────
   scope "/v1/webhooks", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/:dataset", WebhookController, :index
-    get "/:dataset/:id", WebhookController, :show
-    post "/:dataset", WebhookController, :create
-    put "/:dataset/:id", WebhookController, :update
-    delete "/:dataset/:id", WebhookController, :delete
+    get("/:dataset", WebhookController, :index)
+    get("/:dataset/:id", WebhookController, :show)
+    post("/:dataset", WebhookController, :create)
+    put("/:dataset/:id", WebhookController, :update)
+    delete("/:dataset/:id", WebhookController, :delete)
   end
 
   # ── Scoped sharing — admin-only registry CRUD (P4b) ────────────────────
@@ -767,26 +777,26 @@ defmodule BarkparkWeb.Router do
   # RequireShareScope. Writes go through Barkpark.Sharing, which validates +
   # refreshes the live list (no restart).
   scope "/v1/shares", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/", ShareController, :index
-    post "/", ShareController, :create
-    delete "/", ShareController, :delete
+    get("/", ShareController, :index)
+    post("/", ShareController, :create)
+    delete("/", ShareController, :delete)
 
     # P5 edit-token management (admin-only minting, owner decision 2026-06-09).
     # mint_token shows the raw token ONCE; list_tokens never returns it; revoke
     # stamps revoked_at. The registry kill-switch (remove/downgrade the share)
     # also disables tokens live + batch-revokes via Sharing.remove_share/3.
-    get "/tokens", ShareController, :list_tokens
-    post "/tokens", ShareController, :mint_token
-    delete "/tokens/:token_id", ShareController, :revoke_token
+    get("/tokens", ShareController, :list_tokens)
+    post("/tokens", ShareController, :mint_token)
+    delete("/tokens/:token_id", ShareController, :revoke_token)
 
     # P7 ITEM (per-document) share links — Google-Docs-style direct links to ONE
     # paper/doc/media. Admin-only mint (raw token shown once) / list-per-item /
     # revoke; the public reader is GET /s/:token below.
-    get "/links", ShareLinkController, :list
-    post "/links", ShareLinkController, :mint
-    delete "/links/:id", ShareLinkController, :revoke
+    get("/links", ShareLinkController, :list)
+    post("/links", ShareLinkController, :mint)
+    delete("/links/:id", ShareLinkController, :revoke)
   end
 
   # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound
@@ -794,85 +804,87 @@ defmodule BarkparkWeb.Router do
   # serves it: a paper renders its reader page, another doc returns published
   # data, media serves the file. Browser pipeline for the paper HTML render.
   scope "/", BarkparkWeb do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/s/:token", ShareLinkController, :show
+    get("/s/:token", ShareLinkController, :show)
   end
 
   pipeline :media_processing_callback do
-    plug :accepts, ["json"]
-    plug BarkparkWeb.Plugs.ErrorEnvelopeNegotiation
-    plug BarkparkWeb.Plugs.RequireMediaProcessingCallbackToken
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RequireMediaProcessingCallbackToken)
   end
 
   # ── Media — upload requires token, serving is public ────────────────────
   scope "/media", BarkparkWeb do
-    pipe_through :api
+    pipe_through(:api)
 
-    get "/renditions/:id/:preset", MediaController, :serve_rendition
-    get "/", MediaController, :index
-    get "/:id/meta", MediaController, :show
-    get "/files/*path", MediaController, :serve
+    get("/renditions/:id/:preset", MediaController, :serve_rendition)
+    get("/", MediaController, :index)
+    get("/:id/meta", MediaController, :show)
+    get("/files/*path", MediaController, :serve)
   end
 
   scope "/media", BarkparkWeb do
-    pipe_through :media_mutate
+    pipe_through(:media_mutate)
 
-    post "/upload", MediaController, :upload
-    delete "/:id", MediaController, :delete
+    post("/upload", MediaController, :upload)
+    delete("/:id", MediaController, :delete)
   end
 
   # ── v1 Media — unified blob + mediaAsset metadata ───────────────────────
   scope "/v1/media", BarkparkWeb do
-    pipe_through [:api, :require_admin]
+    pipe_through([:api, :require_admin])
 
-    get "/:dataset/search/insights", V1.MediaController, :search_insights
-    get "/:dataset/search/settings", V1.MediaController, :search_settings
-    put "/:dataset/search/settings", V1.MediaController, :update_search_settings
-    get "/:dataset/search/synonyms", V1.MediaController, :search_synonyms
-    get "/:dataset/search/synonyms/preview", V1.MediaController, :preview_search_synonym
-    post "/:dataset/search/synonyms", V1.MediaController, :create_search_synonym
-    post "/:dataset/search/synonyms/promote", V1.MediaController, :promote_search_synonym
-    delete "/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym
+    get("/:dataset/search/insights", V1.MediaController, :search_insights)
+    get("/:dataset/search/settings", V1.MediaController, :search_settings)
+    put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
+    get("/:dataset/search/synonyms", V1.MediaController, :search_synonyms)
+    get("/:dataset/search/synonyms/preview", V1.MediaController, :preview_search_synonym)
+    post("/:dataset/search/synonyms", V1.MediaController, :create_search_synonym)
+    post("/:dataset/search/synonyms/promote", V1.MediaController, :promote_search_synonym)
+    delete("/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym)
   end
 
   scope "/v1/media", BarkparkWeb do
-    pipe_through :api
+    pipe_through(:api)
 
-    get "/:dataset/search/suggestions", V1.MediaController, :search_suggestions
-    post "/:dataset/search/interaction", V1.MediaController, :search_interaction
-    get "/:dataset/search", V1.MediaController, :search
-    get "/:dataset/share/:token", V1.MediaCollectionsController, :share_view
-    get "/:dataset/collections", V1.MediaCollectionsController, :index
-    get "/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets
-    get "/:dataset/collections/:id", V1.MediaCollectionsController, :show
-    get "/:dataset/:id/relations", V1.MediaController, :relations
-    get "/:dataset", V1.MediaController, :index
-    get "/:dataset/:id", V1.MediaController, :show
+    get("/:dataset/search/suggestions", V1.MediaController, :search_suggestions)
+    post("/:dataset/search/interaction", V1.MediaController, :search_interaction)
+    get("/:dataset/search", V1.MediaController, :search)
+    get("/:dataset/share/:token", V1.MediaCollectionsController, :share_view)
+    get("/:dataset/collections", V1.MediaCollectionsController, :index)
+    get("/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets)
+    get("/:dataset/collections/:id", V1.MediaCollectionsController, :show)
+    get("/:dataset/:id/relations", V1.MediaController, :relations)
+    get("/:dataset", V1.MediaController, :index)
+    get("/:dataset/:id", V1.MediaController, :show)
   end
 
   scope "/v1/media", BarkparkWeb do
-    pipe_through :media_processing_callback
+    pipe_through(:media_processing_callback)
 
-    post "/:dataset/processing/:id/callback", V1.MediaProcessingController, :callback
+    post("/:dataset/processing/:id/callback", V1.MediaProcessingController, :callback)
   end
 
   scope "/v1/media", BarkparkWeb do
-    pipe_through :media_mutate
+    pipe_through(:media_mutate)
 
-    post "/:dataset/collections/:id/share", V1.MediaCollectionsController, :share
-    delete "/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share
-    post "/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member
+    post("/:dataset/collections/:id/share", V1.MediaCollectionsController, :share)
+    delete("/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share)
+    post("/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member)
 
-    delete "/:dataset/collections/:id/members/:asset_id",
-           V1.MediaCollectionsController,
-           :remove_member
+    delete(
+      "/:dataset/collections/:id/members/:asset_id",
+      V1.MediaCollectionsController,
+      :remove_member
+    )
 
-    post "/:dataset/upload", V1.MediaController, :upload
-    post "/:dataset/:id/checkout", V1.MediaController, :checkout
-    post "/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
-    patch "/:dataset/:id", V1.MediaController, :update
-    delete "/:dataset/:id", V1.MediaController, :delete
+    post("/:dataset/upload", V1.MediaController, :upload)
+    post("/:dataset/:id/checkout", V1.MediaController, :checkout)
+    post("/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout)
+    patch("/:dataset/:id", V1.MediaController, :update)
+    delete("/:dataset/:id", V1.MediaController, :delete)
   end
 
   # ── Gated scoped paper reader (P1b) ─────────────────────────────────────
@@ -884,7 +896,7 @@ defmodule BarkparkWeb.Router do
   # path doesn't collide with any of the `/v1/…` scoped routes, but keeping the
   # dedicated-pipeline route ahead of the catch-alls keeps intent obvious.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through :shared_paper_browser
+    pipe_through(:shared_paper_browser)
 
     # LIVE scoped reader (P4): the same BulldocsLive as the flat /papers/:slug
     # surface — per-block real-time streaming included (the paper PubSub topic
@@ -897,7 +909,7 @@ defmodule BarkparkWeb.Router do
       on_mount: [{BarkparkWeb.PluginScopeSession, :scope}],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       root_layout: {BarkparkWeb.Layouts, :bulldocs} do
-      live "/papers/:slug", BulldocsLive, :index
+      live("/papers/:slug", BulldocsLive, :index)
     end
   end
 
@@ -909,17 +921,17 @@ defmodule BarkparkWeb.Router do
   # still a string in Wave 1; WHERE-clause scoping by workspace_id is a sibling
   # CONTEXT task. The flat routes below remain the back-compat alias.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through :scoped_api
+    pipe_through(:scoped_api)
 
     # Public reads (mirror of /v1/data public scope)
-    get "/v1/data/search/:dataset/suggestions", SearchController, :search_suggestions
-    post "/v1/data/search/:dataset/interaction", SearchController, :search_interaction
-    get "/v1/data/search/:dataset", SearchController, :search
-    get "/v1/search/:dataset", FederatedSearchController, :search
+    get("/v1/data/search/:dataset/suggestions", SearchController, :search_suggestions)
+    post("/v1/data/search/:dataset/interaction", SearchController, :search_interaction)
+    get("/v1/data/search/:dataset", SearchController, :search)
+    get("/v1/search/:dataset", FederatedSearchController, :search)
 
     # Preview reads
-    get "/v1/preview/query/:dataset/:type", QueryController, :index
-    get "/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show
+    get("/v1/preview/query/:dataset/:type", QueryController, :index)
+    get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
   end
 
   # Scoped READ document routes — share-aware via the :docs surface (P2). These
@@ -928,10 +940,10 @@ defmodule BarkparkWeb.Router do
   # from ever opening the separate POST mutate block. Without a matching :docs
   # share (the default) this is byte-identical to :scoped_api.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through :shared_docs_api
+    pipe_through(:shared_docs_api)
 
-    get "/v1/data/query/:dataset/:type", QueryController, :index
-    get "/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show
+    get("/v1/data/query/:dataset/:type", QueryController, :index)
+    get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
@@ -944,121 +956,125 @@ defmodule BarkparkWeb.Router do
   # (writes) stay excluded. Without a matching :media share this is
   # byte-identical to a normal scoped request.
   scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
-    pipe_through :shared_media_api
+    pipe_through(:shared_media_api)
 
-    get "/", MediaController, :index
-    get "/:id/meta", MediaController, :show
-    get "/files/*path", MediaController, :serve
-    get "/renditions/:id/:preset", MediaController, :serve_rendition
+    get("/", MediaController, :index)
+    get("/:id/meta", MediaController, :show)
+    get("/files/*path", MediaController, :serve)
+    get("/renditions/:id/:preset", MediaController, :serve_rendition)
   end
 
   # Token-required scoped reads (listen/export/analytics/history/revision).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :require_token]
+    pipe_through([:scoped_api, :require_token])
 
-    get "/v1/data/listen/:dataset", ListenController, :listen
-    get "/v1/data/export/:dataset", ExportController, :export
-    get "/v1/data/analytics/:dataset", AnalyticsController, :index
-    get "/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index
-    get "/v1/data/revision/:dataset/:id", HistoryController, :show
-    post "/v1/data/revision/:dataset/:id/restore", HistoryController, :restore
+    get("/v1/data/listen/:dataset", ListenController, :listen)
+    get("/v1/data/export/:dataset", ExportController, :export)
+    get("/v1/data/analytics/:dataset", AnalyticsController, :index)
+    get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
+    get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+    post("/v1/data/revision/:dataset/:id/restore", HistoryController, :restore)
   end
 
   # Scoped mutations — the :scoped_mutate pipeline carries the member write-gate
   # AND the P5 edit-token grant (a scope-bound edit token writes here too).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through :scoped_mutate
+    pipe_through(:scoped_mutate)
 
-    post "/v1/data/mutate/:dataset", MutateController, :mutate
+    post("/v1/data/mutate/:dataset", MutateController, :mutate)
   end
 
   # Scoped admin reads (search insights/synonyms).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :scoped_admin]
+    pipe_through([:scoped_api, :scoped_admin])
 
-    get "/v1/data/search/:dataset/insights", SearchController, :search_insights
-    get "/v1/data/search/:dataset/synonyms", SearchController, :search_synonyms
-    post "/v1/data/search/:dataset/synonyms", SearchController, :create_search_synonym
-    delete "/v1/data/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym
+    get("/v1/data/search/:dataset/insights", SearchController, :search_insights)
+    get("/v1/data/search/:dataset/synonyms", SearchController, :search_synonyms)
+    post("/v1/data/search/:dataset/synonyms", SearchController, :create_search_synonym)
+    delete("/v1/data/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
   # Scoped schema management (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :scoped_admin]
+    pipe_through([:scoped_api, :scoped_admin])
 
-    get "/v1/schemas/:dataset", SchemaController, :index
-    get "/v1/schemas/:dataset/:name", SchemaController, :show
-    post "/v1/schemas/:dataset", SchemaController, :upsert
-    delete "/v1/schemas/:dataset/:name", SchemaController, :delete
+    get("/v1/schemas/:dataset", SchemaController, :index)
+    get("/v1/schemas/:dataset/:name", SchemaController, :show)
+    post("/v1/schemas/:dataset", SchemaController, :upsert)
+    delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end
 
   # Scoped webhooks (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :scoped_admin]
+    pipe_through([:scoped_api, :scoped_admin])
 
-    get "/v1/webhooks/:dataset", WebhookController, :index
-    get "/v1/webhooks/:dataset/:id", WebhookController, :show
-    post "/v1/webhooks/:dataset", WebhookController, :create
-    put "/v1/webhooks/:dataset/:id", WebhookController, :update
-    delete "/v1/webhooks/:dataset/:id", WebhookController, :delete
+    get("/v1/webhooks/:dataset", WebhookController, :index)
+    get("/v1/webhooks/:dataset/:id", WebhookController, :show)
+    post("/v1/webhooks/:dataset", WebhookController, :create)
+    put("/v1/webhooks/:dataset/:id", WebhookController, :update)
+    delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
   end
 
   # Scoped v1 media — admin search ops.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :scoped_admin]
+    pipe_through([:scoped_api, :scoped_admin])
 
-    get "/v1/media/:dataset/search/insights", V1.MediaController, :search_insights
-    get "/v1/media/:dataset/search/synonyms", V1.MediaController, :search_synonyms
-    post "/v1/media/:dataset/search/synonyms", V1.MediaController, :create_search_synonym
-    delete "/v1/media/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym
+    get("/v1/media/:dataset/search/insights", V1.MediaController, :search_insights)
+    get("/v1/media/:dataset/search/synonyms", V1.MediaController, :search_synonyms)
+    post("/v1/media/:dataset/search/synonyms", V1.MediaController, :create_search_synonym)
+    delete("/v1/media/:dataset/search/synonyms/:id", V1.MediaController, :delete_search_synonym)
   end
 
   # Scoped v1 media — public reads.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through :scoped_api
+    pipe_through(:scoped_api)
 
-    get "/v1/media/:dataset/search/suggestions", V1.MediaController, :search_suggestions
-    post "/v1/media/:dataset/search/interaction", V1.MediaController, :search_interaction
-    get "/v1/media/:dataset/search", V1.MediaController, :search
-    get "/v1/media/:dataset/share/:token", V1.MediaCollectionsController, :share_view
-    get "/v1/media/:dataset/collections", V1.MediaCollectionsController, :index
-    get "/v1/media/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets
-    get "/v1/media/:dataset/collections/:id", V1.MediaCollectionsController, :show
-    get "/v1/media/:dataset/:id/relations", V1.MediaController, :relations
-    get "/v1/media/:dataset", V1.MediaController, :index
-    get "/v1/media/:dataset/:id", V1.MediaController, :show
+    get("/v1/media/:dataset/search/suggestions", V1.MediaController, :search_suggestions)
+    post("/v1/media/:dataset/search/interaction", V1.MediaController, :search_interaction)
+    get("/v1/media/:dataset/search", V1.MediaController, :search)
+    get("/v1/media/:dataset/share/:token", V1.MediaCollectionsController, :share_view)
+    get("/v1/media/:dataset/collections", V1.MediaCollectionsController, :index)
+    get("/v1/media/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets)
+    get("/v1/media/:dataset/collections/:id", V1.MediaCollectionsController, :show)
+    get("/v1/media/:dataset/:id/relations", V1.MediaController, :relations)
+    get("/v1/media/:dataset", V1.MediaController, :index)
+    get("/v1/media/:dataset/:id", V1.MediaController, :show)
   end
 
   # Scoped v1 media — collection + lock writes (member-only, bearer-or-session).
   # Collections management + checkout stay membership-gated; they are NOT part of
   # the shareable :media surface (P5 shares asset upload/update/delete only).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through [:scoped_api, :media_mutate]
+    pipe_through([:scoped_api, :media_mutate])
 
-    post "/v1/media/:dataset/collections/:id/share", V1.MediaCollectionsController, :share
+    post("/v1/media/:dataset/collections/:id/share", V1.MediaCollectionsController, :share)
 
-    delete "/v1/media/:dataset/collections/:id/share",
-           V1.MediaCollectionsController,
-           :revoke_share
+    delete(
+      "/v1/media/:dataset/collections/:id/share",
+      V1.MediaCollectionsController,
+      :revoke_share
+    )
 
-    post "/v1/media/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member
+    post("/v1/media/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member)
 
-    delete "/v1/media/:dataset/collections/:id/members/:asset_id",
-           V1.MediaCollectionsController,
-           :remove_member
+    delete(
+      "/v1/media/:dataset/collections/:id/members/:asset_id",
+      V1.MediaCollectionsController,
+      :remove_member
+    )
 
-    post "/v1/media/:dataset/:id/checkout", V1.MediaController, :checkout
-    post "/v1/media/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout
+    post("/v1/media/:dataset/:id/checkout", V1.MediaController, :checkout)
+    post("/v1/media/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout)
   end
 
   # Scoped v1 media — asset upload/update/delete. The :scoped_media_mutate
   # pipeline serves a member (membership) AND a :media-edit-token holder (P5).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through :scoped_media_mutate
+    pipe_through(:scoped_media_mutate)
 
-    post "/v1/media/:dataset/upload", V1.MediaController, :upload
-    patch "/v1/media/:dataset/:id", V1.MediaController, :update
-    delete "/v1/media/:dataset/:id", V1.MediaController, :delete
+    post("/v1/media/:dataset/upload", V1.MediaController, :upload)
+    patch("/v1/media/:dataset/:id", V1.MediaController, :update)
+    delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
   end
 
   # ── Workspace / project switcher — membership-scoped LIST ───────────────
@@ -1069,16 +1085,16 @@ defmodule BarkparkWeb.Router do
   # non-member to avoid leaking existence. Token-gated only — NOT the path
   # tenancy macro / scoped plugin mounts (those live under /w/:ws/p/:project).
   scope "/api", BarkparkWeb do
-    pipe_through [:api, :require_token]
+    pipe_through([:api, :require_token])
 
-    get "/workspaces", WorkspaceController, :index
-    get "/workspaces/:workspace_slug/projects", WorkspaceController, :projects
+    get("/workspaces", WorkspaceController, :index)
+    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects)
 
     # Create surface: any authenticated token may create a workspace (becomes
     # its owner-member, + Default project + production dataset); project
     # creation is member-gated (non-member → 404, no existence leak).
-    post "/workspaces", WorkspaceController, :create
-    post "/workspaces/:workspace_slug/projects", WorkspaceController, :create_project
+    post("/workspaces", WorkspaceController, :create)
+    post("/workspaces/:workspace_slug/projects", WorkspaceController, :create_project)
   end
 
   # ── Legacy compat ──────────────────────────────────────────────────────
@@ -1089,12 +1105,12 @@ defmodule BarkparkWeb.Router do
   # into the Content reads/writes — closing the unauthenticated + unscoped
   # tenancy hole while mirroring the flat `/v1/data` Default-scope contract.
   scope "/api", BarkparkWeb do
-    pipe_through [:api, :require_token, BarkparkWeb.Plugs.LegacyDeprecation]
+    pipe_through([:api, :require_token, BarkparkWeb.Plugs.LegacyDeprecation])
 
-    get "/documents/:type", LegacyController, :index
-    get "/documents/:type/:id", LegacyController, :show
-    post "/documents/:type", LegacyController, :create
-    delete "/documents/:type/:id", LegacyController, :delete
+    get("/documents/:type", LegacyController, :index)
+    get("/documents/:type/:id", LegacyController, :show)
+    post("/documents/:type", LegacyController, :create)
+    delete("/documents/:type/:id", LegacyController, :delete)
   end
 
   # Legacy public schema discovery — intentionally NOT token-gated. w15-E
@@ -1103,17 +1119,17 @@ defmodule BarkparkWeb.Router do
   # in the :api pipeline. Kept :LegacyDeprecation so the deprecation headers
   # still ride along.
   scope "/api", BarkparkWeb do
-    pipe_through [:api, BarkparkWeb.Plugs.LegacyDeprecation]
+    pipe_through([:api, BarkparkWeb.Plugs.LegacyDeprecation])
 
-    get "/schemas", LegacyController, :schemas
+    get("/schemas", LegacyController, :schemas)
   end
 
   if Application.compile_env(:barkpark, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
-      pipe_through [:fetch_session, :protect_from_forgery]
-      live_dashboard "/dashboard", metrics: BarkparkWeb.Telemetry
+      pipe_through([:fetch_session, :protect_from_forgery])
+      live_dashboard("/dashboard", metrics: BarkparkWeb.Telemetry)
     end
   end
 end
