@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -102,9 +103,17 @@ type model struct {
 	// Editor field editing
 	fieldCursor int               // which field is highlighted in editor
 	editing     bool              // actively editing a field
-	textInput   textinput.Model   // text input for current field
+	textInput   textinput.Model   // single-line text input for current field
 	dirtyValues map[string]string // unsaved field changes (fieldName -> value)
 	dirty       bool              // has unsaved changes
+	// Multi-line editing (FieldText + legacy-string FieldRichText): a bubbles
+	// textarea takes the keystream instead of textInput. While the flag is up,
+	// enter inserts a newline INSIDE the textarea and ctrl+s commits the edit
+	// (esc still cancels) — see the editing branch of handleKey. The parallel
+	// widget keeps the n-prompt / search prompt (always single-line, riding
+	// m.textInput) untouched.
+	editingMultiline bool
+	textArea         textarea.Model
 	// New-document prompt (`n` in a doc-list pane): creating gates the one-line
 	// title input (rendered in the help bar, like a vim command line) and
 	// creatingType holds the schema type of the doc-list pane it was opened
@@ -682,8 +691,38 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// ── Editing mode: all input goes to the text input ──
+	// ── Editing mode: all input goes to the active edit widget ──
 	if m.editing {
+		// Multi-line (textarea — FieldText / legacy-string FieldRichText):
+		// enter must INSERT A NEWLINE, not commit, so the commit key moves to
+		// ctrl+s. The first ctrl+s commits the field and leaves editing; the
+		// NEXT ctrl+s (no longer editing) is the existing document save below.
+		if m.editingMultiline {
+			switch key {
+			case "esc":
+				// Cancel edit, discard input
+				m.editing = false
+				m.editingMultiline = false
+			case "ctrl+s":
+				// Commit edit to dirty values
+				m.commitFieldEdit()
+				m.editing = false
+				m.editingMultiline = false
+			default:
+				var cmd tea.Cmd
+				m.textArea, cmd = m.textArea.Update(msg)
+				// Live re-render + scroll-follow: the textarea's rendered box
+				// keeps the height SetHeight pinned at startFieldEdit, but
+				// scrollToField must still run per keystroke so the focused
+				// box stays in view when editing near the bottom of the form
+				// (j/k are the only other callers and they never fire here).
+				m.refreshViewport()
+				m.scrollToField()
+				return m, cmd
+			}
+			m.refreshViewport()
+			return m, nil
+		}
 		switch key {
 		case "esc":
 			// Cancel edit, discard input
@@ -1032,9 +1071,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── Drill in / start editing ──
 	case "enter":
 		if m.focus.Target == FocusEditor && m.editorSchema != nil {
-			m.startFieldEdit()
+			cmd := m.startFieldEdit()
 			m.refreshViewport()
-			return m, textinput.Blink
+			m.scrollToField()
+			return m, cmd
 		}
 		return m.drillIn()
 
@@ -1062,16 +1102,54 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startFieldEdit begins editing the field at fieldCursor.
-func (m *model) startFieldEdit() {
+// startFieldEdit begins editing the field at fieldCursor. It returns the
+// cursor-blink cmd of whichever widget took focus (textarea.Focus()'s cmd for
+// multi-line fields, textinput.Blink for single-line; nil for toggle/picker
+// fields and for a refused richText blocks doc).
+func (m *model) startFieldEdit() tea.Cmd {
 	if m.fieldCursor >= len(m.editorSchema.Fields) {
-		return
+		return nil
 	}
 	field := m.editorSchema.Fields[m.fieldCursor]
 
-	// Only string, text, slug, datetime, color, image fields are text-editable
 	switch field.Type {
-	case FieldString, FieldText, FieldSlug, FieldDatetime, FieldColor, FieldImage:
+	// Multi-line: text + legacy-string richText edit in a textarea. Enter
+	// inserts a newline; ctrl+s commits (see handleKey's editing branch).
+	case FieldText, FieldRichText:
+		if field.Type == FieldRichText {
+			// A blocks-doc projection ({"blocks":…,"html":…} — the current
+			// wire shape for block-editor docs) must NEVER be edited as text:
+			// patching a string over the map is the data-corruption hazard.
+			// renderField shows its read-only preview; here we refuse loudly.
+			if _, blocks := m.richTextBlocksDoc(field.Name); blocks {
+				m.setStatus("blocks doc — read-only here, edit in Studio/Beta", true)
+				return nil
+			}
+		}
+		val := m.getFieldValue(field.Name)
+		// Editing height == the static render's row count (field.Rows,
+		// min 3), grown to fit a taller existing value (capped) so the
+		// scroll accounting in scrollToField never drifts mid-edit: the
+		// textarea View() is FIXED at this height (internal scrolling),
+		// so the rendered field keeps one stable line span per session.
+		return m.openMultilineEditor(val, field.Rows)
+
+	// Array of strings: edits one element per line in the same textarea
+	// (enter adds an element, ctrl+s commits — commitFieldEdit marshals the
+	// lines back to a JSON array string). Anything else inside the array —
+	// objects, numbers, booleans, nulls, or a non-array value — keeps
+	// today's read-only render: a line-based edit would silently stringify
+	// the typed elements, so we refuse loudly instead.
+	case FieldArray:
+		items, ok := m.arrayStringItems(field.Name)
+		if !ok {
+			m.setStatus("array has non-string items — read-only here, edit in Studio", true)
+			return nil
+		}
+		return m.openMultilineEditor(strings.Join(items, "\n"), field.Rows)
+
+	// Single-line: string, slug, datetime, color, image edit in a textinput.
+	case FieldString, FieldSlug, FieldDatetime, FieldColor, FieldImage:
 		m.editing = true
 		m.textInput = textinput.New()
 		m.textInput.Focus()
@@ -1086,6 +1164,7 @@ func (m *model) startFieldEdit() {
 			val, _ = parseImageValue(val)
 		}
 		m.textInput.SetValue(val)
+		return textinput.Blink
 	case FieldSelect:
 		m.toggleField()
 	case FieldBoolean:
@@ -1095,6 +1174,110 @@ func (m *model) startFieldEdit() {
 		// instead of a text input — the value is a document id, never typed.
 		m.openRefPicker(field)
 	}
+	return nil
+}
+
+// openMultilineEditor focuses a fresh textarea seeded with val. Editing
+// height == the static render's row count (schemaRows, min 3), grown to fit a
+// taller existing value (capped at 12) so the scroll accounting in
+// scrollToField never drifts mid-edit: the textarea View() is FIXED at this
+// height (internal scrolling), so the rendered field keeps one stable line
+// span per session. Returns the textarea's cursor-blink cmd.
+func (m *model) openMultilineEditor(val string, schemaRows int) tea.Cmd {
+	rows := schemaRows
+	if rows < 2 {
+		rows = 3
+	}
+	if n := strings.Count(val, "\n") + 1; n > rows {
+		rows = n
+		if rows > 12 {
+			rows = 12
+		}
+	}
+	m.editing = true
+	m.editingMultiline = true
+	m.textArea = textarea.New()
+	m.textArea.Prompt = ""
+	m.textArea.ShowLineNumbers = false
+	m.textArea.CharLimit = 0
+	// The outer activeFieldStyle box carries the border; strip the
+	// textarea's own cursor-line wash so the surface reads like the
+	// single-line input and nothing double-decorates.
+	m.textArea.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	// Interior width mirrors renderField's box math exactly: editor
+	// width − 4 (field indent) − 6 (border+padding+indent) − 2 (the
+	// box style's own padding) = calcEditorWidth() − 12 — the same
+	// budget the single-line textinput gets.
+	taWidth := m.calcEditorWidth() - 12
+	if taWidth < 8 {
+		taWidth = 8
+	}
+	m.textArea.SetWidth(taWidth)
+	m.textArea.SetHeight(rows)
+	m.textArea.SetValue(val)
+	return m.textArea.Focus()
+}
+
+// arrayStringItems returns a FieldArray field's current items when its value
+// is a JSON array of strings — or empty/absent/null, which edits from scratch
+// — plus editable=true. A committed-but-unsaved edit lives in dirtyValues as
+// the marshalled JSON array string and wins over the wire value in Doc.Extra
+// (Doc.Values carries only scalars — arrays never land there, see
+// normalizeEnvelope). Any non-array value or any non-string element returns
+// (nil, false): read-only, exactly the pre-edit behaviour.
+func (m model) arrayStringItems(name string) ([]string, bool) {
+	raw := ""
+	if v, ok := m.dirtyValues[name]; ok {
+		raw = v
+	} else if m.selectedDoc != nil && m.selectedDoc.Extra != nil {
+		raw = string(m.selectedDoc.Extra[name])
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil, true // no items yet — editable from scratch
+	}
+	var elems []any
+	if json.Unmarshal([]byte(raw), &elems) != nil {
+		return nil, false // not a JSON array (object / scalar / garbage)
+	}
+	items := make([]string, 0, len(elems))
+	for _, e := range elems {
+		s, ok := e.(string)
+		if !ok {
+			return nil, false // a number/object/bool/null element — refuse
+		}
+		items = append(items, s)
+	}
+	return items, true
+}
+
+// marshalArrayLines converts the textarea's one-element-per-line text into a
+// compact JSON array-of-strings string — elements trimmed, empty lines
+// dropped, "[]" when nothing remains. The string form keeps dirtyValues a
+// map[string]string; saveDocument re-types it on the wire.
+func marshalArrayLines(text string) string {
+	items := []string{}
+	for _, line := range strings.Split(text, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			items = append(items, t)
+		}
+	}
+	b, _ := json.Marshal(items) // []string never fails to marshal
+	return string(b)
+}
+
+// editorField finds a field by name in the open editor's schema; nil when no
+// schema is open or the name is unknown (e.g. "title"/"status" pseudo-keys).
+func (m model) editorField(name string) *Field {
+	if m.editorSchema == nil {
+		return nil
+	}
+	for i := range m.editorSchema.Fields {
+		if m.editorSchema.Fields[i].Name == name {
+			return &m.editorSchema.Fields[i]
+		}
+	}
+	return nil
 }
 
 // commitFieldEdit saves the text input value to dirtyValues.
@@ -1104,12 +1287,23 @@ func (m *model) commitFieldEdit() {
 	}
 	field := m.editorSchema.Fields[m.fieldCursor]
 	val := m.textInput.Value()
+	if m.editingMultiline {
+		// Multi-line widget owns the edit — embedded newlines survive
+		// verbatim into dirtyValues (and the eventual patch mutation).
+		val = m.textArea.Value()
+		if field.Type == FieldArray {
+			// One element per line → JSON array string (trimmed, empties
+			// dropped). saveDocument sends the real array on the wire.
+			val = marshalArrayLines(val)
+		}
+	}
 
 	// Image fields edit the URL part of the value. An unchanged URL keeps
 	// the original stored value verbatim (preserving the assetId linkage a
 	// library pick carries); a new or cleared URL stores the bare string —
-	// the asset linkage no longer matches a hand-entered URL.
-	if field.Type == FieldImage {
+	// the asset linkage no longer matches a hand-entered URL. Image fields
+	// never take the multiline path — the guard makes that explicit.
+	if !m.editingMultiline && field.Type == FieldImage {
 		orig := m.getFieldValue(field.Name)
 		if u, _ := parseImageValue(orig); strings.TrimSpace(val) == u {
 			val = orig
@@ -1229,6 +1423,16 @@ func (m *model) applyDirtyToDoc() {
 				m.selectedDoc.Values = make(map[string]string)
 			}
 			m.selectedDoc.Values[k] = v
+			// A FieldArray dirty value is a JSON array string, but the read
+			// path (arrayStringItems, rawFieldJSON via renderField) reads the
+			// raw wire value in Doc.Extra, not Values — mirror the bytes there
+			// so the form shows the committed array, before AND after save.
+			if f := m.editorField(k); f != nil && f.Type == FieldArray && json.Valid([]byte(v)) {
+				if m.selectedDoc.Extra == nil {
+					m.selectedDoc.Extra = make(map[string]json.RawMessage)
+				}
+				m.selectedDoc.Extra[k] = json.RawMessage(v)
+			}
 		}
 	}
 }
@@ -1241,6 +1445,19 @@ func (m *model) saveDocument() {
 
 	setFields := make(map[string]interface{})
 	for k, v := range m.dirtyValues {
+		// TYPED SAVE for arrays: the server's patch path merges the "set" map
+		// verbatim — no coercion — so a Go string here would store the literal
+		// string "[\"a\",\"b\"]" over a JSON array and silently change the
+		// stored JSONB type (confirmed by live probe). Send the raw JSON array
+		// for a FieldArray value that parses as one; everything else keeps the
+		// string behaviour byte-identically.
+		if f := m.editorField(k); f != nil && f.Type == FieldArray {
+			var arr []interface{}
+			if json.Unmarshal([]byte(v), &arr) == nil {
+				setFields[k] = json.RawMessage(v)
+				continue
+			}
+		}
 		setFields[k] = v
 	}
 
@@ -1589,13 +1806,33 @@ func (m *model) scrollToField() {
 		fieldWidth = 20
 	}
 	for i := 0; i < m.fieldCursor && i < len(m.editorSchema.Fields); i++ {
-		targetLine += len(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
+		// PHYSICAL lines, not slice elements: renderField returns a box as ONE
+		// element with embedded newlines (label + bordered box ≈ 4–8 physical
+		// rows in 2 elements), so a bare len() undercounted every boxed field
+		// and the viewport stopped following partway down boxed-heavy forms.
+		// The probe passes isEditing=false for every preceding field, which is
+		// also EXACT while a textarea edit is live: the textarea View() is
+		// height-pinned at startFieldEdit, so the editing render of a field
+		// occupies the same span as its static render (pinned in
+		// multiline_test.go).
+		targetLine += renderedLineCount(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
 	}
 	if targetLine > m.viewport.YOffset+m.viewport.Height-6 {
 		m.viewport.SetYOffset(targetLine - m.viewport.Height + 8)
 	} else if targetLine < m.viewport.YOffset+2 {
 		m.viewport.SetYOffset(maxInt(targetLine-2, 0))
 	}
+}
+
+// renderedLineCount sums the PHYSICAL line count of renderField output — each
+// slice element may itself be a multi-line lipgloss box render, so the slice
+// length alone is not a height.
+func renderedLineCount(chunks []string) int {
+	n := 0
+	for _, c := range chunks {
+		n += strings.Count(c, "\n") + 1
+	}
+	return n
 }
 
 // syncPaneScroll recomputes and persists the pane's scroll offset for the
@@ -1942,6 +2179,8 @@ func (m model) renderHelpBar() string {
 		help = " j/k move  enter select  esc cancel"
 	} else if m.searchOpen {
 		help = " j/k move  enter open  esc dismiss"
+	} else if m.editing && m.editingMultiline {
+		help = " type to edit  enter newline  ctrl+s confirm  esc cancel"
 	} else if m.editing {
 		help = " type to edit  enter confirm  esc cancel"
 	} else if m.focus.Target == FocusEditor && m.isCurrentPaper() {
@@ -2507,21 +2746,52 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 			rows = 3
 		}
 		if isEditing {
-			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
+			// The textarea View() is a fixed `rows`-tall surface (it scrolls
+			// internally), so the rendered box height matches the static
+			// render exactly — scrollToField's line accounting stays true.
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textArea.View()), 2))
 		} else {
-			content := placeholder("Enter " + field.Title + "...")
-			for i := 1; i < rows; i++ {
-				content += "\n"
+			// Real multi-line values render verbatim; pad only UP TO the
+			// schema's row count (the old code appended rows-1 newlines after
+			// the value unconditionally, ballooning multi-line boxes). Cap at
+			// the editing textarea's 12-row pin so static and editing heights
+			// always match (review finding: >12-line values made fields below
+			// jump on edit-open).
+			content := capValueLines(placeholder("Enter "+field.Title+"..."), 12)
+			if n := strings.Count(content, "\n") + 1; n < rows {
+				content += strings.Repeat("\n", rows-n)
 			}
 			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
 		}
 
 	case FieldRichText:
-		lines = append(lines, dimStyle.Render("  B  I  U  H1  H2  \"  ~  #"))
-		content := dimStyle.Render("Start writing...")
-		content += "\n"
-		content += "\n"
-		lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
+		// Value-aware (the old render painted a fake "B I U H1…" toolbar and a
+		// static "Start writing..." placeholder, never the value). Two wire
+		// shapes exist (confirmed across the dev dataset):
+		//   Shape A — legacy plain string: lands in Doc.Values via scalarString
+		//   → shown and edited as multi-line text, like FieldText.
+		//   Shape B — blocks-doc projection {"blocks":…,"html":…}: non-scalar,
+		//   so absent from Doc.Values (only in Doc.Extra) → read-only preview
+		//   (html stripped of tags, clamped, dim) + a Studio pointer.
+		//   startFieldEdit refuses Shape B — text over the map corrupts it.
+		if preview, blocks := m.richTextBlocksDoc(field.Name); blocks {
+			body := preview
+			if body == "" {
+				body = "(no preview)"
+			}
+			content := dimStyle.Render(clampLines(body, maxInt(fieldContentWidth-2, 8), 6))
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
+			lines = append(lines, "  "+dimStyle.Render("blocks doc — edit in Studio/Beta"))
+		} else if isEditing {
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textArea.View()), 2))
+		} else {
+			// Same 12-row cap as FieldText — height parity with the editor.
+			content := capValueLines(placeholder("Start writing..."), 12)
+			if n := strings.Count(content, "\n") + 1; n < 3 {
+				content += strings.Repeat("\n", 3-n)
+			}
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
+		}
 
 	case FieldImage:
 		// Value-aware, like every other field: show the stored image URL
@@ -2615,8 +2885,12 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 
 	case FieldArray:
 		// An array WITH data shows it (clamped raw JSON) — "[ ] No items yet"
-		// over a populated dependencies list was a lie.
-		if raw := m.rawFieldJSON(field.Name); raw != "" {
+		// over a populated dependencies list was a lie. A string-only array
+		// edits in the textarea, one element per line (startFieldEdit refuses
+		// mixed / non-string arrays — those stay read-only as before).
+		if isEditing {
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textArea.View()), 2))
+		} else if raw := m.rawFieldJSON(field.Name); raw != "" {
 			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(raw)), 2))
 		} else {
 			lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
@@ -2674,6 +2948,86 @@ func (m model) rawFieldJSON(name string) string {
 	lines := strings.Split(string(pretty), "\n")
 	if len(lines) > maxRawJSONLines {
 		lines = append(lines[:maxRawJSONLines], "…")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// richTextBlocksDoc inspects a richText field's RAW wire value for the
+// blocks-doc projection shape ({"blocks":[…],"html":"…"} — the current
+// projected form for block-editor docs). A legacy plain-string body lands in
+// Doc.Values via scalarString and returns ("", false) — editable as text.
+// Any NON-scalar value returns (preview, true), where preview is the html
+// projection stripped of tags (possibly "" when the html key is absent or the
+// bytes don't parse) — the caller renders it read-only and startFieldEdit
+// refuses to open an editor: a string patch over the projection map is the
+// data-corruption hazard. Studio/Beta owns those docs.
+func (m model) richTextBlocksDoc(name string) (string, bool) {
+	if m.selectedDoc == nil || m.selectedDoc.Extra == nil {
+		return "", false
+	}
+	raw, ok := m.selectedDoc.Extra[name]
+	if !ok {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return "", false // scalar (legacy string / null) — text-editable
+	}
+	var proj struct {
+		HTML string `json:"html"`
+	}
+	// Best-effort preview only: an unparseable or html-less object is STILL
+	// refused for editing (true) — refusal keys on non-scalar, not on shape.
+	_ = json.Unmarshal([]byte(trimmed), &proj)
+	return strings.TrimSpace(stripHTMLTags(proj.HTML)), true
+}
+
+// htmlEntityReplacer decodes the handful of entities the projection's html
+// serializer actually emits — a preview needs readable text, not a parser.
+var htmlEntityReplacer = strings.NewReplacer(
+	"&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&nbsp;", " ",
+)
+
+// stripHTMLTags drops <…> tags from an html projection string and decodes the
+// common entities, leaving the visible text for the read-only preview box.
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return htmlEntityReplacer.Replace(b.String())
+}
+
+// clampLines wraps s to width and keeps at most max physical lines, appending
+// an ellipsis row when clipped — a long blocks-doc preview must never flood
+// the form (mirrors rawFieldJSON's clamp discipline).
+// capValueLines bounds a multi-line value to max logical lines for the
+// STATIC render — the editing textarea pins its height at the same cap
+// (openMultilineEditor), so static and editing renders of an over-long
+// value occupy identical line spans and fields below never jump. The last
+// visible line is replaced by a summary so the truncation is explicit.
+func capValueLines(s string, max int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= max {
+		return s
+	}
+	kept := lines[:max-1]
+	return strings.Join(kept, "\n") + "\n… +" + fmt.Sprint(len(lines)-(max-1)) + " more lines"
+}
+
+func clampLines(s string, width, max int) string {
+	wrapped := lipgloss.NewStyle().Width(width).Render(s)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) > max {
+		lines = append(lines[:max], "…")
 	}
 	return strings.Join(lines, "\n")
 }

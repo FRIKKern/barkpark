@@ -30,6 +30,7 @@ Launch `barkpark` (no args). Miller columns: structure → doc lists → editor.
 | Key | Does |
 |---|---|
 | `enter` | edit field — reference opens a picker; image edits the URL |
+| | text/richText/arrays open a **textarea**: `enter` = newline / new item, `ctrl+s` = confirm |
 | `space` | toggle boolean / cycle select |
 | `ctrl+s` → `ctrl+p` | save, then publish the draft |
 | `U` | unpublish (back to draft) |
@@ -39,7 +40,7 @@ Launch `barkpark` (no args). Miller columns: structure → doc lists → editor.
 
 **Draft lifecycle:** edits autosave to `drafts.<id>`; `ctrl+p` promotes, `U` demotes, `R R` throws the draft away. Use `d` before either — look before you leap. Restore-from-revision lives in Studio.
 
-**Papers are read-only** here (scroll with `j/k`, `ctrl+d/u`); edit them in Studio.
+**Blocks-doc bodies** (edited in Studio's block editor) show a read-only preview — the TUI refuses to edit them so it can never corrupt block structure. **Papers are read-only** here (scroll with `j/k`, `ctrl+d/u`); edit them in Studio.
 
 **Scope selector:** pick from lists, or `n` creates a workspace/project (server slugs the name and seeds Default/production), `m` for manual entry.
 

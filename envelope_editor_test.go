@@ -198,13 +198,16 @@ func TestEditorScrollReachesTailFields(t *testing.T) {
 	}
 
 	// The claim field's REAL first line must be inside the visible window.
+	// Physical lines, not slice elements: renderField returns each bordered
+	// box as ONE element with embedded newlines, so renderedLineCount is the
+	// real height (the same accounting scrollToField uses).
 	fieldWidth := m.calcEditorWidth() - 4
 	if fieldWidth < 20 {
 		fieldWidth = 20
 	}
 	target := 4
 	for i := 0; i < 19; i++ {
-		target += len(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
+		target += renderedLineCount(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
 	}
 	top, bottom := m.viewport.YOffset, m.viewport.YOffset+m.viewport.Height
 	if target < top || target > bottom {
