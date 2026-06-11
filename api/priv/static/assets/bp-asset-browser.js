@@ -204,7 +204,7 @@
             '" data-title="' +
             title +
             '">' +
-            thumb +
+            cell +
             '<span class="bp-ab-card-title">' +
             title +
             "</span></button>"

@@ -167,6 +167,57 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
       assert saved.content["body"]["blocks"] == free_blocks
     end
 
+    test "a submitted field with NO bound block persists as a plain content key" do
+      id = "unbound-#{System.unique_integer([:positive])}"
+
+      # A blocks-bearing doc whose block list binds ONLY title — featuredImage
+      # has no bound block (the bug shape: the Studio image picker emitted the
+      # value, the editor said "Saved", and the blocks branch dropped it).
+      blocks = [
+        %{
+          "id" => "b-title",
+          "type" => "field-string",
+          "fieldName" => "title",
+          "value" => "Unbound Test"
+        },
+        %{
+          "id" => "free-p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Body."}]
+        }
+      ]
+
+      content = Projection.project(%{"blocks" => blocks}, blocks)
+
+      {:ok, base_doc} =
+        Content.upsert_document(
+          "post",
+          %{"doc_id" => id, "title" => "Unbound Test", "content" => content},
+          @dataset
+        )
+
+      image_value = ~s({"url":"/media/files/x.png","assetId":"asset-1"})
+
+      form = %{
+        "title" => "Unbound Test",
+        "slug" => "",
+        "featuredImage" => image_value,
+        "status" => "draft"
+      }
+
+      {:ok, saved, _errs} = Content.upsert_draft(base_doc, "post", schema_for(), form, @dataset)
+
+      # The unbound field landed as a plain content key; blocks survive intact.
+      assert saved.content["featuredImage"] == image_value
+      assert Enum.map(saved.content["blocks"], & &1["id"]) == ["b-title", "free-p1"]
+
+      # And a follow-up save with the field EMPTIED clears the key (the same
+      # empty-string-clears semantics as the non-blocks branch).
+      cleared_form = %{form | "featuredImage" => ""}
+      {:ok, cleared, _errs} = Content.upsert_draft(saved, "post", schema_for(), cleared_form, @dataset)
+      refute Map.has_key?(cleared.content, "featuredImage")
+    end
+
     test "a legacy doc WITHOUT blocks keeps the field-map save path" do
       id = "legacy-#{System.unique_integer([:positive])}"
 

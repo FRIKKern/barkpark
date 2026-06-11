@@ -210,6 +210,12 @@
     .text-muted { color: var(--fg-muted); }
     .text-dim { color: var(--fg-dim); }
 
+    /* The `hidden` attribute must always win. Author display rules on
+       classes (.btn { display:inline-flex }, .bp-ab-loading { display:flex })
+       otherwise override the UA's [hidden] rule, leaving "hidden" chrome
+       visible — and, for overlays, click-intercepting. */
+    [hidden] { display: none !important; }
+
     /* ── Buttons (shadcn) ─────────────────────────────────────────────── */
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -956,7 +962,36 @@
       font-size: 11px; color: var(--fg-muted); padding: 6px 8px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    /* bp-media-picker — the image-field input. Two states only: a framed
+       preview of the SELECTED image, or ONE dashed drop-target card when
+       empty (click = upload, drag = drop). The library never renders inline
+       under the field — Browse library opens the bp-asset-browser modal. */
+    bp-media-picker { display: block; }
     .bp-mp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .bp-mp-preview-img {
+      display: block; max-width: 100%; max-height: 240px;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--bg-subtle);
+    }
+    .bp-mp-empty {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 88px; padding: 20px;
+      border: 1px dashed var(--border); border-radius: var(--radius-sm);
+      color: var(--fg-muted); font-size: 13px; text-align: center;
+      cursor: pointer; user-select: none;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .bp-mp-empty:hover, .bp-mp-empty:focus-visible {
+      border-color: var(--primary); color: var(--fg);
+      background: var(--bg-subtle); outline: none;
+    }
+    bp-media-picker.bp-mp-drag-over .bp-mp-empty,
+    bp-media-picker.bp-mp-drag-over .bp-mp-preview-img {
+      border-color: var(--primary); border-style: dashed;
+    }
+    .bp-mp-broken { color: var(--destructive); border-color: var(--destructive); opacity: 0.8; }
+    bp-media-picker.bp-mp-busy { opacity: 0.7; pointer-events: none; }
+    .bp-mp-error { display: none; margin-top: 6px; font-size: 12px; color: var(--destructive); }
 
     /* bp-asset-explorer — full-page Media tab workspace */
     .media-explorer-panel {
@@ -2559,11 +2594,14 @@
       border-radius: 3px; border: 1px solid var(--paper-rule);
       background: var(--paper-bg-deep);
     }
-    /* Empty state: collapse the WC's "No image selected" text to a slim
+    /* Empty state: collapse the WC's "No image selected" drop card to a slim
        affordance. font-size:0 hides the WC's own text node; the ::before
-       carries the visible "+ Add image" label at readable size. */
+       carries the visible "+ Add image" label at readable size. Border and
+       min-height are zeroed so the Studio dashed drop-target chrome never
+       reaches the paper surface (the WC's click/drop targets keep working). */
     .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty {
-      font-size: 0; padding: 0;
+      font-size: 0; padding: 0; border: 0; min-height: 0;
+      justify-content: flex-start; background: transparent;
     }
     .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty::before {
       content: "+ Add image";
@@ -2572,12 +2610,6 @@
     }
     .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-actions {
       display: flex; gap: 6px; margin-top: 4px;
-    }
-    /* Hide the big "Drop image here" dropzone card + the browse grid at rest —
-       they reappear only via the WC's own interactions, not as resting chrome. */
-    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-dropzone,
-    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-grid:empty {
-      display: none;
     }
 
     /* Add-block row — quiet hairline divider, muted control. */

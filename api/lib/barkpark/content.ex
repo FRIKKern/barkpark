@@ -566,7 +566,24 @@ defmodule Barkpark.Content do
         values = classic_field_values(params, schema)
         new_blocks = Synthesis.patch_bound_values(blocks, values)
 
+        # A submitted field with NO bound block must still persist (e.g. an
+        # image field on a doc whose block list never bound it) — patching
+        # bound blocks alone silently dropped it while the editor reported
+        # "Saved". Merge those onto content as plain keys with the same
+        # semantics as the non-blocks branch (empty string clears the key).
+        # Projection only rewrites bound fieldNames + "body", so these
+        # survive the project pass.
+        bound_names =
+          blocks
+          |> Enum.map(& &1["fieldName"])
+          |> Enum.filter(&(is_binary(&1) and &1 != ""))
+
+        unbound_params = Map.drop(params, bound_names)
+
         base_content
+        |> Map.drop(Map.keys(unbound_params))
+        |> Map.drop(["title", "status"])
+        |> Map.merge(build_content(unbound_params, schema))
         |> Map.put("blocks", new_blocks)
         |> Projection.project(new_blocks, render_opts(dataset))
 
