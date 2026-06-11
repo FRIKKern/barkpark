@@ -1825,7 +1825,7 @@ func (m model) renderHelpBar() string {
 			// taskTarget) — advertise them where they apply, like the task list does.
 			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  esc back"
 		} else {
-			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  y dup  s scope  esc back"
+			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  R discard  y dup  s scope  esc back"
 		}
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
