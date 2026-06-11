@@ -78,7 +78,7 @@ Or let the wizard drive it: `bp setup --target deploy`. Updates: `ssh` in, `cd /
 | [`docs/INDEX.md`](docs/INDEX.md) | Catalog of every card, contract, and runbook |
 | [`docs/setup/TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) | The task system — agent loop, Studio collaboration, goals |
 | [`docs/cli/HANDBOOK.md`](docs/cli/HANDBOOK.md) | Full `bp` CLI manual |
-| [`docs/cheatsheets/`](docs/cheatsheets/) | One-pagers: `bp`, tasks, HTTP API, papers |
+| [`docs/cheatsheets/`](docs/cheatsheets/) | One-pagers: `bp`, TUI keys, tasks, HTTP API, papers |
 | [`docs/api-v1.md`](docs/api-v1.md) · [`docs/auth.md`](docs/auth.md) | HTTP contract · tokens and tiers |
 | [`docs/cards/plugins.md`](docs/cards/plugins.md) | Build a plugin (contract: `api/lib/barkpark/plugin.ex` moduledoc) |
 

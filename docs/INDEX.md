@@ -11,7 +11,7 @@ Runbooks: ops/PROD_OPS.md · ops/npm-rollback-playbook.md · ops/merge-gates.md 
 
 Setup: setup/{QUICKSTART,SETUP,TASK-SYSTEM,personal-local}.md
 
-Cheatsheets: cheatsheets/{bp,tasks,http-api,papers}.md
+Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 
 Frozen paths: api-v1.md · auth.md · cli/error-exit-table.md · cli/m0-decisions.md · cli/HANDBOOK.md · spec/bokbasen-api-contract.md
 

@@ -55,6 +55,7 @@ docs/auth.md 5600
 docs/setup/QUICKSTART.md 6000
 docs/setup/TASK-SYSTEM.md 16000
 docs/cheatsheets/bp.md 2400
+docs/cheatsheets/tui.md 2400
 docs/cheatsheets/tasks.md 2400
 docs/cheatsheets/http-api.md 2400
 docs/cheatsheets/papers.md 2400
