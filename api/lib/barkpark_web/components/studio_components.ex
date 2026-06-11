@@ -783,7 +783,7 @@ defmodule BarkparkWeb.StudioComponents do
   #
   # Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs
   # (which default to 100 via `normalize_top_menu_entry/1`).
-  defp default_top_menu_entries(dataset, scope_prefix \\ "") when is_binary(dataset) do
+  defp default_top_menu_entries(dataset, scope_prefix) when is_binary(dataset) do
     ds = URI.encode(dataset)
     ds_re = Regex.escape(ds)
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
@@ -2023,7 +2023,7 @@ defmodule BarkparkWeb.StudioComponents do
   # Same interpolation StudioLive used for schema-declared `"link"`
   # actions. Falls back to `"#"` when href is missing. Substitutes
   # `:dataset` and `:id` (published id — drafts. prefix stripped).
-  defp interpolate_doc_action_href(action, doc, dataset, ws_slug \\ "", proj_slug \\ "") do
+  defp interpolate_doc_action_href(action, doc, dataset, ws_slug, proj_slug) do
     case action["opts"] do
       %{"href" => href} when is_binary(href) ->
         do_interpolate_href(href, doc, dataset, ws_slug, proj_slug)
@@ -2041,7 +2041,7 @@ defmodule BarkparkWeb.StudioComponents do
   # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
   # :workspace is replaced before :w-anything ambiguity can arise because
   # the replacements run longest-token-first.
-  defp do_interpolate_href(href, doc, dataset, ws_slug \\ "", proj_slug \\ "") do
+  defp do_interpolate_href(href, doc, dataset, ws_slug, proj_slug) do
     id =
       case doc do
         %{doc_id: doc_id} -> Barkpark.Content.published_id(doc_id)
