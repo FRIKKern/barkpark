@@ -13,7 +13,7 @@
 | search Phase 10 (retriever) | spike doc only; intelligence stays Postgres | >500k media assets OR fuzzy p95 > 100ms |
 | `/v1/paperflow/*` alias | back-compat alias of `/v1/plugins/bulldocs/*`; `PAPERFLOW_INGEST_TOKEN` unchanged | drop only after paperflow `event-on-save.sh` repoints |
 | TUI media browse + sharing UI | parity sprint closed gaps 1–7 (publish/create/delete/task c·x/ref picker//search/y dup, cli-v1.4.0); media + share management (incl. per-doc item-share links) stay Studio/`bp` | demand — terminal-niche |
-| TUI long-tail vs Studio | discard-draft, history/revisions, bulk publish, diff view, content preview, secondary pane, array-row editing, workspace-create-in-selector — Studio is the rich desk; TUI covers the solo edit loop (2026-06-11 parity audit) | demand per item |
+| TUI long-tail vs Studio | history/revisions, bulk publish, diff view, content preview, secondary pane, array-row editing, workspace-create-in-selector — Studio is the rich desk; TUI covers the solo edit loop incl. the full draft lifecycle (publish/unpublish/discard, 2026-06-11 audit) | demand per item |
 | CLI long-tail | no `doc.duplicate` (use a `create` mutation with the content), no history verb, no item-share verb | demand |
 | Studio task claim/close buttons | DESIGN, not a gap: fenced claim/close belong to the API/agents; humans steer via the lifecycle dropdown (TASK-SYSTEM division of labour) | n/a |
 | workspace/project delete | `workspace create / project-create` exist; no delete verb — spikes accumulate (server-side cascade: projects, datasets, docs, media, tokens) | demand — first user drowning in spikes |

@@ -118,6 +118,13 @@ type model struct {
 	deleteArmed   bool
 	deleteDocID   string
 	deleteDocType string
+	// Armed discard-draft confirm (`R`×2) — same two-press shape as delete.
+	// Armed only for a DRAFT whose published twin exists (probed at arm time:
+	// the server does not twin-guard, and discarding the only draft would
+	// delete the document — that's D's job, with its own confirm).
+	discardArmed   bool
+	discardDocID   string // the BARE published id (what the mutation takes)
+	discardDocType string
 	// workerID is this TUI's task-claim worker identity (BARKPARK_WORKER_ID,
 	// default "tui-<hostname>"), computed once in initialModel.
 	workerID string
@@ -674,6 +681,19 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// ── Armed discard-draft confirm: same two-press contract as delete. ──
+	if m.discardArmed {
+		armedID, armedType := m.discardDocID, m.discardDocType
+		m.discardArmed = false
+		m.discardDocID, m.discardDocType = "", ""
+		switch key {
+		case "R":
+			return m.performDiscard(armedID, armedType)
+		case "esc":
+			return m, nil
+		}
+	}
+
 	// ── Read-only paper: the editor is a scroll surface, not a field form ──
 	// A focused paper BYPASSES every field-editing handler (startFieldEdit,
 	// toggleField, commitFieldEdit, ctrl+s save) — a paper is read-only in the
@@ -910,6 +930,16 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if doc, typeName := m.deleteTarget(); doc != nil {
 			return m.performDuplicate(doc, typeName)
 		}
+
+	// ── Discard draft (`R`×2 — revert to published): drops the highlighted
+	//    or open doc's DRAFT, keeping the published version. Twin-guarded at
+	//    arm time (the server isn't): a draft with no published twin refuses
+	//    with a pointer to D, and a published doc has nothing to discard. ──
+	case "R":
+		if doc, typeName := m.deleteTarget(); doc != nil {
+			m.armDiscard(doc, typeName)
+		}
+		return m, nil
 
 	// ── Task quick actions (task doc-lists + an editor holding a task only;
 	//    inert on every other surface) ──
@@ -1301,6 +1331,41 @@ func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
 		m.refreshDocViews()
 	}
 	m.setStatus("deleted", false)
+	return m, nil
+}
+
+// armDiscard arms the R×2 discard confirm for doc — a DRAFT whose published
+// twin exists. The twin probe (Get on the bare id) runs here at arm time
+// because the server's discardDraft does NOT twin-guard: discarding the only
+// draft deletes the document outright, which is D's job with its own confirm.
+func (m *model) armDiscard(doc *Doc, typeName string) {
+	if doc.Status != "draft" {
+		m.setStatus("nothing to discard — not a draft", true)
+		return
+	}
+	bare := strings.TrimPrefix(doc.ID, "drafts.")
+	if _, ok := m.ds.Get(typeName, bare); !ok {
+		m.setStatus("no published twin — D deletes the draft outright", true)
+		return
+	}
+	m.discardArmed = true
+	m.discardDocID = bare
+	m.discardDocType = typeName
+	m.setStatus(fmt.Sprintf("discard draft of %q, revert to published? press R again · esc cancel", doc.Title), true)
+}
+
+// performDiscard sends the discardDraft mutation ({"discardDraft":{"id":
+// <bare>,"type":…}}, matching Content.discard_draft's bare-id contract),
+// then re-queries and lands on the PUBLISHED doc — the surviving version is
+// what the user reverts to, mirroring Studio's post-discard navigation.
+func (m model) performDiscard(bareID, typeName string) (tea.Model, tea.Cmd) {
+	if err := m.ds.DiscardDraft(typeName, bareID); err != nil {
+		m.setStatus(fmt.Sprintf("discard failed: %v", err), true)
+		return m, nil
+	}
+	m.rebuildPanes()
+	m.selectAndOpenDoc(bareID, typeName)
+	m.setStatus("draft discarded — showing published", false)
 	return m, nil
 }
 
@@ -1769,7 +1834,7 @@ func (m model) renderHelpBar() string {
 			help = " j/k navigate  c claim  x close  y dup  D delete  n new  / search  enter select  esc back"
 		} else {
 			// Doc-list pane: surface the n-new / D-delete affordances, subtle, in hint order.
-			help = " j/k navigate  n new  y dup  D delete  / search  h/l switch pane  enter select  s scope  esc back  q quit"
+			help = " j/k navigate  n new  y dup  R discard  D delete  / search  h/l switch pane  enter select  s scope  esc back  q quit"
 		}
 	} else {
 		help = " j/k navigate  / search  h/l switch pane  enter select  s scope  esc back  q quit"

@@ -536,6 +536,22 @@ func (c *Client) Unpublish(typeName, id string) error {
 	return c.Mutate([]map[string]interface{}{mutation})
 }
 
+// DiscardDraft drops a document's draft, reverting to the published version,
+// via the discardDraft mutation. id is the BARE published id (the server
+// derives the drafts. twin itself, mirroring Content.discard_draft). The
+// SERVER does not twin-guard — discarding the only draft deletes the document
+// outright — so callers gate on a published twin existing (Studio's
+// is_draft && has_published guard; the TUI probes Get(type, bareId)).
+func (c *Client) DiscardDraft(typeName, id string) error {
+	mutation := map[string]interface{}{
+		"discardDraft": map[string]interface{}{
+			"id":   id,
+			"type": typeName,
+		},
+	}
+	return c.Mutate([]map[string]interface{}{mutation})
+}
+
 // Create creates a NEW draft document with a server-assigned id: a create
 // mutation carrying no _id makes Content.create_document generate
 // "<type>-<n>" and prefix "drafts.". The assigned draft id is returned from

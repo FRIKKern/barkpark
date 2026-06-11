@@ -124,3 +124,77 @@ func TestSSERefreshKeepsEditorFocus(t *testing.T) {
 			m.showEditor, m.selectedDoc)
 	}
 }
+
+// TUI parity pins for R×2 discard-draft (Studio's discard-draft action,
+// twin-guarded client-side because the server isn't):
+//   - arm probes the published twin via Get(bare id); a draft WITHOUT a twin
+//     refuses (D's job), a published doc has nothing to discard
+//   - second R sends {"discardDraft":{"id":<bare>,"type":…}}
+//   - esc disarms without a request
+func TestDiscardDraftTwinGuardAndWire(t *testing.T) {
+	var mutates [][]byte
+	twinExists := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/v1/data/doc/"):
+			if twinExists {
+				_, _ = w.Write([]byte(`{"result":{"_id":"post-1","_type":"post","_draft":false,"title":"Hello"}}`))
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case strings.Contains(r.URL.Path, "/v1/data/mutate/"):
+			b, _ := io.ReadAll(r.Body)
+			mutates = append(mutates, b)
+			_, _ = w.Write([]byte(`{"transactionId":"t1","results":[{"id":"drafts.post-1","operation":"discardDraft"}]}`))
+		case strings.Contains(r.URL.Path, "/v1/data/query/"):
+			_, _ = w.Write([]byte(`{"result":{"documents":[` + postDocJSON + `]}}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+
+	m := listModel(t, srv.URL, "post")
+
+	// Arm + confirm on the draft row (postDocJSON is drafts.post-1).
+	m = press(t, m, "R")
+	if !m.discardArmed || m.discardDocID != "post-1" {
+		t.Fatalf("R must arm with the BARE id, got armed=%v id=%q", m.discardArmed, m.discardDocID)
+	}
+	m = press(t, m, "R")
+	if len(mutates) != 1 {
+		t.Fatalf("want 1 discard mutation, got %d", len(mutates))
+	}
+	var body struct {
+		Mutations []struct {
+			DiscardDraft struct {
+				ID   string `json:"id"`
+				Type string `json:"type"`
+			} `json:"discardDraft"`
+		} `json:"mutations"`
+	}
+	if err := json.Unmarshal(mutates[0], &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	d := body.Mutations[0].DiscardDraft
+	if d.ID != "post-1" || d.Type != "post" {
+		t.Errorf("discardDraft = %+v, want bare post-1 + post", d)
+	}
+
+	// esc disarms without a request.
+	m = press(t, m, "R")
+	m = press(t, m, "esc")
+	if m.discardArmed || len(mutates) != 1 {
+		t.Errorf("esc must disarm with no request, armed=%v mutates=%d", m.discardArmed, len(mutates))
+	}
+
+	// No published twin → refuse at arm time.
+	twinExists = false
+	m = press(t, m, "R")
+	if m.discardArmed {
+		t.Error("a draft with no published twin must NOT arm")
+	}
+	if !strings.Contains(m.status, "D deletes") {
+		t.Errorf("refusal must point at D, got %q", m.status)
+	}
+}
