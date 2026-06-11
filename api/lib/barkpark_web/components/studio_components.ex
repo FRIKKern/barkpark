@@ -1750,7 +1750,7 @@ defmodule BarkparkWeb.StudioComponents do
             </span>
           </:status_pill>
           <:presence>
-            <% doc_presences = presences_on_doc(@presences, Barkpark.Content.published_id(@editor_doc.doc_id)) %>
+            <% doc_presences = presences_on_doc(@presences, Barkpark.Content.published_id(@editor_doc.doc_id), @dataset) %>
             <%= if doc_presences != [] do %>
               <div class="presence-dots">
                 <%= for p <- doc_presences do %>
@@ -1852,8 +1852,10 @@ defmodule BarkparkWeb.StudioComponents do
     """
   end
 
-  defp presences_on_doc(presences, doc_id) do
-    Enum.filter(presences, &(&1.doc_id == doc_id))
+  # Dataset arm mirrors PresenceState.on_doc/3 (tsk-url-p0): the same doc_id
+  # in another dataset is NOT co-presence.
+  defp presences_on_doc(presences, doc_id, dataset) do
+    Enum.filter(presences, &(&1.doc_id == doc_id and Map.get(&1, :dataset) == dataset))
   end
 
   @doc """

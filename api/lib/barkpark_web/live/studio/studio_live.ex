@@ -77,15 +77,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
         do: stored_color,
         else: PresenceState.pick_color(user_id)
 
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, PresenceState.topic())
-    end
-
+    # Presence subscription happens in handle_params via
+    # ensure_presence_subscription/1 — the topic is workspace-keyed
+    # (tsk-url-p0) and the workspace isn't resolved until
+    # ensure_tenancy_scope runs there.
     {:ok,
      socket
      |> assign(
        nav_section: :structure,
        page_title: "Studio",
+       presence_topic: nil,
        subscribed_doc: nil,
        image_picker_field: nil,
        media_files: [],
@@ -262,7 +263,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp finish_handle_params(socket, dataset, path, desk, uri) do
-    socket = ensure_list_subscription(socket, dataset)
+    socket =
+      socket
+      |> ensure_list_subscription(dataset)
+      |> ensure_presence_subscription()
 
     current_path =
       case uri do
@@ -374,7 +378,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Presence updates
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
-    {:noreply, assign(socket, presences: PresenceState.list())}
+    # Diffs only arrive on the subscribed (ws-keyed) topic; a diff racing a
+    # workspace flip before ensure_presence_subscription re-keys is read off
+    # the OLD topic and immediately superseded by the post-flip track.
+    case socket.assigns[:presence_topic] do
+      nil -> {:noreply, socket}
+      topic -> {:noreply, assign(socket, presences: PresenceState.list(topic))}
+    end
   end
 
   # Global doc change — rebuild if we're viewing this type
@@ -478,6 +488,33 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp list_topic(dataset, _ws_id), do: "documents:#{dataset}"
 
+  # Re-key the presence subscription to the CURRENT workspace's topic
+  # (tsk-url-p0 — same diff-and-resubscribe shape as ensure_list_subscription).
+  # On a workspace flip the old tracking is explicitly untracked: Presence
+  # entries are (topic, key)-scoped, so without the untrack the user's avatar
+  # would linger on the OLD workspace's topic until the LV process dies.
+  defp ensure_presence_subscription(socket) do
+    if connected?(socket) do
+      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+      new_topic = PresenceState.topic(ws_id)
+      old_topic = socket.assigns[:presence_topic]
+
+      if new_topic == old_topic do
+        socket
+      else
+        if old_topic do
+          Presence.untrack(self(), old_topic, socket.assigns.user_id)
+          Phoenix.PubSub.unsubscribe(Barkpark.PubSub, old_topic)
+        end
+
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, new_topic)
+        assign(socket, presence_topic: new_topic)
+      end
+    else
+      socket
+    end
+  end
+
   # Subscribe to the specific doc being edited
   defp subscribe_to_doc(socket) do
     old_sub = socket.assigns[:subscribed_doc]
@@ -528,18 +565,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
       meta = %{
         doc_id: doc_id,
         type: socket.assigns[:editor_type],
+        # Scope stamps (tsk-url-p0): dataset disambiguates same-doc_id
+        # presence across datasets (PresenceState.on_doc/3); project_id
+        # lets future consumers (jump-to-user across projects) resolve
+        # the full location without a lookup.
+        dataset: socket.assigns[:dataset],
+        project_id: socket.assigns[:current_project] && socket.assigns.current_project.id,
         name: socket.assigns.user_name,
         color: socket.assigns.user_color,
         joined_at: System.system_time(:second)
       }
 
+      # The ws-keyed topic is seeded by ensure_presence_subscription before
+      # any track call in the handle_params pipeline; the fallback covers
+      # out-of-band callers (save-profile) racing an unconnected socket.
+      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+      topic = socket.assigns[:presence_topic] || PresenceState.topic(ws_id)
+
       # Use update if already tracked, track if new
-      case Presence.get_by_key(PresenceState.topic(), socket.assigns.user_id) do
-        [] -> Presence.track(self(), PresenceState.topic(), socket.assigns.user_id, meta)
-        _ -> Presence.update(self(), PresenceState.topic(), socket.assigns.user_id, meta)
+      case Presence.get_by_key(topic, socket.assigns.user_id) do
+        [] -> Presence.track(self(), topic, socket.assigns.user_id, meta)
+        _ -> Presence.update(self(), topic, socket.assigns.user_id, meta)
       end
 
-      assign(socket, presences: PresenceState.list())
+      assign(socket, presences: PresenceState.list(topic))
     else
       socket
     end
@@ -963,7 +1012,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
           content_type: entry.client_type
         }
 
-        case Media.upload(plug_upload, socket.assigns.dataset) do
+        # Scope stamp (tsk-url-p0): without scope_opts the blob row landed
+        # with NULL workspace/project — invisible to every scoped read.
+        case Media.upload(plug_upload, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)) do
           {:ok, file} -> {:ok, "/media/files/#{file.path}"}
           {:error, _} -> {:error, "upload failed"}
         end
@@ -2633,9 +2684,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
           # The owning workspace may have flipped though, so re-point the
           # list subscription at the new scope's topic (barkpark-fe2k) before
           # rebuilding — otherwise live updates would still arrive on the OLD
-          # workspace's topic (or not at all).
+          # workspace's topic (or not at all). Presence re-keys + re-tracks for
+          # the same reason (tsk-url-p0): the avatar must move workspaces.
           socket
           |> ensure_list_subscription(slug)
+          |> ensure_presence_subscription()
+          |> track_presence()
           |> rebuild_panes()
         else
           # Different slug — push_patch runs handle_params, re-asserting nav_path
@@ -2648,9 +2702,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
       _ ->
         # Project has no dataset rows — the current slug stays authoritative,
         # but the workspace may have flipped, so re-point the list subscription
-        # at the new scope's topic before rebuilding (barkpark-fe2k).
+        # at the new scope's topic before rebuilding (barkpark-fe2k); presence
+        # re-keys + re-tracks alongside (tsk-url-p0).
         socket
         |> ensure_list_subscription(socket.assigns[:dataset])
+        |> ensure_presence_subscription()
+        |> track_presence()
         |> rebuild_panes()
     end
   end
@@ -2660,6 +2717,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
       socket
       |> reset_nav_for_switch()
       |> ensure_list_subscription(socket.assigns[:dataset])
+      |> ensure_presence_subscription()
+      |> track_presence()
       |> rebuild_panes()
 
   # Reset navigation + open-document state for a workspace/project switch.
@@ -4664,7 +4723,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   </a>
 
                 <% :doc -> %>
-                  <% item_presences = PresenceState.on_doc(@presences, item.id) %>
+                  <% item_presences = PresenceState.on_doc(@presences, item.id, @dataset) %>
                   <.pane_doc_item
                     id={"doc-#{item.id}"}
                     phx_click="select"

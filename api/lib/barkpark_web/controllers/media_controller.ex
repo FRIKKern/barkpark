@@ -74,9 +74,18 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
-  @doc "Serve a cached or on-demand rendition preset."
+  @doc """
+  Serve a cached or on-demand rendition preset.
+
+  Scoped lookup (tsk-url-p0): this was the ONE media action passing no
+  scope_opts — an unscoped `get_file/1` served any workspace's renditions
+  by id on the flat URL (the cross-scope leak the router comment over the
+  scoped-media block calls out). The flat pipeline's AssignDefaultScope
+  pins this to the Default workspace; non-Default renditions become
+  reachable only via the scoped route (P4) or an item share link.
+  """
   def serve_rendition(conn, %{"id" => id, "preset" => preset}) do
-    with {:ok, file} <- Media.get_file(id),
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :preview),
          watermark = Access.watermark_profile(doc),

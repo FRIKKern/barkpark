@@ -8,7 +8,19 @@ defmodule BarkparkWeb.Studio.DashboardLive do
     dataset = params["dataset"] || Content.default_dataset()
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{dataset}")
+      # Workspace-scoped stream (tsk-url-p0): the flat dashboard is
+      # Default-pinned, so subscribe the Default workspace's scoped topic —
+      # the legacy global topic carries EVERY tenant's mutations and each
+      # one triggered a counts rebuild here. Falls back to the legacy topic
+      # only when tenancy is unseeded (no Default workspace), the same
+      # shape as StudioLive.list_topic/2.
+      topic =
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: ws_id} -> "documents:ws:#{ws_id}:#{dataset}"
+          _ -> "documents:#{dataset}"
+        end
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
     end
 
     structure = Structure.build(dataset)
