@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1319,6 +1320,16 @@ func (m *model) commitFieldEdit() bool {
 			return false
 		}
 		val = norm
+	}
+
+	// Schema pattern (validation.pattern): refuse a violating non-empty value
+	// at commit so it never reaches the server's warning pass. An invalid
+	// regex in the schema fails open — enforcement is the server's job.
+	if field.Pattern != "" && val != "" {
+		if re, err := regexp.Compile(field.Pattern); err == nil && !re.MatchString(val) {
+			m.setStatus("doesn't match the field's pattern: "+field.Pattern, true)
+			return false
+		}
 	}
 	if m.editingMultiline {
 		// Multi-line widget owns the edit — embedded newlines survive
@@ -2758,6 +2769,11 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 	// slug field's [gen]) rides on the label line so every field box can keep the
 	// same full width and all the box right edges line up.
 	labelText := "  " + strings.ToUpper(field.Title)
+	if field.Required {
+		// Sanity's required marker; the annotation adds "(required)" while
+		// the field is still empty so the obligation is explicit at rest.
+		labelText += " *"
+	}
 	labelStyle := editorLabelStyle
 	if isFocused {
 		labelStyle = lipgloss.NewStyle().Bold(true).Foreground(highlight)
@@ -2768,6 +2784,9 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		annotation = dimStyle.Render("[gen]")
 	case FieldNumber:
 		annotation = dimStyle.Render("[num]")
+	}
+	if field.Required && m.getFieldValue(field.Name) == "" {
+		annotation = dimStyle.Render("(required)")
 	}
 	if annotation != "" {
 		gap := width - lipgloss.Width(labelText) - lipgloss.Width(annotation)

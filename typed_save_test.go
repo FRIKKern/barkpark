@@ -171,3 +171,62 @@ func TestCommitFieldEditDirectCallStillWorks(t *testing.T) {
 		t.Errorf("dirty = %q", m.dirtyValues["note"])
 	}
 }
+
+// Validation affordances (Sanity parity): required fields carry the asterisk
+// marker + a "(required)" annotation while empty; a schema pattern refuses a
+// violating commit (server still owns enforcement — drafts warn, publish
+// blocks).
+func TestRequiredMarkerAndAnnotation(t *testing.T) {
+	f := Field{Name: "kind", Title: "Kind", Type: FieldString, Required: true}
+	m := typedModel([]Field{f}, map[string]string{})
+
+	out := strings.Join(m.renderField(f, 60, false, false), "\n")
+	if !strings.Contains(out, "KIND *") {
+		t.Errorf("required label should carry the asterisk, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(required)") {
+		t.Errorf("empty required field should annotate, got:\n%s", out)
+	}
+
+	// Filled → the annotation goes quiet; the marker stays.
+	m.selectedDoc.Values = map[string]string{"kind": "task"}
+	out = strings.Join(m.renderField(f, 60, false, false), "\n")
+	if strings.Contains(out, "(required)") {
+		t.Errorf("filled required field must not nag, got:\n%s", out)
+	}
+	if !strings.Contains(out, "KIND *") {
+		t.Errorf("marker should persist when filled, got:\n%s", out)
+	}
+}
+
+func TestPatternCommitRefusesViolation(t *testing.T) {
+	f := Field{Name: "code", Title: "Code", Type: FieldString, Pattern: "^[A-Z]{3}-[0-9]+$"}
+	m := typedModel([]Field{f}, map[string]string{})
+	m.startFieldEdit()
+	m.textInput.SetValue("nope")
+
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(model)
+	if !nm.editing || !nm.statusErr || !strings.Contains(nm.status, "pattern") {
+		t.Errorf("pattern violation should refuse and stay editing (editing=%v status=%q)", nm.editing, nm.status)
+	}
+
+	nm.textInput.SetValue("ABC-42")
+	after, _ := nm.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	am := after.(model)
+	if am.editing || am.dirtyValues["code"] != "ABC-42" {
+		t.Errorf("matching value should commit, got editing=%v val=%q", am.editing, am.dirtyValues["code"])
+	}
+
+	// Empty always commits (clearing is not a pattern violation); an invalid
+	// regex fails open.
+	am.editorSchema.Fields[0].Pattern = "(["
+	am.fieldCursor = 0
+	am.startFieldEdit()
+	am.textInput.SetValue("anything")
+	final, _ := am.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	fm := final.(model)
+	if fm.editing {
+		t.Error("invalid schema regex must fail open, not lock the field")
+	}
+}

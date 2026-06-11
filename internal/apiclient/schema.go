@@ -41,6 +41,15 @@ type Field struct {
 	Options []string
 	RefType string
 	Rows    int
+	// Required mirrors the schema's validation.required — the editor
+	// renders Sanity's asterisk marker and a "(required)" hint when empty.
+	// Enforcement stays server-side (drafts save with warnings; publish
+	// blocks); the marker is the affordance.
+	Required bool
+	// Pattern mirrors validation.pattern (a regex source) — the editor
+	// validates on commit so a violating value never even reaches the
+	// server's warning pass.
+	Pattern string
 }
 
 // PreviewSpec names one content field a document-list row surfaces, with an
@@ -116,12 +125,17 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 			// parseListPreview below.
 			ListPreview map[string]json.RawMessage `json:"listPreview"`
 			Fields      []struct {
-				Name    string   `json:"name"`
-				Title   string   `json:"title"`
-				Type    string   `json:"type"`
-				Options []string `json:"options,omitempty"`
-				RefType string   `json:"refType,omitempty"`
-				Rows    int      `json:"rows,omitempty"`
+				Name       string          `json:"name"`
+				Title      string          `json:"title"`
+				Type       string          `json:"type"`
+				Options    []string        `json:"options,omitempty"`
+				RefType    string          `json:"refType,omitempty"`
+				Rows       int             `json:"rows,omitempty"`
+				// Validation values are mixed types ({"required": bool},
+				// {"pattern": string} both ship in live schemas) — decode
+				// raw and pick fields tolerantly so an unknown shape can
+				// never fail the whole schema fetch.
+				Validation map[string]json.RawMessage `json:"validation,omitempty"`
 			} `json:"fields"`
 		} `json:"schemas"`
 	}
@@ -141,11 +155,13 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 		}
 		for _, af := range as.Fields {
 			s.Fields = append(s.Fields, Field{
-				Name:    af.Name,
-				Title:   af.Title,
-				Type:    parseFieldType(af.Type),
-				Options: af.Options,
-				RefType: af.RefType,
+				Name:     af.Name,
+				Title:    af.Title,
+				Type:     parseFieldType(af.Type),
+				Options:  af.Options,
+				RefType:  af.RefType,
+				Required: rawBool(af.Validation["required"]),
+				Pattern:  rawString(af.Validation["pattern"]),
 				Rows:    af.Rows,
 			})
 		}
@@ -187,6 +203,20 @@ func parsePreviewSpec(raw json.RawMessage) *PreviewSpec {
 		return &PreviewSpec{Field: spec.Field, Prefix: spec.Prefix}
 	}
 	return nil
+}
+
+// rawBool / rawString decode a tolerant scalar from a raw validation value —
+// absent, null, or mistyped values yield the zero value, never an error.
+func rawBool(raw json.RawMessage) bool {
+	var b bool
+	_ = json.Unmarshal(raw, &b)
+	return b
+}
+
+func rawString(raw json.RawMessage) string {
+	var s string
+	_ = json.Unmarshal(raw, &s)
+	return s
 }
 
 func parseFieldType(s string) FieldType {
