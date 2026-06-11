@@ -330,6 +330,12 @@ defmodule Barkpark.Plugins.Tasks do
             required: false,
             type: "string",
             summary: "done | cancelled | blocked (defaults to done when omitted)."
+          },
+          %{
+            name: "reason",
+            required: false,
+            type: "string",
+            summary: "One-line close rationale, persisted as content.close_reason."
           }
         ],
         flags: [],

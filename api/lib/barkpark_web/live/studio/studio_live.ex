@@ -851,7 +851,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     case Content.create_document(
            type,
-           %{"doc_id" => id, "title" => "Untitled"},
+           %{"doc_id" => id, "title" => "Untitled", "content" => seed_new_doc_content(type)},
            socket.assigns.dataset,
            hook_opts(socket)
          ) do
@@ -873,6 +873,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, put_flash(socket, :error, "Failed to create")}
     end
   end
+
+  # Born-valid Studio creates (tsk-dossier-studio-create). The task write
+  # path validates content BEFORE any scaffold/initial_values merge
+  # (content.ex: validate_task_kind runs ahead of do_create_document's
+  # insert-branch scaffold), so a bare {doc_id, title} create for
+  # type:task ALWAYS failed — humans could not create tasks in Studio at
+  # all. Seed the two required fields here, in the Studio create flow
+  # only. Deliberately NOT schema initial_values: validated-before-merge
+  # makes those inert for this, and a priority default would deep-merge
+  # into every API create that omits priority, silently re-ranking the
+  # bd ready queue (see /papers/task-dossier-schema). No priority seeded:
+  # a fresh Studio task sorts NULLS-LAST exactly like a fresh bd task.
+  defp seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
+  defp seed_new_doc_content(_type), do: %{}
 
   def handle_event("save", %{"doc" => params}, socket) do
     socket = do_autosave(socket, params)
@@ -3898,15 +3912,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # once OUTSIDE the streamed container so a `handle_info` DOM diff preserves it
   # — the same no-reload proof BulldocsLive uses, now inside the Studio. Read-only:
   # editing stays on the paper-ingest ops endpoint.
-  attr :paper_doc, :map, default: nil
-  attr :paper_rev, :integer, default: 0
-  attr :paper_html, :string, default: ""
-  attr :paper_block_mode, :boolean, default: false
-  attr :paper_edit_mode, :boolean, default: false
-  attr :shares_admin?, :boolean, default: false
-  attr :dataset, :string, required: true
-  attr :api_token_raw, :string, default: ""
-  attr :streams, :map, required: true
+  attr(:paper_doc, :map, default: nil)
+  attr(:paper_rev, :integer, default: 0)
+  attr(:paper_html, :string, default: "")
+  attr(:paper_block_mode, :boolean, default: false)
+  attr(:paper_edit_mode, :boolean, default: false)
+  attr(:shares_admin?, :boolean, default: false)
+  attr(:dataset, :string, required: true)
+  attr(:api_token_raw, :string, default: "")
+  attr(:streams, :map, required: true)
 
   defp studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -4037,8 +4051,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # Two-button segmented control fired into `editor-set-mode`. The active mode
   # is `btn-primary`, the other `btn-ghost`. Rendered in the editor header for
   # a Beta-eligible document only (the caller gates on `@editor_blocks != []`).
-  attr :mode, :atom, default: :classic
-  attr :beta_ok, :boolean, default: false
+  attr(:mode, :atom, default: :classic)
+  attr(:beta_ok, :boolean, default: false)
 
   defp editor_mode_toggle(assigns) do
     ~H"""
@@ -4063,18 +4077,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
     """
   end
 
-  attr :slug, :string, required: true
-  attr :blocks, :list, required: true
-  attr :paper_rev, :integer, default: 0
-  attr :dataset, :string, default: "production"
-  attr :api_token_raw, :string, default: ""
+  attr(:slug, :string, required: true)
+  attr(:blocks, :list, required: true)
+  attr(:paper_rev, :integer, default: 0)
+  attr(:dataset, :string, default: "production")
+  attr(:api_token_raw, :string, default: "")
   # EX2 — the expected fields STILL recommendable for THIS doc's current block
   # list (Content.available_expected_fields/3). Each entry carries name/type/
   # label; the slash menu reads it from `data-expected-fields` to render its
   # top EXPECTED group. Empty list ⇒ no group rendered (e.g. the paper pane,
   # which has no Expectation). Re-rendered on every block-list change because
   # the carrier <div> lives OUTSIDE any phx-update="ignore" node.
-  attr :expected_fields, :list, default: []
+  attr(:expected_fields, :list, default: [])
 
   defp paper_block_editor(assigns) do
     assigns =
@@ -4354,9 +4368,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # carries a hidden `id` and submits its changed field(s); the handler maps
   # the params to a patch-block op. Paragraph/callout bodies are PLAIN TEXT in
   # the MVP (inline marks dropped on save).
-  attr :block, :map, required: true
-  attr :dataset, :string, default: "production"
-  attr :api_token_raw, :string, default: ""
+  attr(:block, :map, required: true)
+  attr(:dataset, :string, default: "production")
+  attr(:api_token_raw, :string, default: "")
 
   defp paper_block_fields(assigns) do
     assigns =

@@ -427,6 +427,7 @@ defmodule BarkparkWeb.TasksController do
         [observed_epoch: observed_epoch]
         |> put_opt(:observed_rev, params["observed_rev"])
         |> put_opt(:lifecycle_status, params["lifecycle_status"])
+        |> put_opt(:reason, params["reason"])
 
       case Tasks.close(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->

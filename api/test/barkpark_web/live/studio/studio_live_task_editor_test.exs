@@ -172,6 +172,26 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     assert saved.content["claim"] == @claim
   end
 
+  test "Studio new-document creates a BORN-VALID task (tsk-dossier-studio-create)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task"))
+
+    # Pre-fix this flashed "Failed to create": the bare {doc_id, title}
+    # create hit validate_task_kind before any scaffold could run.
+    html = render_click(view, "new-document", %{"type" => "task"})
+    refute html =~ "Failed to create"
+
+    # The freshly created draft is a valid open task with NO priority —
+    # it must sort NULLS-LAST in bd ready exactly like a fresh bd task.
+    docs = Content.list_documents("task", @dataset, perspective: :raw)
+    created = Enum.find(docs, &(&1.title == "Untitled"))
+    assert created, "expected the Studio-created task draft to exist"
+    assert created.content["kind"] == "task"
+    assert created.content["lifecycle_status"] == "open"
+    refute Map.has_key?(created.content, "priority")
+  end
+
   test "empty priority saves cleanly and stores no priority key", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
 

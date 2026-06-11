@@ -208,6 +208,32 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["doc"]["lifecycle_status"] == "done"
       refute payload["reason"] == "fenced_off"
     end
+
+    test "close with reason persists content.close_reason (tsk-dossier-cli)",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("close-reason"), scope)
+
+      close_body =
+        Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, reason: "done per criteria"})
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["doc"]["content"]["close_reason"] == "done per criteria"
+    end
+
+    test "close with a BLANK reason never writes close_reason",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("close-blank-reason"), scope)
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, reason: ""})
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      refute Map.has_key?(payload["doc"]["content"], "close_reason")
+    end
   end
 
   describe "GET /v1/tasks/:doc_id/edges" do

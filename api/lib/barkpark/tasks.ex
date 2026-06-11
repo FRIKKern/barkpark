@@ -1010,7 +1010,7 @@ defmodule Barkpark.Tasks do
 
   defp maybe_filter_edge_kind(query, kind) do
     kind_str = normalize_kind(kind)
-    from [edge: e] in query, where: e.kind == ^kind_str
+    from([edge: e] in query, where: e.kind == ^kind_str)
   end
 
   # The caller may pass `:blocks` / `:"discovered-from"` / `"blocks"` /
@@ -1020,8 +1020,9 @@ defmodule Barkpark.Tasks do
 
   defp fetch_edge!(from_id, to_id, kind) do
     Repo.one!(
-      from e in Edge,
+      from(e in Edge,
         where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
+      )
     )
   end
 
@@ -1483,6 +1484,9 @@ defmodule Barkpark.Tasks do
         per-task serialization).
       * `:lifecycle_status` (default `"done"`) — one of `done`/`cancelled`/
         `blocked`.
+      * `:reason` (optional string) — persisted as `content.close_reason`,
+        the dossier's one-line close rationale (`bd close --reason`'s
+        landing slot, tsk-dossier-cli). Ignored when blank.
 
   ## Returns
     * `{:ok, %Document{}}` — closed successfully; the returned doc carries
@@ -1500,17 +1504,18 @@ defmodule Barkpark.Tasks do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
     new_status = Keyword.get(opts, :lifecycle_status, "done")
     observed_rev_opt = Keyword.get(opts, :observed_rev)
+    reason = Keyword.get(opts, :reason)
 
     cond do
       new_status not in @closed_lifecycle_statuses ->
         {:error, {:invalid_lifecycle, new_status}}
 
       true ->
-        do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status)
+        do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status, reason)
     end
   end
 
-  defp do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status) do
+  defp do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status, reason) do
     result =
       Repo.transaction(fn ->
         # 1. Advisory lock — per-task. hashtext('task:' || doc_id) gives a
@@ -1541,7 +1546,7 @@ defmodule Barkpark.Tasks do
               true ->
                 with :ok <- check_fencing(doc, observed_epoch),
                      {:ok, updated} <-
-                       apply_close_update(doc, worker_id, observed_rev, new_status) do
+                       apply_close_update(doc, worker_id, observed_rev, new_status, reason) do
                   ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
                   unblocked = cascade_unblock_dependents!(updated)
 
@@ -1743,7 +1748,7 @@ defmodule Barkpark.Tasks do
     end
   end
 
-  defp apply_close_update(%Document{} = doc, worker_id, observed_rev, new_status) do
+  defp apply_close_update(%Document{} = doc, worker_id, observed_rev, new_status, reason) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
@@ -1767,6 +1772,15 @@ defmodule Barkpark.Tasks do
 
         _ ->
           Map.put(doc.content, "lifecycle_status", new_status)
+      end
+
+    # Dossier close rationale (tsk-dossier-cli): one scalar write riding the
+    # close call — far cheaper for an agent than a separate mutate round-trip
+    # to fill outcome. Blank reasons never overwrite an existing value.
+    new_content =
+      case reason do
+        r when is_binary(r) and r != "" -> Map.put(new_content, "close_reason", r)
+        _ -> new_content
       end
 
     {rows, _} =
@@ -1900,7 +1914,7 @@ defmodule Barkpark.Tasks do
         where: fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
         where:
           not exists(
-            from e in Edge,
+            from(e in Edge,
               join: b in Document,
               on: b.id == e.to_id,
               where:
@@ -1908,6 +1922,7 @@ defmodule Barkpark.Tasks do
                   e.kind == "blocks" and
                   fragment("COALESCE(?->>'lifecycle_status', '')", b.content) != "done",
               select: 1
+            )
           ),
         order_by: [
           asc_nulls_last: fragment("(?->>'priority')::int", d.content),
@@ -1925,13 +1940,14 @@ defmodule Barkpark.Tasks do
   defp maybe_filter_dataset(query, nil), do: query
 
   defp maybe_filter_dataset(query, dataset) when is_binary(dataset) do
-    from [doc: d] in query, where: d.dataset == ^dataset
+    from([doc: d] in query, where: d.dataset == ^dataset)
   end
 
   defp maybe_filter_phase(query, nil), do: query
 
   defp maybe_filter_phase(query, phase_id) when is_binary(phase_id) do
-    from [doc: d] in query,
+    from([doc: d] in query,
       where: fragment("?->>'parent_id'", d.content) == ^phase_id
+    )
   end
 end
