@@ -10,7 +10,7 @@ Constraint (D12): documents whose schema uses v2 field types (composite / arrayO
 - **Parity rule:** a new block type must land in all three renderers — `Barkpark.PortableDoc.Render.render_html/2` (server HTML), the paper-surface CSS in `api/lib/barkpark_web/layouts/root.html.heex` (`.bp-paper-surface`), and pdrender (terminal). Don't ship one without the others.
 - **HARD pin: `go.mod` stays `go 1.24.2`** — chroma is pinned v2.20.0, and the prod post-merge hook builds the Go TUI on the server. Do not bump.
 
-Editing: v1 fields inline (reference: picker, stores bare published id; image: shows url+asset, edits the URL — unchanged keeps assetId envelope, edited stores bare url); `/` search; `ctrl+s` save · `ctrl+p` publish (drafts) · `U` unpublish (published) · `d` diff draft↔published · `H` history (enter diffs vs current; no restore) · `R`×2 discard draft (twin-guarded) · `n` new doc (list panes) · `y` duplicate (verbatim, " (copy)"; papers refuse) · `D`×2 delete (NOT ctrl+d — paper half-page).
+Editing: v1 fields inline (reference: picker, stores bare published id; image: shows url+asset, edits the URL — unchanged keeps assetId envelope); `/` search; `ctrl+s` save · `ctrl+p` publish · `U` unpub · `d` diff draft↔published · `H` history (enter diffs vs current; no restore) · `R`×2 discard (twin-guarded) · `n` new · `y` dup (papers refuse) · `D`×2 delete (ctrl+d = paper half-page). Bulk: `space` marks list rows (✓, bare id); `ctrl+p`/`U` act on marked, esc clears.
 Scope: `s` selector (ws→proj→dataset; `n` creates ws/proj — server slugs + seeds defaults; `m` manual).
 Task lists (`type:task`): `c` claim / `x` close via flat `/v1/tasks/:id/{claim,close}`; worker id `BARKPARK_WORKER_ID`, default `tui-<hostname>`; close echoes `claim.epoch`.
 

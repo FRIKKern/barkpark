@@ -167,6 +167,9 @@ type model struct {
 	historyOpen   bool
 	historyRevs   []apiclient.Revision
 	historyCursor int
+	// Bulk marks (space on doc-list rows — bulk.go): bare published id → type.
+	// ctrl+p / U over the set when focus is a pane; esc clears first.
+	marked map[string]string
 	// ── Paper rendering (pdrender) ──────────────────────────────────────────
 	// paperRegistry/paperTheme/paperProfile are built ONCE in runTUI and reused
 	// for every paper render. selectedPaperBlocks holds the decoded block tree of
@@ -800,6 +803,17 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// ── Bulk publish/unpublish (Studio-E3 parity — bulk.go): the same two
+	//    keys, widened to the marked set when the focus is a list pane. ──
+	if key == "ctrl+p" && m.focus.Target == FocusPane && len(m.marked) > 0 {
+		m.bulkPublish()
+		return m, nil
+	}
+	if key == "U" && m.focus.Target == FocusPane && len(m.marked) > 0 {
+		m.bulkUnpublish()
+		return m, nil
+	}
+
 	// ── Diff (`d`, editor only) — draft↔published field diff (diff.go).
 	//    The look-before-you-leap step for ctrl+p / R×2. ──
 	if key == "d" && m.focus.Target == FocusEditor {
@@ -1006,16 +1020,20 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.drillIn()
 
-	// ── Toggle for boolean/select ──
+	// ── Toggle for boolean/select; mark for bulk on doc-list rows ──
 	case " ":
 		if m.focus.Target == FocusEditor && m.editorSchema != nil {
 			m.toggleField()
 			m.refreshViewport()
+		} else if m.focus.Target == FocusPane {
+			m.toggleMark()
 		}
 
-	// ── Go back ──
+	// ── Go back (esc clears bulk marks first — second esc navigates) ──
 	case "backspace", "esc":
-		if m.focus.Target == FocusEditor {
+		if m.focus.Target == FocusPane && len(m.marked) > 0 {
+			m.clearMarks()
+		} else if m.focus.Target == FocusEditor {
 			m.focus = focusState{Target: FocusPane, PaneIndex: len(m.panes) - 1}
 		} else if len(m.path) > 0 {
 			m.path = m.path[:len(m.path)-1]
@@ -1921,9 +1939,12 @@ func (m model) renderHelpBar() string {
 		if node := m.panes[m.focus.PaneIndex].Node; node != nil && node.TypeName == "task" {
 			// Task list: the quick-action verbs lead — claim/close at terminal speed.
 			help = " j/k navigate  c claim  x close  y dup  D delete  n new  / search  enter select  esc back"
+		} else if len(m.marked) > 0 {
+			// Marks present: the bulk verbs lead (Studio's floating action bar).
+			help = fmt.Sprintf(" %d marked  space mark  ctrl+p publish marked  U unpub marked  esc clear", len(m.marked))
 		} else {
 			// Doc-list pane: surface the n-new / D-delete affordances, subtle, in hint order.
-			help = " j/k navigate  n new  y dup  R discard  D delete  / search  h/l switch pane  enter select  s scope  esc back  q quit"
+			help = " j/k navigate  space mark  n new  y dup  R discard  D delete  / search  enter select  s scope  esc back  q quit"
 		}
 	} else {
 		help = " j/k navigate  / search  h/l switch pane  enter select  s scope  esc back  q quit"
@@ -2226,7 +2247,16 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 			pad = strings.Repeat(" ", gap)
 		}
 
-		line1 := fmt.Sprintf(" %s %s", dot, style.Render(title))
+		// Bulk mark (space — bulk.go): marked rows swap the leading space for
+		// a highlighted ✓, same physical width so nothing shifts.
+		lead := " "
+		if item.Doc != nil && m.marked != nil {
+			if _, ok := m.marked[strings.TrimPrefix(item.Doc.ID, "drafts.")]; ok {
+				lead = lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("✓")
+			}
+		}
+
+		line1 := fmt.Sprintf("%s%s %s", lead, dot, style.Render(title))
 		if badge != "" {
 			line1 += pad + dimStyle.Render(badge)
 		}

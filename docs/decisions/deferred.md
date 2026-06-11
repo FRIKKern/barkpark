@@ -13,7 +13,7 @@
 | search Phase 10 (retriever) | spike doc only; intelligence stays Postgres | >500k media assets OR fuzzy p95 > 100ms |
 | `/v1/paperflow/*` alias | back-compat alias of `/v1/plugins/bulldocs/*`; `PAPERFLOW_INGEST_TOKEN` unchanged | drop only after paperflow `event-on-save.sh` repoints |
 | TUI media browse + sharing UI | parity sprint closed gaps 1–7 (publish/create/delete/task c·x/ref picker//search/y dup, cli-v1.4.0); media + share management (incl. per-doc item-share links) stay Studio/`bp` | demand — terminal-niche |
-| TUI long-tail vs Studio | bulk publish, content preview, secondary pane, array-row editing (diff, history, workspace/project-create shipped 2026-06-11) — Studio is the rich desk; TUI covers the solo edit loop incl. the full draft lifecycle (publish/unpublish/discard, 2026-06-11 audit) | demand per item |
+| TUI long-tail vs Studio | content preview, secondary pane, array-row editing (diff, history, ws/proj-create, bulk publish shipped 2026-06-11) — Studio is the rich desk; TUI covers the solo edit loop incl. the full draft lifecycle (publish/unpublish/discard, 2026-06-11 audit) | demand per item |
 | CLI long-tail | no `doc.duplicate` (use a `create` mutation with the content), no history verb, no item-share verb | demand |
 | ADR-002 edge contract vs `node:crypto` | webhook/ + draft-mode/ have imported `node:crypto` since Phase 5 — found 2026-06-11 when js CI first ran `check-no-node-imports.sh` (advisory step in js-tests.yml). Conform = Web Crypto port (breaks sync `signDraftModeToken`); relax = amendment ADR | owner decision: port or amend |
 | Studio task claim/close buttons | DESIGN, not a gap: fenced claim/close belong to the API/agents; humans steer via the lifecycle dropdown (TASK-SYSTEM division of labour) | n/a |
