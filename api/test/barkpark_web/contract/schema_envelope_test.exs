@@ -133,6 +133,7 @@ defmodule BarkparkWeb.Contract.SchemaEnvelopeTest do
     task = Enum.find(body["schemas"], &(&1["name"] == "task"))
 
     assert task
+
     assert task["listPreview"] == %{
              "badge" => "lifecycle_status",
              "meta" => %{"field" => "priority", "prefix" => "P"}

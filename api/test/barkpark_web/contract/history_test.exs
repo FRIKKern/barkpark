@@ -129,7 +129,11 @@ defmodule BarkparkWeb.Contract.HistoryTest do
   describe "cross-dataset revision IDOR (vdmk)" do
     setup do
       {:ok, _} =
-        Content.create_document("post", %{"doc_id" => "drafts.other1", "title" => "OTHER-V1"}, "other")
+        Content.create_document(
+          "post",
+          %{"doc_id" => "drafts.other1", "title" => "OTHER-V1"},
+          "other"
+        )
 
       Content.publish_document("other1", "post", "other")
 

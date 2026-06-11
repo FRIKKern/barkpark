@@ -37,7 +37,9 @@ defmodule Barkpark.ContentFindReferencingDocsTest do
       @dataset
     )
 
-    {:ok, _} = Content.create_document("author", %{"_id" => "author-1", "title" => "Target"}, @dataset)
+    {:ok, _} =
+      Content.create_document("author", %{"_id" => "author-1", "title" => "Target"}, @dataset)
+
     {:ok, _} = Content.publish_document("author-1", "author", @dataset)
 
     # Two articles reference author-1; a third references someone else.

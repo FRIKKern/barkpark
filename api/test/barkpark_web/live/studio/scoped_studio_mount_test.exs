@@ -87,7 +87,7 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       assert conn.status == 403
     end
 
-    test "anonymous 403s at the dead render (fail-closed until P3)", %{
+    test "anonymous 403s on any NON-Default workspace (the allowance is Default-only)", %{
       conn: conn,
       ws_a: ws_a,
       proj_a: proj_a
@@ -135,11 +135,52 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
     end
   end
 
-  describe "flat surface unchanged" do
-    test "flat /studio/:dataset still mounts anonymously (Default workspace)", %{conn: conn} do
+  describe "P3: the flat→scoped cutover" do
+    test "flat /studio/:dataset 302s to the scoped canonical, path+query preserved", %{
+      conn: conn
+    } do
+      {ws, proj} = ensure_default_scope!()
+
+      conn = get(conn, "/studio/#{@dataset}/post/p1?desk=drafts")
+
+      assert redirected_to(conn, 302) ==
+               "/w/#{ws.slug}/p/#{proj.slug}/studio/#{@dataset}/post/p1?desk=drafts"
+    end
+
+    test "bare / and /studio 302 to the session-resolved scoped Studio", %{conn: conn} do
       ensure_default_scope!()
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}")
+
+      for path <- ["/", "/studio"] do
+        conn = get(conn, path)
+        assert redirected_to(conn, 302) =~ ~r{^/w/[^/]+/p/[^/]+/studio/}
+      end
+    end
+
+    test "a member's flat bookmark resolves to THEIR first workspace, not Default", %{
+      member_conn: conn,
+      ws_a: ws_a
+    } do
+      ensure_default_scope!()
+      conn = get(conn, "/studio/#{@dataset}")
+      # ws_a slug ("scoped-studio-a...") sorts before "default"? Resolution is
+      # first slug-ordered MEMBERSHIP workspace — the member only belongs to
+      # A (and B in the P2 block's setup, not here), never Default.
+      assert redirected_to(conn, 302) =~ "/w/#{ws_a.slug}/p/"
+    end
+
+    test "ANONYMOUS mounts the Default scoped Studio (the allowance — prod demo posture)",
+         %{conn: conn} do
+      {ws, proj} = ensure_default_scope!()
+      {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/#{@dataset}")
       assert html =~ "pane-layout"
+    end
+
+    test "legacy onixedit book deep link 302s SINGLE-HOP to the scoped editor", %{conn: conn} do
+      {ws, proj} = ensure_default_scope!()
+      conn = get(conn, "/studio/#{@dataset}/onixedit/book/bk1?tab=meta")
+
+      assert redirected_to(conn, 302) ==
+               "/w/#{ws.slug}/p/#{proj.slug}/studio/#{@dataset}/book/bk1?tab=meta"
     end
   end
 

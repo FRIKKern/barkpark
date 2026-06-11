@@ -172,7 +172,8 @@ defmodule Barkpark.Search.Intelligence do
       from(e in Event,
         where:
           e.surface == ^surface and e.scope == ^scope and e.event_type == "search" and
-            (is_nil(e.quality) or e.quality == "accepted") and e.inserted_at >= ^period_start_dt(period, period_start),
+            (is_nil(e.quality) or e.quality == "accepted") and
+            e.inserted_at >= ^period_start_dt(period, period_start),
         select: {e.zero_hits, e.metadata}
       )
       |> Repo.all()
@@ -353,7 +354,9 @@ defmodule Barkpark.Search.Intelligence do
 
   defp interaction_position(attrs) do
     case Map.get(attrs, :position) || Map.get(attrs, "position") do
-      n when is_integer(n) and n >= 0 -> n
+      n when is_integer(n) and n >= 0 ->
+        n
+
       n when is_binary(n) ->
         case Integer.parse(n) do
           {i, _} when i >= 0 -> i
@@ -432,7 +435,7 @@ defmodule Barkpark.Search.Intelligence do
 
   defp recent_payload(%Event{} = e) do
     %{
-      query: e.query != "" && e.query || e.query_normalized,
+      query: (e.query != "" && e.query) || e.query_normalized,
       filters: e.filters || %{},
       resultCount: e.result_count,
       zeroHits: e.zero_hits,
@@ -681,7 +684,8 @@ defmodule Barkpark.Search.Intelligence do
             [
               %{
                 kind: "nohits",
-                message: "Query \"#{q.query}\" has high zero-hit rate — consider synonyms or tags.",
+                message:
+                  "Query \"#{q.query}\" has high zero-hit rate — consider synonyms or tags.",
                 query: q.query
               }
               | acc

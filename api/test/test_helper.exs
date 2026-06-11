@@ -55,4 +55,5 @@ ExUnit.start(
     :plugin_routes
   ]
 )
+
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

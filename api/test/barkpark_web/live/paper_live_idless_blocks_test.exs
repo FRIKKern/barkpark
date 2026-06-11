@@ -41,7 +41,10 @@ defmodule BarkparkWeb.BulldocsLiveIdlessBlocksTest do
       assert length(stored) == 3
 
       ids = Enum.map(stored, &Map.get(&1, "id"))
-      assert Enum.all?(ids, &(is_binary(&1) and &1 != "")), "every stored block must carry a non-blank id"
+
+      assert Enum.all?(ids, &(is_binary(&1) and &1 != "")),
+             "every stored block must carry a non-blank id"
+
       assert Enum.uniq(ids) == ids, "stored block ids must be unique, got: #{inspect(ids)}"
     end
 
@@ -99,8 +102,14 @@ defmodule BarkparkWeb.BulldocsLiveIdlessBlocksTest do
       # heading reads "text". None carry an "id" — the exact R2 shape.
       blocks = [
         %{"type" => "heading", "level" => 1, "text" => "Heading line"},
-        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "First paragraph"}]},
-        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Second paragraph"}]}
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "First paragraph"}]
+        },
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Second paragraph"}]
+        }
       ]
 
       seed_idless_paper(slug, blocks)

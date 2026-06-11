@@ -53,9 +53,13 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
     end
 
     test "deep nested arrayOf path preserves the index" do
-      assert StudioLive.parse_path(
-               "doc[productSupplies][0].market.territory.countries"
-             ) == ["productSupplies", 0, "market", "territory", "countries"]
+      assert StudioLive.parse_path("doc[productSupplies][0].market.territory.countries") == [
+               "productSupplies",
+               0,
+               "market",
+               "territory",
+               "countries"
+             ]
     end
 
     test "deeper dot chain → [a, b, c]" do
@@ -289,7 +293,11 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "add_row appends a row via path", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event("array_op", %{"action" => "add_row", "path" => "doc[tags]"}, socket)
+        StudioLive.handle_event(
+          "array_op",
+          %{"action" => "add_row", "path" => "doc[tags]"},
+          socket
+        )
 
       assert new_socket.assigns.editor_form["tags"] == ["a", "b", "c", nil]
     end

@@ -85,12 +85,15 @@ systemctl restart barkpark
 ## URL reference
 
 ```
-/studio                                  → redirects to /studio/production
-/studio/production/book                  → all books
-/studio/production/book?desk=drafts      → only drafts
-/studio/production/book/<doc-id>         → editor
-/admin/onixedit/staleness                → book sync status overview
+/w/<ws>/p/<proj>/studio/<dataset>                    → the canonical Studio URL (workspace + project live in the path)
+/w/<ws>/p/<proj>/studio/<dataset>/book               → all books
+/w/<ws>/p/<proj>/studio/<dataset>/book?desk=drafts   → only drafts
+/w/<ws>/p/<proj>/studio/<dataset>/book/<doc-id>      → editor
+/studio[/<dataset>/...]                              → 302 to your scoped Studio (path + query preserved)
+/admin/onixedit/staleness                            → book sync status overview
 ```
+
+Links are addresses now: a Studio URL opens the same workspace/project/dataset/document for whoever you share it with (membership permitting) — switching workspace changes the URL, and reload reproduces your exact location.
 
 ## Getting help
 

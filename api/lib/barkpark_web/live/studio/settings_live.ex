@@ -103,7 +103,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     if field in masked_keys(fields) do
       case Settings.reveal(plugin_name, user_id: user_id(socket)) do
         {:ok, map} ->
-          typed_form = Map.put(socket.assigns.typed_form, field, to_string(Map.get(map, field, "")))
+          typed_form =
+            Map.put(socket.assigns.typed_form, field, to_string(Map.get(map, field, "")))
+
           revealed = Map.put(socket.assigns.revealed, field, true)
 
           {:noreply,

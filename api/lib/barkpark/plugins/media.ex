@@ -114,9 +114,7 @@ defmodule Barkpark.Plugins.Media do
   defp log_hook_failure(hook, reason) do
     require Logger
 
-    Logger.warning(
-      "Barkpark.Plugins.Media.#{hook} failed: #{inspect(reason)}"
-    )
+    Logger.warning("Barkpark.Plugins.Media.#{hook} failed: #{inspect(reason)}")
 
     :ok
   end

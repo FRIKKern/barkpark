@@ -24,10 +24,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLivePluginAssertsTest do
       status: status,
       headers: [{"content-type", "application/json"}],
       body_text: body_text,
-      body_json: Jason.decode(body_text) |> case do
-        {:ok, json} -> json
-        _ -> nil
-      end,
+      body_json:
+        Jason.decode(body_text)
+        |> case do
+          {:ok, json} -> json
+          _ -> nil
+        end,
       duration_ms: 42,
       verdict: :pass,
       verdict_reason: "200 OK"

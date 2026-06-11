@@ -56,7 +56,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
 
   test "a claim broadcast refreshes the open task list pane to in_progress with no remount",
        %{conn: conn, task: task} do
-    {:ok, view, html} = live(conn, "/studio/#{@dataset}/task")
+    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/task"))
 
     # Pre-claim: the row is present with its `open` badge; nothing is
     # in_progress yet.

@@ -29,7 +29,10 @@ defmodule Barkpark.Plugins.Media.Codelists do
         issue: "1",
         name: "Media license",
         values: [
-          %{code: "all-rights-reserved", translations: [%{language: "eng", label: "All rights reserved"}]},
+          %{
+            code: "all-rights-reserved",
+            translations: [%{language: "eng", label: "All rights reserved"}]
+          },
           %{code: "cc-by", translations: [%{language: "eng", label: "CC BY"}]},
           %{code: "cc-by-sa", translations: [%{language: "eng", label: "CC BY-SA"}]},
           %{code: "cc0", translations: [%{language: "eng", label: "CC0"}]},

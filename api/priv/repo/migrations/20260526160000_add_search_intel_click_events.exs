@@ -10,7 +10,9 @@ defmodule Barkpark.Repo.Migrations.AddSearchIntelClickEvents do
       add :event_type, :text, null: false, default: "search"
       add :object_id, :text
       add :position, :integer
-      add :query_event_id, references(:search_intel_events, type: :binary_id, on_delete: :nilify_all)
+
+      add :query_event_id,
+          references(:search_intel_events, type: :binary_id, on_delete: :nilify_all)
     end
 
     create index(:search_intel_events, [:query_event_id])

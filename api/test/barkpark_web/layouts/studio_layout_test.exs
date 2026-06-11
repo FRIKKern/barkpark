@@ -24,7 +24,7 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
   describe "Studio chrome on /studio/:dataset" do
     test "renders all chrome anchors on /studio/production", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, _view, html} = live(conn, "/studio/production")
+      {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
 
       # Outer shell + topbar
       assert html =~ ~s|<div class="studio-shell">|
@@ -37,13 +37,15 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       # Dataset switcher (rendered when @dataset is assigned)
       assert html =~ ~s|class="dataset-switcher-select"|
 
-      # Nav tabs (Structure active for StudioLive)
-      assert html =~ ~s|<a href="/studio/production"| and html =~ "Structure"
-      assert html =~ ~s|href="/studio/production/media"|
+      # Nav tabs (Structure active for StudioLive) — hrefs are scoped (P3)
+      assert html =~ ~s|<a href="#{scoped_studio("/studio/production")}"| and
+               html =~ "Structure"
+
+      assert html =~ ~s|href="#{scoped_studio("/studio/production/media")}"|
       # Task barkpark-7xne: the rich `/api-tester` LV was restored after
       # the misjudged route-removal in commit f1e5a21; the "API" tab
       # points back at `/api-tester`.
-      assert html =~ ~s|href="/studio/production/api-tester"|
+      assert html =~ ~s|href="#{scoped_studio("/studio/production/api-tester")}"|
 
       # Sign-out form (rendered when @api_token is assigned)
       assert html =~ ~s|action="/logout"|

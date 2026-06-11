@@ -77,13 +77,31 @@ defmodule Barkpark.Tasks.CompactorTest do
 
       cond do
         i == 1 ->
-          %{"kind" => "status_change", "from" => "open", "to" => "in_progress", "ts" => ts, "worker" => worker}
+          %{
+            "kind" => "status_change",
+            "from" => "open",
+            "to" => "in_progress",
+            "ts" => ts,
+            "worker" => worker
+          }
 
         i == n ->
-          %{"kind" => "status_change", "from" => "in_progress", "to" => "done", "ts" => ts, "worker" => worker}
+          %{
+            "kind" => "status_change",
+            "from" => "in_progress",
+            "to" => "done",
+            "ts" => ts,
+            "worker" => worker
+          }
 
         rem(i, 13) == 0 ->
-          %{"kind" => "status_change", "from" => "in_progress", "to" => "blocked", "ts" => ts, "worker" => worker}
+          %{
+            "kind" => "status_change",
+            "from" => "in_progress",
+            "to" => "blocked",
+            "ts" => ts,
+            "worker" => worker
+          }
 
         true ->
           %{"kind" => "comment", "ts" => ts, "worker" => worker, "body" => "event-#{i}"}

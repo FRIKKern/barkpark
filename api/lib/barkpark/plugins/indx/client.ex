@@ -534,7 +534,16 @@ defmodule Barkpark.Plugins.Indx.Client do
     {:ok, resp}
   end
 
-  defp handle_response({:ok, %{status: status} = resp}, _method, url, _b, _opts, _rq, _ar, error_fun) do
+  defp handle_response(
+         {:ok, %{status: status} = resp},
+         _method,
+         url,
+         _b,
+         _opts,
+         _rq,
+         _ar,
+         error_fun
+       ) do
     {:error, error_fun.(status, resp.body, url)}
   end
 

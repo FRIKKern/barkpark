@@ -54,7 +54,10 @@ defmodule Barkpark.Plugins.OnixEdit.ImportRoundtripTest do
     assert product["productForm"] == "BB"
     assert product["productFormDetail"] == "B102"
     assert product["themaSubjectCategory"] == ["FBA", "FBC", "Y"]
-    assert [%{"idValue" => "9788234567890", "productIdType" => "15"}] = product["productIdentifiers"]
+
+    assert [%{"idValue" => "9788234567890", "productIdType" => "15"}] =
+             product["productIdentifiers"]
+
     assert length(product["contributors"]) == 2
     assert length(product["productSupplies"]) == 2
   end

@@ -129,7 +129,9 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
   end
 
   defp write_temp_upload!(name, body \\ "fake bytes") do
-    path = Path.join(System.tmp_dir!(), "tenancy-del-#{System.unique_integer([:positive])}-#{name}")
+    path =
+      Path.join(System.tmp_dir!(), "tenancy-del-#{System.unique_integer([:positive])}-#{name}")
+
     File.write!(path, body)
     path
   end
@@ -455,5 +457,4 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       :count
     )
   end
-
 end

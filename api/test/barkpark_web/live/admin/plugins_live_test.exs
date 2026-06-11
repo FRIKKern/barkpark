@@ -102,9 +102,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
       assert render(view) =~ "never"
 
       view
-      |> element(
-        ~s|[data-test-plugin="onixedit"] button[data-test-action="reload-plugin"]|
-      )
+      |> element(~s|[data-test-plugin="onixedit"] button[data-test-action="reload-plugin"]|)
       |> render_click()
 
       html = render(view)

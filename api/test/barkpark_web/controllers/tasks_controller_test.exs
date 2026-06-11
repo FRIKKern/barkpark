@@ -928,7 +928,10 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       conn
       |> authed()
-      |> post("/v1/tasks/#{claimed_id}/close", Jason.encode!(%{worker_id: "w1", observed_epoch: epoch}))
+      |> post(
+        "/v1/tasks/#{claimed_id}/close",
+        Jason.encode!(%{worker_id: "w1", observed_epoch: epoch})
+      )
       |> json_response(200)
 
       # f.go is free again the moment the claim is gone.

@@ -179,7 +179,9 @@ defmodule Barkpark.Plugins.Media.AssetsTest do
   end
 
   defp write_temp!(name, body) do
-    path = Path.join(System.tmp_dir!(), "media-test-#{System.unique_integer([:positive])}-#{name}")
+    path =
+      Path.join(System.tmp_dir!(), "media-test-#{System.unique_integer([:positive])}-#{name}")
+
     File.write!(path, body)
     path
   end

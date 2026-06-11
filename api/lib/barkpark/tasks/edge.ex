@@ -57,9 +57,7 @@ defmodule Barkpark.Tasks.Edge do
     edge
     |> cast(attrs, [:from_id, :to_id, :kind])
     |> validate_required([:from_id, :to_id, :kind])
-    |> validate_inclusion(:kind, @kinds,
-      message: "must be one of #{inspect(@kinds)}"
-    )
+    |> validate_inclusion(:kind, @kinds, message: "must be one of #{inspect(@kinds)}")
     |> validate_not_self_edge()
     |> foreign_key_constraint(:from_id)
     |> foreign_key_constraint(:to_id)

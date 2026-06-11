@@ -72,6 +72,7 @@ defmodule BarkparkWeb.Contract.ListenWorkspaceScopeTest do
       doc_ids = ListenController.replay_since(@dataset, 0, ws_b.id) |> Enum.map(& &1.doc_id)
 
       assert doc_b.doc_id in doc_ids
+
       refute doc_a.doc_id in doc_ids,
              "CROSS-TENANT LEAK: A's event (#{doc_a.doc_id}) surfaced under B's scope"
     end

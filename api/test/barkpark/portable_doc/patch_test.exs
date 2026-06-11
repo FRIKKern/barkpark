@@ -55,7 +55,9 @@ defmodule Barkpark.PortableDoc.PatchTest do
 
     test "operates on a bare block list and returns a bare block list" do
       blocks = [%{"id" => "a", "type" => "divider"}]
-      assert {:ok, [%{"id" => "a"}, %{"id" => "b"}]} = Patch.apply_patch(blocks, append("b", "divider"))
+
+      assert {:ok, [%{"id" => "a"}, %{"id" => "b"}]} =
+               Patch.apply_patch(blocks, append("b", "divider"))
     end
   end
 
@@ -321,7 +323,11 @@ defmodule Barkpark.PortableDoc.PatchTest do
 
     test "block-not-found when the anchor id does not exist" do
       assert {:error, {:block_not_found, "ghost", "move-block"}} =
-               Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "a", "after" => "ghost"})
+               Patch.apply_patch(abc_doc(), %{
+                 "op" => "move-block",
+                 "id" => "a",
+                 "after" => "ghost"
+               })
     end
   end
 

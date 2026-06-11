@@ -30,8 +30,17 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
 
   defp do_drain(deadline) do
     case Task.Supervisor.children(Barkpark.TaskSupervisor) do
-      [] -> :ok
-      _ -> if System.monotonic_time(:millisecond) >= deadline, do: :timeout, else: (Process.sleep(50); do_drain(deadline))
+      [] ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: :timeout,
+          else:
+            (
+              Process.sleep(50)
+              do_drain(deadline)
+            )
     end
   end
 
@@ -46,7 +55,8 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   end
 
   defp create_collection!(attrs \\ %{}) when is_map(attrs) do
-    id = Map.get(attrs, "id") || Map.get(attrs, :id) || "col-#{System.unique_integer([:positive])}"
+    id =
+      Map.get(attrs, "id") || Map.get(attrs, :id) || "col-#{System.unique_integer([:positive])}"
 
     title = Map.get(attrs, "title") || Map.get(attrs, :title) || "Campaign"
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}

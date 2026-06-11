@@ -243,8 +243,11 @@ defmodule Barkpark.Tasks.Compactor do
 
         :compacted
 
-      {:ok, outcome} -> outcome
-      {:error, _} -> :skipped
+      {:ok, outcome} ->
+        outcome
+
+      {:error, _} ->
+        :skipped
     end
   end
 

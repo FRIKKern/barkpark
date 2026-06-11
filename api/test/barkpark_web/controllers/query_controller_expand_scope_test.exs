@@ -136,7 +136,9 @@ defmodule BarkparkWeb.QueryControllerExpandScopeTest do
       # The leak signature: pre-fix, this is the OTHER workspace's row (or a
       # 500 from `Ecto.MultipleResultsError` raising in Repo.one). Post-fix,
       # workspace_id IS in the WHERE clause on the expand-time read.
-      assert is_map(result["author"]), "author should have expanded into a map, got: #{inspect(result["author"])}"
+      assert is_map(result["author"]),
+             "author should have expanded into a map, got: #{inspect(result["author"])}"
+
       assert result["author"]["_id"] == "a1"
       assert result["author"]["title"] == "Author from A"
       refute result["author"]["title"] == "Author from B"

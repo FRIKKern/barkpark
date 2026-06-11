@@ -17,9 +17,16 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     * `switch-project` re-assigns `:current_project` within the current
       workspace.
 
-  The Studio route shape stays `/studio/:dataset` — switching is a LiveView
-  event over socket scope, NOT a URL navigation. Full live-browser round-trip
-  is the orchestrator's integration gate; this is LiveViewTest + compile.
+  P3 (Scoped-by-URL cutover): the canonical Studio address is
+  `/w/:ws/p/:proj/studio/:dataset` — flat `/studio/:dataset` 302s to the
+  principal's first member workspace's scoped URL, and a workspace/project/
+  dataset switch is a push_patch to the NEW scope's canonical URL
+  (handle_params + the LiveScope hook re-resolve the scope from the URL).
+  These tests mount THROUGH the flat redirect so they keep exercising the
+  "principal's slug-first member workspace" default, and follow each honoured
+  switch with assert_patch. A refused/unknown switch still patches nothing.
+  Full live-browser round-trip is the orchestrator's integration gate; this
+  is LiveViewTest + compile.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -100,7 +107,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       acme_ws: acme_ws,
       acme_blog: acme_blog
     } do
-      {:ok, view, html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, html} = mount_studio(conn)
 
       # Both selects present, wired to the switch events.
       assert html =~ ~s(phx-change="switch-workspace")
@@ -130,7 +137,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     # binding is on a <form>, and no select/input carries a bare phx-change.
     test "each switcher select is wrapped in a <form phx-change>, no bare phx-change on an input",
          %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # The binding lives on a <form> for all three switch events — these are the
       # selectors the switch tests drive through, so render_change resolves them.
@@ -147,15 +154,20 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # The selects still carry their name= attributes so the handler param keys
       # (workspace / project / dataset) are unchanged.
-      assert view |> element(~s(form[phx-change="switch-workspace"] select[name="workspace"])) |> has_element?()
-      assert view |> element(~s(form[phx-change="switch-dataset"] select[name="dataset"])) |> has_element?()
+      assert view
+             |> element(~s(form[phx-change="switch-workspace"] select[name="workspace"]))
+             |> has_element?()
+
+      assert view
+             |> element(~s(form[phx-change="switch-dataset"] select[name="dataset"]))
+             |> has_element?()
     end
 
     test "the workspace select lists ONLY member workspaces — no foreign tenant", %{
       conn: conn,
       foreign_ws: foreign_ws
     } do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       ws_select = view |> element(~s(select[name="workspace"])) |> render()
 
@@ -174,9 +186,15 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       acme_ws: acme_ws,
       acme_blog: acme_blog
     } do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => acme_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => acme_ws.slug
+      })
+
+      # P3: an honoured switch is URL-real — a push_patch to the NEW scope's
+      # canonical URL (handle_params + LiveScope re-resolve from it).
+      assert assert_patch(view) =~ "/w/#{acme_ws.slug}/p/#{acme_blog.slug}/studio/"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -191,7 +209,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       conn: conn,
       foreign_ws: foreign_ws
     } do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       before = :sys.get_state(view.pid).socket.assigns.current_workspace.slug
 
@@ -202,8 +220,10 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       })
 
       assigns = :sys.get_state(view.pid).socket.assigns
+
       assert assigns.current_workspace.slug == before,
              "MEMBERSHIP GATE BREACH: switch-workspace re-scoped to a non-member workspace"
+
       refute assigns.current_workspace.slug == foreign_ws.slug
     end
 
@@ -214,14 +234,22 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       {:ok, second_project} =
         Tenancy.create_project(default_ws, %{slug: "secondary", name: "Secondary"})
 
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # Switch into Default (a member workspace), then change project within it.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
+      # P3: each honoured switch patches to its NEW scope's canonical URL —
+      # consume the patches in order.
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => default_ws.slug
+      })
+
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/"
 
       render_change(element(view, ~s(form[phx-change="switch-project"])), %{
         "project" => second_project.slug
       })
+
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/studio/"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == default_ws.slug
@@ -232,9 +260,11 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       conn: conn,
       acme_ws: acme_ws
     } do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => "does-not-exist"})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => "does-not-exist"
+      })
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -251,7 +281,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   describe "dataset select (barkpark-dgpf)" do
     test "renders Workspace → Project → Dataset in DOM order, dataset is the far-right control",
          %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}")
+      {:ok, _view, html} = mount_studio(conn)
 
       # All three controls are present, wired to their switch events.
       assert html =~ ~s(phx-change="switch-workspace") or html =~ "workspace-switcher-static"
@@ -275,7 +305,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       acme_ws: acme_ws,
       acme_blog: acme_blog
     } do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -293,7 +323,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       acme_staging: acme_staging,
       acme_reftest: acme_reftest
     } do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       ds_select = view |> element(~s(select[name="dataset"])) |> render()
 
@@ -319,15 +349,22 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       {:ok, _} = Tenancy.create_dataset(second_project, %{slug: "production", name: "Prod2"})
       {:ok, _} = Tenancy.create_dataset(second_project, %{slug: "archive", name: "Archive2"})
 
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # Move into Default (a member workspace) — its first project may differ;
       # then switch explicitly to `secondary`, whose datasets we control.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
+      # P3: consume each switch's canonical-URL patch in order.
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => default_ws.slug
+      })
+
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/"
 
       render_change(element(view, ~s(form[phx-change="switch-project"])), %{
         "project" => second_project.slug
       })
+
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/studio/"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_project.slug == second_project.slug
@@ -349,10 +386,21 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       {:ok, solo_project} = Tenancy.create_project(default_ws, %{slug: "solo", name: "Solo"})
       {:ok, _} = Tenancy.create_dataset(solo_project, %{slug: "only-ds", name: "Only"})
 
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
-      render_change(element(view, ~s(form[phx-change="switch-project"])), %{"project" => solo_project.slug})
+      # P3: consume each switch's canonical-URL patch in order — the project
+      # switch patches to the new project's URL with the cascaded dataset leaf.
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => default_ws.slug
+      })
+
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/"
+
+      render_change(element(view, ~s(form[phx-change="switch-project"])), %{
+        "project" => solo_project.slug
+      })
+
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{solo_project.slug}/studio/only-ds"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_project.slug == solo_project.slug
@@ -361,19 +409,25 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     end
 
     test "switch-dataset re-scopes the socket dataset to a project dataset", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       assert :sys.get_state(view.pid).socket.assigns.dataset == "production"
 
-      render_change(element(view, ~s(form[phx-change="switch-dataset"])), %{"dataset" => "staging"})
+      render_change(element(view, ~s(form[phx-change="switch-dataset"])), %{
+        "dataset" => "staging"
+      })
+
+      # P3: the dataset is the URL leaf under the scoped prefix.
+      assert assert_patch(view) =~ ~r{/w/[^/]+/p/[^/]+/studio/staging}
 
       assigns = :sys.get_state(view.pid).socket.assigns
+
       assert assigns.dataset == "staging",
-             "switch-dataset must re-scope the socket dataset (push_patch to /studio/:dataset)"
+             "switch-dataset must re-scope the socket dataset (push_patch to the scoped /studio/:dataset leaf)"
     end
 
     test "switch-dataset to a slug NOT in the current project is a no-op", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       before = :sys.get_state(view.pid).socket.assigns.dataset
 
@@ -397,7 +451,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   describe "create affordances (barkpark-ylrw)" do
     test "create-workspace builds ws + owner membership + Default project + production dataset, switches to it",
          %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # The "＋ New workspace" button is present (token-backed session).
       assert view
@@ -435,6 +489,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       project = Tenancy.get_project(ws.slug, "default")
       assert project, "create-workspace must create a Default project (slug 'default')"
+
       assert Enum.any?(Tenancy.list_datasets(project), &(&1.slug == "production")),
              "create-workspace must create the production dataset"
 
@@ -452,13 +507,17 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       listed = Tenancy.list_projects(assigns.current_workspace.id)
       assert Enum.any?(listed, &(&1.id == assigns.current_project.id))
       assert assigns.current_project.slug == project.slug
-      assert Enum.any?(Tenancy.list_datasets(assigns.current_project), &(&1.slug == "production")),
+
+      assert Enum.any?(
+               Tenancy.list_datasets(assigns.current_project),
+               &(&1.slug == "production")
+             ),
              "current_project must resolve its datasets (DB-backed, not transaction-partial)"
     end
 
     test "create-project in the current workspace creates project + dataset and switches to it",
          %{conn: conn, acme_ws: acme_ws} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # Mount scope is the slug-first member workspace (acme). Open the Project
       # create form and submit.
@@ -472,6 +531,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       project = Tenancy.get_project(acme_ws.slug, "fresh-project")
       assert project, "create-project must persist the project under the current workspace"
+
       assert Enum.any?(Tenancy.list_datasets(project), &(&1.slug == "production")),
              "create-project must create the production dataset"
 
@@ -488,12 +548,16 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_project.id == project.id
       listed = Tenancy.list_projects(assigns.current_workspace.id)
       assert Enum.any?(listed, &(&1.id == assigns.current_project.id))
-      assert Enum.any?(Tenancy.list_datasets(assigns.current_project), &(&1.slug == "production")),
+
+      assert Enum.any?(
+               Tenancy.list_datasets(assigns.current_project),
+               &(&1.slug == "production")
+             ),
              "current_project must resolve its datasets (DB-backed, not transaction-partial)"
     end
 
     test "blank workspace name flashes an error and creates nothing", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       before = Tenancy.list_workspaces_for(:sys.get_state(view.pid).socket.assigns.api_token)
 
@@ -507,6 +571,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert html =~ "Could not create workspace"
 
       after_ws = Tenancy.list_workspaces_for(:sys.get_state(view.pid).socket.assigns.api_token)
+
       assert length(after_ws) == length(before),
              "a blank name must create no workspace"
 
@@ -519,7 +584,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       # the test token, so build a clean one). In :test there is no dev
       # browser-token fallback, so api_token resolves to nil → can_create false.
       anon_conn = Plug.Test.init_test_session(Phoenix.ConnTest.build_conn(), %{})
-      {:ok, view, html} = live(anon_conn, "/studio/#{@dataset}")
+      {:ok, view, html} = mount_studio(anon_conn)
 
       assert :sys.get_state(view.pid).socket.assigns.api_token == nil
 
@@ -554,7 +619,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
     test "switching to a project-less workspace is REFUSED — scope unchanged, current_project NOT nil, flash shown",
          %{conn: conn, empty_ws: empty_ws, acme_ws: acme_ws, acme_blog: acme_blog} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       before_ws = :sys.get_state(view.pid).socket.assigns.current_workspace.slug
 
@@ -588,10 +653,12 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       before_count = doc_count(default_ws.id, default_project.id)
 
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # Attempt the bad switch (refused), then fire a real scoped write.
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => empty_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => empty_ws.slug
+      })
 
       assigns = :sys.get_state(view.pid).socket.assigns
       # Scope stayed on the prior (acme) workspace — NOT the empty one, NOT Default.
@@ -605,6 +672,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       render_click(view, "new-document", %{"type" => "post"})
 
       after_count = doc_count(default_ws.id, default_project.id)
+
       assert after_count == before_count,
              "TENANT LEAK: a write after a refused project-less switch landed in the Default tenant"
     end
@@ -615,12 +683,17 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       default_project = Tenancy.get_default_project()
       default_before = doc_count(default_ws.id, default_project.id)
 
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+      {:ok, view, _html} = mount_studio(conn)
 
       # Move to Default first, then switch to acme so the handler runs for a
       # workspace with projects (initial_project must be non-nil + chosen).
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => default_ws.slug})
-      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => acme_ws.slug})
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => default_ws.slug
+      })
+
+      render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+        "workspace" => acme_ws.slug
+      })
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -639,6 +712,16 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert doc_count(default_ws.id, default_project.id) == default_before,
              "a write after a legit switch must NOT touch the Default tenant"
     end
+  end
+
+  # P3 cutover: the flat /studio/:dataset no longer mounts StudioLive — it
+  # 302s to the principal's canonical scoped URL
+  # (/w/<first-member-ws>/p/<default-proj>/studio/:dataset). Mount THROUGH the
+  # redirect so these tests keep exercising the same "principal's slug-first
+  # member workspace" default the flat mount used to resolve in-socket.
+  defp mount_studio(conn) do
+    {:error, {:redirect, %{to: to}}} = live(conn, "/studio/#{@dataset}")
+    live(conn, to)
   end
 
   # Count documents stamped with the given workspace + project ids — the

@@ -302,6 +302,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       # The row should now be back on the ready queue.
       ready = Tasks.ready(scope ++ [phase_id: phase_id, dataset: @dataset])
+
       assert Enum.any?(ready, &(&1.id == task.id)),
              "swept task should be ready again; ready=#{inspect(Enum.map(ready, & &1.doc_id))}"
 
@@ -311,6 +312,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
         Tasks.claim("worker-B", scope ++ [phase_id: phase_id, dataset: @dataset])
 
       assert claim_b.id == task.id
+
       assert claim_b.content["claim"]["epoch"] == 3,
              "epoch must be monotonic across reap→reclaim; got #{claim_b.content["claim"]["epoch"]}"
 
@@ -381,6 +383,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
                  "close should have returned {:ok, _}; got #{inspect(close_results)}"
 
           assert length(closed_events) == 1
+
           assert lease_events == [],
                  "no lease_expired events when close wins; got #{inspect(lease_events)}"
 
@@ -395,7 +398,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
           # Close failed — either :fenced_off (saw the bumped epoch) or
           # :stale_claim (lost CAS). Both are acceptable lost-race
           # outcomes.
-          assert match?({:error, reason} when reason in [:fenced_off, :stale_claim], hd(close_results)),
+          assert match?(
+                   {:error, reason} when reason in [:fenced_off, :stale_claim],
+                   hd(close_results)
+                 ),
                  "close should be fenced or stale; got #{inspect(close_results)}"
 
           assert reloaded.content["claim"]["epoch"] == epoch + 1

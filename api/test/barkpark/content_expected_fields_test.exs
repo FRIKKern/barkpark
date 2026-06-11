@@ -40,7 +40,12 @@ defmodule Barkpark.ContentExpectedFieldsTest do
   end
 
   defp bound(field_name) do
-    %{"id" => "b-#{field_name}", "type" => "field-string", "fieldName" => field_name, "value" => "x"}
+    %{
+      "id" => "b-#{field_name}",
+      "type" => "field-string",
+      "fieldName" => field_name,
+      "value" => "x"
+    }
   end
 
   describe "available_expected_fields/3" do

@@ -102,8 +102,11 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
     defp seed_block_paper do
       blocks = [
-        %{"id" => "b-intro", "type" => "paragraph",
-          "content" => [%{"type" => "text", "value" => "First block streamed."}]}
+        %{
+          "id" => "b-intro",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "First block streamed."}]
+        }
       ]
 
       {:ok, paper} =
@@ -148,9 +151,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # Append three blocks in sequence through the real context + PubSub spine.
       # Each apply_block_op renders the fragment, bumps rev, broadcasts a
       # {:paper_block, …} delta the LiveView (subscribed at mount) consumes.
-      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Second block."))
+      {:ok, _} =
+        Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Second block."))
+
       {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-3", "Third block."))
-      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-4", "Fourth block."))
+
+      {:ok, _} =
+        Content.apply_paper_block_op(@block_slug, append_block_op("b-4", "Fourth block."))
 
       rendered = render(view)
 
@@ -179,7 +186,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "a patch-block delta patches one block in place; the rest are untouched",
          %{conn: conn} do
       seed_block_paper()
-      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Second block."))
+
+      {:ok, _} =
+        Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Second block."))
 
       {:ok, view, _html} = live(conn, "/papers/#{@block_slug}")
       pid_before = view.pid
@@ -210,8 +219,11 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # Persist two blocks straight into the context (bumps rev), but hand the
       # LiveView a SINGLE delta whose rev is ahead of what it last saw — a
       # simulated dropped frame. The view must refetch the full doc.
-      {:ok, _} = Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Recovered B2."))
-      {:ok, last} = Content.apply_paper_block_op(@block_slug, append_block_op("b-3", "Recovered B3."))
+      {:ok, _} =
+        Content.apply_paper_block_op(@block_slug, append_block_op("b-2", "Recovered B2."))
+
+      {:ok, last} =
+        Content.apply_paper_block_op(@block_slug, append_block_op("b-3", "Recovered B3."))
 
       # Frame with a rev far ahead of the mount rev → gap → refetch path.
       send(

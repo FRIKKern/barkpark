@@ -26,19 +26,20 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     # A SECOND workspace the caller IS additionally made a member of — proves
     # the list surfaces every membership, not just Default.
     {:ok, member_ws} = Tenancy.create_workspace(%{slug: "member-ws", name: "Member WS"})
-    {:ok, member_proj} = Tenancy.create_project(member_ws, %{slug: "member-proj", name: "Member Proj"})
+
+    {:ok, member_proj} =
+      Tenancy.create_project(member_ws, %{slug: "member-proj", name: "Member Proj"})
+
     {:ok, _m} = TenancyAuth.create_membership(member_ws.id, token.id, "member")
 
     # A THIRD workspace the caller is NOT a member of — the leak guard. Has its
     # own project so a leaked :projects response would be visibly wrong.
     {:ok, other_ws} = Tenancy.create_workspace(%{slug: "other-ws", name: "Other WS"})
-    {:ok, _other_proj} = Tenancy.create_project(other_ws, %{slug: "other-proj", name: "Other Proj"})
 
-    {:ok,
-     raw_token: raw,
-     member_ws: member_ws,
-     member_proj: member_proj,
-     other_ws: other_ws}
+    {:ok, _other_proj} =
+      Tenancy.create_project(other_ws, %{slug: "other-proj", name: "Other Proj"})
+
+    {:ok, raw_token: raw, member_ws: member_ws, member_proj: member_proj, other_ws: other_ws}
   end
 
   defp authed(conn, raw), do: put_req_header(conn, "authorization", "Bearer " <> raw)
@@ -174,7 +175,9 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "422 — duplicate slug (clean conflict)", %{conn: conn, raw_token: raw} do
       slug = "dup-ws-#{System.unique_integer([:positive])}"
 
-      assert conn |> authed(raw) |> post("/api/workspaces", %{"name" => "A", "slug" => slug})
+      assert conn
+             |> authed(raw)
+             |> post("/api/workspaces", %{"name" => "A", "slug" => slug})
              |> Map.get(:status) == 201
 
       resp = conn |> authed(raw) |> post("/api/workspaces", %{"name" => "B", "slug" => slug})
@@ -257,7 +260,10 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert conn
              |> authed(raw)
-             |> post("/api/workspaces/#{member_ws.slug}/projects", %{"name" => "A", "slug" => slug})
+             |> post("/api/workspaces/#{member_ws.slug}/projects", %{
+               "name" => "A",
+               "slug" => slug
+             })
              |> Map.get(:status) == 201
 
       resp =

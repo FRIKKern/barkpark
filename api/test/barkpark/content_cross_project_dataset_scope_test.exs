@@ -35,12 +35,20 @@ defmodule Barkpark.ContentCrossProjectDatasetScopeTest do
     scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
-    {:ok, _} = Content.create_document("post", %{"doc_id" => "a-only", "title" => "A1"}, @ds, scope_a)
-    {:ok, _} = Content.create_document("post", %{"doc_id" => "a-two", "title" => "A2"}, @ds, scope_a)
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "a-only", "title" => "A1"}, @ds, scope_a)
 
-    {:ok, _} = Content.create_document("post", %{"doc_id" => "b-only", "title" => "B1"}, @ds, scope_b)
-    {:ok, _} = Content.create_document("note", %{"doc_id" => "b-two", "title" => "B2"}, @ds, scope_b)
-    {:ok, _} = Content.create_document("note", %{"doc_id" => "b-three", "title" => "B3"}, @ds, scope_b)
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "a-two", "title" => "A2"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "b-only", "title" => "B1"}, @ds, scope_b)
+
+    {:ok, _} =
+      Content.create_document("note", %{"doc_id" => "b-two", "title" => "B2"}, @ds, scope_b)
+
+    {:ok, _} =
+      Content.create_document("note", %{"doc_id" => "b-three", "title" => "B3"}, @ds, scope_b)
 
     {scope_a, scope_b}
   end
@@ -114,10 +122,20 @@ defmodule Barkpark.ContentCrossProjectDatasetScopeTest do
     # Both projects have a `post` "shared-rev" doc in "production" — a write
     # records a revision per project, scoped by dataset_id.
     {:ok, _} =
-      Content.upsert_document("post", %{"doc_id" => "shared-rev", "title" => "A-rev"}, @ds, scope_a)
+      Content.upsert_document(
+        "post",
+        %{"doc_id" => "shared-rev", "title" => "A-rev"},
+        @ds,
+        scope_a
+      )
 
     {:ok, _} =
-      Content.upsert_document("post", %{"doc_id" => "shared-rev", "title" => "B-rev"}, @ds, scope_b)
+      Content.upsert_document(
+        "post",
+        %{"doc_id" => "shared-rev", "title" => "B-rev"},
+        @ds,
+        scope_b
+      )
 
     a_revs = Content.list_revisions("shared-rev", "post", @ds, scope_a)
     b_revs = Content.list_revisions("shared-rev", "post", @ds, scope_b)

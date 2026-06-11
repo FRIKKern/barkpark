@@ -168,6 +168,7 @@ defmodule Barkpark.Release.Secrets do
   end
 
   defp ensure_trailing_newline(""), do: ""
+
   defp ensure_trailing_newline(contents) do
     if String.ends_with?(contents, "\n"), do: contents, else: contents <> "\n"
   end

@@ -30,7 +30,18 @@ defmodule BarkparkWeb.LegacyRedirectController do
 
   def onixedit_book(conn, %{"doc_id" => doc_id} = params) do
     dataset = params["dataset"] || "production"
-    target = "/studio/#{dataset}/book/#{doc_id}"
+
+    # P3 retarget: single-hop to the SCOPED editor (no flat→scoped redirect
+    # chain), and demoted 301→302 — the scoped target is session-resolved,
+    # so it must never be browser-cached across users.
+    target =
+      case BarkparkWeb.StudioRedirectController.scoped_studio_target(conn, dataset, [
+             "book",
+             doc_id
+           ]) do
+        {:ok, scoped} -> scoped
+        :error -> "/studio/#{dataset}/book/#{doc_id}"
+      end
 
     target =
       case conn.query_string do
@@ -39,8 +50,6 @@ defmodule BarkparkWeb.LegacyRedirectController do
         qs -> target <> "?" <> qs
       end
 
-    conn
-    |> put_status(:moved_permanently)
-    |> redirect(to: target)
+    redirect(conn, to: target)
   end
 end

@@ -95,7 +95,9 @@ defmodule Barkpark.Media.Cdn do
 
     if is_binary(url) and url != "" do
       secret = Keyword.get(cfg, :secret, "")
-      body = Jason.encode!(%{paths: paths, timestamp: DateTime.utc_now() |> DateTime.to_iso8601()})
+
+      body =
+        Jason.encode!(%{paths: paths, timestamp: DateTime.utc_now() |> DateTime.to_iso8601()})
 
       headers =
         [

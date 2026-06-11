@@ -24,12 +24,15 @@ defmodule Barkpark.Search.InteractionTest do
       |> Repo.insert()
 
     assert {:ok, click_id} =
-             Intelligence.record_interaction(@surface, @scope, %{
-               "queryEventId" => search.id,
-               "objectId" => "p1",
-               "position" => 1,
-               "type" => "select"
-             }, actor_key: "client:test", source: "test")
+             Intelligence.record_interaction(
+               @surface,
+               @scope,
+               %{
+                 "queryEventId" => search.id,
+                 "objectId" => "p1",
+                 "position" => 1,
+                 "type" => "select"
+               }, actor_key: "client:test", source: "test")
 
     click = Repo.get!(Event, click_id)
     assert click.event_type == "select"

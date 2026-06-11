@@ -30,14 +30,30 @@ defmodule Barkpark.Plugins.FrtExportTest do
 
     test "non-singleton types become a list sorted by doc_id" do
       docs = [
-        %{"doc_id" => "enemyType_runner", "type" => "enemyType", "title" => "Runner", "content" => %{}},
-        %{"doc_id" => "enemyType_grunt", "type" => "enemyType", "title" => "Grunt", "content" => %{}},
-        %{"doc_id" => "enemyType_elite", "type" => "enemyType", "title" => "Elite", "content" => %{}}
+        %{
+          "doc_id" => "enemyType_runner",
+          "type" => "enemyType",
+          "title" => "Runner",
+          "content" => %{}
+        },
+        %{
+          "doc_id" => "enemyType_grunt",
+          "type" => "enemyType",
+          "title" => "Grunt",
+          "content" => %{}
+        },
+        %{
+          "doc_id" => "enemyType_elite",
+          "type" => "enemyType",
+          "title" => "Elite",
+          "content" => %{}
+        }
       ]
 
       types = Export.build_types(docs)
 
       assert is_list(types["enemyType"])
+
       assert Enum.map(types["enemyType"], & &1["_id"]) ==
                ~w(enemyType_elite enemyType_grunt enemyType_runner)
     end
@@ -73,7 +89,8 @@ defmodule Barkpark.Plugins.FrtExportTest do
       assert obj["baseHp"] == "120"
       assert obj["title"] == "Grunt"
 
-      for stripped <- ~w(rev dataset_id workspace_id project_id id inserted_at updated_at status dataset type) do
+      for stripped <-
+            ~w(rev dataset_id workspace_id project_id id inserted_at updated_at status dataset type) do
         refute Map.has_key?(obj, stripped), "#{stripped} should have been stripped"
       end
     end

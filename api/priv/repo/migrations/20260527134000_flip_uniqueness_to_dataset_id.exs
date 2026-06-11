@@ -91,13 +91,27 @@ defmodule Barkpark.Repo.Migrations.FlipUniquenessToDatasetId do
     # ── search_intel_crystals: swap `scope` -> `dataset_id` ──────────────────
     create unique_index(
              :search_intel_crystals,
-             [:surface, :dataset_id, :period, :period_start, :query_normalized, :filter_fingerprint],
+             [
+               :surface,
+               :dataset_id,
+               :period,
+               :period_start,
+               :query_normalized,
+               :filter_fingerprint
+             ],
              name: :search_intel_crystals_dataset_id_unique_idx
            )
 
     drop_if_exists unique_index(
                      :search_intel_crystals,
-                     [:surface, :scope, :period, :period_start, :query_normalized, :filter_fingerprint],
+                     [
+                       :surface,
+                       :scope,
+                       :period,
+                       :period_start,
+                       :query_normalized,
+                       :filter_fingerprint
+                     ],
                      name: :search_intel_crystals_unique_idx
                    )
 
@@ -155,9 +169,7 @@ defmodule Barkpark.Repo.Migrations.FlipUniquenessToDatasetId do
                    )
 
     # media_files
-    create unique_index(:media_files, [:path, :dataset],
-             name: :media_files_path_dataset_index
-           )
+    create unique_index(:media_files, [:path, :dataset], name: :media_files_path_dataset_index)
 
     drop_if_exists unique_index(:media_files, [:path, :dataset_id],
                      name: :media_files_path_dataset_id_index

@@ -40,13 +40,7 @@ defmodule BarkparkWeb.SiblingControllerLeakTest do
     # on duplicating `post` across workspaces.
     {:ok, _} = Content.upsert_schema(post_schema(), @dataset, scope(ws_a, proj_a))
 
-    {:ok,
-     ws_a: ws_a,
-     proj_a: proj_a,
-     tok_a: tok_a,
-     ws_b: ws_b,
-     proj_b: proj_b,
-     tok_b: tok_b}
+    {:ok, ws_a: ws_a, proj_a: proj_a, tok_a: tok_a, ws_b: ws_b, proj_b: proj_b, tok_b: tok_b}
   end
 
   describe "B1 search (/v1/data/search) — the worst leak" do
@@ -226,7 +220,12 @@ defmodule BarkparkWeb.SiblingControllerLeakTest do
       # An extra schema that exists ONLY in workspace A's project.
       {:ok, _} =
         Content.upsert_schema(
-          %{"name" => "secret_a", "title" => "Secret A", "visibility" => "public", "fields" => []},
+          %{
+            "name" => "secret_a",
+            "title" => "Secret A",
+            "visibility" => "public",
+            "fields" => []
+          },
           @dataset,
           scope(ctx.ws_a, ctx.proj_a)
         )
@@ -245,11 +244,17 @@ defmodule BarkparkWeb.SiblingControllerLeakTest do
 
   defp workspace_with_token(slug_seed) do
     suffix = System.unique_integer([:positive])
-    {:ok, ws} = Tenancy.create_workspace(%{slug: "#{slug_seed}-ws-#{suffix}", name: "WS #{slug_seed}"})
-    {:ok, proj} = Tenancy.create_project(ws, %{slug: "#{slug_seed}-proj-#{suffix}", name: "Proj #{slug_seed}"})
+
+    {:ok, ws} =
+      Tenancy.create_workspace(%{slug: "#{slug_seed}-ws-#{suffix}", name: "WS #{slug_seed}"})
+
+    {:ok, proj} =
+      Tenancy.create_project(ws, %{slug: "#{slug_seed}-proj-#{suffix}", name: "Proj #{slug_seed}"})
 
     raw = "leak-#{slug_seed}-#{suffix}"
-    {:ok, _token} = Auth.create_token(raw, "leak #{slug_seed}", @dataset, ["read", "write", "admin"], ws.id)
+
+    {:ok, _token} =
+      Auth.create_token(raw, "leak #{slug_seed}", @dataset, ["read", "write", "admin"], ws.id)
 
     {ws, proj, raw}
   end
@@ -282,7 +287,9 @@ defmodule BarkparkWeb.SiblingControllerLeakTest do
     body =
       tok
       |> authed(ctx.conn)
-      |> get(scoped(ws, proj, "/v1/search/#{@dataset}?q=#{q}&surfaces=documents&perspective=drafts"))
+      |> get(
+        scoped(ws, proj, "/v1/search/#{@dataset}?q=#{q}&surfaces=documents&perspective=drafts")
+      )
       |> json_response(200)
 
     body

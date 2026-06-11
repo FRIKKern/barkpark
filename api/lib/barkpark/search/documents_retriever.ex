@@ -21,7 +21,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
-    if terms == [] and Map.get(parsed, :phrases, []) == [] and Map.get(parsed, :prefixes, []) == [] do
+    if terms == [] and Map.get(parsed, :phrases, []) == [] and
+         Map.get(parsed, :prefixes, []) == [] do
       {[], 0, %{}}
     else
       base =
@@ -60,7 +61,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp search_terms(parsed) do
-    (Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, []) ++ Map.get(parsed, :prefixes, []))
+    (Map.get(parsed, :terms, []) ++
+       Map.get(parsed, :phrases, []) ++ Map.get(parsed, :prefixes, []))
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
   end
@@ -89,7 +91,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
       prefix_pattern = prefix_pattern(term)
 
       clause =
-        dynamic([d],
+        dynamic(
+          [d],
           fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
             ilike(d.title, ^pattern) or
             ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern) or
@@ -114,7 +117,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
       pattern = like_pattern(term)
 
       clause =
-        dynamic([d],
+        dynamic(
+          [d],
           fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
             ilike(d.title, ^pattern) or
             ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern) or

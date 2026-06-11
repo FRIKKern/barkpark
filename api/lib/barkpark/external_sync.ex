@@ -85,6 +85,7 @@ defmodule Barkpark.ExternalSync do
   def state_meta(system_name, state) do
     entry = get(system_name) || %{label: to_label(system_name), states: %{}}
     key = normalize_state(state)
+
     Map.get(entry.states, key) || Map.get(entry.states, nil) ||
       %{color: "gray", label: "Not synced"}
   end

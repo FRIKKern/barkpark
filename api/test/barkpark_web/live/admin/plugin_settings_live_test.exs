@@ -71,8 +71,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
     test "unknown plugin redirects to /_plugins with flash", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
-      assert {:error,
-              {:redirect, %{to: "/studio/production/_plugins", flash: %{"error" => msg}}}} =
+      assert {:error, {:redirect, %{to: "/studio/production/_plugins", flash: %{"error" => msg}}}} =
                live(conn, "/studio/production/_plugins/no-such-plugin/settings")
 
       assert msg =~ "not registered"

@@ -40,10 +40,13 @@ defmodule Barkpark.ContentReferenceTitleTest do
     test "prefers the PUBLISHED row over its drafts. twin" do
       # Published row carries the canonical title; a draft twin exists with a
       # different (in-progress) title. The published row must win.
-      {:ok, _} = Content.create_document("post", %{"_id" => "p2", "title" => "Published Title"}, @dataset)
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "p2", "title" => "Published Title"}, @dataset)
+
       {:ok, _} = Content.publish_document("p2", "post", @dataset)
       # Editing the published doc spawns a fresh draft alongside it.
-      {:ok, _} = Content.create_document("post", %{"_id" => "p2", "title" => "Draft Title"}, @dataset)
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "p2", "title" => "Draft Title"}, @dataset)
 
       assert Content.reference_title("p2", "", @dataset) == "Published Title"
     end

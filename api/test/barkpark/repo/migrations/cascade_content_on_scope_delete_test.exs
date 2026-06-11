@@ -164,7 +164,9 @@ defmodule Barkpark.Repo.Migrations.CascadeContentOnScopeDeleteTest do
     n
   end
 
-  defp delete_workspace!(ws), do: Repo.query!("DELETE FROM workspaces WHERE id = $1", [uuid_in(ws.id)])
+  defp delete_workspace!(ws),
+    do: Repo.query!("DELETE FROM workspaces WHERE id = $1", [uuid_in(ws.id)])
+
   defp delete_project!(p), do: Repo.query!("DELETE FROM projects WHERE id = $1", [uuid_in(p.id)])
   defp delete_dataset!(d), do: Repo.query!("DELETE FROM datasets WHERE id = $1", [uuid_in(d.id)])
 

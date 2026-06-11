@@ -29,7 +29,10 @@ defmodule Barkpark.SeedsCleanTest do
   # `MIX_ENV=test mix ecto.reset` (which seeds the demo profile). Deletions
   # roll back with the sandbox. Memberships referencing tokens go first.
   setup do
-    Repo.delete_all(from(m in Barkpark.Tenancy.Membership, where: m.principal_type == "api_token"))
+    Repo.delete_all(
+      from(m in Barkpark.Tenancy.Membership, where: m.principal_type == "api_token")
+    )
+
     Repo.delete_all(Barkpark.Auth.ApiToken)
     Repo.delete_all(Document)
     Repo.delete_all(SchemaDefinition)

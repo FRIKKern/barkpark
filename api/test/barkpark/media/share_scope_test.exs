@@ -105,7 +105,8 @@ defmodule Barkpark.Media.ShareScopeTest do
 
       # Victim A's collection lives in the DEFAULT workspace — the exact row the
       # pre-fix unscoped read resolves. B never owns this id.
-      a_doc_id = create_collection!(default_ws, default_proj, shared_id, "Default-workspace collection")
+      a_doc_id =
+        create_collection!(default_ws, default_proj, shared_id, "Default-workspace collection")
 
       # B issues create scoped to ITS OWN workspace for A's collection id.
       result =
@@ -129,7 +130,9 @@ defmodule Barkpark.Media.ShareScopeTest do
       proj_b = create_project!(ws_b)
 
       shared_id = "col-#{System.unique_integer([:positive])}"
-      a_doc_id = create_collection!(default_ws, default_proj, shared_id, "Default-workspace collection")
+
+      a_doc_id =
+        create_collection!(default_ws, default_proj, shared_id, "Default-workspace collection")
 
       # A enables its own share link (in A's / Default scope).
       assert {:ok, %{token: a_token}} =
@@ -196,7 +199,13 @@ defmodule Barkpark.Media.ShareScopeTest do
       ws = create_workspace!()
       proj = create_project!(ws)
 
-      doc_id = create_collection!(ws, proj, "col-#{System.unique_integer([:positive])}", "Own collection")
+      doc_id =
+        create_collection!(
+          ws,
+          proj,
+          "col-#{System.unique_integer([:positive])}",
+          "Own collection"
+        )
 
       assert {:ok, %{token: token, shareUrl: share_url}} =
                Share.create(doc_id, @dataset, workspace_id: ws.id, project_id: proj.id)

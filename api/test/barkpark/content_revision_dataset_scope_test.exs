@@ -32,8 +32,11 @@ defmodule Barkpark.ContentRevisionDatasetScopeTest do
     proj = create_project!(ws)
     scope = [workspace_id: ws.id, project_id: proj.id]
 
-    {:ok, _} = Content.upsert_document("post", %{"doc_id" => "shared", "title" => "A-title"}, @ds_a, scope)
-    {:ok, _} = Content.upsert_document("post", %{"doc_id" => "shared", "title" => "B-title"}, @ds_b, scope)
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => "shared", "title" => "A-title"}, @ds_a, scope)
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => "shared", "title" => "B-title"}, @ds_b, scope)
 
     [rev_a | _] = Content.list_revisions("shared", "post", @ds_a, scope)
     [rev_b | _] = Content.list_revisions("shared", "post", @ds_b, scope)

@@ -70,7 +70,6 @@ defmodule Barkpark.Plugins.RegistryDeskItemsTest do
       assert "Pending submissions" in labels
     end
   end
-
 end
 
 defmodule Barkpark.Plugins.RegistryDeskItemsStructureTest do

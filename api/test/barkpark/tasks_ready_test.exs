@@ -90,7 +90,11 @@ defmodule Barkpark.TasksReadyTest do
     test "returns an open task with no blockers in the right phase",
          %{scope: scope} do
       phase_id = "phase-build-#{System.unique_integer([:positive])}"
-      task = mk_task!("rdy-basic-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      task =
+        mk_task!("rdy-basic-#{System.unique_integer([:positive])}", scope, %{
+          "parent_id" => phase_id
+        })
 
       results = Tasks.ready(scope ++ [phase_id: phase_id, dataset: @dataset])
 
@@ -110,9 +114,22 @@ defmodule Barkpark.TasksReadyTest do
          %{scope: scope} do
       phase_id = "phase-ord-#{System.unique_integer([:positive])}"
 
-      no_prio = mk_task!("ord-noprio-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
-      p2 = mk_task!("ord-p2-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id, "priority" => 2})
-      p0 = mk_task!("ord-p0-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id, "priority" => 0})
+      no_prio =
+        mk_task!("ord-noprio-#{System.unique_integer([:positive])}", scope, %{
+          "parent_id" => phase_id
+        })
+
+      p2 =
+        mk_task!("ord-p2-#{System.unique_integer([:positive])}", scope, %{
+          "parent_id" => phase_id,
+          "priority" => 2
+        })
+
+      p0 =
+        mk_task!("ord-p0-#{System.unique_integer([:positive])}", scope, %{
+          "parent_id" => phase_id,
+          "priority" => 0
+        })
 
       ordered =
         scope
@@ -135,8 +152,12 @@ defmodule Barkpark.TasksReadyTest do
     test "B is NOT ready while A blocks it; flipping A to done makes B ready",
          %{scope: scope} do
       phase_id = "phase-blk-#{System.unique_integer([:positive])}"
-      a = mk_task!("blk-a-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
-      b = mk_task!("blk-b-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      a =
+        mk_task!("blk-a-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      b =
+        mk_task!("blk-b-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
 
       # b blocks on a (FK is documents.id per W7-02 — NOT doc_id).
       {:ok, _} = Tasks.add_dep(b.id, a.id, :blocks)
@@ -172,8 +193,14 @@ defmodule Barkpark.TasksReadyTest do
     test "discovered-from edges do NOT block readiness — only :blocks does",
          %{scope: scope} do
       phase_id = "phase-df-#{System.unique_integer([:positive])}"
-      ancestor = mk_task!("df-anc-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
-      child = mk_task!("df-child-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      ancestor =
+        mk_task!("df-anc-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      child =
+        mk_task!("df-child-#{System.unique_integer([:positive])}", scope, %{
+          "parent_id" => phase_id
+        })
 
       {:ok, _} = Tasks.add_dep(child.id, ancestor.id, :"discovered-from")
 
@@ -192,8 +219,15 @@ defmodule Barkpark.TasksReadyTest do
       phase_id = "phase-life-#{System.unique_integer([:positive])}"
 
       for blocker_status <- ~w(open in_progress blocked cancelled) do
-        a = mk_task!("life-a-#{blocker_status}-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
-        b = mk_task!("life-b-#{blocker_status}-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+        a =
+          mk_task!("life-a-#{blocker_status}-#{System.unique_integer([:positive])}", scope, %{
+            "parent_id" => phase_id
+          })
+
+        b =
+          mk_task!("life-b-#{blocker_status}-#{System.unique_integer([:positive])}", scope, %{
+            "parent_id" => phase_id
+          })
 
         # Need a valid open blocker first (the create validator enforces
         # lifecycle_status); then flip via raw update.
@@ -222,8 +256,11 @@ defmodule Barkpark.TasksReadyTest do
       phase_x = "phase-x-#{System.unique_integer([:positive])}"
       phase_y = "phase-y-#{System.unique_integer([:positive])}"
 
-      task_x = mk_task!("phs-x-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_x})
-      task_y = mk_task!("phs-y-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_y})
+      task_x =
+        mk_task!("phs-x-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_x})
+
+      task_y =
+        mk_task!("phs-y-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_y})
 
       ready_x =
         scope |> Keyword.merge(phase_id: phase_x, dataset: @dataset) |> Tasks.ready() |> ids_of()
@@ -241,7 +278,9 @@ defmodule Barkpark.TasksReadyTest do
          %{scope: scope} do
       phase_id = "phase-strict-#{System.unique_integer([:positive])}"
       orphan = mk_task!("orph-#{System.unique_integer([:positive])}", scope)
-      in_phase = mk_task!("in-phs-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      in_phase =
+        mk_task!("in-phs-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
 
       ready =
         scope |> Keyword.merge(phase_id: phase_id, dataset: @dataset) |> Tasks.ready() |> ids_of()
@@ -260,7 +299,11 @@ defmodule Barkpark.TasksReadyTest do
 
       tasks_by_status =
         for status <- ~w(open in_progress blocked done cancelled), into: %{} do
-          t = mk_task!("lf-#{status}-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+          t =
+            mk_task!("lf-#{status}-#{System.unique_integer([:positive])}", scope, %{
+              "parent_id" => phase_id
+            })
+
           # All tasks created as "open"; flip the non-open ones via raw update.
           t = if status == "open", do: t, else: set_lifecycle!(t, status)
           {status, t}
@@ -338,7 +381,11 @@ defmodule Barkpark.TasksReadyTest do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
       phase_id = "phase-conc-#{System.unique_integer([:positive])}"
-      task = mk_task!("conc-single-#{System.unique_integer([:positive])}", scope, %{"parent_id" => phase_id})
+
+      task =
+        mk_task!("conc-single-#{System.unique_integer([:positive])}", scope, %{
+          "parent_id" => phase_id
+        })
 
       claim_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
 
@@ -423,7 +470,8 @@ defmodule Barkpark.TasksReadyTest do
           |> Tasks.ready()
           |> ids_of()
 
-        assert leftover == [], "iter #{iter}: ready set should be empty after 5/5 claims; got #{inspect(leftover)}"
+        assert leftover == [],
+               "iter #{iter}: ready set should be empty after 5/5 claims; got #{inspect(leftover)}"
 
         for %Document{} = doc <- results do
           assert doc.content["lifecycle_status"] == "in_progress"

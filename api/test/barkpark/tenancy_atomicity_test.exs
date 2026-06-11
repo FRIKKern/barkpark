@@ -49,7 +49,8 @@ defmodule Barkpark.TenancyAtomicityTest do
   defp membership_count(principal_id),
     do: Repo.aggregate(from(m in Membership, where: m.principal_id == ^principal_id), :count)
 
-  defp project_count(ws_id), do: Repo.aggregate(from(p in Project, where: p.workspace_id == ^ws_id), :count)
+  defp project_count(ws_id),
+    do: Repo.aggregate(from(p in Project, where: p.workspace_id == ^ws_id), :count)
 
   defp dataset_count(project_id),
     do: Repo.aggregate(from(d in Dataset, where: d.project_id == ^project_id), :count)
@@ -58,7 +59,11 @@ defmodule Barkpark.TenancyAtomicityTest do
   # left behind even after the workspace row itself is gone.
   defp projects_under_slug(slug) do
     Repo.aggregate(
-      from(p in Project, join: w in Workspace, on: p.workspace_id == w.id, where: w.slug == ^slug),
+      from(p in Project,
+        join: w in Workspace,
+        on: p.workspace_id == w.id,
+        where: w.slug == ^slug
+      ),
       :count
     )
   end
@@ -117,7 +122,10 @@ defmodule Barkpark.TenancyAtomicityTest do
       principal_id = Ecto.UUID.generate()
 
       assert {:ok, %Workspace{} = ws} =
-               Tenancy.create_workspace_with_owner(%{name: "Atomic WS3", slug: slug}, principal_id)
+               Tenancy.create_workspace_with_owner(
+                 %{name: "Atomic WS3", slug: slug},
+                 principal_id
+               )
 
       assert ws.slug == slug
       assert ws_count(slug) == 1

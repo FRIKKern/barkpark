@@ -152,7 +152,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
   describe "StudioLive editor renders v1 schemas via FieldInputs" do
     test "post editor mounts and emits all 7 leaf-input clauses byte-identically",
          %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}/post/p1")
+      {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/post/p1"))
 
       # Editor mounted at all
       assert html =~ ~s(name="doc[title]")
@@ -256,7 +256,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
     end
 
     test "page editor mounts (text fallback only)", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}/page/about")
+      {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/page/about"))
       assert html =~ ~s(name="doc[title]")
       assert html =~ "About"
       assert html =~ ~r{<textarea[^>]*name="doc\[body\]"[^>]*rows="3"}
@@ -264,7 +264,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
     end
 
     test "author editor mounts (string + text)", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}/author/knut")
+      {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/author/knut"))
       assert html =~ ~s(name="doc[title]")
       assert html =~ "Knut"
       assert html =~ ~r{<textarea[^>]*name="doc\[bio\]"[^>]*rows="3"}

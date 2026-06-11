@@ -94,7 +94,11 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
       # was UNAUTHENTICATED + UNSCOPED — a tenancy hole. It now sits behind
       # `:require_token`; an anonymous read is rejected with 401.
       {:ok, _} =
-        Content.create_document(@type_name, %{"_id" => "lc-list-1", "title" => "L1"}, "production")
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-list-1", "title" => "L1"},
+          "production"
+        )
 
       resp = get(conn, ~p"/api/documents/#{@type_name}")
 
@@ -103,7 +107,11 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
 
     test "with auth → 200 + JSON list + deprecation headers", %{conn: conn} do
       {:ok, _} =
-        Content.create_document(@type_name, %{"_id" => "lc-list-2", "title" => "L2"}, "production")
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-list-2", "title" => "L2"},
+          "production"
+        )
 
       resp = conn |> authed() |> get(~p"/api/documents/#{@type_name}")
 
@@ -135,7 +143,11 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
   describe "GET /api/documents/:type/:id" do
     test "returns the legacy doc shape + headers for an existing draft", %{conn: conn} do
       {:ok, _} =
-        Content.create_document(@type_name, %{"_id" => "lc-show-1", "title" => "S1"}, "production")
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-show-1", "title" => "S1"},
+          "production"
+        )
 
       resp = conn |> authed() |> get(~p"/api/documents/#{@type_name}/drafts.lc-show-1")
       assert resp.status == 200

@@ -16,9 +16,7 @@ defmodule Barkpark.Repo.Migrations.ExtendDocumentsSearchVectorSlug do
     ) STORED
     """)
 
-    execute(
-      "CREATE INDEX documents_search_vector_idx ON documents USING GIN (search_vector)"
-    )
+    execute("CREATE INDEX documents_search_vector_idx ON documents USING GIN (search_vector)")
   end
 
   def down do
@@ -31,8 +29,6 @@ defmodule Barkpark.Repo.Migrations.ExtendDocumentsSearchVectorSlug do
     GENERATED ALWAYS AS (to_tsvector('english', coalesce(title, ''))) STORED
     """)
 
-    execute(
-      "CREATE INDEX documents_search_vector_idx ON documents USING GIN (search_vector)"
-    )
+    execute("CREATE INDEX documents_search_vector_idx ON documents USING GIN (search_vector)")
   end
 end

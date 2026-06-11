@@ -201,7 +201,16 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       # An admin token bound to A, then ALSO made a member of B so the routing
       # membership gate lets requests to /w/B/... through to the controller.
       raw = "isolation-admin-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "isolation admin", isolation_ds, ["read", "write", "admin"], ws_a.id)
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "isolation admin",
+          isolation_ds,
+          ["read", "write", "admin"],
+          ws_a.id
+        )
+
       {:ok, _} = TenancyAuth.create_membership(ws_b.id, token.id, "admin")
 
       {:ok,

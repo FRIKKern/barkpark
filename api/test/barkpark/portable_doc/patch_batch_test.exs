@@ -19,7 +19,10 @@ defmodule Barkpark.PortableDoc.PatchBatchTest do
   describe "apply_patches/2 — all ops succeed" do
     test "applies every op in order and returns {:ok, doc}" do
       ops = [
-        %{"op" => "append-block", "block" => %{"id" => "c", "type" => "paragraph", "text" => "C"}},
+        %{
+          "op" => "append-block",
+          "block" => %{"id" => "c", "type" => "paragraph", "text" => "C"}
+        },
         %{"op" => "patch-block", "id" => "a", "patch" => %{"text" => "A2"}},
         %{"op" => "remove-block", "id" => "b"}
       ]
@@ -54,8 +57,7 @@ defmodule Barkpark.PortableDoc.PatchBatchTest do
         # op 2 — FAILS: target id does not exist
         %{"op" => "remove-block", "id" => "does-not-exist"},
         # op 3 — would succeed, but must never run
-        %{"op" => "append-block",
-          "block" => %{"id" => "z", "type" => "paragraph", "text" => "Z"}}
+        %{"op" => "append-block", "block" => %{"id" => "z", "type" => "paragraph", "text" => "Z"}}
       ]
 
       assert {:error, {:block_not_found, "does-not-exist", "remove-block"}} =

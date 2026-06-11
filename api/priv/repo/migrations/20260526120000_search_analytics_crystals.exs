@@ -64,7 +64,14 @@ defmodule Barkpark.Repo.Migrations.SearchAnalyticsCrystals do
 
     create unique_index(
              :media_search_merge_patterns,
-             [:dataset, :period, :period_start, :from_fingerprint, :to_fingerprint, :pattern_type],
+             [
+               :dataset,
+               :period,
+               :period_start,
+               :from_fingerprint,
+               :to_fingerprint,
+               :pattern_type
+             ],
              name: :media_search_merge_patterns_unique_idx
            )
 

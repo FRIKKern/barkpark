@@ -121,9 +121,7 @@ defmodule Barkpark.Structure do
     }
   end
 
-  defp plugin_item_to_node(
-         %{type: :document_list, label: label, doc_type: doc_type} = item
-       ) do
+  defp plugin_item_to_node(%{type: :document_list, label: label, doc_type: doc_type} = item) do
     %Node{
       id: "plugin-doclist-#{:erlang.phash2({label, doc_type, item[:filter] || %{}})}",
       title: label,

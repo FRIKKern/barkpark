@@ -86,12 +86,17 @@ defmodule Barkpark.MediaWorkspaceScopeTest do
       assert total == 1
     end
 
-    test "get_file scoped to A cannot fetch B's file", %{ws_a: ws_a, file_b: file_b, file_a: file_a} do
+    test "get_file scoped to A cannot fetch B's file", %{
+      ws_a: ws_a,
+      file_b: file_b,
+      file_a: file_a
+    } do
       assert {:error, :not_found} = Media.get_file(file_b.id, workspace_id: ws_a.id)
       assert {:ok, _} = Media.get_file(file_a.id, workspace_id: ws_a.id)
     end
 
-    test "an unscoped read (nil workspace) still sees both — proves the filter is the gate", %{} do
+    test "an unscoped read (nil workspace) still sees both — proves the filter is the gate",
+         %{} do
       files = Media.list_files(@shared_dataset)
       assert "a.png" in names(files)
       assert "b.png" in names(files)

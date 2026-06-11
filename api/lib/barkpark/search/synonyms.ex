@@ -252,8 +252,11 @@ defmodule Barkpark.Search.Synonyms do
            query_normalized: Sanitizer.normalize(query),
            filter_fingerprint: ""
          ) do
-      nil -> %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
-      row -> %{search_count: row.search_count, zero_hit_count: row.zero_hit_count, ctr: row.ctr || 0.0}
+      nil ->
+        %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
+
+      row ->
+        %{search_count: row.search_count, zero_hit_count: row.zero_hit_count, ctr: row.ctr || 0.0}
     end
   end
 

@@ -231,7 +231,11 @@ defmodule Barkpark.Plugins.Tasks do
         auth_tier: "read",
         args: [],
         flags: [
-          %{name: "worker", type: "string", summary: "Narrow in_progress to this worker's claims."},
+          %{
+            name: "worker",
+            type: "string",
+            summary: "Narrow in_progress to this worker's claims."
+          },
           %{name: "limit", type: "int", summary: "Ready-head and event-window size.", default: 10}
         ],
         writes: false,
@@ -267,8 +271,18 @@ defmodule Barkpark.Plugins.Tasks do
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/claim"},
         auth_tier: "read",
         args: [
-          %{name: "doc_id", required: true, type: "string", summary: "Task document id to claim."},
-          %{name: "worker_id", required: true, type: "string", summary: "Worker identity claiming the task."}
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to claim."
+          },
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity claiming the task."
+          }
         ],
         flags: [
           %{
@@ -293,10 +307,30 @@ defmodule Barkpark.Plugins.Tasks do
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
-          %{name: "doc_id", required: true, type: "string", summary: "Task document id to close."},
-          %{name: "worker_id", required: true, type: "string", summary: "Worker identity that holds the claim."},
-          %{name: "observed_epoch", required: true, type: "int", summary: "Claim epoch returned at claim time (optimistic concurrency guard)."},
-          %{name: "lifecycle_status", required: false, type: "string", summary: "done | cancelled | blocked (defaults to done when omitted)."}
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to close."
+          },
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity that holds the claim."
+          },
+          %{
+            name: "observed_epoch",
+            required: true,
+            type: "int",
+            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+          },
+          %{
+            name: "lifecycle_status",
+            required: false,
+            type: "string",
+            summary: "done | cancelled | blocked (defaults to done when omitted)."
+          }
         ],
         flags: [],
         writes: true,
@@ -314,8 +348,18 @@ defmodule Barkpark.Plugins.Tasks do
         http: %{method: "POST", path_template: "/v1/tasks/claim"},
         auth_tier: "read",
         args: [
-          %{name: "worker_id", required: true, type: "string", summary: "Worker identity claiming the task."},
-          %{name: "phase_id", required: false, type: "string", summary: "Restrict the claim to tasks under this phase id."}
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity claiming the task."
+          },
+          %{
+            name: "phase_id",
+            required: false,
+            type: "string",
+            summary: "Restrict the claim to tasks under this phase id."
+          }
         ],
         flags: [],
         writes: true,

@@ -52,10 +52,29 @@ defmodule Barkpark.ContentProjectionTest do
       slug = "exp-projection-#{System.unique_integer([:positive])}"
 
       blocks = [
-        %{"id" => "t", "type" => "field-string", "fieldName" => "title", "value" => "Projected Title"},
-        %{"id" => "s", "type" => "field-slug", "fieldName" => "slug", "value" => "projected-title"},
-        %{"id" => "i", "type" => "field-image", "fieldName" => "featuredImage", "value" => "/hero.jpg"},
-        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "Free body text."}]}
+        %{
+          "id" => "t",
+          "type" => "field-string",
+          "fieldName" => "title",
+          "value" => "Projected Title"
+        },
+        %{
+          "id" => "s",
+          "type" => "field-slug",
+          "fieldName" => "slug",
+          "value" => "projected-title"
+        },
+        %{
+          "id" => "i",
+          "type" => "field-image",
+          "fieldName" => "featuredImage",
+          "value" => "/hero.jpg"
+        },
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Free body text."}]
+        }
       ]
 
       {:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
@@ -85,7 +104,11 @@ defmodule Barkpark.ContentProjectionTest do
 
       blocks = [
         %{"id" => "t", "type" => "field-string", "fieldName" => "title", "value" => "Before"},
-        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "body"}]}
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "body"}]
+        }
       ]
 
       {:ok, _} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
@@ -154,7 +177,10 @@ defmodule Barkpark.ContentProjectionTest do
     test "returns stored blocks verbatim when content[\"blocks\"] already exists" do
       slug = "exp-stored-#{System.unique_integer([:positive])}"
 
-      blocks = [%{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]}]
+      blocks = [
+        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]}
+      ]
+
       {:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
 
       {resolved, synthesized?} = Content.resolve_blocks_for_edit(doc, "paper", @dataset)

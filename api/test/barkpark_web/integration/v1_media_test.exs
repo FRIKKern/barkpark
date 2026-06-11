@@ -26,8 +26,17 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
 
   defp do_drain(deadline) do
     case Task.Supervisor.children(Barkpark.TaskSupervisor) do
-      [] -> :ok
-      _ -> if System.monotonic_time(:millisecond) >= deadline, do: :timeout, else: (Process.sleep(50); do_drain(deadline))
+      [] ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: :timeout,
+          else:
+            (
+              Process.sleep(50)
+              do_drain(deadline)
+            )
     end
   end
 

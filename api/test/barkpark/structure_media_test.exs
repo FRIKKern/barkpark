@@ -12,7 +12,9 @@ defmodule Barkpark.StructureMediaTest do
           %{name: "mediaCollection", title: "Media Collection", icon: "📁"}
         ] do
       %SchemaDefinition{}
-      |> SchemaDefinition.changeset(Map.merge(spec, %{visibility: "private", dataset: dataset, fields: []}))
+      |> SchemaDefinition.changeset(
+        Map.merge(spec, %{visibility: "private", dataset: dataset, fields: []})
+      )
       |> Repo.insert!()
     end
 

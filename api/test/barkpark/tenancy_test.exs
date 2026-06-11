@@ -127,7 +127,13 @@ defmodule Barkpark.TenancyTest do
       assert m.principal_type == "api_token"
       assert m.role == "owner"
 
-      bad = Membership.changeset(%Membership{}, %{workspace_id: ws.id, principal_id: principal_id, role: "wizard"})
+      bad =
+        Membership.changeset(%Membership{}, %{
+          workspace_id: ws.id,
+          principal_id: principal_id,
+          role: "wizard"
+        })
+
       refute bad.valid?
     end
   end

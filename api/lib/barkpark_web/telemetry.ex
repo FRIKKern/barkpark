@@ -74,7 +74,6 @@ defmodule BarkparkWeb.Telemetry do
         description:
           "The time the connection spent waiting before being checked out for the query"
       ),
-
       sum("search.intel.record.count",
         tags: [:surface, :result],
         description: "Search intelligence record outcomes"

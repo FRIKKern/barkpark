@@ -110,11 +110,17 @@ defmodule Barkpark.Media.RelationsTenancyTest do
       {:ok, file_a} = create_media_file_in!(ws_a, proj_a, %{}, @dataset)
 
       _doc_a =
-        insert_asset_doc!("asset-a-inbound", file_a.id, "Secret A inbound", [edge("asset-b-entry")], %{
-          workspace_id: ws_a.id,
-          project_id: proj_a.id,
-          dataset_id: nil
-        })
+        insert_asset_doc!(
+          "asset-a-inbound",
+          file_a.id,
+          "Secret A inbound",
+          [edge("asset-b-entry")],
+          %{
+            workspace_id: ws_a.id,
+            project_id: proj_a.id,
+            dataset_id: nil
+          }
+        )
 
       # B reads the relations graph for its own blob, scoped to B.
       graph =
@@ -141,7 +147,8 @@ defmodule Barkpark.Media.RelationsTenancyTest do
       {default_ws, default_project} = ensure_default_scope!()
       {:ok, ds} = Tenancy.get_or_create_dataset(default_project, @dataset)
 
-      {:ok, file} = create_media_file_in!(default_ws, default_project, %{dataset_id: ds.id}, @dataset)
+      {:ok, file} =
+        create_media_file_in!(default_ws, default_project, %{dataset_id: ds.id}, @dataset)
 
       # The graph entry doc for the blob — also legacy NULL-workspace shape.
       _entry =
@@ -203,7 +210,13 @@ defmodule Barkpark.Media.RelationsTenancyTest do
 
       # Inbound source doc back-links to the entry doc.
       _in_doc =
-        insert_asset_doc!("asset-a-in", file_in.id, "A inbound source", [edge("asset-a-entry")], scope)
+        insert_asset_doc!(
+          "asset-a-in",
+          file_in.id,
+          "A inbound source",
+          [edge("asset-a-entry")],
+          scope
+        )
 
       graph =
         Relations.graph(file_entry, @dataset,

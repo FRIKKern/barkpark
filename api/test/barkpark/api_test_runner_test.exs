@@ -112,7 +112,9 @@ defmodule Barkpark.ApiTestRunnerTest do
 
       result =
         run_one_with_stub(spec, fn conn ->
-          conn |> Plug.Conn.put_resp_content_type("text/plain") |> Plug.Conn.send_resp(418, "nope")
+          conn
+          |> Plug.Conn.put_resp_content_type("text/plain")
+          |> Plug.Conn.send_resp(418, "nope")
         end)
 
       assert result.status == :fail

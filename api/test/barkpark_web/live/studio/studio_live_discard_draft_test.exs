@@ -81,7 +81,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
     test "button present when draft has a published twin", %{conn: conn} do
       # Open the draft (drafts. prefix → editor sees is_draft=true)
       {:ok, _view, html} =
-        live(conn, "/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        live(
+          conn,
+          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        )
 
       assert html =~ ~s(data-test-id="discard-draft"),
              "expected discard-draft button when draft has a published twin"
@@ -89,7 +92,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
 
     test "button absent when draft has NO published twin", %{conn: conn} do
       {:ok, _view, html} =
-        live(conn, "/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p2")}")
+        live(
+          conn,
+          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p2")}")
+        )
 
       refute html =~ ~s(data-test-id="discard-draft"),
              "expected no discard-draft button for a draft-only document"
@@ -99,7 +105,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
   describe "confirm-discard" do
     test "removes the draft and keeps the published doc", %{conn: conn} do
       {:ok, view, _html} =
-        live(conn, "/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        live(
+          conn,
+          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        )
 
       # Open the modal
       html = render_click(view, "discard-draft", %{})
@@ -118,7 +127,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
 
     test "flash confirms success after discard", %{conn: conn} do
       {:ok, view, _html} =
-        live(conn, "/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        live(
+          conn,
+          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        )
 
       _ = render_click(view, "discard-draft", %{})
       html = render_click(view, "confirm-discard", %{})
@@ -128,7 +140,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
 
     test "close-discard cancels without removing the draft", %{conn: conn} do
       {:ok, view, _html} =
-        live(conn, "/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        live(
+          conn,
+          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+        )
 
       _ = render_click(view, "discard-draft", %{})
       html = render_click(view, "close-discard", %{})

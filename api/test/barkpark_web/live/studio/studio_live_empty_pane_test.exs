@@ -7,7 +7,9 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
   isolated from the demo-seeded `production` data.  Uses the `author` type
   because it appears in Structure's taxonomy group and therefore gets a
   `:document_type_list` nav node that walk_path can resolve from the
-  `/studio/:dataset/author` URL.
+  `/w/:ws/p/:proj/studio/:dataset/author` URL (P3: the flat /studio mount
+  is gone — the dataset lives under this test's own workspace/project, so
+  the mount uses that scope, not the Default one).
 
   Test 1: fresh dataset + author schema with no docs shows the hint.
   Test 2: once a doc is created the hint disappears.
@@ -35,8 +37,16 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
     {:ok, _ds} = Tenancy.create_dataset(proj, %{slug: @dataset, name: "Empty"})
 
     raw = "empty-pane-token-" <> Ecto.UUID.generate()
-    {:ok, token} = Auth.create_token(raw, "empty-pane", "production", ["read", "write"], default_ws.id)
+
+    {:ok, token} =
+      Auth.create_token(raw, "empty-pane", "production", ["read", "write"], default_ws.id)
+
     {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "member")
+
+    # P3: scoped reads resolve dataset_id within the URL's project — an
+    # unscoped write would fall back to the Default workspace and land in a
+    # DIFFERENT dataset_id, invisible to this test's scoped Studio mount.
+    scope = [workspace_id: ws.id, project_id: proj.id]
 
     {:ok, _schema} =
       Content.upsert_schema(
@@ -47,29 +57,31 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
           "visibility" => "public",
           "fields" => [%{"name" => "title", "title" => "Name", "type" => "string"}]
         },
-        @dataset
+        @dataset,
+        scope
       )
 
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
-    {:ok, conn: conn}
+    {:ok, conn: conn, scope: scope}
   end
 
   test "empty document-list pane shows the no-documents hint", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/author")
+    {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/studio/#{@dataset}/author")
 
     assert html =~ "No documents yet"
     assert html =~ "press + to create one"
   end
 
-  test "hint disappears once a document exists", %{conn: conn} do
+  test "hint disappears once a document exists", %{conn: conn, scope: scope} do
     {:ok, _doc} =
       Content.create_document(
         "author",
         %{"doc_id" => "ep-a1", "title" => "First Author", "content" => %{}},
-        @dataset
+        @dataset,
+        scope
       )
 
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/author")
+    {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/studio/#{@dataset}/author")
 
     refute html =~ "No documents yet"
     assert html =~ "First Author"

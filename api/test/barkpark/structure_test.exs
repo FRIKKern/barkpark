@@ -203,8 +203,11 @@ defmodule Barkpark.StructureTest do
           dataset: dataset,
           blocks: [
             %{"id" => "h", "type" => "heading", "text" => "Desk Listing Paper"},
-            %{"id" => "p", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "body"}]}
+            %{
+              "id" => "p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "body"}]
+            }
           ]
         })
 
@@ -240,8 +243,11 @@ defmodule Barkpark.StructureTest do
           dataset: dataset,
           blocks: [
             %{"id" => "h", "type" => "heading", "text" => "Editor Paper"},
-            %{"id" => "p", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "body"}]}
+            %{
+              "id" => "p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "body"}]
+            }
           ]
         })
 

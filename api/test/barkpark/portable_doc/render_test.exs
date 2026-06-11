@@ -30,6 +30,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
     test "PdContainer clamps to the smaller container budget when maxWidth exceeds it" do
       node = %{"kind" => "PdContainer", "maxWidth" => 900, "children" => []}
+
       assert Render.render_html(node, %{doctype: false, container_width: 600}) =~
                "max-width:600px"
     end
@@ -80,7 +81,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
 
     test "PdLink escapes string children and uses safe href" do
-      node = %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["click <here>"]}
+      node = %{
+        "kind" => "PdLink",
+        "href" => "https://example.com",
+        "children" => ["click <here>"]
+      }
 
       assert Render.render_html(node, @opts) ==
                ~s(<a href="https://example.com" style="color:#1d4ed8;text-decoration:underline">click &lt;here&gt;</a>)
@@ -94,14 +99,24 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
 
     test "PdButton primary uses brand background" do
-      node = %{"kind" => "PdButton", "href" => "https://x.test", "label" => "Go", "priority" => "primary"}
+      node = %{
+        "kind" => "PdButton",
+        "href" => "https://x.test",
+        "label" => "Go",
+        "priority" => "primary"
+      }
 
       assert Render.render_html(node, @opts) ==
                ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
     end
 
     test "PdButton secondary uses brand border" do
-      node = %{"kind" => "PdButton", "href" => "https://x.test", "label" => "Go", "priority" => "secondary"}
+      node = %{
+        "kind" => "PdButton",
+        "href" => "https://x.test",
+        "label" => "Go",
+        "priority" => "secondary"
+      }
 
       assert Render.render_html(node, @opts) ==
                ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;border:2px solid #4f46e5;color:#4f46e5;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
@@ -225,8 +240,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "type" => "section",
         "title" => "Highlights",
         "blocks" => [
-          %{"id" => "p", "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Body."}]}
+          %{
+            "id" => "p",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Body."}]
+          }
         ]
       }
 
@@ -240,8 +258,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "render_blocks concatenates a list in order" do
       blocks = [
         %{"id" => "h", "type" => "heading", "text" => "A"},
-        %{"id" => "p", "type" => "paragraph",
-          "content" => [%{"type" => "text", "value" => "B"}]}
+        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "B"}]}
       ]
 
       assert Render.render_blocks(blocks) ==
@@ -268,8 +285,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "id" => "p",
         "type" => "paragraph",
         "content" => [
-          %{"type" => "text", "value" => "x",
-            "marks" => [%{"type" => "bold"}, %{"type" => "italic"}]}
+          %{
+            "type" => "text",
+            "value" => "x",
+            "marks" => [%{"type" => "bold"}, %{"type" => "italic"}]
+          }
         ]
       }
 
@@ -294,8 +314,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "id" => "p",
         "type" => "paragraph",
         "content" => [
-          %{"type" => "text", "value" => "click",
-            "marks" => [%{"type" => "link", "attrs" => %{"href" => "https://x.test"}}]}
+          %{
+            "type" => "text",
+            "value" => "click",
+            "marks" => [%{"type" => "link", "attrs" => %{"href" => "https://x.test"}}]
+          }
         ]
       }
 
@@ -397,7 +420,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
       tree = %{
         "kind" => "PdContainer",
         "children" => [
-          %{"kind" => "PdButton", "href" => "https://x.test", "label" => "Go", "priority" => "primary"}
+          %{
+            "kind" => "PdButton",
+            "href" => "https://x.test",
+            "label" => "Go",
+            "priority" => "primary"
+          }
         ]
       }
 
@@ -409,7 +437,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # the fallback hex stays byte-identical for non-themed surfaces.
       assert html =~ "#a23925"
       # Serif body stack on the article container.
-      assert html =~ "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
+      assert html =~
+               "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
+
       # Default article width budget (clamped maxWidth defaults to palette width).
       assert html =~ "max-width:680px"
       # Parchment page background on the doctype body — same hex, now wrapped
@@ -421,6 +451,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # The Wave 4 expectation for a heading block must still hold byte-for-byte.
       block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
       assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+
       assert Render.render_block(block, %{style: :email}) ==
                ~s(<span style="font-weight:bold">Title</span>)
     end
@@ -977,7 +1008,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
       block = %{
         "type" => "form",
         "questions" => [
-          %{"id" => "s", "prompt" => "Rate", "type" => "scale", "scale" => %{"min" => 0, "max" => 2}}
+          %{
+            "id" => "s",
+            "prompt" => "Rate",
+            "type" => "scale",
+            "scale" => %{"min" => 0, "max" => 2}
+          }
         ]
       }
 

@@ -80,9 +80,7 @@ defmodule Barkpark.Plugins.OnixEdit.Lifecycle do
 
     case args |> PublishWorker.new() |> Oban.insert() do
       {:ok, job} ->
-        Logger.info(
-          "OnixEdit.Lifecycle: enqueued Bokbasen PublishWorker job #{job.id} for #{id}"
-        )
+        Logger.info("OnixEdit.Lifecycle: enqueued Bokbasen PublishWorker job #{job.id} for #{id}")
 
         :ok
 

@@ -106,8 +106,7 @@ defmodule BarkparkWeb.TasksController do
       from(d in Document,
         where: d.type == "task",
         group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
-        select:
-          {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
+        select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
       )
       |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
       |> maybe_filter_project(Keyword.get(scope, :project_id))

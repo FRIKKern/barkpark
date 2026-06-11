@@ -135,8 +135,11 @@ defmodule Barkpark.ApiTestRunner.Asserts do
 
   defp decode_json(body) when is_binary(body) do
     case Jason.decode(body) do
-      {:ok, json} -> {:ok, json}
-      {:error, %Jason.DecodeError{} = e} -> {:error, "json decode failed: #{Exception.message(e)}"}
+      {:ok, json} ->
+        {:ok, json}
+
+      {:error, %Jason.DecodeError{} = e} ->
+        {:error, "json decode failed: #{Exception.message(e)}"}
     end
   end
 
@@ -144,8 +147,11 @@ defmodule Barkpark.ApiTestRunner.Asserts do
 
   defp get_path(map, [key | rest]) when is_map(map) and is_binary(key) do
     case Map.fetch(map, key) do
-      {:ok, v} -> get_path(v, rest)
-      :error -> {:error, "json_path: missing key #{inspect(key)} (have #{inspect(Map.keys(map))})"}
+      {:ok, v} ->
+        get_path(v, rest)
+
+      :error ->
+        {:error, "json_path: missing key #{inspect(key)} (have #{inspect(Map.keys(map))})"}
     end
   end
 

@@ -64,7 +64,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
 
   describe "E1: Duplicate" do
     test "duplicate-doc clones the open doc into a fresh draft", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/p1")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/p1"))
 
       pre_count = length(Content.list_documents("post", @dataset))
 
@@ -80,7 +80,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
     end
 
     test "duplicate button is rendered in the editor header", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}/post/p1")
+      {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/post/p1"))
       assert html =~ ~s(phx-click="duplicate-doc")
       assert html =~ ~s(data-test-id="duplicate-doc")
     end
@@ -88,7 +88,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
 
   describe "E2: Open in new pane" do
     test "open-secondary-picker shows the modal with candidates", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/p1")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/p1"))
 
       html = render_click(view, "open-secondary-picker", %{})
 
@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
     end
 
     test "select-secondary loads a read-only card and closes the picker", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/p1")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/p1"))
 
       _ = render_click(view, "open-secondary-picker", %{})
       html = render_click(view, "select-secondary", %{"id" => "p2"})
@@ -115,7 +115,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
     end
 
     test "close-secondary clears the card", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/p1")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/p1"))
 
       _ = render_click(view, "open-secondary-picker", %{})
       _ = render_click(view, "select-secondary", %{"id" => "p2"})
@@ -127,7 +127,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
 
   describe "E3: Bulk publish" do
     test "toggle-doc-checkbox flips bulk-action-bar visibility", %{conn: conn} do
-      {:ok, view, html} = live(conn, "/studio/#{@dataset}/post")
+      {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/post"))
 
       refute html =~ ~s(data-test-id="bulk-action-bar")
 
@@ -144,7 +144,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
     end
 
     test "bulk-publish publishes every selected draft", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post"))
 
       _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p1"})
       _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p2"})
@@ -159,7 +159,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
     end
 
     test "bulk-clear empties the selection set", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post"))
 
       _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p1"})
       _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p2"})

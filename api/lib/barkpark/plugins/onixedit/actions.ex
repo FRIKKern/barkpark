@@ -95,7 +95,8 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
   """
   @spec publish_to_bokbasen(String.t(), String.t(), mode()) ::
           {:ok, dryrun_result()} | {:ok, real_result()} | {:error, term()}
-  def publish_to_bokbasen(doc_id, dataset, mode), do: publish_to_bokbasen(doc_id, dataset, mode, [])
+  def publish_to_bokbasen(doc_id, dataset, mode),
+    do: publish_to_bokbasen(doc_id, dataset, mode, [])
 
   @spec publish_to_bokbasen(String.t(), String.t(), mode(), keyword()) ::
           {:ok, dryrun_result()} | {:ok, real_result()} | {:error, term()}

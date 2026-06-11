@@ -45,7 +45,8 @@ defmodule Barkpark.Search.Highlighter do
   end
 
   defp highlight_needles(parsed) do
-    (Map.get(parsed, :phrases, []) ++ Map.get(parsed, :terms, []) ++ Map.get(parsed, :prefixes, []))
+    (Map.get(parsed, :phrases, []) ++
+       Map.get(parsed, :terms, []) ++ Map.get(parsed, :prefixes, []))
     |> Enum.map(&String.downcase/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()

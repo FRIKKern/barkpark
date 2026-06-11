@@ -27,7 +27,12 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
       |> Enum.map(&Collections.render/1)
 
     json(conn, %{
-      result: %{collections: collections, count: length(collections), limit: limit, offset: offset},
+      result: %{
+        collections: collections,
+        count: length(collections),
+        limit: limit,
+        offset: offset
+      },
       syncTags: ["bp:ds:#{dataset}:media:collections"]
     })
   end
@@ -149,7 +154,10 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
          {:ok, doc} <- Collections.add_member(id, file, dataset, scope_opts(conn)) do
       json(conn, %{
         result: AssetResponse.render(file, doc, dataset: dataset, conn: conn),
-        syncTags: ["bp:ds:#{dataset}:media:collections:#{id}", "bp:ds:#{dataset}:media:#{asset_id}"]
+        syncTags: [
+          "bp:ds:#{dataset}:media:collections:#{id}",
+          "bp:ds:#{dataset}:media:#{asset_id}"
+        ]
       })
     end
   end
@@ -161,7 +169,10 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
          {:ok, doc} <- Collections.remove_member(id, file, dataset, scope_opts(conn)) do
       json(conn, %{
         result: AssetResponse.render(file, doc, dataset: dataset, conn: conn),
-        syncTags: ["bp:ds:#{dataset}:media:collections:#{id}", "bp:ds:#{dataset}:media:#{asset_id}"]
+        syncTags: [
+          "bp:ds:#{dataset}:media:collections:#{id}",
+          "bp:ds:#{dataset}:media:#{asset_id}"
+        ]
       })
     end
   end

@@ -58,7 +58,12 @@ defmodule Barkpark.Tenancy.Auth do
   """
   @spec create_membership(binary(), binary(), String.t(), String.t()) ::
           {:ok, Membership.t()} | {:error, Ecto.Changeset.t()}
-  def create_membership(workspace_id, principal_id, role \\ @default_role, principal_type \\ "api_token")
+  def create_membership(
+        workspace_id,
+        principal_id,
+        role \\ @default_role,
+        principal_type \\ "api_token"
+      )
       when is_binary(workspace_id) and is_binary(principal_id) and is_binary(role) do
     %Membership{}
     |> Membership.changeset(%{

@@ -52,7 +52,8 @@ defmodule Barkpark.Media.Relations do
           %{
             relation: edge.relation,
             assetDocId: edge.target,
-            asset: AssetResponse.render(file, target_doc, Keyword.put(render_opts, :dataset, dataset))
+            asset:
+              AssetResponse.render(file, target_doc, Keyword.put(render_opts, :dataset, dataset))
           }
 
         nil ->

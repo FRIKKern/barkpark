@@ -163,11 +163,13 @@ defmodule Barkpark.Plugins.HooksTest do
   defp with_async_target(ctx) do
     prior = Application.get_env(:barkpark, :hooks_test_target)
     Application.put_env(:barkpark, :hooks_test_target, self())
+
     ExUnit.Callbacks.on_exit(ctx, fn ->
       if is_nil(prior),
         do: Application.delete_env(:barkpark, :hooks_test_target),
         else: Application.put_env(:barkpark, :hooks_test_target, prior)
     end)
+
     :ok
   end
 

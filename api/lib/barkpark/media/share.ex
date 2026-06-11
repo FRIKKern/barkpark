@@ -75,8 +75,7 @@ defmodule Barkpark.Media.Share do
         "doc_id" => doc.doc_id,
         "title" => doc.title,
         "status" => doc.status,
-        "content" =>
-          Map.put(content, "shareLink", Map.merge(share_link, %{"enabled" => false}))
+        "content" => Map.put(content, "shareLink", Map.merge(share_link, %{"enabled" => false}))
       }
 
       Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts))

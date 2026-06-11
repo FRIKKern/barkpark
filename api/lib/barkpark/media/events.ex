@@ -101,9 +101,7 @@ defmodule Barkpark.Media.Events do
   defp retry(url, body, headers, attempt, reason) do
     delay = Enum.at(@retry_delays_ms, attempt - 1, 2_000)
 
-    Logger.warning(
-      "Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms"
-    )
+    Logger.warning("Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms")
 
     Process.sleep(delay)
     do_attempt(url, body, headers, attempt + 1)

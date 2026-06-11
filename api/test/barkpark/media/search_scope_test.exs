@@ -52,12 +52,12 @@ defmodule Barkpark.Media.SearchScopeTest do
       # parsed map whose `terms ++ phrases` is []. The pre-fix code ran
       # `hd([])` here and raised ArgumentError, 500ing the search.
       assert {files, total, _facets, _meta} =
-               Search.search(@dataset, [
+               Search.search(@dataset,
                  q: "foo*",
                  sort: "relevance",
                  workspace_id: ws.id,
                  project_id: proj.id
-               ])
+               )
 
       assert is_list(files)
       assert is_integer(total)
@@ -70,12 +70,12 @@ defmodule Barkpark.Media.SearchScopeTest do
       # No media at all in this workspace + a no-term relevance query: the exact
       # zero-hit recovery path that exercised hd([]).
       assert {[], total, _facets, _meta} =
-               Search.search(@dataset, [
+               Search.search(@dataset,
                  q: "-nope",
                  sort: "relevance",
                  workspace_id: ws.id,
                  project_id: proj.id
-               ])
+               )
 
       assert total == 0
     end
@@ -108,6 +108,7 @@ defmodule Barkpark.Media.SearchScopeTest do
 
       # A sees its own tags and NOT B's exclusive tag.
       assert "a-only" in a_tags
+
       refute "b-only" in a_tags,
              "CROSS-WORKSPACE LEAK: workspace A's tags facet #{inspect(a_tags)} " <>
                "included workspace B's exclusive tag 'b-only'"

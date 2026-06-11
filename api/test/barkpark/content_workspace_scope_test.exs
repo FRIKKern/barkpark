@@ -105,7 +105,8 @@ defmodule Barkpark.ContentWorkspaceScopeTest do
                )
     end
 
-    test "an unscoped query (nil workspace) still sees both — proves the filter is the gate", %{} do
+    test "an unscoped query (nil workspace) still sees both — proves the filter is the gate",
+         %{} do
       docs = Content.list_documents(@type_name, @shared_dataset, perspective: :raw)
       ids = doc_ids(docs)
       assert "drafts.doc-in-a" in ids

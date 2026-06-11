@@ -205,8 +205,11 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
         :swept
 
-      {:ok, outcome} -> outcome
-      {:error, _} -> :skipped
+      {:ok, outcome} ->
+        outcome
+
+      {:error, _} ->
+        :skipped
     end
   end
 

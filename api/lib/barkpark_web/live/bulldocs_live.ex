@@ -326,8 +326,7 @@ defmodule BarkparkWeb.BulldocsLive do
             "event_type" => "simplify-request",
             "goal_id" => goal_id,
             "paper_slug" => slug,
-            "payload_html" =>
-              "<p>Simplify requested (#{branch}) for /papers/#{slug}</p>",
+            "payload_html" => "<p>Simplify requested (#{branch}) for /papers/#{slug}</p>",
             "branch" => branch
           }
           |> stamp_scope(scope)
@@ -372,8 +371,7 @@ defmodule BarkparkWeb.BulldocsLive do
             "event_type" => event_type,
             "goal_id" => goal_id,
             "paper_slug" => slug,
-            "payload_html" =>
-              "<p>#{verb} #{branch} for /papers/#{slug}</p>",
+            "payload_html" => "<p>#{verb} #{branch} for /papers/#{slug}</p>",
             "branch" => branch
           }
           |> stamp_scope(scope)
@@ -478,7 +476,8 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}} = paper) when is_list(blocks) do
+  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}} = paper)
+       when is_list(blocks) do
     socket
     |> assign(:block_mode, true)
     |> stream(:blocks, to_stream_items(blocks, paper_article?(paper)))
@@ -572,7 +571,10 @@ defmodule BarkparkWeb.BulldocsLive do
     |> assign(:found, true)
   end
 
-  defp apply_delta(socket, %{op_kind: kind, block_id: id, fragment_html: html, position: pos} = frame)
+  defp apply_delta(
+         socket,
+         %{op_kind: kind, block_id: id, fragment_html: html, position: pos} = frame
+       )
        when kind in ["append-block", "insert-after"] and is_integer(pos) do
     # A NEW block enters the stream at its known top-level index, so a
     # mid-document insert-after lands in order — not appended to the end.

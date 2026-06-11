@@ -460,8 +460,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         default: "https://api.bokbasen.io",
         placeholder: "https://api.bokbasen.io",
         group: "Bokbasen",
-        hint:
-          "Production: https://api.bokbasen.io  ·  Sandbox: https://api-sandbox.bokbasen.io"
+        hint: "Production: https://api.bokbasen.io  ·  Sandbox: https://api-sandbox.bokbasen.io"
       },
       %{
         name: "bokbasen.oauth_token_url",
@@ -581,7 +580,12 @@ defmodule Barkpark.Plugins.OnixEdit do
         },
         auth_tier: "admin",
         args: [
-          %{name: "dataset", required: true, type: "string", summary: "Dataset (e.g. production)."},
+          %{
+            name: "dataset",
+            required: true,
+            type: "string",
+            summary: "Dataset (e.g. production)."
+          },
           %{name: "id", required: true, type: "string", summary: "Book document id."}
         ],
         flags: [],
@@ -656,7 +660,9 @@ defmodule Barkpark.Plugins.OnixEdit do
     %{field | "fields" => splice_subschemas(inner)}
   end
 
-  defp splice_field(%{"type" => "arrayOf", "of" => %{"type" => "composite", "fields" => inner} = of} = field)
+  defp splice_field(
+         %{"type" => "arrayOf", "of" => %{"type" => "composite", "fields" => inner} = of} = field
+       )
        when is_list(inner) do
     %{field | "of" => %{of | "fields" => splice_subschemas(inner)}}
   end
@@ -710,8 +716,7 @@ defmodule Barkpark.Plugins.OnixEdit do
         "kind" => "modal",
         "modal" => %{
           "title" => "Publish to Bokbasen?",
-          "body" =>
-            "We'll run a dry-run first, then ask again before sending for real.",
+          "body" => "We'll run a dry-run first, then ask again before sending for real.",
           "steps" => ["dryrun", "real"]
         },
         # Editor-header glyph (task barkpark-jl4x). `cloud-upload` so the

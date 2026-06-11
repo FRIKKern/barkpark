@@ -40,11 +40,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
   defp restore(key, value), do: Application.put_env(:barkpark, key, value)
 
   defp admin_view(conn) do
-    conn |> init_test_session(%{"api_token" => @admin}) |> live("/studio/#{@dataset}")
+    conn
+    |> init_test_session(%{"api_token" => @admin})
+    |> live(scoped_studio("/studio/#{@dataset}"))
   end
 
   defp junior_view(conn) do
-    conn |> init_test_session(%{"api_token" => @junior}) |> live("/studio/#{@dataset}")
+    conn
+    |> init_test_session(%{"api_token" => @junior})
+    |> live(scoped_studio("/studio/#{@dataset}"))
   end
 
   # ── admin happy path ──────────────────────────────────────────────────────
@@ -137,7 +141,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
     end
 
     test "the Share button is hidden for an anonymous session", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}")
+      {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}"))
       refute html =~ ~s(phx-click="shares-open")
     end
 

@@ -70,7 +70,8 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
       {:ok, e3} = Events.create_event(%{"goal_id" => goal_id, "event_type" => "plan-grilled"})
 
       # An unrelated goal's events must not leak in.
-      {:ok, _other} = Events.create_event(%{"goal_id" => "bd-other", "event_type" => "goal-opened"})
+      {:ok, _other} =
+        Events.create_event(%{"goal_id" => "bd-other", "event_type" => "goal-opened"})
 
       ids = goal_id |> Events.list_for_goal() |> Enum.map(& &1.id)
       assert ids == [e1.id, e2.id, e3.id]

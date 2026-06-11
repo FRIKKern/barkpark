@@ -47,7 +47,12 @@ defmodule BarkparkWeb.LegacyController do
       "content" => Map.drop(attrs, ["id", "doc_id", "title", "status", "updatedAt"])
     }
 
-    case Content.upsert_document(type, internal_attrs, @dataset, [source: :api] ++ scope_opts(conn)) do
+    case Content.upsert_document(
+           type,
+           internal_attrs,
+           @dataset,
+           [source: :api] ++ scope_opts(conn)
+         ) do
       {:ok, doc} ->
         conn
         |> put_status(:created)

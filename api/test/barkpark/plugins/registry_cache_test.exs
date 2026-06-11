@@ -97,6 +97,7 @@ defmodule Barkpark.Plugins.RegistryCacheTest do
 
       try do
         result = Registry.all()
+
         assert Enum.any?(result, &(&1.name == poison_name)),
                "all/0 should have read the poisoned cache, but didn't"
       after
@@ -150,6 +151,7 @@ defmodule Barkpark.Plugins.RegistryCacheTest do
       :ok = Registry.register(CacheActionPlugin, %{"plugin_name" => new_name})
 
       handlers = Registry.collect_action_handlers()
+
       refute Map.has_key?(handlers, "poisoned"),
              "register/2 should have wiped the poisoned key"
 

@@ -102,7 +102,7 @@ defmodule Barkpark.Repo.Migrations.PapersAsDocuments do
 
     rev_sql =
       cond do
-        not ("rev" in columns) -> "1"
+        "rev" not in columns -> "1"
         rev_is_integer -> "GREATEST(COALESCE(rev, 0), 1)"
         # Wave 3 string rev — not monotonic; reset to 1 on migration.
         true -> "1"

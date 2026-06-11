@@ -46,7 +46,8 @@ defmodule BarkparkWeb.FederatedSearchController do
       filters: %{"surfaces" => Enum.join(surfaces, ",")}
     }
 
-    record_result = Intelligence.record("federated", dataset, context, total_hits, ms, record_opts)
+    record_result =
+      Intelligence.record("federated", dataset, context, total_hits, ms, record_opts)
 
     search_event_id =
       case record_result do
@@ -73,7 +74,14 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp surface_payload(%{surface: "media", hits: files, total: total, meta: meta, dataset: dataset, scope: scope}) do
+  defp surface_payload(%{
+         surface: "media",
+         hits: files,
+         total: total,
+         meta: meta,
+         dataset: dataset,
+         scope: scope
+       }) do
     docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
 

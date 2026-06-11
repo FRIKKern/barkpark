@@ -30,7 +30,8 @@ defmodule BarkparkWeb.HistoryController do
     type = get_type(conn, params)
 
     with :ok <- validate_uuid(id),
-         {:ok, doc} <- Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
+         {:ok, doc} <-
+           Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
       json(conn, %{restored: true, document: Envelope.render(doc)})
     else
       {:error, :invalid_uuid} ->

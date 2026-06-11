@@ -74,7 +74,13 @@ defmodule Barkpark.TenancyFixtures do
           map(),
           String.t()
         ) :: {:ok, Content.Document.t()}
-  def create_document_in!(workspace, project, type \\ "post", attrs \\ %{}, dataset \\ @default_dataset) do
+  def create_document_in!(
+        workspace,
+        project,
+        type \\ "post",
+        attrs \\ %{},
+        dataset \\ @default_dataset
+      ) do
     attrs = Map.put_new(attrs, "title", "fixture doc")
 
     {:ok, _doc} =

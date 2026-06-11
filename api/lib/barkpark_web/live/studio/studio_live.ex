@@ -776,6 +776,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
             {:noreply,
              socket
              |> assign(create_open: nil, current_workspace: workspace, current_project: project)
+             # Same prefix sync the switch handlers got in P2 — without it
+             # the rescope push_patch is built from the STALE prefix and
+             # LiveScope's reauthorize hook silently reverts the switch
+             # into the just-created workspace (caught by the P3 test fleet).
+             |> sync_scope_prefix()
              |> put_flash(:info, "Workspace created")
              |> rescope_dataset_for_project(project)}
 
@@ -819,6 +824,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
             {:noreply,
              socket
              |> assign(create_open: nil, current_project: project)
+             # P2 prefix sync — see the create-workspace handler above.
+             |> sync_scope_prefix()
              |> put_flash(:info, "Project created")
              |> rescope_dataset_for_project(project)}
 

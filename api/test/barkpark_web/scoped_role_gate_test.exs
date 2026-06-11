@@ -45,6 +45,7 @@ defmodule BarkparkWeb.ScopedRoleGateTest do
     # This is the exact bypass vector — a global-admin token granted member
     # access to another tenant.
     member_raw = "role-gate-member-#{System.unique_integer([:positive])}"
+
     {:ok, member_token} =
       Auth.create_token(member_raw, "member of B", @dataset, ["read", "write", "admin"])
 
@@ -54,6 +55,7 @@ defmodule BarkparkWeb.ScopedRoleGateTest do
 
     # ADMIN token: explicitly granted admin of B (legit workspace admin).
     admin_raw = "role-gate-admin-#{System.unique_integer([:positive])}"
+
     {:ok, admin_token} =
       Auth.create_token(admin_raw, "admin of B", @dataset, ["read", "write", "admin"])
 
@@ -61,13 +63,11 @@ defmodule BarkparkWeb.ScopedRoleGateTest do
 
     # NON-MEMBER token: global admin perms, NO membership in B at all.
     nonmember_raw = "role-gate-nonmember-#{System.unique_integer([:positive])}"
+
     {:ok, _} =
       Auth.create_token(nonmember_raw, "non-member", @dataset, ["read", "write", "admin"])
 
-    {:ok,
-     member_raw: member_raw,
-     admin_raw: admin_raw,
-     nonmember_raw: nonmember_raw}
+    {:ok, member_raw: member_raw, admin_raw: admin_raw, nonmember_raw: nonmember_raw}
   end
 
   defp authed(conn, raw) do

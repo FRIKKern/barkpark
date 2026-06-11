@@ -115,8 +115,7 @@ defmodule Barkpark.ApiTester.Endpoints do
       auth: plugin_auth_to_auth_level(Map.get(spec, :auth, :none)),
       method: spec.method |> to_string() |> String.upcase(),
       path_template: spec.path,
-      description:
-        "Plugin-contributed test. Asserts: " <> describe_asserts(asserts),
+      description: "Plugin-contributed test. Asserts: " <> describe_asserts(asserts),
       path_params: [],
       query_params: [],
       body_example: Map.get(spec, :body),

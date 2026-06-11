@@ -33,7 +33,12 @@ defmodule Barkpark.ContentPaperIfRevTest do
       seed_paper(slug)
       rev0 = current_rev(slug)
 
-      ops = [%{"op" => "append-block", "block" => %{"type" => "paragraph", "text" => "added", "id" => "b2"}}]
+      ops = [
+        %{
+          "op" => "append-block",
+          "block" => %{"type" => "paragraph", "text" => "added", "id" => "b2"}
+        }
+      ]
 
       assert {:ok, result} =
                Content.apply_paper_block_ops(slug, ops, "production", if_rev: rev0)
@@ -52,7 +57,12 @@ defmodule Barkpark.ContentPaperIfRevTest do
 
       stale = rev0 - 1
 
-      ops = [%{"op" => "append-block", "block" => %{"type" => "paragraph", "text" => "nope", "id" => "bx"}}]
+      ops = [
+        %{
+          "op" => "append-block",
+          "block" => %{"type" => "paragraph", "text" => "nope", "id" => "bx"}
+        }
+      ]
 
       assert {:error, :precondition_failed} =
                Content.apply_paper_block_ops(slug, ops, "production", if_rev: stale)
@@ -67,7 +77,12 @@ defmodule Barkpark.ContentPaperIfRevTest do
       seed_paper(slug)
       rev0 = current_rev(slug)
 
-      ops = [%{"op" => "append-block", "block" => %{"type" => "paragraph", "text" => "ok", "id" => "b2"}}]
+      ops = [
+        %{
+          "op" => "append-block",
+          "block" => %{"type" => "paragraph", "text" => "ok", "id" => "b2"}
+        }
+      ]
 
       assert {:ok, result} = Content.apply_paper_block_ops(slug, ops)
       assert result.rev == rev0 + 1
@@ -78,7 +93,12 @@ defmodule Barkpark.ContentPaperIfRevTest do
       seed_paper(slug)
       rev0 = current_rev(slug)
 
-      ops = [%{"op" => "append-block", "block" => %{"type" => "paragraph", "text" => "x", "id" => "b2"}}]
+      ops = [
+        %{
+          "op" => "append-block",
+          "block" => %{"type" => "paragraph", "text" => "x", "id" => "b2"}
+        }
+      ]
 
       assert {:error, :precondition_failed} =
                Content.apply_paper_block_ops(slug, ops, "production", if_rev: "not-a-rev")

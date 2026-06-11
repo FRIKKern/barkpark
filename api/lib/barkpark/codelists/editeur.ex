@@ -224,18 +224,14 @@ defmodule Barkpark.Codelists.EDItEUR do
           {:ok, length(ids)}
         else
           {:error, reason} = err ->
-            Logger.error(
-              "Codelists.EDItEUR: bundled seed failed — #{inspect(reason)}"
-            )
+            Logger.error("Codelists.EDItEUR: bundled seed failed — #{inspect(reason)}")
 
             err
         end
     end
   rescue
     e ->
-      Logger.error(
-        "Codelists.EDItEUR: bundled seed raised — #{Exception.message(e)}"
-      )
+      Logger.error("Codelists.EDItEUR: bundled seed raised — #{Exception.message(e)}")
 
       {:error, {:raised, Exception.message(e)}}
   end

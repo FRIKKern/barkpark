@@ -501,7 +501,9 @@ defmodule Barkpark.PortableDoc.Render do
   # kinds. All values flow through PdText, so they inherit `escape_html` at walk
   # time — no field-* clause emits raw HTML.
 
-  def compose_block(%{"type" => "field-string"} = b, _style), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-string"} = b, _style),
+    do: field_row(b, field_value_text(b))
+
   def compose_block(%{"type" => "field-slug"} = b, _style), do: field_row(b, field_value_text(b))
   def compose_block(%{"type" => "field-text"} = b, _style), do: field_row(b, field_value_text(b))
 
@@ -945,8 +947,11 @@ defmodule Barkpark.PortableDoc.Render do
   defp figure_html(child, caption, style) do
     child_html =
       case child do
-        c when is_map(c) -> c |> compose_block(style) |> render_html(%{doctype: false, style: style})
-        _ -> ""
+        c when is_map(c) ->
+          c |> compose_block(style) |> render_html(%{doctype: false, style: style})
+
+        _ ->
+          ""
       end
 
     {open, cap} =
@@ -1021,6 +1026,7 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp form_muted_line(text, prefix, style) when is_binary(text) do
     color = if style == :article, do: "#6a6a6a", else: "#6b7280"
+
     ~s(<p style="color:#{color};font-size:0.9em;margin:0.3rem 0">#{escape_html(prefix)}#{escape_html(text)}</p>)
   end
 
@@ -1323,7 +1329,7 @@ defmodule Barkpark.PortableDoc.Render do
     bc = Map.get(s, "borderColor")
     bs = Map.get(s, "borderStyle")
 
-    if bw != nil and bc && bs do
+    if (bw != nil and bc) && bs do
       ["border:#{bw}px #{css_border_style(bs)} #{bc}" | out]
     else
       out
@@ -1578,14 +1584,14 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp image(n) do
     dims =
-      (case Map.get(n, "width") do
-         nil -> ""
-         w -> ~s( width="#{w}")
-       end) <>
-        (case Map.get(n, "height") do
-           nil -> ""
-           h -> ~s( height="#{h}")
-         end)
+      case Map.get(n, "width") do
+        nil -> ""
+        w -> ~s( width="#{w}")
+      end <>
+        case Map.get(n, "height") do
+          nil -> ""
+          h -> ~s( height="#{h}")
+        end
 
     ~s(<img src="#{safe_url(Map.get(n, "src", ""))}" alt="#{escape_attr(Map.get(n, "alt", ""))}" style="max-width:100%;height:auto"#{dims}>)
   end
@@ -1632,6 +1638,7 @@ defmodule Barkpark.PortableDoc.Render do
           row
           |> Enum.map(fn cell ->
             inner = render_children(cell, width, pal)
+
             ~s(<td style="border-bottom:1px solid #{pal.rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
           end)
           |> Enum.join("")
@@ -1652,6 +1659,7 @@ defmodule Barkpark.PortableDoc.Render do
           row
           |> Enum.map(fn cell ->
             inner = render_children(cell, width, pal)
+
             ~s(<td style="border:1px solid #{pal.rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
           end)
           |> Enum.join("")

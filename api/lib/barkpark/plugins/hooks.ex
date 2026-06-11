@@ -101,9 +101,7 @@ defmodule Barkpark.Plugins.Hooks do
   end
 
   def fire(event, _payload) do
-    Logger.warning(
-      "Barkpark.Plugins.Hooks: unknown lifecycle event #{inspect(event)}; ignoring"
-    )
+    Logger.warning("Barkpark.Plugins.Hooks: unknown lifecycle event #{inspect(event)}; ignoring")
 
     :ok
   end

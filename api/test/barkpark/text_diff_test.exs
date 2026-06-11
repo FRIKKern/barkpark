@@ -13,6 +13,7 @@ defmodule Barkpark.TextDiffTest do
   describe "hunks/2" do
     test "all-equal text yields all-context hunks with op=\" \"" do
       result = TextDiff.hunks("a\nb\nc", "a\nb\nc")
+
       assert result == [
                %{op: " ", text: "a"},
                %{op: " ", text: "b"},
@@ -22,6 +23,7 @@ defmodule Barkpark.TextDiffTest do
 
     test "pure addition emits only `+` rows" do
       result = TextDiff.hunks("", "x\ny")
+
       assert result == [
                %{op: "+", text: "x"},
                %{op: "+", text: "y"}

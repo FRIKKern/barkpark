@@ -71,6 +71,7 @@ defmodule Barkpark.Plugins.OnixEdit.ApiTestsTest do
     test "every :path is a binary that starts with '/'", %{specs: specs} do
       for spec <- specs do
         assert is_binary(spec.path), "path is not a binary on #{spec.name}"
+
         assert String.starts_with?(spec.path, "/"),
                "path #{inspect(spec.path)} on #{spec.name} does not start with '/'"
       end

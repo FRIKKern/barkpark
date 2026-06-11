@@ -26,8 +26,17 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
 
   defp do_drain(deadline) do
     case Task.Supervisor.children(Barkpark.TaskSupervisor) do
-      [] -> :ok
-      _ -> if System.monotonic_time(:millisecond) >= deadline, do: :timeout, else: (Process.sleep(50); do_drain(deadline))
+      [] ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: :timeout,
+          else:
+            (
+              Process.sleep(50)
+              do_drain(deadline)
+            )
     end
   end
 
@@ -65,7 +74,10 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
         |> json_response(200)
 
       assert resp["result"]["asset"]["bp_processing_status"] == "ready"
-      assert get_in(resp, ["result", "asset", "bp_external_processing", "provider"]) == "transcoder"
+
+      assert get_in(resp, ["result", "asset", "bp_external_processing", "provider"]) ==
+               "transcoder"
+
       assert get_in(resp, ["result", "asset", "bp_cdn_status"]) in ["skipped", "published"]
 
       File.rm(Path.join(Media.upload_dir(), created["result"]["path"]))

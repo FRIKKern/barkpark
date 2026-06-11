@@ -233,6 +233,7 @@ defmodule Barkpark.ContentResolveReadDatasetMemoTest do
       assigns = %{current_workspace: %{id: "ws-1"}, current_project: %{id: "p-1"}}
       socket = %Phoenix.LiveView.Socket{assigns: assigns}
       opts = BarkparkWeb.ScopeHelpers.scope_opts(socket)
+
       refute Keyword.has_key?(opts, :memoize),
              "LV socket must NOT carry :memoize — long-lived process, staleness risk"
 

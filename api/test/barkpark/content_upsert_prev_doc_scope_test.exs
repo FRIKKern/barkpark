@@ -39,10 +39,20 @@ defmodule Barkpark.ContentUpsertPrevDocScopeTest do
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
     {:ok, doc_a} =
-      Content.create_document(@type_name, %{"doc_id" => @doc_id, "title" => "A-original"}, @ds, scope_a)
+      Content.create_document(
+        @type_name,
+        %{"doc_id" => @doc_id, "title" => "A-original"},
+        @ds,
+        scope_a
+      )
 
     {:ok, doc_b} =
-      Content.create_document(@type_name, %{"doc_id" => @doc_id, "title" => "B-original"}, @ds, scope_b)
+      Content.create_document(
+        @type_name,
+        %{"doc_id" => @doc_id, "title" => "B-original"},
+        @ds,
+        scope_b
+      )
 
     # Sanity: same leaf, distinct authoritative dataset_id — the conflation setup.
     assert doc_a.doc_id == doc_b.doc_id

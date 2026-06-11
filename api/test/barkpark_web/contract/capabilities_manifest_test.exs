@@ -53,6 +53,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd != nil, "doc.query command not found in manifest"
 
       flag_names = Enum.map(cmd["flags"], & &1["name"])
+
       assert "filter" in flag_names,
              "doc.query must declare flag 'filter'; got: #{inspect(flag_names)}"
 
@@ -78,6 +79,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd != nil, "media.upload command not found in manifest"
 
       path = get_in(cmd, ["http", "path_template"])
+
       assert path == "/v1/media/:dataset/upload",
              "media.upload path_template should be '/v1/media/:dataset/upload'; got: #{inspect(path)}"
     end

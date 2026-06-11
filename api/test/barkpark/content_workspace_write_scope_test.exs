@@ -119,11 +119,17 @@ defmodule Barkpark.ContentWorkspaceWriteScopeTest do
         )
 
       a_ids =
-        Content.list_documents(@type_name, @shared_dataset, perspective: :raw, workspace_id: ws_a.id)
+        Content.list_documents(@type_name, @shared_dataset,
+          perspective: :raw,
+          workspace_id: ws_a.id
+        )
         |> doc_ids()
 
       b_ids =
-        Content.list_documents(@type_name, @shared_dataset, perspective: :raw, workspace_id: ws_b.id)
+        Content.list_documents(@type_name, @shared_dataset,
+          perspective: :raw,
+          workspace_id: ws_b.id
+        )
         |> doc_ids()
 
       assert ra.id in a_ids
@@ -251,7 +257,10 @@ defmodule Barkpark.ContentWorkspaceWriteScopeTest do
       # And the row is STILL readable in its own scope via the yx7f NULL-tolerant
       # read — a workspace-only list surfaces it.
       ids =
-        Content.list_documents(@type_name, @shared_dataset, perspective: :raw, workspace_id: ws.id)
+        Content.list_documents(@type_name, @shared_dataset,
+          perspective: :raw,
+          workspace_id: ws.id
+        )
         |> doc_ids()
 
       assert result.id in ids

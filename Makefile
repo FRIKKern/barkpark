@@ -157,7 +157,7 @@ domain-cutover: ## Update prod PHX_HOST=<DOMAIN> + PHX_SCHEME=https, restart, ve
 	@echo ">> Last 20 log lines"
 	ssh $(SSH_HOST) 'journalctl -u barkpark -n 20 --no-pager'
 	@echo ">> Verify Studio HTTP (expect 200)"
-	curl -sI https://$(DOMAIN)/studio/production | head -5
+	curl -sIL https://$(DOMAIN)/studio/production | head -8
 	@echo ">> Verify WebSocket (must NOT be 403)"
 	curl -sI -H 'Origin: https://$(DOMAIN)' -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: test' -H 'Sec-WebSocket-Version: 13' https://$(DOMAIN)/live/websocket | head -5
 

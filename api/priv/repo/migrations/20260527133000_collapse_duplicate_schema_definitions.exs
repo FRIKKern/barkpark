@@ -210,7 +210,9 @@ defmodule Barkpark.Repo.Migrations.CollapseDuplicateSchemaDefinitions do
   # WHERE fragment that selects exactly the rows of one group, handling the
   # NULL dataset_id case (which `= $2` would never match).
   defp group_filter(name, nil), do: {"name = $1 AND dataset_id IS NULL", [name]}
-  defp group_filter(name, dataset_id), do: {"name = $1 AND dataset_id = $2", [name, uuid(dataset_id)]}
+
+  defp group_filter(name, dataset_id),
+    do: {"name = $1 AND dataset_id = $2", [name, uuid(dataset_id)]}
 
   # Return the list of substantive columns where survivor and row differ.
   # Comparison is on the raw decoded values Postgrex returns (jsonb -> maps,

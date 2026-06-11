@@ -94,13 +94,22 @@ defmodule BarkparkWeb.LiveScope do
   defp resolve_and_authorize(socket, _params), do: deny(socket)
 
   # Membership + read permission via the canonical gate. Anonymous (nil
-  # token) fails closed — on this surface the conn-side ResolveWorkspace
-  # already 403'd the dead render; this arm is what stops a LIVE patch
-  # from an authorized scope into a foreign one.
+  # token) is allowed ONLY into the seeded Default workspace — the
+  # socket-side mirror of ResolveWorkspace's :allow_anonymous_default
+  # (P3): the flat Studio's anonymous demo/dev posture carried onto its
+  # scoped successor. Any other anonymous scope fails closed, and this
+  # arm is what stops a LIVE patch from an authorized scope into a
+  # foreign one.
   defp authorize_read(socket, ws) do
     case socket.assigns[:api_token] do
-      %Barkpark.Auth.ApiToken{} = token -> Tenancy.Auth.authorize(token, ws.id, :read)
-      _ -> {:error, :forbidden}
+      %Barkpark.Auth.ApiToken{} = token ->
+        Tenancy.Auth.authorize(token, ws.id, :read)
+
+      _ ->
+        case Tenancy.get_default_workspace() do
+          %{id: id} when id == ws.id -> :ok
+          _ -> {:error, :forbidden}
+        end
     end
   end
 

@@ -111,9 +111,11 @@ defmodule Barkpark.Repo.Migrations.W7aTaskEdges do
   def down do
     drop_if_exists index(:task_edges, [:to_id, :kind])
     drop_if_exists index(:task_edges, [:from_id, :kind])
+
     drop_if_exists index(:task_edges, [:from_id, :to_id, :kind],
                      name: :task_edges_from_to_kind_uniq
                    )
+
     drop table(:task_edges)
   end
 end

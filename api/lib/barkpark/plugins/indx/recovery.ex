@@ -86,9 +86,7 @@ defmodule Barkpark.Plugins.Indx.Recovery do
         |> Enum.each(fn {scope, dataset} ->
           case Indexer.restore_pointer(scope, dataset) do
             :ok ->
-              Logger.info(
-                "Indx.Recovery: restored pointer scope=#{scope} dataset=#{dataset}"
-              )
+              Logger.info("Indx.Recovery: restored pointer scope=#{scope} dataset=#{dataset}")
 
             :noop ->
               :ok
@@ -100,7 +98,10 @@ defmodule Barkpark.Plugins.Indx.Recovery do
       {:error, reason} ->
         # Indx down / unconfigured. The first edit after a restart triggers
         # the IndexerWorker upsert → rebuild self-heal, so this is benign.
-        Logger.debug("Indx.Recovery: get_user_datasets failed, skipping recovery: #{inspect(reason)}")
+        Logger.debug(
+          "Indx.Recovery: get_user_datasets failed, skipping recovery: #{inspect(reason)}"
+        )
+
         :ok
     end
   rescue

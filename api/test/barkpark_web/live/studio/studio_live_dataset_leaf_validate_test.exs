@@ -24,6 +24,11 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
     * the seeded Default project owns "production" — a valid nav there is NOT
       redirected (the project_has_dataset? semantics hold for the seeded slug).
 
+  P3 (Scoped-by-URL cutover): the only Studio mount is the scoped live_session,
+  and the URL names the resolved project — these tests mount
+  `/w/acme/p/blog/studio/:leaf` directly (the token holds an acme membership),
+  and the push_patch target carries the same scoped prefix.
+
   LiveViewTest + compile. Full live-browser verification is the orchestrator's gate.
   """
   use BarkparkWeb.ConnCase, async: false
@@ -37,12 +42,18 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
 
   @dataset "production"
 
+  # The scoped-canonical form for the acme/blog project under test. NOT
+  # ConnCase.scoped_studio/1 (that prefixes the Default workspace) — the whole
+  # point here is which project the URL resolves, and it must be acme/blog.
+  defp scoped(path) when is_binary(path), do: "/w/acme/p/blog" <> path
+
   setup %{conn: conn} do
     default_ws = Tenancy.get_default_workspace()
 
-    # A MEMBER workspace + project whose datasets we control. Slug "acme" sorts
-    # before "default", so `list_workspaces_for/1` (slug-ordered) makes acme/blog
-    # the mount-default scope — the resolved `current_project` in handle_params.
+    # A MEMBER workspace + project whose datasets we control. Since P3 the
+    # scoped URL names the resolved scope — `/w/acme/p/blog/...` makes
+    # acme/blog the `current_project` LiveScope hands to handle_params; the
+    # token's acme membership authorizes the mount.
     {:ok, acme_ws} = Tenancy.create_workspace(%{slug: "acme", name: "Acme"})
     {:ok, acme_blog} = Tenancy.create_project(acme_ws, %{slug: "blog", name: "Blog"})
 
@@ -77,20 +88,20 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
       conn: conn,
       acme_blog: acme_blog
     } do
-      # The mount-default scope is acme/blog (slug-first member workspace).
-      # "secret-ds" is not one of blog's datasets → handle_params must push_patch
-      # to blog's default ("production"), NOT leave the socket on the bogus leaf.
-      # A push_patch raised from the initial (disconnected) handle_params surfaces
-      # as a {:live_redirect, …} that live/2 returns as {:error, …}; the redirect
-      # TARGET is the assertion — it must point at the project's default dataset,
-      # never the bogus leaf.
-      assert {:error, {:live_redirect, %{to: to}}} = live(conn, "/studio/secret-ds")
+      # The URL-resolved scope is acme/blog. "secret-ds" is not one of blog's
+      # datasets → handle_params must push_patch to blog's default
+      # ("production"), NOT leave the socket on the bogus leaf. A push_patch
+      # raised from the initial (disconnected) handle_params surfaces as a
+      # {:live_redirect, …} that live/2 returns as {:error, …}; the redirect
+      # TARGET is the assertion — it must point at the project's default
+      # dataset (scoped form since P3), never the bogus leaf.
+      assert {:error, {:live_redirect, %{to: to}}} = live(conn, scoped("/studio/secret-ds"))
 
-      assert to == "/studio/production",
+      assert to == scoped("/studio/production"),
              "handle_params must redirect an unowned dataset leaf to the project's default, " <>
                "got #{inspect(to)}"
 
-      refute to == "/studio/secret-ds",
+      refute to =~ "/studio/secret-ds",
              "the bogus leaf must never become the navigation target"
 
       # Following the redirect lands on the validated dataset, scoped to blog.
@@ -102,7 +113,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
 
     test "a dataset the project DOES own stays on that leaf and renders", %{conn: conn} do
       # "staging" is one of blog's datasets → no redirect, leaf is authoritative.
-      {:ok, view, html} = live(conn, "/studio/staging")
+      {:ok, view, html} = live(conn, scoped("/studio/staging"))
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -117,7 +128,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
     test "the project's default ('production') is NOT redirected (no loop, seeded slug owned)", %{
       conn: conn
     } do
-      {:ok, view, _html} = live(conn, "/studio/production")
+      {:ok, view, _html} = live(conn, scoped("/studio/production"))
 
       assert :sys.get_state(view.pid).socket.assigns.dataset == "production",
              "navigating to the project's own default dataset must stay put"

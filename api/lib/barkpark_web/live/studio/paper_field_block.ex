@@ -383,7 +383,11 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   end
 
   defp build_field(block) do
-    %Field{name: Map.get(block, "id"), type: Map.get(block, "type"), title: Map.get(block, "label")}
+    %Field{
+      name: Map.get(block, "id"),
+      type: Map.get(block, "type"),
+      title: Map.get(block, "label")
+    }
   end
 
   # A subfield / array-element descriptor. Recurses into nested composites,

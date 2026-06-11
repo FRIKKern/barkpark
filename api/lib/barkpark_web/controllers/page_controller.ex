@@ -2,10 +2,13 @@ defmodule BarkparkWeb.PageController do
   use BarkparkWeb, :controller
 
   def redirect_to_studio(conn, _params) do
-    # The bare-Studio landing dataset. Resolved through Content so the Default
-    # scope's dataset is a single source of truth, not a scattered "production"
-    # literal (Task barkpark-k86v). Re-scoping the URL under /w/:ws/p/:project
-    # is the sibling task barkpark-4tuu.
-    redirect(conn, to: "/studio/#{Barkpark.Content.default_dataset()}")
+    # P3 cutover (Scoped-by-URL): bare / and /studio land on the
+    # session-resolved SCOPED Studio — workspace/project/dataset chosen by
+    # the documented resolution rule (StudioRedirectController), visible in
+    # the address bar instead of silently picked in-socket.
+    case BarkparkWeb.StudioRedirectController.scoped_studio_target(conn, nil) do
+      {:ok, target} -> redirect(conn, to: target)
+      :error -> redirect(conn, to: "/login")
+    end
   end
 end

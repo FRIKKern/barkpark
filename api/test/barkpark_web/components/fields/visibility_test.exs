@@ -14,7 +14,10 @@ defmodule BarkparkWeb.Components.Fields.VisibilityTest do
     end
 
     test "non-map doc → visible (defensive default)" do
-      assert Visibility.visible?(%{"visibleWhen" => %{"field" => "x", "operator" => "eq", "value" => 1}}, nil) ==
+      assert Visibility.visible?(
+               %{"visibleWhen" => %{"field" => "x", "operator" => "eq", "value" => 1}},
+               nil
+             ) ==
                true
     end
 
@@ -99,7 +102,13 @@ defmodule BarkparkWeb.Components.Fields.VisibilityTest do
     end
 
     test "walks through array → flat list of leaf values" do
-      f = %{"visibleWhen" => %{"field" => "subjects.subject.subjectCode", "operator" => "in", "value" => ["REL"]}}
+      f = %{
+        "visibleWhen" => %{
+          "field" => "subjects.subject.subjectCode",
+          "operator" => "in",
+          "value" => ["REL"]
+        }
+      }
 
       doc = %{
         "subjects" => [
@@ -112,7 +121,10 @@ defmodule BarkparkWeb.Components.Fields.VisibilityTest do
       # But `non_empty` proves the walk found values.
       assert Visibility.visible?(f, doc) == false
 
-      f2 = %{"visibleWhen" => %{"field" => "subjects.subject.subjectCode", "operator" => "non_empty"}}
+      f2 = %{
+        "visibleWhen" => %{"field" => "subjects.subject.subjectCode", "operator" => "non_empty"}
+      }
+
       assert Visibility.visible?(f2, doc) == true
 
       f3 = %{
@@ -137,7 +149,9 @@ defmodule BarkparkWeb.Components.Fields.VisibilityTest do
         }
       }
 
-      assert Visibility.visible?(field, %{"audienceCodes" => [%{"audienceCodeValue" => "01"}]}) == true
+      assert Visibility.visible?(field, %{"audienceCodes" => [%{"audienceCodeValue" => "01"}]}) ==
+               true
+
       assert Visibility.visible?(field, %{"audienceCodes" => []}) == false
       assert Visibility.visible?(field, %{}) == false
     end

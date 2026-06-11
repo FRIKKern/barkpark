@@ -17,6 +17,13 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
   document but NEVER B's. LiveViewTest + compile only — full live-browser
   verification of the desk is the orchestrator's gate (see what-to-click in
   the subagent return).
+
+  P3 (Scoped-by-URL cutover): the only Studio mount is the scoped
+  live_session, so mounts use `scoped_studio/1` (Default scope) or the
+  explicit `/w/<ws>/p/<proj>` form. A workspace switch is now a push_patch
+  to the NEW scope's canonical URL — tests follow the navigation
+  (`assert_patch` + fresh mount of the patched scope) instead of asserting
+  in-place assign flips.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -82,12 +89,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
       )
 
     {:ok,
-     conn: conn,
-     default_ws: default_ws,
-     ws_a: ws_a,
-     proj_a: proj_a,
-     ws_b: ws_b,
-     proj_b: proj_b}
+     conn: conn, default_ws: default_ws, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b}
   end
 
   test "desk scoped to workspace A lists A's doc and NOT workspace B's", %{
@@ -95,16 +97,23 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     ws_a: ws_a,
     proj_a: proj_a
   } do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
 
     # Switch the socket scope to workspace A (mirrors the s5 switcher click).
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
+    # P3: the switch is a push_patch to the NEW scope's canonical URL.
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+      "workspace" => ws_a.slug
+    })
 
-    # Drill into the `post` desk so a :document_type_list pane is built.
-    {:ok, view, html} = live(conn, "/studio/#{@dataset}/post")
-    # The fresh mount defaults to Default scope; re-switch then re-navigate so
-    # the desk rebuild runs under workspace A's scope.
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
+    patched = assert_patch(view)
+    assert patched =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/"
+
+    # Follow the navigation: the switch lands on A's scope ROOT
+    # (reset_nav_for_switch), so drill into the `post` desk by mounting the
+    # new scope's desk URL — that builds the :document_type_list pane under
+    # workspace A's URL-resolved scope.
+    {:ok, view, html} =
+      live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}/post")
 
     # Inspect the rebuilt pane assigns directly — the authoritative check.
     assigns = :sys.get_state(view.pid).socket.assigns
@@ -133,8 +142,16 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     ws_a: ws_a,
     proj_a: proj_a
   } do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
+
+    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{
+      "workspace" => ws_a.slug
+    })
+
+    # P3: the switch navigates — follow the patch so handle_params +
+    # LiveScope have re-resolved the scope from the new URL before we
+    # inspect the socket.
+    assert assert_patch(view) =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/"
 
     socket = :sys.get_state(view.pid).socket
     opts = BarkparkWeb.ScopeHelpers.scope_opts(socket)
@@ -150,15 +167,14 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
   # scope it offers A's `post` doc but NEVER B's.
   test "the secondary-doc picker is workspace-scoped (no foreign workspace doc)", %{
     conn: conn,
-    ws_a: ws_a
+    ws_a: ws_a,
+    proj_a: proj_a
   } do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}")
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
-
-    # Open the secondary-doc picker after navigating into an editor so
-    # `editor_type` is set; navigate to A's doc, then open the picker.
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/post/post-a")
-    render_change(element(view, ~s(form[phx-change="switch-workspace"])), %{"workspace" => ws_a.slug})
+    # P3: workspace A's scope comes from the URL, not an in-socket switch —
+    # mount the editor for A's doc directly on A's scoped surface so
+    # `editor_type` is set, then open the picker.
+    {:ok, view, _html} =
+      live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}/post/post-a")
 
     render_click(view, "open-secondary-picker", %{})
 

@@ -113,7 +113,7 @@ defmodule Barkpark.Media.Access do
   defp delivery_ok?("private", auth, _) when auth, do: true
   defp delivery_ok?("private", _, _), do: false
   defp delivery_ok?(_, auth, _) when auth, do: true
-  defp delivery_ok?( _, _, _), do: false
+  defp delivery_ok?(_, _, _), do: false
 
   defp signed_for?(conn, %MediaFile{id: id}) do
     path = conn.request_path

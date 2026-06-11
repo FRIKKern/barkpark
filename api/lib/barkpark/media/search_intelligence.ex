@@ -19,7 +19,14 @@ defmodule Barkpark.Media.SearchIntelligence do
   def prune(opts \\ []), do: Intelligence.prune(opts)
 
   def record(scope, params, total, duration_ms, opts \\ []) when is_binary(scope) do
-    Intelligence.record(@surface, scope, context_from_params(scope, params), total, duration_ms, opts)
+    Intelligence.record(
+      @surface,
+      scope,
+      context_from_params(scope, params),
+      total,
+      duration_ms,
+      opts
+    )
   end
 
   def suggestions(scope, actor_key, prefix \\ nil, opts \\ []) when is_binary(scope) do
@@ -75,7 +82,9 @@ defmodule Barkpark.Media.SearchIntelligence do
 
   defp parse_offset(params) do
     case params["offset"] do
-      nil -> 0
+      nil ->
+        0
+
       value ->
         case Integer.parse(to_string(value)) do
           {n, _} when n >= 0 -> n

@@ -78,7 +78,11 @@ defmodule BarkparkWeb.Contract.SearchSynonymsTest do
     conn =
       conn
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
-      |> get("/v1/data/search/test/synonyms/preview", %{"q" => "hero", "from" => "hero", "to" => "phoenix"})
+      |> get("/v1/data/search/test/synonyms/preview", %{
+        "q" => "hero",
+        "from" => "hero",
+        "to" => "phoenix"
+      })
 
     preview = json_response(conn, 200)["result"]
     assert Map.has_key?(preview, "beforeCount")

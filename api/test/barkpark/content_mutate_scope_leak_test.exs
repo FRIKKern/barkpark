@@ -152,7 +152,10 @@ defmodule Barkpark.ContentMutateScopeLeakTest do
       {ws_a, proj_a} = make_scope("unp-a", "up-a")
       {ws_b, _proj_b} = make_scope("unp-b", "up-b")
       _a = create_draft(@doc_id, "A's draft", ws_a, proj_a)
-      {:ok, _} = Content.publish_document(@doc_id, @type_name, @shared_dataset, workspace_id: ws_a.id)
+
+      {:ok, _} =
+        Content.publish_document(@doc_id, @type_name, @shared_dataset, workspace_id: ws_a.id)
+
       %{ws_a: ws_a, ws_b: ws_b}
     end
 
@@ -207,15 +210,13 @@ defmodule Barkpark.ContentMutateScopeLeakTest do
     end
 
     test "reference_title scoped to A resolves A's title, never B's", %{ws_a: ws_a} do
-      assert Content.reference_title(@doc_id, @type_name, @shared_dataset,
-               workspace_id: ws_a.id
-             ) == "Title in A"
+      assert Content.reference_title(@doc_id, @type_name, @shared_dataset, workspace_id: ws_a.id) ==
+               "Title in A"
     end
 
     test "reference_title scoped to B resolves B's title", %{ws_b: ws_b} do
-      assert Content.reference_title(@doc_id, @type_name, @shared_dataset,
-               workspace_id: ws_b.id
-             ) == "Title in B"
+      assert Content.reference_title(@doc_id, @type_name, @shared_dataset, workspace_id: ws_b.id) ==
+               "Title in B"
     end
   end
 

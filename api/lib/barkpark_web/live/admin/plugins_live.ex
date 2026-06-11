@@ -259,8 +259,12 @@ defmodule BarkparkWeb.Admin.PluginsLive do
   # callback can't crash the admin LV.
   defp plugin_has_settings?(module) do
     cond do
-      not Code.ensure_loaded?(module) -> false
-      not function_exported?(module, :settings_schema, 0) -> false
+      not Code.ensure_loaded?(module) ->
+        false
+
+      not function_exported?(module, :settings_schema, 0) ->
+        false
+
       true ->
         try do
           case module.settings_schema() do

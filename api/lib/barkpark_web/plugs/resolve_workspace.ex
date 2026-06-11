@@ -29,6 +29,19 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   (anonymous read of a shared scope). The flag is set ONLY by RequireShareScope,
   ONLY on an exact shared-scope match; without it (the default everywhere) this
   plug runs its membership gate exactly as before.
+
+  ## Anonymous-Default allowance (P3 of Scoped-by-URL)
+
+  `plug ResolveWorkspace, allow_anonymous_default: true` lets an ANONYMOUS
+  conn resolve the seeded **Default workspace only** — the posture the flat
+  Studio always had (anonymous demo/dev access to Default), carried onto its
+  scoped successor so the P3 flat→scoped 302 doesn't break the public demo
+  link or tokenless dev. Strictly bounded: token-present requests still go
+  through the membership gate unchanged, and an anonymous request for any
+  NON-Default workspace still fails closed. Opt-in per pipeline — every
+  pipeline that doesn't pass the option keeps the hard fail-closed gate. The
+  pass-through is marked `assigns[:anonymous_default_read] = true` so
+  downstream surfaces can tell it from a member resolve.
   """
 
   import Plug.Conn
@@ -40,24 +53,40 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
 
   def call(%{assigns: %{share_public: true}} = conn, _opts), do: conn
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
     slug = conn.path_params["workspace_slug"]
 
     case slug && Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
-        authorize(conn, workspace)
+        authorize(conn, workspace, opts)
 
       _ ->
         halt_envelope(conn, {:error, :not_found})
     end
   end
 
-  defp authorize(conn, workspace) do
+  defp authorize(conn, workspace, opts) do
     token = conn.assigns[:api_token]
 
-    case TenancyAuth.authorize(token, workspace.id, :read) do
-      :ok -> assign(conn, :current_workspace, workspace)
-      {:error, :forbidden} -> halt_envelope(conn, {:error, :forbidden})
+    cond do
+      TenancyAuth.authorize(token, workspace.id, :read) == :ok ->
+        assign(conn, :current_workspace, workspace)
+
+      is_nil(token) and Keyword.get(opts, :allow_anonymous_default, false) and
+          default_workspace?(workspace) ->
+        conn
+        |> assign(:current_workspace, workspace)
+        |> assign(:anonymous_default_read, true)
+
+      true ->
+        halt_envelope(conn, {:error, :forbidden})
+    end
+  end
+
+  defp default_workspace?(workspace) do
+    case Tenancy.get_default_workspace() do
+      %{id: id} -> id == workspace.id
+      _ -> false
     end
   end
 

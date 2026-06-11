@@ -68,7 +68,14 @@ defmodule Barkpark.Repo.Migrations.ExtendWorkspaceDeleteCascadeTest do
       VALUES
         (gen_random_uuid(), $1, $2, $3, '{}', '{}', true, $4, $5, $6, now(), now())
       """,
-      [key, "https://hook/#{key}", dataset.slug, uuid_in(ws.id), uuid_in(project.id), uuid_in(dataset.id)]
+      [
+        key,
+        "https://hook/#{key}",
+        dataset.slug,
+        uuid_in(ws.id),
+        uuid_in(project.id),
+        uuid_in(dataset.id)
+      ]
     )
   end
 
@@ -187,7 +194,8 @@ defmodule Barkpark.Repo.Migrations.ExtendWorkspaceDeleteCascadeTest do
     n
   end
 
-  defp delete_workspace!(ws), do: Repo.query!("DELETE FROM workspaces WHERE id = $1", [uuid_in(ws.id)])
+  defp delete_workspace!(ws),
+    do: Repo.query!("DELETE FROM workspaces WHERE id = $1", [uuid_in(ws.id)])
 
   describe "workspace delete cascades the seven peripheral tables (up)" do
     test "every owned row in the seven tables is GONE; no NULL-scope orphan" do

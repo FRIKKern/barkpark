@@ -183,7 +183,11 @@ defmodule Barkpark.Media.Search do
   end
 
   defp join_scope_dataset(query, dataset, dataset_id) when is_binary(dataset_id) do
-    where(query, [d], d.dataset_id == ^dataset_id or (is_nil(d.dataset_id) and d.dataset == ^dataset))
+    where(
+      query,
+      [d],
+      d.dataset_id == ^dataset_id or (is_nil(d.dataset_id) and d.dataset == ^dataset)
+    )
   end
 
   defp join_scope_dataset(query, dataset, _dataset_id) do
@@ -256,7 +260,10 @@ defmodule Barkpark.Media.Search do
         |> case do
           {:ok, cursor_id, cursor_at} ->
             ordered
-            |> where([m, _d], m.inserted_at < ^cursor_at or (m.inserted_at == ^cursor_at and m.id < ^cursor_id))
+            |> where(
+              [m, _d],
+              m.inserted_at < ^cursor_at or (m.inserted_at == ^cursor_at and m.id < ^cursor_id)
+            )
             |> Repo.all()
 
           _ ->

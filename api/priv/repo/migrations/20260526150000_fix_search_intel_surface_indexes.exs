@@ -94,15 +94,15 @@ defmodule Barkpark.Repo.Migrations.FixSearchIntelSurfaceIndexes do
     )
 
     drop_if_exists index(:search_intel_crystals, [:surface, :scope, :period, :period_start],
-      name: :search_intel_crystals_popular_idx
-    )
+                     name: :search_intel_crystals_popular_idx
+                   )
 
     execute("DROP INDEX IF EXISTS search_intel_events_query_normalized_prefix_idx", "")
     execute("DROP INDEX IF EXISTS search_intel_events_suggest_recent_idx", "")
 
     drop_if_exists unique_index(:search_intel_merge_patterns, [],
-      name: :search_intel_merge_patterns_unique_idx
-    )
+                     name: :search_intel_merge_patterns_unique_idx
+                   )
 
     create unique_index(
              :search_intel_merge_patterns,
@@ -110,7 +110,9 @@ defmodule Barkpark.Repo.Migrations.FixSearchIntelSurfaceIndexes do
              name: :media_search_merge_patterns_unique_idx
            )
 
-    drop_if_exists unique_index(:search_intel_crystals, [], name: :search_intel_crystals_unique_idx)
+    drop_if_exists unique_index(:search_intel_crystals, [],
+                     name: :search_intel_crystals_unique_idx
+                   )
 
     create unique_index(
              :search_intel_crystals,

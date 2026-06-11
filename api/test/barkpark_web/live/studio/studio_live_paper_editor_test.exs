@@ -72,7 +72,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "View/Edit toggle flips the pane into the block editor", %{conn: conn} do
-    {:ok, view, html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
 
     # View mode by default — the read-only stream, no edit controls.
     assert html =~ ~s(data-test-id="paper-edit-toggle")
@@ -88,7 +88,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "rich-text blocks render a <bp-paper-editor> WC carrying the block JSON",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     edit_html = open_editor(view)
 
     # Each rich-text block (heading / paragraph) is now edited by the
@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a paper-op patch-block from the WC hook applies + persists; same pid (no remount)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     pid_before = view.pid
@@ -146,7 +146,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "adding a block appends a new block", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     before_count = Content.paper_blocks(@slug, @dataset) |> length()
@@ -167,7 +167,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "deleting a block removes it", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     view
@@ -183,7 +183,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "reordering a block changes the order", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     # Initial order: h-1, p-intro, p-second.
@@ -224,7 +224,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "move up/down buttons disable at the boundaries (first ▲ / last ▼)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     edit_html = open_editor(view)
 
     # Whole <button> element (start tag) for a given move direction inside a
@@ -253,7 +253,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "moving up preserves the moved block's content (same id, same body)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     before = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-second"))
@@ -271,7 +271,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "the drag path (paper-move-block-to) reorders to a chosen anchor",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     # A drop event from the BarkparkPaperSortable hook: drop p-second AFTER h-1.
@@ -283,7 +283,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "the drag path with an empty after-id moves the block to the front",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     # Empty after-id ⇒ move-to-front (after: nil).
@@ -299,7 +299,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "View → Edit → View round-trip re-populates the read-only stream (no remount)",
        %{conn: conn} do
-    {:ok, view, html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     pid_before = view.pid
 
     # View mode: the read-only stream shows the blocks' text, no edit controls.
@@ -334,7 +334,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "edit made in Edit mode is visible in View after toggling back (re-streams CURRENT blocks)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     pid_before = view.pid
 
     # → Edit, patch the intro paragraph via the WC's paper-op path, then → View.
@@ -379,7 +379,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
           %{"value" => "warning", "label" => "Warning"}
         ]
       },
-      %{"id" => "f-dt", "type" => "field-datetime", "label" => "When", "value" => "2026-05-24T10:00"},
+      %{
+        "id" => "f-dt",
+        "type" => "field-datetime",
+        "label" => "When",
+        "value" => "2026-05-24T10:00"
+      },
       %{"id" => "f-color", "type" => "field-color", "label" => "Accent", "value" => "#4f46e5"},
       %{
         "id" => "f-ref",
@@ -403,7 +408,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "Edit mode renders a native control + BarkparkFieldBlockBridge for each field-* block",
        %{conn: conn} do
     seed_field_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@field_slug}"))
     edit_html = open_editor(view)
 
     # Each field block gets a stable wrapper mounted with the bridge hook,
@@ -435,7 +440,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a paper-op patch-block on a field-string block persists the new value", %{conn: conn} do
     seed_field_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@field_slug}"))
     open_editor(view)
 
     render_hook(view, "paper-op", %{
@@ -454,7 +459,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "a paper-op patch-block on a field-boolean coerces + persists a real boolean",
        %{conn: conn} do
     seed_field_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@field_slug}"))
     open_editor(view)
 
     # The bridge sends a real JS boolean; assert the bool path. Also assert the
@@ -480,7 +485,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a {:paper_block} broadcast from another source streams into the editor (edits are ops)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     pid_before = view.pid
@@ -514,7 +519,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "Edit mode renders the bp-reference-picker + bp-media-picker picker WCs",
        %{conn: conn} do
     seed_field_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@field_slug}"))
     edit_html = open_editor(view)
 
     # field-reference mounts a bp-reference-picker inside the standard bridge
@@ -540,7 +545,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "a paper-op patch-block on a field-reference persists the new ref doc id",
        %{conn: conn} do
     seed_field_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@field_slug}"))
     open_editor(view)
 
     # The bp-reference-picker emits a bubbling `bp-change` CustomEvent with
@@ -564,7 +569,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "a paper-op patch-block on a field-image persists the new image URL",
        %{conn: conn} do
     seed_field_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@field_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@field_slug}"))
     open_editor(view)
 
     # The bp-media-picker emits the same `bp-change` event carrying the image
@@ -617,7 +622,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
       }
     ]
 
-    {:ok, paper} = Content.upsert_paper(%{slug: @ref_view_slug, dataset: @dataset, blocks: blocks})
+    {:ok, paper} =
+      Content.upsert_paper(%{slug: @ref_view_slug, dataset: @dataset, blocks: blocks})
+
     paper
   end
 
@@ -625,7 +632,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     seed_author!("ref-a1", "Solveig Aamodt")
     seed_ref_view_paper!("ref-a1")
 
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@ref_view_slug}")
+    {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@ref_view_slug}"))
 
     # The streamed read-only View shows the resolved title for the reference
     # row; the raw doc id never appears as the displayed value.
@@ -638,7 +645,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     # No author doc seeded for "ghost-ref" → reference_title returns the id.
     seed_ref_view_paper!("ghost-ref")
 
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@ref_view_slug}")
+    {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@ref_view_slug}"))
 
     assert html =~ "ghost-ref"
   end
@@ -695,14 +702,16 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
       }
     ]
 
-    {:ok, paper} = Content.upsert_paper(%{slug: @composite_slug, dataset: @dataset, blocks: blocks})
+    {:ok, paper} =
+      Content.upsert_paper(%{slug: @composite_slug, dataset: @dataset, blocks: blocks})
+
     paper
   end
 
   test "Edit mode renders a PaperFieldBlock LiveComponent for each composite block",
        %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@composite_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@composite_slug}"))
     edit_html = open_editor(view)
 
     # Each composite block renders the nested LiveComponent wrapper, keyed by
@@ -737,7 +746,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "an inner composite change → handle_info({:paper_op,…}) persists the merged value",
        %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@composite_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@composite_slug}"))
     open_editor(view)
 
     pid_before = view.pid
@@ -771,7 +780,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "an inner localizedText change persists the merged %{lang => text} value",
        %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@composite_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@composite_slug}"))
     open_editor(view)
 
     view
@@ -788,7 +797,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "an inner codelist change persists the selected code", %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@composite_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@composite_slug}"))
     open_editor(view)
 
     # codelist renders with path="value", so the code arrives as %{"value" => …}.
@@ -801,7 +810,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
     render(view)
 
-    block = Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-audience"))
+    block =
+      Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-audience"))
+
     assert block["type"] == "codelist"
     assert block["value"] == "02"
     assert block["codelistId"] == "onixedit:audience"
@@ -809,24 +820,28 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "an arrayOf reorder (move_up) persists the reordered list", %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@composite_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@composite_slug}"))
     open_editor(view)
 
     # Initial order: ["history", "norway"]. Moving row index 1 up swaps them.
     view
-    |> element(~s([data-block-id="c-keywords"] button[phx-value-action="move_up"][phx-value-index="1"]))
+    |> element(
+      ~s([data-block-id="c-keywords"] button[phx-value-action="move_up"][phx-value-index="1"])
+    )
     |> render_click()
 
     render(view)
 
-    block = Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-keywords"))
+    block =
+      Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-keywords"))
+
     assert block["type"] == "arrayOf"
     assert block["value"] == ["norway", "history"]
   end
 
   test "an arrayOf add_row appends an empty element", %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@composite_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@composite_slug}"))
     open_editor(view)
 
     view
@@ -835,7 +850,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
     render(view)
 
-    block = Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-keywords"))
+    block =
+      Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1["id"] == "c-keywords"))
+
     assert block["value"] == ["history", "norway", ""]
   end
 
@@ -873,14 +890,16 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
       }
     ]
 
-    {:ok, paper} = Content.upsert_paper(%{slug: @arraycomp_slug, dataset: @dataset, blocks: blocks})
+    {:ok, paper} =
+      Content.upsert_paper(%{slug: @arraycomp_slug, dataset: @dataset, blocks: blocks})
+
     paper
   end
 
   test "an inner-change on a composite element subfield inside an arrayOf updates the right nested value + persists",
        %{conn: conn} do
     seed_arraycomp_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@arraycomp_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@arraycomp_slug}"))
     open_editor(view)
 
     pid_before = view.pid
@@ -913,7 +932,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "editing two subfields of the same arrayOf composite element in one change merges both",
        %{conn: conn} do
     seed_arraycomp_paper!()
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@arraycomp_slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@arraycomp_slug}"))
     open_editor(view)
 
     view
@@ -973,7 +992,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   defp addable_block_valid?(%{"type" => "field-boolean", "value" => false}), do: true
   defp addable_block_valid?(%{"type" => "field-datetime", "value" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-color", "value" => "#000000"}), do: true
-  defp addable_block_valid?(%{"type" => "field-select", "options" => o}) when length(o) == 2, do: true
+
+  defp addable_block_valid?(%{"type" => "field-select", "options" => o}) when length(o) == 2,
+    do: true
+
   defp addable_block_valid?(%{"type" => "field-reference", "refType" => _}), do: true
   defp addable_block_valid?(%{"type" => "field-image", "value" => ""}), do: true
 
@@ -996,7 +1018,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     test "adding a #{type} block via the add-block UI appends a valid block", %{conn: conn} do
       type = unquote(type)
 
-      {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+      {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
       open_editor(view)
 
       before_count = Content.paper_blocks(@slug, @dataset) |> length()
@@ -1043,10 +1065,11 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     |> render_submit(Map.put(params, "block_id", id))
   end
 
-  defp block_after_edit(id), do: Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == id))
+  defp block_after_edit(id),
+    do: Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == id))
 
   test "editing an eyebrow block writes a flat text string", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "eyebrow")
 
@@ -1058,7 +1081,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "editing a byline block splits ' · ' into an items list", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "byline")
 
@@ -1070,7 +1093,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "editing an ingress block wraps text in an inline content array", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "ingress")
 
@@ -1082,7 +1105,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "editing a pullquote block wraps text in an inline content array", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "pullquote")
 
@@ -1095,7 +1118,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a byline edit pre-fills its input from the items list joined by ' · '",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "byline")
     submit_edit_form(view, id, %{"text" => "Ada · Grace"})
@@ -1114,7 +1137,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "adding a diagram block yields the flat empty source+caption default",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "diagram")
 
@@ -1127,7 +1150,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "editing a diagram block writes flat source + caption strings",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "diagram")
 
@@ -1142,7 +1165,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a diagram edit pre-fills its source textarea + caption input",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "diagram")
     submit_edit_form(view, id, %{"source" => "graph TD", "caption" => "Fig 1"})
@@ -1169,7 +1192,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "a callout block auto-saves on change (no Save submit)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "callout")
 
@@ -1188,7 +1211,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   end
 
   test "a code block auto-saves on change (no Save submit)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "code")
 
@@ -1202,7 +1225,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a diagram block auto-saves source + caption on change (no Save submit)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "diagram")
 
@@ -1216,7 +1239,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "autosave with an unknown/missing block_id is a quiet no-op (never crashes)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     pid_before = view.pid
 
@@ -1236,7 +1259,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   # persists exactly as before — autosave is purely additive.
   test "the explicit Save still persists a diagram edit (paper-edit-block fallback)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "diagram")
 
@@ -1250,7 +1273,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a freshly-added field block can be removed via its delete control (remove-block)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     # Add a field-string, then delete it — the per-block × control fires a
@@ -1282,7 +1305,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a paper-slash-insert inserts a heading AFTER the anchor block + persists",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     # Initial order: h-1, p-intro, p-second.
@@ -1315,7 +1338,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "a paper-slash-insert with a blank afterId appends at the end",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@slug}")
+    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
     open_editor(view)
 
     before_count = Content.paper_blocks(@slug, @dataset) |> length()
@@ -1429,7 +1452,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     register_flat_codelist!()
     seed_codelist_view_paper!("01")
 
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_view_slug}")
+    {:ok, _view, html} =
+      live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@codelist_view_slug}"))
 
     # The streamed read-only View shows the resolved label, not the bare code.
     assert html =~ "Distinctive title"
@@ -1442,7 +1466,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     # No codelist registered → codelist_label returns the code unchanged.
     seed_codelist_view_paper!("99")
 
-    {:ok, _view, html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_view_slug}")
+    {:ok, _view, html} =
+      live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@codelist_view_slug}"))
 
     assert html =~ "99"
   end
@@ -1452,7 +1477,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     register_flat_codelist!()
     seed_codelist_view_paper!("01")
 
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_view_slug}")
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@codelist_view_slug}"))
+
     edit_html = open_editor(view)
 
     # The flat block hosts the native CodelistField <select> (not the disabled
@@ -1479,7 +1506,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     register_tree_codelist!()
     seed_codelist_tree_paper!("FBA")
 
-    {:ok, view, _html} = live(conn, "/studio/#{@dataset}/paper/#{@codelist_tree_slug}")
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@codelist_tree_slug}"))
+
     edit_html = open_editor(view)
 
     # PaperFieldBlock hosts the stateful TreeCodelistField inside its form.
@@ -1497,7 +1526,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     # A tree-row select propagates up: TreeCodelistField notifies the LiveView,
     # which send_updates the PaperFieldBlock, which persists the patch-block.
     view
-    |> element(~s([data-block-id="cl-tree"] button[phx-click="tree_node_select"][phx-value-code="FB"]))
+    |> element(
+      ~s([data-block-id="cl-tree"] button[phx-click="tree_node_select"][phx-value-code="FB"])
+    )
     |> render_click()
 
     render(view)

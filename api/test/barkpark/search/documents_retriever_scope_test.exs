@@ -32,10 +32,20 @@ defmodule Barkpark.Search.DocumentsRetrieverScopeTest do
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "a-hit", "title" => "#{@term} from A"}, @ds, scope_a)
+      Content.create_document(
+        "post",
+        %{"doc_id" => "a-hit", "title" => "#{@term} from A"},
+        @ds,
+        scope_a
+      )
 
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "b-hit", "title" => "#{@term} from B"}, @ds, scope_b)
+      Content.create_document(
+        "post",
+        %{"doc_id" => "b-hit", "title" => "#{@term} from B"},
+        @ds,
+        scope_b
+      )
 
     {scope_a, scope_b}
   end

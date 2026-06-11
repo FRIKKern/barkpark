@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: studio-ui | budget: 500tok -->
 # Studio (LiveView)
 
-One LiveView — `StudioLive` — manages the whole multi-pane Studio at `/studio`. The file is ~4,800 lines: do NOT read it whole. It opens with a section-index comment; grep the `# ──` banners for the handle_event/handle_info group you need.
+One LiveView — `StudioLive` — manages the whole multi-pane Studio at `/w/:ws/p/:proj/studio/:dataset` (flat `/studio/*` 302s there; `BarkparkWeb.LiveScope` resolves + re-authorizes scope from URL params on every patch). The file is ~4,800 lines: do NOT read it whole. It opens with a section-index comment; grep the `# ──` banners for the handle_event/handle_info group you need.
 
 Layout gotchas:
 - `pane_builder.ex` lives at `lib/barkpark_web/studio/` — NOT `live/studio/`. Same dir holds `presence_state.ex`, `nav.ex`, `dataset_switcher.ex`, `workspace_switcher.ex`.

@@ -29,13 +29,7 @@ defmodule BarkparkWeb.Contract.FederatedSearchMediaScopeTest do
     {ws_a, proj_a, tok_a} = workspace_with_token("a")
     {ws_b, proj_b, tok_b} = workspace_with_token("b")
 
-    {:ok,
-     ws_a: ws_a,
-     proj_a: proj_a,
-     tok_a: tok_a,
-     ws_b: ws_b,
-     proj_b: proj_b,
-     tok_b: tok_b}
+    {:ok, ws_a: ws_a, proj_a: proj_a, tok_a: tok_a, ws_b: ws_b, proj_b: proj_b, tok_b: tok_b}
   end
 
   describe "federated media surface (/w/:ws/p/:project/v1/search :: media)" do
@@ -79,7 +73,15 @@ defmodule BarkparkWeb.Contract.FederatedSearchMediaScopeTest do
       Tenancy.create_project(ws, %{slug: "#{slug_seed}-proj-#{suffix}", name: "Proj #{slug_seed}"})
 
     raw = "fedmedia-#{slug_seed}-#{suffix}"
-    {:ok, _token} = Auth.create_token(raw, "fed media #{slug_seed}", @dataset, ["read", "write", "admin"], ws.id)
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "fed media #{slug_seed}",
+        @dataset,
+        ["read", "write", "admin"],
+        ws.id
+      )
 
     {ws, proj, raw}
   end

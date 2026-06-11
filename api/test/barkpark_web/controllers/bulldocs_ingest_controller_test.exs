@@ -151,8 +151,11 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
         Content.upsert_paper(%{
           slug: slug,
           blocks: [
-            %{"id" => "intro", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Intro."}]}
+            %{
+              "id" => "intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Intro."}]
+            }
           ]
         })
 
@@ -294,7 +297,9 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert pc(paper, "body_html") =~ "Patched intro."
 
       # A single batch delta frame on the per-doc topic.
-      assert_receive {:paper_block, %{op_kind: :batch, block_ids: ["b1", "b2", "intro"], rev: rev}}
+      assert_receive {:paper_block,
+                      %{op_kind: :batch, block_ids: ["b1", "b2", "intro"], rev: rev}}
+
       assert rev == rev0 + 1
     end
 

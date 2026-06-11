@@ -218,7 +218,11 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
         dataset: dataset,
         fields: [%{"name" => "title", "type" => "string"}],
         desk_groups: [
-          %{"name" => "images", "title" => "Images", "filter" => %{"content.bp_asset_kind" => %{"eq" => "image"}}},
+          %{
+            "name" => "images",
+            "title" => "Images",
+            "filter" => %{"content.bp_asset_kind" => %{"eq" => "image"}}
+          },
           %{"name" => "all", "title" => "All", "filter" => %{}}
         ]
       })

@@ -47,7 +47,10 @@ defmodule BarkparkWeb.ScopedPluginSessionTest do
 
     # A second workspace this token is NOT a member of (membership-gate target).
     {:ok, other_ws} =
-      Tenancy.create_workspace(%{slug: "scoped-cookie-other-#{System.unique_integer([:positive])}", name: "Other"})
+      Tenancy.create_workspace(%{
+        slug: "scoped-cookie-other-#{System.unique_integer([:positive])}",
+        name: "Other"
+      })
 
     {:ok, other_proj} = Tenancy.create_project(other_ws, %{slug: "other-proj", name: "Other"})
 
@@ -103,13 +106,32 @@ defmodule BarkparkWeb.ScopedPluginSessionTest do
       assert Jason.decode!(conn.resp_body)["error"]["code"] == "forbidden"
     end
 
-    test "anonymous cookie (no api_token) is 403 on a scoped browser route", %{conn: conn} do
-      conn =
+    # P3 (Scoped-by-URL): ResolveWorkspace now runs with
+    # `allow_anonymous_default: true` on :scoped_browser, so an anonymous
+    # conn passes the WORKSPACE gate for the seeded Default workspace only.
+    # The admin plugin LV stays unreachable: the LiveAuth :admin on_mount
+    # gate halts and redirects to /studio. Non-Default is still a hard 403.
+    test "anonymous cookie (no api_token) never reaches the scoped admin plugin LV", %{
+      conn: conn,
+      other_ws: other_ws,
+      other_proj: other_proj
+    } do
+      # Default workspace: past the workspace gate, bounced by the admin gate.
+      default_conn =
         conn
         |> init_test_session(%{})
         |> get("/w/default/p/default/studio/onixedit/ping")
 
-      assert conn.status == 403
+      assert redirected_to(default_conn) == "/studio"
+      refute default_conn.resp_body =~ @body_marker
+
+      # Any NON-Default workspace: the membership gate still fails closed.
+      other_conn =
+        build_conn()
+        |> init_test_session(%{})
+        |> get("/w/#{other_ws.slug}/p/#{other_proj.slug}/studio/onixedit/ping")
+
+      assert other_conn.status == 403
     end
   end
 

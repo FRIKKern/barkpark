@@ -33,8 +33,17 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
       blocks = [
         %{"id" => "t", "type" => "field-string", "fieldName" => "title", "value" => "My Post"},
         %{"id" => "s", "type" => "field-slug", "fieldName" => "slug", "value" => "my-post"},
-        %{"id" => "i", "type" => "field-image", "fieldName" => "featuredImage", "value" => "/x.jpg"},
-        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "Hello body."}]}
+        %{
+          "id" => "i",
+          "type" => "field-image",
+          "fieldName" => "featuredImage",
+          "value" => "/x.jpg"
+        },
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Hello body."}]
+        }
       ]
 
       content = Projection.project(%{"blocks" => blocks, "rev" => 3}, blocks)
@@ -60,7 +69,10 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
     end
 
     test "a boolean bound block projects a real boolean, not a string" do
-      blocks = [%{"id" => "f", "type" => "field-boolean", "fieldName" => "featured", "value" => true}]
+      blocks = [
+        %{"id" => "f", "type" => "field-boolean", "fieldName" => "featured", "value" => true}
+      ]
+
       content = Projection.project(%{}, blocks)
       assert content["featured"] == true
     end
@@ -123,7 +135,10 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
     end
 
     test "an already-projected body map reuses its free blocks verbatim" do
-      free = [%{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]}]
+      free = [
+        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]}
+      ]
+
       content = %{"title" => "T", "body" => %{"blocks" => free, "html" => "<x>"}}
       blocks = Synthesis.synthesize(@layout, content, @fields)
       # The body region reuses the stored blocks (not a re-wrapped string).

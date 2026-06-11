@@ -89,7 +89,8 @@ defmodule BarkparkWeb.Integration.MutationsTest do
     test "returns 200 + result with operation:publish + persists drafts.X → X", %{conn: conn} do
       _draft = create_draft!("pub-1")
 
-      resp = mutate(conn, %{"mutations" => [%{"publish" => %{"id" => "pub-1", "type" => "post"}}]})
+      resp =
+        mutate(conn, %{"mutations" => [%{"publish" => %{"id" => "pub-1", "type" => "post"}}]})
 
       assert resp.status == 200
       body = json_response(resp, 200)
@@ -98,6 +99,7 @@ defmodule BarkparkWeb.Integration.MutationsTest do
 
       # Post-mutation persistence: draft gone, published exists.
       assert {:error, :not_found} = Content.get_document("drafts.pub-1", "post", "test")
+
       assert {:ok, %{doc_id: "pub-1", status: "published"}} =
                Content.get_document("pub-1", "post", "test")
     end
@@ -122,6 +124,7 @@ defmodule BarkparkWeb.Integration.MutationsTest do
 
       # Published gone, draft restored with the published content.
       assert {:error, :not_found} = Content.get_document("unp-1", "post", "test")
+
       assert {:ok, %{doc_id: "drafts.unp-1", status: "draft"}} =
                Content.get_document("drafts.unp-1", "post", "test")
     end

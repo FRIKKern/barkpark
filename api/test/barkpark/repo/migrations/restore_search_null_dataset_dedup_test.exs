@@ -111,7 +111,11 @@ defmodule Barkpark.Repo.Migrations.RestoreSearchNullDatasetDedupTest do
 
       # Pre-state: the duplicate pair coexists (bug reproduced).
       assert count_synonyms("documents", scope, "kolor", "color", "alt_correction") == 2
-      assert Enum.all?(dataset_ids("documents", scope, "kolor", "color", "alt_correction"), &is_nil/1)
+
+      assert Enum.all?(
+               dataset_ids("documents", scope, "kolor", "color", "alt_correction"),
+               &is_nil/1
+             )
 
       # --- run the migration ---
       assert :ok = migrate_up()

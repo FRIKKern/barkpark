@@ -70,6 +70,7 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
       free = Enum.reject(blocks, &Projection.bound?/1)
 
       assert Enum.map(bound, & &1["fieldName"]) == ["title", "slug", "featuredImage"]
+
       assert Enum.map(bound, & &1["type"]) ==
                ["field-string", "field-slug", "field-image"]
 
@@ -110,7 +111,12 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
       ]
 
       blocks = [
-        %{"id" => "b-title", "type" => "field-string", "fieldName" => "title", "value" => "Original Title"}
+        %{
+          "id" => "b-title",
+          "type" => "field-string",
+          "fieldName" => "title",
+          "value" => "Original Title"
+        }
         | free_blocks
       ]
 
@@ -130,7 +136,12 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
 
       # A Classic form save (the schema-form path → upsert_draft) that ONLY
       # changes the title field. The form map is flat — title + fields, no blocks.
-      form = %{"title" => "Updated Title", "slug" => "", "featuredImage" => "", "status" => "draft"}
+      form = %{
+        "title" => "Updated Title",
+        "slug" => "",
+        "featuredImage" => "",
+        "status" => "draft"
+      }
 
       {:ok, saved, _errs} = Content.upsert_draft(base_doc, "post", schema_for(), form, @dataset)
 
@@ -310,7 +321,13 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
 
       # Now a Classic save that only touches the title — the Exp-P3.1 guard,
       # exercised through the real Beta-then-Classic round trip.
-      form = %{"title" => "Classic Edit", "slug" => "", "featuredImage" => "", "status" => "draft"}
+      form = %{
+        "title" => "Classic Edit",
+        "slug" => "",
+        "featuredImage" => "",
+        "status" => "draft"
+      }
+
       {:ok, saved, _errs} = Content.upsert_draft(after_beta, "post", schema_for(), form, @dataset)
 
       saved_free = Enum.reject(saved.content["blocks"], &Projection.bound?/1)

@@ -153,8 +153,19 @@ defmodule BarkparkWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug BarkparkWeb.Plugs.OptionalSessionToken
-    plug BarkparkWeb.Plugs.ResolveWorkspace
+    # Anonymous resolves the DEFAULT workspace only (P3 cutover — the flat
+    # Studio's public-demo/dev posture carried onto the scoped surface);
+    # every other anonymous scope still fails closed, token paths unchanged.
+    plug BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true
     plug BarkparkWeb.Plugs.ResolveProject
+  end
+
+  # Optional token resolution for browser routes that only REDIRECT (the
+  # flat-Studio 302s, P3): composes after :browser, supplies the
+  # session/dev token the scope-resolution rule keys off. No gating —
+  # anonymous passes through and resolves to the Default workspace.
+  pipeline :soft_token do
+    plug BarkparkWeb.Plugs.OptionalSessionToken
   end
 
   # Public-share variant of :scoped_browser for the gated scoped paper reader
@@ -253,9 +264,12 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.RequireWritePermission
   end
 
-  # Bare /studio and / redirect to the default dataset.
+  # Bare /studio and / redirect to the session-resolved SCOPED Studio
+  # (P3 cutover — see PageController.redirect_to_studio for the
+  # resolution rule). The :soft_token pipeline supplies the optional
+  # session/dev token the resolution keys off.
   scope "/", BarkparkWeb do
-    pipe_through :browser
+    pipe_through [:browser, :soft_token]
     get "/", PageController, :redirect_to_studio
     get "/studio", PageController, :redirect_to_studio
   end
@@ -330,7 +344,7 @@ defmodule BarkparkWeb.Router do
   # `/studio/:dataset/book/:doc_id`. These two redirects keep old deep links
   # working — including the `?tab=…` query string the old editor used.
   scope "/studio/:dataset", BarkparkWeb do
-    pipe_through :browser
+    pipe_through [:browser, :soft_token]
 
     get "/onixedit/book/:doc_id", LegacyRedirectController, :onixedit_book
     get "/onixedit/book/:doc_id/view", LegacyRedirectController, :onixedit_book
@@ -589,23 +603,19 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # ── Studio (LiveView) ─────────────────────────────────────────────────────
-  scope "/studio/:dataset", BarkparkWeb.Studio do
-    pipe_through :browser
+  # ── Flat Studio → scoped 302 (P3 cutover, Scoped-by-URL) ─────────────────
+  # The :studio_public live_session is GONE: /w/:ws/p/:proj/studio/:dataset
+  # (the :scoped_studio session above) is the only Studio mount. Every flat
+  # form 302s to the session-resolved scoped canonical, path + query
+  # preserved — old bookmarks resolve AT LEAST as well as they did when the
+  # workspace was silently picked in-socket, except the choice is now
+  # visible and correctable in the address bar. 302 (never 301): the
+  # resolution is session-dependent and must not be browser-cached.
+  scope "/studio/:dataset", BarkparkWeb do
+    pipe_through [:browser, :soft_token]
 
-    live_session :studio_public,
-      on_mount: [{BarkparkWeb.LiveAuth, :fetch_api_token}],
-      layout: {BarkparkWeb.Layouts, :studio} do
-      live "/", StudioLive
-      live "/media", MediaLive
-      # Task barkpark-7xne — restored after the misjudged route-removal
-      # in commit f1e5a21. The legacy ApiTesterLive is the rich endpoint
-      # docs + form-driven playground; plugin-contributed api_tests/0
-      # specs ride this same UI via Endpoints.all/1's "Plugins" category.
-      live "/api-tester", ApiTesterLive
-
-      live "/*path", StudioLive
-    end
+    get "/", StudioRedirectController, :studio
+    get "/*path", StudioRedirectController, :studio
   end
 
   # ── Meta (SDK handshake) — no auth, no rate limit ───────────────────────
