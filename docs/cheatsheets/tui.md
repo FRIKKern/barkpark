@@ -32,6 +32,7 @@ Launch `barkpark` (no args). Miller columns: structure → doc lists → editor.
 | `enter` | edit field — reference opens a picker; image edits the URL |
 | | text/richText/arrays open a **textarea**: `enter` = newline / new item, `ctrl+s` = confirm |
 | `space` | toggle boolean / cycle select |
+| `enter` on empty slug | pre-fills from the title — `enter` again accepts |
 | `ctrl+s` → `ctrl+p` | save, then publish the draft |
 | `U` | unpublish (back to draft) |
 | `d` | diff draft ↔ published (− published, + draft) |

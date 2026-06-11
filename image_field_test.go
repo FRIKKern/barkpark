@@ -117,3 +117,28 @@ func TestImageFieldCommitSemantics(t *testing.T) {
 		t.Errorf("cleared commit = %q, want empty", got)
 	}
 }
+
+// Slug generation (Sanity's Generate button, TUI form): enter on an EMPTY
+// slug pre-fills the title-derived slug — enter→enter accepts it; a typed
+// value always wins; an existing slug is never overwritten by the prefill.
+func TestSlugEditPrefillsFromTitle(t *testing.T) {
+	m := model{
+		selectedDoc: &Doc{ID: "drafts.p1", Title: "Hello World!", Values: map[string]string{}},
+		editorSchema: &apiclient.Schema{Name: "post", Fields: []Field{
+			{Name: "slug", Title: "Slug", Type: FieldSlug},
+		}},
+		width: 100, height: 40,
+	}
+	m.startFieldEdit()
+	if got := m.textInput.Value(); got != "hello-world" {
+		t.Errorf("empty slug edit prefill = %q, want title-derived", got)
+	}
+
+	// An existing slug prefills itself, not the title derivation.
+	m.editing = false
+	m.selectedDoc.Values["slug"] = "kept-slug"
+	m.startFieldEdit()
+	if got := m.textInput.Value(); got != "kept-slug" {
+		t.Errorf("existing slug prefill = %q, want stored value", got)
+	}
+}

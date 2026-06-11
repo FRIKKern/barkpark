@@ -1163,6 +1163,13 @@ func (m *model) startFieldEdit() tea.Cmd {
 		if field.Type == FieldImage {
 			val, _ = parseImageValue(val)
 		}
+		// Empty slug pre-fills the title-derived slug — the same value the
+		// static render ghosts — so enter→enter ACCEPTS the generation
+		// (Sanity's Generate button, two keypresses here). The [gen] label
+		// annotation finally describes a real behavior.
+		if field.Type == FieldSlug && val == "" && m.selectedDoc != nil {
+			val = toSlug(m.selectedDoc.Title)
+		}
 		m.textInput.SetValue(val)
 		return textinput.Blink
 	case FieldSelect:

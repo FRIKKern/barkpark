@@ -323,19 +323,32 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       assert html =~ ~s(phx-debounce="500")
     end
 
-    test "slug and unknown types hit the text fallback" do
-      for type <- ["slug", "weirdo"] do
-        html =
-          render_input(%{
-            field: %{"type" => type, "name" => "f"},
-            editor_form: %{}
-          })
+    test "unknown types hit the text fallback" do
+      html =
+        render_input(%{
+          field: %{"type" => "weirdo", "name" => "f"},
+          editor_form: %{}
+        })
 
-        assert html =~ ~s(<input)
-        assert html =~ ~s(type="text")
-        assert html =~ ~s(class="form-input")
-        assert html =~ ~s(phx-debounce="500")
-      end
+      assert html =~ ~s(<input)
+      assert html =~ ~s(type="text")
+      assert html =~ ~s(class="form-input")
+      assert html =~ ~s(phx-debounce="500")
+    end
+
+    test "slug renders a text input PLUS the Generate-from-title button" do
+      html =
+        render_input(%{
+          field: %{"type" => "slug", "name" => "slug"},
+          editor_form: %{"slug" => "my-post"}
+        })
+
+      assert html =~ ~s(name="doc[slug]")
+      assert html =~ ~s(value="my-post")
+      assert html =~ ~s(phx-debounce="500")
+      assert html =~ ~s(phx-click="slug-generate")
+      assert html =~ ~s(phx-value-field="slug")
+      assert html =~ ">Generate</button>"
     end
 
     test "datetime renders as datetime-local (Goal barkpark-mwr G1)" do

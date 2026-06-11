@@ -198,6 +198,25 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # Slug fields get Sanity's signature affordance: a Generate button that
+  # derives the slug from the document title server-side (Tenancy.slugify/1,
+  # the same slugger workspace/project creation uses). The button is a plain
+  # phx-click — StudioLive's "slug-generate" handler writes the derived slug
+  # through the normal autosave path, so it lands in editor_form + the draft
+  # exactly like a typed value. The input itself stays the standard text
+  # input (hand-editing always wins).
+  def input(%{field: %{"type" => "slug", "name" => name}} = assigns) do
+    val = Map.get(assigns.editor_form, name, "")
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
+      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} title="Generate from title">Generate</button>
+    </div>
+    """
+  end
+
   # v1 "array" / "object" fields (e.g. the task schema's `dependencies`
   # and `claim`): structured data with no Classic leaf editor. Render the
   # current value as read-only pretty-printed JSON and emit NO form

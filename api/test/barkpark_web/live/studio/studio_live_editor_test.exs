@@ -149,6 +149,23 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
     {:ok, conn: conn}
   end
 
+  describe "slug Generate button (Sanity parity)" do
+    test "slug-generate derives the slug from the title and persists it", %{conn: conn} do
+      {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/p1"))
+      assert html =~ ~s(phx-click="slug-generate")
+
+      view
+      |> element(~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
+      |> render_click()
+
+      # The derived slug lands in the form AND the saved draft.
+      assert render(view) =~ Barkpark.Tenancy.slugify("Hello world")
+
+      {:ok, saved} = Barkpark.Content.get_document("drafts.p1", "post", @dataset)
+      assert saved.content["slug"] == Barkpark.Tenancy.slugify("Hello world")
+    end
+  end
+
   describe "StudioLive editor renders v1 schemas via FieldInputs" do
     test "post editor mounts and emits all 7 leaf-input clauses byte-identically",
          %{conn: conn} do

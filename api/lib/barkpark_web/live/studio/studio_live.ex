@@ -918,6 +918,27 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # Slug-field Generate button (FieldInputs slug clause): derive the slug
+  # from the document's current title — the live form value when the user
+  # has typed one, else the stored doc title — and write it through the
+  # normal autosave path, so it persists + lands in editor_form like a
+  # typed value. No title → no-op (nothing to derive from).
+  def handle_event("slug-generate", %{"field" => field}, socket) do
+    title =
+      case Map.get(socket.assigns[:editor_form] || %{}, "title") do
+        t when is_binary(t) and t != "" -> t
+        _ -> socket.assigns[:editor_doc] && socket.assigns.editor_doc.title
+      end
+
+    case title do
+      t when is_binary(t) and t != "" ->
+        {:noreply, do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)})}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_event("autosave", %{"doc" => params}, socket) do
     {:noreply, do_autosave(socket, params)}
   end
