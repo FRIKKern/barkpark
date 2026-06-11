@@ -76,3 +76,34 @@ jobs:
       - name: "No node: imports in edge packages (ADVISORY — ADR-002 conflict)"
         continue-on-error: true
         run: bash scripts/check-no-node-imports.sh
+
+  changesets:
+    name: Changeset present (PRs only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Exits non-zero when packages/** changed against the base branch
+      # without a changeset — the js/CLAUDE.md "CI blocks otherwise" rule,
+      # enforced for real since 2026-06-11.
+      - name: Changeset status
+        run: pnpm changeset status --since=origin/${{ github.base_ref }}
