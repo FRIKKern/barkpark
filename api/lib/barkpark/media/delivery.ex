@@ -78,6 +78,15 @@ defmodule Barkpark.Media.Delivery do
   defp maybe_sign(nil, _file, _opts), do: nil
 
   defp maybe_sign(path, file, opts) when is_binary(path) do
+    # Scoped emission (P4 of Scoped-by-URL): URLs key off the REQUEST's
+    # scope, never the asset row — a scoped API response emits
+    # /w/<ws>/p/<proj>/media/... so the link resolves in the workspace the
+    # caller is reading, while flat responses stay byte-identical
+    # (prefix "") for every persisted-URL consumer. Prefix applied BEFORE
+    # signing so a signed URL verifies against the path actually requested
+    # on the scoped serve route.
+    path = Keyword.get(opts, :scope_prefix, "") <> path
+
     signed =
       if Keyword.get(opts, :sign_urls, false) and token_visibility?(Keyword.get(opts, :asset_doc)) do
         SignedUrl.sign(path, file.id)

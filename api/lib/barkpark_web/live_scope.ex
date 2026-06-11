@@ -35,7 +35,7 @@ defmodule BarkparkWeb.LiveScope do
   with P4.
   """
 
-  import Phoenix.Component, only: [assign: 2]
+  import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, redirect: 2, put_flash: 3]
 
   alias Barkpark.Tenancy
@@ -74,18 +74,21 @@ defmodule BarkparkWeb.LiveScope do
 
   defp resolve_and_authorize(
          socket,
-         %{"workspace_slug" => ws_slug, "project_slug" => proj_slug}
+         %{"workspace_slug" => ws_slug, "project_slug" => proj_slug} = params
        )
        when is_binary(ws_slug) and is_binary(proj_slug) do
     with %{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
-         :ok <- authorize_read(socket, ws),
-         %{} = proj <- Tenancy.get_project(ws_slug, proj_slug) do
-      {:ok,
-       assign(socket,
-         current_workspace: ws,
-         current_project: proj,
-         scope_prefix: "/w/#{ws.slug}/p/#{proj.slug}"
-       )}
+         %{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
+         {:ok, grade} <- authorize_read(socket, ws, proj, params["dataset"]) do
+      socket =
+        assign(socket,
+          current_workspace: ws,
+          current_project: proj,
+          scope_prefix: "/w/#{ws.slug}/p/#{proj.slug}",
+          share_access: if(grade == :share_read, do: :read, else: nil)
+        )
+
+      {:ok, maybe_attach_readonly_gate(socket, grade)}
     else
       _ -> deny(socket)
     end
@@ -94,24 +97,70 @@ defmodule BarkparkWeb.LiveScope do
   defp resolve_and_authorize(socket, _params), do: deny(socket)
 
   # Membership + read permission via the canonical gate. Anonymous (nil
-  # token) is allowed ONLY into the seeded Default workspace — the
+  # token) is allowed into: (a) the seeded Default workspace — the
   # socket-side mirror of ResolveWorkspace's :allow_anonymous_default
-  # (P3): the flat Studio's anonymous demo/dev posture carried onto its
-  # scoped successor. Any other anonymous scope fails closed, and this
-  # arm is what stops a LIVE patch from an authorized scope into a
-  # foreign one.
-  defp authorize_read(socket, ws) do
+  # (P3, flat-parity demo/dev posture); or (b) a `:docs`-SHARED scope
+  # (P4) — READ-ONLY, enforced by the handle_event gate this grade
+  # attaches. Any other anonymous scope fails closed, and this arm is
+  # what stops a LIVE patch from an authorized scope into a foreign one.
+  defp authorize_read(socket, ws, proj, dataset) do
     case socket.assigns[:api_token] do
       %Barkpark.Auth.ApiToken{} = token ->
-        Tenancy.Auth.authorize(token, ws.id, :read)
+        case Tenancy.Auth.authorize(token, ws.id, :read) do
+          :ok -> {:ok, :member}
+          err -> err
+        end
 
       _ ->
-        case Tenancy.get_default_workspace() do
-          %{id: id} when id == ws.id -> :ok
-          _ -> {:error, :forbidden}
+        cond do
+          match?(%{id: id} when id == ws.id, Tenancy.get_default_workspace()) ->
+            {:ok, :anonymous_default}
+
+          Barkpark.Sharing.shared?(ws.slug, proj.slug, dataset || "production", :docs) ->
+            {:ok, :share_read}
+
+          true ->
+            {:error, :forbidden}
         end
     end
   end
+
+  # Read-only shared Studio (P4): a `:docs` read share opens the FULL
+  # Studio UI to an anonymous viewer, so the write boundary must be the
+  # SERVER's event handler, not hidden buttons. Deny-by-default: only
+  # navigation/inspection events pass; everything else (autosave, save,
+  # publish, delete, create, uploads, array ops, share admin, …) is
+  # halted with a flash. The gate attaches once per mount of a
+  # share-graded socket; member and anonymous-Default sockets never get it.
+  @readonly_events ~w(
+    select select-group select-desk select-pane
+    switch-workspace switch-project switch-dataset
+    jump-to-user show-profile preview-profile close-profile
+    toggle-content-preview toggle-diff toggle-category
+    editor-set-mode search ref-search validate-upload
+  )
+
+  defp maybe_attach_readonly_gate(socket, :share_read) do
+    # Idempotent across re-resolves (a live patch between two shared scopes
+    # re-runs this; attach_hook raises on a duplicate name). A stale gate on
+    # an anonymous socket that later patches into the Default scope only
+    # over-restricts — never under-restricts — so we keep it once attached.
+    if socket.assigns[:readonly_gate?] do
+      socket
+    else
+      socket
+      |> assign(:readonly_gate?, true)
+      |> attach_hook(:live_scope_readonly, :handle_event, fn event, _params, socket ->
+        if event in @readonly_events do
+          {:cont, socket}
+        else
+          {:halt, put_flash(socket, :error, "This workspace is shared read-only")}
+        end
+      end)
+    end
+  end
+
+  defp maybe_attach_readonly_gate(socket, _grade), do: socket
 
   defp deny(socket) do
     {:halt,

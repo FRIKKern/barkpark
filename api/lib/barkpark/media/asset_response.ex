@@ -48,7 +48,13 @@ defmodule Barkpark.Media.AssetResponse do
           end
       end
 
-    url_opts = [sign_urls: sign_urls?, asset_doc: asset_doc]
+    # Request-scope URL emission (P4): a conn resolved under /w/:ws/p/:proj
+    # prefixes every delivery URL with that scope; flat conns emit "".
+    url_opts = [
+      sign_urls: sign_urls?,
+      asset_doc: asset_doc,
+      scope_prefix: conn_scope_prefix(conn)
+    ]
 
     base = %{
       id: file.id,
@@ -93,4 +99,16 @@ defmodule Barkpark.Media.AssetResponse do
   defp asset_payload(%Document{} = doc) do
     Envelope.render(doc)
   end
+
+  # URL-scoped requests carry the slugs in path_params (set only on
+  # /w/:ws/p/:proj routes) — assigns can't be the signal here because
+  # AssignDefaultScope ALSO sets current_workspace on flat routes, and flat
+  # responses must stay byte-identical (persisted-URL consumers).
+  defp conn_scope_prefix(%Plug.Conn{
+         path_params: %{"workspace_slug" => ws, "project_slug" => proj}
+       })
+       when is_binary(ws) and is_binary(proj),
+       do: "/w/#{ws}/p/#{proj}"
+
+  defp conn_scope_prefix(_), do: ""
 end

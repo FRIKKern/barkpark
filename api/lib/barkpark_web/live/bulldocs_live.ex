@@ -48,10 +48,16 @@ defmodule BarkparkWeb.BulldocsLive do
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
-    # PUBLIC surface: resolve the slug ONLY within the seeded Default (public)
-    # workspace. A bare `Content.get_paper/1` runs UNSCOPED and would resolve
-    # the slug across every tenant — the cross-workspace read leak (barkpark-w9dg).
-    paper = Content.get_public_paper(slug)
+    # Two front doors, one LiveView (P4 of Scoped-by-URL):
+    #   * flat /papers/:slug — PUBLIC surface, resolves ONLY within the seeded
+    #     Default workspace (barkpark-w9dg; the locked paperflow contract).
+    #   * scoped /w/:ws/p/:proj/papers/:slug — the dead-render-resolved scope
+    #     arrives via PluginScopeSession (member, section share, or ?share=
+    #     item token — RequireShareScope/ResolveWorkspace already gated);
+    #     fetch within THAT tenant, live updates ride the same ws-keyed topic.
+    reader_scope = reader_scope(socket)
+    socket = assign(socket, :reader_scope, reader_scope)
+    paper = fetch_paper(slug, reader_scope)
 
     if connected?(socket) do
       # Workspace-scope the subscription (barkpark-n56v, P0). The topic now
@@ -67,7 +73,10 @@ defmodule BarkparkWeb.BulldocsLive do
       # publish into the Default workspace still reaches this viewer.
       Phoenix.PubSub.subscribe(
         Barkpark.PubSub,
-        Content.paper_topic(slug, paper && paper.workspace_id)
+        Content.paper_topic(
+          slug,
+          (paper && paper.workspace_id) || reader_scope[:workspace_id]
+        )
       )
     end
 
@@ -278,7 +287,7 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-action", %{"action" => key}, socket) do
     slug = socket.assigns.slug
     label = action_label(socket.assigns.paper_actions, key)
-    {goal_id, scope} = paper_goal_and_scope(slug)
+    {goal_id, scope} = paper_goal_and_scope(slug, socket.assigns[:reader_scope])
 
     # W1.5-C: stamp the intent row with the paper's OWN workspace/project so the
     # event follows the paper/goal scope (Default fallback when unscoped).
@@ -312,7 +321,7 @@ defmodule BarkparkWeb.BulldocsLive do
   # commit) — the intended Option-B demonstration.
   def handle_event("simplify-request", _params, socket) do
     slug = socket.assigns.slug
-    {goal_id, scope} = paper_goal_and_scope(slug)
+    {goal_id, scope} = paper_goal_and_scope(slug, socket.assigns[:reader_scope])
 
     # No goal_id → nothing to simplify against; skip gracefully (never crash).
     if is_nil(goal_id) do
@@ -360,7 +369,7 @@ defmodule BarkparkWeb.BulldocsLive do
   defp record_simplify_decision(socket, event_type, verb) do
     slug = socket.assigns.slug
     branch = socket.assigns.pending_simplify
-    {goal_id, scope} = paper_goal_and_scope(slug)
+    {goal_id, scope} = paper_goal_and_scope(slug, socket.assigns[:reader_scope])
 
     if is_nil(branch) or is_nil(goal_id) do
       socket
@@ -416,11 +425,12 @@ defmodule BarkparkWeb.BulldocsLive do
   # Shared by the U5 action + U4 Simplify handlers — both need the live goal_id
   # AND (W1.5-C) the paper's workspace/project so the recorded event follows the
   # paper/goal scope. Returns `{goal_id | nil, scope_opts}`.
-  defp paper_goal_and_scope(slug) do
-    # PUBLIC surface — resolve the live paper within the Default (public)
-    # workspace only, matching mount (barkpark-w9dg). The resolved paper's OWN
-    # workspace/project still stamps the recorded event via paper_scope_opts/1.
-    case Content.get_public_paper(slug) do
+  defp paper_goal_and_scope(slug, reader_scope) do
+    # Resolve the live paper within the SAME tenant the reader mounted
+    # (Default for the flat surface, the URL scope for /w/... — P4). The
+    # resolved paper's OWN workspace/project still stamps the recorded
+    # event via paper_scope_opts/1.
+    case fetch_paper(slug, reader_scope) do
       %{content: content} = paper when is_map(content) ->
         {Map.get(content, "goal_id"), paper_scope_opts(paper)}
 
@@ -599,8 +609,8 @@ defmodule BarkparkWeb.BulldocsLive do
   end
 
   defp refetch(socket) do
-    # PUBLIC surface — same Default-workspace scoping as mount (barkpark-w9dg).
-    case Content.get_public_paper(socket.assigns.slug) do
+    # Same tenant scoping as mount (Default flat / URL scope on /w/..., P4).
+    case fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope]) do
       nil ->
         socket
 
@@ -783,4 +793,20 @@ defmodule BarkparkWeb.BulldocsLive do
     </main>
     """
   end
+
+  # ── P4 scoped-reader helpers ────────────────────────────────────────────
+
+  # The PluginScopeSession on_mount put %{id, slug} maps into these assigns
+  # on the scoped mount; the flat mount has neither → nil → public fetch.
+  defp reader_scope(socket) do
+    with %{id: ws_id} when is_binary(ws_id) <- socket.assigns[:current_workspace],
+         %{id: proj_id} when is_binary(proj_id) <- socket.assigns[:current_project] do
+      [workspace_id: ws_id, project_id: proj_id]
+    else
+      _ -> nil
+    end
+  end
+
+  defp fetch_paper(slug, nil), do: Content.get_public_paper(slug)
+  defp fetch_paper(slug, scope), do: Content.get_paper(slug, "production", scope)
 end

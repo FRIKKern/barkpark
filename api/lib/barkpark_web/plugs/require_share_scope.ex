@@ -111,11 +111,24 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
     # `Sharing.shared?/4` is strict default-deny: a nil/garbage slug, an
     # unconfigured registry, or a non-matching scope all return false, and it
     # never raises. Only a true result even considers granting.
-    if is_nil(conn.assigns[:api_token]) and
-         Sharing.shared?(ws_slug, project_slug, dataset, surface) do
-      grant_if_resolvable(conn, ws_slug, project_slug, dataset)
-    else
-      conn
+    cond do
+      not is_nil(conn.assigns[:api_token]) ->
+        conn
+
+      Sharing.shared?(ws_slug, project_slug, dataset, surface) ->
+        grant_if_resolvable(conn, ws_slug, project_slug, dataset)
+
+      true ->
+        # P4 (Scoped-by-URL): `?share=<item-token>` on a SCOPED route.
+        # Capability never changes the URL — the same canonical address
+        # serves a member, a section-share grantee, or an item-token
+        # holder. The grant fires ONLY when the link's stored scope
+        # (workspace/project ids + dataset) equals the URL's resolved
+        # scope AND the link's bound resource equals the route's
+        # single-resource param — a token for another scope or another
+        # doc leaves the conn untouched (the membership gate then denies;
+        # no existence oracle).
+        maybe_grant_item_token(conn, ws_slug, project_slug, dataset)
     end
   end
 
@@ -150,4 +163,44 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
     conn.method in @safe_read_methods or
       Sharing.access_for(ws_slug, project_slug, dataset) == :edit
   end
+
+  # ── P4: item-token grant (?share=<token>) ──────────────────────────────────
+
+  defp maybe_grant_item_token(conn, ws_slug, project_slug, dataset) do
+    conn = Plug.Conn.fetch_query_params(conn)
+
+    with raw when is_binary(raw) and raw != "" <- conn.query_params["share"],
+         # Item links are read capabilities — never an unsafe method.
+         true <- conn.method in @safe_read_methods,
+         {:ok, link} <- Barkpark.Sharing.Links.resolve(raw),
+         %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
+         %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, project_slug),
+         true <- link.workspace_id == workspace.id,
+         true <- link.project_id == project.id,
+         true <- link.dataset == dataset,
+         true <- link_matches_route_resource?(link, conn.path_params) do
+      conn
+      |> assign(:current_workspace, workspace)
+      |> assign(:current_project, project)
+      |> assign(:share_public, true)
+      |> assign(:share_access, :read)
+    else
+      _ -> conn
+    end
+  end
+
+  # An item link is bound to ONE resource; it only opens a route addressing
+  # exactly that resource. Paper reader → slug; doc read → doc_id (compared
+  # exactly as minted); media meta/renditions → file id. Routes without a
+  # single-resource param (lists, file paths) never item-grant.
+  defp link_matches_route_resource?(link, %{"slug" => slug}),
+    do: link.kind == "doc" and link.ref_type == "paper" and link.ref_id == slug
+
+  defp link_matches_route_resource?(link, %{"doc_id" => doc_id}),
+    do: link.kind == "doc" and link.ref_id == doc_id
+
+  defp link_matches_route_resource?(link, %{"id" => id}),
+    do: link.kind == "media" and link.ref_id == id
+
+  defp link_matches_route_resource?(_link, _path_params), do: false
 end

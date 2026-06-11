@@ -85,7 +85,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
           ok: true,
           slug: paper.doc_id,
           rev: to_string(get_in(paper.content, ["rev"])),
-          liveview_path: "/papers/#{paper.doc_id}"
+          liveview_path: "/papers/#{paper.doc_id}",
+          # ADDITIVE (P4) — the canonical scoped reader URL when the paper's
+          # tenancy resolves; liveview_path stays byte-identical forever
+          # (locked paperflow contract).
+          scoped_liveview_path: scoped_liveview_path(paper)
         })
 
       {:error, _changeset} ->
@@ -120,7 +124,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # stringify in the wire response so existing clients that read it as a
           # string keep working.
           rev: to_string(get_in(paper.content, ["rev"])),
-          liveview_path: "/papers/#{paper.doc_id}"
+          liveview_path: "/papers/#{paper.doc_id}",
+          # ADDITIVE (P4) — see scoped_liveview_path/1.
+          scoped_liveview_path: scoped_liveview_path(paper)
         })
 
       {:error, _changeset} ->
@@ -365,4 +371,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp maybe_put(attrs, _key, nil), do: attrs
   defp maybe_put(attrs, key, value), do: Map.put(attrs, key, value)
+  # The scoped reader path for the paper's OWN tenancy — nil when the scope
+  # doesn't resolve to slugs (legacy NULL-scope rows). Additive next to the
+  # contracted flat liveview_path.
+  defp scoped_liveview_path(paper) do
+    with ws_id when is_binary(ws_id) <- paper.workspace_id,
+         %{slug: ws_slug} <- Barkpark.Tenancy.get_workspace_by_id(ws_id),
+         proj_id when is_binary(proj_id) <- paper.project_id,
+         %{slug: proj_slug} <- Barkpark.Tenancy.get_project_by_id(proj_id) do
+      "/w/#{ws_slug}/p/#{proj_slug}/papers/#{paper.doc_id}"
+    else
+      _ -> nil
+    end
+  end
 end

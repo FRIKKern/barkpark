@@ -125,7 +125,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
   end
 
   describe "GET /w/:ws/p/:project/papers/:slug — (d) shared scope, missing slug" do
-    test "a non-existent slug in a shared scope 404s (no leak)", %{
+    test "a non-existent slug in a shared scope renders the pending shell, leaking nothing", %{
       conn: conn,
       ws: ws,
       project: project
@@ -134,7 +134,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       conn = get(conn, paper_path(ws, project, "does-not-exist"))
 
-      assert conn.status == 404
+      # P4: the scoped reader is the LIVE BulldocsLive — a missing slug
+      # renders the empty live shell (200) and streams the paper in if it
+      # is published later (the flat reader's contract, now shared). The
+      # no-leak property is about CONTENT, which stays absent.
+      assert conn.status == 200
       refute conn.resp_body =~ "Hello Shared Paper"
     end
   end

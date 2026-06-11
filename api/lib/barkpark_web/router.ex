@@ -168,6 +168,24 @@ defmodule BarkparkWeb.Router do
     plug BarkparkWeb.Plugs.OptionalSessionToken
   end
 
+  # :scoped_browser + the :docs share gate (P4) — the scoped STUDIO pipeline.
+  # An anonymous request for a `:docs`-shared scope is pre-resolved by
+  # RequireShareScope (read-only; LiveScope attaches the server-side write
+  # gate at mount); otherwise byte-identical to :scoped_browser — members via
+  # membership, anonymous via the Default allowance, everything else closed.
+  pipeline :shared_studio_browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {BarkparkWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+    plug BarkparkWeb.Plugs.OptionalSessionToken
+    plug BarkparkWeb.Plugs.RequireShareScope, surface: :docs
+    plug BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true
+    plug BarkparkWeb.Plugs.ResolveProject
+  end
+
   # Public-share variant of :scoped_browser for the gated scoped paper reader
   # at /w/:ws/p/:project/papers/:slug (P1b). RequireShareScope runs BEFORE the
   # resolvers: when the scope is shared for the :papers surface (via
@@ -568,7 +586,7 @@ defmodule BarkparkWeb.Router do
   # dataset="onixedit". Same reasoning as the flat `_plugins`-before-
   # `:studio_public` ordering below.
   scope "/w/:workspace_slug/p/:project_slug/studio/:dataset", BarkparkWeb.Studio do
-    pipe_through :scoped_browser
+    pipe_through :shared_studio_browser
 
     live_session :scoped_studio,
       on_mount: [
@@ -868,7 +886,19 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through :shared_paper_browser
 
-    get "/papers/:slug", ScopedPaperController, :show
+    # LIVE scoped reader (P4): the same BulldocsLive as the flat /papers/:slug
+    # surface — per-block real-time streaming included (the paper PubSub topic
+    # is already ws-keyed) — mounted behind the share/membership gates above.
+    # PluginScopeSession bridges the dead-render-resolved scope into the LV
+    # session; safe here because the reader never live-navigates across
+    # scopes. The dead-render ScopedPaperController is retired from routing
+    # (its HTML view lives on under /s/:token).
+    live_session :scoped_paper_reader,
+      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}],
+      session: {BarkparkWeb.PluginScopeSession, :build, []},
+      root_layout: {BarkparkWeb.Layouts, :bulldocs} do
+      live "/papers/:slug", BulldocsLive, :index
+    end
   end
 
   # ── Scoped tenancy routes ───────────────────────────────────────────────
@@ -906,17 +936,20 @@ defmodule BarkparkWeb.Router do
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
   # here; otherwise gated. Only the SCOPE-SAFE actions are exposed: index /
-  # show / serve all resolve files via the resolved workspace scope, so a share
-  # can never reach another workspace's media. Deliberately EXCLUDED: the
-  # rendition route (serve_rendition uses an UNSCOPED get_file/1 — a cross-scope
-  # leak under a share) and upload/delete (writes). Without a matching :media
-  # share this is byte-identical to a normal scoped request.
+  # show / serve / renditions all resolve files via the resolved workspace
+  # scope, so a share can never reach another workspace's media. The rendition
+  # route joined in P4 once `serve_rendition` became scope-bounded (the P0 fix
+  # ended its unscoped get_file/1 cross-scope leak — non-Default renditions
+  # are served HERE, never on the Default-pinned flat route). upload/delete
+  # (writes) stay excluded. Without a matching :media share this is
+  # byte-identical to a normal scoped request.
   scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
     pipe_through :shared_media_api
 
     get "/", MediaController, :index
     get "/:id/meta", MediaController, :show
     get "/files/*path", MediaController, :serve
+    get "/renditions/:id/:preset", MediaController, :serve_rendition
   end
 
   # Token-required scoped reads (listen/export/analytics/history/revision).
