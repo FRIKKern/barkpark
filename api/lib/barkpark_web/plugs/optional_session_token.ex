@@ -23,6 +23,19 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
 
   Requires `:fetch_session` upstream (the `:scoped_browser` pipeline runs
   `:fetch_session` before this plug).
+
+  ## Dev fallback (Scoped-by-URL follow-through)
+
+  In dev, the flat Studio works without `/login` because
+  `LiveAuth.:fetch_api_token` falls back to the seeded
+  `:dev_browser_token` — but that hook runs at LiveView mount, AFTER the
+  conn pipeline. On the scoped surface `ResolveWorkspace` authorizes at
+  the DEAD render, so an un-logged-in dev browser 403'd every `/w/...`
+  URL the moment the scoped Studio shipped. The same fallback therefore
+  lives here too: an anonymous conn picks up the dev token when (and
+  only when) `:dev_browser_token` is configured — set exclusively in
+  `config/dev.exs`, so test stays fail-closed (the anonymous-403
+  contract tests depend on it) and prod never carries it.
   """
 
   import Plug.Conn
@@ -31,7 +44,7 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    case token_from_bearer(conn) || token_from_session(conn) do
+    case token_from_bearer(conn) || token_from_session(conn) || token_from_dev_config() do
       {:ok, token} -> assign(conn, :api_token, token)
       _ -> conn
     end
@@ -54,6 +67,13 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
   defp verify(raw) do
     case Auth.verify_token(String.trim(raw)) do
       {:ok, token} -> {:ok, token}
+      _ -> nil
+    end
+  end
+
+  defp token_from_dev_config do
+    case Application.get_env(:barkpark, :dev_browser_token) do
+      raw when is_binary(raw) and raw != "" -> verify(raw)
       _ -> nil
     end
   end
