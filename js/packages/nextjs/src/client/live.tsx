@@ -228,8 +228,13 @@ export function startLiveSubscription(opts: StartLiveOpts): () => void {
     hot.dispose(teardown)
   }
 
-  ;(async () => {
+  // Fire-and-forget consumer loop: errors are handled INSIDE (the catch
+  // below), so the promise is deliberately unawaited — `void` marks that
+  // intent for the linter. The loop body ignores the event payload (any
+  // event just bumps the debounce window), hence the unnamed iteration.
+  void (async () => {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _evt of handle) {
         if (disposed) return
         firstEventReceived = true

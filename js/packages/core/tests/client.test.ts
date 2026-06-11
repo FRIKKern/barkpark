@@ -46,7 +46,7 @@ describe('createClient', () => {
     try {
       createClient({ ...validConfig, perspective: 'drafts' })
       expect(calls.length).toBe(1)
-      expect(String(calls[0][0])).toContain('pins anonymous reads to published')
+      expect(String(calls[0]?.[0])).toContain('pins anonymous reads to published')
 
       // With a token: no warning.
       createClient({ ...validConfig, perspective: 'drafts', token: 't' })

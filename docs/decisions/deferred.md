@@ -15,6 +15,7 @@
 | TUI media browse + sharing UI | parity sprint closed gaps 1–7 (publish/create/delete/task c·x/ref picker//search/y dup, cli-v1.4.0); media + share management (incl. per-doc item-share links) stay Studio/`bp` | demand — terminal-niche |
 | TUI long-tail vs Studio | history/revisions, bulk publish, diff view, content preview, secondary pane, array-row editing, workspace-create-in-selector — Studio is the rich desk; TUI covers the solo edit loop incl. the full draft lifecycle (publish/unpublish/discard, 2026-06-11 audit) | demand per item |
 | CLI long-tail | no `doc.duplicate` (use a `create` mutation with the content), no history verb, no item-share verb | demand |
+| ADR-002 edge contract vs `node:crypto` | webhook/ + draft-mode/ have imported `node:crypto` since Phase 5 — found 2026-06-11 when js CI first ran `check-no-node-imports.sh` (advisory step in js-tests.yml). Conform = Web Crypto port (breaks sync `signDraftModeToken`); relax = amendment ADR | owner decision: port or amend |
 | Studio task claim/close buttons | DESIGN, not a gap: fenced claim/close belong to the API/agents; humans steer via the lifecycle dropdown (TASK-SYSTEM division of labour) | n/a |
 | workspace/project delete | `workspace create / project-create` exist; no delete verb — spikes accumulate (server-side cascade: projects, datasets, docs, media, tokens) | demand — first user drowning in spikes |
 

@@ -1,0 +1,78 @@
+name: js-tests
+
+# The js monorepo's test gate. Until 2026-06-11 NOTHING ran the js suite in
+# CI — typedoc only builds reference docs, ci.yml is web/lighthouse, and
+# release.yml fires on dispatch/tags — so every js/CLAUDE.md claim about CI
+# enforcement (bundle budget, no-node-imports) referenced a workflow that
+# did not exist, and SDK changes shipped test-verified only locally.
+#
+# Steps mirror the local gates js/CLAUDE.md documents: install → build →
+# test (vitest projects: node, core-workerd, react-browser) → lint →
+# typecheck → size (bundle budget) → check-no-node-imports.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "js/**"
+      - ".github/workflows/js-tests.yml"
+  pull_request:
+    paths:
+      - "js/**"
+      - ".github/workflows/js-tests.yml"
+
+concurrency:
+  group: js-tests-${{ github.ref }}
+  # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
+  # superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Build + test + gates
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Bundle budget
+        run: pnpm size
+
+      # ADVISORY (not blocking) until the ADR-002 conflict is decided:
+      # webhook/ and draft-mode/ have imported node:crypto since their Phase 5
+      # birth, violating the locked edge contract the script enforces — never
+      # caught because no CI ran this script before 2026-06-11. Conforming
+      # means porting HMAC to Web Crypto, which makes the exported
+      # signDraftModeToken async (breaking); relaxing means an amendment ADR.
+      # Tracked in docs/decisions/deferred.md. Same advisory-job precedent as
+      # elixir.yml's format job.
+      - name: No node: imports in edge packages (ADVISORY — ADR-002 conflict)
+        continue-on-error: true
+        run: bash scripts/check-no-node-imports.sh
