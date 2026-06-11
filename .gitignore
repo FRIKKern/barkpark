@@ -68,3 +68,4 @@ api/.artifacts/
 .visual-runtime/
 .claude/scheduled_tasks.lock
 .beads/FROZEN
+api/.claude/
