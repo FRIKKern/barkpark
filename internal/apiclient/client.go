@@ -974,6 +974,59 @@ func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
 // ListWorkspaces fetches the workspaces the bearer token is a member of via
 // GET /api/workspaces. This is a token-gated, NOT path-scoped, endpoint — it
 // lives under /api directly, not under /w/:ws/p/:project.
+// tenancyPost POSTs {"name": …} to a flat /api tenancy path and decodes the
+// 201 body into out. The server derives the slug from the name and seeds the
+// child defaults itself (workspace → Default project + production dataset;
+// project → production dataset). Non-201 surfaces the body verbatim — the
+// 422 changeset reason (duplicate/invalid slug) is the useful part.
+func (c *Client) tenancyPost(path, name string, out interface{}) error {
+	body, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("create error %d: %s", resp.StatusCode, string(raw))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// CreateWorkspace creates a workspace from a display name
+// (POST /api/workspaces). The caller's token becomes its owner-member.
+func (c *Client) CreateWorkspace(name string) (WorkspaceInfo, error) {
+	var out struct {
+		Workspace WorkspaceInfo `json:"workspace"`
+	}
+	err := c.tenancyPost("/api/workspaces", name, &out)
+	return out.Workspace, err
+}
+
+// CreateProject creates a project under a workspace the caller is a member of
+// (POST /api/workspaces/:slug/projects).
+func (c *Client) CreateProject(workspaceSlug, name string) (ProjectInfo, error) {
+	var out struct {
+		Project ProjectInfo `json:"project"`
+	}
+	err := c.tenancyPost("/api/workspaces/"+url.PathEscape(workspaceSlug)+"/projects", name, &out)
+	return out.Project, err
+}
+
 func (c *Client) ListWorkspaces() ([]WorkspaceInfo, error) {
 	resp, err := c.authGet(c.baseURL + "/api/workspaces")
 	if err != nil {

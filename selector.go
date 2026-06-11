@@ -30,10 +30,12 @@ import (
 type selectorStage int
 
 const (
-	stageWorkspace selectorStage = iota // pick a workspace from the list
-	stageProject                        // pick a project from the list
-	stageDataset                        // enter a dataset name
-	stageManual                         // fallback: three free-text fields
+	stageWorkspace    selectorStage = iota // pick a workspace from the list
+	stageProject                           // pick a project from the list
+	stageDataset                           // enter a dataset name
+	stageManual                            // fallback: three free-text fields
+	stageNewWorkspace                      // `n` on the workspace list: name prompt
+	stageNewProject                        // `n` on the project list: name prompt
 )
 
 const (
@@ -63,6 +65,11 @@ type selectorState struct {
 	datasetInput textinput.Model
 	cursor       int                       // active field in stageManual
 	inputs       [selFieldCount]textinput.Model
+
+	// Name prompt for the create stages (stageNewWorkspace / stageNewProject).
+	// The server derives the slug from the name and seeds the child defaults
+	// (workspace → Default project + production dataset; project → production).
+	nameInput textinput.Model
 
 	err string // last error, shown inline
 }
@@ -185,9 +192,94 @@ func (m model) handleSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleProjectStageKey(msg)
 	case stageDataset:
 		return m.handleDatasetStageKey(msg)
+	case stageNewWorkspace, stageNewProject:
+		return m.handleCreateStageKey(msg)
 	default:
 		return m.handleManualStageKey(msg)
 	}
+}
+
+// seedNameInput opens the create-name prompt for the given stage.
+func (m *model) seedNameInput(stage selectorStage) {
+	ti := textinput.New()
+	ti.CharLimit = 100
+	ti.Width = 30
+	ti.Prompt = ""
+	ti.Focus()
+	m.selector.nameInput = ti
+	m.selector.stage = stage
+	m.selector.err = ""
+}
+
+// handleCreateStageKey handles the new-workspace / new-project name prompt.
+// enter creates and flows FORWARD (a new workspace lists its seeded projects;
+// a new project goes straight to the dataset step); esc steps back to the
+// list it came from. A create failure (422 duplicate slug, network) stays on
+// the prompt with the server's reason inline.
+func (m model) handleCreateStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	creatingWorkspace := m.selector.stage == stageNewWorkspace
+
+	switch msg.String() {
+	case "esc":
+		if creatingWorkspace {
+			m.selector.stage = stageWorkspace
+		} else {
+			m.selector.stage = stageProject
+		}
+		m.selector.err = ""
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(m.selector.nameInput.Value())
+		if name == "" {
+			m.selector.err = "name is required"
+			return m, nil
+		}
+		if creatingWorkspace {
+			return m.createWorkspaceAndAdvance(name)
+		}
+		return m.createProjectAndAdvance(name)
+	default:
+		var cmd tea.Cmd
+		m.selector.nameInput, cmd = m.selector.nameInput.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m model) createWorkspaceAndAdvance(name string) (tea.Model, tea.Cmd) {
+	ws, err := m.ds.CreateWorkspace(name)
+	if err != nil {
+		m.selector.err = fmt.Sprintf("create failed: %v", err)
+		return m, nil
+	}
+	m.selector.chosenWorkspace = ws.Slug
+	m.selector.err = ""
+
+	// The server seeded a Default project — list and continue the normal flow.
+	projs, listErr := m.ds.ListProjects(ws.Slug)
+	if listErr != nil || len(projs) == 0 {
+		m.seedManualSelector()
+		m.selector.inputs[selFieldWorkspace].SetValue(ws.Slug)
+		m.selector.err = "created " + ws.Slug + " — finish manually"
+		return m, textinput.Blink
+	}
+	m.selector.projects = projs
+	m.selector.listCursor = 0
+	m.selector.stage = stageProject
+	return m, nil
+}
+
+func (m model) createProjectAndAdvance(name string) (tea.Model, tea.Cmd) {
+	pr, err := m.ds.CreateProject(m.selector.chosenWorkspace, name)
+	if err != nil {
+		m.selector.err = fmt.Sprintf("create failed: %v", err)
+		return m, nil
+	}
+	// The server seeded the production dataset — go straight to the dataset
+	// step with the new project chosen.
+	m.selector.chosenProject = pr.Slug
+	m.selector.err = ""
+	m.seedDatasetInput()
+	return m, textinput.Blink
 }
 
 func (m model) handleWorkspaceStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -208,6 +300,10 @@ func (m model) handleWorkspaceStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "m":
 		// Drop to manual entry on demand.
 		m.seedManualSelector()
+		return m, textinput.Blink
+	case "n":
+		// Create a new workspace (Studio-selector parity).
+		m.seedNameInput(stageNewWorkspace)
 		return m, textinput.Blink
 	case "enter":
 		sel := m.selector.workspaces[m.selector.listCursor]
@@ -252,6 +348,10 @@ func (m model) handleProjectStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selector.listCursor--
 		}
 		return m, nil
+	case "n":
+		// Create a new project under the chosen workspace.
+		m.seedNameInput(stageNewProject)
+		return m, textinput.Blink
 	case "enter":
 		m.selector.chosenProject = m.selector.projects[m.selector.listCursor].Slug
 		m.selector.err = ""
@@ -357,7 +457,7 @@ func (m model) renderSelector(width, height int) string {
 		}
 		lines = append(lines, "")
 		lines = appendErr(lines, m.selector.err)
-		lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter pick  m manual  esc cancel"))
+		lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter pick  n new  m manual  esc cancel"))
 
 	case stageProject:
 		lines = append(lines, editorLabelStyle.Render("  Project — "+m.selector.chosenWorkspace))
@@ -366,7 +466,19 @@ func (m model) renderSelector(width, height int) string {
 		}
 		lines = append(lines, "")
 		lines = appendErr(lines, m.selector.err)
-		lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter pick  esc back"))
+		lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter pick  n new  esc back"))
+
+	case stageNewWorkspace, stageNewProject:
+		what := "workspace"
+		if m.selector.stage == stageNewProject {
+			what = "project — " + m.selector.chosenWorkspace
+		}
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("  New "+what))
+		lines = append(lines, dimStyle.Render("  slug derives from the name"))
+		lines = append(lines, "  "+focusedFieldStyle.Width(30).Render(m.selector.nameInput.View()))
+		lines = append(lines, "")
+		lines = appendErr(lines, m.selector.err)
+		lines = append(lines, dimStyle.Render("  enter create  esc back"))
 
 	case stageDataset:
 		lines = append(lines, editorLabelStyle.Render(
