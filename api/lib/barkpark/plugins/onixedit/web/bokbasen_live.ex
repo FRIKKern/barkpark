@@ -288,7 +288,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
                       </button>
                     <% end %>
                     <.link
-                      navigate={"/studio/#{sub.dataset}/book/#{sub.doc_id}"}
+                      navigate={book_editor_path(assigns, sub)}
                       data-test-action="view"
                     >
                       View Document
@@ -472,5 +472,18 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     subs
     |> Enum.map(& &1.doc_id)
     |> MapSet.new()
+  end
+
+  # Scoped deep link (P5 of Scoped-by-URL): on the /w/:ws/p/:proj/admin
+  # mount PluginScopeSession carries the scope — link the book editor
+  # under the SAME tenant. The flat mount emits the flat form, which the
+  # P3 redirect resolves (session scope) — never a dead link either way.
+  defp book_editor_path(assigns, sub) do
+    with %{slug: ws_slug} when is_binary(ws_slug) <- assigns[:current_workspace],
+         %{slug: proj_slug} when is_binary(proj_slug) <- assigns[:current_project] do
+      "/w/#{ws_slug}/p/#{proj_slug}/studio/#{sub.dataset}/book/#{sub.doc_id}"
+    else
+      _ -> "/studio/#{sub.dataset}/book/#{sub.doc_id}"
+    end
   end
 end

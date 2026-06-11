@@ -15,18 +15,6 @@ defmodule BarkparkWeb.StudioComponents do
     """
   end
 
-  attr :schema, :map, required: true
-
-  def schema_card(assigns) do
-    ~H"""
-    <a href={"/studio/#{@schema.name}"} class="schema-card">
-      <div class="schema-icon"><%= @schema.icon %></div>
-      <div class="schema-name"><%= @schema.title %></div>
-      <span class={"badge badge-#{@schema.visibility}"}><%= @schema.visibility %></span>
-    </a>
-    """
-  end
-
   # ── Pane layout components ──────────────────────────────────────────
   #
   # Shared structural building blocks for every Studio LiveView pane.
@@ -120,71 +108,6 @@ defmodule BarkparkWeb.StudioComponents do
         <%= render_slot(@inner_block) %>
       </div>
     <% end %>
-    """
-  end
-
-  @doc """
-  Passive Studio sidebar — renders the top-level structure tree as plain
-  anchor links. Originally built for plugin LiveViews (the now-removed
-  BookView / BookEditor in Goal `barkpark-zdy`) that rendered outside
-  StudioLive's interactive `<.pane_layout>` so the user retained a way
-  to navigate back into Studio. Kept available for any future
-  out-of-StudioLive surface with the same need.
-
-  Intentionally has NO `phx-click` — events would otherwise route to an
-  enclosing LiveView with no matching handler. Each item is an
-  `<a href>` that triggers a normal LiveView navigation back into
-  StudioLive.
-
-  Attributes:
-    * `:dataset`       — (required) string, current dataset name
-    * `:selected_path` — (optional) list, current nav path; the first
-                         segment is matched against item ids to mark the
-                         active link
-  """
-  attr :dataset, :string, required: true
-  attr :selected_path, :list, default: []
-
-  def studio_sidebar(assigns) do
-    structure = Barkpark.Structure.build(assigns.dataset)
-    selected_id = List.first(assigns.selected_path)
-
-    assigns =
-      assigns
-      |> assign(:structure, structure)
-      |> assign(:selected_id, selected_id)
-
-    ~H"""
-    <aside
-      class="studio-sidebar"
-      style="width:240px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border);padding:.5rem;"
-    >
-      <div
-        class="studio-sidebar-header"
-        style="font-weight:600;padding:.5rem .75rem;color:var(--fg-muted);"
-      ><%= @structure.title %></div>
-      <%= for item <- @structure.items do %>
-        <%= case item.type do %>
-          <% :divider -> %>
-            <div class="studio-sidebar-divider" style="height:1px;background:var(--border);margin:.5rem 0;"></div>
-          <% _ -> %>
-            <a
-              href={"/studio/#{@dataset}/#{item.id}"}
-              class={
-                ["studio-sidebar-item", item.id == @selected_id && "studio-sidebar-item--active"]
-                |> Enum.filter(& &1)
-                |> Enum.join(" ")
-              }
-              style={
-                "display:block;padding:.4rem .75rem;border-radius:4px;text-decoration:none;color:inherit;" <>
-                  if(item.id == @selected_id, do: "font-weight:600;background:rgba(0,0,0,.04);", else: "")
-              }
-            >
-              <%= if item.icon do %><span style="margin-right:.4rem;"><%= item.icon %></span><% end %><%= item.title %>
-            </a>
-        <% end %>
-      <% end %>
-    </aside>
     """
   end
 

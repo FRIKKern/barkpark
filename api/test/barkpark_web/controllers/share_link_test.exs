@@ -123,9 +123,17 @@ defmodule BarkparkWeb.ShareLinkTest do
 
     # url is absolute on the advertised share host (LAN IP in test) or relative.
     assert String.ends_with?(url, "/s/#{token}")
+
+    # P5 (Scoped-by-URL): the short link 302s to the CANONICAL scoped
+    # reader with the token riding as ?share= — and following it serves
+    # the paper anonymously through RequireShareScope's item-token arm.
     resp = get(build_conn(), "/s/#{token}")
-    assert resp.status == 200
-    assert resp.resp_body =~ "Shared via a direct link"
+    target = redirected_to(resp, 302)
+    assert target =~ ~r{^/w/[^/]+/p/[^/]+/papers/demo-paper\?share=}
+
+    followed = get(build_conn(), target)
+    assert followed.status == 200
+    assert followed.resp_body =~ "Shared via a direct link"
   end
 
   # ── doc link ──────────────────────────────────────────────────────────────

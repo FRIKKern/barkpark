@@ -23,12 +23,35 @@ defmodule BarkparkWeb.ShareLinkController do
 
   def show(conn, %{"token" => token}) do
     case Links.resolve(token) do
-      {:ok, link} -> serve(conn, link)
+      {:ok, link} -> serve(conn, link, token)
       {:error, _} -> not_found_html(conn)
     end
   end
 
-  defp serve(conn, %ShareLink{kind: "doc", ref_type: "paper"} = link) do
+  # P5 (Scoped-by-URL): a PAPER short link 302s to its CANONICAL scoped
+  # address with the token riding as ?share= — the recipient lands on the
+  # real, copyable URL and gets the LIVE reader (per-block streaming)
+  # instead of this controller's static render. RequireShareScope's
+  # item-token arm re-validates the token against that exact scope + slug,
+  # so the redirect grants nothing the token didn't already grant. Falls
+  # back to the static render when the link's scope no longer resolves.
+  defp serve(conn, %ShareLink{kind: "doc", ref_type: "paper"} = link, raw_token) do
+    with ws_id when is_binary(ws_id) <- link.workspace_id,
+         %{slug: ws_slug} <- Barkpark.Tenancy.get_workspace_by_id(ws_id),
+         %{slug: proj_slug} <- Barkpark.Tenancy.get_project_by_id(link.project_id) do
+      redirect(conn,
+        to:
+          "/w/#{ws_slug}/p/#{proj_slug}/papers/#{link.ref_id}?share=" <>
+            URI.encode_www_form(raw_token)
+      )
+    else
+      _ -> serve_paper_static(conn, link)
+    end
+  end
+
+  defp serve(conn, %ShareLink{} = link, _raw_token), do: serve(conn, link)
+
+  defp serve_paper_static(conn, %ShareLink{} = link) do
     case Content.get_paper(link.ref_id, link.dataset, scope(link)) do
       %Content.Document{} = paper ->
         conn
