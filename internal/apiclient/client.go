@@ -683,6 +683,88 @@ func (c *Client) Query(typeName, filter string) []Doc {
 // ("postgres") applies. The response carries the matching document envelopes
 // at top-level "documents" ({"documents":[…],"count":…,"query":…,…}), which
 // decode through the same envelope normalization Query's docs use.
+// Revision is one row of a document's revision history
+// (GET /v1/data/history/:dataset/:type/:doc_id — newest first).
+type Revision struct {
+	ID        string    `json:"id"`
+	Action    string    `json:"action"`
+	Title     string    `json:"title"`
+	Status    string    `json:"status"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// History lists a document's revisions, newest first. docID is the BARE
+// published id — the server tracks the draft+published family under it.
+func (c *Client) History(typeName, docID string, limit int) ([]Revision, error) {
+	endpoint := c.scopedURL("/v1/data/history/" + c.Dataset + "/" + typeName + "/" + docID)
+	if limit > 0 {
+		endpoint += "?limit=" + strconv.Itoa(limit)
+	}
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("history error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var out struct {
+		Revisions []Revision `json:"revisions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("parse history response: %w", err)
+	}
+	return out.Revisions, nil
+}
+
+// RevisionDoc fetches one revision (GET /v1/data/revision/:dataset/:id) and
+// shapes it as a Doc — title/status typed, content scalars flattened into
+// Values exactly like a live envelope — so revision content can ride every
+// Doc consumer (e.g. the diff view) unchanged.
+func (c *Client) RevisionDoc(id string) (Doc, error) {
+	endpoint := c.scopedURL("/v1/data/revision/" + c.Dataset + "/" + id)
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return Doc{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return Doc{}, fmt.Errorf("revision error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var out struct {
+		Revision struct {
+			DocID   string                     `json:"doc_id"`
+			Title   string                     `json:"title"`
+			Status  string                     `json:"status"`
+			Content map[string]json.RawMessage `json:"content"`
+		} `json:"revision"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return Doc{}, fmt.Errorf("parse revision response: %w", err)
+	}
+
+	values := make(map[string]string)
+	for k, raw := range out.Revision.Content {
+		if v, ok := scalarString(raw); ok {
+			values[k] = v
+		}
+	}
+	return Doc{
+		ID:     out.Revision.DocID,
+		Title:  out.Revision.Title,
+		Status: out.Revision.Status,
+		Values: values,
+	}, nil
+}
+
 func (c *Client) Search(query string, limit int) ([]Doc, error) {
 	endpoint := c.scopedURL("/v1/data/search/" + c.Dataset)
 	params := url.Values{}

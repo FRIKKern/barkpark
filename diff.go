@@ -57,6 +57,7 @@ func (m *model) openDiffView() {
 		return
 	}
 	m.diffLines = m.buildDiffLines(&pub)
+	m.diffLegend = "- published   + draft"
 	m.diffScroll = 0
 	m.diffOpen = true
 }
@@ -165,7 +166,11 @@ func (m model) renderDiffView(width, height int) string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("  - published   + draft   ·  jk scroll  esc close"))
+	legend := m.diffLegend
+	if legend == "" {
+		legend = "- published   + draft"
+	}
+	lines = append(lines, dimStyle.Render("  "+legend+"   ·  jk scroll  esc close"))
 
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	modal := lipgloss.NewStyle().

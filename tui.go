@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
 
@@ -153,10 +154,19 @@ type model struct {
 	searchCursor int
 	// Diff view (`d` in the editor — diff.go): a transient draft↔published
 	// field-diff modal. diffLines is pre-rendered at open; diffScroll windows
-	// it (the modal is read-only, so no cursor — just scroll).
+	// it (the modal is read-only, so no cursor — just scroll). diffLegend
+	// names the two sides — the history view reuses the modal with
+	// "- revision  + current".
 	diffOpen   bool
 	diffLines  []string
 	diffScroll int
+	diffLegend string
+	// History view (`H` in the editor — history.go): the doc's revision rows,
+	// newest first. enter diffs the highlighted revision against the current
+	// editor values (the diff modal opens OVER the list; esc returns to it).
+	historyOpen   bool
+	historyRevs   []apiclient.Revision
+	historyCursor int
 	// ── Paper rendering (pdrender) ──────────────────────────────────────────
 	// paperRegistry/paperTheme/paperProfile are built ONCE in runTUI and reused
 	// for every paper render. selectedPaperBlocks holds the decoded block tree of
@@ -617,9 +627,16 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSearchResultsKey(msg)
 	}
 
-	// ── Diff modal: j/k scroll, esc/q/d dismiss (diff.go) ──
+	// ── Diff modal: j/k scroll, esc/q/d dismiss (diff.go). Checked BEFORE
+	//    history so a revision diff stacks over the list — closing it falls
+	//    back to the still-open history modal. ──
 	if m.diffOpen {
 		return m.handleDiffKey(msg)
+	}
+
+	// ── History modal: j/k/enter/esc on the revision list (history.go) ──
+	if m.historyOpen {
+		return m.handleHistoryKey(msg)
 	}
 
 	// ── Search query prompt: all input goes to the text input ──
@@ -787,6 +804,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	//    The look-before-you-leap step for ctrl+p / R×2. ──
 	if key == "d" && m.focus.Target == FocusEditor {
 		m.openDiffView()
+		return m, nil
+	}
+
+	// ── History (`H`, editor only) — revision list + diff-vs-current
+	//    (history.go). Read-only; restore stays in Studio / the API. ──
+	if key == "H" && m.focus.Target == FocusEditor {
+		m.openHistoryView()
 		return m, nil
 	}
 
@@ -1711,6 +1735,8 @@ func (m model) View() string {
 		body = m.renderSearchResults(m.width, ph)
 	case m.diffOpen:
 		body = m.renderDiffView(m.width, ph)
+	case m.historyOpen:
+		body = m.renderHistoryView(m.width, ph)
 	default:
 		body = lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	}
@@ -1888,7 +1914,7 @@ func (m model) renderHelpBar() string {
 			// taskTarget) — advertise them where they apply, like the task list does.
 			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  esc back"
 		} else {
-			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  d diff  R discard  y dup  s scope  esc back"
+			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  d diff  H hist  R discard  y dup  s scope  esc back"
 		}
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
