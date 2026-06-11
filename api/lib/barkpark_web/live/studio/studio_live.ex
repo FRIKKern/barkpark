@@ -598,6 +598,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # Born-valid Studio creates (tsk-dossier-studio-create). The task write
+  # path validates content BEFORE any scaffold/initial_values merge
+  # (content.ex: validate_task_kind runs ahead of do_create_document's
+  # insert-branch scaffold), so a bare {doc_id, title} create for
+  # type:task ALWAYS failed — humans could not create tasks in Studio at
+  # all. Seed the two required fields here, in the Studio create flow
+  # only. Deliberately NOT schema initial_values: validated-before-merge
+  # makes those inert for this, and a priority default would deep-merge
+  # into every API create that omits priority, silently re-ranking the
+  # bd ready queue (see /papers/task-dossier-schema). No priority seeded:
+  # a fresh Studio task sorts NULLS-LAST exactly like a fresh bd task.
+  defp seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
+  defp seed_new_doc_content(_type), do: %{}
+
   @impl true
   def handle_event("select", %{"pane" => pane_str, "id" => id}, socket) do
     pane_idx = String.to_integer(pane_str)
@@ -873,20 +887,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, put_flash(socket, :error, "Failed to create")}
     end
   end
-
-  # Born-valid Studio creates (tsk-dossier-studio-create). The task write
-  # path validates content BEFORE any scaffold/initial_values merge
-  # (content.ex: validate_task_kind runs ahead of do_create_document's
-  # insert-branch scaffold), so a bare {doc_id, title} create for
-  # type:task ALWAYS failed — humans could not create tasks in Studio at
-  # all. Seed the two required fields here, in the Studio create flow
-  # only. Deliberately NOT schema initial_values: validated-before-merge
-  # makes those inert for this, and a priority default would deep-merge
-  # into every API create that omits priority, silently re-ranking the
-  # bd ready queue (see /papers/task-dossier-schema). No priority seeded:
-  # a fresh Studio task sorts NULLS-LAST exactly like a fresh bd task.
-  defp seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
-  defp seed_new_doc_content(_type), do: %{}
 
   def handle_event("save", %{"doc" => params}, socket) do
     socket = do_autosave(socket, params)
