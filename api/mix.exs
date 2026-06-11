@@ -65,7 +65,10 @@ defmodule Barkpark.MixProject do
       # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
       {:lazy_html, ">= 0.1.0", only: :test},
       # Phase 7 WI3: in-process HTTP mock for Bokbasen client tests
-      {:bypass, "~> 2.1", only: :test}
+      {:bypass, "~> 2.1", only: :test},
+      # Sheets plugin — xlsx import + export (pure-Elixir, no NIFs)
+      {:xlsx_reader, "~> 0.8"},
+      {:elixlsx, "~> 0.6"}
     ]
   end
 

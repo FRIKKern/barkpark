@@ -1,0 +1,59 @@
+{
+  "name": "sheet",
+  "title": "Sheets",
+  "icon": "📊",
+  "visibility": "private",
+  "fields": [
+    { "name": "title", "title": "Title", "type": "string" },
+    {
+      "name": "locale",
+      "title": "Locale",
+      "type": "string",
+      "description": "BCP 47 locale tag used for number/date formatting (e.g. nb-NO, en-US).",
+      "default": "nb-NO"
+    },
+    {
+      "name": "tabs",
+      "title": "Tabs",
+      "type": "arrayOf",
+      "ordered": true,
+      "description": "Ordered list of worksheet tabs. Each tab carries its own grid layout metadata and a sparse cell map.",
+      "of": {
+        "type": "composite",
+        "fields": [
+          { "name": "name", "title": "Tab name", "type": "string" },
+          {
+            "name": "frozen_rows",
+            "title": "Frozen rows",
+            "type": "string",
+            "description": "Number of rows frozen at the top of the viewport (0 = none)."
+          },
+          {
+            "name": "frozen_cols",
+            "title": "Frozen columns",
+            "type": "string",
+            "description": "Number of columns frozen at the left of the viewport (0 = none)."
+          },
+          {
+            "name": "col_widths",
+            "title": "Column widths",
+            "type": "json",
+            "description": "Sparse map of column index (1-based, as string key) to width in pixels."
+          },
+          {
+            "name": "row_heights",
+            "title": "Row heights",
+            "type": "json",
+            "description": "Sparse map of row index (1-based, as string key) to height in pixels."
+          },
+          {
+            "name": "cells",
+            "title": "Cells",
+            "type": "json",
+            "description": "Sparse map of cell address (e.g. \"A1\") to cell descriptor: {v (value), f (formula), t (type: s|n|b|e), fmt (format string), stale (formula cache stale flag)}."
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+package pdrender
+
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	ltable "github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// ── sheet ──────────────────────────────────────────────────────────────────
+// PdSheet is a spreadsheet-flavoured grid. JSON shape:
+//
+//	{
+//	  "kind":       "PdSheet",
+//	  "head":       ["Col A", "Col B"],   // optional header row
+//	  "rows":       [["a1","b1"], ...],
+//	  "col_widths": [10, 20]              // optional per-column char widths
+//	}
+//
+// When col_widths is present each cell is padded/truncated to exactly that
+// many visible characters BEFORE the table sees it, so lipgloss/table's
+// auto-sizer honours the intent. When absent the table auto-sizes by content
+// exactly like PdTable does.
+//
+// Head row treatment mirrors PdTable: UPPERCASE + muted-bold (opt-in; renders
+// only when `head` is non-empty). Border and layout use the same NormalBorder
+// + BorderStyle(ctx.Theme.Rule) pattern as PdTable for visual consistency.
+type sheetRenderer struct{ ir InlineRenderer }
+
+func (sr sheetRenderer) Render(b Block, ctx RenderCtx) []string {
+	head := attrSlice(b.Attrs, "head")
+	rows := attrSlice(b.Attrs, "rows")
+	colWidths := sr.readColWidths(b.Attrs)
+
+	t := ltable.New().
+		Width(clampWidth(ctx.Width)).
+		Wrap(false). // sheet cells are fixed-width — no re-wrap
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(ctx.Theme.Rule)
+
+	hasHead := len(head) > 0
+	if hasHead {
+		cells := make([]string, 0, len(head))
+		for i, c := range head {
+			txt := ansi.Strip(sr.ir.Inline([]any{c}, ctx))
+			txt = strings.ToUpper(txt)
+			if w := sr.colWidth(colWidths, i); w > 0 {
+				txt = padOrTruncate(txt, w)
+			}
+			cells = append(cells, txt)
+		}
+		t.Headers(cells...)
+	}
+
+	addedRows := 0
+	for _, r := range rows {
+		cells := sr.rowCells(r, colWidths, ctx)
+		if len(cells) == 0 {
+			continue // skip empty rows — ltable panics on zero-column rows
+		}
+		t.Row(cells...)
+		addedRows++
+	}
+
+	// Guard: no columns at all (no head and no non-empty rows) → empty output.
+	if !hasHead && addedRows == 0 {
+		return []string{""}
+	}
+
+	headerStyle := ctx.Theme.Dim.Bold(true)
+	bodyStyle := ctx.Theme.Body
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == ltable.HeaderRow {
+			return headerStyle.Padding(0, 1)
+		}
+		return bodyStyle.Padding(0, 1)
+	})
+
+	return strings.Split(t.Render(), "\n")
+}
+
+// rowCells converts a row ([]any or scalar) to []string, applying col_widths.
+func (sr sheetRenderer) rowCells(row any, colWidths []int, ctx RenderCtx) []string {
+	cells, ok := row.([]any)
+	if !ok {
+		return []string{sr.cellString(row, 0, colWidths, ctx)}
+	}
+	out := make([]string, 0, len(cells))
+	for i, c := range cells {
+		out = append(out, sr.cellString(c, i, colWidths, ctx))
+	}
+	return out
+}
+
+// cellString renders one cell and applies the column width hint if present.
+func (sr sheetRenderer) cellString(cell any, col int, colWidths []int, ctx RenderCtx) string {
+	var txt string
+	switch v := cell.(type) {
+	case []any:
+		txt = sr.ir.Inline(v, ctx)
+	case nil:
+		txt = ""
+	default:
+		txt = sr.ir.Inline([]any{v}, ctx)
+	}
+	if w := sr.colWidth(colWidths, col); w > 0 {
+		txt = padOrTruncate(ansi.Strip(txt), w)
+	}
+	return txt
+}
+
+// colWidth returns the declared width for column col, or 0 (auto) when absent.
+func (sr sheetRenderer) colWidth(widths []int, col int) int {
+	if col < len(widths) {
+		return widths[col]
+	}
+	return 0
+}
+
+// readColWidths extracts the optional "col_widths" array as []int.
+func (sr sheetRenderer) readColWidths(m map[string]any) []int {
+	raw := attrSlice(m, "col_widths")
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(raw))
+	for _, v := range raw {
+		w := attrInt(map[string]any{"w": v}, "w", 0)
+		out = append(out, w)
+	}
+	return out
+}
+
+// padOrTruncate pads s with spaces to exactly w visible characters, or
+// truncates with a "…" ellipsis if s is wider than w. Operates on plain
+// (non-ANSI) strings — callers must strip ANSI before calling when widths
+// matter for alignment.
+func padOrTruncate(s string, w int) string {
+	if w <= 0 {
+		return s
+	}
+	vis := lipgloss.Width(s)
+	switch {
+	case vis < w:
+		return s + strings.Repeat(" ", w-vis)
+	case vis > w:
+		if w <= 1 {
+			return "…"
+		}
+		// Truncate to w-1 visible chars + ellipsis.
+		runes := []rune(s)
+		cut := 0
+		count := 0
+		for range runes {
+			if count >= w-1 {
+				break
+			}
+			cut++
+			count++ // all runes here are plain (ANSI-stripped), so width==1 per rune
+		}
+		return string(runes[:cut]) + "…"
+	default:
+		return s
+	}
+}

@@ -233,5 +233,8 @@ func DefaultRegistry(theme Theme) *Registry {
 	// form / questionnaire (alias): render-only fieldsets, no input wiring.
 	r.blocks["form"] = formRenderer{}
 	r.blocks["questionnaire"] = formRenderer{}
+
+	// PdSheet: bordered spreadsheet grid with optional per-column widths.
+	r.blocks["PdSheet"] = sheetRenderer{ir: ir}
 	return r
 }
