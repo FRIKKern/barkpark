@@ -283,3 +283,63 @@ func TestEditorFooterPublishState(t *testing.T) {
 		t.Errorf("published footer must not advertise a publish action")
 	}
 }
+
+// TestUnpublishDemotesPublishedDoc pins U's wire shape and guards: sends
+// {"unpublish":{"id":<bare>,"type":…}} for a published doc, optimistically
+// flips to the drafts. twin, and no-ops on a draft (ctrl+p's peer, separate
+// key by design).
+func TestUnpublishDemotesPublishedDoc(t *testing.T) {
+	var captured []byte
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		captured, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"transactionId":"t1","results":[{"id":"playground-unpublish-1","operation":"unpublish"}]}`))
+	}))
+	defer srv.Close()
+
+	doc := draftDoc(t)
+	doc.Status = "published"
+	doc.ID = "playground-unpublish-1"
+	m := model{
+		ds:           apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"}),
+		selectedDoc:  doc,
+		editorSchema: &Schema{Name: "post"},
+	}
+	m.unpublishDocument()
+
+	var body struct {
+		Mutations []struct {
+			Unpublish struct {
+				ID   string `json:"id"`
+				Type string `json:"type"`
+			} `json:"unpublish"`
+		} `json:"mutations"`
+	}
+	if err := json.Unmarshal(captured, &body); err != nil || len(body.Mutations) != 1 {
+		t.Fatalf("want 1 unpublish mutation, got err=%v body=%s", err, captured)
+	}
+	u := body.Mutations[0].Unpublish
+	if u.ID != "playground-unpublish-1" || u.Type != "post" {
+		t.Errorf("unpublish = %+v, want bare id + post", u)
+	}
+	if m.selectedDoc.Status != "draft" || m.selectedDoc.ID != "drafts.playground-unpublish-1" {
+		t.Errorf("optimistic flip wrong: status=%q id=%q", m.selectedDoc.Status, m.selectedDoc.ID)
+	}
+
+	// Inert on a draft: no second request.
+	m.unpublishDocument()
+	if requests != 1 {
+		t.Errorf("U on a draft must be a no-op, got %d requests", requests)
+	}
+}
+
+// TestEditorFooterAdvertisesUnpublish: the published footer carries the U hint.
+func TestEditorFooterAdvertisesUnpublish(t *testing.T) {
+	doc := draftDoc(t)
+	doc.Status = "published"
+	m := model{selectedDoc: doc, editorSchema: &Schema{Name: "post", Title: "Posts"}}
+	if out := m.buildEditorContent(80); !strings.Contains(out, "U unpublish") {
+		t.Errorf("published footer must advertise U unpublish:\n%s", out)
+	}
+}

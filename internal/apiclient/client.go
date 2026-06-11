@@ -523,6 +523,19 @@ func (c *Client) Publish(typeName, id string) error {
 	return c.Mutate([]map[string]interface{}{mutation})
 }
 
+// Unpublish demotes a published document back to a draft via the unpublish
+// mutation. id is the BARE published id, exactly like Publish; the server's
+// Content.unpublish_document moves the row to its drafts. twin.
+func (c *Client) Unpublish(typeName, id string) error {
+	mutation := map[string]interface{}{
+		"unpublish": map[string]interface{}{
+			"id":   id,
+			"type": typeName,
+		},
+	}
+	return c.Mutate([]map[string]interface{}{mutation})
+}
+
 // Create creates a NEW draft document with a server-assigned id: a create
 // mutation carrying no _id makes Content.create_document generate
 // "<type>-<n>" and prefix "drafts.". The assigned draft id is returned from

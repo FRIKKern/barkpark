@@ -744,6 +744,14 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// ── Unpublish (`U`, editor only) — ctrl+p's peer on a separate key so
+	//    neither action can fat-finger into the other. Inert on drafts. ──
+	if key == "U" && m.focus.Target == FocusEditor {
+		m.unpublishDocument()
+		m.refreshViewport()
+		return m, nil
+	}
+
 	switch key {
 
 	case "q", "ctrl+c":
@@ -1131,6 +1139,26 @@ func (m *model) publishDocument() {
 	m.selectedDoc.Status = "published"
 	m.selectedDoc.ID = id
 	m.setStatus("published", false)
+}
+
+// unpublishDocument demotes the open PUBLISHED doc back to a draft (`U` in
+// the editor) — the missing peer of ctrl+p, which stays publish-only by
+// design (separate keys so neither action can fat-finger into the other).
+// The mutate contract takes the bare published id ({"unpublish":{"id":"x",
+// "type":…}}); the server moves the row to its drafts. twin, mirrored here
+// by the optimistic flip.
+func (m *model) unpublishDocument() {
+	if m.selectedDoc == nil || m.editorSchema == nil || m.selectedDoc.Status != "published" {
+		return
+	}
+	id := strings.TrimPrefix(m.selectedDoc.ID, "drafts.")
+	if err := m.ds.Unpublish(m.editorSchema.Name, id); err != nil {
+		m.setStatus(fmt.Sprintf("unpublish failed: %v", err), true)
+		return
+	}
+	m.selectedDoc.Status = "draft"
+	m.selectedDoc.ID = "drafts." + id
+	m.setStatus("unpublished — now a draft", false)
 }
 
 // startCreateDoc opens the one-line title prompt for a new document of the
@@ -2163,7 +2191,7 @@ func (m model) buildEditorContent(width int) string {
 	case "draft":
 		publishBtn = publishBtnStyle.Render("Ctrl+P publish")
 	case "published":
-		publishBtn = dimStyle.Render("published ✓")
+		publishBtn = dimStyle.Render("published ✓ · U unpublish")
 	}
 
 	var footerRight string
