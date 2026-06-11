@@ -991,9 +991,9 @@ func (m *model) startFieldEdit() {
 	}
 	field := m.editorSchema.Fields[m.fieldCursor]
 
-	// Only string, text, slug, datetime, color fields are text-editable
+	// Only string, text, slug, datetime, color, image fields are text-editable
 	switch field.Type {
-	case FieldString, FieldText, FieldSlug, FieldDatetime, FieldColor:
+	case FieldString, FieldText, FieldSlug, FieldDatetime, FieldColor, FieldImage:
 		m.editing = true
 		m.textInput = textinput.New()
 		m.textInput.Focus()
@@ -1001,8 +1001,12 @@ func (m *model) startFieldEdit() {
 		m.textInput.Width = m.calcEditorWidth() - 12
 		m.textInput.Prompt = ""
 
-		// Pre-fill with current value
+		// Pre-fill with current value. Image values may be a JSON envelope
+		// ({"url","assetId"}) — edit the URL part, not the raw JSON.
 		val := m.getFieldValue(field.Name)
+		if field.Type == FieldImage {
+			val, _ = parseImageValue(val)
+		}
 		m.textInput.SetValue(val)
 	case FieldSelect:
 		m.toggleField()
@@ -1022,6 +1026,19 @@ func (m *model) commitFieldEdit() {
 	}
 	field := m.editorSchema.Fields[m.fieldCursor]
 	val := m.textInput.Value()
+
+	// Image fields edit the URL part of the value. An unchanged URL keeps
+	// the original stored value verbatim (preserving the assetId linkage a
+	// library pick carries); a new or cleared URL stores the bare string —
+	// the asset linkage no longer matches a hand-entered URL.
+	if field.Type == FieldImage {
+		orig := m.getFieldValue(field.Name)
+		if u, _ := parseImageValue(orig); strings.TrimSpace(val) == u {
+			val = orig
+		} else {
+			val = strings.TrimSpace(val)
+		}
+	}
 
 	if m.dirtyValues == nil {
 		m.dirtyValues = make(map[string]string)
@@ -1067,6 +1084,32 @@ func (m *model) toggleField() {
 	}
 	m.dirty = true
 	m.applyDirtyToDoc()
+}
+
+// parseImageValue splits an image field's stored value into (url, assetId).
+// Two accepted shapes, mirroring the Studio picker's bpParseMediaValue:
+// a JSON object `{"url":…,"assetId":…}` (library/upload selections) or a
+// bare URL string (legacy + hand-entered). Unparseable JSON degrades to
+// treating the whole string as a URL, never an error.
+func parseImageValue(v string) (string, string) {
+	trimmed := strings.TrimSpace(v)
+	if trimmed == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var o struct {
+			URL     string `json:"url"`
+			AssetID string `json:"assetId"`
+			ID      string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &o); err == nil {
+			if o.AssetID == "" {
+				o.AssetID = o.ID
+			}
+			return o.URL, o.AssetID
+		}
+	}
+	return trimmed, ""
 }
 
 // getFieldValue gets the current value for a field, checking dirty values first.
@@ -2385,15 +2428,28 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
 
 	case FieldImage:
-		if isFocused {
-			lines = append(lines, indentLines(lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(highlight).
-				Align(lipgloss.Center).
-				Padding(1, 0).
-				Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")), 2))
+		// Value-aware, like every other field: show the stored image URL
+		// (with its asset linkage when present), or a quiet hint when unset.
+		// Enter edits the URL as text — there is no drop or browse in a
+		// terminal, so the old static "Drop image or browse" card was a dead
+		// affordance that also hid whether an image was set at all.
+		if isEditing {
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
-			lines = append(lines, indentLines(imageDropStyle.Width(fieldContentWidth).Render(dimStyle.Render("Drop image or browse")), 2))
+			url, assetID := parseImageValue(val)
+			var content string
+			switch {
+			case url != "":
+				content = url
+				if assetID != "" {
+					content += "\n" + dimStyle.Render("asset "+assetID)
+				}
+			case assetID != "":
+				content = dimStyle.Render("asset ") + assetID
+			default:
+				content = dimStyle.Render("No image — enter a URL")
+			}
+			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(content), 2))
 		}
 
 	case FieldSelect:

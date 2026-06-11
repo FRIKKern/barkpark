@@ -73,12 +73,6 @@ var (
 			Bold(true).
 			Padding(0, 2)
 
-	imageDropStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}).
-			Align(lipgloss.Center).
-			Padding(1, 0)
-
 	selectActiveStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(highlight)
