@@ -81,9 +81,20 @@ defmodule BarkparkWeb.Router.Plugins do
   ## Compile-time vs runtime
 
   `collect_routes/1` runs at macro-expansion time. After editing a
-  plugin's `register_routes/1`, recompile barkpark (`mix compile`) for
-  the new routes to appear in `mix phx.routes`. There is no hot-reload
-  of plugin routes in v1.
+  plugin's `register_routes/1`, the host router must RECOMPILE for the
+  new routes to appear — and the compiler cannot see this dependency
+  (the plugin module is reached dynamically through the Registry), so a
+  plain `mix compile` recompiles the plugin but NOT the router, and a
+  `touch lib/barkpark_web/router.ex` is defeated by content-digest
+  checking. Force it:
+
+      rm _build/dev/lib/barkpark/ebin/Elixir.BarkparkWeb.Router.beam && mix compile
+
+  (or `mix compile --force` / `make rebuild` on the server). Symptom of
+  forgetting: the verb shows in `/v1/capabilities` (cli_commands is read
+  at runtime) but the route 404s — e.g. `/v1/tasks/prime` returning
+  `not_found` while the manifest advertises `task.prime`. There is no
+  hot-reload of plugin routes in v1.
 
   With `:barkpark, :plugins` configured to `[]` (or no bundled plugins
   on disk), `collect_routes/1` returns `[]` and the macro emits no
