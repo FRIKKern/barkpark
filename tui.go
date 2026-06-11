@@ -151,6 +151,12 @@ type model struct {
 	searchQuery  string
 	searchHits   []Doc
 	searchCursor int
+	// Diff view (`d` in the editor — diff.go): a transient draft↔published
+	// field-diff modal. diffLines is pre-rendered at open; diffScroll windows
+	// it (the modal is read-only, so no cursor — just scroll).
+	diffOpen   bool
+	diffLines  []string
+	diffScroll int
 	// ── Paper rendering (pdrender) ──────────────────────────────────────────
 	// paperRegistry/paperTheme/paperProfile are built ONCE in runTUI and reused
 	// for every paper render. selectedPaperBlocks holds the decoded block tree of
@@ -611,6 +617,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSearchResultsKey(msg)
 	}
 
+	// ── Diff modal: j/k scroll, esc/q/d dismiss (diff.go) ──
+	if m.diffOpen {
+		return m.handleDiffKey(msg)
+	}
+
 	// ── Search query prompt: all input goes to the text input ──
 	if m.searching {
 		switch key {
@@ -769,6 +780,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key == "U" && m.focus.Target == FocusEditor {
 		m.unpublishDocument()
 		m.refreshViewport()
+		return m, nil
+	}
+
+	// ── Diff (`d`, editor only) — draft↔published field diff (diff.go).
+	//    The look-before-you-leap step for ctrl+p / R×2. ──
+	if key == "d" && m.focus.Target == FocusEditor {
+		m.openDiffView()
 		return m, nil
 	}
 
@@ -1691,6 +1709,8 @@ func (m model) View() string {
 		body = m.renderRefPicker(m.width, ph)
 	case m.searchOpen:
 		body = m.renderSearchResults(m.width, ph)
+	case m.diffOpen:
+		body = m.renderDiffView(m.width, ph)
 	default:
 		body = lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	}
@@ -1868,7 +1888,7 @@ func (m model) renderHelpBar() string {
 			// taskTarget) — advertise them where they apply, like the task list does.
 			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  esc back"
 		} else {
-			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  R discard  y dup  s scope  esc back"
+			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  d diff  R discard  y dup  s scope  esc back"
 		}
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
