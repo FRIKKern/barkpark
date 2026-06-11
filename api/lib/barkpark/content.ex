@@ -778,7 +778,9 @@ defmodule Barkpark.Content do
               |> tap_broadcast(dataset, type, "create", nil)
           end
 
-        fire_after(result, :after_save, payload)
+        result
+        |> fire_after(:after_save, payload)
+        |> tap_sheet_writethrough()
     end
   end
 
@@ -1393,6 +1395,127 @@ defmodule Barkpark.Content do
     end)
   end
 
+  # ── Sheet embed write-through ───────────────────────────────────────────────
+  #
+  # A `{"type":"sheet","ref":<sheet doc id>}` block in any document's
+  # `content["blocks"]` carries a cached `"snapshot"` — the dense value grid
+  # `Barkpark.Sheets.snapshot_for/2` synthesizes from the sheet's sparse cells.
+  # The snapshot is what keeps the block rendering with the Sheets plugin off
+  # (fresh-install invariant), so it must never go stale: every successful save
+  # of a `"sheet"` document rewrites the snapshot in all same-scope documents
+  # embedding it, in the same logical operation.
+  #
+  # Targeting is JSONB containment (`content @> {"blocks":[{"type":"sheet",
+  # "ref":…}]}`) so the DB returns ONLY embedding rows — the same predicate
+  # push-down discipline as `find_referencing_docs/3`, never a full scan.
+  # Refreshed docs persist through the direct changeset + `tap_broadcast` tail
+  # `disconnect_references/3` uses, so revisions land and PubSub fires for every
+  # refreshed doc. The direct path cannot re-enter this trigger (only
+  # `create_document/4` / `upsert_document/4` call it), so a sheet embedding
+  # another sheet terminates after one refresh level, and the query excludes the
+  # sheet's own rows — a sheet never embeds itself.
+
+  defp tap_sheet_writethrough({:ok, %Document{type: "sheet"} = sheet} = result) do
+    refresh_sheet_embeds(sheet)
+    result
+  end
+
+  defp tap_sheet_writethrough(result), do: result
+
+  defp refresh_sheet_embeds(%Document{} = sheet) do
+    # Match both id forms: papers canonically embed the published id, but the
+    # mutated row is (almost always) the draft — and a block authored against
+    # the draft id must refresh too.
+    pub_id = published_id(sheet.doc_id)
+    refs = [pub_id, draft_id(pub_id)]
+
+    sheet
+    |> sheet_embed_targets(refs)
+    |> Enum.each(&refresh_doc_sheet_snapshots(&1, refs, sheet.content || %{}))
+  end
+
+  # Same-scope embedding rows. `dataset_id` is the authoritative scope key when
+  # the sheet row carries one (W2); legacy/unscoped rows fall back to the
+  # dataset STRING + nil-safe workspace match, so a fresh sandbox without the
+  # tenancy backfill still resolves its own scope and never crosses another's.
+  defp sheet_embed_targets(%Document{} = sheet, refs) do
+    [embed_a, embed_b] = Enum.map(refs, &%{"blocks" => [%{"type" => "sheet", "ref" => &1}]})
+
+    base =
+      from d in Document,
+        where: d.doc_id not in ^refs,
+        where:
+          fragment("? @> ?", d.content, ^embed_a) or
+            fragment("? @> ?", d.content, ^embed_b)
+
+    scoped =
+      cond do
+        sheet.dataset_id ->
+          where(base, [d], d.dataset_id == ^sheet.dataset_id)
+
+        sheet.workspace_id ->
+          where(base, [d], d.dataset == ^sheet.dataset and d.workspace_id == ^sheet.workspace_id)
+
+        true ->
+          where(base, [d], d.dataset == ^sheet.dataset and is_nil(d.workspace_id))
+      end
+
+    Repo.all(scoped)
+  end
+
+  defp refresh_doc_sheet_snapshots(%Document{} = doc, refs, sheet_content) do
+    content = doc.content || %{}
+    blocks = Map.get(content, "blocks") || []
+
+    {blocks, changed?} =
+      Enum.map_reduce(blocks, false, fn block, changed ->
+        if is_map(block) and Map.get(block, "type") == "sheet" and
+             Map.get(block, "ref") in refs do
+          snapshot = Barkpark.Sheets.snapshot_for(sheet_content, embed_tab_index(block))
+          {Map.put(block, "snapshot", snapshot), true}
+        else
+          {block, changed}
+        end
+      end)
+
+    if changed? do
+      # Re-derive everything downstream of the refreshed blocks: the paper
+      # body_html cache (when the doc carries one — upsert_paper's render of
+      # the full block list) and the projected content[fieldName] /
+      # content["body"] keys, whose html also embeds the rendered grid.
+      # Projection remains the SOLE writer of the projected keys.
+      render_opts = paper_render_opts(doc.dataset, Map.get(content, "style"))
+
+      content =
+        case content do
+          %{"body_html" => _} ->
+            Map.put(content, "body_html", Render.render_blocks(blocks, render_opts))
+
+          _ ->
+            content
+        end
+
+      content =
+        content
+        |> Map.put("blocks", blocks)
+        |> Projection.project(blocks, render_opts)
+
+      doc
+      |> Document.changeset(%{"content" => content, "rev" => generate_rev()})
+      |> Repo.update()
+      |> tap_broadcast(doc.dataset, doc.type, "update", doc.rev)
+    end
+
+    :ok
+  end
+
+  defp embed_tab_index(block) do
+    case Map.get(block, "tab") do
+      i when is_integer(i) and i >= 0 -> i
+      _ -> 0
+    end
+  end
+
   @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
 
   defp from_envelope(attrs) do
@@ -1505,7 +1628,9 @@ defmodule Barkpark.Content do
               |> tap_broadcast(dataset, type, "create", nil)
           end
 
-        fire_after(result, :after_save, payload)
+        result
+        |> fire_after(:after_save, payload)
+        |> tap_sheet_writethrough()
     end
   end
 

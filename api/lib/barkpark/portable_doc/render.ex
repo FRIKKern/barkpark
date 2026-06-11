@@ -472,6 +472,43 @@ defmodule Barkpark.PortableDoc.Render do
     |> maybe_put("height", Map.get(b, "height"))
   end
 
+  # ── sheet embed block ──────────────────────────────────────────────────────
+  # `"type" => "sheet"` embeds a sheet document by `"ref"`; its `"snapshot"`
+  # key holds the cached dense value grid (`Barkpark.Sheets.snapshot_for/2`,
+  # refreshed by the write-through path in `Barkpark.Content` on every sheet
+  # mutation). Composing straight from the snapshot means no DB call — the
+  # block renders even with the Sheets plugin off (fresh-install invariant).
+  # A block with no snapshot yet (freshly authored, never written through)
+  # composes to an empty grid so the walker never crashes.
+  def compose_block(%{"type" => "sheet"} = b, _style) do
+    snap = Map.get(b, "snapshot") || %{}
+
+    rows =
+      case Map.get(snap, "rows") do
+        rows when is_list(rows) ->
+          Enum.map(rows, fn row -> row |> List.wrap() |> Enum.map(&to_string/1) end)
+
+        _ ->
+          []
+      end
+
+    pd = %{"kind" => "PdSheet", "rows" => rows}
+
+    pd =
+      case Map.get(snap, "head") do
+        head when is_list(head) -> Map.put(pd, "head", Enum.map(head, &to_string/1))
+        _ -> pd
+      end
+
+    case Map.get(snap, "col_widths") do
+      widths when is_list(widths) ->
+        Map.put(pd, "col_widths", Enum.map(widths, &if(is_integer(&1), do: &1, else: 0)))
+
+      _ ->
+        pd
+    end
+  end
+
   def compose_block(%{"type" => "table"} = b, _style) do
     compose_cell = fn cell ->
       cell |> compose_inline_children() |> Enum.map(&to_pd_node_from_inline_child/1)
@@ -1260,6 +1297,7 @@ defmodule Barkpark.PortableDoc.Render do
   defp walk(%{"kind" => "PdHr"} = n, _width, pal), do: hr(n, pal)
   defp walk(%{"kind" => "PdImage"} = n, _width, _pal), do: image(n)
   defp walk(%{"kind" => "PdTable"} = n, width, pal), do: table(n, width, pal)
+  defp walk(%{"kind" => "PdSheet"} = n, width, pal), do: sheet(n, width, pal)
   defp walk(%{"kind" => "PdCallout"} = n, width, pal), do: callout(n, width, pal)
   defp walk(%{"kind" => "PdList"} = n, width, pal), do: list(n, width, pal)
   defp walk(%{"kind" => "PdListItem"} = n, width, pal), do: list_item(n, width, pal)
@@ -1670,6 +1708,111 @@ defmodule Barkpark.PortableDoc.Render do
 
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{rows}</table>)
   end
+
+  # PdSheet — dense spreadsheet value grid; the same node shape the TUI's
+  # pdrender already consumes (head/rows/col_widths, all-plain-string cells).
+  # The HTML mirrors the `table` clause, plus an optional `<thead>` band when
+  # `head` is present and per-column inline `width:Npx` hints from
+  # `col_widths`, so the grid renders without any external CSS.
+  defp sheet(n, _width, %{style: :article} = pal) do
+    head = Map.get(n, "head", []) |> List.wrap()
+    body = Map.get(n, "rows", []) |> List.wrap()
+    col_widths = Map.get(n, "col_widths")
+
+    thead =
+      if head == [] do
+        ""
+      else
+        cells =
+          head
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, idx} ->
+            w_style = col_width_style(col_widths, idx)
+
+            ~s(<th style="#{w_style}border-bottom:2px solid #{pal.rule};padding:6px 10px;text-align:left;) <>
+              ~s(text-transform:uppercase;letter-spacing:0.04em;font-size:0.78rem;color:#{pal.muted};) <>
+              ~s(font-family:#{pal.font_heading}">#{escape_html(cell)}</th>)
+          end)
+          |> Enum.join("")
+
+        "<thead><tr>#{cells}</tr></thead>"
+      end
+
+    tbody =
+      body
+      |> Enum.map(fn row ->
+        cells =
+          row
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, idx} ->
+            w_style = col_width_style(col_widths, idx)
+
+            ~s(<td style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem">#{escape_html(cell)}</td>)
+          end)
+          |> Enum.join("")
+
+        "<tr>#{cells}</tr>"
+      end)
+      |> Enum.join("")
+
+    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
+      thead <> "<tbody>#{tbody}</tbody></table>"
+  end
+
+  defp sheet(n, _width, pal) do
+    head = Map.get(n, "head", []) |> List.wrap()
+    body = Map.get(n, "rows", []) |> List.wrap()
+    col_widths = Map.get(n, "col_widths")
+
+    thead_row =
+      if head == [] do
+        ""
+      else
+        cells =
+          head
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, idx} ->
+            w_style = col_width_style(col_widths, idx)
+
+            ~s(<th style="#{w_style}border-bottom:2px solid #{pal.rule};padding:6px 10px;text-align:left;font-weight:bold">#{escape_html(cell)}</th>)
+          end)
+          |> Enum.join("")
+
+        "<thead><tr>#{cells}</tr></thead>"
+      end
+
+    rows =
+      body
+      |> Enum.map(fn row ->
+        cells =
+          row
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, idx} ->
+            w_style = col_width_style(col_widths, idx)
+
+            ~s(<td style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top">#{escape_html(cell)}</td>)
+          end)
+          |> Enum.join("")
+
+        "<tr>#{cells}</tr>"
+      end)
+      |> Enum.join("")
+
+    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{thead_row}<tbody>#{rows}</tbody></table>)
+  end
+
+  # Emit an inline `width:Npx;` style fragment for the col at `idx` (0-based).
+  # Returns `""` when no col_widths list is present or the entry is 0.
+  defp col_width_style(nil, _idx), do: ""
+
+  defp col_width_style(col_widths, idx) when is_list(col_widths) do
+    case Enum.at(col_widths, idx) do
+      w when is_integer(w) and w > 0 -> "width:#{w}px;"
+      _ -> ""
+    end
+  end
+
+  defp col_width_style(_, _), do: ""
 
   defp callout(n, width, pal) do
     tone = tone_palette(Map.get(n, "tone"))
