@@ -458,7 +458,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                 <%= render_reference(assigns, @endpoint.render_key) %>
               <% true -> %>
                 <.endpoint_docs endpoint={@endpoint} />
-                <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} scope_prefix={assigns[:scope_prefix] || ""} />
+                <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} />
             <% end %>
           </div>
         </.pane_column>
@@ -762,7 +762,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   attr :endpoint, :map, required: true
   attr :form_state, :map, required: true
   attr :token, :string, required: true
-  attr :scope_prefix, :string, default: ""
 
   defp endpoint_playground(assigns) do
     assigns =
@@ -773,7 +772,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           assigns.endpoint,
           assigns.form_state,
           assigns.token,
-          "http://localhost:4000" <> (assigns[:scope_prefix] || "")
+          # Flat on purpose — see runner_base/1.
+          "http://localhost:4000"
         )
       )
 
@@ -1085,12 +1085,16 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     """
   end
 
-  # Scoped runner base (tsk-url-p2): on the scoped mount the example
-  # requests exercise the SAME workspace/project the Studio is on — the
-  # /v1 mirror mounts under the /w/<ws>/p/<proj> prefix with identical
-  # path tails. Flat surface → "" → byte-identical legacy behavior.
-  # (Endpoints with no scoped mirror — e.g. /v1/tasks — surface the 404
-  # in the result panel, which is itself honest documentation.)
-  defp runner_base(socket),
-    do: "http://localhost:4000" <> (socket.assigns[:scope_prefix] || "")
+  # The runner deliberately targets the FLAT API regardless of which
+  # scoped page hosts the tester (P2 originally prefixed the scope and
+  # the first real "Run all" proved it wrong): the tester documents the
+  # endpoint CONTRACT, and its example catalog is written for the flat
+  # surface — through the scoped mirror, anonymous public reads 403
+  # (scoped API pipelines are membership-gated; the anonymous-Default
+  # allowance is browser-only by design) and flat-only endpoints
+  # (/v1/meta, /v1/tasks, /api/*) 404. Flat paths are host-absolute and
+  # valid from any page, and resolve to the same Default tenant the
+  # examples seed. Scoped-mirror documentation belongs in the endpoint
+  # docs (each scoped family notes its /w/... twin), not the runner base.
+  defp runner_base(_socket), do: "http://localhost:4000"
 end
