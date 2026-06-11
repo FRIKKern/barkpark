@@ -90,7 +90,11 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           on_change: "autosave",
           on_reorder: "array_op",
           plugin_name: plugin,
-          path: path
+          path: path,
+          # Picker context for reference rows (tsk-dossier-ref-picker).
+          dataset: Map.get(assigns, :dataset, "production"),
+          scope_prefix: Map.get(assigns, :scope_prefix, ""),
+          api_token_raw: Map.get(assigns, :api_token_raw, "")
         })
 
       "codelist" ->

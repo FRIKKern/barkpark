@@ -40,6 +40,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
   attr :readonly, :boolean, default: false
+  # Picker context (tsk-dossier-ref-picker): reference rows mount the same
+  # bp-reference-picker / bp-media-picker Web Components the top-level
+  # FieldInputs use, so they need the dataset, the scoped-surface URL
+  # prefix, and (for media uploads) the bearer token. Defaults keep every
+  # caller that predates the attrs rendering flat + tokenless.
+  attr :dataset, :string, default: "production"
+  attr :scope_prefix, :string, default: ""
+  attr :api_token_raw, :string, default: ""
   # Optional `phx-target` for the reorder/add/remove buttons. Defaults to nil —
   # buttons then bubble to the enclosing LiveView (StudioLive). When a
   # `Phoenix.LiveComponent.CID` is passed (e.g. `@myself` from PaperFieldBlock),
@@ -225,6 +233,25 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           readonly: assigns.readonly
         })
 
+      "reference" ->
+        # Per-row picker (tsk-dossier-ref-picker) — same WC + hidden-input +
+        # BarkparkFieldBridge shape as FieldInputs, row-scoped. The wrapper
+        # id is keyed on (name, VALUE): phx-update="ignore" pins the WC's
+        # internal DOM to the id, so a reorder/selection that changes the
+        # row's value changes the id too → LiveView swaps in a fresh wrapper
+        # rendering the right value instead of leaving a stale ignored node.
+        reference_row(%{
+          wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
+          input_name: row_path,
+          row_value: to_string(row_value || ""),
+          ref_type: ref_type_of(item),
+          dataset: assigns[:dataset] || "production",
+          scope_prefix: assigns[:scope_prefix] || "",
+          api_token_raw: assigns[:api_token_raw] || "",
+          on_change: assigns.on_change,
+          readonly: assigns.readonly
+        })
+
       _ ->
         leaf_assigns = %{
           input_id: "f-#{assigns.field.name}-#{idx}",
@@ -237,6 +264,62 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         leaf_input(leaf_assigns)
     end
   end
+
+  # mediaAsset references browse/select from the media library; everything
+  # else gets the generic document typeahead.
+  defp reference_row(%{ref_type: "mediaAsset"} = assigns) do
+    ~H"""
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-ref-row">
+      <input
+        type="hidden"
+        id={"#{@wrap_id}-h"}
+        name={@input_name}
+        value={@row_value}
+        phx-change={@on_change}
+      />
+      <bp-media-picker
+        value={@row_value}
+        value-mode="reference"
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"#{@wrap_id}-h"}
+        data-token={@api_token_raw}
+      ></bp-media-picker>
+    </div>
+    """
+  end
+
+  defp reference_row(assigns) do
+    ~H"""
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-ref-row">
+      <input
+        type="hidden"
+        id={"#{@wrap_id}-h"}
+        name={@input_name}
+        value={@row_value}
+        phx-change={@on_change}
+      />
+      <bp-reference-picker
+        value={@row_value}
+        ref-type={@ref_type}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"#{@wrap_id}-h"}
+      ></bp-reference-picker>
+    </div>
+    """
+  end
+
+  # Stable-per-(slot,value) DOM id. phash2 keeps it short + id-safe; idx
+  # disambiguates duplicate values across rows.
+  defp ref_row_id(field, row_path, row_value, idx) do
+    "bp-aref-#{field.name}-#{idx}-#{:erlang.phash2({row_path, row_value})}"
+  end
+
+  # refType lives on the RAW field map (a v1 leaf key parse/2 preserves
+  # verbatim); parsed %Field{} carries it under .raw, plain maps directly.
+  defp ref_type_of(%{raw: %{} = raw}), do: raw["refType"] || ""
+  defp ref_type_of(%{} = item), do: item["refType"] || Map.get(item, :ref_type) || ""
 
   defp leaf_input(assigns) do
     ~H"""

@@ -286,6 +286,62 @@ defmodule Barkpark.Tasks.CompactorTest do
 
   # ─── (2) Compact happy path ───────────────────────────────────────────────
 
+  describe "compact/0 — worklog tailing (tsk-dossier-worklog-compaction)" do
+    test "an oversized worklog is tailed with a visible rollup entry; the snapshot keeps it all",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_done_with_history!(uniq("wl"), scope, 60)
+
+      worklog =
+        for i <- 1..12 do
+          %{
+            "ts" => "2026-06-0#{rem(i, 9) + 1}T10:00:00Z",
+            "worker" => "agent-#{i}",
+            "kind" => "progress",
+            "note" => "step #{i}"
+          }
+        end
+
+      task = set_content!(task, Map.put(task.content, "worklog", worklog))
+      assert %{compacted: 1, skipped: 0} = Compactor.compact()
+
+      reloaded = Repo.get!(Document, task.id)
+      tailed = reloaded.content["worklog"]
+
+      # Rollup head + the last 5 entries — the next claiming agent reads
+      # the truncation note exactly where it reads handoff context.
+      assert length(tailed) == 6
+      [rollup | rest] = tailed
+      assert rollup["worker"] == "compactor"
+      assert rollup["note"] =~ "compacted from 12 worklog entries"
+      assert rollup["note"] =~ reloaded.content["compaction_snapshot_revision_id"]
+      assert rest == Enum.take(worklog, -5)
+
+      # The snapshot revision preserves the FULL worklog (restore path).
+      snapshot =
+        Repo.get!(Barkpark.Content.Revision, reloaded.content["compaction_snapshot_revision_id"])
+
+      assert length(snapshot.content["worklog"]) == 12
+    end
+
+    test "a worklog at/under the tail is left byte-identical", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_done_with_history!(uniq("wl-small"), scope, 60)
+
+      worklog = [
+        %{"ts" => "2026-06-01T10:00:00Z", "worker" => "a", "kind" => "progress", "note" => "x"}
+      ]
+
+      task = set_content!(task, Map.put(task.content, "worklog", worklog))
+      assert %{compacted: 1, skipped: 0} = Compactor.compact()
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["worklog"] == worklog
+    end
+  end
+
   describe "compact/0 — happy path" do
     test "60-event history → tail+summary+stamp, snapshot revision, event emitted",
          %{scope: scope} do

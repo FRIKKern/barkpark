@@ -107,6 +107,9 @@ defmodule Barkpark.Tasks.Compactor do
     * `:task_compaction_cap` — max rows per cycle. Default 100.
     * `:task_compaction_lifecycle_statuses` — list of terminal-status
       strings to consider. Default `["done", "cancelled"]`.
+    * `:task_compaction_worklog_tail` — keep this many `content.worklog`
+      entries on compaction (the dossier handoff journal; a synthetic
+      rollup entry notes the truncation + snapshot revision). Default 5.
     * `:task_compaction_history_tail` — keep this many entries on the
       live content after compaction. Default 3.
   """
@@ -128,6 +131,7 @@ defmodule Barkpark.Tasks.Compactor do
   @default_cap 100
   @default_lifecycle_statuses ~w(done cancelled)
   @default_history_tail 3
+  @default_worklog_tail 5
 
   @doc "The mutation_events kinds this worker emits."
   @spec event_kinds() :: %{compacted: String.t(), restored: String.t()}
@@ -292,6 +296,7 @@ defmodule Barkpark.Tasks.Compactor do
       doc.content
       |> Map.put("history", tail)
       |> Map.put("history_summary", summary)
+      |> tail_worklog(cfg, ts_iso, snapshot.id)
       |> Map.put("compacted_at", ts_iso)
       |> Map.put("compaction_snapshot_revision_id", snapshot.id)
 
@@ -334,6 +339,38 @@ defmodule Barkpark.Tasks.Compactor do
     case Map.get(content, "history") do
       list when is_list(list) -> list
       _ -> []
+    end
+  end
+
+  # Tail the dossier worklog (tsk-dossier-worklog-compaction). The handoff
+  # journal is agent-written and uncapped, so a closed task's worklog was
+  # the one content key compaction could not shrink — a >64KB row burned a
+  # snapshot-only cycle. The FULL worklog is already inside the snapshot
+  # revision (taken from doc.content before this transform), so restore/2
+  # brings every entry back. The rollup is a SYNTHETIC worklog entry, not
+  # a side-channel key: the next claiming agent reading handoff context
+  # sees the truncation note exactly where it reads everything else. A
+  # worklog at/under the tail (or absent) is left byte-identical.
+  defp tail_worklog(content, cfg, ts_iso, snapshot_revision_id) do
+    case Map.get(content, "worklog") do
+      worklog when is_list(worklog) and length(worklog) > 0 ->
+        if length(worklog) > cfg.worklog_tail do
+          rollup = %{
+            "ts" => ts_iso,
+            "worker" => "compactor",
+            "kind" => "progress",
+            "note" =>
+              "compacted from #{length(worklog)} worklog entries; " <>
+                "full worklog in revision #{snapshot_revision_id}"
+          }
+
+          Map.put(content, "worklog", [rollup | Enum.take(worklog, -cfg.worklog_tail)])
+        else
+          content
+        end
+
+      _ ->
+        content
     end
   end
 
@@ -614,6 +651,12 @@ defmodule Barkpark.Tasks.Compactor do
           cfg,
           :history_tail,
           Application.get_env(:barkpark, :task_compaction_history_tail, @default_history_tail)
+        ),
+      worklog_tail:
+        Map.get(
+          cfg,
+          :worklog_tail,
+          Application.get_env(:barkpark, :task_compaction_worklog_tail, @default_worklog_tail)
         )
     }
   end

@@ -478,9 +478,8 @@ defmodule Barkpark.Tasks do
         },
 
         # Evidence artifacts (screenshots, logs, exports). Values are bare
-        # mediaAsset doc-id strings. Rows render as plain id text inputs —
-        # arrayOf-of-reference gets no per-row picker (media-plugin
-        # precedent).
+        # mediaAsset doc-id strings; each Studio row mounts a per-row media
+        # picker (tsk-dossier-ref-picker — ArrayField reference rows).
         %{
           "name" => "attachments",
           "title" => "Attachments",
@@ -602,8 +601,7 @@ defmodule Barkpark.Tasks do
         },
 
         # PROMOTED from undeclared. Stays a v1 array (read-only in Studio):
-        # API single writer via /v1/tasks/:id/papers, and arrayOf-of-
-        # reference rows would render as bare text inputs anyway. Values
+        # the API is the single writer via /v1/tasks/:id/papers. Values
         # ARE valid paper doc-ids (a paper's doc_id is its slug).
         %{
           "name" => "papers",
