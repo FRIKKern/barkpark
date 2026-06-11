@@ -457,8 +457,12 @@
     .theme-toggle-moon { display: none; }
     .theme-toggle[data-theme="light"] .theme-toggle-sun { display: none; }
     .theme-toggle[data-theme="light"] .theme-toggle-moon { display: inline-flex; }
+    .studio-bar-right {
+      margin-left: auto; display: flex; align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
     .studio-bar-actions {
-      display: flex; align-items: center; gap: 8px; margin-left: auto;
+      display: flex; align-items: center; gap: 8px;
     }
     .studio-bar-actions-label {
       font-size: 10px; font-weight: 600; text-transform: uppercase;
@@ -652,7 +656,8 @@
        it doesn't jump. */
     html[data-editor-focus="beta"] .studio-bar-tabs { display: none; }
     html[data-editor-focus="beta"] .studio-bar form[action="/logout"],
-    html[data-editor-focus="beta"] .studio-bar .studio-bar-actions:has(form[action="/logout"]) {
+    html[data-editor-focus="beta"] .studio-bar .bar-focusable,
+    html[data-editor-focus="beta"] .studio-bar .presence-nav {
       display: none;
     }
     html[data-editor-focus="beta"] .studio-bar {
@@ -1363,10 +1368,10 @@
     .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
 
     /* Presence */
+    /* Presence renders INSIDE .studio-bar-right (it was a position:fixed
+       overlay pinned over the bar's corner — overlapping Sign out). */
     .presence-nav {
-      position: fixed; top: 0; right: 0; z-index: 40;
-      display: flex; align-items: center; gap: 4px;
-      height: 48px; padding: 0 12px;
+      display: flex; align-items: center; gap: 4px; flex-shrink: 0;
     }
     .presence-avatar {
       width: 28px; height: 28px; border-radius: 50%;
@@ -1437,12 +1442,30 @@
     .dataset-switcher-select:hover { border-color: var(--fg-muted); }
 
     /* Workspace + Project switcher (BarkparkWeb.Studio.WorkspaceSwitcher) */
-    .workspace-switcher { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; font-size: 12px; }
-    .workspace-switcher-label { color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; font-size: 10px; }
-    .workspace-switcher-select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; cursor: pointer; }
-    .workspace-switcher-select:hover { border-color: var(--fg-muted); }
-    .workspace-switcher-add { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 4px; width: 22px; height: 24px; line-height: 1; padding: 0; font-size: 13px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-    .workspace-switcher-add:hover { border-color: var(--fg-muted); color: var(--fg); }
+    /* One calm grouped scope path: [ws ▾] / [proj ▾] / [ds ▾] — uniform
+       segments inside a single bordered pill, labels sr-only (the values
+       are self-evident; the group carries a tooltip). */
+    .scope-switcher {
+      display: inline-flex; align-items: center; gap: 2px; margin-left: 10px;
+      height: 30px; padding: 0 4px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+      font-size: 12px;
+    }
+    .scope-sep { color: var(--fg-dim); padding: 0 1px; user-select: none; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    .workspace-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+    .workspace-switcher-select, .dataset-switcher-select {
+      background: transparent; color: var(--fg); border: none; border-radius: 4px;
+      padding: 4px 4px; font-size: 12px; font-family: inherit; cursor: pointer; max-width: 180px;
+    }
+    .workspace-switcher-select:hover, .dataset-switcher-select:hover { background: var(--bg-muted); }
+    .workspace-switcher-static, .dataset-switcher-static { padding: 4px 4px; color: var(--fg); }
+    .dataset-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+    .workspace-switcher-add { background: transparent; color: var(--fg-dim); border: none; border-radius: 4px; width: 18px; height: 18px; line-height: 1; padding: 0; font-size: 12px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .workspace-switcher-add:hover { background: var(--bg-muted); color: var(--fg); }
     .workspace-switcher-create { display: inline-flex; align-items: center; gap: 4px; }
     .workspace-switcher-create-input { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; width: 140px; }
     .workspace-switcher-create-submit { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; font-family: inherit; cursor: pointer; }

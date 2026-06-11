@@ -4716,17 +4716,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.presence_nav
-      user_id={@user_id}
-      user_name={@user_name}
-      user_color={@user_color}
-      presences={@presences}
-      editor_doc={@editor_doc}
-      dataset={@dataset}
-      current_workspace={@current_workspace}
-      current_project={@current_project}
-    />
-
+    <%!-- Presence renders in the layout's .studio-bar-right (it used to be
+          a position:fixed overlay HERE, stacking over the bar's sign-out
+          corner — the top-bar overlap bug). --%>
     <%!-- Beta focus mode mirror (Task barkpark-270j). This 0×0 element carries
           the live `@editor_mode` and the EditorFocus JS hook mirrors it onto
           `<html data-editor-focus="beta">` whenever the value is "beta". CSS

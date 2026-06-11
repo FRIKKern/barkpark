@@ -31,31 +31,47 @@
         current_path={assigns[:current_path]}
       />
     </:tabs>
-    <:actions :if={assigns[:nav_section] == :api_tester}>
-      <div class="studio-bar-actions">
-        <form phx-change="token-change" style="display:contents;">
-          <label class="studio-bar-actions-label">Token</label>
-          <input type="text" name="token" value={assigns[:token] || ""} class="form-input" style="width:180px;height:26px;font-size:11px;font-family:var(--font-mono);padding:0 8px;" phx-debounce="300" />
-        </form>
-        <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
-      </div>
-    </:actions>
-    <:actions :if={assigns[:shares_admin?]}>
-      <button
-        type="button"
-        class="btn btn-ghost btn-sm"
-        phx-click="shares-open"
-        title="Network shares"
-        aria-label="Network shares"
-      >
-        <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={16} /></span>
-      </button>
-    </:actions>
     <:actions>
-      <.studio_theme_toggle />
-    </:actions>
-    <:actions :if={assigns[:api_token]}>
-      <.studio_signout_button />
+      <%!-- ONE right-aligned group: api-tester controls · presence ·
+            share · theme · sign-out. A single flex container (not N
+            auto-margined slots) is what keeps these from overlapping —
+            presence used to be a position:fixed overlay pinned over
+            this corner. .bar-focusable marks what Beta focus hides. --%>
+      <div class="studio-bar-right">
+        <div :if={assigns[:nav_section] == :api_tester} class="studio-bar-actions bar-focusable">
+          <form phx-change="token-change" style="display:contents;">
+            <label class="studio-bar-actions-label">Token</label>
+            <input type="text" name="token" value={assigns[:token] || ""} class="form-input" style="width:180px;height:26px;font-size:11px;font-family:var(--font-mono);padding:0 8px;" phx-debounce="300" />
+          </form>
+          <button phx-click="run-all" class="btn btn-primary btn-sm" style="height:26px;font-size:11px;padding:0 12px;">Run all</button>
+        </div>
+        <%= if assigns[:presences] do %>
+          <.presence_nav
+            user_id={@user_id}
+            user_name={@user_name}
+            user_color={@user_color}
+            presences={@presences}
+            editor_doc={assigns[:editor_doc]}
+            dataset={assigns[:dataset]}
+            current_workspace={assigns[:current_workspace]}
+            current_project={assigns[:current_project]}
+          />
+        <% end %>
+        <button
+          :if={assigns[:shares_admin?]}
+          type="button"
+          class="btn btn-ghost btn-sm bar-focusable"
+          phx-click="shares-open"
+          title="Network shares"
+          aria-label="Network shares"
+        >
+          <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={16} /></span>
+        </button>
+        <.studio_theme_toggle />
+        <%= if assigns[:api_token] do %>
+          <.studio_signout_button />
+        <% end %>
+      </div>
     </:actions>
   </.studio_topbar>
 

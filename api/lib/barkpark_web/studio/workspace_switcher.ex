@@ -82,8 +82,9 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
       |> assign(:datasets, datasets)
 
     ~H"""
-    <label class="workspace-switcher">
-      <span class="workspace-switcher-label">Workspace</span>
+    <div class="scope-switcher" title="Workspace / Project / Dataset">
+      <label class="workspace-switcher">
+        <span class="workspace-switcher-label sr-only">Workspace</span>
       <%= if length(@workspaces) <= 1 do %>
         <span class="workspace-switcher-static"><%= current_label(@current_workspace, @workspaces) %></span>
       <% else %>
@@ -120,9 +121,10 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
           <button type="submit" class="workspace-switcher-create-submit">Create</button>
         </form>
       <% end %>
-    </label>
-    <label class="workspace-switcher">
-      <span class="workspace-switcher-label">Project</span>
+      </label>
+      <span class="scope-sep" aria-hidden="true">/</span>
+      <label class="workspace-switcher">
+        <span class="workspace-switcher-label sr-only">Project</span>
       <%= if length(@projects) <= 1 do %>
         <span class="workspace-switcher-static"><%= current_label(@current_project, @projects) %></span>
       <% else %>
@@ -159,9 +161,10 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
           <button type="submit" class="workspace-switcher-create-submit">Create</button>
         </form>
       <% end %>
-    </label>
-    <label class="dataset-switcher">
-      <span class="dataset-switcher-label">Dataset</span>
+      </label>
+      <span class="scope-sep" aria-hidden="true">/</span>
+      <label class="dataset-switcher">
+        <span class="dataset-switcher-label sr-only">Dataset</span>
       <%= if length(@datasets) <= 1 do %>
         <span class="dataset-switcher-static"><%= dataset_label(@current_dataset, @datasets) %></span>
       <% else %>
@@ -175,7 +178,8 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
           </select>
         </form>
       <% end %>
-    </label>
+      </label>
+    </div>
     """
   end
 
