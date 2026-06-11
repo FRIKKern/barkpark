@@ -119,7 +119,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         req =
           Runner.build_request(endpoint, form_state, %{
             token: socket.assigns.token,
-            base: "http://localhost:4000"
+            base: runner_base(socket)
           })
 
         legacy = %{
@@ -137,7 +137,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           if plugin_spec = endpoint[:plugin_spec] do
             enrich_with_plugin_asserts(result, plugin_spec,
               token: socket.assigns.token,
-              base: "http://localhost:4000"
+              base: runner_base(socket)
             )
           else
             result
@@ -150,7 +150,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   def handle_event("run-all", _, socket) do
-    config = %{token: socket.assigns.token, base: "http://localhost:4000"}
+    config = %{token: socket.assigns.token, base: runner_base(socket)}
 
     scenario_results =
       socket.assigns.endpoints
@@ -369,11 +369,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     end)
   end
 
-  defp build_curl(%{kind: :reference}, _form_state, _token), do: ""
+  defp build_curl(%{kind: :reference}, _form_state, _token, _base), do: ""
 
-  defp build_curl(endpoint, form_state, token) do
+  defp build_curl(endpoint, form_state, token, base) do
     req =
-      Runner.build_request(endpoint, form_state, %{token: token, base: "http://localhost:4000"})
+      Runner.build_request(endpoint, form_state, %{token: token, base: base})
 
     parts = ["curl -sS"]
     parts = if req.method == "GET", do: parts, else: parts ++ ["-X", req.method]
@@ -458,7 +458,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                 <%= render_reference(assigns, @endpoint.render_key) %>
               <% true -> %>
                 <.endpoint_docs endpoint={@endpoint} />
-                <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} />
+                <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} scope_prefix={assigns[:scope_prefix] || ""} />
             <% end %>
           </div>
         </.pane_column>
@@ -762,10 +762,20 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   attr :endpoint, :map, required: true
   attr :form_state, :map, required: true
   attr :token, :string, required: true
+  attr :scope_prefix, :string, default: ""
 
   defp endpoint_playground(assigns) do
     assigns =
-      assign(assigns, :curl, build_curl(assigns.endpoint, assigns.form_state, assigns.token))
+      assign(
+        assigns,
+        :curl,
+        build_curl(
+          assigns.endpoint,
+          assigns.form_state,
+          assigns.token,
+          "http://localhost:4000" <> (assigns[:scope_prefix] || "")
+        )
+      )
 
     ~H"""
     <div class="api-section">Playground</div>
@@ -1074,4 +1084,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     </details>
     """
   end
+
+  # Scoped runner base (tsk-url-p2): on the scoped mount the example
+  # requests exercise the SAME workspace/project the Studio is on — the
+  # /v1 mirror mounts under the /w/<ws>/p/<proj> prefix with identical
+  # path tails. Flat surface → "" → byte-identical legacy behavior.
+  # (Endpoints with no scoped mirror — e.g. /v1/tasks — surface the 404
+  # in the result panel, which is itself honest documentation.)
+  defp runner_base(socket),
+    do: "http://localhost:4000" <> (socket.assigns[:scope_prefix] || "")
 end

@@ -143,6 +143,73 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
     end
   end
 
+  describe "P2: switches and links are URL-real on the scoped surface" do
+    setup %{member_conn: _conn, ws_b: ws_b} do
+      # The member token (member of A) gains B too, so a workspace switch
+      # is authorized and must materialize as a URL change.
+      token =
+        Barkpark.Repo.get_by!(Barkpark.Auth.ApiToken, label: "scoped-studio-member-a")
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws_b.id, token.id, "member")
+      :ok
+    end
+
+    test "workspace switch CHANGES THE URL; reload reproduces the location", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b
+    } do
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      view
+      |> element(~s{form[phx-change="switch-workspace"]})
+      |> render_change(%{"workspace" => ws_b.slug})
+
+      # The switch is a push_patch to the NEW workspace's canonical URL —
+      # no more socket-state-only switching (reload amnesia).
+      patched = assert_patch(view)
+      assert patched =~ "/w/#{ws_b.slug}/p/"
+
+      # The kill shot: a FRESH mount of the patched URL reproduces the
+      # switched-to location exactly. Before this arc, reload forgot the
+      # workspace and snapped back to a session heuristic.
+      {:ok, _view2, html2} = live(conn, patched)
+      assert html2 =~ ws_b.name
+    end
+
+    test "top-nav tabs address the scoped surface", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {:ok, _view, html} = live(conn, scoped_url(ws_a, proj_a))
+
+      prefix = "/w/#{ws_a.slug}/p/#{proj_a.slug}"
+      assert html =~ ~s{href="#{prefix}/studio/#{@dataset}/media"}
+      assert html =~ ~s{href="#{prefix}/studio/#{@dataset}/api-tester"}
+    end
+
+    test "desk navigation patches stay under the scope prefix", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      # Any structural pane select must produce a scoped URL.
+      html = render(view)
+
+      if html =~ ~s{phx-click="select"} do
+        view
+        |> element(~s{[phx-click="select"][phx-value-pane="0"]:first-of-type})
+        |> render_click()
+
+        assert assert_patch(view) =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/"
+      end
+    end
+  end
+
   # The denied patch surfaces as a redirect — either raised by render_patch
   # (LiveViewTest re-raises server redirects) or readable via assert_redirect.
   defp assert_redirect_to_login(fun) do

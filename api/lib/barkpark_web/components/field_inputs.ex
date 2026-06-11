@@ -47,6 +47,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
+  # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
+  # the pickers' scope-prefix attribute so their fetches hit the scoped API
+  # mirror. "" on the flat surface keeps every fetch byte-identical.
+  attr :scope_prefix, :string, default: ""
   attr :id_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
 
@@ -123,7 +127,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   # reference → mediaAsset: visual picker (thumbnail grid + library browser).
-  def input(%{field: %{"type" => "reference", "name" => name, "refType" => "mediaAsset"}} = assigns) do
+  def input(
+        %{field: %{"type" => "reference", "name" => name, "refType" => "mediaAsset"}} = assigns
+      ) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
 
@@ -134,6 +140,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
         value={@v}
         value-mode="reference"
         dataset={@dataset}
+        scope-prefix={@scope_prefix}
         data-bridge-target={"bp-mp-ref-hidden-#{@n}"}
         data-token={@api_token_raw}
       ></bp-media-picker>
@@ -155,7 +162,13 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-reference-picker value={@v} ref-type={@ref_type} dataset={@dataset} data-bridge-target={"bp-ref-hidden-#{@n}"}></bp-reference-picker>
+      <bp-reference-picker
+        value={@v}
+        ref-type={@ref_type}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"bp-ref-hidden-#{@n}"}
+      ></bp-reference-picker>
     </div>
     """
   end
@@ -174,7 +187,13 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-media-picker value={@v} dataset={@dataset} data-bridge-target={"bp-mp-hidden-#{@n}"} data-token={@api_token_raw}></bp-media-picker>
+      <bp-media-picker
+        value={@v}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"bp-mp-hidden-#{@n}"}
+        data-token={@api_token_raw}
+      ></bp-media-picker>
     </div>
     """
   end

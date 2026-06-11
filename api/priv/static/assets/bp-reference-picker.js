@@ -56,6 +56,9 @@ class BpReferencePicker extends HTMLElement {
     this._value = this.getAttribute("value") || "";
     this._refType = this.getAttribute("ref-type") || "";
     this._dataset = this.getAttribute("dataset") || "production";
+    // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on
+    // the flat surface keeps every fetch byte-identical.
+    this._scopePrefix = this.getAttribute("scope-prefix") || "";
     this._searchIntel.clientId = BpSearchIntel.clientId("documents", this._dataset);
     this._render();
     if (this._value) this._loadSelectedTitle();
@@ -236,6 +239,7 @@ class BpReferencePicker extends HTMLElement {
     });
     if (this._refType) params.set("type", this._refType);
     return (
+      (this._scopePrefix || "") +
       "/v1/data/search/" +
       encodeURIComponent(this._dataset) +
       "?" +
@@ -278,6 +282,7 @@ class BpReferencePicker extends HTMLElement {
     const params = new URLSearchParams({ limit: "8" });
     if (prefix) params.set("q", prefix);
     const url =
+      (this._scopePrefix || "") +
       "/v1/data/search/" +
       encodeURIComponent(this._dataset) +
       "/suggestions?" +
@@ -440,6 +445,7 @@ class BpReferencePicker extends HTMLElement {
     }
     try {
       const url =
+        (this._scopePrefix || "") +
         "/v1/data/doc/" +
         encodeURIComponent(this._dataset) +
         "/" +

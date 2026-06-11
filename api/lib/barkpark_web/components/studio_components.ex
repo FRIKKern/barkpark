@@ -729,12 +729,18 @@ defmodule BarkparkWeb.StudioComponents do
   leak into the topbar when no dataset is set.
   """
   attr :dataset, :string, required: true
+  attr :scope_prefix, :string, default: ""
   attr :nav_section, :atom, default: nil
   attr :current_path, :string, default: nil
 
   def studio_tabs(assigns) do
-    ctx = %{dataset: assigns.dataset, current_path: assigns[:current_path]}
-    baseline = default_top_menu_entries(assigns.dataset)
+    ctx = %{
+      dataset: assigns.dataset,
+      current_path: assigns[:current_path],
+      scope_prefix: assigns[:scope_prefix] || ""
+    }
+
+    baseline = default_top_menu_entries(assigns.dataset, assigns[:scope_prefix] || "")
 
     tabs =
       try do
@@ -777,20 +783,24 @@ defmodule BarkparkWeb.StudioComponents do
   #
   # Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs
   # (which default to 100 via `normalize_top_menu_entry/1`).
-  defp default_top_menu_entries(dataset) when is_binary(dataset) do
+  defp default_top_menu_entries(dataset, scope_prefix \\ "") when is_binary(dataset) do
     ds = URI.encode(dataset)
     ds_re = Regex.escape(ds)
+    # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
+    # the page is on. "" on the flat surface → byte-identical legacy paths.
+    prefix = scope_prefix || ""
+    prefix_re = Regex.escape(prefix)
 
     structure_active =
-      Regex.compile!("^/studio/#{ds_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
+      Regex.compile!("^#{prefix_re}/studio/#{ds_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
 
-    media_path = "/studio/#{ds}/media"
-    api_path = "/studio/#{ds}/api-tester"
+    media_path = "#{prefix}/studio/#{ds}/media"
+    api_path = "#{prefix}/studio/#{ds}/api-tester"
 
     [
       %{
         label: "Structure",
-        path: "/studio/#{ds}",
+        path: "#{prefix}/studio/#{ds}",
         icon: nil,
         order: 10,
         active_when: structure_active
@@ -938,6 +948,7 @@ defmodule BarkparkWeb.StudioComponents do
             field={@field}
             editor_form={@editor_form}
             dataset={@dataset}
+            scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
           />
         <% end %>
@@ -965,6 +976,7 @@ defmodule BarkparkWeb.StudioComponents do
             field={@field}
             editor_form={@editor_form}
             dataset={@dataset}
+            scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
           />
         <% end %>
@@ -1766,6 +1778,8 @@ defmodule BarkparkWeb.StudioComponents do
                   action={action}
                   editor_doc={@editor_doc}
                   dataset={@dataset}
+                  workspace_slug={scope_slug(@parent_assigns, :current_workspace)}
+                  project_slug={scope_slug(@parent_assigns, :current_project)}
                 />
               <% end %>
               <%= render_slot(@extra_actions) %>
@@ -1858,6 +1872,15 @@ defmodule BarkparkWeb.StudioComponents do
     Enum.filter(presences, &(&1.doc_id == doc_id and Map.get(&1, :dataset) == dataset))
   end
 
+  # Slug off the parent LV's resolved scope structs — "" when unscoped
+  # (flat surface) so href interpolation degrades to empty segments.
+  defp scope_slug(parent_assigns, key) do
+    case Map.get(parent_assigns || %{}, key) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> ""
+    end
+  end
+
   @doc """
   Renders a single editor-header doc-action — `"event"`, `"modal"`, or
   `"link"` — from a resolved doc-action map (see
@@ -1880,13 +1903,25 @@ defmodule BarkparkWeb.StudioComponents do
   attr :action, :map, required: true
   attr :editor_doc, :map, default: nil
   attr :dataset, :string, required: true
+  # Scope slugs for href interpolation (tsk-url-p2): a schema action may
+  # carry :workspace / :project placeholders alongside :dataset / :id.
+  attr :workspace_slug, :string, default: ""
+  attr :project_slug, :string, default: ""
 
   def doc_action_button(assigns) do
     ~H"""
     <%= case @action["kind"] do %>
       <% "link" -> %>
         <a
-          href={interpolate_doc_action_href(@action, @editor_doc, @dataset)}
+          href={
+            interpolate_doc_action_href(
+              @action,
+              @editor_doc,
+              @dataset,
+              @workspace_slug,
+              @project_slug
+            )
+          }
           class={action_button_class(@action)}
           title={@action["label"]}
           aria-label={@action["label"]}
@@ -1988,20 +2023,25 @@ defmodule BarkparkWeb.StudioComponents do
   # Same interpolation StudioLive used for schema-declared `"link"`
   # actions. Falls back to `"#"` when href is missing. Substitutes
   # `:dataset` and `:id` (published id — drafts. prefix stripped).
-  defp interpolate_doc_action_href(action, doc, dataset) do
+  defp interpolate_doc_action_href(action, doc, dataset, ws_slug \\ "", proj_slug \\ "") do
     case action["opts"] do
       %{"href" => href} when is_binary(href) ->
-        do_interpolate_href(href, doc, dataset)
+        do_interpolate_href(href, doc, dataset, ws_slug, proj_slug)
 
       _ ->
         case action["href"] do
-          href when is_binary(href) -> do_interpolate_href(href, doc, dataset)
+          href when is_binary(href) -> do_interpolate_href(href, doc, dataset, ws_slug, proj_slug)
           _ -> "#"
         end
     end
   end
 
-  defp do_interpolate_href(href, doc, dataset) do
+  # Placeholder vocabulary: :dataset · :id · :workspace · :project
+  # (tsk-url-p2 added the scope pair — a plugin action can address the
+  # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
+  # :workspace is replaced before :w-anything ambiguity can arise because
+  # the replacements run longest-token-first.
+  defp do_interpolate_href(href, doc, dataset, ws_slug \\ "", proj_slug \\ "") do
     id =
       case doc do
         %{doc_id: doc_id} -> Barkpark.Content.published_id(doc_id)
@@ -2009,6 +2049,8 @@ defmodule BarkparkWeb.StudioComponents do
       end
 
     href
+    |> String.replace(":workspace", to_string(ws_slug || ""))
+    |> String.replace(":project", to_string(proj_slug || ""))
     |> String.replace(":dataset", to_string(dataset || ""))
     |> String.replace(":id", id)
   end

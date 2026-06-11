@@ -3934,7 +3934,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
           </button>
           <a
             :if={@slug}
-            href={"/papers/#{@slug}"}
+            href={(assigns[:scope_prefix] || "") <> "/papers/#{@slug}"}
             class="btn btn-ghost btn-sm"
             target="_blank"
             rel="noopener"
@@ -4866,7 +4866,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
               dataset={@dataset}
               data-token={Map.get(assigns, :api_token_raw, "")}
               data-kind-filter={@media_kind_filter || "all"}
-              data-open-path={"/studio/#{@dataset}/" <> Enum.join(@nav_path, "/")}
+              data-open-path={(assigns[:scope_prefix] || "") <> "/studio/#{@dataset}/" <> Enum.join(@nav_path, "/")}
             />
           </div>
         </div>

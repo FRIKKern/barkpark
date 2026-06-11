@@ -65,6 +65,7 @@ class BpMediaPicker extends HTMLElement {
     if (tok) headers["Authorization"] = "Bearer " + tok;
     try {
       const url =
+        this._scopePrefix() +
         "/v1/data/doc/" +
         encodeURIComponent(this._dataset()) +
         "/mediaAsset/" +
@@ -110,6 +111,12 @@ class BpMediaPicker extends HTMLElement {
 
   _dataset() {
     return this.getAttribute("dataset") || "production";
+  }
+
+  // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on the
+  // flat surface keeps every fetch byte-identical to the legacy paths.
+  _scopePrefix() {
+    return this.getAttribute("scope-prefix") || "";
   }
 
   _token() {
@@ -335,7 +342,7 @@ class BpMediaPicker extends HTMLElement {
 
     try {
       const r = await fetch(
-        "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString(),
+        this._scopePrefix() + "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString(),
         {
           credentials: "same-origin",
           headers: this._searchHeaders(false, { record: true })
@@ -368,7 +375,12 @@ class BpMediaPicker extends HTMLElement {
     const tok = this._token();
     if (tok) headers["Authorization"] = "Bearer " + tok;
     try {
-      const r = await fetch("/media/upload", {
+      // Scoped surface uploads through the scoped v1 mirror (the flat
+      // /media/upload has no scoped twin); flat keeps the legacy path.
+      const uploadUrl = this._scopePrefix()
+        ? this._scopePrefix() + "/v1/media/" + encodeURIComponent(this._dataset()) + "/upload"
+        : "/media/upload";
+      const r = await fetch(uploadUrl, {
         method: "POST",
         headers: headers,
         body: fd,

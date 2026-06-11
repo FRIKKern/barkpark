@@ -11,12 +11,18 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
+    # On the scoped mount LiveScope assigned the /w/<ws>/p/<proj> prefix
+    # before this runs (tsk-url-p2); flat mount → "" → paths byte-identical.
+    prefix = socket.assigns[:scope_prefix] || ""
+
     {:ok,
-     assign(socket,
+     socket
+     |> assign_new(:scope_prefix, fn -> "" end)
+     |> assign(
        nav_section: :media,
        dataset: dataset,
        page_title: "Media Library",
-       current_path: "/studio/#{dataset}/media"
+       current_path: prefix <> "/studio/#{dataset}/media"
      )}
   end
 
@@ -30,6 +36,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
     >
       <bp-asset-explorer
         dataset={@dataset}
+        scope-prefix={@scope_prefix}
         data-token={assigns[:api_token_raw] || ""}
       />
     </div>

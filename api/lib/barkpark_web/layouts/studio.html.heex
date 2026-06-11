@@ -26,6 +26,7 @@
     <:tabs :if={assigns[:dataset]}>
       <.studio_tabs
         dataset={@dataset}
+        scope_prefix={assigns[:scope_prefix] || ""}
         nav_section={assigns[:nav_section]}
         current_path={assigns[:current_path]}
       />

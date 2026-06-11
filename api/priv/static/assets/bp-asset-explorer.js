@@ -429,6 +429,12 @@
       return this.getAttribute("dataset") || "production";
     }
 
+    // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on the
+    // flat surface keeps every fetch byte-identical to the legacy paths.
+    _scopePrefix() {
+      return this.getAttribute("scope-prefix") || "";
+    }
+
     _token() {
       return this.getAttribute("data-token") || "";
     }
@@ -618,7 +624,7 @@
     }
 
     _mediaBase() {
-      return "/v1/media/" + encodeURIComponent(this._dataset());
+      return this._scopePrefix() + "/v1/media/" + encodeURIComponent(this._dataset());
     }
 
     _prefsKey() {
@@ -1733,7 +1739,7 @@
       if (!title) return;
       const id = "col-" + Date.now().toString(36);
       try {
-        const r = await fetch("/v1/data/mutate/" + encodeURIComponent(this._dataset()), {
+        const r = await fetch(this._scopePrefix() + "/v1/data/mutate/" + encodeURIComponent(this._dataset()), {
           method: "POST",
           credentials: "same-origin",
           headers: this._headers(true),
@@ -1812,7 +1818,12 @@
         fd.append("file", file);
         fd.append("dataset", this._dataset());
         try {
-          const r = await fetch("/media/upload", {
+          // Scoped surface uploads through the scoped v1 mirror; flat keeps
+          // the legacy /media/upload path.
+          const uploadUrl = this._scopePrefix()
+            ? this._scopePrefix() + "/v1/media/" + encodeURIComponent(this._dataset()) + "/upload"
+            : "/media/upload";
+          const r = await fetch(uploadUrl, {
             method: "POST",
             headers: headers,
             body: fd,
