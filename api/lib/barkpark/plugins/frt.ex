@@ -210,6 +210,9 @@ defmodule Barkpark.Plugins.Frt do
 
   # A singleton: a link straight to the single canonical document. The host
   # PaneBuilder opens `/studio/<dataset>/<typeName>` in the editor pane.
+  # Deliberately FLAT — desk items carry no scope knowledge. The scoped
+  # Studio rewrites this to the /d/ canonical at render time
+  # (StudioLive.scoped_plugin_href/2).
   defp singleton_link(dataset, type_name, label, icon) do
     %{
       type: :link,

@@ -76,7 +76,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test "lifecycle_status renders as a select with the five lifecycle options", %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
     # lifecycle_status lives on the Work tab.
     html = select_tab(view, "work")
@@ -93,7 +93,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test "dependencies/claim render read-only JSON with no form input", %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
     # The engine ledger lives on the System tab; claim/dependencies are
     # non-empty here so their visibleWhen non_empty gates pass.
@@ -112,7 +112,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test "empty engine fields hide behind visibleWhen non_empty", %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
     html = select_tab(view, "system")
 
@@ -123,7 +123,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test "a Studio save preserves dependencies and claim byte-identically", %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
     # lifecycle_status renders on the Work tab; dependencies/claim live on
     # the System tab — so this save also proves CROSS-TAB preservation
@@ -153,7 +153,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test ~s(priority submitted as "2" persists as integer 2 — save must not error), %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
     html =
       view
@@ -175,7 +175,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   test "Studio new-document creates a BORN-VALID task (tsk-dossier-studio-create)", %{
     conn: conn
   } do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task"))
 
     # Pre-fix this flashed "Failed to create": the bare {doc_id, title}
     # create hit validate_task_kind before any scaffold could run.
@@ -193,7 +193,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   end
 
   test "empty priority saves cleanly and stores no priority key", %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/task/tsk1"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
     html =
       view

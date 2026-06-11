@@ -32,15 +32,16 @@ defmodule BarkparkWeb.ConnCase do
   end
 
   @doc """
-  The scoped-canonical form of a flat Studio path (P3 of Scoped-by-URL).
+  The scoped-canonical form of a Studio path (P3 of Scoped-by-URL).
 
   The flat `/studio/:dataset/...` URLs 302 to
-  `/w/:ws/p/:proj/studio/:dataset/...` since the P3 cutover, so LiveView
-  tests mount the scoped form directly. Seeds the Default workspace/project
-  idempotently (the scoped route 404s on an unseeded tenancy — the flat
-  surface used to tolerate that silently).
+  `/w/:ws/p/:proj/d/:dataset/studio/...` since the P3 cutover (and the
+  /d/ canonical move), so LiveView tests mount the scoped form directly.
+  Pass the `/d/:dataset/studio[/...]` tail. Seeds the Default
+  workspace/project idempotently (the scoped route 404s on an unseeded
+  tenancy — the flat surface used to tolerate that silently).
 
-      live(conn, scoped_studio("/studio/production/post/p1"))
+      live(conn, scoped_studio("/d/production/studio/post/p1"))
   """
   def scoped_studio(path) when is_binary(path) do
     {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()

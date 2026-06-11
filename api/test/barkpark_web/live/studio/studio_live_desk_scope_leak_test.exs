@@ -97,7 +97,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     ws_a: ws_a,
     proj_a: proj_a
   } do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
 
     # Switch the socket scope to workspace A (mirrors a scope-menu pick;
     # fired directly — the bar's select form is gone, the handler isn't).
@@ -105,14 +105,14 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     render_change(view, "switch-workspace", %{"workspace" => ws_a.slug})
 
     patched = assert_patch(view)
-    assert patched =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/"
+    assert patched =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/"
 
     # Follow the navigation: the switch lands on A's scope ROOT
     # (reset_nav_for_switch), so drill into the `post` desk by mounting the
     # new scope's desk URL — that builds the :document_type_list pane under
     # workspace A's URL-resolved scope.
     {:ok, view, html} =
-      live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}/post")
+      live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio/post")
 
     # Inspect the rebuilt pane assigns directly — the authoritative check.
     assigns = :sys.get_state(view.pid).socket.assigns
@@ -141,14 +141,14 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     ws_a: ws_a,
     proj_a: proj_a
   } do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
 
     render_change(view, "switch-workspace", %{"workspace" => ws_a.slug})
 
     # P3: the switch navigates — follow the patch so handle_params +
     # LiveScope have re-resolved the scope from the new URL before we
     # inspect the socket.
-    assert assert_patch(view) =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/"
+    assert assert_patch(view) =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/"
 
     socket = :sys.get_state(view.pid).socket
     opts = BarkparkWeb.ScopeHelpers.scope_opts(socket)
@@ -171,7 +171,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     # mount the editor for A's doc directly on A's scoped surface so
     # `editor_type` is set, then open the picker.
     {:ok, view, _html} =
-      live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}/post/post-a")
+      live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio/post/post-a")
 
     render_click(view, "open-secondary-picker", %{})
 

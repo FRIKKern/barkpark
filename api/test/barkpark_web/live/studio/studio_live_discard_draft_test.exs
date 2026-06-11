@@ -83,7 +83,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
       {:ok, _view, html} =
         live(
           conn,
-          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+          scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p1")}")
         )
 
       assert html =~ ~s(data-test-id="discard-draft"),
@@ -94,7 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
       {:ok, _view, html} =
         live(
           conn,
-          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p2")}")
+          scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p2")}")
         )
 
       refute html =~ ~s(data-test-id="discard-draft"),
@@ -107,7 +107,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
       {:ok, view, _html} =
         live(
           conn,
-          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+          scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p1")}")
         )
 
       # Open the modal
@@ -129,7 +129,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
       {:ok, view, _html} =
         live(
           conn,
-          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+          scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p1")}")
         )
 
       _ = render_click(view, "discard-draft", %{})
@@ -142,7 +142,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
       {:ok, view, _html} =
         live(
           conn,
-          scoped_studio("/studio/#{@dataset}/#{@schema_name}/#{Content.draft_id("dd-p1")}")
+          scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p1")}")
         )
 
       _ = render_click(view, "discard-draft", %{})

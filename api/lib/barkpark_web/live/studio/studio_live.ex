@@ -663,9 +663,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # ── Workspace / Project scope switch (Task barkpark-k86v) ───────────────────
   #
-  # The WorkspaceSwitcher component fires these on `<select>` change. The
-  # Studio route shape stays `/studio/:dataset`, so the workspace/project scope
-  # lives on the socket — switching is a pure LiveView event, not a URL
+  # The WorkspaceSwitcher component fires these on `<select>` change. On the
+  # historical flat mount (`/studio/:dataset`) the workspace/project scope
+  # lived on the socket — switching is a pure LiveView event, not a URL
   # navigation. Selecting a workspace re-defaults the project to that
   # workspace's first project (the current project belongs to the OLD
   # workspace, so it can't carry over). After re-assigning the scope we
@@ -2955,20 +2955,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Socket-aware URL builder — THE single choke point for every push_patch
   # and chip href. On the scoped mount (tsk-url-p1) LiveScope assigns
-  # `scope_prefix: "/w/<ws>/p/<proj>"`; the flat mount carries "" and emits
-  # byte-identical URLs to the pre-scoped era, so flat bookmarks/tests stay
-  # untouched until the deliberate P3 cutover.
+  # `scope_prefix: "/w/<ws>/p/<proj>"`; `studio_path_for` contributes the
+  # `/d/:dataset/studio[/...]` suffix, composing the canonical
+  # `/w/<ws>/p/<proj>/d/<ds>/studio[/...]` shape.
   defp studio_path(socket, path, dataset, opts \\ []) do
     (socket.assigns[:scope_prefix] || "") <> studio_path_for(path, dataset, opts)
   end
 
   defp studio_path_for([], dataset, opts),
-    do: append_desk_query("/studio/#{dataset}", opts)
+    do: append_desk_query("/d/#{dataset}/studio", opts)
 
   defp studio_path_for(segments, dataset, opts),
     do:
       append_desk_query(
-        "/studio/#{dataset}/" <> Enum.join(segments, "/"),
+        "/d/#{dataset}/studio/" <> Enum.join(segments, "/"),
         opts
       )
 
@@ -2987,6 +2987,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp desk_chip_href(scope_prefix, nav_path, dataset, desk) do
     (scope_prefix || "") <> studio_path_for(nav_path, dataset, desk: desk)
   end
+
+  # Render-side scoping for `:plugin_link` hrefs. Structure/PaneBuilder emit
+  # them in the legacy FLAT shape `/studio/<ds>[/...]` — Structure has no
+  # scope knowledge, so the rewrite happens here, where `@scope_prefix` is
+  # in hand. On the scoped surface the flat shape would ride the
+  # flat→scoped 302 funnel, which re-resolves the workspace from the
+  # SESSION and can teleport the user out of the workspace they're on, so
+  # rewrite to the /d/ canonical instead. Empty prefix (flat surfaces, e.g.
+  # the /studio/:dataset/_plugins admin LV) keeps the flat path — mirrors
+  # the branch in StudioComponents.default_top_menu_entries/2.
+  defp scoped_plugin_href("", href), do: href
+
+  defp scoped_plugin_href(scope_prefix, "/studio/" <> rest) when is_binary(scope_prefix) do
+    case String.split(rest, "/", parts: 2) do
+      [ds, suffix] -> "#{scope_prefix}/d/#{ds}/studio/#{suffix}"
+      [ds] -> "#{scope_prefix}/d/#{ds}/studio"
+    end
+  end
+
+  defp scoped_plugin_href(_scope_prefix, href), do: href
 
   # ── Schema-action helpers (Task #16 — action registry) ─────────────────────
 
@@ -4798,7 +4818,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                 <% :plugin_link -> %>
                   <a
                     id={"plugin-link-#{item.id}"}
-                    href={item.href}
+                    href={scoped_plugin_href(@scope_prefix || "", item.href)}
                     class="pane-item nav-plugin-entry"
                     data-test-id="nav-plugin-entry"
                   >
@@ -4900,7 +4920,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
               dataset={@dataset}
               data-token={Map.get(assigns, :api_token_raw, "")}
               data-kind-filter={@media_kind_filter || "all"}
-              data-open-path={(assigns[:scope_prefix] || "") <> "/studio/#{@dataset}/" <> Enum.join(@nav_path, "/")}
+              data-open-path={(assigns[:scope_prefix] || "") <> "/d/#{@dataset}/studio/" <> Enum.join(@nav_path, "/")}
             />
           </div>
         </div>

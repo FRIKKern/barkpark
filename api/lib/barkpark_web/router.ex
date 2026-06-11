@@ -583,18 +583,22 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Scoped Studio (P1 of Scoped-by-URL — tsk-url-p1) ─────────────────────
-  # THE canonical Studio address: workspace + project are URL segments, not
-  # socket state. The :scoped_browser conn resolvers gate the DEAD render
-  # only (plugs never run for live navigation), so the LiveScope on_mount
-  # resolves + authorizes from URL params AND re-authorizes on every
-  # scope-changing live patch — see BarkparkWeb.LiveScope.
+  # THE canonical Studio address: workspace + project + dataset are URL
+  # segments, not socket state — every scope level gets a marker
+  # (`/w/<ws>/p/<proj>/d/<dataset>/studio`). The :scoped_browser conn
+  # resolvers gate the DEAD render only (plugs never run for live
+  # navigation), so the LiveScope on_mount resolves + authorizes from URL
+  # params AND re-authorizes on every scope-changing live patch — see
+  # BarkparkWeb.LiveScope.
   #
-  # ORDERING (route-swallow guard): this scope's `:dataset` wildcard MUST
-  # register AFTER the scoped plugin `/studio` scopes above — otherwise a
-  # plugin path like /w/x/p/y/studio/onixedit/ping would parse here as
-  # dataset="onixedit". Same reasoning as the flat `_plugins`-before-
-  # `:studio_public` ordering below.
-  scope "/w/:workspace_slug/p/:project_slug/studio/:dataset", BarkparkWeb.Studio do
+  # ORDERING: the `/d/:dataset/studio` prefix cannot swallow the scoped
+  # plugin `/studio/<plugin-path>` scopes above (the old
+  # `/studio/:dataset` form could — a plugin path like
+  # /w/x/p/y/studio/onixedit/ping parsed as dataset="onixedit"). The
+  # swallow-guard now lives on the BACK-COMPAT scope below, which keeps
+  # the old wildcard shape and therefore MUST stay registered after the
+  # scoped plugin `/studio` scopes.
+  scope "/w/:workspace_slug/p/:project_slug/d/:dataset/studio", BarkparkWeb.Studio do
     pipe_through(:shared_studio_browser)
 
     live_session :scoped_studio,
@@ -610,6 +614,23 @@ defmodule BarkparkWeb.Router do
 
       live("/*path", StudioLive)
     end
+  end
+
+  # ── Old scoped Studio form → /d/ canonical 302 ───────────────────────────
+  # Back-compat for the pre-/d/ canonical `/w/:ws/p/:proj/studio/:dataset`.
+  # Pure URL rewrite (every segment is already in the URL — no session
+  # resolution); the canonical route above authorizes. 302, never 301.
+  #
+  # ORDERING (route-swallow guard): this scope's `:dataset` wildcard MUST
+  # register AFTER the scoped plugin `/studio` scopes above — otherwise a
+  # plugin path like /w/x/p/y/studio/onixedit/ping would parse here as
+  # dataset="onixedit" and 302 away from the plugin. Same reasoning the
+  # canonical scope carried before the /d/ move.
+  scope "/w/:workspace_slug/p/:project_slug/studio/:dataset", BarkparkWeb do
+    pipe_through(:browser)
+
+    get("/", StudioRedirectController, :legacy_scoped)
+    get("/*path", StudioRedirectController, :legacy_scoped)
   end
 
   # ── Studio admin LV — dataset-scoped, admin-gated ─────────────────────
@@ -632,7 +653,7 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Flat Studio → scoped 302 (P3 cutover, Scoped-by-URL) ─────────────────
-  # The :studio_public live_session is GONE: /w/:ws/p/:proj/studio/:dataset
+  # The :studio_public live_session is GONE: /w/:ws/p/:proj/d/:dataset/studio
   # (the :scoped_studio session above) is the only Studio mount. Every flat
   # form 302s to the session-resolved scoped canonical, path + query
   # preserved — old bookmarks resolve AT LEAST as well as they did when the

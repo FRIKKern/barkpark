@@ -234,6 +234,9 @@ defmodule Barkpark.Structure do
       title: "Media Library",
       icon: "image",
       type: :plugin_link,
+      # Deliberately FLAT — Structure has no scope knowledge. The scoped
+      # Studio rewrites this to the /d/ canonical at render time
+      # (StudioLive.scoped_plugin_href/2).
       filter: "/studio/#{dataset}/media"
     }
 

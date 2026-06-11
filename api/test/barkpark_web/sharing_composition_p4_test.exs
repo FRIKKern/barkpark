@@ -149,7 +149,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
          %{conn: conn, ws: ws, proj: proj} do
       with_shares("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
 
-      {:ok, view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/#{@dataset}")
+      {:ok, view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
       assert html =~ "pane-layout"
 
       # The write boundary is the SERVER's event gate, not hidden buttons:
@@ -169,7 +169,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       ws: ws,
       proj: proj
     } do
-      conn = get(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/#{@dataset}")
+      conn = get(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
       assert conn.status == 403
     end
   end

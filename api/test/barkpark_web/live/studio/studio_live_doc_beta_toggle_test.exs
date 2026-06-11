@@ -66,7 +66,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
 
   test "editor mounts in Classic with the toggle; clicking Beta renders the block editor",
        %{conn: conn} do
-    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/post/toggle-demo-p3"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/toggle-demo-p3"))
 
     # Classic by default — the schema form, the toggle present, no block editor.
     assert html =~ ~s(name="doc[title]")
@@ -85,7 +85,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
 
   test "flipping Classic↔Beta does not mutate content[\"blocks\"] (lossless)",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/toggle-demo-p3"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/toggle-demo-p3"))
 
     {:ok, before} = Content.get_document("drafts.toggle-demo-p3", "post", @dataset)
     before_blocks = stored_blocks("drafts.toggle-demo-p3")
@@ -106,7 +106,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
 
   test "a Beta patch-block on the bound title persists + projects content[\"title\"]; no remount",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/toggle-demo-p3"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/toggle-demo-p3"))
     view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
 
     pid_before = view.pid
@@ -136,7 +136,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
 
   test "flipping back to Classic shows the Beta-edited title in the form",
        %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}/post/toggle-demo-p3"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/toggle-demo-p3"))
     view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
 
     title_block = Enum.find(stored_blocks("drafts.toggle-demo-p3"), &(&1["fieldName"] == "title"))

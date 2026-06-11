@@ -481,7 +481,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   defp book_editor_path(assigns, sub) do
     with %{slug: ws_slug} when is_binary(ws_slug) <- assigns[:current_workspace],
          %{slug: proj_slug} when is_binary(proj_slug) <- assigns[:current_project] do
-      "/w/#{ws_slug}/p/#{proj_slug}/studio/#{sub.dataset}/book/#{sub.doc_id}"
+      "/w/#{ws_slug}/p/#{proj_slug}/d/#{sub.dataset}/studio/book/#{sub.doc_id}"
     else
       _ -> "/studio/#{sub.dataset}/book/#{sub.doc_id}"
     end

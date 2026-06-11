@@ -85,10 +85,10 @@ systemctl restart barkpark
 ## URL reference
 
 ```
-/w/<ws>/p/<proj>/studio/<dataset>                    → the canonical Studio URL (workspace + project live in the path)
-/w/<ws>/p/<proj>/studio/<dataset>/book               → all books
-/w/<ws>/p/<proj>/studio/<dataset>/book?desk=drafts   → only drafts
-/w/<ws>/p/<proj>/studio/<dataset>/book/<doc-id>      → editor
+/w/<ws>/p/<proj>/d/<dataset>/studio                  → the canonical Studio URL (workspace + project + dataset live in the path)
+/w/<ws>/p/<proj>/d/<dataset>/studio/book             → all books
+/w/<ws>/p/<proj>/d/<dataset>/studio/book?desk=drafts → only drafts
+/w/<ws>/p/<proj>/d/<dataset>/studio/book/<doc-id>    → editor
 /studio[/<dataset>/...]                              → 302 to your scoped Studio (path + query preserved)
 /admin/onixedit/staleness                            → book sync status overview
 ```

@@ -328,7 +328,7 @@ defmodule BarkparkWeb.StudioChrome do
   end
 
   defp studio_root(ws, project, dataset),
-    do: "/w/#{ws.slug}/p/#{project.slug}/studio/#{dataset}"
+    do: "/w/#{ws.slug}/p/#{project.slug}/d/#{dataset}/studio"
 
   defp can_reach?(socket, %{id: ws_id}) do
     case socket.assigns[:api_token] do

@@ -11,20 +11,20 @@ defmodule BarkparkWeb.LegacyRedirectControllerTest do
   describe "onixedit_book — legacy /studio/:dataset/onixedit/book/..." do
     test "GET /studio/:ds/onixedit/book/:id 302s single-hop to the scoped /studio/:ds/book/:id",
          %{conn: conn} do
-      expected = scoped_studio("/studio/production/book/p1")
+      expected = scoped_studio("/d/production/studio/book/p1")
       conn = get(conn, "/studio/production/onixedit/book/p1")
       assert redirected_to(conn, 302) == expected
     end
 
     test "GET /studio/:ds/onixedit/book/:id/view 302s to the scoped /studio/:ds/book/:id",
          %{conn: conn} do
-      expected = scoped_studio("/studio/production/book/p1")
+      expected = scoped_studio("/d/production/studio/book/p1")
       conn = get(conn, "/studio/production/onixedit/book/p1/view")
       assert redirected_to(conn, 302) == expected
     end
 
     test "preserves query string (e.g. ?tab=subjects)", %{conn: conn} do
-      expected = scoped_studio("/studio/production/book/p1?tab=subjects")
+      expected = scoped_studio("/d/production/studio/book/p1?tab=subjects")
       conn = get(conn, "/studio/production/onixedit/book/p1?tab=subjects")
       assert redirected_to(conn, 302) == expected
     end
@@ -36,13 +36,13 @@ defmodule BarkparkWeb.LegacyRedirectControllerTest do
       {_ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
       {:ok, _} = Barkpark.Tenancy.create_dataset(project, %{slug: "staging", name: "staging"})
 
-      expected = scoped_studio("/studio/staging/book/x9")
+      expected = scoped_studio("/d/staging/studio/book/x9")
       conn = get(conn, "/studio/staging/onixedit/book/x9")
       assert redirected_to(conn, 302) == expected
     end
 
     test "handles draft doc ids verbatim", %{conn: conn} do
-      expected = scoped_studio("/studio/production/book/drafts.p1")
+      expected = scoped_studio("/d/production/studio/book/drafts.p1")
       conn = get(conn, "/studio/production/onixedit/book/drafts.p1/view")
       assert redirected_to(conn, 302) == expected
     end

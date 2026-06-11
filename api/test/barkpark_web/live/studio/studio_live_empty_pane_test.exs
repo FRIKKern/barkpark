@@ -7,7 +7,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
   isolated from the demo-seeded `production` data.  Uses the `author` type
   because it appears in Structure's taxonomy group and therefore gets a
   `:document_type_list` nav node that walk_path can resolve from the
-  `/w/:ws/p/:proj/studio/:dataset/author` URL (P3: the flat /studio mount
+  `/w/:ws/p/:proj/d/:dataset/studio/author` URL (P3: the flat /studio mount
   is gone — the dataset lives under this test's own workspace/project, so
   the mount uses that scope, not the Default one).
 
@@ -66,7 +66,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
   end
 
   test "empty document-list pane shows the no-documents hint", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/studio/#{@dataset}/author")
+    {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/d/#{@dataset}/studio/author")
 
     assert html =~ "No documents yet"
     assert html =~ "press + to create one"
@@ -81,7 +81,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
         scope
       )
 
-    {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/studio/#{@dataset}/author")
+    {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/d/#{@dataset}/studio/author")
 
     refute html =~ "No documents yet"
     assert html =~ "First Author"

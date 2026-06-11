@@ -50,7 +50,7 @@ defmodule BarkparkWeb.StudioChromeTest do
     %{member_conn: member_conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b}
   end
 
-  defp media_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/#{@dataset}/media"
+  defp media_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/media"
 
   describe "legacy switch events stay safe on non-StudioLive surfaces (the crash kill)" do
     test "switch-workspace on MediaLive NAVIGATES to the target scope", %{
@@ -66,7 +66,7 @@ defmodule BarkparkWeb.StudioChromeTest do
       # event contract remains chrome-handled on every non-StudioLive view.
       render_change(view, "switch-workspace", %{"workspace" => ws_b.slug})
 
-      assert_redirect(view, "/w/#{ws_b.slug}/p/chrome-pb/studio/#{@dataset}")
+      assert_redirect(view, "/w/#{ws_b.slug}/p/chrome-pb/d/#{@dataset}/studio")
     end
 
     test "switch-dataset on MediaLive navigates within the scope", %{
@@ -80,7 +80,7 @@ defmodule BarkparkWeb.StudioChromeTest do
 
       render_change(view, "switch-dataset", %{"dataset" => staging.slug})
 
-      assert_redirect(view, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/staging")
+      assert_redirect(view, "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/staging/studio")
     end
 
     test "a forged switch into a non-membership workspace is ignored", %{
@@ -162,7 +162,7 @@ defmodule BarkparkWeb.StudioChromeTest do
         "ds" => @dataset
       })
 
-      assert_redirect(view, "/w/#{ws_b.slug}/p/#{proj_b.slug}/studio/#{@dataset}")
+      assert_redirect(view, "/w/#{ws_b.slug}/p/#{proj_b.slug}/d/#{@dataset}/studio")
     end
 
     test "a forged scope-open into a non-membership workspace is refused", %{
@@ -218,7 +218,7 @@ defmodule BarkparkWeb.StudioChromeTest do
       ws_b: ws_b,
       proj_b: proj_b
     } do
-      {:ok, view, _html} = live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}")
+      {:ok, view, _html} = live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio")
 
       html = render_click(view, "scope-menu-toggle", %{})
       assert html =~ ~s{aria-label="Switch workspace, project and dataset"}
@@ -229,7 +229,7 @@ defmodule BarkparkWeb.StudioChromeTest do
         "ds" => @dataset
       })
 
-      assert_redirect(view, "/w/#{ws_b.slug}/p/#{proj_b.slug}/studio/#{@dataset}")
+      assert_redirect(view, "/w/#{ws_b.slug}/p/#{proj_b.slug}/d/#{@dataset}/studio")
     end
   end
 
@@ -243,7 +243,7 @@ defmodule BarkparkWeb.StudioChromeTest do
 
       assert html =~ ~s{phx-click="scope-menu-toggle"}
       assert html =~ "studio-bar-tabs"
-      assert html =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}/api-tester"
+      assert html =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio/api-tester"
     end
 
     test "ApiTesterLive renders the scope title + tabs too", %{
@@ -252,7 +252,7 @@ defmodule BarkparkWeb.StudioChromeTest do
       proj_a: proj_a
     } do
       {:ok, _view, html} =
-        live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/studio/#{@dataset}/api-tester")
+        live(conn, "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio/api-tester")
 
       assert html =~ ~s{phx-click="scope-menu-toggle"}
       assert html =~ "studio-bar-tabs"

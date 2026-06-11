@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Studio.MediaLiveTest do
   end
 
   test "renders native bp-asset-explorer on the Media tab", %{conn: conn} do
-    {:ok, view, html} = live(conn, scoped_studio("/studio/production/media"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/production/studio/media"))
 
     assert html =~ "bp-asset-explorer"
     assert html =~ ~s(dataset="production")

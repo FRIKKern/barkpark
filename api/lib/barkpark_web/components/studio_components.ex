@@ -635,11 +635,11 @@ defmodule BarkparkWeb.StudioComponents do
   `<div class="studio-bar-tabs">` wrapper with one anchor per tab.
   The active tab is determined uniformly by `plugin_tab_active?/2` —
   built-ins carry an explicit `:active_when` rule so the existing
-  highlight behaviour for `/studio/:ds`, `/studio/:ds/media`, and
-  `/studio/:ds/api-tester` is preserved.
+  highlight behaviour for `…/d/:ds/studio`, `…/d/:ds/studio/media`, and
+  `…/d/:ds/studio/api-tester` is preserved.
 
   The "API" tab points at the legacy `BarkparkWeb.Studio.ApiTesterLive`
-  (`/studio/:ds/api-tester`) — restored in task barkpark-7xne after
+  (`…/d/:ds/studio/api-tester`) — restored in task barkpark-7xne after
   the misjudged route-removal in commit f1e5a21. Plugin api_tests/0
   specs ride this same UI under a "Plugins" sidebar category seeded by
   `Barkpark.ApiTester.Endpoints.all/1`.
@@ -700,7 +700,7 @@ defmodule BarkparkWeb.StudioComponents do
   # render loop can highlight the active tab uniformly via
   # `plugin_tab_active?/2`:
   #
-  #   * Structure: regex matching `/studio/<ds>` and any sub-route
+  #   * Structure: regex matching the Studio base path and any sub-route
   #     *except* `/media` and `/api-tester` (those are owned by the
   #     other two built-ins).
   #   * Media / API: exact path prefix.
@@ -709,22 +709,29 @@ defmodule BarkparkWeb.StudioComponents do
   # (which default to 100 via `normalize_top_menu_entry/1`).
   defp default_top_menu_entries(dataset, scope_prefix) when is_binary(dataset) do
     ds = URI.encode(dataset)
-    ds_re = Regex.escape(ds)
+
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
-    # the page is on. "" on the flat surface → byte-identical legacy paths.
-    prefix = scope_prefix || ""
-    prefix_re = Regex.escape(prefix)
+    # the page is on via the /d/ canonical. "" on a flat surface (e.g. the
+    # /studio/:dataset/_plugins admin LV) keeps the legacy flat paths —
+    # those ride the flat→scoped 302 funnel.
+    base =
+      case scope_prefix || "" do
+        "" -> "/studio/#{ds}"
+        prefix -> "#{prefix}/d/#{ds}/studio"
+      end
+
+    base_re = Regex.escape(base)
 
     structure_active =
-      Regex.compile!("^#{prefix_re}/studio/#{ds_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
+      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
 
-    media_path = "#{prefix}/studio/#{ds}/media"
-    api_path = "#{prefix}/studio/#{ds}/api-tester"
+    media_path = "#{base}/media"
+    api_path = "#{base}/api-tester"
 
     [
       %{
         label: "Structure",
-        path: "#{prefix}/studio/#{ds}",
+        path: base,
         icon: nil,
         order: 10,
         active_when: structure_active

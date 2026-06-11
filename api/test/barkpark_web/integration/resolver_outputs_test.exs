@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       via `LegacyController.schemas/2`.
     * `/v1/schemas/<dataset>` (admin) — exposes the same through
       `SchemaController.index/2`; 401 without a token.
-    * Scoped Studio (LiveView, `/w/<ws>/p/<proj>/studio/<dataset>`) —
+    * Scoped Studio (LiveView, `/w/<ws>/p/<proj>/d/<dataset>/studio`) —
       renders the Bokbasen top-menu tab and the Pending submissions desk
       link inside the Studio chrome. (Flat `/studio/<dataset>` 302s to
       the scoped form since the P3 cutover.)
@@ -200,7 +200,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
 
     test "HTML contains the Bokbasen top-menu tab", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
         assert html =~ "Bokbasen",
                "expected Bokbasen top-menu tab in /studio/production HTML"
@@ -209,7 +209,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
 
     test "HTML contains the Pending submissions desk link", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
         assert html =~ "Pending submissions",
                "expected OnixEdit desk_items contribution (Pending submissions) in HTML"
@@ -218,7 +218,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
 
     test "HTML contains the nav-plugin-entry marker", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
         assert html =~ "nav-plugin-entry",
                "expected nav-plugin-entry marker (rendered when a :plugin_link desk item is present)"
@@ -227,7 +227,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
 
     test "HTML contains the top-menu-tab marker", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
         assert html =~ "top-menu-tab",
                "expected top-menu-tab marker on the rendered studio_tabs component"

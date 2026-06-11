@@ -10,7 +10,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
   Column clicks PREVIEW (`scope-menu-ws` / `scope-menu-proj` reload the
   child columns without navigating); picking a dataset fires `scope-open`
   with the full (ws, proj, ds) triple — a `push_navigate` to the triple's
-  canonical `/w/:ws/p/:proj/studio/:ds` URL (Scoped-by-URL: a scope pick
+  canonical `/w/:ws/p/:proj/d/:ds/studio` URL (Scoped-by-URL: a scope pick
   IS a navigation). All events are handled by `BarkparkWeb.StudioChrome`'s
   hook on every chrome surface; menu state lives in the `:scope_menu`
   assign (nil = closed, see `StudioChrome.open_scope_menu/1` for the map).
@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
 
   attr :current_workspace, :map, default: nil
   attr :current_project, :map, default: nil
-  # The active dataset slug (the `/studio/:dataset` URL leaf) — shown muted
+  # The active dataset slug (the `/d/:dataset` URL segment) — shown muted
   # in the title trail and dotted as "current" in the dataset column.
   attr :current_dataset, :string, default: nil
   # The chrome's `:scope_menu` assign — nil (closed) or the menu-state map

@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
   # Mount, switch into Project A, open doc_a in the editor (scope preserved via
   # render_patch). Returns the connected view with editor_doc populated under A.
   defp open_doc_under_a(conn, project_a) do
-    {:ok, view, _html} = live(conn, scoped_studio("/studio/#{@dataset}"))
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
 
     render_change(view, "switch-project", %{"project" => project_a.slug})
 
@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
     # under Project A's prefix — a `/p/default` patch would make LiveScope's
     # handle_params hook re-resolve the scope and silently undo the switch.
     ws = Tenancy.get_default_workspace()
-    render_patch(view, "/w/#{ws.slug}/p/#{project_a.slug}/studio/#{@dataset}/post/post-in-a")
+    render_patch(view, "/w/#{ws.slug}/p/#{project_a.slug}/d/#{@dataset}/studio/post/post-in-a")
 
     view
   end

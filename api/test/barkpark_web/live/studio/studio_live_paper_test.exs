@@ -73,7 +73,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
 
   test "navigating to /studio/:dataset/paper/:slug renders blocks in the editor pane with the structure pane present",
        %{conn: conn} do
-    {:ok, _view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
 
     # The left structure pane (root desk) is present...
     assert html =~ "Structure"
@@ -97,7 +97,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
 
   test "a {:paper_block} broadcast streams a new block into the pane with no remount (same pid)",
        %{conn: conn} do
-    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
 
     assert html =~ "First block streamed."
     refute html =~ ~s(data-block-id="b-2")
@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     {:ok, _} =
       Content.apply_paper_block_op(@slug, append_block_op("b-2", "Doomed block."), @dataset)
 
-    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     assert html =~ ~s(data-block-id="b-2")
     assert html =~ "Doomed block."
 
@@ -185,14 +185,14 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     # Open paper A. (Block BODY text — e.g. "First block streamed." — renders
     # ONLY in the editor pane; titles like "Studio Paper" also appear in the
     # Papers list pane, so we assert on block body text to scope to the editor.)
-    {:ok, view, html} = live(conn, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     assert html =~ "First block streamed."
     assert html =~ ~s(data-slug="#{@slug}")
 
     pid_before = view.pid
 
     # Jump to paper B within the SAME LiveView (Studio-internal navigation).
-    html_b = render_patch(view, scoped_studio("/studio/#{@dataset}/paper/#{other_slug}"))
+    html_b = render_patch(view, scoped_studio("/d/#{@dataset}/studio/paper/#{other_slug}"))
 
     # The editor now shows paper B...
     assert html_b =~ ~s(data-slug="#{other_slug}")
@@ -201,7 +201,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     refute html_b =~ "First block streamed."
 
     # Jump back to paper A — A's content returns cleanly, B's is gone.
-    html_a = render_patch(view, scoped_studio("/studio/#{@dataset}/paper/#{@slug}"))
+    html_a = render_patch(view, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     assert html_a =~ ~s(data-slug="#{@slug}")
     assert html_a =~ "First block streamed."
     refute html_a =~ "Totally different body."

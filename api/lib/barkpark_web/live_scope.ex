@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.LiveScope do
   @moduledoc """
   URL-scope resolution + re-authorization for the scoped Studio
-  (`/w/:workspace_slug/p/:project_slug/studio/:dataset/...` — P1 of the
+  (`/w/:workspace_slug/p/:project_slug/d/:dataset/studio/...` — P1 of the
   Scoped-by-URL arc, design: `/papers/studio-url-architecture`).
 
   ## Why params, not the session

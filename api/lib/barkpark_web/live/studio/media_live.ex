@@ -22,7 +22,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
        nav_section: :media,
        dataset: dataset,
        page_title: "Media Library",
-       current_path: prefix <> "/studio/#{dataset}/media"
+       current_path: prefix <> "/d/#{dataset}/studio/media"
      )}
   end
 

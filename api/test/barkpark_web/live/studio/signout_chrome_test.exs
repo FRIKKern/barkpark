@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
 
   test "renders Sign out form when session has api_token", %{conn: conn} do
     conn = init_test_session(conn, %{"api_token" => @admin_token})
-    {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
+    {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
     assert html =~ "Sign out"
     assert html =~ ~s|action="/logout"|
     assert html =~ ~s|method="post"|
@@ -27,7 +27,7 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
     # unconditionally — the topbar no longer gates it on a live session, so
     # the form is present regardless of whether a token was supplied.
     conn = init_test_session(conn, %{})
-    {:ok, _view, html} = live(conn, scoped_studio("/studio/production"))
+    {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
     assert html =~ ~s|action="/logout"|
   end
 

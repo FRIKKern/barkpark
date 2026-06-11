@@ -32,7 +32,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       workspace.
 
   P3 (Scoped-by-URL cutover): the canonical Studio address is
-  `/w/:ws/p/:proj/studio/:dataset` — flat `/studio/:dataset` 302s to the
+  `/w/:ws/p/:proj/d/:dataset/studio` — flat `/studio/:dataset` 302s to the
   principal's first member workspace's scoped URL, and a workspace/project/
   dataset switch is a push_patch to the NEW scope's canonical URL
   (handle_params + the LiveScope hook re-resolve the scope from the URL).
@@ -203,7 +203,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # P3: an honoured switch is URL-real — a push_patch to the NEW scope's
       # canonical URL (handle_params + LiveScope re-resolve from it).
-      assert assert_patch(view) =~ "/w/#{acme_ws.slug}/p/#{acme_blog.slug}/studio/"
+      assert assert_patch(view) =~ "/w/#{acme_ws.slug}/p/#{acme_blog.slug}/d/"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == acme_ws.slug
@@ -252,7 +252,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       render_change(view, "switch-project", %{"project" => second_project.slug})
 
-      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/studio/"
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/d/"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_workspace.slug == default_ws.slug
@@ -367,7 +367,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       render_change(view, "switch-project", %{"project" => second_project.slug})
 
-      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/studio/"
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{second_project.slug}/d/"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_project.slug == second_project.slug
@@ -399,7 +399,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       render_change(view, "switch-project", %{"project" => solo_project.slug})
 
-      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{solo_project.slug}/studio/only-ds"
+      assert assert_patch(view) =~ "/w/#{default_ws.slug}/p/#{solo_project.slug}/d/only-ds/studio"
 
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.current_project.slug == solo_project.slug
@@ -415,12 +415,12 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       render_change(view, "switch-dataset", %{"dataset" => "staging"})
 
       # P3: the dataset is the URL leaf under the scoped prefix.
-      assert assert_patch(view) =~ ~r{/w/[^/]+/p/[^/]+/studio/staging}
+      assert assert_patch(view) =~ ~r{/w/[^/]+/p/[^/]+/d/staging/studio}
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
       assert assigns.dataset == "staging",
-             "switch-dataset must re-scope the socket dataset (push_patch to the scoped /studio/:dataset leaf)"
+             "switch-dataset must re-scope the socket dataset (push_patch to the scoped /d/:dataset/studio leaf)"
     end
 
     test "switch-dataset to a slug NOT in the current project is a no-op", %{conn: conn} do
@@ -717,7 +717,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
   # P3 cutover: the flat /studio/:dataset no longer mounts StudioLive — it
   # 302s to the principal's canonical scoped URL
-  # (/w/<first-member-ws>/p/<default-proj>/studio/:dataset). Mount THROUGH the
+  # (/w/<first-member-ws>/p/<default-proj>/d/:dataset/studio). Mount THROUGH the
   # redirect so these tests keep exercising the same "principal's slug-first
   # member workspace" default the flat mount used to resolve in-socket.
   defp mount_studio(conn) do

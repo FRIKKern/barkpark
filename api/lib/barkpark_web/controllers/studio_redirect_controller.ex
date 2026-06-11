@@ -5,8 +5,10 @@ defmodule BarkparkWeb.StudioRedirectController do
 
   `/studio/:dataset`, `/studio/:dataset/*path` (and, via
   `PageController.redirect_to_studio`, bare `/` + `/studio`) redirect to
-  the session-resolved canonical `/w/:ws/p/:proj/studio/:ds/...` with
-  path and query string preserved.
+  the session-resolved canonical `/w/:ws/p/:proj/d/:ds/studio/...` with
+  path and query string preserved. The pre-/d/ scoped form
+  `/w/:ws/p/:proj/studio/:ds/...` 302s to the same canonical via
+  `legacy_scoped/2` — a pure URL rewrite, no session resolution.
 
   ## Resolution rule (the formerly-invisible in-socket pick, made visible)
 
@@ -41,6 +43,26 @@ defmodule BarkparkWeb.StudioRedirectController do
   end
 
   @doc """
+  Old scoped form `/w/:ws/p/:proj/studio/:dataset[/*path]` → the `/d/`
+  canonical. Every segment is already in the URL, so this is a pure
+  rewrite — no session resolution; the canonical route authorizes.
+  """
+  def legacy_scoped(conn, %{
+        "workspace_slug" => ws,
+        "project_slug" => proj,
+        "dataset" => dataset
+      } = params) do
+    tail =
+      case Map.get(params, "path", []) do
+        [] -> ""
+        segments -> "/" <> Enum.join(segments, "/")
+      end
+
+    target = "/w/#{ws}/p/#{proj}/d/#{dataset}/studio#{tail}"
+    redirect(conn, to: with_query(target, conn.query_string))
+  end
+
+  @doc """
   Resolve the scoped Studio target for this conn's token. Shared with
   `PageController.redirect_to_studio` (bare `/` + `/studio`, dataset nil)
   and `LegacyRedirectController` (retargeted deep links).
@@ -56,7 +78,7 @@ defmodule BarkparkWeb.StudioRedirectController do
           segments -> "/" <> Enum.join(segments, "/")
         end
 
-      {:ok, "/w/#{ws.slug}/p/#{project.slug}/studio/#{ds}#{tail}"}
+      {:ok, "/w/#{ws.slug}/p/#{project.slug}/d/#{ds}/studio#{tail}"}
     else
       _ -> :error
     end
