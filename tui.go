@@ -170,6 +170,9 @@ type model struct {
 	// Bulk marks (space on doc-list rows — bulk.go): bare published id → type.
 	// ctrl+p / U over the set when focus is a pane; esc clears first.
 	marked map[string]string
+	// Help overlay (`?` — help.go): the full grouped key reference.
+	helpOpen   bool
+	helpScroll int
 	// ── Paper rendering (pdrender) ──────────────────────────────────────────
 	// paperRegistry/paperTheme/paperProfile are built ONCE in runTUI and reused
 	// for every paper render. selectedPaperBlocks holds the decoded block tree of
@@ -642,6 +645,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHistoryKey(msg)
 	}
 
+	// ── Help overlay: j/k scroll, ?/esc/q dismiss (help.go) ──
+	if m.helpOpen {
+		return m.handleHelpKey(msg)
+	}
+
 	// ── Search query prompt: all input goes to the text input ──
 	if m.searching {
 		switch key {
@@ -735,6 +743,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "?":
+			m.helpOpen = true
+			m.helpScroll = 0
+			return m, nil
 		case "s":
 			return m, m.openSelector()
 		case "j", "down":
@@ -832,6 +844,12 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	// ── Help overlay (`?` — help.go): the full key reference ──
+	case "?":
+		m.helpOpen = true
+		m.helpScroll = 0
+		return m, nil
 
 	// ── Open scope selector (workspace/project/dataset) ──
 	case "s":
@@ -1755,6 +1773,8 @@ func (m model) View() string {
 		body = m.renderDiffView(m.width, ph)
 	case m.historyOpen:
 		body = m.renderHistoryView(m.width, ph)
+	case m.helpOpen:
+		body = m.renderHelpOverlay(m.width, ph)
 	default:
 		body = lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	}
@@ -1932,7 +1952,7 @@ func (m model) renderHelpBar() string {
 			// taskTarget) — advertise them where they apply, like the task list does.
 			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  esc back"
 		} else {
-			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  d diff  H hist  R discard  y dup  s scope  esc back"
+			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  d diff  H hist  R discard  y dup  s scope  ? keys  esc back"
 		}
 	} else if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
 		m.panes[m.focus.PaneIndex].IsDocList {
@@ -1944,10 +1964,10 @@ func (m model) renderHelpBar() string {
 			help = fmt.Sprintf(" %d marked  space mark  ctrl+p publish marked  U unpub marked  esc clear", len(m.marked))
 		} else {
 			// Doc-list pane: surface the n-new / D-delete affordances, subtle, in hint order.
-			help = " j/k navigate  space mark  n new  y dup  R discard  D delete  / search  enter select  s scope  esc back  q quit"
+			help = " j/k navigate  space mark  n new  y dup  R discard  D delete  / search  enter select  s scope  ? keys  esc back  q quit"
 		}
 	} else {
-		help = " j/k navigate  / search  h/l switch pane  enter select  s scope  esc back  q quit"
+		help = " j/k navigate  / search  h/l switch pane  enter select  s scope  ? keys  esc back  q quit"
 	}
 	// Clamp to one physical row ≤ m.width before styling so the bar never
 	// soft-wraps at narrow widths; a shorter/elided help string is fine.
