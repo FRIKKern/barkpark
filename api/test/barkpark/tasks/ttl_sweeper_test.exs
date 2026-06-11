@@ -143,6 +143,28 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       assert ev.workspace_id == task.workspace_id
     end
 
+    test "sweep drops the dead worker's resource fences from the claim map",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("res-sweep"), scope)
+
+      {:ok, claimed} =
+        Tasks.claim_by_id(task.doc_id, "worker-R", scope ++ [resources: ["lib/x.ex"]])
+
+      assert claimed.content["claim"]["resources"] == ["lib/x.ex"]
+
+      _ = age_claim!(claimed, 600)
+      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep(300)
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open"
+      # No stale "holds lib/x.ex" on an open task — the fences died with
+      # the lease (conflict scans filter in_progress, so this is pure
+      # representation; Studio/TUI render the claim map verbatim).
+      refute Map.has_key?(reloaded.content["claim"], "resources")
+    end
+
     test "perform/1 with synthetic Oban.Job runs the sweep", %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 

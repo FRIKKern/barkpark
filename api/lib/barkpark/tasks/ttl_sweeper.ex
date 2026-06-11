@@ -253,6 +253,11 @@ defmodule Barkpark.Tasks.TtlSweeper do
       |> Map.put("ts_iso", ts_iso)
       |> Map.put("expired_at", ts_iso)
       |> Map.put("previous_worker", previous_worker)
+      # The dead worker's resource fences die with the lease: leaving them
+      # on the map showed a stale "holds lib/x.ex" on an OPEN task (Studio's
+      # claim panel, the TUI's claim JSON). Conflict scans were never
+      # affected — they filter lifecycle in_progress — representation only.
+      |> Map.delete("resources")
 
     new_content =
       doc.content
