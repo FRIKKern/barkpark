@@ -73,6 +73,6 @@ jobs:
       # signDraftModeToken async (breaking); relaxing means an amendment ADR.
       # Tracked in docs/decisions/deferred.md. Same advisory-job precedent as
       # elixir.yml's format job.
-      - name: No node: imports in edge packages (ADVISORY — ADR-002 conflict)
+      - name: "No node: imports in edge packages (ADVISORY — ADR-002 conflict)"
         continue-on-error: true
         run: bash scripts/check-no-node-imports.sh
