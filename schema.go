@@ -23,6 +23,7 @@ const (
 	FieldColor     = apiclient.FieldColor
 	FieldReference = apiclient.FieldReference
 	FieldArray     = apiclient.FieldArray
+	FieldNumber    = apiclient.FieldNumber
 	FieldRaw       = apiclient.FieldRaw
 )
 

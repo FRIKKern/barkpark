@@ -21,6 +21,10 @@ const (
 	FieldColor
 	FieldReference
 	FieldArray
+	// FieldNumber is a numeric scalar — edited as text in the TUI but
+	// validated on commit and saved as a real JSON number (several schema
+	// validators, e.g. task.priority's integer 0..4, hard-reject strings).
+	FieldNumber
 	// FieldRaw marks non-scalar / v2 plugin field types (object, composite,
 	// arrayOf, codelist, localizedText): READ-ONLY in the TUI (D12). Before
 	// this, parseFieldType's default mapped them to FieldString — an EDITABLE
@@ -209,6 +213,8 @@ func parseFieldType(s string) FieldType {
 		return FieldReference
 	case "array":
 		return FieldArray
+	case "number":
+		return FieldNumber
 	case "object", "composite", "arrayOf", "codelist", "localizedText":
 		// The v2 / non-scalar types: read-only render, never an editable box.
 		return FieldRaw

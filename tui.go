@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -704,10 +706,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editing = false
 				m.editingMultiline = false
 			case "ctrl+s":
-				// Commit edit to dirty values
-				m.commitFieldEdit()
-				m.editing = false
-				m.editingMultiline = false
+				// Commit edit to dirty values (a refused commit keeps editing)
+				if m.commitFieldEdit() {
+					m.editing = false
+					m.editingMultiline = false
+				}
 			default:
 				var cmd tea.Cmd
 				m.textArea, cmd = m.textArea.Update(msg)
@@ -728,9 +731,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Cancel edit, discard input
 			m.editing = false
 		case "enter":
-			// Commit edit to dirty values
-			m.commitFieldEdit()
-			m.editing = false
+			// Commit edit to dirty values (a refused commit keeps editing)
+			if m.commitFieldEdit() {
+				m.editing = false
+			}
 		default:
 			var cmd tea.Cmd
 			m.textInput, cmd = m.textInput.Update(msg)
@@ -1149,7 +1153,7 @@ func (m *model) startFieldEdit() tea.Cmd {
 		return m.openMultilineEditor(strings.Join(items, "\n"), field.Rows)
 
 	// Single-line: string, slug, datetime, color, image edit in a textinput.
-	case FieldString, FieldSlug, FieldDatetime, FieldColor, FieldImage:
+	case FieldString, FieldSlug, FieldDatetime, FieldColor, FieldImage, FieldNumber:
 		m.editing = true
 		m.textInput = textinput.New()
 		m.textInput.Focus()
@@ -1288,12 +1292,34 @@ func (m model) editorField(name string) *Field {
 }
 
 // commitFieldEdit saves the text input value to dirtyValues.
-func (m *model) commitFieldEdit() {
+func (m *model) commitFieldEdit() bool {
 	if m.fieldCursor >= len(m.editorSchema.Fields) {
-		return
+		return true
 	}
 	field := m.editorSchema.Fields[m.fieldCursor]
 	val := m.textInput.Value()
+
+	// Validating field types refuse a bad commit and KEEP the editor open
+	// (the caller leaves editing mode only on true) — Studio surfaces the
+	// same constraint via input affordances; here the status line carries it.
+	switch field.Type {
+	case FieldNumber:
+		t := strings.TrimSpace(val)
+		if t != "" {
+			if _, err := strconv.ParseFloat(t, 64); err != nil {
+				m.setStatus("not a number — digits only (esc cancels)", true)
+				return false
+			}
+		}
+		val = t
+	case FieldDatetime:
+		norm, ok := normalizeDatetime(val)
+		if !ok {
+			m.setStatus("bad datetime — YYYY-MM-DD [HH:MM], RFC3339, or 'now'", true)
+			return false
+		}
+		val = norm
+	}
 	if m.editingMultiline {
 		// Multi-line widget owns the edit — embedded newlines survive
 		// verbatim into dirtyValues (and the eventual patch mutation).
@@ -1327,6 +1353,30 @@ func (m *model) commitFieldEdit() {
 
 	// Also update the in-memory doc for immediate display
 	m.applyDirtyToDoc()
+	return true
+}
+
+// normalizeDatetime accepts the friendly terminal spellings and returns the
+// canonical stored form. Empty clears; "now" stamps the current UTC moment;
+// a bare date or "date HH:MM" normalizes to the datetime-local shape Studio's
+// picker writes; full RFC3339 passes through.
+func normalizeDatetime(v string) (string, bool) {
+	t := strings.TrimSpace(v)
+	switch {
+	case t == "":
+		return "", true
+	case strings.EqualFold(t, "now"):
+		return time.Now().UTC().Format(time.RFC3339), true
+	}
+	for _, layout := range []string{"2006-01-02", "2006-01-02 15:04", "2006-01-02T15:04", time.RFC3339} {
+		if _, err := time.Parse(layout, t); err == nil {
+			if layout == "2006-01-02 15:04" {
+				return strings.Replace(t, " ", "T", 1), true
+			}
+			return t, true
+		}
+	}
+	return "", false
 }
 
 // toggleField cycles select options or toggles boolean.
@@ -1458,11 +1508,32 @@ func (m *model) saveDocument() {
 		// stored JSONB type (confirmed by live probe). Send the raw JSON array
 		// for a FieldArray value that parses as one; everything else keeps the
 		// string behaviour byte-identically.
-		if f := m.editorField(k); f != nil && f.Type == FieldArray {
-			var arr []interface{}
-			if json.Unmarshal([]byte(v), &arr) == nil {
-				setFields[k] = json.RawMessage(v)
-				continue
+		if f := m.editorField(k); f != nil {
+			switch f.Type {
+			case FieldArray:
+				var arr []interface{}
+				if json.Unmarshal([]byte(v), &arr) == nil {
+					setFields[k] = json.RawMessage(v)
+					continue
+				}
+			case FieldNumber:
+				// Schema validators (task.priority: integer 0..4) hard-reject
+				// strings; commitFieldEdit already validated the text.
+				if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+					setFields[k] = n
+					continue
+				}
+				if fl, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+					setFields[k] = fl
+					continue
+				}
+			case FieldBoolean:
+				// toggleField writes "true"/"false" strings — store real bools
+				// (the audit's silent-type-flip finding).
+				if v == "true" || v == "false" {
+					setFields[k] = v == "true"
+					continue
+				}
 			}
 		}
 		setFields[k] = v
@@ -2692,8 +2763,11 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		labelStyle = lipgloss.NewStyle().Bold(true).Foreground(highlight)
 	}
 	annotation := ""
-	if field.Type == FieldSlug {
+	switch field.Type {
+	case FieldSlug:
 		annotation = dimStyle.Render("[gen]")
+	case FieldNumber:
+		annotation = dimStyle.Render("[num]")
 	}
 	if annotation != "" {
 		gap := width - lipgloss.Width(labelText) - lipgloss.Width(annotation)
@@ -2727,7 +2801,7 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 	}
 
 	switch field.Type {
-	case FieldString:
+	case FieldString, FieldNumber:
 		if isEditing {
 			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
