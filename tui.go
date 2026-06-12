@@ -1349,10 +1349,16 @@ func (m *model) commitFieldEdit() bool {
 	// never take the multiline path — the guard makes that explicit.
 	if !m.editingMultiline && field.Type == FieldImage {
 		orig := m.getFieldValue(field.Name)
-		if u, _ := parseImageValue(orig); strings.TrimSpace(val) == u {
+		if u, assetID := parseImageValue(orig); strings.TrimSpace(val) == u {
 			val = orig
 		} else {
 			val = strings.TrimSpace(val)
+			if assetID != "" {
+				// The hand-entered URL no longer matches the library pick —
+				// say so instead of silently orphaning the asset reference
+				// (media back-references and renditions key off assetId).
+				m.setStatus("asset link removed — saved as bare URL", true)
+			}
 		}
 	}
 
@@ -2993,7 +2999,7 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		} else if raw := m.rawFieldJSON(field.Name); raw != "" {
 			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(raw)), 2))
 		} else {
-			lines = append(lines, "  "+dimStyle.Render("[ ] No items yet  [+ Add]"))
+			lines = append(lines, "  "+dimStyle.Render("[ ] no items — enter to add"))
 		}
 
 	case FieldRaw:

@@ -98,10 +98,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, c: checked)
 
     ~H"""
-    <div class="form-checkbox">
+    <label class="form-switch">
       <input type="hidden" name={"doc[#{@n}]"} value="false" />
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
-    </div>
+      <span class="form-switch-track" aria-hidden="true"></span>
+      <span class="form-switch-state"><%= if @c, do: "On", else: "Off" %></span>
+    </label>
     """
   end
 

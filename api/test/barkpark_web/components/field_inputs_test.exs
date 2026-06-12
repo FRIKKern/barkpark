@@ -110,7 +110,11 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
           editor_form: %{}
         })
 
-      assert html =~ ~s(class="form-checkbox")
+      # Renders as the labeled switch — the real checkbox stays in the DOM
+      # (hidden-false + checkbox-true ordering is the form contract below).
+      assert html =~ ~s(class="form-switch")
+      assert html =~ ~s(class="form-switch-track")
+      assert html =~ ">Off<"
 
       hidden_idx =
         :binary.match(html, ~s(<input type="hidden" name="doc[featured]" value="false"))
@@ -132,6 +136,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         })
 
       assert html =~ ~s(value="true" checked phx-debounce="100")
+      assert html =~ ">On<"
     end
 
     test "id_prefix lands on the checkbox only" do

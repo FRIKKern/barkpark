@@ -142,3 +142,26 @@ func TestSlugEditPrefillsFromTitle(t *testing.T) {
 		t.Errorf("existing slug prefill = %q, want stored value", got)
 	}
 }
+
+// Severing an asset link is announced, never silent (audit finding): a NEW
+// URL over an assetId-linked image warns in the status line; the unchanged
+// URL keeps the envelope quietly.
+func TestImageCommitWarnsOnAssetSever(t *testing.T) {
+	orig := `{"url":"/media/files/cat.png","assetId":"asset-9"}`
+	m := imageFieldModel(orig)
+	m.textInput = textinput.New()
+	m.textInput.SetValue("https://elsewhere.test/new.png")
+	m.commitFieldEdit()
+	if !m.statusErr || !strings.Contains(m.status, "asset link removed") {
+		t.Errorf("severing commit should warn, got %q (err=%v)", m.status, m.statusErr)
+	}
+
+	// Unchanged URL: envelope kept, no warning.
+	m = imageFieldModel(orig)
+	m.textInput = textinput.New()
+	m.textInput.SetValue("/media/files/cat.png")
+	m.commitFieldEdit()
+	if m.status != "" {
+		t.Errorf("unchanged URL must not warn, got %q", m.status)
+	}
+}

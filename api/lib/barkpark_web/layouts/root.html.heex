@@ -374,6 +374,35 @@
       width: 16px; height: 16px; accent-color: var(--primary);
       border-radius: 4px; cursor: pointer;
     }
+    /* Boolean fields render as a labeled switch (Sanity-style), not a bare
+       checkbox. The real checkbox stays in the DOM (form semantics, a11y,
+       keyboard toggle) but is visually replaced by the track + thumb; the
+       On/Off text states the value in words. */
+    .form-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+    .form-switch input[type="checkbox"] {
+      position: absolute; width: 1px; height: 1px; opacity: 0;
+    }
+    .form-switch-track {
+      width: 34px; height: 20px; border-radius: 10px;
+      background: var(--bg-muted); border: 1px solid var(--border);
+      position: relative; transition: background 0.15s, border-color 0.15s;
+      flex: 0 0 auto;
+    }
+    .form-switch-track::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--fg-muted); transition: transform 0.15s, background 0.15s;
+    }
+    .form-switch input:checked + .form-switch-track {
+      background: var(--primary); border-color: var(--primary);
+    }
+    .form-switch input:checked + .form-switch-track::after {
+      transform: translateX(14px); background: var(--primary-fg);
+    }
+    .form-switch input:focus-visible + .form-switch-track {
+      outline: 2px solid var(--primary); outline-offset: 2px;
+    }
+    .form-switch-state { font-size: 12px; color: var(--fg-muted); }
 
     /* ── Perspective toggle ────────────────────────────────────────────── */
     .perspective-tabs {
