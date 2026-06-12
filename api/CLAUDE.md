@@ -50,7 +50,7 @@ Schemas are tenant-scoped (`workspace_id`/`project_id`; docs also carry `dataset
 | Registration | auto on every boot via `Bootstrap.register_all_schemas/0` (also seeds.exs); idempotent on `(name, dataset)` | endpoint stamps tenant from request scope |
 | Trap | never reintroduce the legacy `mix run` schema workaround | never hand-insert rows with NULL scope |
 
-TUI picks up new schemas on restart; add to `structure.go` for nav.
+TUI desk = server tree (`GET /v1/structure/:dataset`).
 
 ## Dev constants
 

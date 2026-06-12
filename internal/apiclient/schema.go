@@ -179,6 +179,85 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 
 // parseListPreview shapes a schema's raw listPreview map into ListPreview.
 // A nil/empty map (no declaration) yields the zero value.
+// DeskNode is one node of the server's canonical desk structure
+// (GET /v1/structure/:dataset — what Studio renders, host groups + plugin
+// desk items). The TUI converts this into its own pane tree; clients on old
+// servers fall back to building a desk from raw schemas.
+type DeskNode struct {
+	ID       string `json:"id,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Icon     string `json:"icon,omitempty"`
+	Type     string `json:"type"`
+	TypeName string `json:"typeName,omitempty"`
+	// Filter arrives as EITHER a "field=value" string or a filter-map
+	// object ({"status":"draft"}) — the server's tree carries both shapes.
+	// FilterString() normalizes; raw keeps the decode tolerant.
+	Filter   json.RawMessage `json:"filter,omitempty"`
+	Items    []DeskNode      `json:"items,omitempty"`
+	Child    *DeskNode       `json:"child,omitempty"`
+}
+
+// FilterString renders the node's filter as the TUI's "field=value" form.
+// A single-pair map normalizes to "key=value"; a multi-pair map (or any
+// shape the simple filter language can't express) returns "" — an
+// UNfiltered list is honest, a wrongly-filtered one is not.
+func (n DeskNode) FilterString() string {
+	if len(n.Filter) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(n.Filter, &s) == nil {
+		return s
+	}
+	var m map[string]any
+	if json.Unmarshal(n.Filter, &m) == nil && len(m) == 1 {
+		for k, v := range m {
+			if val, ok := scalarString(jsonRaw(v)); ok {
+				return k + "=" + val
+			}
+		}
+	}
+	return ""
+}
+
+// jsonRaw re-encodes a decoded scalar so scalarString can normalize it.
+func jsonRaw(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+// LoadStructure fetches the canonical desk tree for the client's scope.
+// A non-200 (old server without the endpoint) returns an error — callers
+// fall back to client-side desk building.
+func (c *Client) LoadStructure() (*DeskNode, error) {
+	url := fmt.Sprintf("%s/w/%s/p/%s/v1/structure/%s", c.baseURL, c.Workspace, c.Project, c.Dataset)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("structure endpoint: status %d", resp.StatusCode)
+	}
+
+	var out struct {
+		Structure DeskNode `json:"structure"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("parse structure: %w", err)
+	}
+	return &out.Structure, nil
+}
+
 func parseListPreview(raw map[string]json.RawMessage) ListPreview {
 	return ListPreview{
 		Badge: parsePreviewSpec(raw["badge"]),

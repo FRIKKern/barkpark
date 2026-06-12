@@ -162,6 +162,87 @@ func Divider() *StructureNode {
 
 var rootStructure *StructureNode
 
+// buildDesk sets rootStructure from the SERVER's canonical desk when the
+// endpoint exists (TUI desk == Studio desk, plugin groups included), falling
+// back to the schema-derived client-side desk on old servers or fetch
+// failure. Returns true when the server tree was used.
+func buildDesk(ds *DataStore) bool {
+	tree, err := ds.LoadStructure()
+	if err != nil || tree == nil {
+		initRootStructure()
+		return false
+	}
+	converted := fromDeskNode(*tree)
+	if converted == nil || len(converted.Items) == 0 {
+		initRootStructure()
+		return false
+	}
+	rootStructure = converted
+	return true
+}
+
+// terminalIcon keeps an icon only when the terminal can draw it: emoji and
+// other non-ASCII glyphs pass, Lucide icon NAMES ("book", "history") — which
+// Studio resolves to SVGs — would render as stray words, so they drop.
+func terminalIcon(icon string) string {
+	for _, r := range icon {
+		if r > 127 {
+			return icon
+		}
+	}
+	return ""
+}
+
+// fromDeskNode converts one server desk node into the TUI's pane tree.
+// Browser-only node types (link/plugin_link) are skipped — a terminal has
+// nowhere to send them; unknown future types degrade the same way instead
+// of crashing the desk.
+func fromDeskNode(n apiclientDeskNode) *StructureNode {
+	var t NodeType
+	switch n.Type {
+	case "list", "nested":
+		t = NodeList
+	case "list_item":
+		t = NodeListItem
+	case "document_type_list", "document_list", "plugin_document_list":
+		t = NodeDocumentTypeList
+	case "document":
+		t = NodeDocument
+	case "divider":
+		t = NodeDivider
+	default:
+		return nil
+	}
+
+	node := &StructureNode{
+		Type:     t,
+		ID:       n.ID,
+		Title:    n.Title,
+		Icon:     terminalIcon(n.Icon),
+		TypeName: n.TypeName,
+		Filter:   n.FilterString(),
+	}
+	if t == NodeDocument {
+		// Singletons open the doc named after the type (the settings
+		// convention the client-side desk used too).
+		node.DocID = n.TypeName
+	}
+	for _, it := range n.Items {
+		if c := fromDeskNode(it); c != nil {
+			node.Items = append(node.Items, c)
+		}
+	}
+	if n.Child != nil {
+		node.Child = fromDeskNode(*n.Child)
+	}
+	// A list/list_item that lost ALL its content to skipped link nodes is
+	// itself dropped — no dead rows.
+	if (t == NodeList || t == NodeListItem) && len(node.Items) == 0 && node.Child == nil && node.TypeName == "" {
+		return nil
+	}
+	return node
+}
+
 // initRootStructure builds the desk structure from the loaded schemas.
 func initRootStructure() {
 	var contentItems []*StructureNode

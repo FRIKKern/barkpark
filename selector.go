@@ -171,7 +171,7 @@ func (m *model) applyScope(ws, pr, dsName string) {
 	m.ds.Project = pr
 	m.ds.Dataset = dsName
 
-	initRootStructure()
+	buildDesk(m.ds)
 	m.path = nil
 	m.selectedDoc = nil
 	m.editorSchema = nil

@@ -61,8 +61,13 @@ func runTUI() int {
 	schemas = loaded
 	fmt.Fprintf(os.Stderr, "Loaded %d schemas\n", len(schemas))
 
-	// Build structure tree (auto-generated from schemas)
-	initRootStructure()
+	// Desk structure: the server's canonical tree when available (plugin
+	// groups included), schema-derived fallback otherwise.
+	if buildDesk(ds) {
+		fmt.Fprintf(os.Stderr, "Desk structure from server\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "Desk structure built client-side (server endpoint unavailable)\n")
+	}
 
 	// Start TUI
 	p := tea.NewProgram(initialModel(ds), tea.WithAltScreen())

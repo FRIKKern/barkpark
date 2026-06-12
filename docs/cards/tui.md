@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: go-tui | budget: 350tok -->
 # Go TUI
 
-Terminal Studio client at repo root. File map: `main.go` entry → `tui.go` Bubble Tea panes + editor → `store.go` HTTP + SSE client → `schema.go` schemas → `structure.go` nav tree → `styles.go` Lip Gloss.
+Terminal Studio client at repo root. Files: `main.go` → `tui.go` panes+editor → `store.go` HTTP/SSE → `schema.go` → `structure.go` desk (`/v1/structure`; fallback) → `styles.go`.
 
 Constraint (D12): docs whose schema uses v2 field types (composite/arrayOf/codelist/localizedText) render as **JSON dumps** — the editor skips them; Studio is the editing surface. Declared v1 constraint. → docs/contracts/schema-v2.md.
 

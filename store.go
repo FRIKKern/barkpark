@@ -16,6 +16,9 @@ type (
 	Doc           = apiclient.Doc
 	WorkspaceInfo = apiclient.WorkspaceInfo
 	ProjectInfo   = apiclient.ProjectInfo
+	// apiclientDeskNode aliases the server desk-tree DTO for structure.go's
+	// converter (fromDeskNode).
+	apiclientDeskNode = apiclient.DeskNode
 )
 
 // DataStoreRefreshMsg is sent to the TUI when the API data changes. It is a

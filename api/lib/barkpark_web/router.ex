@@ -761,6 +761,13 @@ defmodule BarkparkWeb.Router do
     delete("/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
+  # ── Desk structure — the canonical Studio tree, served for the TUI ──────
+  scope "/v1/structure", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    get("/:dataset", StructureController, :show)
+  end
+
   # ── Schema management — requires admin token ────────────────────────────
   scope "/v1/schemas", BarkparkWeb do
     pipe_through([:api, :require_admin])
@@ -1030,6 +1037,7 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
+    get("/v1/structure/:dataset", StructureController, :show)
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
     post("/v1/schemas/:dataset", SchemaController, :upsert)
