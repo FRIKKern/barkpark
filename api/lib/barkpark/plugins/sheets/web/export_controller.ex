@@ -87,6 +87,11 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
         _ -> @default_dataset
       end
 
+    # M1 read-your-writes: a live session's memory is authoritative — ask it
+    # to persist its debounced state before the read. Cheap, and a no-op
+    # when no session is live for this sheet.
+    Barkpark.Sheets.Session.flush(slug, dataset)
+
     with {:error, :not_found} <-
            Content.get_document(Content.draft_id(slug), "sheet", dataset),
          {:error, :not_found} <-

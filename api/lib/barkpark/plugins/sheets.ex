@@ -25,14 +25,16 @@ defmodule Barkpark.Plugins.Sheets do
       malformed range, a range covering more than `merge_area_cap/0` cells,
       or a corner beyond the same grid bounds.
 
-    * `register_routes/1` (M5) — the conversion API on the `:ingest` bucket
-      (shared-secret bearer via `RequireIngestToken`, like Bulldocs):
-      `POST /v1/plugins/sheets/import` (multipart xlsx/csv/tsv → sheet doc)
-      and `GET /v1/plugins/sheets/:slug/export.{xlsx,csv,tsv,md,html}`.
-      Conversion modules live under `Barkpark.Plugins.Sheets.*`
-      (`XlsxImport`, `XlsxExport`, `Csv`, `Markdown`, `Html`, `Fmt`) — the
-      core stays conversion-free (the Bulldocs split: core keeps the
-      reusable machinery, the plugin is the wiring).
+    * `register_routes/1` (M5 + M1) — the conversion API on the `:ingest`
+      bucket (shared-secret bearer via `RequireIngestToken`, like Bulldocs):
+      `POST /v1/plugins/sheets/import` (multipart xlsx/csv/tsv → sheet doc),
+      `GET /v1/plugins/sheets/:slug/export.{xlsx,csv,tsv,md,html}`, and
+      `POST /v1/plugins/sheets/:slug/ops` (cell-granular wire ops, applied
+      through the core `Barkpark.Sheets.Session`). Conversion modules live
+      under `Barkpark.Plugins.Sheets.*` (`XlsxImport`, `XlsxExport`, `Csv`,
+      `Markdown`, `Html`, `Fmt`) — the core stays conversion-free (the
+      Bulldocs split: core keeps the reusable machinery, the plugin is the
+      wiring).
 
   The grid machinery itself is CORE, not plugin: A1 helpers and snapshot
   synthesis live in `Barkpark.Sheets`, the `"sheet"` portable-doc embed block
@@ -40,7 +42,9 @@ defmodule Barkpark.Plugins.Sheets do
   the save path in `Barkpark.Content` — so existing embeds keep rendering and
   refreshing with this plugin off (fresh-install invariant).
 
-  The collaborative engine is deferred to later milestones.
+  The collaborative session itself (`Barkpark.Sheets.Session`, M1) is CORE —
+  with this plugin off, sessions and direct mutate both keep working; only
+  the wire-op HTTP route goes away.
   """
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
@@ -118,6 +122,9 @@ defmodule Barkpark.Plugins.Sheets do
       save path); imports above 50_000 non-empty cells reject with 413.
     * `GET /v1/plugins/sheets/:slug/export.xlsx|csv|tsv|md|html` — sends
       the converted artifact (csv/tsv take `?tab=`, 0-based, default 0).
+    * `POST /v1/plugins/sheets/:slug/ops` (M1) — `{"ops": [ … ]}` applied
+      through the core `Barkpark.Sheets.Session` (the session validates,
+      serializes, recomputes, broadcasts deltas and debounces persistence).
 
   Route changes need a forced router recompile — the router macro reads the
   registry at compile time (`MIX_ENV=test mix compile --force`).
@@ -126,9 +133,11 @@ defmodule Barkpark.Plugins.Sheets do
   def register_routes(_ctx) do
     import_controller = Barkpark.Plugins.Sheets.Web.ImportController
     export_controller = Barkpark.Plugins.Sheets.Web.ExportController
+    ops_controller = Barkpark.Plugins.Sheets.Web.OpsController
 
     [
       {:post, "/sheets/import", import_controller, :create, auth: :ingest},
+      {:post, "/sheets/:slug/ops", ops_controller, :apply_ops, auth: :ingest},
       {:get, "/sheets/:slug/export.xlsx", export_controller, :export_xlsx, auth: :ingest},
       {:get, "/sheets/:slug/export.csv", export_controller, :export_csv, auth: :ingest},
       {:get, "/sheets/:slug/export.tsv", export_controller, :export_tsv, auth: :ingest},

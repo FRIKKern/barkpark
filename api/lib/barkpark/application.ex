@@ -66,6 +66,15 @@ defmodule Barkpark.Application do
           {Oban, oban_config},
           {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
           {Phoenix.PubSub, name: Barkpark.PubSub},
+          # Sheets M1: per-sheet collaborative sessions — a unique Registry
+          # over {dataset, published-id} keys plus the DynamicSupervisor the
+          # sessions start under (lazily, on first op; restart: :temporary —
+          # a crashed session restarts fresh from the persisted row on the
+          # next op). CORE, plugin-independent (fresh-install invariant):
+          # only the HTTP ops route is plugin wiring. Needs Repo (load /
+          # persist) and PubSub (delta broadcasts) — both above.
+          {Registry, keys: :unique, name: Barkpark.Sheets.SessionRegistry},
+          {DynamicSupervisor, name: Barkpark.Sheets.SessionSupervisor, strategy: :one_for_one},
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,
