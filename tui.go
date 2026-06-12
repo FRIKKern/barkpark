@@ -3082,8 +3082,8 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		// mixed / non-string arrays — those stay read-only as before).
 		if isEditing {
 			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textArea.View()), 2))
-		} else if raw := m.rawFieldJSON(field.Name); raw != "" {
-			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(raw)), 2))
+		} else if body, ok := m.structuredFieldBody(field.Name, fieldContentWidth); ok {
+			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(body), 2))
 		} else {
 			lines = append(lines, "  "+dimStyle.Render("[ ] no items — enter to add"))
 		}
@@ -3097,8 +3097,8 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		// — a task's claim {worker, epoch, resources}, its history — the raw
 		// value renders as clamped pretty JSON, so the terminal shows the
 		// same truth Studio's read-only panels do. Empty stays a placeholder.
-		if raw := m.rawFieldJSON(field.Name); raw != "" {
-			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render(raw)), 2))
+		if body, ok := m.structuredFieldBody(field.Name, fieldContentWidth); ok {
+			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(body), 2))
 		} else {
 			lines = append(lines, indentLines(editorFieldStyle.Width(fieldContentWidth).Render(dimStyle.Render("— (edit in Studio)")), 2))
 		}
@@ -3116,6 +3116,23 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 // the bytes fail to parse — the caller then falls back to the placeholder.
 // Clamped to a few lines so a deep history object cannot flood the form;
 // the full value is one `bp task get` away.
+// structuredFieldBody renders a non-scalar field's read-only body: an array
+// of flat objects becomes the aligned mini-table (objectTable), anything else
+// keeps the clamped pretty-JSON fallback. ok=false means no data at all.
+func (m model) structuredFieldBody(name string, width int) (string, bool) {
+	if m.selectedDoc != nil && m.selectedDoc.Extra != nil {
+		if raw, ok := m.selectedDoc.Extra[name]; ok {
+			if rows, tok := objectTable(raw, maxInt(width-2, 12)); tok {
+				return dimStyle.Render(strings.Join(rows, "\n")), true
+			}
+		}
+	}
+	if raw := m.rawFieldJSON(name); raw != "" {
+		return dimStyle.Render(raw), true
+	}
+	return "", false
+}
+
 func (m model) rawFieldJSON(name string) string {
 	if m.selectedDoc == nil || m.selectedDoc.Extra == nil {
 		return ""
