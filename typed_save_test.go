@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -283,5 +284,64 @@ func TestColorCommitCanonicalizes(t *testing.T) {
 	am := after.(model)
 	if !am.editing || !strings.Contains(am.status, "color") {
 		t.Errorf("named colors refuse (editing=%v status=%q)", am.editing, am.status)
+	}
+}
+
+// Render-layer premium round (2026-06-12): broken references warn, unsaved
+// edits dot the label, datetimes show their distance from now.
+func TestBrokenReferenceWarns(t *testing.T) {
+	f := Field{Name: "author", Title: "Author", Type: FieldReference, RefType: "author"}
+	m := typedModel([]Field{f}, map[string]string{"author": "ghost"})
+
+	// Unchecked (no cache entry): bare id, no warning — fetch may have failed.
+	out := strings.Join(m.renderField(f, 60, false, false), "\n")
+	if strings.Contains(out, "not found") {
+		t.Errorf("unchecked ref must not warn:\n%s", out)
+	}
+
+	// Checked-and-missing (the cacheRefTitlesFor sentinel): warn.
+	m.refTitles = map[string]string{"ghost": ""}
+	out = strings.Join(m.renderField(f, 60, false, false), "\n")
+	if !strings.Contains(out, "not found") {
+		t.Errorf("checked-missing ref should warn:\n%s", out)
+	}
+
+	// Resolved: title + dim id, no warning.
+	m.refTitles["ghost"] = "Ghost Writer"
+	out = strings.Join(m.renderField(f, 60, false, false), "\n")
+	if !strings.Contains(out, "Ghost Writer") || strings.Contains(out, "not found") {
+		t.Errorf("resolved ref render wrong:\n%s", out)
+	}
+}
+
+func TestDirtyDotOnLabel(t *testing.T) {
+	f := Field{Name: "note", Title: "Note", Type: FieldString}
+	m := typedModel([]Field{f}, map[string]string{})
+
+	out := strings.Join(m.renderField(f, 60, false, false), "\n")
+	if strings.Contains(out, "●") {
+		t.Errorf("clean field must not dot:\n%s", out)
+	}
+	m.dirtyValues = map[string]string{"note": "edited"}
+	out = strings.Join(m.renderField(f, 60, false, false), "\n")
+	if !strings.Contains(out, "NOTE ●") {
+		t.Errorf("dirty field should dot the label:\n%s", out)
+	}
+}
+
+func TestRelTimeHint(t *testing.T) {
+	if got := relTimeHint(""); got != "" {
+		t.Errorf("empty → %q", got)
+	}
+	if got := relTimeHint("garbage"); got != "" {
+		t.Errorf("garbage → %q (the hint must never lie)", got)
+	}
+	past := time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
+	if got := relTimeHint(past); got != "3h ago" {
+		t.Errorf("past → %q, want 3h ago", got)
+	}
+	future := time.Now().UTC().Add(49 * time.Hour).Format("2006-01-02T15:04")
+	if got := relTimeHint(future); got != "in 2d" {
+		t.Errorf("future → %q, want in 2d", got)
 	}
 }

@@ -1410,6 +1410,43 @@ func normalizeDatetime(v string) (string, bool) {
 	return "", false
 }
 
+// relTimeHint renders a stored datetime's distance from now ("2h ago",
+// "in 3d") — empty for unparseable/empty values, so the hint never lies.
+func relTimeHint(v string) string {
+	t := strings.TrimSpace(v)
+	if t == "" {
+		return ""
+	}
+	var parsed time.Time
+	var err error
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02"} {
+		if parsed, err = time.Parse(layout, t); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return ""
+	}
+	d := time.Until(parsed)
+	past := d < 0
+	if past {
+		d = -d
+	}
+	var span string
+	switch {
+	case d < time.Hour:
+		span = fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		span = fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		span = fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	if past {
+		return span + " ago"
+	}
+	return "in " + span
+}
+
 // normalizeHexColor validates + canonicalizes a hex color: 6 hex digits with
 // or without the leading #, lowercased, # restored. Empty clears.
 func normalizeHexColor(v string) (string, bool) {
@@ -2808,6 +2845,13 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 	// slug field's [gen]) rides on the label line so every field box can keep the
 	// same full width and all the box right edges line up.
 	labelText := "  " + strings.ToUpper(field.Title)
+	if m.dirtyValues != nil {
+		if _, dirty := m.dirtyValues[field.Name]; dirty {
+			// Unsaved-change marker (Sanity's per-field edited dot): commits
+			// land in dirtyValues and clear on ctrl+s — the dot tracks that.
+			labelText += " ●"
+		}
+	}
 	if field.Required {
 		// Sanity's required marker; the annotation adds "(required)" while
 		// the field is still empty so the obligation is explicit at rest.
@@ -2984,6 +3028,9 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(m.textInput.View()), 2))
 		} else {
 			dv := placeholder("YYYY-MM-DD HH:MM")
+			if rel := relTimeHint(val); rel != "" {
+				dv += "  " + dimStyle.Render("("+rel+")")
+			}
 			lines = append(lines, indentLines(activeFieldStyle.Width(fieldContentWidth).Render(dv), 2))
 		}
 
@@ -3012,11 +3059,17 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		// resolve); fall back to the bare id, and to the dim placeholder when
 		// unset. Enter opens the picker (startFieldEdit's FieldReference case).
 		var rv string
+		title, checked := m.refTitles[val]
 		switch {
 		case val == "":
 			rv = dimStyle.Render("Select " + field.RefType + "...")
-		case m.refTitles[val] != "":
-			rv = m.refTitles[val] + " " + dimStyle.Render(val)
+		case title != "":
+			rv = title + " " + dimStyle.Render(val)
+		case checked:
+			// cacheRefTitlesFor fetched the whole refType list and the target
+			// was NOT in it — a broken reference (deleted target). Sanity
+			// surfaces these; silently rendering the bare id hid them.
+			rv = val + "  " + statusDraft.Render("⚠ not found")
 		default:
 			rv = val
 		}

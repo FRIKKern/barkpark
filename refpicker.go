@@ -263,6 +263,14 @@ func (m *model) cacheRefTitlesFor(schema *Schema) {
 		for i := range docs {
 			m.refTitles[publishedID(docs[i].ID)] = docs[i].Title
 		}
+		// The whole refType list was just fetched; a value still missing
+		// from it points at a deleted doc. The "" sentinel means "checked,
+		// not found" — renderField shows the broken-reference warning. A
+		// FAILED fetch returns zero docs and would mark every ref broken,
+		// so only mark when the fetch produced something.
+		if _, ok := m.refTitles[val]; !ok && len(docs) > 0 {
+			m.refTitles[val] = ""
+		}
 	}
 }
 
