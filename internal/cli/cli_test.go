@@ -982,3 +982,46 @@ func TestRenderMinimalWorkspaceProjectSlug(t *testing.T) {
 		}
 	}
 }
+
+// Typed --set (httpie's := convention, 2026-06-12): key:=raw-json sends the
+// JSON value verbatim — the server's patch path merges with no coercion, so
+// `--set priority=3` stores the STRING "3" (task validators 422 it). Plain
+// key=value stays a string; type is the caller's explicit choice, never
+// sniffed from the value.
+func TestBuildBodyTypedSet(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+	wc, _ := tree.Lookup("webhook", "create")
+
+	body, _, err := buildBody(*wc, map[string][]string{"set": {
+		"priority:=3",
+		"featured:=true",
+		"tags:=[\"a\",\"b\"]",
+		"note=42",
+	}}, map[string]string{})
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	if v, ok := got["priority"].(float64); !ok || v != 3 {
+		t.Errorf("priority = %#v, want the JSON number 3", got["priority"])
+	}
+	if v, ok := got["featured"].(bool); !ok || !v {
+		t.Errorf("featured = %#v, want the JSON boolean true", got["featured"])
+	}
+	if arr, ok := got["tags"].([]any); !ok || len(arr) != 2 || arr[0] != "a" {
+		t.Errorf("tags = %#v, want a real array", got["tags"])
+	}
+	// Plain = stays a string even when the value looks numeric.
+	if got["note"] != "42" {
+		t.Errorf("note = %#v, want the string \"42\"", got["note"])
+	}
+
+	// Invalid JSON after := errors with guidance instead of sending garbage.
+	_, _, err = buildBody(*wc, map[string][]string{"set": {"priority:=three"}}, map[string]string{})
+	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Errorf("bad := value should error with guidance, got %v", err)
+	}
+}

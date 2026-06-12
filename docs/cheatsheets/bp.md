@@ -30,7 +30,7 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp upgrade` | self-update from `cli-v*` releases | `bp upgrade --check` |
 | `bp uninstall` | remove config / dev stack | `bp uninstall --local --dry-run` |
 
-Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml|minimal` (json auto when piped) · `-q` minimal receipt · `--dry-run` client-side preview · `--yes` confirm destructive · `--file -` reads stdin.
+Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml|minimal` (json when piped) · `-q` minimal receipt · `--set k:=json` typed values · `--dry-run` preview · `--yes` confirm · `--file -` stdin.
 
 Exit codes: `docs/cli/error-exit-table.md` (0 ok · 2 usage · 3 auth · 4 not-found · 5 validation · 6 conflict · 7 rate-limited · 8 server).
 

@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: bp-cli-overview | budget: 450tok -->
 # bp CLI
 
-Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches a static builtins switch (version, completion, login, capabilities, whoami, use, servers, server, setup, migrate, paper) and then manifest-driven verbs.
+Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches a static builtins switch (version, completion, login, capabilities, whoami, use, servers, server, setup, migrate, paper) and then manifest-driven verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object — the server patch path stores types verbatim, no coercion), `--file`/stdin overrides all.
 
 - New builtin verb: copy the pattern in builtins.go (`runWhoami` / `runCapabilities` — `*writer` + `globals` + `manifest.Context` in, exit int out).
 - `bp paper` renders Bulldocs portable-docs in the terminal via `internal/pdrender` (see docs/cards/tui.md).

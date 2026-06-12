@@ -366,9 +366,25 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 	}
 	if sets, ok := flags["set"]; ok && len(sets) > 0 {
 		for _, kv := range sets {
+			// key:=raw-json sends a TYPED value (httpie convention): the
+			// server's patch path merges verbatim with no coercion, so
+			// `--set priority=3` stores the STRING "3" (task validators
+			// 422 it; untyped schemas silently flip the JSONB type).
+			// `--set priority:=3` sends the number; arrays/objects/bools/
+			// null ride the same way. Plain key=value stays a string —
+			// type is the caller's explicit choice, never sniffed from the
+			// value (a title that LOOKS numeric must stay a string).
+			if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
+				var typed any
+				if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
+					return nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
+				}
+				obj[kv[:eq]] = typed
+				continue
+			}
 			eq := strings.IndexByte(kv, '=')
 			if eq < 0 {
-				return nil, "", fmt.Errorf("invalid --set %q (want key=value)", kv)
+				return nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
 			obj[kv[:eq]] = kv[eq+1:]
 		}
