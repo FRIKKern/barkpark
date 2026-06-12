@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content={get_csrf_token()} />
+  <title>Sheet · Barkpark</title>
+  <style>
+    /* The /sheets/:slug public reader (Sheets M4) — the papers-reader
+       aesthetic (bulldocs.html.heex's parchment article chrome) over the
+       Studio grid's .sheet-* table rules. The grid CSS below mirrors the
+       root.html.heex Studio block (read-only subset: no toolbar, menus,
+       resize handles or rename inputs render here), retargeted onto the
+       parchment palette via the same custom properties the rules consume. */
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --paper-bg:       #fefdf9;
+      --paper-bg-deep:  #f5f2e9;
+      --paper-ink:      #1a1a1a;
+      --paper-ink-soft: #6a6a6a;
+      --paper-rule:     #e6e2d8;
+      --paper-accent:   #a23925;
+      /* The .sheet-* rules read these (Studio's theme tokens). */
+      --bg:     var(--paper-bg);
+      --bg-alt: var(--paper-bg-deep);
+      --fg:     var(--paper-ink);
+      --fg-dim: var(--paper-ink-soft);
+      --border: var(--paper-rule);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper-bg:       #1b1815;
+        --paper-bg-deep:  #221e1a;
+        --paper-ink:      #ece6dc;
+        --paper-ink-soft: #b8ad9e;
+        --paper-rule:     rgba(236, 230, 220, 0.2);
+        --paper-accent:   #d97a5f;
+      }
+    }
+    body {
+      margin: 0; background: var(--paper-bg-deep); color: var(--paper-ink);
+      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
+    }
+    .bp-sheet-shell {
+      max-width: 1080px; margin: 0 auto; padding: 56px 40px 96px;
+      display: flex; flex-direction: column; min-height: 100vh;
+    }
+    .bp-sheet-head { margin: 0 0 1.75rem; }
+    .bp-sheet-eyebrow {
+      margin: 0 0 0.75rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--paper-accent);
+      padding-bottom: 0.5rem; border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+    }
+    .bp-sheet-title { margin: 0 0 0.4rem; font-size: 2rem; line-height: 1.2; font-weight: 600; }
+    .bp-sheet-byline {
+      margin: 0; font-style: italic; font-size: 0.9rem; color: var(--paper-ink-soft);
+    }
+    .bp-sheet-byline code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-style: normal; font-size: 0.82rem;
+    }
+
+    /* ── Read-only grid (the Studio .sheet-* subset) ─────────────────────── */
+    .sheet-editor { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    .sheet-reader {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      max-height: 75vh;
+    }
+    .sheet-cap-notice {
+      padding: 3px 12px; font-size: 11.5px; color: var(--fg-dim, var(--fg));
+      border-bottom: 1px solid var(--border);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
+    .sheet-scroll { flex: 1; overflow: auto; min-height: 0; }
+    .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; }
+    .sheet-table th, .sheet-table td {
+      border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sheet-corner, .sheet-colhead, .sheet-rowhead {
+      background: var(--bg-alt, var(--bg)); color: var(--fg-dim, var(--fg));
+      font-weight: 500; font-size: 11px; text-align: center; user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .sheet-corner { position: sticky; top: 0; left: 0; z-index: 6; }
+    .sheet-colhead { position: sticky; top: 0; z-index: 4; }
+    .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
+    .sheet-cell { background: var(--bg); }
+    .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
+    .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
+    .sheet-tabs {
+      display: flex; align-items: center; gap: 2px;
+      padding: 4px 8px; border-top: 1px solid var(--border); overflow-x: auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .sheet-tab {
+      background: none; border: 1px solid transparent; color: var(--fg-dim, var(--fg));
+      font-size: 12px; padding: 3px 10px; border-radius: 5px; cursor: pointer;
+      font-family: inherit;
+    }
+    .sheet-tab.is-active { border-color: var(--paper-accent); color: var(--fg); }
+  </style>
+</head>
+<body>
+  {@inner_content}
+  <%!-- LiveView client for the live deltas + read-only tab switching. Loaded
+        at the BOTTOM of the body (NEVER a blocking <script> in <head> —
+        golden rule), same discipline as the bulldocs reader layout. --%>
+  <script src="/assets/phoenix.js"></script>
+  <script src="/assets/phoenix_live_view.js"></script>
+  <script>
+    let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+    let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
+      params: { _csrf_token: csrfToken }
+    });
+    liveSocket.connect();
+    window.liveSocket = liveSocket;
+  </script>
+</body>
+</html>

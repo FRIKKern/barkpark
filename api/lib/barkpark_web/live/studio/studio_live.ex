@@ -201,6 +201,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # navigation, mirroring `list_topic`.
        sheet_doc: nil,
        sheet_topic: nil,
+       # Sheets M4 grid presence: the per-sheet presence topic
+       # (`Session.presence_topic/3`) this LV is tracked on while a sheet
+       # is open, and the materialised collaborator list the SheetGrid
+       # component renders (cursors, selections, editing tags). Lifecycle
+       # lives in resub_sheet_presence/2.
+       sheet_presence_topic: nil,
+       sheet_presences: [],
        # ── In-Studio paper block editor (convergence/studio-paper-editor) ───
        # `paper_edit_mode` flips the paper pane between the read-only live
        # stream (View — the default, unchanged) and the block edit form (Edit).
@@ -432,13 +439,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Presence updates
   @impl true
-  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
-    # Diffs only arrive on the subscribed (ws-keyed) topic; a diff racing a
-    # workspace flip before ensure_presence_subscription re-keys is read off
-    # the OLD topic and immediately superseded by the post-flip track.
-    case socket.assigns[:presence_topic] do
-      nil -> {:noreply, socket}
-      topic -> {:noreply, assign(socket, presences: PresenceState.list(topic))}
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", topic: topic}, socket) do
+    cond do
+      # Sheet-grid presence (Sheets M4): diffs on the per-sheet topic
+      # refresh the collaborator list the SheetGrid component renders
+      # (cursors, selections, editing tags). Keyed by the broadcast topic so
+      # the studio in-bar presence below stays untouched.
+      topic != nil and topic == socket.assigns[:sheet_presence_topic] ->
+        {:noreply, assign(socket, sheet_presences: PresenceState.list(topic))}
+
+      # In-bar studio presence. Diffs only arrive on the subscribed
+      # (ws-keyed) topic; a diff racing a workspace flip before
+      # ensure_presence_subscription re-keys is read off the OLD topic and
+      # immediately superseded by the post-flip track.
+      socket.assigns[:presence_topic] != nil ->
+        {:noreply,
+         assign(socket, presences: PresenceState.list(socket.assigns.presence_topic))}
+
+      true ->
+        {:noreply, socket}
     end
   end
 
@@ -3757,14 +3776,27 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Diff-and-resubscribe, same shape as ensure_list_subscription: idempotent
   # across rebuilds of the same open sheet, unsubscribes on navigation away.
-  # The topic is keyed with the DOC's owning workspace — exactly what the
+  # The topics are keyed with the DOC's owning workspace — exactly what the
   # session broadcasts with — not the viewer's current workspace.
   defp ensure_sheet_subscription(socket, doc) do
-    new_topic =
+    {new_topic, new_presence_topic} =
       if doc != nil and connected?(socket) do
-        Barkpark.Sheets.Session.topic(doc.doc_id, socket.assigns.dataset, doc.workspace_id)
+        {Barkpark.Sheets.Session.topic(doc.doc_id, socket.assigns.dataset, doc.workspace_id),
+         Barkpark.Sheets.Session.presence_topic(
+           doc.doc_id,
+           socket.assigns.dataset,
+           doc.workspace_id
+         )}
+      else
+        {nil, nil}
       end
 
+    socket
+    |> resub_sheet_deltas(new_topic)
+    |> resub_sheet_presence(new_presence_topic)
+  end
+
+  defp resub_sheet_deltas(socket, new_topic) do
     old_topic = socket.assigns[:sheet_topic]
 
     if new_topic == old_topic do
@@ -3773,6 +3805,48 @@ defmodule BarkparkWeb.Studio.StudioLive do
       if old_topic, do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, old_topic)
       if new_topic, do: Phoenix.PubSub.subscribe(Barkpark.PubSub, new_topic)
       assign(socket, sheet_topic: new_topic)
+    end
+  end
+
+  # Per-sheet grid presence (Sheets M4). Track/untrack mirror the in-bar
+  # presence lifecycle: entries are (topic, key)-scoped, so navigating away
+  # without the untrack would leave a ghost cursor until this LV dies. The
+  # seeded meta matches the SheetGrid component's initial state — cursor on
+  # A1 of tab 0, nothing selected, not editing; every later update is the
+  # component's (the hook's throttled `presence-meta` frames + the
+  # edit-start/commit/cancel editing lifecycle), riding the SAME pid since
+  # LiveComponents run in this LV process.
+  defp resub_sheet_presence(socket, new_topic) do
+    old_topic = socket.assigns[:sheet_presence_topic]
+
+    if new_topic == old_topic do
+      socket
+    else
+      if old_topic do
+        Presence.untrack(self(), old_topic, socket.assigns.user_id)
+        Phoenix.PubSub.unsubscribe(Barkpark.PubSub, old_topic)
+      end
+
+      presences =
+        if new_topic do
+          Phoenix.PubSub.subscribe(Barkpark.PubSub, new_topic)
+
+          Presence.track(self(), new_topic, socket.assigns.user_id, %{
+            name: socket.assigns.user_name,
+            color: socket.assigns.user_color,
+            tab: 0,
+            active: "A1",
+            selection: nil,
+            editing: nil,
+            joined_at: System.system_time(:second)
+          })
+
+          PresenceState.list(new_topic)
+        else
+          []
+        end
+
+      assign(socket, sheet_presence_topic: new_topic, sheet_presences: presences)
     end
   end
 
@@ -5004,6 +5078,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
           doc={@sheet_doc}
           dataset={@dataset}
           is_draft={@editor_is_draft}
+          user_id={@user_id}
+          presence_topic={@sheet_presence_topic}
+          presences={@sheet_presences}
         />
         <% @editor_view == :media_explorer -> %>
         <div

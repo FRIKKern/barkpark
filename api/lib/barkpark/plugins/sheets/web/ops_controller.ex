@@ -10,8 +10,12 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   validation, serialization, recompute, delta broadcast and debounced
   persistence. The full op vocabulary (set_cell/clear_cell plus
   insert_rows/delete_rows/insert_cols/delete_cols, set_col_width/
-  set_row_height, rename_tab/add_tab/delete_tab) is documented in the
-  Session moduledoc.
+  set_row_height, rename_tab/add_tab/delete_tab, and undo/redo) is
+  documented in the Session moduledoc. Per-user undo/redo (M4): any op may
+  carry a `"user"` string — the caller's identity (the ingest token is a
+  shared secret, so identity rides the op itself) — which records that op
+  on the user's inverse stack; `{"op":"undo","user":u}` /
+  `{"op":"redo","user":u}` pop it.
 
       POST /v1/plugins/sheets/:slug/ops?dataset=production
       Authorization: Bearer <ingest token>

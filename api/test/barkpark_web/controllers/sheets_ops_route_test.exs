@@ -248,6 +248,70 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
     end
   end
 
+  describe "undo/redo over the wire (M4)" do
+    test "an op stamped with a user undoes and redoes through the endpoint", %{conn: conn} do
+      create_sheet("ops-undo", %{"A1" => %{"v" => "before"}})
+
+      %{"ok" => true, "applied" => 1} =
+        conn
+        |> authed()
+        |> post(ops_path("ops-undo"), %{
+          "ops" => [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "after", "user" => "wire-user"}],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      %{"ok" => true, "rev" => 2, "applied" => 1, "errors" => []} =
+        build_conn()
+        |> authed()
+        |> post(ops_path("ops-undo"), %{
+          "ops" => [%{"op" => "undo", "user" => "wire-user"}],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      {:ok, content} = Session.peek("ops-undo", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => "before"}
+
+      %{"rev" => 3, "applied" => 1, "errors" => []} =
+        build_conn()
+        |> authed()
+        |> post(ops_path("ops-undo"), %{
+          "ops" => [%{"op" => "redo", "user" => "wire-user"}],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      {:ok, content} = Session.peek("ops-undo", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => "after"}
+    end
+
+    test "undo without a user / for a userless history rejects per-op", %{conn: conn} do
+      create_sheet("ops-undo-bad", %{})
+
+      ops = [
+        # No user stamp — records no history…
+        %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => 1},
+        # …so this user has nothing; and a userless undo is invalid outright.
+        %{"op" => "undo", "user" => "wire-user"},
+        %{"op" => "undo"}
+      ]
+
+      body =
+        conn
+        |> authed()
+        |> post(ops_path("ops-undo-bad"), %{"ops" => ops, "dataset" => @dataset})
+        |> json_response(200)
+
+      assert %{"applied" => 1} = body
+
+      assert [
+               %{"index" => 1, "code" => "nothing_to_undo"},
+               %{"index" => 2, "code" => "invalid_user"}
+             ] = body["errors"]
+    end
+  end
+
   describe "export flush (read-your-writes)" do
     test "a wire op followed by an immediate export.csv serves the new value", %{conn: conn} do
       create_sheet("ops-export", %{"A1" => %{"v" => "stale-value"}})

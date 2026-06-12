@@ -157,6 +157,30 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A3" => %{"f" => "SUM(A1:A2)", "v" => 5}} = peek_cells("sg-formula")
   end
 
+  # The hook's Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z arrive as "undo"/"redo" events;
+  # send_ops stamps THIS studio identity onto every op, so the session pops
+  # this user's per-user inverse stack (Sheets M4).
+  test "undo/redo via the grid events round-trips an edit", %{conn: conn} do
+    create_sheet!("sg-undo", one_tab(%{"A1" => %{"v" => "before"}}))
+    {view, target, _html} = open!(conn, "sg-undo")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "edit-commit", %{"value" => "after", "move" => "down"})
+    assert render(view) =~ ~s(data-v="after")
+
+    render_hook(target, "undo", %{})
+    assert render(view) =~ ~s(data-v="before")
+    assert %{"A1" => %{"v" => "before"}} = peek_cells("sg-undo")
+
+    render_hook(target, "redo", %{})
+    assert render(view) =~ ~s(data-v="after")
+    assert %{"A1" => %{"v" => "after"}} = peek_cells("sg-undo")
+
+    # An empty stack surfaces as the transient notice, not a crash.
+    render_hook(target, "redo", %{})
+    assert render(view) =~ "redo stack"
+  end
+
   test "engine error values render with the error styling", %{conn: conn} do
     create_sheet!("sg-err", one_tab(%{}))
     {view, target, _html} = open!(conn, "sg-err")

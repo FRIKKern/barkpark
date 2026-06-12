@@ -37,6 +37,38 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   View mode (the header toggle) reuses the SAME `sheet_table/1` renderer
   minus every editing affordance — formula bar, hook, menus, resize handles
   and tab mutation buttons all drop away.
+
+  ## Read-only hosting (M4 — the public reader)
+
+  A host passing `read_only={true}` (the `/sheets/:slug` reader) gets the
+  bare live grid: no document header, no formula bar, no hook, no menus, no
+  active-cell highlight — the tab strip keeps ONLY its switch buttons. The
+  guard is server-side too: `send_ops/2` drops every mutation while
+  read-only, so a forged client event can never write through an
+  unauthenticated mount. Deltas still apply (the host forwards
+  `{:sheets_op, …}` exactly like StudioLive), so viewers watch edits live.
+
+  ## Per-user undo/redo (M4)
+
+  `send_ops/2` stamps the studio identity's `user_id` onto every op as
+  `"user"`, so the session records per-user inverse stacks; the hook's
+  Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z push `"undo"`/`"redo"` events that ride the
+  same path as ops (`%{"op" => "undo", "user" => …}`). Empty-stack
+  rejections surface as the transient notice like any other per-op error.
+
+  ## Collaborator presence (M4)
+
+  The hosting StudioLive tracks this user on the per-sheet presence topic
+  (`Session.presence_topic/3` via `BarkparkWeb.Presence`) and passes the
+  materialised list down as `presences` plus the topic and own `user_id`.
+  This component OWNS the meta updates (same pid — components run in the LV
+  process): the hook's client-throttled (~10/s) `presence-meta` frames carry
+  the active cell + selection range; the `editing` flag is set on edit-start
+  and cleared on commit/cancel — a soft lock, purely visual, LWW stands.
+  Rendering: a collaborator's cursor cell gets a colored outline + name tag
+  (emphasized while editing), selection ranges a translucent overlay; colors
+  are the user's studio identity color (deterministic per user_id from
+  `PresenceState`'s fixed palette when none is stored).
   """
 
   use BarkparkWeb, :live_component
@@ -44,6 +76,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Content
   alias Barkpark.Sheets
   alias Barkpark.Sheets.Session
+  alias BarkparkWeb.Presence
+  alias BarkparkWeb.Studio.PresenceState
 
   # Render bounds (full virtualization is future work) + layout constants.
   @max_rows 500
@@ -67,7 +101,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        notice: nil,
        menu: nil,
        renaming_tab: nil,
-       mode: :edit
+       mode: :edit,
+       read_only: false,
+       user_id: nil,
+       presence_topic: nil,
+       presences: []
      )}
   end
 
@@ -78,7 +116,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def update(assigns, socket) do
-    socket = assign(socket, Map.take(assigns, [:id, :doc, :dataset, :is_draft]))
+    socket =
+      assign(
+        socket,
+        Map.take(assigns, [:id, :doc, :dataset, :is_draft, :read_only, :user_id, :presence_topic, :presences])
+      )
 
     if socket.assigns[:content] do
       {:ok, socket}
@@ -184,21 +226,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         _ -> raw_of(cell_at(socket, socket.assigns.active))
       end
 
-    {:noreply, assign(socket, editing: %{prefill: prefill}, menu: nil)}
+    {:noreply,
+     socket
+     |> assign(editing: %{prefill: prefill}, menu: nil)
+     |> push_presence(%{
+       editing: Sheets.format_ref(socket.assigns.active),
+       tab: socket.assigns.tab
+     })}
   end
 
   def handle_event("edit-cancel", _params, socket) do
-    {:noreply, assign(socket, editing: nil)}
+    {:noreply, socket |> assign(editing: nil) |> push_presence(%{editing: nil})}
   end
 
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
     socket = commit(socket, socket.assigns.active, value)
     active = move(socket.assigns.active, move_key(params["move"]), dims(socket))
-    {:noreply, assign(socket, editing: nil, active: active, anchor: nil)}
+
+    {:noreply,
+     socket
+     |> assign(editing: nil, active: active, anchor: nil)
+     |> push_presence(%{editing: nil})}
   end
 
   def handle_event("bar-commit", %{"value" => value}, socket) do
-    {:noreply, assign(commit(socket, socket.assigns.active, value), editing: nil)}
+    {:noreply,
+     socket
+     |> commit(socket.assigns.active, value)
+     |> assign(editing: nil)
+     |> push_presence(%{editing: nil})}
   end
 
   def handle_event("clear-selection", _params, socket) do
@@ -240,6 +296,30 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       end
 
     {:noreply, send_ops(socket, ops)}
+  end
+
+  # ── events: collaborator presence (M4) ───────────────────────────────────
+
+  # The hook's client-throttled (~10/s) cursor/selection frame. Refs are
+  # validated server-side; a malformed frame degrades to nil rather than
+  # erroring — presence is advisory, never load-bearing.
+  def handle_event("presence-meta", params, socket) do
+    active =
+      with ref when is_binary(ref) <- params["active"],
+           {:ok, pos} <- Sheets.parse_ref(ref) do
+        Sheets.format_ref(pos)
+      else
+        _ -> nil
+      end
+
+    selection =
+      case parse_range(params["selection"]) do
+        {:ok, _} -> params["selection"]
+        :error -> nil
+      end
+
+    {:noreply,
+     push_presence(socket, %{active: active, selection: selection, tab: socket.assigns.tab})}
   end
 
   # ── events: structure (rows / cols / sizes) ─────────────────────────────
@@ -286,14 +366,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("tab-switch", %{"tab" => idx}, socket) do
     {:noreply,
-     assign(socket,
+     socket
+     |> assign(
        tab: to_int(idx),
        active: {1, 1},
        anchor: nil,
        editing: nil,
        menu: nil,
        renaming_tab: nil
-     )}
+     )
+     |> push_presence(%{tab: to_int(idx), active: "A1", selection: nil, editing: nil})}
   end
 
   def handle_event("tab-add", _params, socket) do
@@ -314,6 +396,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("tab-delete", %{"tab" => idx}, socket) do
     {:noreply, send_ops(socket, [%{"op" => "delete_tab", "tab" => to_int(idx)}])}
+  end
+
+  # ── events: per-user undo/redo (M4) ──────────────────────────────────────
+
+  # The hook's Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z. send_ops stamps the user, so
+  # the session pops THIS identity's stack; the resulting delta re-renders
+  # every client like any other op.
+  def handle_event("undo", _params, socket) do
+    {:noreply, send_ops(socket, [%{"op" => "undo"}])}
+  end
+
+  def handle_event("redo", _params, socket) do
+    {:noreply, send_ops(socket, [%{"op" => "redo"}])}
   end
 
   # ── events: chrome ───────────────────────────────────────────────────────
@@ -349,10 +444,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # All mutations ride Session.apply_ops — the session recomputes,
   # broadcasts the delta (which updates this and every other client) and
-  # debounce-persists. The component never mutates `content` here.
+  # debounce-persists. The component never mutates `content` here. Ops are
+  # stamped with the studio identity's user_id so the session records
+  # per-user undo stacks. Read-only hosts (the public reader) drop EVERY
+  # mutation here — the server-side half of stripping the affordances.
   defp send_ops(socket, []), do: socket
 
+  defp send_ops(%{assigns: %{read_only: true}} = socket, _ops), do: socket
+
   defp send_ops(socket, ops) do
+    ops =
+      case socket.assigns[:user_id] do
+        user_id when is_binary(user_id) and user_id != "" ->
+          Enum.map(ops, &Map.put_new(&1, "user", user_id))
+
+        _ ->
+          ops
+      end
+
     case Session.apply_ops(socket.assigns.slug, socket.assigns.dataset, ops) do
       {:ok, %{errors: []}} ->
         assign(socket, notice: nil)
@@ -389,6 +498,119 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         end
     end
   end
+
+  # ── collaborator presence (M4) ───────────────────────────────────────────
+
+  # Merge `updates` into this user's meta on the sheet presence topic. The
+  # hosting StudioLive tracked the entry (resub_sheet_presence) on THIS pid —
+  # LiveComponents run in the LV process, so the update binds correctly.
+  # No-op when presence isn't wired (disconnected render, read-only hosts).
+  defp push_presence(socket, updates) do
+    with topic when is_binary(topic) <- socket.assigns[:presence_topic],
+         user_id when is_binary(user_id) <- socket.assigns[:user_id] do
+      Presence.update(self(), topic, user_id, &Map.merge(&1, updates))
+    end
+
+    socket
+  end
+
+  # Collaborators on the CURRENT tab, self excluded; one entry per meta (a
+  # user's second window is a second cursor). Colors normalize to the
+  # deterministic palette when the meta carries a non-hex value — the color
+  # lands in inline styles, so this is also the sanitizer.
+  defp grid_peers(presences, user_id, tab) do
+    for %{user_id: uid} = p <- presences || [],
+        uid != user_id,
+        Map.get(p, :tab, 0) == tab do
+      %{
+        name: Map.get(p, :name) || "User #{String.slice(uid, 0..3)}",
+        color: peer_color(p, uid),
+        active: Map.get(p, :active),
+        selection: Map.get(p, :selection),
+        editing: Map.get(p, :editing)
+      }
+    end
+  end
+
+  defp peer_color(p, uid) do
+    case Map.get(p, :color) do
+      color when is_binary(color) ->
+        if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color),
+          do: color,
+          else: PresenceState.pick_color(uid)
+
+      _ ->
+        PresenceState.pick_color(uid)
+    end
+  end
+
+  # `{cursor-cells, selection-cells}` for the rendered bounds:
+  # `peer_active` maps {c, r} → peers whose cursor sits there (name tags +
+  # outlines); `peer_sel` maps {c, r} → overlay colors. Ranges clip to the
+  # rendered grid, out-of-bounds cursors drop.
+  defp peer_maps(peers, cols, rows) do
+    Enum.reduce(peers, {%{}, %{}}, fn peer, {act, sel} ->
+      act =
+        case cursor_pos(peer, cols, rows) do
+          nil -> act
+          pos -> Map.update(act, pos, [peer], &(&1 ++ [peer]))
+        end
+
+      sel =
+        case parse_range(peer.selection) do
+          {:ok, {c1, r1, c2, r2}} when c1 <= cols and r1 <= rows ->
+            for c <- c1..min(c2, cols), r <- r1..min(r2, rows), reduce: sel do
+              acc -> Map.update(acc, {c, r}, [peer.color], &(&1 ++ [peer.color]))
+            end
+
+          _ ->
+            sel
+        end
+
+      {act, sel}
+    end)
+  end
+
+  # The cursor cell — the `editing` ref when set (the emphasized soft-lock
+  # tag follows the cell being edited), the active cell otherwise.
+  defp cursor_pos(peer, cols, rows) do
+    with ref when is_binary(ref) <- peer.editing || peer.active,
+         {:ok, {c, r}} when c <= cols and r <= rows <- Sheets.parse_ref(ref) do
+      {c, r}
+    else
+      _ -> nil
+    end
+  end
+
+  # Per-cell presence decoration: outline shadow per cursor + translucent
+  # fill per selection, both as inset box-shadows so they compose with the
+  # cell's own background and never move layout.
+  defp peer_deco(c, r, peer_active, peer_sel) do
+    cursors = Map.get(peer_active, {c, r}, [])
+    sel_colors = Map.get(peer_sel, {c, r}, [])
+
+    shadows =
+      Enum.map(cursors, &"inset 0 0 0 2px #{&1.color}") ++
+        Enum.map(sel_colors, &"inset 0 0 0 9999px #{rgba(&1, 0.12)}")
+
+    classes =
+      if(cursors != [], do: " sheet-peer-cursor", else: "") <>
+        if(sel_colors != [], do: " sheet-peer-sel", else: "")
+
+    css = if shadows == [], do: "", else: " box-shadow: #{Enum.join(shadows, ", ")};"
+    {classes, css}
+  end
+
+  defp rgba("#" <> hex, alpha) do
+    [r, g, b] =
+      for i <- [0, 2, 4], do: hex |> String.slice(i, 2) |> String.to_integer(16)
+
+    "rgba(#{r}, #{g}, #{b}, #{alpha})"
+  end
+
+  defp td_style(base, ""), do: base
+  defp td_style(nil, peer_css), do: peer_css
+  defp td_style(base, peer_css), do: base <> peer_css
 
   # ── grid geometry ────────────────────────────────────────────────────────
 
@@ -608,8 +830,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     col_widths = Map.get(tab, "col_widths") || %{}
     row_heights = Map.get(tab, "row_heights") || %{}
 
+    {peer_active, peer_sel} =
+      assigns.presences
+      |> grid_peers(assigns.user_id, assigns.tab)
+      |> peer_maps(cols, rows)
+
     assigns =
       assign(assigns,
+        peer_active: peer_active,
+        peer_sel: peer_sel,
         all_tabs: all_tabs,
         cols: cols,
         rows: rows,
@@ -623,15 +852,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         row_heights: row_heights,
         frozen_cols: clamp_frozen(Map.get(tab, "frozen_cols"), cols),
         frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows),
-        sel: selection_rect(assigns.active, assigns.anchor),
+        # The reader strips the active-cell/selection highlight — {0, 0}
+        # sits off the 1-based grid, so no cell matches.
+        sel: if(assigns.read_only, do: {0, 0, 0, 0}, else: selection_rect(assigns.active, assigns.anchor)),
+        grid_active: if(assigns.read_only, do: {0, 0}, else: assigns.active),
         active_ref: Sheets.format_ref(assigns.active),
         bar_value: raw_of(Map.get(cells, Sheets.format_ref(assigns.active))),
-        editable: assigns.mode == :edit
+        editable: assigns.mode == :edit and not assigns.read_only
       )
 
     ~H"""
-    <div id={@id} class="editor-panel sheet-editor" data-test-id="studio-sheet-editor">
-      <.document_header dataset={@dataset} title={@doc.title || @slug}>
+    <div
+      id={@id}
+      class={"editor-panel sheet-editor" <> if(@read_only, do: " sheet-reader", else: "")}
+      data-test-id={if @read_only, do: "sheet-reader", else: "studio-sheet-editor"}
+    >
+      <.document_header :if={not @read_only} dataset={@dataset} title={@doc.title || @slug}>
         <:status_pill>
           <span class={"badge badge-#{if @is_draft, do: "draft", else: "published"}"}>
             <%= if @is_draft, do: "draft", else: "published" %>
@@ -707,6 +943,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               menu={@menu}
               editable={true}
               myself={@myself}
+              peer_active={@peer_active}
+              peer_sel={@peer_sel}
             />
           </div>
         </div>
@@ -725,11 +963,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               frozen_cols={@frozen_cols}
               frozen_rows={@frozen_rows}
               sel={@sel}
-              active={@active}
+              active={@grid_active}
               editing={nil}
               menu={nil}
               editable={false}
               myself={nil}
+              peer_active={@peer_active}
+              peer_sel={@peer_sel}
             />
           </div>
         </div>
@@ -791,9 +1031,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   @doc """
   The shared table renderer — the edit grid and the read-only View render
   the SAME markup; `editable={false}` drops every editing affordance
-  (menus, resize handles, the in-cell input).
+  (menus, resize handles, the in-cell input). Collaborator presence
+  decorations (`peer_active` / `peer_sel`, see `peer_maps/3`) render in
+  both modes and default empty for hosts that don't wire presence.
   """
   def sheet_table(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:peer_active, fn -> %{} end)
+      |> assign_new(:peer_sel, fn -> %{} end)
+
     ~H"""
     <table class="sheet-table" data-test-id="sheet-table">
       <colgroup>
@@ -860,15 +1107,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <% ref = col_letters(c) <> Integer.to_string(r) %>
             <% cell = Map.get(@cells, ref) %>
             <% span = Map.get(@spans, {c, r}) %>
+            <% {peer_cls, peer_css} = peer_deco(c, r, @peer_active, @peer_sel) %>
             <td
-              class={cell_class(c, r, @sel, @active, cell)}
+              class={cell_class(c, r, @sel, @active, cell) <> peer_cls}
               data-ref={ref}
               data-r={r}
               data-c={c}
               data-v={display(cell)}
               colspan={span && elem(span, 0) > 1 && elem(span, 0)}
               rowspan={span && elem(span, 1) > 1 && elem(span, 1)}
-              style={cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell)}
+              style={
+                td_style(
+                  cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell),
+                  peer_css
+                )
+              }
             >
               <%= if @editable and @editing != nil and @active == {c, r} do %>
                 <input
@@ -883,6 +1136,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <% else %>
                 <span class="sheet-cell-v"><%= display(cell) %></span>
               <% end %>
+              <span
+                :for={peer <- Map.get(@peer_active, {c, r}, [])}
+                class={"sheet-peer-tag" <> if(peer.editing, do: " sheet-peer-editing", else: "")}
+                style={"background: #{peer.color};"}
+                data-test-id="sheet-peer-tag"
+              ><%= peer.name %></span>
             </td>
           <% end %>
         </tr>

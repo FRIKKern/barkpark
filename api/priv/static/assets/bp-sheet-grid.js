@@ -18,6 +18,11 @@
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
       this._refocus = false;
+      // Collaborator presence (M4): cursor/selection frames are throttled
+      // client-side to ~10/s and deduped — see _presencePing below.
+      this._presLast = 0;
+      this._presTimer = null;
+      this._presSent = "";
 
       this._onKeydown = (e) => {
         const inp = e.target.closest && e.target.closest(".sheet-cell-input");
@@ -41,6 +46,15 @@
         }
         // Name box / formula bar / tab-rename inputs keep native behaviour.
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
+
+        // Per-user undo/redo (M4): Cmd/Ctrl+Z undoes THIS user's last op,
+        // Cmd/Ctrl+Shift+Z redoes it. The server pops the per-user inverse
+        // stack and the resulting delta re-renders every client.
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
+          e.preventDefault();
+          this.pushEventTo(this.el, e.shiftKey ? "redo" : "undo", {});
+          return;
+        }
 
         if (NAV_KEYS.indexOf(e.key) >= 0) {
           e.preventDefault();
@@ -118,6 +132,8 @@
       this.el.addEventListener("copy", this._onCopy);
       this.el.addEventListener("paste", this._onPaste);
       this.el.addEventListener("mousedown", this._onMousedown);
+
+      this._presencePing();
     },
 
     beforeUpdate() {
@@ -144,11 +160,63 @@
         this._refocus = false;
         this.el.focus({ preventScroll: true });
       }
+      // The server re-render reflects every cursor/selection change
+      // (cell-click, nav, tab-switch) — derive the presence frame from the
+      // fresh DOM; the throttle + dedupe keep remote-delta re-renders quiet.
+      this._presencePing();
     },
 
     destroyed() {
       // Element-scoped listeners die with the node; the drag handlers
       // remove themselves on mouseup.
+      if (this._presTimer) clearTimeout(this._presTimer);
+    },
+
+    // Trailing-edge throttle at 100ms (~10/s): grid interactions re-render
+    // far faster than collaborators need cursor frames. Identical payloads
+    // are deduped so remote-delta re-renders never echo.
+    _presencePing() {
+      if (this._presTimer) return;
+      const wait = Math.max(0, 100 - (Date.now() - this._presLast));
+      this._presTimer = setTimeout(() => {
+        this._presTimer = null;
+        this._presLast = Date.now();
+        const payload = this._presencePayload();
+        const key = JSON.stringify(payload);
+        if (key === this._presSent) return;
+        this._presSent = key;
+        this.pushEventTo(this.el, "presence-meta", payload);
+      }, wait);
+    },
+
+    // Active ref + selection range read off the rendered grid (the server
+    // marks .sheet-active / .sheet-sel). A single-cell rect is no selection.
+    _presencePayload() {
+      const active = this.el.querySelector("td.sheet-active");
+      const sel = this.el.querySelectorAll("td.sheet-sel");
+      let selection = null;
+      if (sel.length > 1) {
+        let c1 = Infinity, r1 = Infinity, c2 = 0, r2 = 0;
+        sel.forEach((td) => {
+          const c = parseInt(td.dataset.c, 10);
+          const r = parseInt(td.dataset.r, 10);
+          if (c < c1) c1 = c;
+          if (c > c2) c2 = c;
+          if (r < r1) r1 = r;
+          if (r > r2) r2 = r;
+        });
+        selection = this._colLetters(c1) + r1 + ":" + this._colLetters(c2) + r2;
+      }
+      return { active: active ? active.dataset.ref : null, selection: selection };
+    },
+
+    _colLetters(c) {
+      let s = "";
+      while (c > 0) {
+        s = String.fromCharCode(65 + ((c - 1) % 26)) + s;
+        c = Math.floor((c - 1) / 26);
+      }
+      return s;
     },
 
     // Selection (server marks every selected td with .sheet-sel, the active

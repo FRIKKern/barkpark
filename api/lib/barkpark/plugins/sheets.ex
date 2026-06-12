@@ -25,16 +25,19 @@ defmodule Barkpark.Plugins.Sheets do
       malformed range, a range covering more than `merge_area_cap/0` cells,
       or a corner beyond the same grid bounds.
 
-    * `register_routes/1` (M5 + M1) — the conversion API on the `:ingest`
-      bucket (shared-secret bearer via `RequireIngestToken`, like Bulldocs):
-      `POST /v1/plugins/sheets/import` (multipart xlsx/csv/tsv → sheet doc),
-      `GET /v1/plugins/sheets/:slug/export.{xlsx,csv,tsv,md,html}`, and
-      `POST /v1/plugins/sheets/:slug/ops` (cell-granular wire ops, applied
-      through the core `Barkpark.Sheets.Session`). Conversion modules live
-      under `Barkpark.Plugins.Sheets.*` (`XlsxImport`, `XlsxExport`, `Csv`,
-      `Markdown`, `Html`, `Fmt`) — the core stays conversion-free (the
-      Bulldocs split: core keeps the reusable machinery, the plugin is the
-      wiring).
+    * `register_routes/1` (M5 + M1 + M4) — the conversion API on the
+      `:ingest` bucket (shared-secret bearer via `RequireIngestToken`, like
+      Bulldocs): `POST /v1/plugins/sheets/import` (multipart xlsx/csv/tsv →
+      sheet doc), `GET /v1/plugins/sheets/:slug/export.{xlsx,csv,tsv,md,html}`,
+      and `POST /v1/plugins/sheets/:slug/ops` (cell-granular wire ops, applied
+      through the core `Barkpark.Sheets.Session`); plus the live public
+      reader `GET /sheets/:slug` on the `:public_root` bucket (the Bulldocs
+      `/papers/:slug` precedent — published-only, read-only grid, live
+      deltas; the reader LiveView `BarkparkWeb.SheetsReaderLive` stays
+      core). Conversion modules live under `Barkpark.Plugins.Sheets.*`
+      (`XlsxImport`, `XlsxExport`, `Csv`, `Markdown`, `Html`, `Fmt`) — the
+      core stays conversion-free (the Bulldocs split: core keeps the
+      reusable machinery, the plugin is the wiring).
 
   The grid machinery itself is CORE, not plugin: A1 helpers and snapshot
   synthesis live in `Barkpark.Sheets`, the `"sheet"` portable-doc embed block
@@ -136,6 +139,13 @@ defmodule Barkpark.Plugins.Sheets do
     ops_controller = Barkpark.Plugins.Sheets.Web.OpsController
 
     [
+      # The live public reader (M4) — the Bulldocs `/papers/:slug` precedent:
+      # `:public_root` mounts the CORE BarkparkWeb.SheetsReaderLive at the
+      # host's top level with its own full-document `:sheets` root layout.
+      # Published-only; draft-only slugs 404. With this plugin off, only
+      # this route goes away (the reader module, session, grid stay core).
+      {:live, "/sheets/:slug", BarkparkWeb.SheetsReaderLive, :index,
+       auth: :public_root, root_layout: {BarkparkWeb.Layouts, :sheets}},
       {:post, "/sheets/import", import_controller, :create, auth: :ingest},
       {:post, "/sheets/:slug/ops", ops_controller, :apply_ops, auth: :ingest},
       {:get, "/sheets/:slug/export.xlsx", export_controller, :export_xlsx, auth: :ingest},
