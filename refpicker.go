@@ -27,8 +27,31 @@ type refPickerState struct {
 	fieldName string // schema field the pick writes to
 	refType   string // the field's RefType (the listed document type)
 	items     []Doc  // fetched candidates of refType
-	cursor    int    // 0 == the "(clear)" row; items occupy 1..len(items)
+	cursor    int    // 0 == the "(clear)" row; filtered items occupy 1..n
 	err       string // inline notice (e.g. empty list)
+	// Type-to-filter (Sanity's search-driven reference field): `/` enters
+	// filter typing, printables narrow the list live (case-insensitive
+	// substring over title + bare id), esc steps out of typing first and
+	// clears the filter second — the third esc closes the picker.
+	filter    string
+	filtering bool
+}
+
+// filteredRefItems returns the items the picker currently shows — the fetch
+// list narrowed by the live filter. An empty filter shows everything.
+func (p refPickerState) filteredRefItems() []Doc {
+	if p.filter == "" {
+		return p.items
+	}
+	q := strings.ToLower(p.filter)
+	var out []Doc
+	for _, d := range p.items {
+		if strings.Contains(strings.ToLower(d.Title), q) ||
+			strings.Contains(strings.ToLower(publishedID(d.ID)), q) {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // publishedID strips the drafts. prefix — the Studio stores reference values
@@ -76,13 +99,61 @@ func (m *model) openRefPicker(field Field) {
 }
 
 // handleRefPickerKey routes key input while the reference picker is open.
+// `/` enters filter typing; in that mode printables narrow the list and the
+// navigation keys still move over the FILTERED rows, so type-then-arrow-then-
+// enter flows without mode juggling.
 func (m model) handleRefPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+	shown := m.refPicker.filteredRefItems()
+
+	if m.refPicker.filtering {
+		switch key {
+		case "esc":
+			// Step out of typing; the filter (and narrowed list) stays.
+			m.refPicker.filtering = false
+			return m, nil
+		case "enter":
+			return m.commitRefPick()
+		case "backspace":
+			if f := m.refPicker.filter; f != "" {
+				m.refPicker.filter = f[:len(f)-1]
+				m.clampRefCursor()
+			}
+			return m, nil
+		case "down", "tab":
+			if m.refPicker.cursor < len(shown) {
+				m.refPicker.cursor++
+			}
+			return m, nil
+		case "up", "shift+tab":
+			if m.refPicker.cursor > 0 {
+				m.refPicker.cursor--
+			}
+			return m, nil
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.refPicker.filter += string(msg.Runes)
+				m.clampRefCursor()
+			}
+			return m, nil
+		}
+	}
+
+	switch key {
 	case "esc":
+		if m.refPicker.filter != "" {
+			// Layered esc: clear the filter first, close on the next.
+			m.refPicker.filter = ""
+			m.clampRefCursor()
+			return m, nil
+		}
 		m.refPicker = refPickerState{}
 		return m, nil
+	case "/":
+		m.refPicker.filtering = true
+		return m, nil
 	case "down", "tab", "j":
-		if m.refPicker.cursor < len(m.refPicker.items) {
+		if m.refPicker.cursor < len(shown) {
 			m.refPicker.cursor++
 		}
 		return m, nil
@@ -97,6 +168,14 @@ func (m model) handleRefPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// clampRefCursor keeps the cursor inside the filtered row span after the
+// filter narrows (row 0 is always the "(clear)" pin).
+func (m *model) clampRefCursor() {
+	if n := len(m.refPicker.filteredRefItems()); m.refPicker.cursor > n {
+		m.refPicker.cursor = n
+	}
+}
+
 // commitRefPick writes the picked value into dirtyValues — the bare published
 // id for a document row, "" for the "(clear)" row — exactly the content value
 // the server expects for a reference field (matches Studio's select-ref /
@@ -108,10 +187,11 @@ func (m model) commitRefPick() (tea.Model, tea.Cmd) {
 	if m.dirtyValues == nil {
 		m.dirtyValues = make(map[string]string)
 	}
+	shown := p.filteredRefItems()
 	if p.cursor == 0 {
 		m.dirtyValues[p.fieldName] = ""
-	} else if p.cursor-1 < len(p.items) {
-		doc := p.items[p.cursor-1]
+	} else if p.cursor-1 < len(shown) {
+		doc := shown[p.cursor-1]
 		id := publishedID(doc.ID)
 		m.dirtyValues[p.fieldName] = id
 		if m.refTitles == nil {
@@ -164,14 +244,30 @@ func (m model) renderRefPicker(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 
+	if m.refPicker.filtering || m.refPicker.filter != "" {
+		cursor := ""
+		if m.refPicker.filtering {
+			cursor = "▌"
+		}
+		lines = append(lines, "  "+dimStyle.Render("/ ")+m.refPicker.filter+cursor)
+	}
+
+	shown := m.refPicker.filteredRefItems()
 	lines = append(lines, renderRefRow("∅", "(clear)", "", m.refPicker.cursor == 0))
-	for i, d := range m.refPicker.items {
+	for i, d := range shown {
 		lines = append(lines, renderRefRow(statusIcon(d.Status), d.Title, timeAgo(d.UpdatedAt), i+1 == m.refPicker.cursor))
+	}
+	if len(shown) == 0 && m.refPicker.filter != "" {
+		lines = append(lines, dimStyle.Render("    no matches"))
 	}
 
 	lines = append(lines, "")
 	lines = appendErr(lines, m.refPicker.err)
-	lines = append(lines, dimStyle.Render("  ↑↓/jk move  enter select  esc cancel"))
+	if m.refPicker.filtering {
+		lines = append(lines, dimStyle.Render("  type to filter  ↑↓ move  enter select  esc done"))
+	} else {
+		lines = append(lines, dimStyle.Render("  ↑↓/jk move  / filter  enter select  esc cancel"))
+	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	modal := lipgloss.NewStyle().

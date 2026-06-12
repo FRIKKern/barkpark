@@ -402,3 +402,115 @@ func TestHelpBarSearchHintOnPanes(t *testing.T) {
 		t.Errorf("doc-list help bar must hint / search:\n%s", bar)
 	}
 }
+
+// Type-to-filter (Sanity's search-driven reference field, 2026-06-12): `/`
+// enters filter typing, printables narrow over title + bare id, enter picks
+// from the FILTERED rows, and esc layers — typing → filter kept → cleared →
+// closed.
+func TestRefPickerTypeToFilter(t *testing.T) {
+	m := model{refPicker: refPickerState{
+		active:    true,
+		fieldName: "author",
+		refType:   "author",
+		items: []Doc{
+			{ID: "knut", Title: "Knut Hamsun", Status: "published"},
+			{ID: "drafts.ibsen", Title: "Henrik Ibsen", Status: "draft"},
+			{ID: "undset", Title: "Sigrid Undset", Status: "published"},
+		},
+		cursor: 1,
+	}}
+
+	press := func(mm model, k string) model {
+		var msg tea.KeyMsg
+		switch k {
+		case "esc":
+			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		case "enter":
+			msg = tea.KeyMsg{Type: tea.KeyEnter}
+		case "backspace":
+			msg = tea.KeyMsg{Type: tea.KeyBackspace}
+		default:
+			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+		}
+		next, _ := mm.handleRefPickerKey(msg)
+		return next.(model)
+	}
+
+	// `/` then type — the filter narrows over title AND bare id.
+	m = press(m, "/")
+	if !m.refPicker.filtering {
+		t.Fatal("/ should enter filter typing")
+	}
+	for _, r := range "ibsen" {
+		m = press(m, string(r))
+	}
+	if got := m.refPicker.filteredRefItems(); len(got) != 1 || got[0].Title != "Henrik Ibsen" {
+		t.Fatalf("filter 'ibsen' = %+v, want just Ibsen (matches the bare id too)", got)
+	}
+
+	// Render shows the filter line and only the matching row.
+	m.width, m.height = 100, 40
+	out := m.renderRefPicker(100, 30)
+	if !strings.Contains(out, "ibsen") || strings.Contains(out, "Undset") {
+		t.Errorf("filtered render wrong:\n%s", out)
+	}
+
+	// Cursor was clamped into the narrowed span; enter picks from FILTERED rows.
+	m.refPicker.cursor = 1
+	m = press(m, "enter")
+	if m.refPicker.active {
+		t.Fatal("enter should commit and close")
+	}
+	if m.dirtyValues["author"] != "ibsen" {
+		t.Errorf("picked %q, want the bare id ibsen", m.dirtyValues["author"])
+	}
+}
+
+func TestRefPickerEscLayers(t *testing.T) {
+	m := model{refPicker: refPickerState{
+		active: true, fieldName: "author", refType: "author",
+		items:  []Doc{{ID: "knut", Title: "Knut Hamsun"}},
+		cursor: 1, filter: "kn", filtering: true,
+	}}
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+
+	next, _ := m.handleRefPickerKey(esc) // 1: stop typing, keep filter
+	m = next.(model)
+	if m.refPicker.filtering || m.refPicker.filter != "kn" {
+		t.Fatalf("first esc should keep the filter, got %+v", m.refPicker)
+	}
+
+	next, _ = m.handleRefPickerKey(esc) // 2: clear filter, stay open
+	m = next.(model)
+	if !m.refPicker.active || m.refPicker.filter != "" {
+		t.Fatalf("second esc should clear the filter and stay open, got %+v", m.refPicker)
+	}
+
+	next, _ = m.handleRefPickerKey(esc) // 3: close
+	m = next.(model)
+	if m.refPicker.active {
+		t.Fatal("third esc should close the picker")
+	}
+}
+
+func TestRefPickerNoMatchesAndBackspace(t *testing.T) {
+	m := model{refPicker: refPickerState{
+		active: true, fieldName: "author", refType: "author",
+		items:  []Doc{{ID: "knut", Title: "Knut Hamsun"}},
+		cursor: 1, filtering: true, filter: "zzz",
+	}}
+	m.clampRefCursor()
+	if m.refPicker.cursor != 0 {
+		t.Errorf("cursor should clamp to the (clear) row on no matches, got %d", m.refPicker.cursor)
+	}
+	out := m.renderRefPicker(100, 30)
+	if !strings.Contains(out, "no matches") {
+		t.Errorf("empty filter result should say so:\n%s", out)
+	}
+
+	next, _ := m.handleRefPickerKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(model)
+	if m.refPicker.filter != "zz" {
+		t.Errorf("backspace should trim the filter, got %q", m.refPicker.filter)
+	}
+}
