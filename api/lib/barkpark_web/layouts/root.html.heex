@@ -1571,7 +1571,29 @@
     /* Web Components — host element placeholder so the area has a
        visible footprint before customElements.define upgrades the tag
        (Task #11 WI4). Inner contenteditable is styled by the WC. */
-    bp-rich-text-editor { display: block; min-height: 80px; padding: 8px; border: 1px solid var(--input); border-radius: var(--radius-sm); font-family: inherit; }
+    bp-rich-text-editor { display: block; min-height: 80px; border: 1px solid var(--input); border-radius: var(--radius-sm); font-family: inherit; }
+    /* Classic richText toolbar (B / I / Link + inline URL row). The editable
+       body keeps the old inner padding; the bar sits flush on top. */
+    .bp-rte-toolbar {
+      display: flex; align-items: center; gap: 4px;
+      padding: 4px 6px; border-bottom: 1px solid var(--border-muted);
+    }
+    .bp-rte-btn {
+      height: 24px; min-width: 26px; padding: 0 6px;
+      border: 1px solid transparent; border-radius: 4px;
+      background: transparent; color: var(--fg-muted);
+      font-size: 13px; cursor: pointer;
+    }
+    .bp-rte-btn:hover { background: var(--bg-accent); color: var(--fg); }
+    .bp-rte-linkrow { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
+    .bp-rte-linkrow[hidden] { display: none; }
+    .bp-rte-url {
+      width: 220px; height: 24px; padding: 0 8px;
+      border: 1px solid var(--input); border-radius: 4px;
+      background: var(--bg); color: var(--fg); font-size: 12px;
+    }
+    .bp-rte-body { min-height: 60px; padding: 8px; outline: none; }
+    .bp-rte-body a { color: var(--primary); text-decoration: underline; }
     bp-reference-picker { display: block; }
     bp-reference-picker .bp-ref-search-input { width: 100%; }
     bp-reference-picker .bp-ref-dropdown {
