@@ -231,6 +231,32 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
                   nil
               end
 
+            # A sheet opens as the collaborative grid editor (Sheets M2).
+            # Same draft-first doc resolution as the generic branch, but the
+            # editor map carries `view: :sheet` so StudioLive renders the
+            # SheetGrid LiveComponent instead of the field form.
+            type_name == "sheet" ->
+              case rest do
+                [doc_id | _] ->
+                  {doc, is_draft, has_pub} =
+                    Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
+
+                  if doc do
+                    %{
+                      view: :sheet,
+                      doc: doc,
+                      schema: schema,
+                      type: type_name,
+                      is_draft: is_draft,
+                      has_published: has_pub,
+                      form: %{}
+                    }
+                  end
+
+                _ ->
+                  nil
+              end
+
             true ->
               case rest do
                 [doc_id | _] ->

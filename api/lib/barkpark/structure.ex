@@ -50,6 +50,7 @@ defmodule Barkpark.Structure do
       [
         build_content_group(schemas),
         build_papers_group(schemas),
+        build_sheets_group(schemas),
         build_books_group(schemas),
         build_media_group(schemas, dataset),
         build_taxonomy_group(schemas),
@@ -209,6 +210,18 @@ defmodule Barkpark.Structure do
   defp build_papers_group(schemas) do
     if Map.has_key?(schemas, "paper") do
       [doc_type_list_item(schemas["paper"])]
+    else
+      []
+    end
+  end
+
+  # Sheets (M2): type-"sheet" documents open as the collaborative grid
+  # editor inside the Studio editor pane at `/studio/:dataset/sheet/:slug` —
+  # the same Studio-internal navigation shape as papers. See PaneBuilder's
+  # special casing of the "sheet" type (`view: :sheet`).
+  defp build_sheets_group(schemas) do
+    if Map.has_key?(schemas, "sheet") do
+      [doc_type_list_item(schemas["sheet"])]
     else
       []
     end

@@ -22,7 +22,7 @@ defmodule Barkpark.Sheets.Session do
 
   ## Ops (v1)
 
-  String-keyed maps, the wire shape:
+  String-keyed maps, the wire shape. Cell ops:
 
     * `%{"op" => "set_cell", "tab" => i, "ref" => "A1", "raw" => raw}` —
       `raw` is a scalar; a string with a leading `"="` is a formula (the
@@ -30,12 +30,31 @@ defmodule Barkpark.Sheets.Session do
       else stores as `%{"v" => raw}`.
     * `%{"op" => "clear_cell", "tab" => i, "ref" => "A1"}`
 
+  Structural ops (the grid editor) — Excel ref-shift semantics live in
+  `Barkpark.Sheets.Structure` (cell keys shift, formula refs/ranges
+  rewrite — dead refs become the literal `#REF!` — merges shift/clip/drop,
+  `col_widths`/`row_heights` re-key, frozen bands clamp), then the op's
+  tab recomputes through the engine:
+
+    * `%{"op" => "insert_rows"|"delete_rows"|"insert_cols"|"delete_cols",
+      "tab" => i, "at" => n, "count" => n}` — 1-based `at`; an insert that
+      would push occupied cells past the grid bounds errors
+      (`grid_bounds_exceeded`).
+    * `%{"op" => "set_col_width", "tab" => i, "col" => n, "px" => px|nil}`
+      and `%{"op" => "set_row_height", "tab" => i, "row" => n, "px" => px|nil}`
+      — `nil` clears the entry.
+    * `%{"op" => "rename_tab", "tab" => i, "name" => s}`,
+      `%{"op" => "add_tab", "name" => s}` (appends an empty tab), and
+      `%{"op" => "delete_tab", "tab" => i}` — deleting the LAST tab is
+      refused (`last_tab`).
+
   Validation per op: the ref must be A1-style within the Excel grid bounds,
   the tab index must exist, and a `set_cell` that would push the sheet past
   the non-empty-cell cap errors (`cell_cap_exceeded`). Invalid ops are
   REJECTED INDIVIDUALLY — the rest of the batch still applies. The mailbox
   is the serializer: concurrent callers' ops interleave whole, last write
-  wins per cell.
+  wins per cell — structural ops ride the same mailbox, so a batch never
+  observes a half-shifted grid.
 
   ## Recompute + delta broadcast
 
@@ -52,7 +71,11 @@ defmodule Barkpark.Sheets.Session do
   `":sheets:op"`, so every existing doc-topic subscriber is unaffected.
   `rev` is the session's monotonic applied-op counter; `changed` carries
   EVERY cell whose stored map changed (recompute dependents included),
-  `nil` marking a removal.
+  `nil` marking a removal. A structural op may produce a LARGE `changed`
+  (every shifted cell appears under both its old key, as `nil`, and its
+  new key) — its delta therefore also carries
+  `structure: %{op: s, at: n | nil, count: n | nil, tab: i}` so clients
+  can re-key locally instead of replaying the map.
 
   ## Persistence
 
@@ -82,6 +105,7 @@ defmodule Barkpark.Sheets.Session do
   alias Barkpark.Content
   alias Barkpark.Sheets
   alias Barkpark.Sheets.Engine
+  alias Barkpark.Sheets.Structure
 
   @registry Barkpark.Sheets.SessionRegistry
   @supervisor Barkpark.Sheets.SessionSupervisor
@@ -322,10 +346,90 @@ defmodule Barkpark.Sheets.Session do
     end
   end
 
+  defp apply_one(%{"op" => op, "tab" => tab, "at" => at, "count" => count}, state)
+       when op in ["insert_rows", "delete_rows", "insert_cols", "delete_cols"] do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, new_tab} <- structural_shift(op, Sheets.get_tab(state.content, tab_idx), at, count) do
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, true, %{op: op, at: at, count: count, tab: tab_idx})}
+    end
+  end
+
+  defp apply_one(%{"op" => "set_col_width", "tab" => tab, "col" => col} = op_map, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, new_tab} <-
+           Structure.set_col_width(Sheets.get_tab(state.content, tab_idx), col, Map.get(op_map, "px")) do
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{op: "set_col_width", at: col, count: nil, tab: tab_idx})}
+    end
+  end
+
+  defp apply_one(%{"op" => "set_row_height", "tab" => tab, "row" => row} = op_map, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, new_tab} <-
+           Structure.set_row_height(Sheets.get_tab(state.content, tab_idx), row, Map.get(op_map, "px")) do
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{op: "set_row_height", at: row, count: nil, tab: tab_idx})}
+    end
+  end
+
+  defp apply_one(%{"op" => "rename_tab", "tab" => tab, "name" => name}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, name} <- validate_tab_name(name) do
+      new_tab = Map.put(Sheets.get_tab(state.content, tab_idx), "name", name)
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{op: "rename_tab", at: nil, count: nil, tab: tab_idx})}
+    end
+  end
+
+  defp apply_one(%{"op" => "add_tab", "name" => name}, state) do
+    with {:ok, name} <- validate_tab_name(name) do
+      tabs = Map.get(state.content, "tabs") || []
+      new_idx = length(tabs)
+      content = Map.put(state.content, "tabs", tabs ++ [%{"name" => name, "cells" => %{}}])
+
+      {:ok,
+       finalize_structural(state, content, new_idx, %{}, %{op: "add_tab", at: nil, count: nil, tab: new_idx})}
+    end
+  end
+
+  defp apply_one(%{"op" => "delete_tab", "tab" => tab}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      tabs = Map.get(state.content, "tabs")
+
+      if length(tabs) == 1 do
+        {:error, "last_tab", "a sheet keeps at least one tab — cannot delete the last one"}
+      else
+        old_cells = Map.get(Enum.at(tabs, tab_idx), "cells") || %{}
+        changed = Map.new(old_cells, fn {addr, _cell} -> {addr, nil} end)
+        content = Map.put(state.content, "tabs", List.delete_at(tabs, tab_idx))
+
+        {:ok,
+         finalize_structural(state, content, tab_idx, changed, %{op: "delete_tab", at: nil, count: nil, tab: tab_idx})}
+      end
+    end
+  end
+
   defp apply_one(_op, _state) do
     {:error, "malformed_op",
-     "op must be {\"op\":\"set_cell\",\"tab\":i,\"ref\":\"A1\",\"raw\":…} or " <>
-       "{\"op\":\"clear_cell\",\"tab\":i,\"ref\":\"A1\"}"}
+     "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
+       "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
+       "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
+       "rename_tab (\"tab\"+\"name\"), add_tab (\"name\") or delete_tab (\"tab\")"}
+  end
+
+  defp structural_shift("insert_rows", tab, at, count), do: Structure.insert_rows(tab, at, count)
+  defp structural_shift("delete_rows", tab, at, count), do: Structure.delete_rows(tab, at, count)
+  defp structural_shift("insert_cols", tab, at, count), do: Structure.insert_cols(tab, at, count)
+  defp structural_shift("delete_cols", tab, at, count), do: Structure.delete_cols(tab, at, count)
+
+  defp validate_tab_name(name) do
+    if is_binary(name) and String.trim(name) != "" do
+      {:ok, name}
+    else
+      {:error, "invalid_name", "name must be a non-blank string, got #{inspect(name)}"}
+    end
   end
 
   defp fetch_tab(content, tab) when is_integer(tab) and tab >= 0 do
@@ -419,6 +523,42 @@ defmodule Barkpark.Sheets.Session do
     state
   end
 
+  # Structural ops rewrite a whole tab: swap the rewritten tab in,
+  # recompute when it still holds formulas (`recompute?` — rewritten refs
+  # must settle; layout/rename ops skip the engine), diff the cells for
+  # the delta, and RECOUNT the cached counters — cells move or die
+  # wholesale here, so incremental bookkeeping is not worth the bug
+  # surface (structural ops are rare next to cell ops).
+  defp apply_structural(state, tab_idx, new_tab, recompute?, structure) do
+    tabs = Map.get(state.content, "tabs")
+    old_cells = Map.get(Enum.at(tabs, tab_idx), "cells") || %{}
+    new_tab = if recompute? and holds_formula?(new_tab), do: recompute_tab(new_tab), else: new_tab
+    changed = diff_cells(old_cells, Map.get(new_tab, "cells") || %{})
+    content = Map.put(state.content, "tabs", List.replace_at(tabs, tab_idx, new_tab))
+    finalize_structural(state, content, tab_idx, changed, structure)
+  end
+
+  defp finalize_structural(state, content, tab_idx, changed, structure) do
+    state = %{
+      state
+      | content: content,
+        rev: state.rev + 1,
+        dirty?: true,
+        ops_since_flush: state.ops_since_flush + 1,
+        nonempty: count_nonempty(content),
+        formula_counts: count_formulas(content)
+    }
+
+    broadcast_delta(state, tab_idx, changed, structure)
+    state
+  end
+
+  defp holds_formula?(tab) do
+    Enum.any?(Map.get(tab, "cells") || %{}, fn {_addr, cell} ->
+      is_map(cell) and is_binary(Map.get(cell, "f"))
+    end)
+  end
+
   defp recompute_tab(tab) do
     %{"tabs" => [tab]} = Engine.recompute(%{"tabs" => [tab]})
     tab
@@ -434,11 +574,14 @@ defmodule Barkpark.Sheets.Session do
     end
   end
 
-  defp broadcast_delta(state, tab_idx, changed) do
+  defp broadcast_delta(state, tab_idx, changed, structure \\ nil) do
+    payload = %{sheet_id: state.slug, rev: state.rev, tab: tab_idx, changed: changed}
+    payload = if structure, do: Map.put(payload, :structure, structure), else: payload
+
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
       topic(state.slug, state.dataset, state.workspace_id),
-      {:sheets_op, %{sheet_id: state.slug, rev: state.rev, tab: tab_idx, changed: changed}}
+      {:sheets_op, payload}
     )
   end
 

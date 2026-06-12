@@ -3004,6 +3004,90 @@
     .bp-paper-format__link-remove:hover {
       color: var(--paper-accent); border-color: var(--paper-accent);
     }
+
+    /* ── Studio sheet grid editor (Sheets M2) ─────────────────────────────
+       LiveView-native grid: CSS sticky pins headers + frozen bands; the
+       SheetGrid hook (bp-sheet-grid.js) adds keyboard/clipboard/resize. */
+    .sheet-editor { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    .sheet-toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-bottom: 1px solid var(--border);
+    }
+    .sheet-namebox-input {
+      width: 72px; text-align: center; font-size: 12px; font-family: monospace;
+      background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px;
+    }
+    .sheet-bar-form { flex: 1; display: flex; }
+    .sheet-bar-input {
+      flex: 1; font-size: 12.5px; font-family: monospace;
+      background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+    }
+    .sheet-notice {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 2px 12px; font-size: 12px; color: #b54708;
+      background: rgba(247, 144, 9, 0.08); border-bottom: 1px solid var(--border);
+    }
+    .sheet-cap-notice {
+      padding: 3px 12px; font-size: 11.5px; color: var(--fg-dim, var(--fg));
+      border-bottom: 1px solid var(--border);
+    }
+    .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
+    .sheet-scroll { flex: 1; overflow: auto; min-height: 0; }
+    .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; }
+    .sheet-table th, .sheet-table td {
+      border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sheet-corner, .sheet-colhead, .sheet-rowhead {
+      background: var(--bg-alt, var(--bg)); color: var(--fg-dim, var(--fg));
+      font-weight: 500; font-size: 11px; text-align: center; user-select: none;
+    }
+    .sheet-corner { position: sticky; top: 0; left: 0; z-index: 6; }
+    .sheet-colhead { position: sticky; top: 0; z-index: 4; }
+    .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
+    .sheet-cell { background: var(--bg); cursor: cell; }
+    .sheet-cell.sheet-sel { background: rgba(59, 130, 246, 0.12); }
+    .sheet-cell.sheet-active { outline: 2px solid #3b82f6; outline-offset: -2px; }
+    .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
+    .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
+    .sheet-cell-input {
+      width: 100%; height: 100%; border: none; background: var(--bg); color: var(--fg);
+      font: inherit; padding: 0; outline: 2px solid #3b82f6; outline-offset: -2px;
+    }
+    .sheet-rsz { position: absolute; z-index: 2; }
+    .sheet-rsz--col { top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
+    .sheet-rsz--row { left: 0; bottom: -3px; height: 6px; width: 100%; cursor: row-resize; }
+    .sheet-head-menu-btn {
+      background: none; border: none; color: inherit; cursor: pointer;
+      font-size: 9px; padding: 0 2px; opacity: 0;
+    }
+    th:hover > .sheet-head-menu-btn { opacity: 0.8; }
+    .sheet-menu {
+      position: absolute; top: 100%; left: 0; z-index: 9;
+      display: flex; flex-direction: column; min-width: 130px; padding: 4px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+    .sheet-menu button {
+      background: none; border: none; color: var(--fg); text-align: left;
+      font-size: 12px; padding: 5px 8px; border-radius: 4px; cursor: pointer;
+    }
+    .sheet-menu button:hover { background: rgba(127, 127, 127, 0.12); }
+    .sheet-tabs {
+      display: flex; align-items: center; gap: 2px;
+      padding: 4px 8px; border-top: 1px solid var(--border); overflow-x: auto;
+    }
+    .sheet-tab {
+      background: none; border: 1px solid transparent; color: var(--fg-dim, var(--fg));
+      font-size: 12px; padding: 3px 10px; border-radius: 5px; cursor: pointer;
+    }
+    .sheet-tab.is-active { border-color: var(--border); color: var(--fg); }
+    .sheet-tab-rename-input {
+      width: 90px; font-size: 12px; background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+    }
   </style>
 </head>
 <body>
@@ -3019,6 +3103,12 @@
   <script src="/assets/bp-paper-editor.bundle.js" defer></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
+  <%!-- Non-defer ON PURPOSE (unlike the bp-* Web Components above): it must
+        define window.BarkparkSheetGrid BEFORE the inline script below
+        registers it as a LiveView hook and connects the LiveSocket.
+        Bottom-of-body, so Golden Rule #4 (no blocking scripts in head)
+        holds. --%>
+  <script src="/assets/bp-sheet-grid.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -3032,6 +3122,12 @@
     let userColor = localStorage.getItem("barkpark_user_color") || "";
 
     let Hooks = {};
+
+    // SheetGrid — the Studio sheet grid editor's thin client half
+    // (keyboard map, clipboard TSV, resize drag, scroll keep). Defined in
+    // /assets/bp-sheet-grid.js (loaded non-defer just above).
+    Hooks.SheetGrid = window.BarkparkSheetGrid;
+
     Hooks.PresenceIdentity = {
       mounted() {
         this.handleEvent("save-identity", ({name, color}) => {

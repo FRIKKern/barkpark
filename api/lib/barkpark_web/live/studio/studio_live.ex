@@ -189,6 +189,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
        paper_html: "",
        paper_block_mode: false,
        paper_topic: nil,
+       # ── In-Studio sheet grid editor (Sheets M2) ───────────────────────
+       # A type:"sheet" document opens as the collaborative grid editor
+       # (`editor_view: :sheet`), not the field form. The LiveView
+       # subscribes to the sheet session's delta topic
+       # (`Barkpark.Sheets.Session.topic/3` — the doc topic suffixed with
+       # ":sheets:op"); `{:sheets_op, …}` payloads forward into the
+       # SheetGrid LiveComponent via send_update — the component owns all
+       # grid state and applies deltas in place (no rebuild, no remount).
+       # `sheet_topic` is tracked for the diff-and-resubscribe on
+       # navigation, mirroring `list_topic`.
+       sheet_doc: nil,
+       sheet_topic: nil,
        # ── In-Studio paper block editor (convergence/studio-paper-editor) ───
        # `paper_edit_mode` flips the paper pane between the read-only live
        # stream (View — the default, unchanged) and the block edit form (Edit).
@@ -398,6 +410,24 @@ defmodule BarkparkWeb.Studio.StudioLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # ── In-Studio sheet grid deltas (Sheets M2) ─────────────────────────────
+  # Session deltas for the OPEN sheet forward into the SheetGrid
+  # LiveComponent (it owns the grid state and applies them in place — no
+  # rebuild_panes, no remount). This pane's own ops and remote edits ride
+  # the SAME path: the component never applies an op locally, so a second
+  # browser on the same sheet stays live by construction. Frames arriving
+  # while no sheet is open are ignored.
+  def handle_info({:sheets_op, payload}, socket) do
+    if socket.assigns[:editor_view] == :sheet and socket.assigns[:sheet_doc] do
+      send_update(BarkparkWeb.Studio.SheetGrid,
+        id: "sheet-grid-#{Content.published_id(socket.assigns.sheet_doc.doc_id)}",
+        sheets_op: payload
+      )
+    end
+
+    {:noreply, socket}
   end
 
   # Presence updates
@@ -3678,11 +3708,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # `{:paper_block,…}` delta path NEVER rebuilds panes, so it never remounts.
     case editor && editor[:view] do
       :paper ->
-        setup_paper_view(socket, editor[:doc])
+        socket
+        |> clear_sheet_view()
+        |> setup_paper_view(editor[:doc])
+
+      :sheet ->
+        socket
+        |> clear_paper_view()
+        |> setup_sheet_view(editor[:doc])
 
       :media_explorer ->
         socket
         |> clear_paper_view()
+        |> clear_sheet_view()
         |> assign(
           editor_view: :media_explorer,
           media_kind_filter: editor[:kind_filter] || "all"
@@ -3691,7 +3729,50 @@ defmodule BarkparkWeb.Studio.StudioLive do
       _ ->
         socket
         |> clear_paper_view()
+        |> clear_sheet_view()
         |> assign(editor_view: :form, media_kind_filter: "all")
+    end
+  end
+
+  # ── In-Studio sheet grid editor (Sheets M2) ──────────────────────────────
+  #
+  # A `view: :sheet` editor (a sheet opened in the editor pane) renders the
+  # SheetGrid LiveComponent and subscribes this LiveView to the sheet
+  # session's delta topic. The component owns all grid state; the
+  # `{:sheets_op,…}` handle_info above just forwards frames via send_update.
+
+  defp setup_sheet_view(socket, %{} = doc) do
+    socket
+    |> ensure_sheet_subscription(doc)
+    |> assign(editor_view: :sheet, sheet_doc: doc)
+  end
+
+  defp setup_sheet_view(socket, _doc), do: clear_sheet_view(socket)
+
+  defp clear_sheet_view(socket) do
+    socket
+    |> ensure_sheet_subscription(nil)
+    |> assign(sheet_doc: nil)
+  end
+
+  # Diff-and-resubscribe, same shape as ensure_list_subscription: idempotent
+  # across rebuilds of the same open sheet, unsubscribes on navigation away.
+  # The topic is keyed with the DOC's owning workspace — exactly what the
+  # session broadcasts with — not the viewer's current workspace.
+  defp ensure_sheet_subscription(socket, doc) do
+    new_topic =
+      if doc != nil and connected?(socket) do
+        Barkpark.Sheets.Session.topic(doc.doc_id, socket.assigns.dataset, doc.workspace_id)
+      end
+
+    old_topic = socket.assigns[:sheet_topic]
+
+    if new_topic == old_topic do
+      socket
+    else
+      if old_topic, do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, old_topic)
+      if new_topic, do: Phoenix.PubSub.subscribe(Barkpark.PubSub, new_topic)
+      assign(socket, sheet_topic: new_topic)
     end
   end
 
@@ -4913,6 +4994,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
           shares_admin?={@shares_admin?}
           dataset={@dataset}
           streams={@streams}
+        />
+        <% @editor_view == :sheet and @sheet_doc != nil -> %>
+        <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
+              surface; `{:sheets_op,…}` deltas reach it via send_update. --%>
+        <.live_component
+          module={BarkparkWeb.Studio.SheetGrid}
+          id={"sheet-grid-#{Content.published_id(@sheet_doc.doc_id)}"}
+          doc={@sheet_doc}
+          dataset={@dataset}
+          is_draft={@editor_is_draft}
         />
         <% @editor_view == :media_explorer -> %>
         <div

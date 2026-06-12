@@ -239,6 +239,238 @@ defmodule Barkpark.Sheets.SessionTest do
     end
   end
 
+  # ── structural ops ──────────────────────────────────────────────────────────
+
+  describe "structural ops" do
+    test "insert_rows shifts keys, rewrites + recomputes formulas, and the delta carries structure" do
+      doc =
+        create_sheet("st-insrow", %{
+          "A1" => %{"v" => 1},
+          "A2" => %{"v" => 2},
+          "A3" => %{"f" => "SUM(A1:A2)", "v" => 3, "t" => "n"}
+        })
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-insrow", @dataset, doc.workspace_id))
+
+      {:ok, %{rev: 1, applied: 1, errors: []}} =
+        Session.apply_ops("st-insrow", @dataset, [
+          %{"op" => "insert_rows", "tab" => 0, "at" => 2, "count" => 1}
+        ])
+
+      assert peek_cell("st-insrow", "A1") == %{"v" => 1}
+      assert peek_cell("st-insrow", "A2") == nil
+      assert peek_cell("st-insrow", "A3") == %{"v" => 2}
+      # The range expanded over the inserted row and recomputed.
+      assert peek_cell("st-insrow", "A4") == %{"f" => "SUM(A1:A3)", "v" => 3, "t" => "n"}
+
+      assert_receive {:sheets_op, %{rev: 1, tab: 0, changed: changed, structure: structure}}, 1_000
+      assert structure == %{op: "insert_rows", at: 2, count: 1, tab: 0}
+      assert changed["A2"] == nil
+      assert changed["A3"] == %{"v" => 2}
+      assert changed["A4"] == %{"f" => "SUM(A1:A3)", "v" => 3, "t" => "n"}
+      refute Map.has_key?(changed, "A1")
+    end
+
+    test "delete_rows: refs into the span become #REF! and recompute to the error value" do
+      create_sheet("st-delrow", %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"f" => "A2*10", "v" => 20, "t" => "n"}
+      })
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-delrow", @dataset, [
+          %{"op" => "delete_rows", "tab" => 0, "at" => 2, "count" => 1}
+        ])
+
+      assert peek_cell("st-delrow", "A1") == %{"v" => 1}
+      assert peek_cell("st-delrow", "A2") == %{"f" => "#REF!*10", "v" => "#REF!", "t" => "e"}
+      assert peek_cell("st-delrow", "A3") == nil
+    end
+
+    test "insert_cols and delete_cols shift the column axis" do
+      create_sheet("st-cols", %{"A1" => %{"v" => "a"}, "B1" => %{"v" => "b"}})
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("st-cols", @dataset, [%{"op" => "insert_cols", "tab" => 0, "at" => 2, "count" => 2}])
+
+      assert peek_cell("st-cols", "A1") == %{"v" => "a"}
+      assert peek_cell("st-cols", "D1") == %{"v" => "b"}
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("st-cols", @dataset, [%{"op" => "delete_cols", "tab" => 0, "at" => 1, "count" => 3}])
+
+      assert peek_cell("st-cols", "A1") == %{"v" => "b"}
+      assert peek_cell("st-cols", "D1") == nil
+    end
+
+    test "set_col_width and set_row_height set and clear; the delta carries structure, no cells" do
+      doc = create_sheet("st-size", %{"A1" => %{"v" => 1}})
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-size", @dataset, doc.workspace_id))
+
+      {:ok, %{applied: 2, errors: []}} =
+        Session.apply_ops("st-size", @dataset, [
+          %{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => 120},
+          %{"op" => "set_row_height", "tab" => 0, "row" => 3, "px" => 44}
+        ])
+
+      {:ok, content} = Session.peek("st-size", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "col_widths"]) == %{"2" => 120}
+      assert get_in(content, ["tabs", Access.at(0), "row_heights"]) == %{"3" => 44}
+
+      assert_receive {:sheets_op, %{rev: 1, changed: changed, structure: %{op: "set_col_width", at: 2, count: nil, tab: 0}}},
+                     1_000
+
+      assert changed == %{}
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("st-size", @dataset, [%{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => nil}])
+
+      {:ok, content} = Session.peek("st-size", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "col_widths"]) == %{}
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "invalid_px"}]}} =
+        Session.apply_ops("st-size", @dataset, [%{"op" => "set_row_height", "tab" => 0, "row" => 1, "px" => -4}])
+    end
+
+    test "rename_tab renames; a blank or non-string name is rejected" do
+      create_sheet("st-rename", %{})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-rename", @dataset, [%{"op" => "rename_tab", "tab" => 0, "name" => "Budget"}])
+
+      {:ok, content} = Session.peek("st-rename", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "name"]) == "Budget"
+
+      {:ok, %{applied: 0, errors: errors}} =
+        Session.apply_ops("st-rename", @dataset, [
+          %{"op" => "rename_tab", "tab" => 0, "name" => "  "},
+          %{"op" => "rename_tab", "tab" => 0, "name" => 7}
+        ])
+
+      assert [%{index: 0, code: "invalid_name"}, %{index: 1, code: "invalid_name"}] = errors
+    end
+
+    test "add_tab appends an empty tab that immediately accepts ops" do
+      doc = create_sheet("st-addtab", %{"A1" => %{"v" => "t0"}})
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-addtab", @dataset, doc.workspace_id))
+
+      {:ok, %{applied: 2, errors: []}} =
+        Session.apply_ops("st-addtab", @dataset, [
+          %{"op" => "add_tab", "name" => "T1"},
+          %{"op" => "set_cell", "tab" => 1, "ref" => "A1", "raw" => "=1+1"}
+        ])
+
+      assert_receive {:sheets_op, %{rev: 1, changed: %{} = changed, structure: %{op: "add_tab", at: nil, count: nil, tab: 1}}},
+                     1_000
+
+      assert changed == %{}
+
+      {:ok, content} = Session.peek("st-addtab", @dataset)
+      assert get_in(content, ["tabs", Access.at(1), "name"]) == "T1"
+      assert get_in(content, ["tabs", Access.at(1), "cells", "A1"]) == %{"f" => "1+1", "v" => 2, "t" => "n"}
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => "t0"}
+    end
+
+    test "delete_tab drops the tab, re-indexes counters, and the delta nils every cell" do
+      doc = create_sheet("st-deltab", %{"A1" => %{"v" => "gone"}, "B2" => %{"v" => "also"}})
+
+      {:ok, %{applied: 1}} = Session.apply_ops("st-deltab", @dataset, [%{"op" => "add_tab", "name" => "Keep"}])
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-deltab", @dataset, doc.workspace_id))
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-deltab", @dataset, [%{"op" => "delete_tab", "tab" => 0}])
+
+      assert_receive {:sheets_op, %{changed: changed, structure: %{op: "delete_tab", tab: 0}}}, 1_000
+      assert changed == %{"A1" => nil, "B2" => nil}
+
+      # The surviving tab is now tab 0 — formulas on it still recompute
+      # (the per-tab formula counters were recounted, not left stale).
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-deltab", @dataset, [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "=2*3"}])
+
+      assert peek_cell("st-deltab", "A1") == %{"f" => "2*3", "v" => 6, "t" => "n"}
+      {:ok, content} = Session.peek("st-deltab", @dataset)
+      assert length(content["tabs"]) == 1
+    end
+
+    test "deleting the LAST tab is refused and nothing changes" do
+      create_sheet("st-lasttab", %{"A1" => %{"v" => "stays"}})
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "last_tab"}]}} =
+        Session.apply_ops("st-lasttab", @dataset, [%{"op" => "delete_tab", "tab" => 0}])
+
+      assert peek_cell("st-lasttab", "A1") == %{"v" => "stays"}
+    end
+
+    test "an insert that would push occupied cells past the grid bounds errors cleanly" do
+      create_sheet("st-bounds", %{"A1048576" => %{"v" => "edge"}})
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "grid_bounds_exceeded"}]}} =
+        Session.apply_ops("st-bounds", @dataset, [%{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 1}])
+
+      assert peek_cell("st-bounds", "A1048576") == %{"v" => "edge"}
+    end
+
+    test "structural validation errors reject individually; the rest of the batch applies" do
+      create_sheet("st-mixed", %{"A1" => %{"v" => 1}})
+
+      ops = [
+        %{"op" => "insert_rows", "tab" => 0, "at" => 0, "count" => 1},
+        %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => "two"},
+        %{"op" => "insert_rows", "tab" => 9, "at" => 1, "count" => 1},
+        %{"op" => "insert_rows", "tab" => 0, "at" => 1},
+        %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 1}
+      ]
+
+      {:ok, %{rev: 1, applied: 1, errors: errors}} = Session.apply_ops("st-mixed", @dataset, ops)
+
+      assert [
+               %{index: 0, code: "invalid_at"},
+               %{index: 1, code: "invalid_count"},
+               %{index: 2, code: "tab_not_found"},
+               %{index: 3, code: "malformed_op"}
+             ] = errors
+
+      assert peek_cell("st-mixed", "A2") == %{"v" => 1}
+    end
+
+    test "delete_rows frees non-empty-cell headroom (the cap counter is recounted)" do
+      put_cfg(cell_cap: 2)
+      create_sheet("st-cap", %{"A1" => %{"v" => "one"}, "A2" => %{"v" => "two"}})
+
+      {:ok, %{applied: 0, errors: [%{code: "cell_cap_exceeded"}]}} =
+        Session.apply_ops("st-cap", @dataset, [set_cell("B5", "over")])
+
+      {:ok, %{applied: 2, errors: []}} =
+        Session.apply_ops("st-cap", @dataset, [
+          %{"op" => "delete_rows", "tab" => 0, "at" => 1, "count" => 2},
+          set_cell("B5", "fits")
+        ])
+
+      assert peek_cell("st-cap", "B5") == %{"v" => "fits"}
+    end
+
+    test "structural state persists through the canonical path" do
+      create_sheet("st-persist", %{"A1" => %{"v" => "x"}})
+
+      {:ok, _} =
+        Session.apply_ops("st-persist", @dataset, [
+          %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 2},
+          %{"op" => "set_col_width", "tab" => 0, "col" => 1, "px" => 99},
+          %{"op" => "rename_tab", "tab" => 0, "name" => "Moved"}
+        ])
+
+      :ok = Session.flush("st-persist", @dataset)
+
+      {:ok, doc} = Content.get_document(Content.draft_id("st-persist"), "sheet", @dataset)
+      tab = get_in(doc.content, ["tabs", Access.at(0)])
+      assert tab["cells"] == %{"A3" => %{"v" => "x"}}
+      assert tab["col_widths"] == %{"1" => 99}
+      assert tab["name"] == "Moved"
+    end
+  end
+
   # ── LWW serialization ───────────────────────────────────────────────────────
 
   describe "LWW serialization under concurrent callers" do
@@ -272,6 +504,57 @@ defmodule Barkpark.Sheets.SessionTest do
       assert %{"v" => "w" <> _} = peek_cell("lww-same", "A1")
 
       {:ok, %{rev: 20}} = Session.apply_ops("lww-same", @dataset, [])
+    end
+
+    test "structural + cell ops interleave whole from concurrent processes — no torn state" do
+      create_sheet("lww-struct", Map.new(1..10, fn i -> {"A#{i}", %{"v" => i}} end))
+
+      inserts =
+        Enum.map(1..15, fn _ ->
+          Task.async(fn ->
+            Session.apply_ops("lww-struct", @dataset, [
+              %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 1}
+            ])
+          end)
+        end)
+
+      # Each concurrent cell write targets its OWN column — a row insert
+      # shifts it but can never collide it with another writer's cell.
+      cols = ~w(B C D E F G H I J K L M N O P)
+
+      sets =
+        Enum.map(cols, fn col ->
+          Task.async(fn -> Session.apply_ops("lww-struct", @dataset, [set_cell("#{col}1", "v-#{col}")]) end)
+        end)
+
+      Task.await_many(inserts ++ sets, 10_000)
+
+      {:ok, content} = Session.peek("lww-struct", @dataset)
+      cells = get_in(content, ["tabs", Access.at(0), "cells"])
+
+      # Every op was applied exactly once, whole.
+      {:ok, %{rev: 30, applied: 0}} = Session.apply_ops("lww-struct", @dataset, [])
+
+      # The ten seeded values survive in column A, contiguous and in order
+      # — every insert shifted the WHOLE block or none of it (no tearing).
+      a_cells =
+        for {addr, %{"v" => v}} <- cells, String.starts_with?(addr, "A") do
+          {String.to_integer(String.trim_leading(addr, "A")), v}
+        end
+
+      assert length(a_cells) == 10
+      first_row = a_cells |> Enum.map(&elem(&1, 0)) |> Enum.min()
+      assert first_row == 16
+      assert Enum.sort(a_cells) == Enum.map(1..10, fn i -> {first_row + i - 1, i} end)
+
+      # Every concurrent set_cell landed exactly once, value intact, alone
+      # in its column (its key shifted with whichever inserts followed it).
+      for col <- cols do
+        assert [{_addr, %{"v" => v}}] =
+                 Enum.filter(cells, fn {addr, _cell} -> String.starts_with?(addr, col) end)
+
+        assert v == "v-#{col}"
+      end
     end
   end
 

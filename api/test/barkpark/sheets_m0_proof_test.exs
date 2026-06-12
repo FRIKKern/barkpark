@@ -9,12 +9,13 @@ defmodule Barkpark.SheetsM0ProofTest do
        (strings, numbers, a date, col_widths) via the mutation envelope.
     2. `POST /v1/paperflow/papers` ingests a paper embedding that sheet via
        two core `"sheet"` blocks (tab 0 + tab 1).
-    3. `GET /papers/:slug` — before any post-embed sheet mutation the blocks
-       carry no snapshot, so the reader renders a VALID, EMPTY grid (the
-       fresh-install invariant: no crash, no DB join at render time).
+    3. `GET /papers/:slug` — the sheet existed BEFORE the embed, so the
+       ingest hydrated BOTH blocks' snapshots immediately (M0a): the first
+       read already shows the cell values, still with no DB join at render
+       time (the blocks compose straight from their cached snapshots).
     4. A second mutate (append a row) fires the write-through: BOTH embed
        snapshots refresh in the same logical operation, and the re-fetched
-       page now shows the actual cell values in the HTML grid.
+       page shows the appended row.
     5. A third mutate edits ONE cell; the re-fetched page shows the new
        value and no trace of the old one.
     6. Structurally malformed sheets (cells as a list, a non-A1 `"1A"` key)
@@ -110,7 +111,7 @@ defmodule Barkpark.SheetsM0ProofTest do
     }
   end
 
-  test "full M0 story over the wire: create → embed → write-through → render → re-mutate",
+  test "full M0 story over the wire: create → embed (hydrates) → write-through → re-mutate",
        %{conn: conn} do
     # 1 — CREATE the sheet through the public mutation envelope.
     resp =
@@ -151,13 +152,16 @@ defmodule Barkpark.SheetsM0ProofTest do
     assert resp.status == 200
     assert Jason.decode!(resp.resp_body)["ok"] == true
 
-    # 3 — Fresh-install invariant: no sheet mutation has happened SINCE the
-    # embed, so the blocks carry no snapshot yet — the reader still renders
-    # a valid (empty) grid rather than crashing or hitting the DB.
+    # 3 — M0a hydration: the embed was ingested AFTER the sheet existed, so
+    # the ingest hydrated BOTH blocks' snapshots — the first read already
+    # renders the cell values (head row, data, both tabs), before any
+    # post-embed sheet mutation.
     html = read_paper(conn)
     assert html =~ "Budsjettet under oppdateres live."
     assert html =~ "<table"
-    refute html =~ "Hundeseng"
+    assert html =~ ">Hundeseng</td>"
+    assert html =~ ">Q3-lansering utsatt</td>"
+    refute html =~ ">Kobbel</td>"
 
     # 4 — WRITE-THROUGH: mutate the sheet over the wire (append row 3). The
     # same logical operation must refresh BOTH embed snapshots in the paper.

@@ -5,6 +5,11 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
   `"snapshot"` of every same-scope `{"type":"sheet","ref":…}` block, in the
   same logical operation — and broadcasts for the refreshed docs.
 
+  Also locks the mirror move (M0a embed hydration): saving the EMBEDDING
+  document hydrates its sheet blocks' snapshots from the referenced sheets
+  immediately, so a doc embedding an existing sheet never waits for the
+  sheet's next save to render values.
+
   Also locks plain sheet CRUD through Content with NO plugin wiring in scope:
   the grid machinery is core, so a sheet document round-trips and its embeds
   refresh even when `Barkpark.Plugins.Sheets` is not loaded (fresh-install
@@ -278,6 +283,93 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
 
     test "mutating a sheet nothing embeds is a clean no-op" do
       assert %{} = create_sheet("wt-lonely", "solo")
+    end
+  end
+
+  # ── Embed hydration (M0a) ───────────────────────────────────────────────────
+
+  describe "embed hydration — the embedding doc's own save" do
+    test "a paper created AFTER the sheet hydrates its snapshot immediately" do
+      sheet = create_sheet("hy-1", "ready")
+      pub_id = Content.published_id(sheet.doc_id)
+
+      paper = create_paper("hy-paper-1", [sheet_block(pub_id)])
+
+      # No sheet mutation since the embed — the paper's own save hydrated.
+      [block] = get_in(paper.content, ["blocks"])
+      assert block["snapshot"] == %{"head" => ["Name"], "rows" => [["ready"]]}
+    end
+
+    test "upsert_paper hydrates at ingest and renders values into body_html" do
+      sheet = create_sheet("hy-2", "ingest-value")
+      pub_id = Content.published_id(sheet.doc_id)
+
+      {:ok, paper} =
+        Content.upsert_paper(%{
+          slug: "hy-paper-2",
+          dataset: @dataset,
+          blocks: [sheet_block(pub_id)]
+        })
+
+      [block] = get_in(paper.content, ["blocks"])
+      assert block["snapshot"]["rows"] == [["ingest-value"]]
+      assert get_in(paper.content, ["body_html"]) =~ "ingest-value"
+    end
+
+    test "a ref to a missing sheet stays an untouched empty-grid placeholder" do
+      paper = create_paper("hy-paper-3", [sheet_block("hy-never-created")])
+
+      [block] = get_in(paper.content, ["blocks"])
+      refute Map.has_key?(block, "snapshot")
+    end
+
+    test "a mixed multi-ref doc hydrates each block from its own sheet" do
+      a = create_sheet("hy-a", "alpha")
+      b = create_sheet("hy-b", "beta")
+
+      other = %{"id" => "p1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}
+
+      paper =
+        create_paper("hy-paper-4", [
+          other,
+          sheet_block(Content.published_id(a.doc_id)),
+          # Draft-form ref hydrates too — both id forms resolve.
+          sheet_block(b.doc_id),
+          sheet_block("hy-missing") |> Map.put("id", "b-miss")
+        ])
+
+      [b_other, b_a, b_b, b_miss] = get_in(paper.content, ["blocks"])
+      assert b_other == other
+      assert b_a["snapshot"]["rows"] == [["alpha"]]
+      assert b_b["snapshot"]["rows"] == [["beta"]]
+      refute Map.has_key?(b_miss, "snapshot")
+    end
+
+    test "upsert_document with blocks hydrates and projection sees the grid" do
+      sheet = create_sheet("hy-3", "upserted")
+      pub_id = Content.published_id(sheet.doc_id)
+
+      {:ok, doc} =
+        Content.upsert_document(
+          "paper",
+          %{"doc_id" => "hy-paper-5", "content" => %{"blocks" => [sheet_block(pub_id)]}},
+          @dataset
+        )
+
+      [block] = get_in(doc.content, ["blocks"])
+      assert block["snapshot"]["rows"] == [["upserted"]]
+      assert (get_in(doc.content, ["body", "html"]) || "") =~ "upserted"
+    end
+
+    test "a carried-along stale snapshot is re-hydrated on the embedding doc's save" do
+      sheet = create_sheet("hy-4", "current")
+      pub_id = Content.published_id(sheet.doc_id)
+      stale = sheet_block(pub_id) |> Map.put("snapshot", %{"rows" => [["stale"]]})
+
+      paper = create_paper("hy-paper-6", [stale])
+
+      [block] = get_in(paper.content, ["blocks"])
+      assert block["snapshot"]["rows"] == [["current"]]
     end
   end
 

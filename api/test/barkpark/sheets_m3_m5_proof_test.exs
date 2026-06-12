@@ -13,9 +13,10 @@ defmodule Barkpark.SheetsM3M5ProofTest do
 
     1. `POST /v1/plugins/sheets/import` — the stored doc carries the
        recomputed values, never the file's lies.
-    2. A paper embeds tab 0; re-uploading the same file fires the embed
-       write-through, and `GET /papers/:slug` renders the computed total,
-       the merged title (colspan) and the styled cells in the HTML grid.
+    2. A paper embeds tab 0 — the ingest hydrates the snapshot immediately
+       (M0a); re-uploading the same file fires the embed write-through, and
+       `GET /papers/:slug` renders the computed total, the merged title
+       (colspan) and the styled cells in the HTML grid.
     3. One qty cell mutates via `/v1/data/mutate`; the dependent product
        total AND the SUM grand total update in the re-fetched page.
     4. `GET export.xlsx` → re-import under a new slug → cell-level equality
@@ -176,8 +177,9 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     assert notater["cells"] ==
              %{"A1" => %{"v" => "Husk leveringsavtale"}, "B3" => %{"v" => "Purres fredag"}}
 
-    # 2 — EMBED: a paper references tab 0. The block carries no snapshot yet
-    # (no sheet save since the embed), so the reader shows a valid empty grid.
+    # 2 — EMBED: a paper references tab 0. The sheet already exists, so the
+    # ingest hydrates the embed snapshot immediately (M0a) — the first read
+    # shows the RECOMPUTED values, no post-embed sheet save needed.
     resp =
       ingest_paper(%{
         "slug" => @paper_slug,
@@ -197,7 +199,9 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     html = read_paper()
     assert html =~ "Salgstallene under oppdateres direkte."
     assert html =~ "<table"
-    refute html =~ "Hundeseng"
+    assert html =~ ">Hundeseng</td>"
+    # The hydrated snapshot carries the RECOMPUTED total, not the file's lie.
+    assert html =~ ">5463.0</td>"
 
     # Re-upload the same file: the idempotent upsert re-saves the sheet and
     # the write-through refreshes the embed snapshot in the same operation.

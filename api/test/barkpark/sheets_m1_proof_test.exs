@@ -267,7 +267,8 @@ defmodule Barkpark.SheetsM1ProofTest do
 
     assert resp.status == 200
 
-    # No sheet mutation since the embed — the paper renders an empty grid yet.
+    # Ingest hydrated the embed from the sheet's CURRENT state (M0a) — the
+    # final sum can only appear after the ops below land and persist.
     refute read_paper() =~ ">#{@final_sum}</td>"
 
     # 2 — WATCHER: external consumers get sheets:op deltas via Phoenix.PubSub

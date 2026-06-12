@@ -155,6 +155,99 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
     end
   end
 
+  describe "structural ops over the wire" do
+    test "insert_rows shifts keys and rewrites formulas through the endpoint", %{conn: conn} do
+      create_sheet("ops-insrow", %{"A1" => %{"v" => 5}, "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}})
+
+      body =
+        conn
+        |> authed()
+        |> post(ops_path("ops-insrow"), %{
+          "ops" => [%{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 2}],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      assert %{"ok" => true, "rev" => 1, "applied" => 1, "errors" => []} = body
+
+      {:ok, content} = Session.peek("ops-insrow", @dataset)
+      cells = get_in(content, ["tabs", Access.at(0), "cells"])
+      assert cells == %{"A3" => %{"v" => 5}, "A4" => %{"f" => "A3*2", "v" => 10, "t" => "n"}}
+    end
+
+    test "tab + layout ops apply in one batch; per-op errors keep their index", %{conn: conn} do
+      create_sheet("ops-struct-mix", %{"A1" => %{"v" => "x"}})
+
+      ops = [
+        %{"op" => "add_tab", "name" => "T1"},
+        %{"op" => "rename_tab", "tab" => 0, "name" => "Main"},
+        %{"op" => "set_col_width", "tab" => 0, "col" => 1, "px" => 140},
+        %{"op" => "delete_tab", "tab" => 1},
+        # The last tab cannot be deleted — indexed error, batch continues.
+        %{"op" => "delete_tab", "tab" => 0},
+        %{"op" => "set_row_height", "tab" => 0, "row" => 2, "px" => 36}
+      ]
+
+      body =
+        conn
+        |> authed()
+        |> post(ops_path("ops-struct-mix"), %{"ops" => ops, "dataset" => @dataset})
+        |> json_response(200)
+
+      assert %{"ok" => true, "rev" => 5, "applied" => 5} = body
+      assert [%{"index" => 4, "code" => "last_tab"}] = body["errors"]
+
+      {:ok, content} = Session.peek("ops-struct-mix", @dataset)
+      [tab] = content["tabs"]
+      assert tab["name"] == "Main"
+      assert tab["col_widths"] == %{"1" => 140}
+      assert tab["row_heights"] == %{"2" => 36}
+    end
+
+    test "a structural op missing its fields is malformed_op; invalid at is invalid_at", %{conn: conn} do
+      create_sheet("ops-struct-bad", %{})
+
+      ops = [
+        %{"op" => "insert_rows", "tab" => 0, "at" => 2},
+        %{"op" => "delete_cols", "tab" => 0, "at" => 0, "count" => 1}
+      ]
+
+      body =
+        conn
+        |> authed()
+        |> post(ops_path("ops-struct-bad"), %{"ops" => ops, "dataset" => @dataset})
+        |> json_response(200)
+
+      assert %{"applied" => 0} = body
+      assert [%{"index" => 0, "code" => "malformed_op"}, %{"index" => 1, "code" => "invalid_at"}] = body["errors"]
+    end
+
+    test "JSON null px clears a width over the wire", %{conn: conn} do
+      create_sheet("ops-struct-px", %{})
+
+      %{"applied" => 1} =
+        conn
+        |> authed()
+        |> post(ops_path("ops-struct-px"), %{
+          "ops" => [%{"op" => "set_col_width", "tab" => 0, "col" => 3, "px" => 88}],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      %{"applied" => 1, "errors" => []} =
+        build_conn()
+        |> authed()
+        |> post(ops_path("ops-struct-px"), %{
+          "ops" => [%{"op" => "set_col_width", "tab" => 0, "col" => 3, "px" => nil}],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      {:ok, content} = Session.peek("ops-struct-px", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "col_widths"]) == %{}
+    end
+  end
+
   describe "export flush (read-your-writes)" do
     test "a wire op followed by an immediate export.csv serves the new value", %{conn: conn} do
       create_sheet("ops-export", %{"A1" => %{"v" => "stale-value"}})

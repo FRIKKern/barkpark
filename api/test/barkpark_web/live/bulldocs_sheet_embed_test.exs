@@ -1,8 +1,9 @@
 defmodule BarkparkWeb.BulldocsSheetEmbedTest do
   @moduledoc """
   End-to-end View-mode lock for the `"sheet"` embed block: a paper ingested
-  with a sheet block renders an HTML grid in the Bulldocs reader, and after
-  the referenced sheet is mutated through Content the write-through refreshed
+  with a sheet block hydrates its snapshot at ingest (M0a) and renders the
+  grid values in the Bulldocs reader on the FIRST read, and after the
+  referenced sheet is mutated through Content the write-through refreshed
   snapshot is what the reader renders — no plugin in the loop, the block
   composes straight from its cached snapshot (fresh-install invariant).
   """
@@ -39,9 +40,9 @@ defmodule BarkparkWeb.BulldocsSheetEmbedTest do
 
     pub_id = Content.published_id(sheet.doc_id)
 
-    # Ingest a paper embedding the sheet. The block carries NO snapshot yet
-    # (the sheet was saved before any embed existed), so the reader shows an
-    # empty grid — a valid table, never a crash.
+    # Ingest a paper embedding the sheet. The sheet already exists, so the
+    # ingest hydrates the block's snapshot immediately (M0a) — the reader's
+    # first render shows the grid values, no post-embed sheet save needed.
     {:ok, _paper} =
       Content.upsert_paper(%{
         slug: @slug,
@@ -50,7 +51,8 @@ defmodule BarkparkWeb.BulldocsSheetEmbedTest do
 
     {:ok, _view, html} = live(conn, "/papers/#{@slug}")
     assert html =~ "<table"
-    refute html =~ "first-value"
+    assert html =~ "Metric"
+    assert html =~ "first-value"
 
     # Mutate the sheet: write-through refreshes the paper's snapshot (and its
     # body_html cache) in the same logical operation.

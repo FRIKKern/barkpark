@@ -1,17 +1,22 @@
 defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   @moduledoc """
-  POST /v1/plugins/sheets/:slug/ops — cell-granular wire ops (M1).
+  POST /v1/plugins/sheets/:slug/ops — cell-granular AND structural wire
+  ops (M1 + the grid editor's row/col/tab ops).
 
   Mounted by `Barkpark.Plugins.Sheets.register_routes/1` on the `:ingest`
   bucket (`RequireIngestToken`), the same bucket as import/export. A THIN
   shim: the body's `{"ops": [ … ]}` list goes straight through
   `Barkpark.Sheets.Session.apply_ops/3` — the session (CORE) owns
   validation, serialization, recompute, delta broadcast and debounced
-  persistence.
+  persistence. The full op vocabulary (set_cell/clear_cell plus
+  insert_rows/delete_rows/insert_cols/delete_cols, set_col_width/
+  set_row_height, rename_tab/add_tab/delete_tab) is documented in the
+  Session moduledoc.
 
       POST /v1/plugins/sheets/:slug/ops?dataset=production
       Authorization: Bearer <ingest token>
       {"ops": [{"op":"set_cell","tab":0,"ref":"A1","raw":"=SUM(B1:B3)"},
+               {"op":"insert_rows","tab":0,"at":2,"count":3},
                {"op":"clear_cell","tab":0,"ref":"C9"}]}
 
   Responds `{ok, slug, rev, applied, errors}` — ops are applied

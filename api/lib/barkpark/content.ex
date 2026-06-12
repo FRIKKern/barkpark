@@ -739,6 +739,7 @@ defmodule Barkpark.Content do
       |> Map.put("rev", generate_rev())
       |> put_scope_attrs(opts)
       |> maybe_recompute_sheet_formulas(type)
+      |> hydrate_sheet_embed_snapshots()
 
     with :ok <- validate_task_kind(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
@@ -1548,6 +1549,103 @@ defmodule Barkpark.Content do
     end
   end
 
+  # ── Sheet embed hydration (M0a) ─────────────────────────────────────────────
+  #
+  # The write-through above keeps embed snapshots fresh when the SHEET saves;
+  # this is its mirror for the EMBEDDING side. A document save whose blocks
+  # introduce or change `{"type":"sheet","ref":…}` blocks hydrates each
+  # block's `"snapshot"` from the referenced sheet IMMEDIATELY — same
+  # `Barkpark.Sheets.snapshot_for/2` projection, same per-block `"tab"`,
+  # same scope ladder — so a paper embedding an EXISTING sheet renders its
+  # values on the first read instead of an empty grid until the sheet's next
+  # save. ONE batched query fetches every referenced sheet (both id forms,
+  # draft preferred — the freshest content, matching what the write-through
+  # last projected); a ref that resolves to nothing leaves its block
+  # untouched (the renderer keeps the valid empty-grid placeholder), and a
+  # self-reference is skipped — the mirror of the write-through's
+  # `doc_id not in refs` exclusion, so a sheet embedding itself terminates.
+  # Runs pre-write in the attrs pipeline (zero extra writes); a save without
+  # sheet blocks costs zero extra queries.
+
+  defp hydrate_sheet_embed_snapshots(attrs) do
+    content = Map.get(attrs, "content")
+
+    case content && Map.get(content, "blocks") do
+      blocks when is_list(blocks) ->
+        blocks = hydrate_sheet_blocks(blocks, attrs, Map.get(attrs, "doc_id"))
+        Map.put(attrs, "content", Map.put(content, "blocks", blocks))
+
+      _ ->
+        attrs
+    end
+  end
+
+  defp hydrate_sheet_blocks(blocks, scope, self_id) do
+    self_root = self_id && published_id(self_id)
+
+    refs =
+      for %{"type" => "sheet", "ref" => ref} <- blocks,
+          is_binary(ref) and ref != "" and published_id(ref) != self_root,
+          uniq: true,
+          do: published_id(ref)
+
+    case refs do
+      [] ->
+        blocks
+
+      refs ->
+        sheets = fetch_embedded_sheets(refs, scope)
+
+        Enum.map(blocks, fn block ->
+          with %{"type" => "sheet", "ref" => ref} when is_binary(ref) <- block,
+               %{} = sheet_content <- Map.get(sheets, published_id(ref)) do
+            snapshot = Barkpark.Sheets.snapshot_for(sheet_content, embed_tab_index(block))
+            Map.put(block, "snapshot", snapshot)
+          else
+            _ -> block
+          end
+        end)
+    end
+  end
+
+  # Same-scope sheet rows for the refs an embedding doc carries — the reverse
+  # of `sheet_embed_targets/2`, same scope ladder (`dataset_id` authoritative,
+  # workspace + dataset STRING, then unscoped dataset STRING). Returns a map
+  # of published root → sheet content; when a ref has both a draft and a
+  # published row the DRAFT wins.
+  defp fetch_embedded_sheets(refs, scope) do
+    ids = refs ++ Enum.map(refs, &draft_id/1)
+    dataset = Map.get(scope, "dataset")
+    dataset_id = Map.get(scope, "dataset_id")
+    workspace_id = Map.get(scope, "workspace_id")
+
+    base = from d in Document, where: d.type == "sheet", where: d.doc_id in ^ids
+
+    scoped =
+      cond do
+        dataset_id ->
+          where(base, [d], d.dataset_id == ^dataset_id)
+
+        workspace_id ->
+          where(base, [d], d.dataset == ^dataset and d.workspace_id == ^workspace_id)
+
+        true ->
+          where(base, [d], d.dataset == ^dataset and is_nil(d.workspace_id))
+      end
+
+    scoped
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn doc, acc ->
+      root = published_id(doc.doc_id)
+
+      if draft?(doc.doc_id) or not Map.has_key?(acc, root) do
+        Map.put(acc, root, doc.content || %{})
+      else
+        acc
+      end
+    end)
+  end
+
   @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
 
   defp from_envelope(attrs) do
@@ -1607,6 +1705,7 @@ defmodule Barkpark.Content do
       |> Map.put("rev", generate_rev())
       |> put_scope_attrs(opts)
       |> maybe_recompute_sheet_formulas(type)
+      |> hydrate_sheet_embed_snapshots()
       # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
       # carries content["blocks"] re-derives content[fieldName]/content["body"]
       # from those blocks — the same project-on-write the paper path runs.
@@ -3142,6 +3241,37 @@ defmodule Barkpark.Content do
     # would update.
     existing = slug && get_existing_paper_for_write(slug, dataset, attrs)
 
+    # Tenancy scope for the row stamp, resolved BEFORE the content build so
+    # the sheet-embed hydration below can fetch same-scope sheets (M0a). Same
+    # contract as the stamp it feeds (W1.5-C, below): an explicit caller
+    # scope ALWAYS wins; a brand-new row falls back to the seeded Default; an
+    # UPDATE without an explicit scope resolves to `%{}` (nothing stamped, the
+    # existing row's scope preserved) and hydration scopes by the existing row.
+    scope_opts = paper_scope_opts(attrs)
+
+    scope_attrs =
+      cond do
+        scope_opts != [] ->
+          Map.delete(put_scope_attrs(%{"dataset" => dataset}, scope_opts), "dataset")
+
+        existing ->
+          %{}
+
+        true ->
+          Map.delete(put_scope_attrs(%{"dataset" => dataset}, []), "dataset")
+      end
+
+    embed_scope =
+      if scope_attrs == %{} and existing do
+        %{
+          "dataset" => dataset,
+          "dataset_id" => existing.dataset_id,
+          "workspace_id" => existing.workspace_id
+        }
+      else
+        Map.put(scope_attrs, "dataset", dataset)
+      end
+
     # R2 fix (Option A): assign a stable per-block id at INGEST so every block
     # has a UNIQUE "id" before storage/render. Id-less blocks otherwise all
     # collapse to the same LiveView stream/DOM id (`blocks-`), so Phoenix's
@@ -3150,10 +3280,17 @@ defmodule Barkpark.Content do
     # recursing into sections) — it NEVER overwrites an author/op-supplied id, so
     # DocPatchOp block-addressing (ops target blocks by id) stays stable across
     # ops and re-ingests of the same structure.
+    #
+    # M0a: hydrate `"sheet"` block snapshots from their referenced sheets at
+    # ingest, BEFORE the body_html render below — a paper embedding an
+    # EXISTING sheet shows its values on the first read.
     blocks =
       case attrs["blocks"] do
-        list when is_list(list) -> ensure_block_ids(list)
-        other -> other
+        list when is_list(list) ->
+          list |> ensure_block_ids() |> hydrate_sheet_blocks(embed_scope, slug)
+
+        other ->
+          other
       end
 
     # Per-doc article marker. An ingest/POST may set `style: "article"` in
@@ -3206,16 +3343,9 @@ defmodule Barkpark.Content do
     # falls back to the seeded Default workspace/project (same contract as
     # create_document/4) — without that a NULL-workspace paper is invisible to
     # the now-scoped Studio desk (B8/qucz). An UPDATE only re-stamps when the
-    # caller asserted an explicit scope; otherwise put_scope_attrs writes no
-    # scope keys at all and the existing row's scope is preserved.
-    scope_opts = paper_scope_opts(attrs)
-
-    doc_attrs =
-      cond do
-        scope_opts != [] -> put_scope_attrs(doc_attrs, scope_opts)
-        existing -> doc_attrs
-        true -> put_scope_attrs(doc_attrs, [])
-      end
+    # caller asserted an explicit scope; otherwise `scope_attrs` resolved to
+    # `%{}` above and the existing row's scope is preserved.
+    doc_attrs = Map.merge(doc_attrs, scope_attrs)
 
     changeset =
       Document.changeset(existing || %Document{}, doc_attrs)
