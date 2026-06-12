@@ -243,7 +243,14 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def input(%{field: %{"name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val, numeric: numeric_name?(name))
+
+    # A field DECLARED "number" always gets the numeric treatment — the
+    # name heuristic below only exists for ONIX's string-typed numerics
+    # (priceAmount etc.); task.priority is type:number with no matching
+    # suffix and rendered as a plain text input (found by the 2026-06-12
+    # field-QA sweep).
+    numeric = numeric_name?(name) or assigns.field["type"] == "number"
+    assigns = assign(assigns, n: name, v: val, numeric: numeric)
 
     ~H"""
     <%= if @numeric do %>

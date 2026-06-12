@@ -328,6 +328,18 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       assert html =~ ~s(phx-debounce="500")
     end
 
+    test "a DECLARED number type gets the numeric input regardless of name" do
+      html =
+        render_input(%{
+          field: %{"type" => "number", "name" => "priority"},
+          editor_form: %{"priority" => "2"}
+        })
+
+      assert html =~ ~s(inputmode="numeric")
+      assert html =~ ~s(class="form-input bp-input-numeric")
+      assert html =~ ~s(value="2")
+    end
+
     test "unknown types hit the text fallback" do
       html =
         render_input(%{
