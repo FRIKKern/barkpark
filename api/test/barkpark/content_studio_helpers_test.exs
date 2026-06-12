@@ -125,6 +125,23 @@ defmodule Barkpark.ContentStudioHelpersTest do
       schema = %{fields: [%{"name" => "body"}]}
       assert Content.build_content(%{}, schema) == %{}
     end
+
+    test "boolean fields coerce the checkbox strings to real booleans" do
+      # The Studio checkbox + hidden-false pair submits "true"/"false" STRINGS;
+      # storing them verbatim silently flipped the JSONB type (found live
+      # 2026-06-12 by clicking the switch and reading the draft back).
+      schema = %{fields: [%{"name" => "featured", "type" => "boolean"}]}
+
+      assert Content.build_content(%{"featured" => "true"}, schema) ==
+               %{"featured" => true}
+
+      assert Content.build_content(%{"featured" => "false"}, schema) ==
+               %{"featured" => false}
+
+      # Anything else stays AS-IS so a schema validator rejects it loudly.
+      assert Content.build_content(%{"featured" => "maybe"}, schema) ==
+               %{"featured" => "maybe"}
+    end
   end
 
   describe "upsert_draft/5" do
@@ -144,6 +161,21 @@ defmodule Barkpark.ContentStudioHelpersTest do
       assert saved.title == "New"
       assert saved.content["body"] == "new body"
       assert Content.draft?(saved.doc_id)
+    end
+
+    test "boolean checkbox strings persist as REAL booleans end-to-end" do
+      base = seed_post("u-bool", title: "Bool")
+      schema = %{fields: [%{"name" => "featured", "type" => "boolean"}]}
+
+      {:ok, saved, _} =
+        Content.upsert_draft(base, @doc_type, schema, %{"featured" => "true"}, @dataset)
+
+      assert saved.content["featured"] === true
+
+      {:ok, saved2, _} =
+        Content.upsert_draft(saved, @doc_type, schema, %{"featured" => "false"}, @dataset)
+
+      assert saved2.content["featured"] === false
     end
 
     test "saves draft AND returns validation errors map (warnings, not blocking)" do

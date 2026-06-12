@@ -547,6 +547,16 @@ defmodule Barkpark.Content do
     end
   end
 
+  # Schema `"boolean"` fields arrive from the Classic form as the STRINGS
+  # "true"/"false" (the checkbox + hidden-false pair) — found live 2026-06-12
+  # by clicking the Studio switch and reading the draft back: `featured`
+  # stored as the string "true", a silent JSONB type flip under every typed
+  # consumer (the same bug class the TUI/CLI typed saves fixed client-side).
+  # Coerce at the save boundary; any other string is kept AS-IS so a schema
+  # validator rejects it loudly rather than this path guessing.
+  defp coerce_field_value(%{"type" => "boolean"}, "true"), do: true
+  defp coerce_field_value(%{"type" => "boolean"}, "false"), do: false
+
   defp coerce_field_value(_field, val), do: val
 
   # ── Exp-P3.2 — Classic-save content (the data-loss guard) ─────────────────

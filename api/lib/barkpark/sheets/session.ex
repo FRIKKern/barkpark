@@ -1,0 +1,571 @@
+defmodule Barkpark.Sheets.Session do
+  @moduledoc """
+  Per-sheet collaborative session (M1) — a GenServer that owns one sheet
+  document's content in memory and serializes cell-granular ops against it.
+
+  CORE, plugin-independent (fresh-install invariant): sessions work with the
+  Sheets plugin off — only the HTTP ops route
+  (`POST /v1/plugins/sheets/:slug/ops`) is plugin wiring. Direct
+  `/v1/data/mutate` writes keep working without a session.
+
+  ## Lifecycle
+
+  Started LAZILY on the first op via `apply_ops/3` — a `DynamicSupervisor`
+  (`Barkpark.Sheets.SessionSupervisor`) child keyed in
+  `Barkpark.Sheets.SessionRegistry` by `{dataset, published-id}`. `init/1`
+  reads the persisted row ONCE (draft-first, published fallback — the same
+  precedence the export controller uses); while the session lives, its
+  memory is authoritative. The process hibernates when idle
+  (`:hibernate_after`) and stops itself after `idle_stop_ms` without calls;
+  `terminate/2` persists any unflushed state (exits are trapped so a
+  supervisor shutdown reaches it).
+
+  ## Ops (v1)
+
+  String-keyed maps, the wire shape:
+
+    * `%{"op" => "set_cell", "tab" => i, "ref" => "A1", "raw" => raw}` —
+      `raw` is a scalar; a string with a leading `"="` is a formula (the
+      importer convention) and stores as `%{"f" => <without "=">}`, anything
+      else stores as `%{"v" => raw}`.
+    * `%{"op" => "clear_cell", "tab" => i, "ref" => "A1"}`
+
+  Validation per op: the ref must be A1-style within the Excel grid bounds,
+  the tab index must exist, and a `set_cell` that would push the sheet past
+  the non-empty-cell cap errors (`cell_cap_exceeded`). Invalid ops are
+  REJECTED INDIVIDUALLY — the rest of the batch still applies. The mailbox
+  is the serializer: concurrent callers' ops interleave whole, last write
+  wins per cell.
+
+  ## Recompute + delta broadcast
+
+  After each applied op the session recomputes the op's tab through
+  `Barkpark.Sheets.Engine` (formulas are tab-local, so other tabs cannot
+  change; tabs holding NO formula cell skip the engine entirely — a
+  per-tab formula count keeps the common bulk-import case O(1) per op,
+  since a full recompute measures ~70–90ms at the 50_000-cell cap) and
+  broadcasts a compact delta:
+
+      {:sheets_op, %{sheet_id: pubid, rev: n, tab: i, changed: %{"A1" => cell | nil, …}}}
+
+  on `topic/3` — the existing `Content.doc_topic/4` SUFFIXED with
+  `":sheets:op"`, so every existing doc-topic subscriber is unaffected.
+  `rev` is the session's monotonic applied-op counter; `changed` carries
+  EVERY cell whose stored map changed (recompute dependents included),
+  `nil` marking a removal.
+
+  ## Persistence
+
+  DEBOUNCED through the canonical `Content.upsert_document/4` path (engine
+  recompute, revisions, write-through embed snapshots and the standard
+  broadcasts all ride along): after `debounce_ms` without further ops OR
+  every `flush_after_ops` ops, whichever first — and on terminate. Reads
+  outside the session (GET endpoints, exports) may serve the last persisted
+  row; `flush/2` is the cheap pre-read barrier (the export controller calls
+  it — a no-op when no session is live). A direct mutate to the same sheet
+  while a session lives is a DOCUMENTED conflict: the session detects the
+  external rev change at persist time, logs a warning, and its persist wins
+  (full conflict handling is M4 territory).
+
+  ## Configuration
+
+  `config :barkpark, Barkpark.Sheets.Session, …` — `debounce_ms` (2_000),
+  `flush_after_ops` (25), `idle_stop_ms` (300_000), `hibernate_after`
+  (15_000), `cell_cap` (50_000, mirroring the plugin gate's import cap).
+  Read at session start; tests override via `Application.put_env/3`.
+  """
+
+  use GenServer, restart: :temporary
+
+  require Logger
+
+  alias Barkpark.Content
+  alias Barkpark.Sheets
+  alias Barkpark.Sheets.Engine
+
+  @registry Barkpark.Sheets.SessionRegistry
+  @supervisor Barkpark.Sheets.SessionSupervisor
+
+  # Excel's grid bounds — column XFD, row 1_048_576. Deliberately duplicated
+  # (the established convention: `Barkpark.Sheets.Engine` and the plugin gate
+  # `Barkpark.Plugins.Sheets` each keep their own copy of the same two
+  # integers): the Session is CORE and must not reach into the plugin, and
+  # `Barkpark.Sheets.parse_ref/1` stays a pure, total A1 parser.
+  @grid_max_col 16_384
+  @grid_max_row 1_048_576
+
+  @call_timeout 30_000
+
+  # ── Public API ───────────────────────────────────────────────────────────
+
+  @doc """
+  Apply `ops` (a list of wire-shaped op maps, see the moduledoc) to the
+  sheet at `slug` in `dataset`, resolving-or-starting the session.
+
+  Returns `{:ok, %{rev: n, applied: n, errors: [%{index:, code:, message:}]}}`
+  or `{:error, :not_found}` when no sheet resolves for the slug.
+  """
+  @spec apply_ops(String.t(), String.t(), [map()]) ::
+          {:ok, %{rev: non_neg_integer(), applied: non_neg_integer(), errors: [map()]}}
+          | {:error, term()}
+  def apply_ops(slug, dataset, ops)
+      when is_binary(slug) and is_binary(dataset) and is_list(ops) do
+    call_session(slug, dataset, {:apply_ops, ops})
+  end
+
+  @doc """
+  Ask a LIVE session to persist its unflushed state — the read-your-writes
+  barrier for exports and GETs. Never starts a session: a no-op `:ok` when
+  none is registered (or it stopped concurrently).
+  """
+  @spec flush(String.t(), String.t()) :: :ok
+  def flush(slug, dataset) do
+    case whereis(slug, dataset) do
+      nil -> :ok
+      pid -> safe_call(pid, :flush)
+    end
+  end
+
+  @doc """
+  The session's in-memory content (authoritative while it lives).
+  `{:error, :no_session}` when none is live — this never starts one.
+  """
+  @spec peek(String.t(), String.t()) :: {:ok, map()} | {:error, :no_session}
+  def peek(slug, dataset) do
+    case whereis(slug, dataset) do
+      nil -> {:error, :no_session}
+      pid -> GenServer.call(pid, :peek, @call_timeout)
+    end
+  end
+
+  @doc """
+  Stop a live session (normal shutdown — `terminate/2` persists any dirty
+  state). A no-op when none is registered.
+  """
+  @spec stop(String.t(), String.t()) :: :ok
+  def stop(slug, dataset) do
+    case whereis(slug, dataset) do
+      nil -> :ok
+      pid -> safe_stop(pid)
+    end
+  end
+
+  @doc "The live session pid for `{slug, dataset}`, or `nil`."
+  @spec whereis(String.t(), String.t()) :: pid() | nil
+  def whereis(slug, dataset) do
+    case Registry.lookup(@registry, key(slug, dataset)) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
+  end
+
+  @doc """
+  The delta-broadcast topic for a sheet: `Content.doc_topic/4` suffixed with
+  `":sheets:op"` — a SIBLING of the doc topic, so existing doc-topic
+  subscribers never see session deltas. Subscribers receive
+  `{:sheets_op, payload}` (see the moduledoc for the payload shape).
+  """
+  @spec topic(String.t(), String.t(), String.t() | nil) :: String.t()
+  def topic(slug, dataset, workspace_id) do
+    Content.doc_topic(Content.published_id(slug), "sheet", workspace_id, dataset) <> ":sheets:op"
+  end
+
+  @doc false
+  def start_link({dataset, pubid} = session_key) when is_binary(dataset) and is_binary(pubid) do
+    GenServer.start_link(__MODULE__, session_key,
+      name: {:via, Registry, {@registry, session_key}},
+      hibernate_after: config().hibernate_after
+    )
+  end
+
+  # ── resolve-or-start + call plumbing ─────────────────────────────────────
+
+  defp key(slug, dataset), do: {dataset, Content.published_id(slug)}
+
+  defp call_session(slug, dataset, msg, retry? \\ true) do
+    with {:ok, pid} <- ensure_session(slug, dataset) do
+      try do
+        GenServer.call(pid, msg, @call_timeout)
+      catch
+        # The session idled out (or crashed) between lookup and call —
+        # restart it once; its state reloads from the persisted row.
+        :exit, {reason, {GenServer, :call, _}} when retry? and reason in [:noproc, :normal, :shutdown] ->
+          call_session(slug, dataset, msg, false)
+      end
+    end
+  end
+
+  defp ensure_session(slug, dataset) do
+    session_key = key(slug, dataset)
+
+    case Registry.lookup(@registry, session_key) do
+      [{pid, _}] ->
+        {:ok, pid}
+
+      [] ->
+        case DynamicSupervisor.start_child(@supervisor, {__MODULE__, session_key}) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp safe_call(pid, msg) do
+    GenServer.call(pid, msg, @call_timeout)
+  catch
+    :exit, {reason, {GenServer, :call, _}} when reason in [:noproc, :normal, :shutdown] -> :ok
+  end
+
+  defp safe_stop(pid) do
+    GenServer.stop(pid, :normal, @call_timeout)
+  catch
+    :exit, _ -> :ok
+  end
+
+  # ── GenServer ────────────────────────────────────────────────────────────
+
+  @impl true
+  def init({dataset, pubid}) do
+    # Trap exits so a supervisor shutdown runs terminate/2 (the dirty-state
+    # persist) instead of killing the process outright.
+    Process.flag(:trap_exit, true)
+
+    case load_doc(pubid, dataset) do
+      {:ok, doc} ->
+        content = doc.content || %{}
+
+        {:ok,
+         schedule_idle(%{
+           slug: pubid,
+           dataset: dataset,
+           title: doc.title,
+           workspace_id: doc.workspace_id,
+           content: content,
+           rev: 0,
+           persisted_doc_id: doc.doc_id,
+           persisted_rev: doc.rev,
+           dirty?: false,
+           ops_since_flush: 0,
+           flush_timer: nil,
+           idle_timer: nil,
+           nonempty: count_nonempty(content),
+           formula_counts: count_formulas(content),
+           cfg: config()
+         })}
+
+      {:error, :not_found} ->
+        {:stop, :not_found}
+    end
+  end
+
+  @impl true
+  def handle_call({:apply_ops, ops}, _from, state) do
+    {state, applied, errors} =
+      ops
+      |> Enum.with_index()
+      |> Enum.reduce({state, 0, []}, fn {op, index}, {st, n, errs} ->
+        case apply_one(op, st) do
+          {:ok, st} ->
+            {st, n + 1, errs}
+
+          {:error, code, message} ->
+            {st, n, [%{index: index, code: code, message: message} | errs]}
+        end
+      end)
+
+    state = if applied > 0, do: maybe_flush_or_debounce(state), else: state
+    reply = %{rev: state.rev, applied: applied, errors: Enum.reverse(errors)}
+    {:reply, {:ok, reply}, schedule_idle(state)}
+  end
+
+  def handle_call(:flush, _from, state) do
+    {:reply, :ok, schedule_idle(persist(state))}
+  end
+
+  def handle_call(:peek, _from, state) do
+    {:reply, {:ok, state.content}, schedule_idle(state)}
+  end
+
+  @impl true
+  def handle_info(:flush_debounce, state) do
+    {:noreply, persist(%{state | flush_timer: nil})}
+  end
+
+  def handle_info(:idle_stop, state) do
+    {:stop, :normal, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    persist(state)
+    :ok
+  end
+
+  # ── op application ───────────────────────────────────────────────────────
+
+  defp apply_one(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, ref} <- validate_ref(ref),
+         {:ok, cell} <- build_cell(raw),
+         :ok <- check_cap(state, tab_idx, ref, cell) do
+      {:ok, apply_cell(state, tab_idx, ref, cell)}
+    end
+  end
+
+  defp apply_one(%{"op" => "clear_cell", "tab" => tab, "ref" => ref}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, ref} <- validate_ref(ref) do
+      {:ok, apply_cell(state, tab_idx, ref, nil)}
+    end
+  end
+
+  defp apply_one(_op, _state) do
+    {:error, "malformed_op",
+     "op must be {\"op\":\"set_cell\",\"tab\":i,\"ref\":\"A1\",\"raw\":…} or " <>
+       "{\"op\":\"clear_cell\",\"tab\":i,\"ref\":\"A1\"}"}
+  end
+
+  defp fetch_tab(content, tab) when is_integer(tab) and tab >= 0 do
+    case Sheets.get_tab(content, tab) do
+      %{} -> {:ok, tab}
+      _ -> {:error, "tab_not_found", "the sheet has no tab #{tab}"}
+    end
+  end
+
+  defp fetch_tab(_content, tab),
+    do: {:error, "invalid_tab", "tab must be a non-negative integer, got #{inspect(tab)}"}
+
+  # Normalizes through format_ref so "a1" and "A1" address the same cell.
+  defp validate_ref(ref) do
+    case Sheets.parse_ref(ref) do
+      {:ok, {col, row}} when col <= @grid_max_col and row <= @grid_max_row ->
+        {:ok, Sheets.format_ref({col, row})}
+
+      {:ok, _} ->
+        {:error, "ref_out_of_bounds",
+         "ref #{inspect(ref)} is beyond the grid bounds (column #{@grid_max_col}/XFD, row #{@grid_max_row})"}
+
+      :error ->
+        {:error, "invalid_ref", "ref must be A1-style, got #{inspect(ref)}"}
+    end
+  end
+
+  # Leading "=" means formula — the importer convention; the canonical
+  # stored "f" drops the "=" (the engine tolerates both, see its moduledoc).
+  defp build_cell("=" <> formula), do: {:ok, %{"f" => formula}}
+
+  defp build_cell(raw) when is_binary(raw) or is_number(raw) or is_boolean(raw) or is_nil(raw),
+    do: {:ok, %{"v" => raw}}
+
+  defp build_cell(_raw),
+    do: {:error, "invalid_raw", "raw must be a scalar (string, number, boolean or null)"}
+
+  # Cap-aware set_cell: counts non-empty cells (the import predicate — a
+  # usable "v" or a formula) incrementally; an op that would push past the
+  # cap errors before touching the content.
+  defp check_cap(state, tab_idx, ref, cell) do
+    old_cell =
+      case Map.get(Sheets.get_tab(state.content, tab_idx), "cells") do
+        cells when is_map(cells) -> Map.get(cells, ref)
+        _ -> nil
+      end
+
+    if state.nonempty + nonempty_flag(cell) - nonempty_flag(old_cell) > state.cfg.cell_cap do
+      {:error, "cell_cap_exceeded",
+       "the sheet holds #{state.nonempty} non-empty cells; the cap is #{state.cfg.cell_cap}"}
+    else
+      :ok
+    end
+  end
+
+  defp apply_cell(state, tab_idx, ref, cell_or_nil) do
+    tabs = Map.get(state.content, "tabs")
+    old_tab = Enum.at(tabs, tab_idx)
+    old_cells = Map.get(old_tab, "cells") || %{}
+    old_cell = Map.get(old_cells, ref)
+
+    base_cells =
+      case cell_or_nil do
+        nil -> Map.delete(old_cells, ref)
+        cell -> Map.put(old_cells, ref, cell)
+      end
+
+    formula_count =
+      Map.get(state.formula_counts, tab_idx, 0) + formula_flag(cell_or_nil) -
+        formula_flag(old_cell)
+
+    new_tab = Map.put(old_tab, "cells", base_cells)
+    # Refs are tab-local (engine contract), so only the op's tab can change —
+    # and a tab with zero formula cells has nothing to derive: skip the
+    # engine entirely (the bulk-import fast path; see the moduledoc).
+    new_tab = if formula_count > 0, do: recompute_tab(new_tab), else: new_tab
+
+    changed = diff_cells(old_cells, Map.get(new_tab, "cells") || %{})
+
+    state = %{
+      state
+      | content: Map.put(state.content, "tabs", List.replace_at(tabs, tab_idx, new_tab)),
+        rev: state.rev + 1,
+        dirty?: true,
+        ops_since_flush: state.ops_since_flush + 1,
+        nonempty: state.nonempty + nonempty_flag(cell_or_nil) - nonempty_flag(old_cell),
+        formula_counts: Map.put(state.formula_counts, tab_idx, formula_count)
+    }
+
+    broadcast_delta(state, tab_idx, changed)
+    state
+  end
+
+  defp recompute_tab(tab) do
+    %{"tabs" => [tab]} = Engine.recompute(%{"tabs" => [tab]})
+    tab
+  end
+
+  # Every cell whose stored map changed — recompute dependents included;
+  # nil marks a removal.
+  defp diff_cells(old, new) do
+    for addr <- Enum.uniq(Map.keys(old) ++ Map.keys(new)),
+        Map.get(old, addr) != Map.get(new, addr),
+        into: %{} do
+      {addr, Map.get(new, addr)}
+    end
+  end
+
+  defp broadcast_delta(state, tab_idx, changed) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      topic(state.slug, state.dataset, state.workspace_id),
+      {:sheets_op, %{sheet_id: state.slug, rev: state.rev, tab: tab_idx, changed: changed}}
+    )
+  end
+
+  # ── persistence ──────────────────────────────────────────────────────────
+
+  defp maybe_flush_or_debounce(state) do
+    if state.ops_since_flush >= state.cfg.flush_after_ops do
+      persist(state)
+    else
+      arm_debounce(state)
+    end
+  end
+
+  # Persist through the canonical upsert path — engine recompute (idempotent
+  # double-compute, by design), revisions, write-through embed snapshots and
+  # the standard broadcasts all ride along. No-op when clean.
+  defp persist(%{dirty?: false} = state), do: state
+
+  defp persist(state) do
+    detect_external_change(state)
+
+    attrs = %{"doc_id" => state.slug, "content" => state.content}
+    attrs = if is_binary(state.title), do: Map.put(attrs, "title", state.title), else: attrs
+
+    case Content.upsert_document("sheet", attrs, state.dataset, source: "sheets_session") do
+      {:ok, doc} ->
+        cancel_debounce(%{
+          state
+          | dirty?: false,
+            ops_since_flush: 0,
+            persisted_doc_id: doc.doc_id,
+            persisted_rev: doc.rev
+        })
+
+      {:error, reason} ->
+        Logger.warning(
+          "[Sheets.Session] persist failed for #{state.dataset}/#{state.slug}: #{inspect(reason)} — retrying on the next debounce"
+        )
+
+        arm_debounce(%{state | ops_since_flush: 0})
+    end
+  end
+
+  # A direct mutate to the same sheet while this session lives is a
+  # DOCUMENTED conflict (M4 presence/locks territory): detect the external
+  # rev change, warn, and let this persist win.
+  defp detect_external_change(state) do
+    case Content.get_document(state.persisted_doc_id, "sheet", state.dataset) do
+      {:ok, %{rev: rev}} when rev != state.persisted_rev ->
+        Logger.warning(
+          "[Sheets.Session] external write detected on #{state.dataset}/#{state.persisted_doc_id} " <>
+            "(rev #{rev} != session's #{state.persisted_rev}) — the session's persist wins"
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  # ── timers + counters ────────────────────────────────────────────────────
+
+  defp arm_debounce(state) do
+    state = cancel_debounce(state)
+    %{state | flush_timer: Process.send_after(self(), :flush_debounce, state.cfg.debounce_ms)}
+  end
+
+  defp cancel_debounce(%{flush_timer: nil} = state), do: state
+
+  defp cancel_debounce(%{flush_timer: timer} = state) do
+    Process.cancel_timer(timer)
+    %{state | flush_timer: nil}
+  end
+
+  defp schedule_idle(state) do
+    if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
+    %{state | idle_timer: Process.send_after(self(), :idle_stop, state.cfg.idle_stop_ms)}
+  end
+
+  # Draft-first, published fallback — the export controller's precedence.
+  defp load_doc(pubid, dataset) do
+    with {:error, :not_found} <- Content.get_document(Content.draft_id(pubid), "sheet", dataset),
+         {:error, :not_found} <- Content.get_document(pubid, "sheet", dataset) do
+      {:error, :not_found}
+    else
+      {:ok, doc} -> {:ok, doc}
+    end
+  end
+
+  # The import controller's non-empty predicate: a usable "v" or a formula.
+  defp nonempty_flag(nil), do: 0
+
+  defp nonempty_flag(cell) do
+    if Map.get(cell, "v") not in [nil, ""] or is_binary(Map.get(cell, "f")), do: 1, else: 0
+  end
+
+  defp formula_flag(nil), do: 0
+  defp formula_flag(cell), do: if(is_binary(Map.get(cell, "f")), do: 1, else: 0)
+
+  defp count_nonempty(content) do
+    for tab <- Map.get(content, "tabs") || [],
+        is_map(tab),
+        {_addr, cell} <- Map.get(tab, "cells") || %{},
+        is_map(cell),
+        reduce: 0 do
+      acc -> acc + nonempty_flag(cell)
+    end
+  end
+
+  defp count_formulas(content) do
+    for {tab, idx} <- Enum.with_index(Map.get(content, "tabs") || []),
+        is_map(tab),
+        {_addr, cell} <- Map.get(tab, "cells") || %{},
+        is_map(cell),
+        reduce: %{} do
+      acc -> Map.update(acc, idx, formula_flag(cell), &(&1 + formula_flag(cell)))
+    end
+  end
+
+  defp config do
+    env = Application.get_env(:barkpark, __MODULE__, [])
+
+    %{
+      debounce_ms: Keyword.get(env, :debounce_ms, 2_000),
+      flush_after_ops: Keyword.get(env, :flush_after_ops, 25),
+      idle_stop_ms: Keyword.get(env, :idle_stop_ms, 300_000),
+      hibernate_after: Keyword.get(env, :hibernate_after, 15_000),
+      cell_cap: Keyword.get(env, :cell_cap, 50_000)
+    }
+  end
+end
