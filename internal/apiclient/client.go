@@ -497,7 +497,7 @@ func (c *Client) MutateResults(mutations []map[string]interface{}) ([]MutationRe
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("mutation error %d: %s", resp.StatusCode, string(respBody))
+		return nil, humanAPIError(resp.StatusCode, respBody)
 	}
 
 	var out struct {
@@ -507,6 +507,40 @@ func (c *Client) MutateResults(mutations []map[string]interface{}) ([]MutationRe
 		return nil, nil
 	}
 	return out.Results, nil
+}
+
+// humanAPIError turns the server's error envelope into a one-line human
+// message — the TUI status bar gets "validation_failed: priority must be an
+// integer 0..4" instead of a raw JSON blob. Unknown shapes fall back to the
+// body verbatim (clamped) so nothing is ever swallowed.
+func humanAPIError(status int, body []byte) error {
+	var env struct {
+		Error struct {
+			Code    string              `json:"code"`
+			Message string              `json:"message"`
+			Details map[string][]string `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
+		msg := env.Error.Message
+		if msg == "" {
+			msg = env.Error.Code
+		}
+		var parts []string
+		for field, reasons := range env.Error.Details {
+			parts = append(parts, field+": "+strings.Join(reasons, "; "))
+		}
+		sort.Strings(parts) // deterministic over the map
+		if len(parts) > 0 {
+			msg += " — " + strings.Join(parts, " · ")
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	raw := strings.TrimSpace(string(body))
+	if len(raw) > 200 {
+		raw = raw[:200] + "…"
+	}
+	return fmt.Errorf("error %d: %s", status, raw)
 }
 
 // Publish promotes a document's draft to published via the publish mutation.

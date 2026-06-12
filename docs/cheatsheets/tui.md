@@ -31,7 +31,7 @@ Launch `barkpark` (no args). Miller columns: structure → doc lists → editor.
 |---|---|
 | `enter` | edit field — reference opens a picker (`/` filters it live); image edits the URL |
 | | text/richText/arrays open a **textarea**: `enter` = newline / new item, `ctrl+s` = confirm |
-| `space` | toggle boolean / cycle select |
+| `space` | toggle boolean / cycle select (5+ options: `enter` opens a filterable picker) |
 | `enter` on empty slug | pre-fills from the title — `enter` again accepts |
 | datetime | accepts `now`, `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` — invalid input refuses |
 | validation | required fields show `*` + `(required)` when empty; schema patterns refuse bad commits |

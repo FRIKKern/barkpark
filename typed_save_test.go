@@ -230,3 +230,58 @@ func TestPatternCommitRefusesViolation(t *testing.T) {
 		t.Error("invalid schema regex must fail open, not lock the field")
 	}
 }
+
+// Round 3 polish: long selects open the filterable picker, short ones keep
+// the in-place cycle; color commits canonicalize #rrggbb; the API error
+// envelope renders human.
+func TestSelectRoutingByOptionCount(t *testing.T) {
+	short := Field{Name: "size", Title: "Size", Type: FieldSelect, Options: []string{"s", "m", "l"}}
+	m := typedModel([]Field{short}, map[string]string{})
+	m.startFieldEdit()
+	if m.refPicker.active {
+		t.Error("3 options should cycle in place, not open the picker")
+	}
+	if m.dirtyValues["size"] == "" {
+		t.Error("cycle should have advanced the value")
+	}
+
+	long := Field{Name: "status", Title: "Status", Type: FieldSelect,
+		Options: []string{"planning", "active", "review", "blocked", "completed", "archived"}}
+	// "status" is a ROW field (getFieldValue's special case, mirroring the
+	// server's title/status row contract) — it reads Doc.Status, not Values.
+	m = typedModel([]Field{long}, map[string]string{})
+	m.selectedDoc.Status = "review"
+	m.startFieldEdit()
+	if !m.refPicker.active {
+		t.Fatal("6 options should open the picker")
+	}
+	if m.refPicker.cursor != 3 {
+		t.Errorf("cursor should land on the current option (review=row 3), got %d", m.refPicker.cursor)
+	}
+	// Picking a row writes the option string verbatim.
+	m.refPicker.cursor = 5
+	next, _ := m.handleRefPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(model)
+	if nm.dirtyValues["status"] != "completed" {
+		t.Errorf("picked %q, want completed", nm.dirtyValues["status"])
+	}
+}
+
+func TestColorCommitCanonicalizes(t *testing.T) {
+	m := typedModel([]Field{{Name: "accent", Title: "Accent", Type: FieldColor}}, map[string]string{})
+	m.startFieldEdit()
+	m.textInput.SetValue("3B82F6")
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(model)
+	if nm.dirtyValues["accent"] != "#3b82f6" {
+		t.Errorf("color canonical = %q, want #3b82f6", nm.dirtyValues["accent"])
+	}
+
+	nm.startFieldEdit()
+	nm.textInput.SetValue("teal")
+	after, _ := nm.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	am := after.(model)
+	if !am.editing || !strings.Contains(am.status, "color") {
+		t.Errorf("named colors refuse (editing=%v status=%q)", am.editing, am.status)
+	}
+}

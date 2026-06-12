@@ -98,6 +98,36 @@ func (m *model) openRefPicker(field Field) {
 	}
 }
 
+// openOptionPicker reuses the reference-picker modal for a LONG select
+// field's options: each option becomes a synthetic row (ID == Title == the
+// option string, so commitRefPick writes the option verbatim), the (clear)
+// row clears, and `/` filtering works unchanged. Short selects keep the
+// in-place cycle (startFieldEdit's threshold).
+func (m *model) openOptionPicker(field Field) {
+	docs := make([]Doc, 0, len(field.Options))
+	for _, opt := range field.Options {
+		docs = append(docs, Doc{ID: opt, Title: opt, Status: ""})
+	}
+
+	cursor := 1
+	if cur := m.getFieldValue(field.Name); cur != "" {
+		for i, opt := range field.Options {
+			if opt == cur {
+				cursor = i + 1
+				break
+			}
+		}
+	}
+
+	m.refPicker = refPickerState{
+		active:    true,
+		fieldName: field.Name,
+		refType:   field.Title, // the modal header reads "Select <Title>"
+		items:     docs,
+		cursor:    cursor,
+	}
+}
+
 // handleRefPickerKey routes key input while the reference picker is open.
 // `/` enters filter typing; in that mode printables narrow the list and the
 // navigation keys still move over the FILTERED rows, so type-then-arrow-then-

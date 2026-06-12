@@ -1178,7 +1178,14 @@ func (m *model) startFieldEdit() tea.Cmd {
 		m.textInput.SetValue(val)
 		return textinput.Blink
 	case FieldSelect:
-		m.toggleField()
+		// Short option lists cycle in place (space muscle-memory); long ones
+		// open the filterable picker — cycling through a dozen options blind
+		// is the anti-Sanity experience.
+		if len(field.Options) > 4 {
+			m.openOptionPicker(field)
+		} else {
+			m.toggleField()
+		}
 	case FieldBoolean:
 		m.toggleField()
 	case FieldReference:
@@ -1320,6 +1327,13 @@ func (m *model) commitFieldEdit() bool {
 			return false
 		}
 		val = norm
+	case FieldColor:
+		norm, ok := normalizeHexColor(val)
+		if !ok {
+			m.setStatus("bad color — use #rrggbb", true)
+			return false
+		}
+		val = norm
 	}
 
 	// Schema pattern (validation.pattern): refuse a violating non-empty value
@@ -1394,6 +1408,25 @@ func normalizeDatetime(v string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// normalizeHexColor validates + canonicalizes a hex color: 6 hex digits with
+// or without the leading #, lowercased, # restored. Empty clears.
+func normalizeHexColor(v string) (string, bool) {
+	t := strings.TrimSpace(strings.ToLower(v))
+	if t == "" {
+		return "", true
+	}
+	t = strings.TrimPrefix(t, "#")
+	if len(t) != 6 {
+		return "", false
+	}
+	for _, r := range t {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return "", false
+		}
+	}
+	return "#" + t, true
 }
 
 // toggleField cycles select options or toggles boolean.
