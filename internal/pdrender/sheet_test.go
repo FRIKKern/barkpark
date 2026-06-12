@@ -155,3 +155,55 @@ func TestPdSheetColWidthsPadTruncate(t *testing.T) {
 		}
 	}
 }
+
+// TestSheetEmbedBlock locks the raw paper "sheet" embed path: the authored
+// {"type":"sheet","snapshot":{…}} shape the API serves renders the dense
+// value grid (NOT the unknown-block box), values-at-anchor for merges, no
+// styles, and px col_widths dropped — the documented losses in sheet.go.
+func TestSheetEmbedBlock(t *testing.T) {
+	reg := testRegistry()
+	raw := []byte(`[{"id":"s1","type":"sheet","ref":"demo","tab":0,
+	  "snapshot":{"head":["Metric","Q3","Q4"],
+	  "rows":[["Revenue","1200","3.5"],["Active?","TRUE",""]],
+	  "col_widths":[120,0,0],"merges":[[1,1,1,2]],
+	  "styles":{"0,0":{"b":true,"bg":"#ffee00"}}}}]`)
+	blocks, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
+	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
+
+	if strings.Contains(out, "unknown block") {
+		t.Fatalf("sheet embed fell through to the unknown-block box:\n%s", out)
+	}
+	// Head + every anchor value renders (merged range shows its anchor value).
+	for _, want := range []string{"METRIC", "Revenue", "1200", "3.5", "Active?", "TRUE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in sheet embed render, got:\n%s", want, out)
+		}
+	}
+	// px col_widths are dropped — no 120-char padded column.
+	for _, line := range strings.Split(out, "\n") {
+		if lw := len([]rune(line)); lw > 80 {
+			t.Errorf("line wider than ctx.Width (%d chars) — px widths leaked as char widths:\n%s", lw, line)
+		}
+	}
+}
+
+// TestSheetEmbedBlockDegenerate: no snapshot / empty snapshot never panics.
+func TestSheetEmbedBlockDegenerate(t *testing.T) {
+	reg := testRegistry()
+	cases := [][]byte{
+		[]byte(`[{"type":"sheet","ref":"x"}]`),
+		[]byte(`[{"type":"sheet","snapshot":{}}]`),
+		[]byte(`[{"type":"sheet","snapshot":{"rows":[]}}]`),
+	}
+	for _, raw := range cases {
+		blocks, err := Decode(raw)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		_ = reg.RenderDoc(blocks, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor})
+	}
+}

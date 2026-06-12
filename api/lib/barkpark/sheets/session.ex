@@ -51,10 +51,13 @@ defmodule Barkpark.Sheets.Session do
   Validation per op: the ref must be A1-style within the Excel grid bounds,
   the tab index must exist, and a `set_cell` that would push the sheet past
   the non-empty-cell cap errors (`cell_cap_exceeded`). Invalid ops are
-  REJECTED INDIVIDUALLY — the rest of the batch still applies. The mailbox
-  is the serializer: concurrent callers' ops interleave whole, last write
-  wins per cell — structural ops ride the same mailbox, so a batch never
-  observes a half-shifted grid.
+  REJECTED INDIVIDUALLY — the rest of the batch still applies. A single
+  `apply_ops/3` call carries at most 1_000 ops — beyond that the whole
+  call is refused (`{:error, :batch_too_large, n}`) before it reaches the
+  mailbox; large legitimate batches (grid pastes, big clears) chunk at the
+  caller. The mailbox is the serializer: concurrent callers' ops interleave
+  whole, last write wins per cell — structural ops ride the same mailbox,
+  so a batch never observes a half-shifted grid.
 
   ## Per-user undo/redo (M4)
 
@@ -108,7 +111,10 @@ defmodule Barkpark.Sheets.Session do
   every `flush_after_ops` ops, whichever first — and on terminate. Reads
   outside the session (GET endpoints, exports) may serve the last persisted
   row; `flush/2` is the cheap pre-read barrier (the export controller calls
-  it — a no-op when no session is live). A direct mutate to the same sheet
+  it — a no-op when no session is live). A flush whose persist FAILS
+  surfaces `{:error, reason}` to the caller — the state stays dirty and the
+  debounce retry stays armed, so read-your-writes never silently serves the
+  stale row. A direct mutate to the same sheet
   while a session lives is a DOCUMENTED conflict: the session detects the
   external rev change at persist time, logs a warning, and its persist wins
   (full conflict handling is M4 territory).
@@ -143,6 +149,13 @@ defmodule Barkpark.Sheets.Session do
 
   @call_timeout 30_000
 
+  # Per-call batch bound: one apply_ops call carries at most this many ops.
+  # Refused outright ({:error, :batch_too_large, n}) before the call reaches
+  # the session mailbox — the 50k cell cap and the 30s call timeout are the
+  # only other bounds, and neither stops a pathological million-op list.
+  # Large legitimate batches chunk at the caller (SheetGrid.send_ops/2).
+  @max_ops_per_call 1_000
+
   # Per-user undo/redo stack depth (M4, bound at the grill).
   @undo_depth 100
 
@@ -152,23 +165,37 @@ defmodule Barkpark.Sheets.Session do
   Apply `ops` (a list of wire-shaped op maps, see the moduledoc) to the
   sheet at `slug` in `dataset`, resolving-or-starting the session.
 
-  Returns `{:ok, %{rev: n, applied: n, errors: [%{index:, code:, message:}]}}`
-  or `{:error, :not_found}` when no sheet resolves for the slug.
+  Returns `{:ok, %{rev: n, applied: n, errors: [%{index:, code:, message:}]}}`,
+  `{:error, :not_found}` when no sheet resolves for the slug,
+  `{:error, :batch_too_large, n}` when `ops` exceeds `max_ops_per_call/0`,
+  or `{:error, :session_unavailable}` when the session died twice in a row
+  (see `call_session/4`).
   """
   @spec apply_ops(String.t(), String.t(), [map()]) ::
           {:ok, %{rev: non_neg_integer(), applied: non_neg_integer(), errors: [map()]}}
           | {:error, term()}
+          | {:error, :batch_too_large, pos_integer()}
   def apply_ops(slug, dataset, ops)
       when is_binary(slug) and is_binary(dataset) and is_list(ops) do
-    call_session(slug, dataset, {:apply_ops, ops})
+    case length(ops) do
+      n when n > @max_ops_per_call -> {:error, :batch_too_large, n}
+      _ -> call_session(slug, dataset, {:apply_ops, ops})
+    end
   end
+
+  @doc "The per-call `apply_ops/3` batch bound — callers chunk above it."
+  @spec max_ops_per_call() :: pos_integer()
+  def max_ops_per_call, do: @max_ops_per_call
 
   @doc """
   Ask a LIVE session to persist its unflushed state — the read-your-writes
   barrier for exports and GETs. Never starts a session: a no-op `:ok` when
-  none is registered (or it stopped concurrently).
+  none is registered (or it stopped concurrently). `{:error, reason}` when
+  the persist itself failed — the session keeps its dirty state and the
+  debounce retry stays armed, so callers must NOT serve the stale row as
+  fresh (the export controller maps this to a 503 with a retry hint).
   """
-  @spec flush(String.t(), String.t()) :: :ok
+  @spec flush(String.t(), String.t()) :: :ok | {:error, term()}
   def flush(slug, dataset) do
     case whereis(slug, dataset) do
       nil -> :ok
@@ -251,9 +278,16 @@ defmodule Barkpark.Sheets.Session do
         GenServer.call(pid, msg, @call_timeout)
       catch
         # The session idled out (or crashed) between lookup and call —
-        # restart it once; its state reloads from the persisted row.
-        :exit, {reason, {GenServer, :call, _}} when retry? and reason in [:noproc, :normal, :shutdown] ->
-          call_session(slug, dataset, msg, false)
+        # restart it once; its state reloads from the persisted row. A
+        # SECOND death in the same window is NOT retried (a crash-looping
+        # session must not become an infinite loop): the caller gets a
+        # clean error tuple instead of the raw exit.
+        :exit, {reason, {GenServer, :call, _}} when reason in [:noproc, :normal, :shutdown] ->
+          if retry? do
+            call_session(slug, dataset, msg, false)
+          else
+            {:error, :session_unavailable}
+          end
       end
     end
   end
@@ -344,8 +378,13 @@ defmodule Barkpark.Sheets.Session do
     {:reply, {:ok, reply}, schedule_idle(state)}
   end
 
+  # The flush reply carries the persist result — a failed persist must not
+  # read as :ok, or read-your-writes callers (export) silently serve the
+  # stale row. The error branch of persist_result/1 keeps the state dirty
+  # and the debounce retry armed.
   def handle_call(:flush, _from, state) do
-    {:reply, :ok, schedule_idle(persist(state))}
+    {result, state} = persist_result(state)
+    {:reply, result, schedule_idle(state)}
   end
 
   def handle_call(:peek, _from, state) do
@@ -801,10 +840,17 @@ defmodule Barkpark.Sheets.Session do
 
   # Persist through the canonical upsert path — engine recompute (idempotent
   # double-compute, by design), revisions, write-through embed snapshots and
-  # the standard broadcasts all ride along. No-op when clean.
-  defp persist(%{dirty?: false} = state), do: state
-
+  # the standard broadcasts all ride along. No-op when clean. Fire-and-forget
+  # callers (debounce, op-count flush, terminate) take the state alone;
+  # the :flush call uses persist_result/1 to surface a failed persist.
   defp persist(state) do
+    {_result, state} = persist_result(state)
+    state
+  end
+
+  defp persist_result(%{dirty?: false} = state), do: {:ok, state}
+
+  defp persist_result(state) do
     detect_external_change(state)
 
     attrs = %{"doc_id" => state.slug, "content" => state.content}
@@ -812,20 +858,21 @@ defmodule Barkpark.Sheets.Session do
 
     case Content.upsert_document("sheet", attrs, state.dataset, source: "sheets_session") do
       {:ok, doc} ->
-        cancel_debounce(%{
-          state
-          | dirty?: false,
-            ops_since_flush: 0,
-            persisted_doc_id: doc.doc_id,
-            persisted_rev: doc.rev
-        })
+        {:ok,
+         cancel_debounce(%{
+           state
+           | dirty?: false,
+             ops_since_flush: 0,
+             persisted_doc_id: doc.doc_id,
+             persisted_rev: doc.rev
+         })}
 
       {:error, reason} ->
         Logger.warning(
           "[Sheets.Session] persist failed for #{state.dataset}/#{state.slug}: #{inspect(reason)} — retrying on the next debounce"
         )
 
-        arm_debounce(%{state | ops_since_flush: 0})
+        {{:error, reason}, arm_debounce(%{state | ops_since_flush: 0})}
     end
   end
 

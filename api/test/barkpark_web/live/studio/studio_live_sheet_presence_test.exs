@@ -97,8 +97,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     {view, with_target(view, "#sheet-grid-#{slug}"), html}
   end
 
-  defp cell(view, ref) do
-    view |> element(~s(td[data-ref="#{ref}"])) |> render()
+  # Peer decoration lives on the overlay layer (one box per cursor, one rect
+  # per selection), never on the tds — see the SheetGrid moduledoc. Missing
+  # boxes render as "" so `eventually` retries instead of raising.
+  defp peer_cursor(view, ref) do
+    selector = ~s(.sheet-peer-cursor[data-peer-cell="#{ref}"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+  end
+
+  defp peer_selection(view, range) do
+    selector = ~s(.sheet-peer-sel[data-peer-range="#{range}"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
   end
 
   # Presence diffs (Phoenix.Tracker) and LV re-renders are asynchronous —
@@ -123,17 +132,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
     # Each sees the OTHER's name tag parked at A1 (the tracked seed meta)…
     eventually(fn ->
-      assert cell(view1, "A1") =~ "sheet-peer-tag"
-      assert cell(view1, "A1") =~ "Bob"
-      assert cell(view2, "A1") =~ "Alice"
+      assert peer_cursor(view1, "A1") =~ "sheet-peer-tag"
+      assert peer_cursor(view1, "A1") =~ "Bob"
+      assert peer_cursor(view2, "A1") =~ "Alice"
     end)
 
     # …never their own (self is excluded from the peer list), and the tag
     # carries the deterministic palette color for the peer's user_id.
-    refute cell(view1, "A1") =~ "Alice"
-    refute cell(view2, "A1") =~ "Bob"
-    assert cell(view1, "A1") =~ "background: #{PresenceState.pick_color("bob-id-002")}"
-    assert cell(view2, "A1") =~ "background: #{PresenceState.pick_color("alice-id-001")}"
+    refute peer_cursor(view1, "A1") =~ "Alice"
+    refute peer_cursor(view2, "A1") =~ "Bob"
+    assert peer_cursor(view1, "A1") =~ "background: #{PresenceState.pick_color("bob-id-002")}"
+    assert peer_cursor(view2, "A1") =~ "background: #{PresenceState.pick_color("alice-id-001")}"
   end
 
   test "colors are deterministic per user_id from the fixed palette" do
@@ -153,23 +162,24 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     {view1, _t1, _} = open_as!("sp-cursor", "alice-id-001", "Alice")
     {_view2, t2, _} = open_as!("sp-cursor", "bob-id-002", "Bob")
 
-    # Cursor move — the tag leaves A1 and lands on B4 with the outline class.
+    # Cursor move — the box leaves A1 and lands on B4 with the name tag.
     render_hook(t2, "presence-meta", %{"active" => "B4", "selection" => nil})
 
     eventually(fn ->
-      assert cell(view1, "B4") =~ "sheet-peer-cursor"
-      assert cell(view1, "B4") =~ "Bob"
-      refute cell(view1, "A1") =~ "Bob"
+      assert peer_cursor(view1, "B4") =~ "sheet-peer-cursor"
+      assert peer_cursor(view1, "B4") =~ "Bob"
+      refute peer_cursor(view1, "A1") =~ "Bob"
     end)
 
-    # Selection — every cell of B2:C3 gets the translucent overlay class;
-    # a cell outside the rect stays clean.
+    # Selection — ONE translucent rect covering exactly B2:C3 (default
+    # 88x24 cells: x 44+88, y 25+24, two columns by two rows); anything
+    # outside the rect stays clean because the rect ends at C3's edges.
     render_hook(t2, "presence-meta", %{"active" => "B2", "selection" => "B2:C3"})
 
     eventually(fn ->
-      assert cell(view1, "B2") =~ "sheet-peer-sel"
-      assert cell(view1, "C3") =~ "sheet-peer-sel"
-      refute cell(view1, "D4") =~ "sheet-peer-sel"
+      sel = peer_selection(view1, "B2:C3")
+      assert sel =~ "sheet-peer-sel"
+      assert sel =~ "left: 132px; top: 49px; width: 176px; height: 48px"
     end)
   end
 
@@ -178,7 +188,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     {view1, _t1, _} = open_as!("sp-junk", "alice-id-001", "Alice")
     {_view2, t2, _} = open_as!("sp-junk", "bob-id-002", "Bob")
 
-    eventually(fn -> assert cell(view1, "A1") =~ "Bob" end)
+    eventually(fn -> assert peer_cursor(view1, "A1") =~ "Bob" end)
 
     render_hook(t2, "presence-meta", %{"active" => "not-a-ref", "selection" => "junk"})
 
@@ -196,8 +206,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     render_hook(t2, "edit-start", %{})
 
     eventually(fn ->
-      assert cell(view1, "B2") =~ "sheet-peer-editing"
-      assert cell(view1, "B2") =~ "Bob"
+      assert peer_cursor(view1, "B2") =~ "sheet-peer-editing"
+      assert peer_cursor(view1, "B2") =~ "Bob"
     end)
 
     render_hook(t2, "edit-commit", %{"value" => "42", "move" => "none"})
@@ -211,13 +221,13 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
     # Cancel clears it too.
     render_hook(t2, "edit-start", %{})
-    eventually(fn -> assert cell(view1, "B2") =~ "sheet-peer-editing" end)
+    eventually(fn -> assert peer_cursor(view1, "B2") =~ "sheet-peer-editing" end)
     render_hook(t2, "edit-cancel", %{})
     eventually(fn -> refute render(view1) =~ "sheet-peer-editing" end)
 
     # view2 never saw a tag of ITSELF on the cell it edited (Alice's tag
     # sits parked at A1 — that one is legitimate).
-    refute cell(view2, "B2") =~ "sheet-peer-tag"
+    refute peer_cursor(view2, "B2") =~ "sheet-peer-tag"
   end
 
   # ── departure ──────────────────────────────────────────────────────────────
@@ -227,13 +237,82 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     {view1, _t1, _} = open_as!("sp-leave", "alice-id-001", "Alice")
     {view2, _t2, _} = open_as!("sp-leave", "bob-id-002", "Bob")
 
-    eventually(fn -> assert cell(view1, "A1") =~ "Bob" end)
+    eventually(fn -> assert peer_cursor(view1, "A1") =~ "Bob" end)
 
     # Process exit -> presence leave -> the tag disappears for the survivor.
     Process.flag(:trap_exit, true)
     GenServer.stop(view2.pid)
 
     eventually(fn -> refute render(view1) =~ "Bob" end)
+  end
+
+  # ── render cost (review-phase measurement) ─────────────────────────────────
+
+  test "MEASURE: a presence frame on a 500-row rendered sheet re-renders within budget" do
+    cells =
+      for r <- 1..500, c <- 1..8, into: %{} do
+        {"#{<<?A + c - 1>>}#{r}", %{"v" => "r#{r}c#{c}"}}
+      end
+
+    create_sheet!("sp-bench", cells)
+    {view, _t, _} = open_as!("sp-bench", "alice-id-001", "Alice")
+    assert render(view) =~ ~s(data-ref="H500")
+
+    # Synthetic peer frames pushed straight at the component — the same
+    # send_update spine StudioLive's presence_diff handler rides. The
+    # :sys.get_state barrier and the send_update leave THIS process, so
+    # FIFO ordering guarantees the timed window covers the component
+    # update + re-render + diff, nothing async. The barrier itself copies
+    # the LV state to the test process (~ms on a 4_000-cell sheet), so the
+    # honest per-frame cost is moving MINUS the no-op baseline: a no-op
+    # frame (identical presences) marks no assigns changed and skips the
+    # render outright, leaving pure barrier overhead.
+    frame = fn ref ->
+      peer = %{
+        user_id: "bench-bob",
+        name: "Bob",
+        color: nil,
+        tab: 0,
+        active: ref,
+        selection: "C2:D5",
+        editing: nil
+      }
+
+      {us, _} =
+        :timer.tc(fn ->
+          Phoenix.LiveView.send_update(view.pid, BarkparkWeb.Studio.SheetGrid,
+            id: "sheet-grid-sp-bench",
+            presences: [peer]
+          )
+
+          :sys.get_state(view.pid)
+        end)
+
+      us
+    end
+
+    median = fn times -> times |> Enum.sort() |> Enum.at(div(length(times), 2)) end
+
+    [_warmup | moving] = for i <- 0..10, do: frame.("B#{i + 2}")
+    [_warmup | static] = for _ <- 0..10, do: frame.("B12")
+
+    moving_ms = median.(moving) / 1000
+    baseline_ms = median.(static) / 1000
+    frame_ms = max(moving_ms - baseline_ms, 0.0)
+
+    # The frames really re-rendered: the last cursor landed on B12.
+    assert peer_cursor(view, "B12") =~ "Bob"
+
+    IO.puts(
+      "[sheets-presence-bench] 500-row (10-col) presence frame: " <>
+        "#{Float.round(frame_ms, 2)}ms server cost " <>
+        "(moving #{Float.round(moving_ms, 2)}ms - barrier baseline #{Float.round(baseline_ms, 2)}ms, n=10 medians)"
+    )
+
+    # The 10ms review budget, with headroom for slow CI boxes — before the
+    # overlay split + derive_grid persistence this measured ~15ms (a full
+    # grid-body re-render per frame); now only the overlay layer re-renders.
+    assert frame_ms < 10
   end
 
   # ── bystander read access ──────────────────────────────────────────────────

@@ -81,7 +81,8 @@ defmodule Barkpark.Sheets do
   portable-doc block stores under `"snapshot"`:
 
     * `"rows"` — dense 2-D value grid, row-major, bounded by the max occupied
-      row/col. Every cell is `to_string(v)`; gaps pad with `""`.
+      row/col. Every cell is `to_string(v)` (booleans as `"TRUE"`/`"FALSE"`,
+      matching the Studio grid's display); gaps pad with `""`.
     * `"head"` — present only when the tab freezes at least one row; row 1
       becomes the column-label list and data rows start at row 2.
     * `"col_widths"` — present only when the tab carries a usable
@@ -195,7 +196,12 @@ defmodule Barkpark.Sheets do
 
   defp cell_value(%{"v" => v}) when is_binary(v), do: v
   defp cell_value(%{"v" => v}) when is_number(v), do: to_string(v)
-  defp cell_value(%{"v" => v}) when is_boolean(v), do: to_string(v)
+  # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
+  # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's
+  # uppercase; every snapshot surface (paper embeds, csv/md/html exports, the
+  # TUI) must show the SAME string (lock: sheets_parity_test.exs).
+  defp cell_value(%{"v" => true}), do: "TRUE"
+  defp cell_value(%{"v" => false}), do: "FALSE"
   defp cell_value(_), do: ""
 
   # The schema stores frozen_rows as a string field; in-memory writers may

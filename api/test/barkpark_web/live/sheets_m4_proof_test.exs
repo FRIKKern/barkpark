@@ -93,8 +93,21 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
     view |> element(~s(td[data-ref="#{ref}"])) |> render()
   end
 
-  # The selection overlay paints as an inset rgba() box-shadow derived from
-  # the peer's palette hex — same conversion the component applies.
+  # Peer decoration lives on the overlay layer (one box per cursor, one
+  # rect per selection), never on the tds — see the SheetGrid moduledoc.
+  # Missing boxes render as "" so `eventually` retries instead of raising.
+  defp peer_cursor(view, ref) do
+    selector = ~s(.sheet-peer-cursor[data-peer-cell="#{ref}"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+  end
+
+  defp peer_selection(view, range) do
+    selector = ~s(.sheet-peer-sel[data-peer-range="#{range}"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+  end
+
+  # The selection rect paints a translucent rgba() fill derived from the
+  # peer's palette hex — same conversion the component applies.
   defp overlay_rgba("#" <> hex) do
     [r, g, b] = for i <- [0, 2, 4], do: hex |> String.slice(i, 2) |> String.to_integer(16)
     "rgba(#{r}, #{g}, #{b}, 0.12)"
@@ -165,7 +178,7 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
     render_hook(kari_grid, "presence-meta", %{"active" => "C3", "selection" => nil})
 
     eventually(fn ->
-      c3 = cell(ola, "C3")
+      c3 = peer_cursor(ola, "C3")
       assert c3 =~ "sheet-peer-cursor"
       assert c3 =~ "Kari"
       assert c3 =~ "background: #{kari_color}"
@@ -173,23 +186,26 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
 
     # Self is never a peer: Kari's own C3 (where her cursor sits) carries
     # no peer tag in HER view — only the in-bar avatar shows herself.
-    refute cell(kari, "C3") =~ "sheet-peer-tag"
+    refute peer_cursor(kari, "C3") =~ "sheet-peer-tag"
 
     # ── 2. Ola selects B2:D5 — Kari sees the overlay in Ola's color ────────
     render_hook(ola_grid, "presence-meta", %{"active" => "B2", "selection" => "B2:D5"})
 
     eventually(fn ->
-      assert cell(kari, "B2") =~ "sheet-peer-sel"
-      assert cell(kari, "D5") =~ "sheet-peer-sel"
-      assert cell(kari, "C4") =~ overlay_rgba(ola_color)
-      refute cell(kari, "E6") =~ "sheet-peer-sel"
+      sel = peer_selection(kari, "B2:D5")
+      assert sel =~ "sheet-peer-sel"
+      assert sel =~ overlay_rgba(ola_color)
+      # ONE rect covering exactly B2..D5 (default 88x24 cells, x 44+88,
+      # y 25+24, three columns by four rows) — E6 stays clean because the
+      # rect ends at D5's edges.
+      assert sel =~ "left: 132px; top: 49px; width: 264px; height: 96px"
     end)
 
     # ── 3. Kari edits C3 — soft lock up, 4200 commits, lock clears ─────────
     render_hook(kari_grid, "edit-start", %{})
 
     eventually(fn ->
-      c3 = cell(ola, "C3")
+      c3 = peer_cursor(ola, "C3")
       assert c3 =~ "sheet-peer-editing"
       assert c3 =~ "Kari"
     end)

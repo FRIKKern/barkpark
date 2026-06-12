@@ -13,6 +13,11 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   (0-based, default 0); xlsx/md/html convert the whole document. xlsx, csv,
   tsv and md send as attachments; html renders inline (it is a viewable
   page).
+
+  Read-your-writes: every export flushes the live session first. A flush
+  whose persist fails is a 503 (`flush_failed`, `retry-after: 2`) — the
+  persisted row is stale and must not be served as fresh; the session's
+  debounce retry stays armed, so a retry shortly succeeds.
   """
 
   use BarkparkWeb, :controller
@@ -89,17 +94,24 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
 
     # M1 read-your-writes: a live session's memory is authoritative — ask it
     # to persist its debounced state before the read. Cheap, and a no-op
-    # when no session is live for this sheet.
-    Barkpark.Sheets.Session.flush(slug, dataset)
+    # when no session is live for this sheet. A FAILED persist means the
+    # row below is stale — surface a clean 503 instead of serving it; the
+    # session keeps retrying on its debounce, so the hint is honest.
+    case Barkpark.Sheets.Session.flush(slug, dataset) do
+      :ok ->
+        with {:error, :not_found} <-
+               Content.get_document(Content.draft_id(slug), "sheet", dataset),
+             {:error, :not_found} <-
+               Content.get_document(Content.published_id(slug), "sheet", dataset) do
+          {:error, :not_found, "not_found",
+           "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
+        else
+          {:ok, doc} -> {:ok, doc}
+        end
 
-    with {:error, :not_found} <-
-           Content.get_document(Content.draft_id(slug), "sheet", dataset),
-         {:error, :not_found} <-
-           Content.get_document(Content.published_id(slug), "sheet", dataset) do
-      {:error, :not_found, "not_found",
-       "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
-    else
-      {:ok, doc} -> {:ok, doc}
+      {:error, _reason} ->
+        {:error, :service_unavailable, "flush_failed",
+         "the sheet's latest edits could not be persisted — retry in a few seconds"}
     end
   end
 
@@ -139,6 +151,15 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
 
   defp attachment(conn, filename) do
     put_resp_header(conn, "content-disposition", ~s(attachment; filename="#{filename}"))
+  end
+
+  # The 503 carries the machine-readable retry hint (the session's debounce
+  # is 2s, so the next attempt usually lands after the armed retry).
+  defp error_json(conn, {:error, :service_unavailable, code, message}) do
+    conn
+    |> put_resp_header("retry-after", "2")
+    |> put_status(:service_unavailable)
+    |> json(%{error: %{code: code, message: message}})
   end
 
   defp error_json(conn, {:error, status, code, message}) do

@@ -3034,7 +3034,7 @@
       border-bottom: 1px solid var(--border);
     }
     .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
-    .sheet-scroll { flex: 1; overflow: auto; min-height: 0; }
+    .sheet-scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
     .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; }
     .sheet-table th, .sheet-table td {
       border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
@@ -3052,10 +3052,15 @@
     .sheet-cell.sheet-active { outline: 2px solid #3b82f6; outline-offset: -2px; }
     .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
-    /* Collaborator presence (Sheets M4): cursor outline + selection overlay
-       arrive as inline inset box-shadows; the name tag pins to the cell's
-       top-right corner (inside — the td clips overflow). */
-    .sheet-cell.sheet-peer-cursor { position: relative; }
+    /* Collaborator presence (Sheets M4): cursors + selections paint on a
+       dedicated overlay layer SIBLING to the table (never on the tds — a
+       presence frame must not re-render the grid body, see the SheetGrid
+       moduledoc). The layer's boxes are positioned with the same px sums
+       the frozen bands use, scroll with the content (absolute inside the
+       relative .sheet-scroll) and pass clicks through. z-auto keeps them
+       above plain cells but under the sticky frozen bands (z >= 1). */
+    .sheet-peer-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+    .sheet-peer-cursor, .sheet-peer-sel { position: absolute; overflow: hidden; }
     .sheet-peer-tag {
       position: absolute; top: 0; right: 0; z-index: 1; pointer-events: none;
       max-width: 90%; overflow: hidden; text-overflow: ellipsis;

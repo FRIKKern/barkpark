@@ -28,6 +28,31 @@ import (
 // + BorderStyle(ctx.Theme.Rule) pattern as PdTable for visual consistency.
 type sheetRenderer struct{ ir InlineRenderer }
 
+// ── raw "sheet" embed blocks ────────────────────────────────────────────────
+// A paper embeds a sheet document as {"type":"sheet","ref":…,"snapshot":{…}} —
+// the raw authored shape the API serves. The snapshot carries the same dense
+// grid PdSheet consumes (head/rows), nested one level down, so this adapter
+// lifts snapshot.head/snapshot.rows onto a PdSheet-shaped block and delegates.
+//
+// Documented losses (values-first fidelity):
+//   - snapshot "merges" are ignored — a merged range renders as its
+//     anchor-cell value (covered cells are "" in the dense grid); there is
+//     no colspan in a character grid.
+//   - snapshot "styles" (bold/italic/background/align) do not travel.
+//   - snapshot "col_widths" are PIXEL hints from the Studio grid; PdSheet
+//     widths are character counts, so px values are dropped and columns
+//     auto-size by content.
+type sheetBlockRenderer struct{ sr sheetRenderer }
+
+func (sb sheetBlockRenderer) Render(b Block, ctx RenderCtx) []string {
+	attrs := map[string]any{}
+	if snap, ok := b.Attrs["snapshot"].(map[string]any); ok {
+		attrs["head"] = snap["head"]
+		attrs["rows"] = snap["rows"]
+	}
+	return sb.sr.Render(Block{Type: "PdSheet", Attrs: attrs}, ctx)
+}
+
 func (sr sheetRenderer) Render(b Block, ctx RenderCtx) []string {
 	head := attrSlice(b.Attrs, "head")
 	rows := attrSlice(b.Attrs, "rows")

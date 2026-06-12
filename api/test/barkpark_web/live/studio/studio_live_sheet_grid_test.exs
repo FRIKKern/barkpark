@@ -259,6 +259,28 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
            } = peek_cells("sg-paste")
   end
 
+  test "a paste larger than the session's per-call batch cap chunks and fully applies", %{conn: conn} do
+    create_sheet!("sg-paste-big", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-paste-big")
+
+    # 101 rows x 10 cols = 1_010 cells — one op over the 1_000-op cap, so
+    # send_ops must chunk (an unchunked call would be refused whole as
+    # batch_too_large and surface the "edit failed" notice).
+    cap = Session.max_ops_per_call()
+    tsv = Enum.map_join(1..101, "\n", fn r -> Enum.map_join(1..10, "\t", &"r#{r}c#{&1}") end)
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "paste", %{"tsv" => tsv})
+
+    refute render(view) =~ "edit failed"
+
+    cells = peek_cells("sg-paste-big")
+    assert map_size(cells) == 1_010
+    assert map_size(cells) > cap
+    assert cells["A1"] == %{"v" => "r1c1"}
+    assert cells["J101"] == %{"v" => "r101c10"}
+  end
+
   # ── structure ops ──────────────────────────────────────────────────────────
 
   test "inserting a row via the header menu shifts the grid", %{conn: conn} do

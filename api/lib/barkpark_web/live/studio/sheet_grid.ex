@@ -65,10 +65,29 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   process): the hook's client-throttled (~10/s) `presence-meta` frames carry
   the active cell + selection range; the `editing` flag is set on edit-start
   and cleared on commit/cancel — a soft lock, purely visual, LWW stands.
-  Rendering: a collaborator's cursor cell gets a colored outline + name tag
-  (emphasized while editing), selection ranges a translucent overlay; colors
-  are the user's studio identity color (deterministic per user_id from
-  `PresenceState`'s fixed palette when none is stored).
+  Rendering: a collaborator's cursor renders as a colored outline box + name
+  tag (emphasized while editing), a selection range as ONE translucent rect;
+  colors are the user's studio identity color (deterministic per user_id
+  from `PresenceState`'s fixed palette when none is stored).
+
+  Presence paints on a dedicated absolutely-positioned overlay layer
+  (`peer_layer/1`) SIBLING to the table, never inside the cell
+  comprehension — deliberately: presence frames are the hottest re-render
+  trigger (up to ~10/s per moving peer), and when peer decoration lived on
+  the `<td>`s every frame re-evaluated the full grid body. Two halves make
+  the skip real (review-phase measurement, 500-row × 10-col sheet,
+  MIX_ENV=test, 2026-06): the overlay split keeps peer assigns out of the
+  table's dynamics, and `derive_grid/1` persists every grid assign on the
+  socket in update/2 — assigns computed in render/1 are render-local, so
+  they re-mark as changed on every call and silently defeat LiveView's
+  equality-based change tracking. Before: ~15ms server cost per presence
+  frame (full grid re-render); after: ~0.3ms (only the overlay layer
+  re-renders) — the live lock is the "MEASURE:" test in
+  `studio_live_sheet_presence_test.exs`, budget 10ms. The geometry reuses
+  the frozen-band px math (`left_px`/`top_px`), so overlay boxes align
+  with the cells by construction; boxes scroll with the content (the
+  layer is absolutely positioned inside `.sheet-scroll`) and slide UNDER
+  frozen bands like any non-sticky cell.
   """
 
   use BarkparkWeb, :live_component
@@ -112,7 +131,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.
   @impl true
   def update(%{sheets_op: payload}, socket) do
-    {:ok, apply_delta(socket, payload)}
+    {:ok, socket |> apply_delta(payload) |> derive_grid()}
   end
 
   def update(assigns, socket) do
@@ -121,6 +140,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         socket,
         Map.take(assigns, [:id, :doc, :dataset, :is_draft, :read_only, :user_id, :presence_topic, :presences])
       )
+
+    socket = derive_editable(socket)
 
     if socket.assigns[:content] do
       {:ok, socket}
@@ -136,8 +157,49 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           {:error, :no_session} -> doc.content || %{}
         end
 
-      {:ok, assign(socket, slug: slug, content: content)}
+      {:ok, socket |> assign(slug: slug, content: content) |> derive_grid()}
     end
+  end
+
+  # ── derived assigns (the change-tracking contract) ────────────────────────
+  #
+  # Everything the grid BODY renders from is derived HERE — on content/tab
+  # changes — and persisted on the socket, never computed in render/1.
+  # Persisted assigns get Phoenix's equality-based change tracking, so an
+  # update that does NOT touch the grid (a presence frame, ~10/s per moving
+  # peer) marks none of these changed and the 500-row table diff is skipped
+  # wholesale. Assigns computed in render/1 are local to that call: they
+  # re-mark as changed on EVERY render and silently defeat the tracking
+  # (measured: full-grid re-render per presence frame — see the moduledoc).
+  # Call sites: both update/2 clauses (mount, deltas/refetch) and the
+  # tab-switch handler — the only places content or the active tab change.
+  defp derive_grid(socket) do
+    all_tabs = Map.get(socket.assigns.content || %{}, "tabs") || []
+    tab = Enum.at(all_tabs, socket.assigns.tab) || %{"name" => "Sheet 1", "cells" => %{}}
+    {cols, rows, used_rows} = grid_dims(tab)
+    {spans, covered} = merge_maps(tab, cols, rows)
+
+    assign(socket,
+      all_tabs: all_tabs,
+      cols: cols,
+      rows: rows,
+      used_rows: used_rows,
+      truncated: used_rows > @max_rows,
+      cap_rows: @max_rows,
+      cells: Map.get(tab, "cells") || %{},
+      spans: spans,
+      covered: covered,
+      col_widths: Map.get(tab, "col_widths") || %{},
+      row_heights: Map.get(tab, "row_heights") || %{},
+      frozen_cols: clamp_frozen(Map.get(tab, "frozen_cols"), cols),
+      frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows)
+    )
+  end
+
+  # `editable` rides the same persistence rule (it gates whole template
+  # subtrees): derived on update (read_only may arrive) and on toggle-mode.
+  defp derive_editable(socket) do
+    assign(socket, editable: socket.assigns.mode == :edit and not socket.assigns.read_only)
   end
 
   # ── delta application ───────────────────────────────────────────────────
@@ -375,6 +437,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        menu: nil,
        renaming_tab: nil
      )
+     |> derive_grid()
      |> push_presence(%{tab: to_int(idx), active: "A1", selection: nil, editing: nil})}
   end
 
@@ -415,11 +478,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("toggle-mode", _params, socket) do
     {:noreply,
-     assign(socket,
+     socket
+     |> assign(
        mode: if(socket.assigns.mode == :edit, do: :view, else: :edit),
        editing: nil,
        menu: nil
-     )}
+     )
+     |> derive_editable()}
   end
 
   def handle_event("notice-dismiss", _params, socket) do
@@ -448,6 +513,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # stamped with the studio identity's user_id so the session records
   # per-user undo stacks. Read-only hosts (the public reader) drop EVERY
   # mutation here — the server-side half of stripping the affordances.
+  #
+  # The session refuses batches over its per-call bound (batch_too_large) —
+  # a big TSV paste or clear-selection can exceed it, so the batch chunks
+  # here; the session's mailbox serializes the chunks back-to-back and the
+  # per-op semantics (individual rejection, LWW) are unchanged.
   defp send_ops(socket, []), do: socket
 
   defp send_ops(%{assigns: %{read_only: true}} = socket, _ops), do: socket
@@ -462,11 +532,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           ops
       end
 
-    case Session.apply_ops(socket.assigns.slug, socket.assigns.dataset, ops) do
-      {:ok, %{errors: []}} ->
+    result =
+      ops
+      |> Enum.chunk_every(Session.max_ops_per_call())
+      |> Enum.reduce_while({:ok, []}, fn chunk, {:ok, errors} ->
+        case Session.apply_ops(socket.assigns.slug, socket.assigns.dataset, chunk) do
+          {:ok, %{errors: chunk_errors}} -> {:cont, {:ok, errors ++ chunk_errors}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+
+    case result do
+      {:ok, []} ->
         assign(socket, notice: nil)
 
-      {:ok, %{errors: [%{message: message} | _] = errors}} ->
+      {:ok, [%{message: message} | _] = errors} ->
         assign(socket, notice: "#{length(errors)} op(s) rejected: #{message}")
 
       {:error, reason} ->
@@ -544,30 +624,54 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
-  # `{cursor-cells, selection-cells}` for the rendered bounds:
-  # `peer_active` maps {c, r} → peers whose cursor sits there (name tags +
-  # outlines); `peer_sel` maps {c, r} → overlay colors. Ranges clip to the
-  # rendered grid, out-of-bounds cursors drop.
-  defp peer_maps(peers, cols, rows) do
-    Enum.reduce(peers, {%{}, %{}}, fn peer, {act, sel} ->
-      act =
+  # `{cursor-boxes, selection-rects}` for the overlay layer, in table px
+  # (the same `left_px`/`top_px` sums the frozen bands pin with, so the
+  # boxes align with the cells by construction). One box per peer cursor,
+  # ONE rect per peer selection — never per cell: the layer must stay tiny
+  # so a presence frame re-renders boxes, not the grid body. Ranges clip to
+  # the rendered grid, out-of-bounds cursors drop.
+  defp peer_boxes(peers, cols, rows, col_widths, row_heights) do
+    Enum.reduce(peers, {[], []}, fn peer, {cursors, sels} ->
+      cursors =
         case cursor_pos(peer, cols, rows) do
-          nil -> act
-          pos -> Map.update(act, pos, [peer], &(&1 ++ [peer]))
+          nil ->
+            cursors
+
+          {c, r} ->
+            box = %{
+              ref: Sheets.format_ref({c, r}),
+              left: left_px(c, col_widths),
+              top: top_px(r, row_heights),
+              w: col_px(col_widths, c),
+              h: row_px(row_heights, r),
+              peer: peer
+            }
+
+            [box | cursors]
         end
 
-      sel =
+      sels =
         case parse_range(peer.selection) do
           {:ok, {c1, r1, c2, r2}} when c1 <= cols and r1 <= rows ->
-            for c <- c1..min(c2, cols), r <- r1..min(r2, rows), reduce: sel do
-              acc -> Map.update(acc, {c, r}, [peer.color], &(&1 ++ [peer.color]))
-            end
+            c2 = min(c2, cols)
+            r2 = min(r2, rows)
+
+            rect = %{
+              range: peer.selection,
+              color: peer.color,
+              left: left_px(c1, col_widths),
+              top: top_px(r1, row_heights),
+              w: Enum.sum(for c <- c1..c2, do: col_px(col_widths, c)),
+              h: Enum.sum(for r <- r1..r2, do: row_px(row_heights, r))
+            }
+
+            [rect | sels]
 
           _ ->
-            sel
+            sels
         end
 
-      {act, sel}
+      {cursors, sels}
     end)
   end
 
@@ -582,25 +686,6 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
-  # Per-cell presence decoration: outline shadow per cursor + translucent
-  # fill per selection, both as inset box-shadows so they compose with the
-  # cell's own background and never move layout.
-  defp peer_deco(c, r, peer_active, peer_sel) do
-    cursors = Map.get(peer_active, {c, r}, [])
-    sel_colors = Map.get(peer_sel, {c, r}, [])
-
-    shadows =
-      Enum.map(cursors, &"inset 0 0 0 2px #{&1.color}") ++
-        Enum.map(sel_colors, &"inset 0 0 0 9999px #{rgba(&1, 0.12)}")
-
-    classes =
-      if(cursors != [], do: " sheet-peer-cursor", else: "") <>
-        if(sel_colors != [], do: " sheet-peer-sel", else: "")
-
-    css = if shadows == [], do: "", else: " box-shadow: #{Enum.join(shadows, ", ")};"
-    {classes, css}
-  end
-
   defp rgba("#" <> hex, alpha) do
     [r, g, b] =
       for i <- [0, 2, 4], do: hex |> String.slice(i, 2) |> String.to_integer(16)
@@ -608,9 +693,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     "rgba(#{r}, #{g}, #{b}, #{alpha})"
   end
 
-  defp td_style(base, ""), do: base
-  defp td_style(nil, peer_css), do: peer_css
-  defp td_style(base, peer_css), do: base <> peer_css
+  # The presence overlay — absolutely positioned boxes inside .sheet-scroll,
+  # painting cursor outlines (inset shadow + name tag) and selection rects
+  # (translucent fill) OVER the table without ever touching its assigns.
+  # pointer-events: none (CSS), so clicks fall through to the cells.
+  defp peer_layer(assigns) do
+    ~H"""
+    <div :if={@cursors != [] or @sels != []} class="sheet-peer-layer" data-test-id="sheet-peer-layer">
+      <div
+        :for={sel <- @sels}
+        class="sheet-peer-sel"
+        data-peer-range={sel.range}
+        style={"left: #{sel.left}px; top: #{sel.top}px; width: #{sel.w}px; height: #{sel.h}px; background: #{rgba(sel.color, 0.12)};"}
+      >
+      </div>
+      <div
+        :for={cur <- @cursors}
+        class="sheet-peer-cursor"
+        data-peer-cell={cur.ref}
+        style={"left: #{cur.left}px; top: #{cur.top}px; width: #{cur.w}px; height: #{cur.h}px; box-shadow: inset 0 0 0 2px #{cur.peer.color};"}
+      >
+        <span
+          class={"sheet-peer-tag" <> if(cur.peer.editing, do: " sheet-peer-editing", else: "")}
+          style={"background: #{cur.peer.color};"}
+          data-test-id="sheet-peer-tag"
+        ><%= cur.peer.name %></span>
+      </div>
+    </div>
+    """
+  end
 
   # ── grid geometry ────────────────────────────────────────────────────────
 
@@ -691,6 +802,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   defp selection_rect({c1, r1}, {c2, r2}),
     do: {min(c1, c2), max(c1, c2), min(r1, r2), max(r1, r2)}
+
+  # Pure attr expressions for the template (tracked on @active/@anchor/
+  # @read_only — never re-marked by unrelated updates). The reader strips
+  # the active-cell/selection highlight — {0, 0} sits off the 1-based grid,
+  # so no cell matches.
+  defp grid_sel(_active, _anchor, true), do: {0, 0, 0, 0}
+  defp grid_sel(active, anchor, _read_only), do: selection_rect(active, anchor)
+
+  defp grid_cursor(_active, true), do: {0, 0}
+  defp grid_cursor(active, _read_only), do: active
+
+  defp bar_value(cells, active), do: raw_of(Map.get(cells, Sheets.format_ref(active)))
 
   defp move(pos, nil, _dims), do: pos
 
@@ -822,44 +945,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   @impl true
   def render(assigns) do
-    all_tabs = Map.get(assigns.content || %{}, "tabs") || []
-    tab = Enum.at(all_tabs, assigns.tab) || %{"name" => "Sheet 1", "cells" => %{}}
-    {cols, rows, used_rows} = grid_dims(tab)
-    cells = Map.get(tab, "cells") || %{}
-    {spans, covered} = merge_maps(tab, cols, rows)
-    col_widths = Map.get(tab, "col_widths") || %{}
-    row_heights = Map.get(tab, "row_heights") || %{}
-
-    {peer_active, peer_sel} =
+    # ONLY the presence-derived assigns are computed here — they change on
+    # (almost) every presence frame and feed nothing but the tiny overlay
+    # layer. Everything the grid body needs is persisted by derive_grid/1
+    # (see its comment for why render-local assigns would break tracking).
+    {peer_cursors, peer_sels} =
       assigns.presences
       |> grid_peers(assigns.user_id, assigns.tab)
-      |> peer_maps(cols, rows)
+      |> peer_boxes(assigns.cols, assigns.rows, assigns.col_widths, assigns.row_heights)
 
-    assigns =
-      assign(assigns,
-        peer_active: peer_active,
-        peer_sel: peer_sel,
-        all_tabs: all_tabs,
-        cols: cols,
-        rows: rows,
-        used_rows: used_rows,
-        truncated: used_rows > @max_rows,
-        cap_rows: @max_rows,
-        cells: cells,
-        spans: spans,
-        covered: covered,
-        col_widths: col_widths,
-        row_heights: row_heights,
-        frozen_cols: clamp_frozen(Map.get(tab, "frozen_cols"), cols),
-        frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows),
-        # The reader strips the active-cell/selection highlight — {0, 0}
-        # sits off the 1-based grid, so no cell matches.
-        sel: if(assigns.read_only, do: {0, 0, 0, 0}, else: selection_rect(assigns.active, assigns.anchor)),
-        grid_active: if(assigns.read_only, do: {0, 0}, else: assigns.active),
-        active_ref: Sheets.format_ref(assigns.active),
-        bar_value: raw_of(Map.get(cells, Sheets.format_ref(assigns.active))),
-        editable: assigns.mode == :edit and not assigns.read_only
-      )
+    assigns = assign(assigns, peer_cursors: peer_cursors, peer_sels: peer_sels)
 
     ~H"""
     <div
@@ -893,7 +988,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             name="ref"
             type="text"
             class="sheet-namebox-input"
-            value={@active_ref}
+            value={Sheets.format_ref(@active)}
             autocomplete="off"
             data-test-id="sheet-namebox"
           />
@@ -903,7 +998,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             name="value"
             type="text"
             class="sheet-bar-input"
-            value={@bar_value}
+            value={bar_value(@cells, @active)}
             autocomplete="off"
             spellcheck="false"
             placeholder="Enter a value or =FORMULA"
@@ -923,9 +1018,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         Showing the first <%= @cap_rows %> of <%= @used_rows %> rows.
       </div>
 
-      <%= if @editable do %>
-        <div id={"#{@id}-grid"} class="sheet-grid-wrap" phx-hook="SheetGrid" tabindex="0">
-          <div class="sheet-scroll">
+      <%!-- ONE wrapper for both modes (id + hook flip with @editable, so a
+            mode toggle still remounts the hook) and the peer layer OUTSIDE
+            the if-block: an `if` block is a single tracked dynamic whose
+            dependencies are everything inside it — peer assigns in there
+            would make every presence frame re-render the whole grid body
+            (measured ~15ms extra; see the moduledoc). --%>
+      <div
+        id={if @editable, do: "#{@id}-grid", else: "#{@id}-grid-view"}
+        class="sheet-grid-wrap"
+        phx-hook={if @editable, do: "SheetGrid"}
+        tabindex={if @editable, do: "0"}
+      >
+        <div class="sheet-scroll">
+          <%= if @editable do %>
             <.sheet_table
               id={@id}
               cols={@cols}
@@ -937,20 +1043,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               row_heights={@row_heights}
               frozen_cols={@frozen_cols}
               frozen_rows={@frozen_rows}
-              sel={@sel}
+              sel={grid_sel(@active, @anchor, @read_only)}
               active={@active}
               editing={@editing}
               menu={@menu}
               editable={true}
               myself={@myself}
-              peer_active={@peer_active}
-              peer_sel={@peer_sel}
             />
-          </div>
-        </div>
-      <% else %>
-        <div id={"#{@id}-grid-view"} class="sheet-grid-wrap">
-          <div class="sheet-scroll">
+          <% else %>
             <.sheet_table
               id={"#{@id}-view"}
               cols={@cols}
@@ -962,18 +1062,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               row_heights={@row_heights}
               frozen_cols={@frozen_cols}
               frozen_rows={@frozen_rows}
-              sel={@sel}
-              active={@grid_active}
+              sel={grid_sel(@active, @anchor, @read_only)}
+              active={grid_cursor(@active, @read_only)}
               editing={nil}
               menu={nil}
               editable={false}
               myself={nil}
-              peer_active={@peer_active}
-              peer_sel={@peer_sel}
             />
-          </div>
+          <% end %>
+          <.peer_layer cursors={@peer_cursors} sels={@peer_sels} />
         </div>
-      <% end %>
+      </div>
 
       <div class="sheet-tabs" data-test-id="sheet-tabs">
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
@@ -1031,16 +1130,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   @doc """
   The shared table renderer — the edit grid and the read-only View render
   the SAME markup; `editable={false}` drops every editing affordance
-  (menus, resize handles, the in-cell input). Collaborator presence
-  decorations (`peer_active` / `peer_sel`, see `peer_maps/3`) render in
-  both modes and default empty for hosts that don't wire presence.
+  (menus, resize handles, the in-cell input). Collaborator presence never
+  renders here — it lives on the sibling overlay layer (`peer_layer/1`),
+  so a presence frame cannot re-render the grid body (see the moduledoc).
   """
   def sheet_table(assigns) do
-    assigns =
-      assigns
-      |> assign_new(:peer_active, fn -> %{} end)
-      |> assign_new(:peer_sel, fn -> %{} end)
-
     ~H"""
     <table class="sheet-table" data-test-id="sheet-table">
       <colgroup>
@@ -1107,21 +1201,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <% ref = col_letters(c) <> Integer.to_string(r) %>
             <% cell = Map.get(@cells, ref) %>
             <% span = Map.get(@spans, {c, r}) %>
-            <% {peer_cls, peer_css} = peer_deco(c, r, @peer_active, @peer_sel) %>
             <td
-              class={cell_class(c, r, @sel, @active, cell) <> peer_cls}
+              class={cell_class(c, r, @sel, @active, cell)}
               data-ref={ref}
               data-r={r}
               data-c={c}
               data-v={display(cell)}
               colspan={span && elem(span, 0) > 1 && elem(span, 0)}
               rowspan={span && elem(span, 1) > 1 && elem(span, 1)}
-              style={
-                td_style(
-                  cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell),
-                  peer_css
-                )
-              }
+              style={cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell)}
             >
               <%= if @editable and @editing != nil and @active == {c, r} do %>
                 <input
@@ -1136,12 +1224,6 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <% else %>
                 <span class="sheet-cell-v"><%= display(cell) %></span>
               <% end %>
-              <span
-                :for={peer <- Map.get(@peer_active, {c, r}, [])}
-                class={"sheet-peer-tag" <> if(peer.editing, do: " sheet-peer-editing", else: "")}
-                style={"background: #{peer.color};"}
-                data-test-id="sheet-peer-tag"
-              ><%= peer.name %></span>
             </td>
           <% end %>
         </tr>

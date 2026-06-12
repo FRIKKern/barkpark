@@ -228,7 +228,7 @@ defmodule Barkpark.SheetsTest do
       }
 
       assert Sheets.snapshot_for(content, 0) == %{
-               "rows" => [["3.14", "true", "false", "", ""]]
+               "rows" => [["3.14", "TRUE", "FALSE", "", ""]]
              }
     end
   end

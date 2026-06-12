@@ -27,7 +27,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   INDIVIDUALLY (not atomically): invalid ops land in `errors` (with their
   list `index`) while the rest apply; `rev` is the session's monotonic
   applied-op counter. Whole-request errors: 404 for an unknown slug, 422
-  when the body carries no `"ops"` list.
+  when the body carries no `"ops"` list or the list exceeds the per-call
+  batch bound (`Session.max_ops_per_call/0` — split and resend), 503 when
+  the session died twice in a row (`session_unavailable` — retry shortly).
   """
 
   use BarkparkWeb, :controller
@@ -58,6 +60,27 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
         |> put_status(:not_found)
         |> json(%{
           error: %{code: "not_found", message: "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
+        })
+
+      {:error, :batch_too_large, n} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "batch_too_large",
+            message:
+              "the ops list carries #{n} ops; the cap is #{Session.max_ops_per_call()} per call — split the batch"
+          }
+        })
+
+      # The session died twice in a row (crash loop / restart window) —
+      # transient by construction, so 503 + retry, not a 422.
+      {:error, :session_unavailable} ->
+        conn
+        |> put_resp_header("retry-after", "2")
+        |> put_status(:service_unavailable)
+        |> json(%{
+          error: %{code: "session_unavailable", message: "the sheet session is restarting — retry shortly"}
         })
 
       {:error, _other} ->

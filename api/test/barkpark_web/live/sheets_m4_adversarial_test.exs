@@ -110,10 +110,6 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
     {view, with_target(view, "#sheet-grid-#{slug}"), html}
   end
 
-  defp cell(view, ref) do
-    view |> element(~s(td[data-ref="#{ref}"])) |> render()
-  end
-
   defp eventually(fun, tries \\ 100)
   defp eventually(fun, 0), do: fun.()
 
@@ -197,9 +193,15 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
     render_hook(t2, "cell-click", %{"ref" => "B2", "shift" => false})
     render_hook(t2, "edit-start", %{})
 
+    # Peer decoration lives on the overlay layer, not the tds.
+    peer_cursor = fn view, ref ->
+      selector = ~s(.sheet-peer-cursor[data-peer-cell="#{ref}"])
+      if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+    end
+
     eventually(fn ->
-      assert cell(view1, "B2") =~ "sheet-peer-editing"
-      assert cell(view1, "B2") =~ "Bob"
+      assert peer_cursor.(view1, "B2") =~ "sheet-peer-editing"
+      assert peer_cursor.(view1, "B2") =~ "Bob"
     end)
 
     # Brutal kill — no terminate/2, no graceful untrack. Presence is

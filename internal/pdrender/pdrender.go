@@ -236,5 +236,9 @@ func DefaultRegistry(theme Theme) *Registry {
 
 	// PdSheet: bordered spreadsheet grid with optional per-column widths.
 	r.blocks["PdSheet"] = sheetRenderer{ir: ir}
+	// Raw paper "sheet" embed blocks ({"type":"sheet","snapshot":{…}}) render
+	// through the same grid via the snapshot-lifting adapter (values only —
+	// see sheet.go for the documented merge/style/width losses).
+	r.blocks["sheet"] = sheetBlockRenderer{sr: sheetRenderer{ir: ir}}
 	return r
 }

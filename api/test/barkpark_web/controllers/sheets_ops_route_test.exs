@@ -1,3 +1,17 @@
+defmodule BarkparkWeb.SheetsOpsRouteTest.HaltingPersist do
+  @moduledoc false
+  # A before_save hook that halts ONLY the sheets-session persist path —
+  # installed via the `:barkpark, :plugins` env seam so the canonical upsert
+  # fails like a real plugin gate refusing the write (no mocking). Mirrors
+  # Barkpark.Sheets.SessionHardeningTest.HaltingPersist.
+  def lifecycle_hooks, do: %{before_save: [&__MODULE__.halt_session_persist/1]}
+
+  def halt_session_persist(%{ctx: %{source: "sheets_session"}}),
+    do: {:halt, "forced persist failure (test)"}
+
+  def halt_session_persist(_payload), do: :ok
+end
+
 defmodule BarkparkWeb.SheetsOpsRouteTest do
   @moduledoc """
   M1 route locks for the Sheets wire-op API:
@@ -7,9 +21,11 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
   Rides the `:ingest` bucket (RequireIngestToken) like import/export. The
   controller is a thin shim over the CORE `Barkpark.Sheets.Session` —
   per-op errors land in the 200 receipt's `errors` (indexed), whole-request
-  failures are 401/404/422. The export-flush lock closes the
-  read-your-writes loop: a wire op followed by an immediate export.csv
-  serves the new value (the export controller flushes the live session).
+  failures are 401/404/422 (+ 503 for the transient session/flush windows).
+  The export-flush lock closes the read-your-writes loop: a wire op followed
+  by an immediate export.csv serves the new value (the export controller
+  flushes the live session) — and a FAILED flush is a 503, never the stale
+  row served as fresh.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -108,6 +124,48 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       end
 
       assert Session.whereis("ops-malformed", @dataset) == nil
+    end
+
+    test "422 batch_too_large when the ops list exceeds the per-call cap", %{conn: conn} do
+      create_sheet("ops-too-many", %{})
+      n = Session.max_ops_per_call() + 1
+      ops = for i <- 1..n, do: set_cell("A#{i}", i)
+
+      body =
+        conn
+        |> authed()
+        |> post(ops_path("ops-too-many"), %{"ops" => ops, "dataset" => @dataset})
+        |> json_response(422)
+
+      assert body["error"]["code"] == "batch_too_large"
+      assert body["error"]["message"] =~ "#{n} ops"
+      # Refused pre-mailbox — no session was started for the oversized call.
+      assert Session.whereis("ops-too-many", @dataset) == nil
+    end
+
+    test "503 session_unavailable when the session dies twice in the call window", %{conn: conn} do
+      create_sheet("ops-dead", %{})
+      {:ok, _} = Session.apply_ops("ops-dead", @dataset, [set_cell("A1", 1)])
+      pid = Session.whereis("ops-dead", @dataset)
+
+      # Suspend registry cleanup so the dead pid stays registered across the
+      # call AND its single retry — the bounded double-death window.
+      partitions = registry_partitions()
+      Enum.each(partitions, &:sys.suspend/1)
+
+      conn =
+        try do
+          GenServer.stop(pid, :normal, 5_000)
+
+          conn
+          |> authed()
+          |> post(ops_path("ops-dead"), %{"ops" => [set_cell("A1", 2)], "dataset" => @dataset})
+        after
+          Enum.each(partitions, &:sys.resume/1)
+        end
+
+      assert json_response(conn, 503)["error"]["code"] == "session_unavailable"
+      assert get_resp_header(conn, "retry-after") == ["2"]
     end
   end
 
@@ -336,5 +394,69 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       assert csv =~ "wire-value"
       refute csv =~ "stale-value"
     end
+
+    test "a failed flush is a 503 with a retry hint — never the stale row served as fresh", %{conn: conn} do
+      create_sheet("ops-export-fail", %{"A1" => %{"v" => "stale-value"}})
+
+      %{"ok" => true, "applied" => 1} =
+        conn
+        |> authed()
+        |> post(ops_path("ops-export-fail"), %{
+          "ops" => [set_cell("A1", "wire-value")],
+          "dataset" => @dataset
+        })
+        |> json_response(200)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          with_failing_persist(fn ->
+            conn =
+              build_conn()
+              |> authed()
+              |> get("/v1/plugins/sheets/ops-export-fail/export.csv?dataset=#{@dataset}")
+
+            assert json_response(conn, 503)["error"]["code"] == "flush_failed"
+            assert get_resp_header(conn, "retry-after") == ["2"]
+          end)
+        end)
+
+      assert log =~ "persist failed"
+
+      # The failure window closed — the retry the hint promised succeeds and
+      # serves the fresh value (the session stayed dirty, nothing was lost).
+      csv =
+        build_conn()
+        |> authed()
+        |> get("/v1/plugins/sheets/ops-export-fail/export.csv?dataset=#{@dataset}")
+        |> response(200)
+
+      assert csv =~ "wire-value"
+      refute csv =~ "stale-value"
+    end
+  end
+
+  # ── hardening helpers ──────────────────────────────────────────────────────
+
+  defp with_failing_persist(fun) do
+    prior = Application.fetch_env(:barkpark, :plugins)
+    Application.put_env(:barkpark, :plugins, [BarkparkWeb.SheetsOpsRouteTest.HaltingPersist])
+
+    try do
+      fun.()
+    after
+      case prior do
+        {:ok, v} -> Application.put_env(:barkpark, :plugins, v)
+        :error -> Application.delete_env(:barkpark, :plugins)
+      end
+    end
+  end
+
+  defp registry_partitions do
+    Barkpark.Sheets.SessionRegistry
+    |> Supervisor.which_children()
+    |> Enum.flat_map(fn
+      {_, pid, :worker, _} when is_pid(pid) -> [pid]
+      _ -> []
+    end)
   end
 end
