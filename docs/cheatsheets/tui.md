@@ -31,10 +31,10 @@ Launch `barkpark` (no args). Miller columns: structure → doc lists → editor.
 |---|---|
 | `enter` | edit field — reference opens a picker (`/` filters it live); image edits the URL |
 | | text/richText/arrays open a **textarea**: `enter` = newline / new item, `ctrl+s` = confirm |
-| `space` | toggle boolean / cycle select (5+ options: `enter` opens a filterable picker) |
+| `space` | toggle bool / cycle select (5+ options: `enter` opens a picker) |
 | `enter` on empty slug | pre-fills from the title — `enter` again accepts |
-| datetime | accepts `now`, `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` — invalid input refuses |
-| validation | required fields show `*` + `(required)` when empty; schema patterns refuse bad commits |
+| datetime | `now`, `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` |
+| validation | required shows `*`; patterns/number/datetime/color refuse bad commits |
 | `ctrl+s` → `ctrl+p` | save, then publish the draft |
 | `U` | unpublish (back to draft) |
 | `d` | diff draft ↔ published (− published, + draft) |
