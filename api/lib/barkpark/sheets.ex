@@ -10,9 +10,10 @@ defmodule Barkpark.Sheets do
   plugin off (fresh-install invariant), and the write-through path in
   `Barkpark.Content` refreshes it on every sheet mutation.
 
-  The formula engine (M1) lands at `Barkpark.Sheets.Engine`. It slots in
-  AHEAD of snapshot synthesis — recomputing stale `"v"` values on the cells
-  map — so the dense grid here stays a pure projection of cell values.
+  The formula engine lives at `Barkpark.Sheets.Engine`. It slots in AHEAD of
+  snapshot synthesis — `Barkpark.Content` recomputes formula `"v"` values on
+  the cells map on every sheet save — so the dense grid here stays a pure
+  projection of cell values.
   """
 
   @a1 ~r/^([A-Za-z]+)([1-9][0-9]*)$/
@@ -86,6 +87,35 @@ defmodule Barkpark.Sheets do
     * `"col_widths"` — present only when the tab carries a usable
       `"col_widths"` map (sparse `"1"`-based string key → px). Densified to
       a list indexed 1..max_col, gaps as `0`.
+    * `"merges"` — present only when the tab carries a usable `"merges"`
+      list (`["A1:B2", …]`). Encoded as `[row, col, rowspan, colspan]`
+      entries, 0-based into the dense `"rows"` body grid. Merge ranges
+      NEVER extend the grid bounds — a range reaching past the last valued
+      cell clips to the occupied bounds (defense in depth: a hostile range
+      cannot inflate the dense grid); ranges are also clipped to the body —
+      a merge touching a frozen head row keeps only its body part — and a
+      range that clips down to a single cell is dropped.
+    * `"styles"` — present only when at least one body cell carries a
+      usable `"s"` style map. A sparse map keyed `"row,col"` (0-based body
+      grid) → sanitized style: `"b"`/`"i"` booleans (kept only when `true`),
+      `"bg"` (#rrggbb hex, normalized lowercase), `"al"`
+      (`left|center|right`). Unknown keys and invalid values are dropped;
+      styles on a frozen head row are dropped (the head band has its own
+      fixed style).
+
+  Fidelity note: the HTML walker (`Barkpark.PortableDoc.Render`) honors
+  `"merges"` (colspan/rowspan) and `"styles"`; the TUI's pdrender ignores
+  both keys and renders a merged range as its anchor-cell value (covered
+  cells are `""` in the dense grid) with no styling — values-first fidelity.
+
+  The dense grid is hard-capped at 200_000 positions (rows × cols), on
+  BOTH axes: COLUMNS clamp against the cap first (legacy content may
+  store refs past column XFD — the write-side gate now rejects them),
+  then ROWS truncate to as many full rows as fit (minimum 1),
+  deterministically — rows × cols never exceeds the cap regardless of
+  stored content. Cells beyond the truncated bounds do not appear in the
+  snapshot. Every snapshot consumer — embeds, the save write-through,
+  csv/md/html exports — inherits the bound.
 
   An empty, missing, or malformed tab yields `%{"rows" => []}` — even a
   blank sheet snapshots to a valid (empty) grid. Cells with an invalid A1
@@ -102,14 +132,30 @@ defmodule Barkpark.Sheets do
 
   # ── snapshot synthesis ─────────────────────────────────────────────────────
 
+  # The dense grid is hard-capped at this many positions (rows × cols) —
+  # see the moduledoc. Truncation is two-axis: columns clamp against the
+  # cap first, then rows truncate to as many full rows as fit, minimum 1.
+  @snapshot_position_cap 200_000
+
   defp build_snapshot(tab) do
     occupied = occupied_cells(tab)
 
     if occupied == %{} do
       %{"rows" => []}
     else
+      merges = tab_merges(tab)
+
       {max_col, max_row} =
         Enum.reduce(occupied, {0, 0}, fn {{c, r}, _v}, {mc, mr} -> {max(mc, c), max(mr, r)} end)
+
+      # Merges never extend the grid past the occupied bounds — hostile or
+      # sloppy ranges clip in maybe_put_merges. The grid itself then
+      # hard-caps at @snapshot_position_cap positions, two-axis: columns
+      # clamp against the cap first, then rows truncate to as many full
+      # rows as fit — rows × cols stays under the cap whatever legacy
+      # content stores.
+      max_col = min(max_col, @snapshot_position_cap)
+      max_row = min(max_row, max(div(@snapshot_position_cap, max_col), 1))
 
       {head, data_start} =
         if frozen_rows(tab) >= 1 do
@@ -126,6 +172,8 @@ defmodule Barkpark.Sheets do
       %{"rows" => rows}
       |> maybe_put_head(head)
       |> maybe_put_widths(tab, max_col)
+      |> maybe_put_merges(merges, data_start, max_col, max_row)
+      |> maybe_put_styles(tab, data_start, max_col, max_row)
     end
   end
 
@@ -186,6 +234,102 @@ defmodule Barkpark.Sheets do
       _ -> 0
     end
   end
+
+  # Tab "merges" (`["A1:B2", …]`) → normalized corner pairs. Malformed
+  # entries are skipped (synthesis stays total); corners are reordered so
+  # the first is always top-left.
+  defp tab_merges(tab) do
+    case Map.get(tab, "merges") do
+      merges when is_list(merges) ->
+        Enum.flat_map(merges, fn merge ->
+          with true <- is_binary(merge),
+               [a, b] <- String.split(merge, ":"),
+               {:ok, {c1, r1}} <- parse_ref(a),
+               {:ok, {c2, r2}} <- parse_ref(b) do
+            [{{min(c1, c2), min(r1, r2)}, {max(c1, c2), max(r1, r2)}}]
+          else
+            _ -> []
+          end
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  # Encode merges against the dense BODY grid as [row, col, rowspan, colspan]
+  # (0-based). Clipped to the body (head row excluded) and the grid bounds;
+  # a range that clips to a single cell carries no information and is dropped.
+  defp maybe_put_merges(snapshot, merges, data_start, max_col, max_row) do
+    encoded =
+      merges
+      |> Enum.flat_map(fn {{c1, r1}, {c2, r2}} ->
+        r1 = max(r1, data_start)
+        c2 = min(c2, max_col)
+        r2 = min(r2, max_row)
+
+        if r1 > r2 or c1 > c2 or (r1 == r2 and c1 == c2) do
+          []
+        else
+          [[r1 - data_start, c1 - 1, r2 - r1 + 1, c2 - c1 + 1]]
+        end
+      end)
+      |> Enum.sort()
+
+    if encoded == [], do: snapshot, else: Map.put(snapshot, "merges", encoded)
+  end
+
+  # Project per-cell "s" style maps into a sparse `"row,col"`-keyed map over
+  # the dense body grid, sanitizing as we go. Head-row styles are dropped
+  # (the head band has its own fixed style), as is anything out of bounds.
+  defp maybe_put_styles(snapshot, tab, data_start, max_col, max_row) do
+    styles =
+      case Map.get(tab, "cells") do
+        cells when is_map(cells) ->
+          Enum.reduce(cells, %{}, fn {addr, cell}, acc ->
+            with {:ok, {c, r}} <- parse_ref(addr),
+                 true <- r >= data_start and r <= max_row and c <= max_col,
+                 %{} = style <- cell_style(cell) do
+              Map.put(acc, "#{r - data_start},#{c - 1}", style)
+            else
+              _ -> acc
+            end
+          end)
+
+        _ ->
+          %{}
+      end
+
+    if styles == %{}, do: snapshot, else: Map.put(snapshot, "styles", styles)
+  end
+
+  defp cell_style(%{"s" => %{} = s}) do
+    style =
+      %{}
+      |> put_style_flag("b", Map.get(s, "b"))
+      |> put_style_flag("i", Map.get(s, "i"))
+      |> put_style_bg(Map.get(s, "bg"))
+      |> put_style_align(Map.get(s, "al"))
+
+    if style == %{}, do: nil, else: style
+  end
+
+  defp cell_style(_), do: nil
+
+  defp put_style_flag(style, key, true), do: Map.put(style, key, true)
+  defp put_style_flag(style, _key, _), do: style
+
+  defp put_style_bg(style, bg) when is_binary(bg) do
+    bg = String.downcase(bg)
+    if Regex.match?(~r/^#[0-9a-f]{6}$/, bg), do: Map.put(style, "bg", bg), else: style
+  end
+
+  defp put_style_bg(style, _), do: style
+
+  defp put_style_align(style, al) when al in ["left", "center", "right"],
+    do: Map.put(style, "al", al)
+
+  defp put_style_align(style, _), do: style
 
   # ── A1 column arithmetic (bijective base-26) ───────────────────────────────
 

@@ -108,8 +108,8 @@ defmodule Barkpark.Plugins.SheetsTest do
       assert manifest["plugin_name"] == "sheets",
              "expected plugin_name 'sheets' in manifest, got: #{inspect(manifest["plugin_name"])}"
 
-      assert manifest["capabilities"] == ["schemas"],
-             "expected capabilities ['schemas'] in manifest (no routes yet)"
+      assert manifest["capabilities"] == ["schemas", "routes"],
+             "expected capabilities ['schemas', 'routes'] in manifest (M5 conversion API)"
     end
   end
 end

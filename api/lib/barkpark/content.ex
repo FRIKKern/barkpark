@@ -728,6 +728,7 @@ defmodule Barkpark.Content do
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
       |> put_scope_attrs(opts)
+      |> maybe_recompute_sheet_formulas(type)
 
     with :ok <- validate_task_kind(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
@@ -1395,6 +1396,27 @@ defmodule Barkpark.Content do
     end)
   end
 
+  # ── Sheet formula recompute (M3) ────────────────────────────────────────────
+  #
+  # A "sheet" save recomputes every formula cell's cached "v" BEFORE the row
+  # persists — `Barkpark.Sheets.Engine.recompute/1` runs in the attrs pipeline
+  # of `create_document/4` and `upsert_document/4`, so the stored content
+  # carries computed values and the write-through below projects them into
+  # embed snapshots with zero renderer changes. The engine is pure and total:
+  # non-sheet types and writes without a "tabs" list pass through untouched.
+
+  defp maybe_recompute_sheet_formulas(attrs, "sheet") do
+    case Map.get(attrs, "content") do
+      %{"tabs" => _} = content ->
+        Map.put(attrs, "content", Barkpark.Sheets.Engine.recompute(content))
+
+      _ ->
+        attrs
+    end
+  end
+
+  defp maybe_recompute_sheet_formulas(attrs, _type), do: attrs
+
   # ── Sheet embed write-through ───────────────────────────────────────────────
   #
   # A `{"type":"sheet","ref":<sheet doc id>}` block in any document's
@@ -1574,6 +1596,7 @@ defmodule Barkpark.Content do
       |> Map.put_new("status", "draft")
       |> Map.put("rev", generate_rev())
       |> put_scope_attrs(opts)
+      |> maybe_recompute_sheet_formulas(type)
       # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
       # carries content["blocks"] re-derives content[fieldName]/content["body"]
       # from those blocks — the same project-on-write the paper path runs.

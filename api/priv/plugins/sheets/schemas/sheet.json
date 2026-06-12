@@ -47,10 +47,16 @@
             "description": "Sparse map of row index (1-based, as string key) to height in pixels."
           },
           {
+            "name": "merges",
+            "title": "Merged ranges",
+            "type": "json",
+            "description": "List of merged cell ranges in A1 notation (e.g. [\"A1:B2\"]). The merged value lives at the range's top-left anchor cell."
+          },
+          {
             "name": "cells",
             "title": "Cells",
             "type": "json",
-            "description": "Sparse map of cell address (e.g. \"A1\") to cell descriptor: {v (value), f (formula), t (type: s|n|b|e), fmt (format string), stale (formula cache stale flag)}."
+            "description": "Sparse map of cell address (e.g. \"A1\") to cell descriptor: {v (value), f (formula), t (type: s|n|b|e|date|datetime), fmt (format hint: fixed|percent|currency|thousands|date|datetime), stale (formula cache stale flag), s (style: {b, i, bg, al})}."
           }
         ]
       }

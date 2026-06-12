@@ -1,0 +1,220 @@
+defmodule Barkpark.Plugins.Sheets.Web.ImportController do
+  @moduledoc """
+  POST /v1/plugins/sheets/import — multipart spreadsheet import (M5).
+
+  Mounted by `Barkpark.Plugins.Sheets.register_routes/1` on the `:ingest`
+  bucket — shared-secret bearer token via `RequireIngestToken`, exactly like
+  the Bulldocs ingest API.
+
+      POST /v1/plugins/sheets/import
+      Authorization: Bearer <ingest token>
+      Content-Type: multipart/form-data
+      file=<upload .xlsx | .csv | .tsv>   (required)
+      slug=<doc id>                       (optional — defaults to the
+                                           slugified file basename)
+      title=<title>                       (optional — defaults to the
+                                           file basename)
+      dataset=<dataset>                   (optional — "production")
+
+  The kind is detected from the filename extension (content-type fallback).
+  Conversion goes through `XlsxImport` / `Csv`; the document persists via
+  `Content.upsert_document/4` (idempotent re-imports), so the formula
+  engine recompute and the embed write-through ride the canonical save
+  path — unknown functions keep the file's cached value with
+  `"stale" => true`, per the bound grill decision.
+
+  Caps (both reject with **413** — Plug's `:request_entity_too_large`; the
+  JSON shape stays the codebase's `%{error: %{code, message}}` envelope):
+
+    * **bytes** — uploads over 15_000_000 bytes reject on the on-disk size
+      BEFORE any bytes are read or parsed (xlsx decompression is unbounded;
+      the multipart layer alone accepts far more).
+    * **cells** — more than `Barkpark.Plugins.Sheets.cell_cap/0` non-empty
+      cells rejects, enforced incrementally inside the converters (the fold
+      aborts the moment the running count exceeds the cap, never
+      materializing the rest); `check_cap/1` stays as a post-hoc backstop.
+  """
+
+  use BarkparkWeb, :controller
+
+  alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets
+  alias Barkpark.Plugins.Sheets.{Csv, XlsxImport}
+  alias Barkpark.Tenancy
+
+  @byte_cap 15_000_000
+  @default_dataset "production"
+  @slug_pattern ~r/^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+  def create(conn, params) do
+    with {:ok, upload} <- fetch_upload(params),
+         {:ok, kind} <- detect_kind(upload),
+         :ok <- check_byte_cap(upload),
+         {:ok, raw} <- read_upload(upload),
+         {:ok, content} <- convert(kind, raw),
+         {:ok, cell_count} <- check_cap(content),
+         {:ok, slug, title, dataset} <- resolve_identity(params, upload),
+         {:ok, doc} <- save(slug, title, dataset, content) do
+      json(conn, %{
+        ok: true,
+        slug: slug,
+        doc_id: doc.doc_id,
+        dataset: dataset,
+        type: "sheet",
+        tabs: length(Map.get(content, "tabs", [])),
+        cells: cell_count
+      })
+    else
+      {:error, status, code, message} ->
+        conn
+        |> put_status(status)
+        |> json(%{error: %{code: code, message: message}})
+    end
+  end
+
+  defp fetch_upload(%{"file" => %Plug.Upload{} = upload}), do: {:ok, upload}
+
+  defp fetch_upload(_params),
+    do:
+      {:error, :unprocessable_entity, "missing_file",
+       "multipart field \"file\" is required (xlsx, csv or tsv)"}
+
+  defp detect_kind(%Plug.Upload{filename: filename, content_type: content_type}) do
+    case filename |> to_string() |> Path.extname() |> String.downcase() do
+      ".xlsx" ->
+        {:ok, :xlsx}
+
+      ".csv" ->
+        {:ok, :csv}
+
+      ".tsv" ->
+        {:ok, :tsv}
+
+      _ ->
+        case content_type do
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ->
+            {:ok, :xlsx}
+
+          "text/csv" ->
+            {:ok, :csv}
+
+          "text/tab-separated-values" ->
+            {:ok, :tsv}
+
+          _ ->
+            {:error, :unprocessable_entity, "unsupported_format",
+             "unsupported file #{inspect(filename)} — expected .xlsx, .csv or .tsv"}
+        end
+    end
+  end
+
+  # Cheap pre-parse guard on the on-disk byte size — nothing is read into
+  # memory and nothing parses before this passes.
+  defp check_byte_cap(%Plug.Upload{path: path}) do
+    case File.stat(path) do
+      {:ok, %File.Stat{size: size}} when size > @byte_cap ->
+        {:error, :request_entity_too_large, "upload_too_large",
+         "upload is #{size} bytes; the cap is #{@byte_cap}"}
+
+      {:ok, _stat} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, :unprocessable_entity, "unreadable_upload", "#{reason}"}
+    end
+  end
+
+  defp read_upload(%Plug.Upload{path: path}) do
+    case File.read(path) do
+      {:ok, raw} -> {:ok, raw}
+      {:error, reason} -> {:error, :unprocessable_entity, "unreadable_upload", "#{reason}"}
+    end
+  end
+
+  defp convert(:xlsx, raw), do: wrap_convert(XlsxImport.to_content(raw), "invalid_xlsx")
+  defp convert(:csv, raw), do: wrap_convert(Csv.import_content(raw, ","), "invalid_csv")
+  defp convert(:tsv, raw), do: wrap_convert(Csv.import_content(raw, "\t"), "invalid_tsv")
+
+  defp wrap_convert({:ok, content}, _code), do: {:ok, content}
+
+  # The converters abort their fold the moment the running non-empty-cell
+  # count exceeds the cap — `count` is a lower bound on the full total.
+  defp wrap_convert({:error, {:cell_cap_exceeded, count}}, _code),
+    do:
+      {:error, :request_entity_too_large, "sheet_too_large",
+       "import carries at least #{count} non-empty cells; the cap is #{Sheets.cell_cap()}"}
+
+  defp wrap_convert({:error, message}, code),
+    do: {:error, :unprocessable_entity, code, message}
+
+  # Post-hoc backstop — the converters enforce the cap incrementally, so
+  # this only fires for content that arrived through some other seam.
+  defp check_cap(content) do
+    count = cell_count(content)
+
+    if count > Sheets.cell_cap() do
+      {:error, :request_entity_too_large, "sheet_too_large",
+       "import carries #{count} non-empty cells; the cap is #{Sheets.cell_cap()}"}
+    else
+      {:ok, count}
+    end
+  end
+
+  defp cell_count(content) do
+    for tab <- Map.get(content, "tabs", []),
+        is_map(tab),
+        {_addr, cell} <- Map.get(tab, "cells") || %{},
+        is_map(cell),
+        Map.get(cell, "v") not in [nil, ""] or is_binary(Map.get(cell, "f")),
+        reduce: 0 do
+      acc -> acc + 1
+    end
+  end
+
+  defp resolve_identity(params, %Plug.Upload{filename: filename}) do
+    base = filename |> to_string() |> Path.basename() |> Path.rootname()
+
+    slug =
+      case params["slug"] do
+        s when is_binary(s) and s != "" -> s
+        _ -> Tenancy.slugify(base)
+      end
+
+    title =
+      case params["title"] do
+        t when is_binary(t) and t != "" -> t
+        _ -> base
+      end
+
+    dataset =
+      case params["dataset"] do
+        d when is_binary(d) and d != "" -> d
+        _ -> @default_dataset
+      end
+
+    if is_binary(slug) and Regex.match?(@slug_pattern, slug) do
+      {:ok, slug, title, dataset}
+    else
+      {:error, :unprocessable_entity, "invalid_slug",
+       "cannot derive a usable slug from #{inspect(params["slug"] || base)}"}
+    end
+  end
+
+  defp save(slug, title, dataset, content) do
+    case Content.upsert_document(
+           "sheet",
+           %{"doc_id" => slug, "title" => title, "content" => content},
+           dataset,
+           source: "sheets_import"
+         ) do
+      {:ok, doc} ->
+        {:ok, doc}
+
+      {:error, {:halted, reason}} ->
+        {:error, :unprocessable_entity, "invalid_sheet", to_string(reason)}
+
+      {:error, _changeset} ->
+        {:error, :unprocessable_entity, "invalid_sheet", "could not store sheet"}
+    end
+  end
+end

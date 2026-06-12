@@ -1,8 +1,8 @@
 {
   "plugin_name": "sheets",
-  "version": "0.1.0",
-  "description": "Sheets — collaborative spreadsheet surface. Stores multi-tab spreadsheet documents as type-`sheet` documents with cell-level structure (value, formula, type, format) and layout metadata (frozen rows/cols, column widths, row heights).",
-  "capabilities": ["schemas"],
+  "version": "0.2.0",
+  "description": "Sheets — collaborative spreadsheet surface. Stores multi-tab spreadsheet documents as type-`sheet` documents with cell-level structure (value, formula, type, format, style) and layout metadata (frozen rows/cols, column widths, row heights, merges). Converts xlsx/csv/tsv in and xlsx/csv/tsv/md/html out via the token-gated /v1/plugins/sheets API.",
+  "capabilities": ["schemas", "routes"],
   "module": "Barkpark.Plugins.Sheets",
   "schemas": [{ "name": "sheet", "version": "1", "file": "schemas/sheet.json" }]
 }

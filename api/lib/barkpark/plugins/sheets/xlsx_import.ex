@@ -1,0 +1,530 @@
+defmodule Barkpark.Plugins.Sheets.XlsxImport do
+  @moduledoc """
+  xlsx binary → sheet-document content (`%{"tabs" => […]}`) — the import
+  half of the Sheets plugin's conversion layer (M5).
+
+  Two readers over the same bytes:
+
+    * `XlsxReader` (cell mode) supplies VALUES + FORMULAS per A1 ref —
+      shared strings resolved, recognized date formats already converted
+      to `Date`/`NaiveDateTime`.
+    * a thin Saxy pass over the package XML supplies what the library does
+      not expose: per-cell style indexes (→ `fmt` class + `s` basic style),
+      column widths, merged ranges, and frozen panes.
+
+  ## Mapping
+
+    * every worksheet → one tab, in workbook order, name preserved
+    * values: numbers (floats normalized to ints when exact), strings,
+      booleans; date/datetime cells → ISO-8601 strings with `"t"`
+      `"date"`/`"datetime"` (serials converted against the workbook's
+      epoch — 1900 or 1904 system). Datetimes are NAIVE — xlsx has no
+      timezone, so a trailing offset never appears.
+    * formulas → `"f"` (any leading `"="` stripped — the canonical stored
+      form); a numeric cached value rides along as `"v"`. The save path
+      runs `Barkpark.Sheets.Engine.recompute/1`, which keeps the file's
+      cached value and flags `"stale" => true` for functions the engine
+      does not know (bound grill decision).
+    * number formats → `"fmt"` hints via `Barkpark.Plugins.Sheets.Fmt`
+    * column widths → `"col_widths"` (px ≈ width-units × 7, the xlsx
+      character-width convention; the export half divides by the same
+      factor, so widths round-trip exactly)
+    * merged ranges → tab `"merges"` (`["A1:B2", …]`), sanitized: each
+      range clips to the tab's occupied bounds, then drops when its
+      clipped area exceeds `Barkpark.Plugins.Sheets.merge_area_cap/0`
+      cells or collapses to a single cell — a hostile `mergeCell` can
+      never widen the dense snapshot grid
+    * basic styles → cell `"s"`: bold / italic / solid-fill bg
+      (normalized to lowercase `#rrggbb`) / horizontal alignment
+      (left|center|right)
+    * frozen panes → `"frozen_rows"` / `"frozen_cols"`
+
+  ## Dropped on import (documented, never an error)
+
+  Charts, pivot tables, images, conditional formatting, data validation —
+  plus row heights, fonts beyond bold/italic, borders, theme/indexed fill
+  colors, number formats outside the `Fmt` vocabulary, merged ranges
+  that exceed the area cap after clipping (dropped deterministically),
+  and cells addressed beyond the Excel grid bounds (column XFD/16,384,
+  row 1,048,576 — Excel itself cannot write one, only a hand-crafted
+  package can; dropping them keeps the import legal for the
+  `before_save` gate).
+  `"t"` on plain literals is normalized away (the JSON value type carries
+  it); only `"date"`/`"datetime"` literals keep a `"t"`.
+
+  The non-empty-cell cap (`Barkpark.Plugins.Sheets.cell_cap/0`) enforces
+  incrementally across all tabs — the fold halts with
+  `{:error, {:cell_cap_exceeded, count}}` the moment the running count
+  exceeds the cap, never building the rest.
+  """
+
+  alias Barkpark.Plugins.Sheets.Fmt
+  alias Barkpark.Sheets, as: SheetCore
+  alias XlsxReader.Cell
+
+  # xlsx column widths are in "character" units; Excel's default char is
+  # ~7px. round(px / 7 * 7) is exact for integers, so widths round-trip.
+  @px_per_width_unit 7
+
+  @epoch_1900 ~D[1899-12-30]
+  @epoch_1904 ~D[1904-01-01]
+
+  @doc """
+  Convert an xlsx binary to sheet-document content.
+
+  Returns `{:ok, %{"tabs" => […]}}` or `{:error, message}`.
+  """
+  @spec to_content(binary()) ::
+          {:ok, map()} | {:error, String.t() | {:cell_cap_exceeded, pos_integer()}}
+  def to_content(binary) when is_binary(binary) do
+    with {:ok, package} <- open_package(binary),
+         {:ok, layout} <- parse_layout(binary) do
+      package
+      |> XlsxReader.sheet_names()
+      |> Enum.reduce_while({:ok, [], 0}, fn name, {:ok, acc, count} ->
+        case XlsxReader.sheet(package, name, cell_data_format: :cell) do
+          {:ok, rows} ->
+            case build_tab(name, rows, Map.get(layout.sheets, name), layout, count) do
+              {:ok, tab, count} -> {:cont, {:ok, [tab | acc], count}}
+              {:error, _} = error -> {:halt, error}
+            end
+
+          {:error, reason} ->
+            {:halt, {:error, "could not read sheet #{inspect(name)}: #{inspect(reason)}"}}
+        end
+      end)
+      |> case do
+        {:ok, tabs, _count} -> {:ok, %{"tabs" => Enum.reverse(tabs)}}
+        {:error, _} = error -> error
+      end
+    end
+  end
+
+  # xlsx_reader's zip-error translation is not total — hand-crafted garbage
+  # bytes can raise out of :zip instead of returning {:error, _}. Rescue to
+  # the same clean error either way.
+  defp open_package(binary) do
+    case XlsxReader.open(binary, source: :binary) do
+      {:ok, package} -> {:ok, package}
+      {:error, reason} -> {:error, "invalid xlsx: #{inspect(reason)}"}
+    end
+  rescue
+    _ -> {:error, "invalid xlsx: not an xlsx package"}
+  end
+
+  # ── tab assembly ───────────────────────────────────────────────────────────
+
+  defp build_tab(name, rows, sheet_layout, layout, count) do
+    sheet_layout = sheet_layout || %{}
+    cell_xfs = Map.get(sheet_layout, :cell_styles, %{})
+    cap = Barkpark.Plugins.Sheets.cell_cap()
+
+    rows
+    |> List.flatten()
+    |> Enum.reduce_while({%{}, count}, fn
+      # Padding for omitted cells/rows is the raw blank_value (""), only
+      # real cells arrive as Cell structs with a ref.
+      %Cell{ref: ref} = cell, {acc, count} when is_binary(ref) ->
+        case build_cell(cell, Map.get(cell_xfs, ref), layout.date_base) do
+          nil ->
+            {:cont, {acc, count}}
+
+          built ->
+            count = count + non_empty(built)
+
+            if count > cap do
+              {:halt, {:error, {:cell_cap_exceeded, count}}}
+            else
+              {:cont, {Map.put(acc, ref, built), count}}
+            end
+        end
+
+      _blank, acc_count ->
+        {:cont, acc_count}
+    end)
+    |> case do
+      {:error, _} = error ->
+        error
+
+      {cells, count} ->
+        tab =
+          %{"name" => name}
+          |> put_unless_empty("cells", cells)
+          |> put_unless_empty("col_widths", Map.get(sheet_layout, :col_widths, %{}))
+          |> put_unless_empty("merges", sanitize_merges(Map.get(sheet_layout, :merges, []), cells))
+          |> put_frozen("frozen_rows", Map.get(sheet_layout, :frozen_rows, 0))
+          |> put_frozen("frozen_cols", Map.get(sheet_layout, :frozen_cols, 0))
+
+        {:ok, tab, count}
+    end
+  end
+
+  # Mirrors the import controller's non-empty predicate: a counted cell
+  # carries a non-empty value or a formula (style-only cells are free).
+  defp non_empty(built) do
+    if Map.get(built, "v") not in [nil, ""] or is_binary(Map.get(built, "f")), do: 1, else: 0
+  end
+
+  # Hostile or sloppy mergeCell ranges must never leave the import wider
+  # than the data: clip each range to the tab's occupied bounds, then drop
+  # any range whose clipped area still exceeds the merge-area cap — and any
+  # range that clips down to a single cell (it carries no information).
+  defp sanitize_merges([], _cells), do: []
+
+  defp sanitize_merges(merges, cells) do
+    area_cap = Barkpark.Plugins.Sheets.merge_area_cap()
+
+    {max_col, max_row} =
+      Enum.reduce(cells, {0, 0}, fn {ref, _cell}, {mc, mr} ->
+        case SheetCore.parse_ref(ref) do
+          {:ok, {c, r}} -> {max(mc, c), max(mr, r)}
+          :error -> {mc, mr}
+        end
+      end)
+
+    Enum.flat_map(merges, fn merge ->
+      with [a, b] <- String.split(merge, ":"),
+           {:ok, {c1, r1}} <- SheetCore.parse_ref(a),
+           {:ok, {c2, r2}} <- SheetCore.parse_ref(b) do
+        {c1, c2} = {min(c1, c2), min(max(c1, c2), max_col)}
+        {r1, r2} = {min(r1, r2), min(max(r1, r2), max_row)}
+        area = (c2 - c1 + 1) * (r2 - r1 + 1)
+
+        if c1 > c2 or r1 > r2 or area <= 1 or area > area_cap do
+          []
+        else
+          [SheetCore.format_ref({c1, r1}) <> ":" <> SheetCore.format_ref({c2, r2})]
+        end
+      else
+        _ -> []
+      end
+    end)
+  end
+
+  defp put_unless_empty(map, _key, empty) when empty == %{} or empty == [], do: map
+  defp put_unless_empty(map, key, value), do: Map.put(map, key, value)
+
+  defp put_frozen(map, key, n) when is_integer(n) and n > 0, do: Map.put(map, key, n)
+  defp put_frozen(map, _key, _n), do: map
+
+  # A ref beyond the Excel grid bounds drops like any other unrepresentable
+  # feature (see the moduledoc) — `if` without `else` yields nil, the same
+  # "no cell" the callers already handle.
+  defp build_cell(%Cell{} = cell, xf, date_base) do
+    if in_grid?(cell.ref), do: do_build_cell(cell, xf, date_base)
+  end
+
+  defp in_grid?(ref) do
+    case SheetCore.parse_ref(ref) do
+      {:ok, {col, row}} ->
+        col <= Barkpark.Plugins.Sheets.grid_max_col() and
+          row <= Barkpark.Plugins.Sheets.grid_max_row()
+
+      :error ->
+        false
+    end
+  end
+
+  defp do_build_cell(%Cell{} = cell, xf, date_base) do
+    fmt = xf && xf.fmt
+    style = (xf && xf.style) || %{}
+
+    {v, t, fmt} = convert_value(cell.value, fmt, date_base)
+
+    built =
+      %{}
+      |> maybe_put("v", v)
+      |> maybe_put("t", t)
+      |> maybe_put("f", normalize_formula(cell.formula))
+      |> maybe_put("fmt", fmt)
+      |> put_unless_empty("s", style)
+
+    if built == %{}, do: nil, else: built
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp normalize_formula(f) when is_binary(f) and f != "" do
+    case String.trim(f) do
+      "=" <> rest -> rest
+      other -> other
+    end
+  end
+
+  defp normalize_formula(_), do: nil
+
+  # value (+ fmt class) → {v, t, fmt}. xlsx_reader converts serials it
+  # recognizes itself; serials under formats it does not recognize arrive
+  # as numbers and convert here against the fmt class.
+  defp convert_value(%Date{} = d, fmt, _base),
+    do: {Date.to_iso8601(d), "date", fmt || "date"}
+
+  defp convert_value(%NaiveDateTime{} = ndt, fmt, _base),
+    do: {NaiveDateTime.to_iso8601(ndt), "datetime", fmt || "datetime"}
+
+  defp convert_value(%DateTime{} = dt, fmt, _base),
+    do: {dt |> DateTime.to_naive() |> NaiveDateTime.to_iso8601(), "datetime", fmt || "datetime"}
+
+  defp convert_value(n, "date", base) when is_number(n) and n >= 0,
+    do: {base |> Date.add(trunc(n)) |> Date.to_iso8601(), "date", "date"}
+
+  defp convert_value(n, "datetime", base) when is_number(n) and n >= 0 do
+    days = trunc(n)
+    seconds = round((n - days) * 86_400)
+
+    iso =
+      base
+      |> Date.add(days)
+      |> NaiveDateTime.new!(~T[00:00:00])
+      |> NaiveDateTime.add(seconds, :second)
+      |> NaiveDateTime.to_iso8601()
+
+    {iso, "datetime", "datetime"}
+  end
+
+  defp convert_value(n, fmt, _base) when is_number(n), do: {normalize_number(n), nil, fmt}
+  defp convert_value(b, fmt, _base) when is_boolean(b), do: {b, nil, fmt}
+  defp convert_value("", fmt, _base), do: {nil, nil, fmt}
+  defp convert_value(s, fmt, _base) when is_binary(s), do: {s, nil, fmt}
+  defp convert_value(other, fmt, _base), do: {to_string(other), nil, fmt}
+
+  # Floats that are exactly integral normalize to ints (xlsx stores every
+  # number as a double; "2" must come back as 2, not 2.0).
+  defp normalize_number(n) when is_float(n) do
+    if n == trunc(n) and abs(n) < 1.0e15, do: trunc(n), else: n
+  end
+
+  defp normalize_number(n), do: n
+
+  # ── package-XML layout parse (Saxy over the raw zip) ───────────────────────
+  #
+  # Everything XlsxReader does not expose: workbook sheet order + rels,
+  # styles.xml (numFmts / fonts / fills / cellXfs), and per-worksheet cols,
+  # mergeCells, frozen panes, and per-cell style indexes.
+
+  defp parse_layout(binary) do
+    case :zip.extract(binary, [:memory]) do
+      {:ok, entries} ->
+        files = Map.new(entries, fn {name, content} -> {to_string(name), content} end)
+        workbook = simple_form(files["xl/workbook.xml"])
+        rels = parse_rels(simple_form(files["xl/_rels/workbook.xml.rels"]))
+        xfs = parse_styles(simple_form(files["xl/styles.xml"]))
+        date_base = if date_1904?(workbook), do: @epoch_1904, else: @epoch_1900
+
+        sheets =
+          workbook
+          |> workbook_sheets()
+          |> Map.new(fn {name, rid} ->
+            xml = files[resolve_target(Map.get(rels, rid))]
+            {name, parse_worksheet(simple_form(xml), xfs)}
+          end)
+
+        {:ok, %{sheets: sheets, date_base: date_base}}
+
+      {:error, reason} ->
+        {:error, "invalid xlsx: #{inspect(reason)}"}
+    end
+  end
+
+  defp simple_form(nil), do: nil
+
+  defp simple_form(xml) do
+    case Saxy.SimpleForm.parse_string(xml) do
+      {:ok, element} -> element
+      _ -> nil
+    end
+  end
+
+  # Local (prefix-stripped) element/attribute name matching — real-world
+  # producers vary the namespace prefixes.
+  defp local(name), do: name |> String.split(":") |> List.last()
+
+  defp children_named(nil, _name), do: []
+
+  defp children_named({_n, _attrs, children}, name) do
+    Enum.filter(children, fn
+      {n, _, _} -> local(n) == name
+      _ -> false
+    end)
+  end
+
+  defp child_named(element, name), do: element |> children_named(name) |> List.first()
+
+  defp attr(nil, _name), do: nil
+
+  defp attr({_n, attrs, _c}, name) do
+    Enum.find_value(attrs, fn {k, v} -> if local(k) == name, do: v end)
+  end
+
+  defp to_int(nil), do: nil
+
+  defp to_int(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp to_num(nil), do: nil
+
+  defp to_num(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, ""} -> f
+      _ -> nil
+    end
+  end
+
+  defp date_1904?(workbook) do
+    (workbook |> child_named("workbookPr") |> attr("date1904")) in ["1", "true"]
+  end
+
+  defp workbook_sheets(workbook) do
+    for sheet <- workbook |> child_named("sheets") |> children_named("sheet"),
+        name = attr(sheet, "name"),
+        rid = attr(sheet, "id"),
+        is_binary(name) and is_binary(rid),
+        do: {name, rid}
+  end
+
+  defp parse_rels(rels_root) do
+    for rel <- children_named(rels_root, "Relationship"),
+        id = attr(rel, "Id"),
+        target = attr(rel, "Target"),
+        is_binary(id) and is_binary(target),
+        into: %{},
+        do: {id, target}
+  end
+
+  defp resolve_target(nil), do: nil
+
+  defp resolve_target(target) do
+    t = String.trim_leading(target, "/")
+    if String.starts_with?(t, "xl/"), do: t, else: "xl/" <> t
+  end
+
+  # styles.xml → cellXfs as a list of %{fmt:, style:} (indexed by the
+  # worksheet cells' `s` attribute).
+  defp parse_styles(nil), do: []
+
+  defp parse_styles(root) do
+    custom_formats =
+      for nf <- root |> child_named("numFmts") |> children_named("numFmt"),
+          id = attr(nf, "numFmtId"),
+          code = attr(nf, "formatCode"),
+          is_binary(id) and is_binary(code),
+          into: %{},
+          do: {id, code}
+
+    fonts =
+      for font <- root |> child_named("fonts") |> children_named("font") do
+        %{b: font_flag?(font, "b"), i: font_flag?(font, "i")}
+      end
+
+    fills =
+      for fill <- root |> child_named("fills") |> children_named("fill"), do: fill_bg(fill)
+
+    for xf <- root |> child_named("cellXfs") |> children_named("xf") do
+      %{
+        fmt: Fmt.classify(attr(xf, "numFmtId"), custom_formats),
+        style: xf_style(xf, fonts, fills)
+      }
+    end
+  end
+
+  defp font_flag?(font, name) do
+    case child_named(font, name) do
+      nil -> false
+      flag -> attr(flag, "val") not in ["0", "false"]
+    end
+  end
+
+  # Only an explicit solid patternFill with an rgb fgColor maps to "bg" —
+  # theme/indexed colors are dropped (documented). ARGB → lowercase #rrggbb.
+  defp fill_bg(fill) do
+    with pattern_fill when pattern_fill != nil <- child_named(fill, "patternFill"),
+         "solid" <- attr(pattern_fill, "patternType"),
+         fg_color when fg_color != nil <- child_named(pattern_fill, "fgColor"),
+         rgb when is_binary(rgb) and byte_size(rgb) >= 6 <- attr(fg_color, "rgb") do
+      "#" <> (rgb |> String.slice(-6, 6) |> String.downcase())
+    else
+      _ -> nil
+    end
+  end
+
+  defp xf_style(xf, fonts, fills) do
+    font = Enum.at(fonts, to_int(attr(xf, "fontId")) || 0) || %{b: false, i: false}
+    bg = Enum.at(fills, to_int(attr(xf, "fillId")) || 0)
+
+    al =
+      case xf |> child_named("alignment") |> attr("horizontal") do
+        h when h in ["left", "center", "right"] -> h
+        _ -> nil
+      end
+
+    %{}
+    |> put_if(font.b, "b", true)
+    |> put_if(font.i, "i", true)
+    |> put_if(is_binary(bg), "bg", bg)
+    |> put_if(is_binary(al), "al", al)
+  end
+
+  defp put_if(map, true, key, value), do: Map.put(map, key, value)
+  defp put_if(map, _cond, _key, _value), do: map
+
+  # One worksheet's layout: per-cell xf lookup, col widths, merges, panes.
+  defp parse_worksheet(nil, _xfs), do: %{}
+
+  defp parse_worksheet(root, xfs) do
+    cell_styles =
+      for row <- root |> child_named("sheetData") |> children_named("row"),
+          c <- children_named(row, "c"),
+          ref = attr(c, "r"),
+          is_binary(ref),
+          xf = Enum.at(xfs, to_int(attr(c, "s")) || 0),
+          xf != nil,
+          xf.fmt != nil or xf.style != %{},
+          into: %{},
+          do: {ref, xf}
+
+    col_widths =
+      for col <- root |> child_named("cols") |> children_named("col"),
+          w = to_num(attr(col, "width")),
+          w != nil and w > 0,
+          min = to_int(attr(col, "min")),
+          min != nil,
+          i <- min..(to_int(attr(col, "max")) || min),
+          into: %{},
+          do: {Integer.to_string(i), round(w * @px_per_width_unit)}
+
+    merges =
+      for mc <- root |> child_named("mergeCells") |> children_named("mergeCell"),
+          ref = attr(mc, "ref"),
+          is_binary(ref) and String.contains?(ref, ":"),
+          do: ref
+
+    {frozen_rows, frozen_cols} = frozen_panes(root)
+
+    %{
+      cell_styles: cell_styles,
+      col_widths: col_widths,
+      merges: merges,
+      frozen_rows: frozen_rows,
+      frozen_cols: frozen_cols
+    }
+  end
+
+  defp frozen_panes(root) do
+    pane =
+      root
+      |> child_named("sheetViews")
+      |> child_named("sheetView")
+      |> child_named("pane")
+
+    if pane != nil and attr(pane, "state") == "frozen" do
+      {to_int(attr(pane, "ySplit")) || 0, to_int(attr(pane, "xSplit")) || 0}
+    else
+      {0, 0}
+    end
+  end
+end

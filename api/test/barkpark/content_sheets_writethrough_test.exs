@@ -281,6 +281,122 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
     end
   end
 
+  # ── Formula recompute (M3) ──────────────────────────────────────────────────
+
+  defp formula_content(a1) do
+    %{
+      "tabs" => [
+        %{
+          "name" => "Calc",
+          "cells" => %{
+            "A1" => %{"v" => a1},
+            "A2" => %{"v" => 3},
+            "A3" => %{"f" => "A1*A2"}
+          }
+        }
+      ]
+    }
+  end
+
+  describe "formula recompute on the save path" do
+    test "create computes formula cells before the row persists" do
+      {:ok, doc} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => "m3-create", "content" => formula_content(2)},
+          @dataset
+        )
+
+      {:ok, fetched} = Content.get_document(doc.doc_id, "sheet", @dataset)
+      cell = get_in(fetched.content, ["tabs", Access.at(0), "cells", "A3"])
+      assert cell["v"] == 6
+      assert cell["t"] == "n"
+    end
+
+    test "upsert recomputes: changing an input updates dependent formulas" do
+      {:ok, doc} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => "m3-upsert", "content" => formula_content(2)},
+          @dataset
+        )
+
+      {:ok, updated} =
+        Content.upsert_document(
+          "sheet",
+          %{"doc_id" => doc.doc_id, "content" => formula_content(5)},
+          @dataset
+        )
+
+      assert get_in(updated.content, ["tabs", Access.at(0), "cells", "A3", "v"]) == 15
+    end
+
+    test "write-through snapshots carry COMPUTED values into embedding docs" do
+      {:ok, sheet} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => "m3-wt", "content" => formula_content(2)},
+          @dataset
+        )
+
+      pub_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("m3-wt-paper", [sheet_block(pub_id)])
+
+      {:ok, _} =
+        Content.upsert_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => formula_content(7)},
+          @dataset
+        )
+
+      {_doc, [block]} = reload_blocks(paper)
+      assert block["snapshot"]["rows"] == [["7"], ["3"], ["21"]]
+    end
+
+    test "a cycle lands as #CYCLE! in the doc and its snapshots" do
+      content = %{
+        "tabs" => [
+          %{"cells" => %{"A1" => %{"f" => "B1+1"}, "B1" => %{"f" => "A1+1"}}}
+        ]
+      }
+
+      {:ok, sheet} =
+        Content.create_document("sheet", %{"doc_id" => "m3-cycle", "content" => content}, @dataset)
+
+      pub_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("m3-cycle-paper", [sheet_block(pub_id)])
+
+      {:ok, _} =
+        Content.upsert_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => content},
+          @dataset
+        )
+
+      {:ok, fetched} = Content.get_document(sheet.doc_id, "sheet", @dataset)
+      assert get_in(fetched.content, ["tabs", Access.at(0), "cells", "A1", "v"]) == "#CYCLE!"
+
+      {_doc, [block]} = reload_blocks(paper)
+      assert block["snapshot"]["rows"] == [["#CYCLE!", "#CYCLE!"]]
+    end
+
+    test "unknown function survives the save stale, keeping its cached value" do
+      content = %{
+        "tabs" => [
+          %{"cells" => %{"A1" => %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n"}}}
+        ]
+      }
+
+      {:ok, doc} =
+        Content.create_document("sheet", %{"doc_id" => "m3-stale", "content" => content}, @dataset)
+
+      {:ok, fetched} = Content.get_document(doc.doc_id, "sheet", @dataset)
+      cell = get_in(fetched.content, ["tabs", Access.at(0), "cells", "A1"])
+      assert cell["v"] == 42
+      assert cell["stale"] == true
+    end
+  end
+
   # ── PubSub ──────────────────────────────────────────────────────────────────
 
   describe "write-through — broadcasts" do

@@ -500,12 +500,40 @@ defmodule Barkpark.PortableDoc.Render do
         _ -> pd
       end
 
-    case Map.get(snap, "col_widths") do
-      widths when is_list(widths) ->
-        Map.put(pd, "col_widths", Enum.map(widths, &if(is_integer(&1), do: &1, else: 0)))
+    pd =
+      case Map.get(snap, "col_widths") do
+        widths when is_list(widths) ->
+          Map.put(pd, "col_widths", Enum.map(widths, &if(is_integer(&1), do: &1, else: 0)))
 
-      _ ->
-        pd
+        _ ->
+          pd
+      end
+
+    # Merges + styles ride the snapshot into the PdSheet node (M5). The HTML
+    # walker honors both; the TUI's pdrender ignores the keys and shows the
+    # merged value at its anchor cell, unstyled — values-first fidelity.
+    pd =
+      case Map.get(snap, "merges") do
+        merges when is_list(merges) ->
+          valid =
+            Enum.filter(merges, fn
+              [r, c, rs, cs] ->
+                is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
+                  r >= 0 and c >= 0 and rs >= 1 and cs >= 1
+
+              _ ->
+                false
+            end)
+
+          if valid == [], do: pd, else: Map.put(pd, "merges", valid)
+
+        _ ->
+          pd
+      end
+
+    case Map.get(snap, "styles") do
+      styles when is_map(styles) and map_size(styles) > 0 -> Map.put(pd, "styles", styles)
+      _ -> pd
     end
   end
 
@@ -1712,12 +1740,17 @@ defmodule Barkpark.PortableDoc.Render do
   # PdSheet — dense spreadsheet value grid; the same node shape the TUI's
   # pdrender already consumes (head/rows/col_widths, all-plain-string cells).
   # The HTML mirrors the `table` clause, plus an optional `<thead>` band when
-  # `head` is present and per-column inline `width:Npx` hints from
-  # `col_widths`, so the grid renders without any external CSS.
+  # `head` is present, per-column inline `width:Npx` hints from `col_widths`,
+  # `colspan`/`rowspan` from `merges` (covered cells emit no `<td>`), and
+  # per-cell inline styles from `styles` (bold/italic/background/text-align)
+  # — so the grid renders without any external CSS. The TUI ignores
+  # merges/styles and shows the merged value at its anchor cell.
   defp sheet(n, _width, %{style: :article} = pal) do
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
     col_widths = Map.get(n, "col_widths")
+    {anchors, covered} = sheet_merge_lookup(n)
+    styles = Map.get(n, "styles")
 
     thead =
       if head == [] do
@@ -1740,14 +1773,23 @@ defmodule Barkpark.PortableDoc.Render do
 
     tbody =
       body
-      |> Enum.map(fn row ->
+      |> Enum.with_index()
+      |> Enum.map(fn {row, r} ->
         cells =
           row
           |> Enum.with_index()
-          |> Enum.map(fn {cell, idx} ->
-            w_style = col_width_style(col_widths, idx)
+          |> Enum.flat_map(fn {cell, c} ->
+            if MapSet.member?(covered, {r, c}) do
+              []
+            else
+              w_style = col_width_style(col_widths, c)
+              span = sheet_span_attr(anchors, r, c)
+              extra = sheet_cell_style(styles, r, c)
 
-            ~s(<td style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem">#{escape_html(cell)}</td>)
+              [
+                ~s(<td#{span} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}">#{escape_html(cell)}</td>)
+              ]
+            end
           end)
           |> Enum.join("")
 
@@ -1763,6 +1805,8 @@ defmodule Barkpark.PortableDoc.Render do
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
     col_widths = Map.get(n, "col_widths")
+    {anchors, covered} = sheet_merge_lookup(n)
+    styles = Map.get(n, "styles")
 
     thead_row =
       if head == [] do
@@ -1783,14 +1827,23 @@ defmodule Barkpark.PortableDoc.Render do
 
     rows =
       body
-      |> Enum.map(fn row ->
+      |> Enum.with_index()
+      |> Enum.map(fn {row, r} ->
         cells =
           row
           |> Enum.with_index()
-          |> Enum.map(fn {cell, idx} ->
-            w_style = col_width_style(col_widths, idx)
+          |> Enum.flat_map(fn {cell, c} ->
+            if MapSet.member?(covered, {r, c}) do
+              []
+            else
+              w_style = col_width_style(col_widths, c)
+              span = sheet_span_attr(anchors, r, c)
+              extra = sheet_cell_style(styles, r, c)
 
-            ~s(<td style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top">#{escape_html(cell)}</td>)
+              [
+                ~s(<td#{span} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}">#{escape_html(cell)}</td>)
+              ]
+            end
           end)
           |> Enum.join("")
 
@@ -1800,6 +1853,78 @@ defmodule Barkpark.PortableDoc.Render do
 
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{thead_row}<tbody>#{rows}</tbody></table>)
   end
+
+  # `merges` ([[row, col, rowspan, colspan], …], 0-based body grid) →
+  # `{anchors, covered}`: anchor position → {rowspan, colspan}, plus the set
+  # of positions a merged range covers (anchor excluded — those cells emit
+  # no <td>). Malformed entries are ignored; with overlapping ranges the
+  # first listed wins (a covered anchor is simply skipped at emission time).
+  defp sheet_merge_lookup(n) do
+    n
+    |> Map.get("merges")
+    |> List.wrap()
+    |> Enum.reduce({%{}, MapSet.new()}, fn
+      [r, c, rs, cs], {anchors, covered}
+      when is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
+             r >= 0 and c >= 0 and rs >= 1 and cs >= 1 ->
+        covered =
+          for(rr <- r..(r + rs - 1), cc <- c..(c + cs - 1), {rr, cc} != {r, c}, do: {rr, cc})
+          |> Enum.into(covered)
+
+        {Map.put(anchors, {r, c}, {rs, cs}), covered}
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp sheet_span_attr(anchors, r, c) do
+    case Map.fetch(anchors, {r, c}) do
+      {:ok, {rs, cs}} ->
+        if(cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if(rs > 1, do: ~s( rowspan="#{rs}"), else: "")
+
+      :error ->
+        ""
+    end
+  end
+
+  # The sanitized per-cell style fragment — `""` or `";prop:val;…"` (it
+  # appends to a base style that carries no trailing semicolon, so the
+  # no-style output stays byte-identical to before M5). Defensive even
+  # though the snapshot side already sanitizes: only a strict #rrggbb hex
+  # may reach `background` (it sits inside the inline style attribute),
+  # only the three known alignment words reach `text-align`.
+  defp sheet_cell_style(styles, r, c) when is_map(styles) do
+    case Map.get(styles, "#{r},#{c}") do
+      %{} = s ->
+        [
+          if(Map.get(s, "b") == true, do: "font-weight:bold;", else: ""),
+          if(Map.get(s, "i") == true, do: "font-style:italic;", else: ""),
+          sheet_bg_style(Map.get(s, "bg")),
+          sheet_align_style(Map.get(s, "al"))
+        ]
+        |> Enum.join("")
+        |> case do
+          "" -> ""
+          fragment -> ";" <> fragment
+        end
+
+      _ ->
+        ""
+    end
+  end
+
+  defp sheet_cell_style(_styles, _r, _c), do: ""
+
+  defp sheet_bg_style(bg) when is_binary(bg) do
+    if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background:#{bg};", else: ""
+  end
+
+  defp sheet_bg_style(_), do: ""
+
+  defp sheet_align_style(al) when al in ["left", "center", "right"], do: "text-align:#{al};"
+  defp sheet_align_style(_), do: ""
 
   # Emit an inline `width:Npx;` style fragment for the col at `idx` (0-based).
   # Returns `""` when no col_widths list is present or the entry is 0.
