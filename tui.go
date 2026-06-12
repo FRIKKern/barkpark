@@ -1980,7 +1980,14 @@ func (m *model) scrollToField() {
 		// height-pinned at startFieldEdit, so the editing render of a field
 		// occupies the same span as its static render (pinned in
 		// multiline_test.go).
+		if m.fieldGroupHeader(i) != "" {
+			targetLine += 2 // header + blank, mirroring buildEditorContent
+		}
 		targetLine += renderedLineCount(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
+	}
+	// The cursor's OWN group header (rendered before it) shifts its start too.
+	if m.fieldCursor < len(m.editorSchema.Fields) && m.fieldGroupHeader(m.fieldCursor) != "" {
+		targetLine += 2
 	}
 	if targetLine > m.viewport.YOffset+m.viewport.Height-6 {
 		m.viewport.SetYOffset(targetLine - m.viewport.Height + 8)
@@ -2738,6 +2745,22 @@ func (m model) renderEditor(width, height int, isActive bool) string {
 
 // buildEditorContent renders the full editor content as a string.
 // The viewport handles scrolling and clipping.
+// fieldGroupHeader returns the dim section-header line rendered BEFORE field
+// i when it starts a new schema group ("" otherwise). Shared by
+// buildEditorContent (render) and scrollToField (line accounting) so the two
+// can never drift — every header is exactly TWO physical lines (header +
+// blank).
+func (m model) fieldGroupHeader(i int) string {
+	fields := m.editorSchema.Fields
+	if i >= len(fields) || fields[i].Group == "" {
+		return ""
+	}
+	if i > 0 && fields[i-1].Group == fields[i].Group {
+		return ""
+	}
+	return dimStyle.Render("  ── " + strings.ToUpper(fields[i].Group) + " ──")
+}
+
 func (m model) buildEditorContent(width int) string {
 	if m.selectedDoc == nil || m.editorSchema == nil {
 		return ""
@@ -2776,6 +2799,9 @@ func (m model) buildEditorContent(width int) string {
 	}
 	isEditorFocused := m.focus.Target == FocusEditor
 	for i, field := range m.editorSchema.Fields {
+		if h := m.fieldGroupHeader(i); h != "" {
+			lines = append(lines, h, "")
+		}
 		isFocused := isEditorFocused && i == m.fieldCursor
 		isEditing := isFocused && m.editing
 		lines = append(lines, m.renderField(field, fieldWidth, isFocused, isEditing)...)

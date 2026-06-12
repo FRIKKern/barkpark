@@ -50,6 +50,10 @@ type Field struct {
 	// validates on commit so a violating value never even reaches the
 	// server's warning pass.
 	Pattern string
+	// Group mirrors the schema's field "group" — the editor renders a dim
+	// section header when consecutive fields cross a group boundary
+	// (Studio renders the same groups as tab bars).
+	Group string
 }
 
 // PreviewSpec names one content field a document-list row surfaces, with an
@@ -131,6 +135,7 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 				Options    []string        `json:"options,omitempty"`
 				RefType    string          `json:"refType,omitempty"`
 				Rows       int             `json:"rows,omitempty"`
+				Group      string          `json:"group,omitempty"`
 				// Validation values are mixed types ({"required": bool},
 				// {"pattern": string} both ship in live schemas) — decode
 				// raw and pick fields tolerantly so an unknown shape can
@@ -162,6 +167,7 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 				RefType:  af.RefType,
 				Required: rawBool(af.Validation["required"]),
 				Pattern:  rawString(af.Validation["pattern"]),
+				Group:    af.Group,
 				Rows:    af.Rows,
 			})
 		}

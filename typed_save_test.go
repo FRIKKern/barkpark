@@ -345,3 +345,70 @@ func TestRelTimeHint(t *testing.T) {
 		t.Errorf("future → %q, want in 2d", got)
 	}
 }
+
+// Field-group section headers (Studio renders groups as tabs; the TUI gets
+// dim dividers, 2026-06-12): one header per group TRANSITION, none for
+// ungrouped fields, and scrollToField's line formula stays exact across them.
+func TestFieldGroupHeaders(t *testing.T) {
+	m := typedModel([]Field{
+		{Name: "a", Title: "A", Type: FieldString, Group: "brief"},
+		{Name: "b", Title: "B", Type: FieldString, Group: "brief"},
+		{Name: "c", Title: "C", Type: FieldString, Group: "system"},
+		{Name: "d", Title: "D", Type: FieldString},
+	}, map[string]string{})
+
+	if h := m.fieldGroupHeader(0); !strings.Contains(h, "BRIEF") {
+		t.Errorf("field 0 should open the brief group, got %q", h)
+	}
+	if h := m.fieldGroupHeader(1); h != "" {
+		t.Errorf("same-group field must not repeat the header, got %q", h)
+	}
+	if h := m.fieldGroupHeader(2); !strings.Contains(h, "SYSTEM") {
+		t.Errorf("group transition should header, got %q", h)
+	}
+	if h := m.fieldGroupHeader(3); h != "" {
+		t.Errorf("ungrouped field must not header, got %q", h)
+	}
+
+	content := m.buildEditorContent(80)
+	if strings.Count(content, "── BRIEF ──") != 1 || strings.Count(content, "── SYSTEM ──") != 1 {
+		t.Errorf("editor should render each group header exactly once:\n%s", content)
+	}
+}
+
+func TestScrollAccountingExactAcrossGroupHeaders(t *testing.T) {
+	m := typedModel([]Field{
+		{Name: "a", Title: "A", Type: FieldString, Group: "brief"},
+		{Name: "b", Title: "B", Type: FieldString, Group: "system"},
+		{Name: "footer", Title: "Footer", Type: FieldString, Group: "system"},
+	}, map[string]string{})
+	m.fieldCursor = 2
+
+	ew := m.calcEditorWidth()
+	fieldWidth := maxInt(ew-4, 20)
+
+	// The formula from scrollToField, headers included.
+	target := 4
+	for i := 0; i < 2; i++ {
+		if m.fieldGroupHeader(i) != "" {
+			target += 2
+		}
+		target += renderedLineCount(m.renderField(m.editorSchema.Fields[i], fieldWidth, false, false)) + 1
+	}
+	if m.fieldGroupHeader(2) != "" {
+		target += 2
+	}
+
+	// The REAL line where field 2's label starts in the assembled content.
+	lines := strings.Split(m.buildEditorContent(ew), "\n")
+	real := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "FOOTER") {
+			real = i
+			break
+		}
+	}
+	if real != target {
+		t.Errorf("scroll formula says line %d, content has FOOTER at %d", target, real)
+	}
+}
