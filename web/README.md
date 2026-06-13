@@ -5,7 +5,7 @@ Next.js (App Router) demo at https://barkpark.cloud — read-only consumer of th
 
 Run: `pnpm install && pnpm dev`. Reads `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`); copy `.env.example` → `.env.local`. The server-only client (`lib/barkpark-client.ts`) reads `BARKPARK_READ_TOKEN` (never `NEXT_PUBLIC_*`) — scoped routes return 403 anonymously.
 
-**SDK status:** `@barkpark/core` (local workspace link) handles reads. `@barkpark/nextjs` (pinned exact `1.0.0-preview.3`) is **installed and ready but not wired yet** — preview/live-update integration comes later. Guide: `docs/cards/js-sdk.md`.
+**SDK status:** `@barkpark/core` (local workspace link) handles reads. `@barkpark/nextjs` (`1.0.0-preview.3`) live updates are **wired but gated**: `<BarkparkLive/>` (root layout) subscribes via the same-origin SSE proxy `app/v1/data/listen/[dataset]/route.ts` (injects `BARKPARK_READ_TOKEN`, which needs `listen` permission) and triggers `router.refresh()`. Inert until `NEXT_PUBLIC_BARKPARK_LIVE=1` **and** a listen-capable token are set — then the flat surface (`force-dynamic`) auto-refreshes on change. Guide: `docs/cards/js-sdk.md`.
 
 **Rollback** (if the SDK preview breaks before GA — mechanical): `pnpm remove @barkpark/core @barkpark/nextjs`, then write `lib/barkpark.ts` with three ~20-line `fetch` helpers — `query`, `doc`, `mutate` — against `${NEXT_PUBLIC_API_URL}/v1/data/...`.
 
