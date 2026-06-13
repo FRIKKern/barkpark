@@ -58,8 +58,8 @@ defmodule Barkpark.MixProject do
       {:xml_builder, "~> 2.2"},
       {:cloak_ecto, "~> 1.2"},
       {:oban, "~> 2.17"},
-      # Media Phase 1 — image probe + renditions (requires libvips on host)
-      {:image, "~> 0.55"},
+      # Media Phase 1 — image probe + renditions. Added conditionally; see
+      # image_dep/0 (vix has no Windows prebuilt NIF). macOS/Linux/Docker keep it.
       # WI2: json schema validator dep
       {:ex_json_schema, "~> 0.10"},
       # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
@@ -69,7 +69,23 @@ defmodule Barkpark.MixProject do
       # Sheets plugin — xlsx import + export (pure-Elixir, no NIFs)
       {:xlsx_reader, "~> 0.8"},
       {:elixlsx, "~> 0.6"}
-    ]
+    ] ++ image_dep()
+  end
+
+  # The :image dep pulls vix, whose libvips NIF has NO Windows prebuilt binary —
+  # it would need MSVC + libvips to build from source, which breaks zero-friction
+  # native Windows dev. So we drop :image on Windows by default; media renditions
+  # are the only feature affected (the rest of the API is unchanged). macOS,
+  # Linux, Docker, and the prod compile gate keep media. Overrides:
+  #   BARKPARK_WITH_IMAGE=1  force it ON  (Windows users who installed libvips+MSVC)
+  #   BARKPARK_SKIP_IMAGE=1  force it OFF (e.g. a Linux box without libvips)
+  defp image_dep do
+    cond do
+      System.get_env("BARKPARK_WITH_IMAGE") == "1" -> [{:image, "~> 0.55"}]
+      System.get_env("BARKPARK_SKIP_IMAGE") == "1" -> []
+      match?({:win32, _}, :os.type()) -> []
+      true -> [{:image, "~> 0.55"}]
+    end
   end
 
   # Release configuration (T5.1 — Wave 5 personal-local packaging).

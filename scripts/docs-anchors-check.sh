@@ -140,7 +140,8 @@ echo "== canonical-for uniqueness =="
 DUPES=$(
   find . -name '*.md' \
     -not -path './_attic/*' -not -path './node_modules/*' \
-    -not -path '*/node_modules/*' -not -path './.artifacts/*' |
+    -not -path '*/node_modules/*' -not -path './.artifacts/*' \
+    -not -path '*/_build/*' -not -path '*/deps/*' |
   while IFS= read -r f; do
     h=$(header_line "$f")
     printf '%s\n' "$h" | grep -E "$HEADER_RE" |
@@ -176,7 +177,8 @@ tripwire() {
   # $1 = literal, $2 = space-separated allowlist
   local literal="$1" allow="$2" hits f allowed a
   hits=$(grep -rlF "$literal" --include='*.md' . 2>/dev/null |
-    sed 's|^\./||' | grep -v '^_attic/' | grep -v node_modules | grep -v '^\.artifacts/' || true)
+    sed 's|^\./||' | grep -v '^_attic/' | grep -v node_modules | grep -v '^\.artifacts/' \
+    | grep -v '/_build/' | grep -v '/deps/' || true)
   for f in $hits; do
     allowed=0
     for a in $allow; do
@@ -197,7 +199,7 @@ tripwire '89.167.28.206' \
 tripwire 'v1=<hex>' \
   "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \
-  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
+  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 
 # --- summary ------------------------------------------------------------------
 echo ""
