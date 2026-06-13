@@ -54,12 +54,20 @@ function ListHeader({
           </span>
         ) : null}
       </p>
-      <Link
-        href="/papers"
-        className="w-fit text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
-      >
-        Browse Papers (Portable Docs) →
-      </Link>
+      <nav className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+        <Link
+          href="/find"
+          className="font-medium text-zinc-700 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-zinc-50"
+        >
+          Find anything →
+        </Link>
+        <Link
+          href="/papers"
+          className="text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
+        >
+          Browse Papers (Portable Docs) →
+        </Link>
+      </nav>
     </header>
   );
 }
