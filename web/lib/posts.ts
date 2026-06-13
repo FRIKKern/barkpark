@@ -4,6 +4,13 @@ export interface PostDocument extends BarkparkDocument {
   title?: string;
   slug?: string;
   excerpt?: string;
+  /** Body copy. Plain string in the demo dataset; richer types use `content.body`. */
+  body?: string;
+  author?: string;
+  /** Author-supplied publish date (free-form in the demo data); falls back to `_updatedAt`. */
+  publishedAt?: string;
+  category?: string;
+  featured?: string | boolean;
   content?: { slug?: string; body?: unknown };
 }
 

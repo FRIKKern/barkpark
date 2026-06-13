@@ -1,54 +1,54 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { client } from "@/lib/barkpark-client";
-import { fetchPostBySlug } from "@/lib/posts";
+import { getPost } from "@/lib/get-post";
+import { PostArticle } from "@/components/post-article";
 
 export const revalidate = 60;
 
 /**
  * Flat post detail — `/posts/[slug]`. The flat counterpart to the scoped
  * `/w/[workspace]/p/[project]/posts/[slug]` route: same fetch, but via the
- * default flat-scope `client`. Linked from the home listing (`basePath="/posts"`).
+ * default flat-scope client. Linked from the home listing (`basePath="/posts"`).
  */
-export default async function PostDetail({
+
+type Params = Promise<{ slug: string }>;
+
+export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ slug: string }>;
-}) {
+  params: Params;
+}): Promise<Metadata> {
   const { slug } = await params;
+  const { post, error } = await getPost(slug);
+  // Trigger 404 here (metadata resolves before the response status is committed)
+  // so a missing post yields a real HTTP 404 — not a 200 from the page throwing
+  // notFound() after headers are already sent.
+  if (!post && !error) notFound();
+  if (!post) return { title: "Post unavailable · Barkpark" };
+  const description = post.excerpt ?? undefined;
+  return {
+    title: `${post.title ?? "(untitled)"} · Barkpark`,
+    description,
+    openGraph: {
+      title: post.title ?? undefined,
+      description,
+      type: "article",
+    },
+  };
+}
 
-  let error: string | null = null;
-  let post = null;
-
-  try {
-    post = await fetchPostBySlug(client, slug);
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-  }
+export default async function PostDetail({ params }: { params: Params }) {
+  const { slug } = await params;
+  const { post, error } = await getPost(slug);
 
   if (!error && !post) notFound();
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16 font-sans text-zinc-900 dark:text-zinc-50">
-      <Link href="/" className="text-sm text-zinc-500 hover:underline">
-        ← back to all posts
-      </Link>
-
-      {error ? (
-        <section className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-          <strong className="font-medium">Failed to load post.</strong>
-          <pre className="mt-2 whitespace-pre-wrap text-xs">{error}</pre>
-        </section>
-      ) : post ? (
-        <article className="flex flex-col gap-4">
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {post.title ?? "(untitled)"}
-          </h1>
-          {post.excerpt ? (
-            <p className="text-zinc-600 dark:text-zinc-400">{post.excerpt}</p>
-          ) : null}
-        </article>
-      ) : null}
-    </main>
+    <PostArticle
+      post={post}
+      error={error}
+      backHref="/"
+      backLabel="back to all posts"
+    />
   );
 }

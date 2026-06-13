@@ -1,5 +1,18 @@
+import Link from "next/link";
 import type { PostDocument } from "@/lib/posts";
 import { postSlug } from "@/lib/posts";
+
+/** Format an ISO date as a short label; null when unparseable. */
+function shortDate(value?: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
 
 interface PostsListProps {
   posts: PostDocument[];
@@ -42,21 +55,31 @@ export function PostsList({
         <p className="text-zinc-500">No published posts yet.</p>
       ) : (
         <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
-          {posts.map((post) => (
-            <li key={post._id} className="py-4">
-              <a
-                href={`${basePath}/${postSlug(post)}`}
-                className="flex flex-col gap-1 hover:underline"
-              >
-                <span className="text-lg font-medium">
-                  {post.title ?? "(untitled)"}
-                </span>
-                <span className="text-sm text-zinc-500">
-                  /{postSlug(post)}
-                </span>
-              </a>
-            </li>
-          ))}
+          {posts.map((post) => {
+            const date = shortDate(post.publishedAt) ?? shortDate(post._updatedAt);
+            return (
+              <li key={post._id} className="group py-5">
+                <Link
+                  href={`${basePath}/${postSlug(post)}`}
+                  className="flex flex-col gap-1.5"
+                >
+                  <span className="text-lg font-medium tracking-tight group-hover:underline">
+                    {post.title ?? "(untitled)"}
+                  </span>
+                  {post.excerpt ? (
+                    <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
+                      {post.excerpt}
+                    </span>
+                  ) : null}
+                  <span className="flex flex-wrap items-center gap-x-2 text-xs text-zinc-400">
+                    {date ? <span>{date}</span> : null}
+                    {date ? <span aria-hidden>·</span> : null}
+                    <span className="font-mono">/{postSlug(post)}</span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
