@@ -54,6 +54,12 @@ function ListHeader({
           </span>
         ) : null}
       </p>
+      <Link
+        href="/papers"
+        className="w-fit text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
+      >
+        Browse Papers (Portable Docs) →
+      </Link>
     </header>
   );
 }
