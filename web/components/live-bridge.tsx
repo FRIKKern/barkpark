@@ -13,10 +13,16 @@ import { BarkparkLive } from "@barkpark/nextjs/client";
  * `<BarkparkLive/>` debounces incoming change events into `router.refresh()`,
  * re-rendering the server components with fresh data.
  *
- * Renders `null`. Mounted once in the root layout.
+ * Renders `null`. Mounted once in the root layout. Gated behind
+ * `NEXT_PUBLIC_BARKPARK_LIVE=1` so it stays inert (no connection attempts, no
+ * console noise) until the deployment is provisioned with a listen-capable
+ * `BARKPARK_READ_TOKEN` and live is explicitly switched on.
  */
+const liveEnabled = process.env.NEXT_PUBLIC_BARKPARK_LIVE === "1";
+
 export function LiveBridge() {
   const client = useMemo(() => {
+    if (!liveEnabled) return null;
     if (typeof window === "undefined") return null;
     return createClient({
       projectUrl: window.location.origin,
