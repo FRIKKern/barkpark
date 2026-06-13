@@ -9,11 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -720,10 +718,7 @@ func waitDockerDBHealthy(ctx context.Context, w writerLike, dir string) error {
 	return fmt.Errorf("timed out waiting for the postgres container to become healthy")
 }
 
-// backgroundCommand builds an exec.Cmd detached into its own session (Setsid)
-// so the child outlives bp's exit and never holds the terminal.
-func backgroundCommand(name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd
-}
+// backgroundCommand builds an exec.Cmd detached from bp's process group so the
+// child outlives bp's exit and never holds the terminal. The detach mechanism is
+// platform-specific — see local_unix.go (Setsid) and local_windows.go
+// (CREATE_NEW_PROCESS_GROUP).

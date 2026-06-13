@@ -10,6 +10,12 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp version
 ```
 
+**Windows** (PowerShell) — see [WINDOWS.md](WINDOWS.md) for the full guide:
+
+```powershell
+irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
+```
+
 | Env | Effect |
 |---|---|
 | `BARKPARK_BIN_DIR` | install dir (default `/usr/local/bin`, fallback `~/.local/bin`) |

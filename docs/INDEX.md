@@ -9,7 +9,7 @@ Decisions: decisions/0001-sdk-envelope.md · decisions/0002-npm-dist-tag.md · d
 
 Runbooks: ops/PROD_OPS.md · ops/npm-rollback-playbook.md · ops/merge-gates.md · ops/adding-a-domain.md · ops/bokbasen-go-live.md · ops/realtime-webhook-setup.md
 
-Setup: setup/{QUICKSTART,SETUP,TASK-SYSTEM,personal-local}.md
+Setup: setup/{QUICKSTART,SETUP,WINDOWS,TASK-SYSTEM,personal-local}.md
 
 Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 

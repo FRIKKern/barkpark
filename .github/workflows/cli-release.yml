@@ -59,4 +59,5 @@ jobs:
             --title "bp $VERSION" \
             dist/bp-darwin-arm64 dist/bp-darwin-amd64 \
             dist/bp-linux-arm64 dist/bp-linux-amd64 \
+            dist/bp-windows-amd64.exe dist/bp-windows-arm64.exe \
             dist/checksums.txt

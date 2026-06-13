@@ -83,7 +83,7 @@ LDFLAGS := -s -w \
   -X $(MODULE)/internal/cli.cliVersion=$(VERSION) \
   -X $(MODULE)/internal/cli.cliCommit=$(COMMIT) \
   -X $(MODULE)/internal/cli.cliDate=$(DATE)
-CLI_TARGETS := bp-darwin-arm64 bp-darwin-amd64 bp-linux-arm64 bp-linux-amd64
+CLI_TARGETS := bp-darwin-arm64 bp-darwin-amd64 bp-linux-arm64 bp-linux-amd64 bp-windows-amd64.exe bp-windows-arm64.exe
 
 # deploy.sh is go:embedded into bp (internal/cli/setup/assets/) so a
 # curl-installed binary can deploy without a checkout. The canonical script
@@ -100,12 +100,14 @@ cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOO
 	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp .
 	@echo ">> Done: dist/bp"
 
-cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux × arm64/amd64 into dist/
-	@echo ">> Cross-compiling bp $(VERSION) for 4 targets into dist/..."
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-arm64 .
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-amd64 .
-	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-arm64 .
-	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-amd64 .
+cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux/windows × arm64/amd64 into dist/
+	@echo ">> Cross-compiling bp $(VERSION) for 6 targets into dist/..."
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-arm64 .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-amd64 .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-arm64 .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-amd64 .
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-windows-amd64.exe .
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-windows-arm64.exe .
 	@echo ">> Done. Artifacts:"
 	@ls -lh dist/bp-*
 
