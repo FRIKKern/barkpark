@@ -81,8 +81,12 @@ export function PostArticle({
           ) : null}
 
           {post.body ? (
-            <div className="leading-relaxed whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
-              {post.body}
+            <div className="flex flex-col gap-4 text-base leading-7 text-zinc-700 dark:text-zinc-300">
+              {post.body.split(/\n{2,}/).map((para, i) => (
+                <p key={i} className="whitespace-pre-wrap">
+                  {para}
+                </p>
+              ))}
             </div>
           ) : !post.excerpt ? (
             <p className="text-sm text-zinc-400 italic">

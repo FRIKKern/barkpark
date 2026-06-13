@@ -1,19 +1,22 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/barkpark-client";
 import { fetchPosts, type PostDocument } from "@/lib/posts";
-import { PostsList } from "@/components/posts-list";
+import { PostsList, PostsListSkeleton } from "@/components/posts-list";
 
 export const revalidate = 60;
 
 /**
  * Scoped post listing. The route params → `createClient({ workspace, project })`
  * → a core client whose requests carry `/w/<ws>/p/<project>` (via scopePrefix).
+ * The fetch streams in behind the skeleton fallback.
  */
-export default async function ScopedHome({
-  params,
+async function ScopedPosts({
+  workspace,
+  project,
 }: {
-  params: Promise<{ workspace: string; project: string }>;
+  workspace: string;
+  project: string;
 }) {
-  const { workspace, project } = await params;
   const client = createClient({ workspace, project });
 
   let posts: PostDocument[] = [];
@@ -32,5 +35,18 @@ export default async function ScopedHome({
       basePath={`/w/${workspace}/p/${project}/posts`}
       scopeLabel={`w/${workspace} · p/${project}`}
     />
+  );
+}
+
+export default async function ScopedHome({
+  params,
+}: {
+  params: Promise<{ workspace: string; project: string }>;
+}) {
+  const { workspace, project } = await params;
+  return (
+    <Suspense fallback={<PostsListSkeleton />}>
+      <ScopedPosts workspace={workspace} project={project} />
+    </Suspense>
   );
 }

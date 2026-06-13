@@ -78,7 +78,7 @@ export default async function ScopedLayout({
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex items-center justify-between gap-4 border-b border-zinc-200 px-6 py-3 text-sm dark:border-zinc-800">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-zinc-200 bg-background/80 px-6 py-3 text-sm backdrop-blur dark:border-zinc-800">
         <nav className="text-zinc-500" aria-label="Breadcrumb">
           <Link
             href={`/w/${workspace}/p/${project}`}
