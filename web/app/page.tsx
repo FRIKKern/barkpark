@@ -3,7 +3,9 @@ import { client } from "@/lib/barkpark-client";
 import { fetchPosts, type PostDocument } from "@/lib/posts";
 import { PostsList, PostsListSkeleton } from "@/components/posts-list";
 
-export const revalidate = 60;
+// Live surface: render fresh each request so <BarkparkLive/>'s router.refresh()
+// reflects content changes immediately (ISR caching would lag up to revalidate).
+export const dynamic = "force-dynamic";
 
 /** Async data boundary — streams the list in behind the skeleton fallback. */
 async function FlatPosts() {

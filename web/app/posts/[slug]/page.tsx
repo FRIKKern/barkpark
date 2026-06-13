@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { getPost } from "@/lib/get-post";
 import { PostArticle } from "@/components/post-article";
 
-export const revalidate = 60;
+// Live surface: render fresh each request so <BarkparkLive/>'s router.refresh()
+// reflects content changes immediately (ISR caching would lag up to revalidate).
+export const dynamic = "force-dynamic";
 
 /**
  * Flat post detail — `/posts/[slug]`. The flat counterpart to the scoped
