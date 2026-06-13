@@ -1,17 +1,21 @@
 # Vercel rootDirectory is set to `web/` in the project dashboard (Phase 3).
 # This .vercelignore is defensive — exclude every non-Next.js path from any
 # context the build might still see. Do NOT exclude `web/`.
-
-api/
-.doey/
-.claude/
-.githooks/
-.github/
-apps/
-docs/
-priv/
-deps/
-_build/
+#
+# These are root-only paths, so each MUST carry a leading slash to anchor it to
+# the repo root. An unanchored `api/` is a gitignore-style match-at-any-depth
+# pattern and silently strips `web/app/api/` too — which dropped the /api/find
+# route handler from the build (it 404'd in prod while every other route built).
+/api/
+/.doey/
+/.claude/
+/.githooks/
+/.github/
+/apps/
+/docs/
+/priv/
+/deps/
+/_build/
 
 # Phoenix / Elixir
 *.ex
