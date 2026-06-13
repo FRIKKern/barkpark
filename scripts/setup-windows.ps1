@@ -69,7 +69,8 @@ function Use-Toolchain {
     "$ScoopRoot\shims",
     "$ScoopRoot\apps\elixir\current\bin",
     "$ScoopRoot\apps\erlang\current\bin",
-    "$ScoopRoot\apps\postgresql\current\bin"
+    "$ScoopRoot\apps\postgresql\current\bin",
+    "$ScoopRoot\apps\imagemagick\current"
   )
   $env:Path = ($dirs -join ';') + ';' + $env:Path
 }
@@ -109,8 +110,8 @@ function Install-Scoop {
 }
 
 function Install-Toolchain {
-  Step 'Installing Erlang + Elixir + PostgreSQL via Scoop (idempotent)'
-  scoop install erlang elixir postgresql
+  Step 'Installing Erlang + Elixir + PostgreSQL + ImageMagick via Scoop (idempotent)'
+  scoop install erlang elixir postgresql imagemagick
   Use-Toolchain
   Ok ("erlang : OTP " + (Get-ErlangVersion))
   Ok ("elixir : " + ((& elixir --version 2>$null | Select-String '^Elixir').ToString()))
@@ -172,7 +173,7 @@ function Build-And-Seed {
 # --- server -------------------------------------------------------------------
 function Start-Server {
   Step "Starting Phoenix on :$Port (new window)"
-  $dirs = "$ScoopRoot\shims;$ScoopRoot\apps\elixir\current\bin;$ScoopRoot\apps\erlang\current\bin;$ScoopRoot\apps\postgresql\current\bin"
+  $dirs = "$ScoopRoot\shims;$ScoopRoot\apps\elixir\current\bin;$ScoopRoot\apps\erlang\current\bin;$ScoopRoot\apps\postgresql\current\bin;$ScoopRoot\apps\imagemagick\current"
   $cmd = "`$env:Path='$dirs;'+`$env:Path; `$env:PORT='$Port'; Set-Location '$ApiDir'; Write-Host 'Barkpark dev server -- close this window to stop' -ForegroundColor Cyan; mix phx.server"
   Start-Process powershell -ArgumentList '-NoExit','-NoProfile','-Command', $cmd | Out-Null
 

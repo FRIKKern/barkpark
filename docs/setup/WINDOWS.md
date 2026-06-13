@@ -93,11 +93,13 @@ bp whoami
 
 ---
 
-## Media (libvips) — the one real limitation
+## Media on Windows (ImageMagick)
 
-Image renditions use `vix`, whose libvips NIF has **no Windows prebuilt binary** — it would need MSVC + libvips to build from source. So `mix.exs` **auto-drops the `image` dep on Windows**; the rest of the API is unaffected, and media renditions are the only feature missing. macOS, Linux, Docker, and CI keep media.
+Image renditions normally use `vix`/libvips, which has **no Windows prebuilt NIF**. So on Windows Barkpark uses an **ImageMagick backend** instead: `mix.exs` drops the `image` dep, and `Barkpark.Media.ImageBackend` shells out to the `magick` CLI — a plain executable, no NIF. `scripts\setup-windows.ps1` installs it (`scoop install imagemagick`); the backend is selected automatically by OS.
 
-To enable media on Windows anyway: install libvips + the C toolchain, then build with `BARKPARK_WITH_IMAGE=1`. Most people who need media just use Docker instead.
+All presets work natively — **thumb / preview / hero / og, JPEG and WebP**. macOS, Linux, Docker, and CI keep using libvips unchanged (byte-identical output there).
+
+Prefer libvips on Windows anyway? Install libvips + a C toolchain and build with `BARKPARK_WITH_IMAGE=1`, or use Docker.
 
 ---
 
