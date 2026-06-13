@@ -75,8 +75,9 @@ defmodule Barkpark.MixProject do
   # The :image dep pulls vix, whose libvips NIF has NO Windows prebuilt binary —
   # it would need MSVC + libvips to build from source, which breaks zero-friction
   # native Windows dev. So we drop :image on Windows by default; media renditions
-  # are the only feature affected (the rest of the API is unchanged). macOS,
-  # Linux, Docker, and the prod compile gate keep media. Overrides:
+  # still work there via the ImageMagick CLI backend (Barkpark.Media.ImageBackend
+  # selects it automatically). macOS, Linux, Docker, and the prod compile gate
+  # keep libvips. Overrides:
   #   BARKPARK_WITH_IMAGE=1  force it ON  (Windows users who installed libvips+MSVC)
   #   BARKPARK_SKIP_IMAGE=1  force it OFF (e.g. a Linux box without libvips)
   defp image_dep do

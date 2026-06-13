@@ -8,6 +8,7 @@ defmodule Barkpark.Media.Renditions do
   """
 
   alias Barkpark.Media
+  alias Barkpark.Media.ImageBackend
   alias Barkpark.Media.MediaFile
 
   @presets %{
@@ -86,12 +87,11 @@ defmodule Barkpark.Media.Renditions do
     src = Media.file_path(file.path)
     File.mkdir_p!(Path.dirname(dest))
 
-    with {:ok, image} <- Image.open(src),
-         {:ok, thumb} <- Image.thumbnail(image, spec.max_width, height: spec.max_height),
-         {:ok, stamped} <- maybe_watermark(thumb, profile),
-         :ok <- write_image(stamped, dest, spec) do
-      {:ok, rel}
-    else
+    # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
+    case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
+      :ok ->
+        {:ok, rel}
+
       {:error, reason} ->
         require Logger
 
@@ -103,50 +103,9 @@ defmodule Barkpark.Media.Renditions do
     end
   end
 
-  defp maybe_watermark(image, profile) when profile in [nil, "", "none"], do: {:ok, image}
-
-  defp maybe_watermark(image, profile) when profile in ["draft", "editorial"] do
-    label = watermark_label(profile)
-
-    with {:ok, text_layer} <-
-           Image.Text.text(label,
-             font_size: watermark_font_size(image),
-             text_fill_color: {255, 255, 255, 0.35},
-             background_color: :none
-           ),
-         {:ok, watermarked} <- Image.compose(image, text_layer, x: :center, y: :middle) do
-      {:ok, watermarked}
-    else
-      {:error, _} = error -> error
-      _ -> {:ok, image}
-    end
-  end
-
-  defp maybe_watermark(image, _profile), do: {:ok, image}
-
-  defp watermark_label("draft"), do: "DRAFT"
-  defp watermark_label("editorial"), do: "EDITORIAL USE ONLY"
-  defp watermark_label(_), do: "DRAFT"
-
-  defp watermark_font_size(image) do
-    min(Image.width(image), Image.height(image))
-    |> div(12)
-    |> max(18)
-  end
-
-  defp write_image(image, dest, %{format: "webp"} = spec) do
-    case Image.write(image, dest, suffix: ".webp", quality: spec.quality) do
-      {:ok, _} -> :ok
-      error -> error
-    end
-  end
-
-  defp write_image(image, dest, spec) do
-    case Image.write(image, dest, suffix: ".jpg", quality: spec.quality) do
-      {:ok, _} -> :ok
-      error -> error
-    end
-  end
+  # Collapse the "no watermark" sentinels to nil for the backend contract.
+  defp normalize_profile(profile) when profile in [nil, "", "none"], do: nil
+  defp normalize_profile(profile), do: profile
 
   defp cache_relative(id, preset, ext, profile) do
     suffix =
