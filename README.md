@@ -5,6 +5,29 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
+## Setup
+
+**Install the `bp` CLI:**
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
+```
+
+Then `bp setup` (local · deploy · connect) and `bp task ready`.
+
+**Local server, zero config:**
+
+- **macOS / Linux:** `bp setup --target local` (native or `--docker`)
+- **Windows:** clone, then `.\scripts\setup-windows.ps1` — installs the toolchain + starts Phoenix
+
+[Quickstart](docs/setup/QUICKSTART.md) · [Windows](docs/setup/WINDOWS.md) · [from source](docs/setup/SETUP.md)
+
 ## Your AI's task board
 
 Task management is the headline use case. Tasks are plain documents with a lifecycle (`open → in_progress → done`, plus `blocked`/`cancelled`), a dependency graph, priorities, labels, and an atomic claim/close contract built for concurrent workers (fencing epochs, 300s lease sweeps):
@@ -17,16 +40,6 @@ bp task close t1 agent-1 1   # CAS on the claim epoch
 ```
 
 Open `/studio` and the same queue is the **Tasks ✅** pane: you flip lifecycle states and set priority/assignee while the agent claims and closes over HTTP (claims and dependencies render read-only — the API owns them). A root task is a goal; subtasks nest under it via `parent_id`. Guide: [`docs/setup/TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) · cheatsheet: [`docs/cheatsheets/tasks.md`](docs/cheatsheets/tasks.md).
-
-## Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp setup        # wizard: local dev · deploy a server · connect — tasks + papers pre-checked
-bp task ready   # you're in
-```
-
-The wizard covers every route: local stack (native or Docker), SSH deploy to any Ubuntu 22.04+ box (ARM64 or x86_64), or connect to a running server. Walkthrough: [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md). Hacking on Barkpark itself: [`docs/setup/SETUP.md`](docs/setup/SETUP.md).
 
 ## Play around without stacking up mess
 
