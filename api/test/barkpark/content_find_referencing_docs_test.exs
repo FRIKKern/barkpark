@@ -116,4 +116,66 @@ defmodule Barkpark.ContentFindReferencingDocsTest do
       assert Content.find_referencing_docs("author-1", @dataset) == []
     end
   end
+
+  describe "disconnect_references/3 — arrayOf-of-reference (blast-radius fix)" do
+    setup do
+      # `bundle` carries an arrayOf-of-reference field (`attachments`, the
+      # `task.attachments` headline shape) AND a scalar reference (`primary`).
+      # The scalar SQL scan never sees the arrayOf referencer
+      # (`content->>attachments` is a JSON array, not the bare id) — the fix
+      # unions the materialised inbound edge so disconnect can act on it. The
+      # edge is materialised straight into `content_edges` (the async projector
+      # is `:manual` in tests, same as the unpublish-guard test). A plain content
+      # type (NOT `task`) so no plugin content-validation intercepts the create.
+      Content.upsert_schema(
+        %{
+          "name" => "bundle",
+          "title" => "Bundle",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "primary", "type" => "reference", "refType" => "author"},
+            %{
+              "name" => "attachments",
+              "type" => "arrayOf",
+              "of" => %{"type" => "reference", "refType" => "author"}
+            }
+          ]
+        },
+        @dataset
+      )
+
+      # A bundle whose arrayOf `attachments` references author-1 (+ author-2,
+      # which must SURVIVE) and whose scalar `primary` references author-1 too.
+      {:ok, _} =
+        Content.create_document(
+          "bundle",
+          %{
+            "_id" => "bundle-arr",
+            "title" => "Bundle w/ attachments",
+            "primary" => "author-1",
+            "attachments" => ["author-1", "author-2"]
+          },
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("bundle-arr", "bundle", @dataset)
+
+      # Materialise the inbound arrayOf edge so reverse_referencers finds it.
+      {:ok, _} =
+        Content.add_edge("bundle-arr", "author-1", "references", dataset: @dataset)
+
+      :ok
+    end
+
+    test "strips the target from the arrayOf field, keeping other array elements" do
+      Content.disconnect_references("author-1", @dataset)
+
+      {:ok, bundle} = Content.get_document("bundle-arr", "bundle", @dataset)
+
+      # author-1 removed from the array; author-2 survives.
+      assert bundle.content["attachments"] == ["author-2"]
+      # The scalar reference to author-1 is cleared too.
+      refute Map.has_key?(bundle.content, "primary")
+    end
+  end
 end

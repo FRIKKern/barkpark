@@ -102,6 +102,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
        show_delete: false,
        delete_refs: [],
        show_discard: false,
+       # ── Blast-radius graph pane (Goal ges/graph-edge-seam, Phase 5) ──────
+       # A `graph` doc opens the Cytoscape blast-radius pane
+       # (`editor_view: :graph`), rendered by the GraphView LiveComponent. The
+       # unpublish guard (gap #5) probes `Content.Graph.reverse_referencers/2`
+       # — the arrayOf-aware inbound-edge query — and pops a confirm modal when
+       # a doc has live referencers that would dangle on unpublish.
+       graph_doc: nil,
+       graph_data: %{nodes: [], edges: []},
+       show_unpublish_guard: false,
+       unpublish_refs: [],
        user_id: user_id,
        user_name: user_name,
        user_color: user_color,
@@ -1567,21 +1577,71 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # ── Unpublish with blast-radius guard (gap #5) ──────────────────────────────
+  #
+  # Unpublishing a published doc removes it from the published graph — every
+  # doc that references it would then dangle. The PROBE phase queries
+  # `Content.Graph.reverse_referencers/2` (the arrayOf-aware inbound-edge query
+  # over `content_edges`, materialised in Phase 2) — NOT the scalar-only
+  # `Content.find_referencing_docs/3`, which UNDERCOUNTS arrayOf references like
+  # `task.attachments` (the exact blast-radius bug this feature targets). When
+  # there are referencers, the modal lists them and the real unpublish is
+  # deferred to `confirm-unpublish`; with none, the unpublish proceeds inline.
+  #
+  # Mirrors the delete guard at handle_event("delete-doc"/"confirm-delete").
   def handle_event("unpublish", _, socket) do
-    opts = hook_opts(socket)
+    doc = socket.assigns[:editor_doc]
+    type = socket.assigns[:editor_type]
 
-    do_action(
-      socket,
-      fn doc, type ->
-        Content.unpublish_document(
-          Content.published_id(doc.doc_id),
-          type,
-          socket.assigns.dataset,
-          opts
+    if doc && type do
+      published_id = Content.published_id(doc.doc_id)
+
+      refs =
+        Content.Graph.reverse_referencers(
+          published_id,
+          [dataset: socket.assigns.dataset] ++ ScopeHelpers.scope_opts(socket)
         )
-      end,
-      "Unpublished"
-    )
+
+      if refs == [] do
+        do_unpublish(socket)
+      else
+        {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close-unpublish-guard", _, socket) do
+    {:noreply, assign(socket, show_unpublish_guard: false, unpublish_refs: [])}
+  end
+
+  # The confirm phase — the editor acknowledged the blast radius. Optionally
+  # disconnect the inbound references first (mirroring confirm-delete's
+  # `disconnect` branch), then run the real Content.unpublish_document.
+  def handle_event("confirm-unpublish", params, socket) do
+    doc = socket.assigns[:editor_doc]
+
+    if doc && socket.assigns[:editor_type] do
+      socket =
+        if params["disconnect"] == "true" do
+          Content.disconnect_references(
+            doc.doc_id,
+            socket.assigns.dataset,
+            ScopeHelpers.scope_opts(socket)
+          )
+
+          socket
+        else
+          socket
+        end
+
+      socket
+      |> assign(show_unpublish_guard: false, unpublish_refs: [])
+      |> do_unpublish()
+    else
+      {:noreply, assign(socket, show_unpublish_guard: false, unpublish_refs: [])}
+    end
   end
 
   # ── E1. Duplicate ──────────────────────────────────────────────────────────
@@ -1712,6 +1772,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, bulk_action(socket, :publish)}
   end
 
+  # GAP (Phase 5, documented loudly per the brief): bulk-unpublish is NOT
+  # blast-radius-guarded. The single-doc unpublish above probes
+  # Content.Graph.reverse_referencers/2 before unpublishing; bulk-unpublish
+  # runs straight through bulk_action/2 with NO reverse-reference probe. A
+  # bulk unpublish can therefore silently strand arrayOf referencers (e.g.
+  # task.attachments) — the exact bug the single-doc guard targets. Guarding
+  # bulk requires running reverse_referencers/2 per selected id and surfacing
+  # an aggregate modal; deferred as a follow-up. Do NOT assume bulk is safe
+  # because single is guarded.
   def handle_event("bulk-unpublish", _, socket) do
     {:noreply, bulk_action(socket, :unpublish)}
   end
@@ -2640,6 +2709,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   end
 
+  # The shared real-unpublish path used by BOTH the no-referencers fast path and
+  # the post-confirm-guard path. Reuses do_action/3's flash + pane-rebuild
+  # discipline (Phase 5, gap #5).
+  defp do_unpublish(socket) do
+    opts = hook_opts(socket)
+
+    do_action(
+      socket,
+      fn doc, type ->
+        Content.unpublish_document(
+          Content.published_id(doc.doc_id),
+          type,
+          socket.assigns.dataset,
+          opts
+        )
+      end,
+      "Unpublished"
+    )
+  end
+
   defp do_action(socket, action, msg) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
@@ -2893,7 +2982,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
       editor_is_draft: false,
       editor_has_published: false,
       published_doc: nil,
-      diff_visible: false
+      diff_visible: false,
+      # Clear the graph pane too (the verified 3-site reset gotcha) — a stale
+      # `:graph` view + payload must not leak across a nav switch.
+      graph_doc: nil,
+      graph_data: %{nodes: [], edges: []}
     )
   end
 
@@ -3729,17 +3822,26 @@ defmodule BarkparkWeb.Studio.StudioLive do
       :paper ->
         socket
         |> clear_sheet_view()
+        |> clear_graph_view()
         |> setup_paper_view(editor[:doc])
 
       :sheet ->
         socket
         |> clear_paper_view()
+        |> clear_graph_view()
         |> setup_sheet_view(editor[:doc])
+
+      :graph ->
+        socket
+        |> clear_paper_view()
+        |> clear_sheet_view()
+        |> setup_graph_view(editor[:doc], editor[:graph])
 
       :media_explorer ->
         socket
         |> clear_paper_view()
         |> clear_sheet_view()
+        |> clear_graph_view()
         |> assign(
           editor_view: :media_explorer,
           media_kind_filter: editor[:kind_filter] || "all"
@@ -3749,6 +3851,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
         socket
         |> clear_paper_view()
         |> clear_sheet_view()
+        |> clear_graph_view()
         |> assign(editor_view: :form, media_kind_filter: "all")
     end
   end
@@ -3772,6 +3875,33 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket
     |> ensure_sheet_subscription(nil)
     |> assign(sheet_doc: nil)
+  end
+
+  # ── In-Studio blast-radius graph pane (Phase 5) ───────────────────────────
+  #
+  # A `view: :graph` editor renders the GraphView LiveComponent over the
+  # node/edge payload PaneBuilder already traversed (Content.Graph.traverse/2).
+  # No subscription: the graph is a snapshot rebuilt on navigation — the
+  # GraphView component diffs via its stable-id Cytoscape hook, never remounts.
+  # `clear_graph_view/1` runs at every other reset arm so a stale `:graph` view
+  # never leaks across nav switches (the verified 3-site gotcha).
+
+  defp setup_graph_view(socket, %{} = doc, graph) when is_map(graph) do
+    assign(socket,
+      editor_view: :graph,
+      graph_doc: doc,
+      graph_data: %{nodes: Map.get(graph, :nodes, []), edges: Map.get(graph, :edges, [])}
+    )
+  end
+
+  defp setup_graph_view(socket, _doc, _graph), do: clear_graph_view(socket)
+
+  defp clear_graph_view(socket) do
+    if socket.assigns[:editor_view] == :graph do
+      assign(socket, editor_view: :form, graph_doc: nil, graph_data: %{nodes: [], edges: []})
+    else
+      assign(socket, graph_doc: nil, graph_data: %{nodes: [], edges: []})
+    end
   end
 
   # Diff-and-resubscribe, same shape as ensure_list_subscription: idempotent
@@ -5082,6 +5212,18 @@ defmodule BarkparkWeb.Studio.StudioLive do
           presence_topic={@sheet_presence_topic}
           presences={@sheet_presences}
         />
+        <% @editor_view == :graph and @graph_doc != nil -> %>
+        <%!-- Blast-radius graph pane (Phase 5). The GraphView LiveComponent
+              owns the Cytoscape surface; its div carries the CONSTANT id
+              "studio-graph" so navigation diffs the data-* attrs rather than
+              remounting the hook and losing layout. The component derives the
+              JSON payloads in update/2 (the change-tracking contract). --%>
+        <.live_component
+          module={BarkparkWeb.Studio.GraphView}
+          id="studio-graph"
+          doc={@graph_doc}
+          graph={@graph_data}
+        />
         <% @editor_view == :media_explorer -> %>
         <div
           id={"media-explorer-#{@nav_desk || "all"}"}
@@ -5229,6 +5371,52 @@ defmodule BarkparkWeb.Studio.StudioLive do
         editor_doc={@editor_doc}
         show_discard={@show_discard}
       />
+
+      <%!-- Unpublish blast-radius guard modal (Phase 5, gap #5). Lists the
+            soon-to-dangle referencers (from Content.Graph.reverse_referencers/2
+            — the arrayOf-aware inbound-edge query) by title + via_field. Mirrors
+            the delete modal: a confirm proceeds with the real unpublish, with an
+            optional "disconnect references first" branch. --%>
+      <%= if @show_unpublish_guard do %>
+        <div class="image-picker-overlay" phx-click="close-unpublish-guard"></div>
+        <div class="delete-modal" data-test-id="unpublish-guard-modal">
+          <div class="delete-modal-header">
+            <span style="font-weight: 600; font-size: 16px;">Unpublish document</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-unpublish-guard">x</button>
+          </div>
+          <div class="delete-modal-body">
+            <div class="delete-warning">
+              <p class="text-sm" style="margin-bottom: 12px;">
+                <strong><%= @editor_doc && @editor_doc.title %></strong> is referenced by
+                <strong><%= length(@unpublish_refs) %></strong> document<%= if length(@unpublish_refs) != 1, do: "s" %>.
+                Unpublishing it will leave those references dangling:
+              </p>
+              <div class="delete-ref-list">
+                <%= for ref <- @unpublish_refs do %>
+                  <div class="delete-ref-item" data-test-id="unpublish-ref">
+                    <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                    <span class="delete-ref-meta"><%= ref.type %> / <%= ref.via_field %></span>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+            <div class="delete-modal-actions">
+              <button class="btn btn-sm" phx-click="close-unpublish-guard">Cancel</button>
+              <button
+                class="btn btn-sm"
+                phx-click="confirm-unpublish"
+                phx-value-disconnect="true"
+                data-test-id="confirm-unpublish-disconnect"
+              >Disconnect references and unpublish</button>
+              <button
+                class="btn btn-destructive btn-sm"
+                phx-click="confirm-unpublish"
+                data-test-id="confirm-unpublish"
+              >Unpublish anyway</button>
+            </div>
+          </div>
+        </div>
+      <% end %>
 
       <.shares_modal
         show={@show_shares}

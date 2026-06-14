@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   """
 
   alias Barkpark.{Content, Structure}
+  alias Barkpark.Content.Graph
 
   @doc """
   Build the full pane tree for `dataset` along `nav_path`. Returns
@@ -231,6 +232,36 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
                   nil
               end
 
+            # A `graph` doc opens as the blast-radius Cytoscape pane (Goal
+            # ges/graph-edge-seam, Phase 5). Same draft-first doc resolution as
+            # the generic branch, but the editor map carries `view: :graph` plus
+            # the traversed node/edge payload (reverse direction — the
+            # blast-radius is "what would break if this doc went away"). The
+            # GraphView LiveComponent renders it; the StudioLive `:graph` arm
+            # wires it up. Built via Content.Graph.traverse/2 (Phase 4).
+            type_name == "graph" ->
+              case rest do
+                [doc_id | _] ->
+                  {doc, is_draft, has_pub} =
+                    Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
+
+                  if doc do
+                    %{
+                      view: :graph,
+                      doc: doc,
+                      schema: schema,
+                      type: type_name,
+                      is_draft: is_draft,
+                      has_published: has_pub,
+                      form: %{},
+                      graph: graph_payload(doc, dataset, scope(opts))
+                    }
+                  end
+
+                _ ->
+                  nil
+              end
+
             # A sheet opens as the collaborative grid editor (Sheets M2).
             # Same draft-first doc resolution as the generic branch, but the
             # editor map carries `view: :sheet` so StudioLive renders the
@@ -313,6 +344,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         {panes, nil}
     end
   end
+
+  # Build the blast-radius graph payload for the GraphView pane. Roots on the
+  # doc's `documents.id` UUID and walks the materialised `content_edges` table
+  # (Phase 4 BFS), direction `:both` so the pane shows both what this doc
+  # references AND what references it (the blast radius). Returns the
+  # `%{nodes, edges}` slice the GraphView LiveComponent encodes. nil-safe on a
+  # doc without an `:id` (degrades to an empty graph rather than crashing the
+  # whole pane tree).
+  defp graph_payload(%{id: id} = _doc, dataset, scope_kw) when is_binary(id) do
+    result =
+      Graph.traverse(id, [dataset: dataset, direction: :both, depth: 2] ++ scope_kw)
+
+    %{nodes: result.nodes, edges: result.edges}
+  end
+
+  defp graph_payload(_doc, _dataset, _scope_kw), do: %{nodes: [], edges: []}
 
   # Pull the tenancy scope keyword threaded in via `build(.., scope: scope_opts)`.
   # Returns the `[workspace_id: …, project_id: …]` list (or `[]` when no scope

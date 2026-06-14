@@ -1386,24 +1386,101 @@ defmodule Barkpark.Content do
   `opts` may carry `:workspace_id` / `:project_id` — threaded into both the
   referencing-doc scan and the per-doc read so the disconnect stays inside the
   tenant boundary (barkpark-af50).
+
+  ## arrayOf-aware (the blast-radius fix)
+
+  The referencing-source set is the UNION of two probes, so it matches the
+  Studio guard modal exactly while staying robust when edges are not yet
+  materialised:
+
+    * the scalar SQL scan `find_referencing_docs/3` (`content->>field == pub_id`)
+      — finds scalar `reference` referencers WITHOUT depending on the
+      `content_edges` projection (the projector is async / `:manual` in tests);
+      and
+    * `Content.Graph.reverse_referencers/2` — the arrayOf-aware inbound-edge
+      query over `content_edges` (materialised in Phase 2) — finds referencers
+      via `arrayOf`-of-`reference` fields like `task.attachments`.
+
+  The previous path built its `ref_fields` from `field["type"] == "reference"`
+  ONLY, so it silently skipped arrayOf referencers: the guard modal warned about
+  them (it probes via `reverse_referencers`) but the disconnect never acted on
+  them, leaving those references dangling after the doc was unpublished anyway —
+  defeating the disconnect remediation for the headline arrayOf case. This
+  closes the gap: for each referencing source we strip the target from BOTH
+  scalar `reference` fields (delete the field) AND `arrayOf`-of-`reference`
+  fields (`List.delete` the element, keeping the array's other references).
   """
   def disconnect_references(doc_id, dataset, opts \\ []) do
-    _pub_id = published_id(doc_id)
-    refs = find_referencing_docs(doc_id, dataset, opts)
+    pub_id = published_id(doc_id)
 
-    Enum.each(refs, fn %{doc_id: ref_doc_id, type: type, field: field} ->
-      case get_document(ref_doc_id, type, dataset, opts) do
-        {:ok, doc} ->
-          updated_content = Map.delete(doc.content || %{}, field)
-          prev_rev = doc.rev
+    scalar_refs =
+      find_referencing_docs(doc_id, dataset, opts)
+      |> Enum.map(fn ref -> {ref.doc_id, ref.type} end)
 
-          doc
-          |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
-          |> Repo.update()
-          |> tap_broadcast(dataset, type, "update", prev_rev)
+    array_refs =
+      Barkpark.Content.Graph.reverse_referencers(pub_id, [dataset: dataset] ++ opts)
+      |> Enum.map(fn ref -> {ref[:from_doc_id] || ref[:from_id], ref[:type]} end)
 
-        _ ->
-          :ok
+    # Distinct referencing sources — a source can reference the target via
+    # several edges (a scalar `rel` AND an `arrayOf` `attachments`), and the two
+    # probes can both surface the same scalar source; we load + rewrite each
+    # source doc once, stripping the id from every matching field in one update.
+    (scalar_refs ++ array_refs)
+    |> Enum.reject(fn {ref_doc_id, type} -> is_nil(ref_doc_id) or is_nil(type) end)
+    |> Enum.uniq()
+    |> Enum.each(fn {ref_doc_id, type} ->
+      disconnect_one_source(ref_doc_id, type, pub_id, dataset, opts)
+    end)
+  end
+
+  # Strip every reference to `target_pub_id` out of one referencing source doc,
+  # across BOTH scalar `reference` fields and `arrayOf`-of-`reference` fields.
+  defp disconnect_one_source(ref_doc_id, type, target_pub_id, dataset, opts) do
+    with {:ok, schema} <- get_schema(type, dataset),
+         {:ok, doc} <- get_document(ref_doc_id, type, dataset, opts) do
+      content = doc.content || %{}
+      updated_content = strip_reference_fields(content, schema.fields, target_pub_id)
+
+      if updated_content != content do
+        prev_rev = doc.rev
+
+        doc
+        |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
+        |> Repo.update()
+        |> tap_broadcast(dataset, type, "update", prev_rev)
+      end
+
+      :ok
+    else
+      _ -> :ok
+    end
+  end
+
+  # Walk the schema fields and remove `target_pub_id` from each reference-bearing
+  # field of `content`. Scalar `reference` whose value coalesces to the target →
+  # delete the key. `arrayOf` of `reference` → keep every element that is NOT the
+  # target (published-coalesced compare), so OTHER references in the array
+  # survive. All other fields pass through untouched.
+  defp strip_reference_fields(content, fields, target_pub_id) do
+    Enum.reduce(fields, content, fn field, acc ->
+      name = field["name"]
+      value = Map.get(acc, name)
+
+      cond do
+        field["type"] == "reference" and is_binary(value) and
+            published_id(value) == target_pub_id ->
+          Map.delete(acc, name)
+
+        get_in(field, ["of", "type"]) == "reference" and is_list(value) ->
+          kept =
+            Enum.reject(value, fn v ->
+              is_binary(v) and published_id(v) == target_pub_id
+            end)
+
+          if kept == value, do: acc, else: Map.put(acc, name, kept)
+
+        true ->
+          acc
       end
     end)
   end

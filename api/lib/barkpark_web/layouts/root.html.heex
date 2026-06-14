@@ -3125,6 +3125,15 @@
         Bottom-of-body, so Golden Rule #4 (no blocking scripts in head)
         holds. --%>
   <script src="/assets/bp-sheet-grid.js"></script>
+  <%!-- Blast-radius graph pane (Goal ges/graph-edge-seam, Phase 5). Cytoscape
+        is VENDORED (not in the asset pipeline, no npm) and loaded NON-DEFER at
+        the bottom of body — Golden Rule #4 forbids blocking scripts in <head>,
+        bottom-of-body non-defer is explicitly permitted. Load ORDER is
+        load-bearing: phoenix_live_view.js → cytoscape.min.js → bp-graph.js, so
+        `cytoscape` is a defined global before bp-graph.js's window.BarkparkGraph
+        closure runs and BEFORE the inline Hooks registration below. --%>
+  <script src="/assets/cytoscape.min.js"></script>
+  <script src="/assets/bp-graph.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -3143,6 +3152,12 @@
     // (keyboard map, clipboard TSV, resize drag, scroll keep). Defined in
     // /assets/bp-sheet-grid.js (loaded non-defer just above).
     Hooks.SheetGrid = window.BarkparkSheetGrid;
+
+    // GraphPane — the Studio blast-radius graph (Cytoscape) client half.
+    // Defined in /assets/bp-graph.js (loaded non-defer just above, AFTER
+    // cytoscape.min.js). Registered here BEFORE `new LiveSocket(...)` below, or
+    // window.BarkparkGraph would be undefined when the LiveSocket connects.
+    Hooks.GraphPane = window.BarkparkGraph;
 
     Hooks.PresenceIdentity = {
       mounted() {
