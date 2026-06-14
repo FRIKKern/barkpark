@@ -428,6 +428,45 @@ defmodule Barkpark.Plugins.Indx.Client do
   end
 
   @doc """
+  Like `search/3` but returns the facet-aware envelope:
+  `{:ok, %{records: [...], facets: %{field => [%{"key" => v, "value" => n}]},
+  truncation_index: int | nil}}`.
+
+  Sends `"enableFacets" => true` so the engine computes value-counts across the
+  WHOLE dataset (not just the returned page) for every `facetable` field. An
+  empty `text` is the v5 "enumerate + facet" browse mode. `truncationIndex` is
+  the coverage boundary: records before it are coverage-confirmed matches,
+  records after are softer pattern-only hits.
+  """
+  @spec search_full(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, struct()}
+  def search_full(dataset, text, opts \\ []) when is_binary(dataset) and is_binary(text) do
+    max = Keyword.get(opts, :max, 30)
+    body = Jason.encode!(%{"text" => text, "maxNumberOfRecordsToReturn" => max, "enableFacets" => true})
+
+    case search_request(:post, path("Search", dataset, opts), body, opts,
+           content_type: "application/json"
+         ) do
+      {:ok, resp} ->
+        decoded = decode_json(resp.body)
+
+        {:ok,
+         %{
+           records: extract_records(resp.body),
+           facets: facets_of(decoded),
+           truncation_index: truncation_of(decoded)
+         }}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp facets_of(%{"facets" => f}) when is_map(f), do: f
+  defp facets_of(_), do: %{}
+  defp truncation_of(%{"truncationIndex" => i}) when is_integer(i), do: i
+  defp truncation_of(_), do: nil
+
+  @doc """
   Hydrate full JSON docs by key. `POST /api/GetJson/{ds}` body `long[]`
   (sent as `application/json`) → a `string[]` where each element is a
   document serialized as a JSON STRING. Returns `{:ok, [doc_map, ...]}` —

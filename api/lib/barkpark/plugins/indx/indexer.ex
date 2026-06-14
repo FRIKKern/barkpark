@@ -622,8 +622,35 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   defp render_record(doc, key, id) do
     doc
     |> stringify_top()
+    |> Map.merge(facet_fields(doc))
     |> Map.put("id", key)
     |> Map.put("_id", id)
+  end
+
+  # Surface a couple of scalar fields out of the (dropped) :content JSONB so
+  # Indx can facet/filter on them — `type` and `status` are already top-level
+  # columns, this adds `author` and `category`. ALWAYS present (default "") so
+  # SetFieldConfiguration never 400s on a field absent from the whole corpus;
+  # the UI hides the empty-string bucket.
+  defp facet_fields(doc) do
+    content = doc_content(doc)
+
+    %{
+      "author" => facet_val(content, "author"),
+      "category" => facet_val(content, "category")
+    }
+  end
+
+  defp doc_content(%{content: c}) when is_map(c), do: c
+  defp doc_content(%{"content" => c}) when is_map(c), do: c
+  defp doc_content(_), do: %{}
+
+  defp facet_val(content, key) do
+    case Map.get(content, key) do
+      v when is_binary(v) -> v
+      v when is_number(v) -> to_string(v)
+      _ -> ""
+    end
   end
 
   defp stringify_top(doc) when is_map(doc) and not is_struct(doc) do
@@ -695,19 +722,48 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   # title search — confirmed by the 2026-06-03 spike) and carries the
   # field's weight plus the engine's default BM25 knobs.
   defp field_proxies(weights) do
-    Enum.map(weights, fn {field, weight} ->
+    searchable =
+      Enum.map(weights, fn {field, weight} ->
+        %{
+          "fieldName" => to_string(field),
+          "fieldType" => "String",
+          "isArray" => false,
+          "searchable" => true,
+          "filterable" => false,
+          "facetable" => false,
+          "sortable" => false,
+          "wordIndexing" => true,
+          "embeddable" => false,
+          "preloadFilters" => false,
+          "weight" => weight,
+          "bM25b" => 0.75,
+          "bM25k1" => 1.2
+        }
+      end)
+
+    searchable ++ facet_proxies()
+  end
+
+  # Facetable + filterable (not searchable) fields. `enableFacets` in the query
+  # makes the engine return dataset-wide value-counts for each of these; the
+  # fields must exist in the corpus records (render_record surfaces author /
+  # category; type / status are top-level columns).
+  @facet_fields ~w(type status author category)
+
+  defp facet_proxies do
+    Enum.map(@facet_fields, fn field ->
       %{
-        "fieldName" => to_string(field),
+        "fieldName" => field,
         "fieldType" => "String",
         "isArray" => false,
-        "searchable" => true,
-        "filterable" => false,
-        "facetable" => false,
+        "searchable" => false,
+        "filterable" => true,
+        "facetable" => true,
         "sortable" => false,
-        "wordIndexing" => true,
+        "wordIndexing" => false,
         "embeddable" => false,
         "preloadFilters" => false,
-        "weight" => weight,
+        "weight" => 1,
         "bM25b" => 0.75,
         "bM25k1" => 1.2
       }

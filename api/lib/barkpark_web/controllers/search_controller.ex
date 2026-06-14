@@ -57,6 +57,10 @@ defmodule BarkparkWeb.SearchController do
           parsedQuery: meta[:parsed],
           highlights: meta[:highlights] || %{},
           recovery: meta[:recovery],
+          # Indx-only (null for Postgres): dataset-wide facet buckets +
+          # coverage truncation boundary.
+          facets: meta[:facets],
+          truncation: meta[:truncation],
           searchEventId: search_event_id,
           ms: ms
         })

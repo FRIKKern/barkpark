@@ -51,10 +51,10 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     text = query_text(parsed)
     dataset = Indexer.current_dataset(scope)
 
+    # An empty `text` is NOT short-circuited: Indx's empty-query + enableFacets
+    # is the browse-with-facets mode (the finder's landing). Only a missing live
+    # dataset degrades to empty.
     cond do
-      text == "" ->
-        {[], 0, %{}}
-
       is_nil(dataset) ->
         {[], 0, %{}}
 
@@ -68,7 +68,8 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     limit = Keyword.get(opts, :limit, 50) |> min(200)
     client_opts = client_opts(opts)
 
-    with {:ok, records} <- client.search(dataset, text, [max: limit] ++ client_opts),
+    with {:ok, %{records: records, facets: facets, truncation_index: tindex}} <-
+           client.search_full(dataset, text, [max: limit] ++ client_opts),
          keys = Enum.map(records, &record_key/1) |> Enum.reject(&is_nil/1),
          {:ok, docs} <- hydrate(client, dataset, keys, client_opts) do
       hits =
@@ -77,13 +78,46 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         |> Enum.reject(&is_nil/1)
         |> apply_excludes(parsed, config)
 
-      {hits, length(hits), %{}}
+      {hits, length(hits), engine_meta(facets, tindex)}
     else
       {:error, err} ->
         Logger.warning("Indx.Retriever: search failed for #{dataset}: #{inspect(err)}")
         {[], 0, %{}}
     end
   end
+
+  # Engine diagnostics surfaced to the pipeline → HTTP response: Indx-computed
+  # dataset-wide facet buckets and the coverage `truncation` boundary. Both are
+  # genuinely Indx (the API gateway exposes neither for Postgres).
+  defp engine_meta(facets, tindex) do
+    %{}
+    |> maybe_put(:facets, normalize_facets(facets))
+    |> maybe_put(:truncation, if(is_integer(tindex), do: %{index: tindex}))
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, v) when v == %{}, do: map
+  defp maybe_put(map, key, v), do: Map.put(map, key, v)
+
+  # Indx returns `%{"type" => [%{"key" => "post", "value" => 2}], ...}` (key =
+  # bucket value, value = count). Re-shape to `%{"type" => [%{"label","count"}]}`
+  # and drop the empty-string bucket (docs that lack the field).
+  defp normalize_facets(facets) when is_map(facets) do
+    facets
+    |> Enum.map(fn {field, buckets} ->
+      {field,
+       buckets
+       |> List.wrap()
+       |> Enum.map(fn b ->
+         %{"label" => to_string(Map.get(b, "key", "")), "count" => Map.get(b, "value", 0)}
+       end)
+       |> Enum.reject(&(&1["label"] in ["", nil]))}
+    end)
+    |> Enum.reject(fn {_field, buckets} -> buckets == [] end)
+    |> Map.new()
+  end
+
+  defp normalize_facets(_), do: %{}
 
   # Indx has no native negation in this path: query_text/1 builds only the
   # POSITIVE query for the engine. The parsed `:excludes` are honored here as a

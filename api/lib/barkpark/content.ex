@@ -2725,7 +2725,7 @@ defmodule Barkpark.Content do
 
     {:ok, result} = Barkpark.Search.QueryPipeline.search("documents", dataset, context, opts)
 
-    meta = Map.take(result, [:parsed, :highlights, :recovery])
+    meta = Map.take(result, [:parsed, :highlights, :recovery, :facets, :truncation])
     {result.hits, result.total, meta}
   end
 

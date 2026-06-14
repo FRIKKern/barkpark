@@ -29,11 +29,17 @@ defmodule Barkpark.Search.QueryPipeline do
     parsed = QueryParser.parse(raw_query)
     parsed = expand_synonyms(surface, scope, parsed)
 
-    {hits, total, recovery} =
+    {hits, total, recovery, engine_meta} =
       case surface do
-        "documents" -> search_documents(scope, parsed, config, context, opts)
-        "media" -> search_media(scope, parsed, config, context, opts)
-        _ -> {[], 0, nil}
+        "documents" ->
+          search_documents(scope, parsed, config, context, opts)
+
+        "media" ->
+          {h, t, r} = search_media(scope, parsed, config, context, opts)
+          {h, t, r, %{}}
+
+        _ ->
+          {[], 0, nil, %{}}
       end
 
     highlights = highlight_hits(surface, hits, parsed, config, opts)
@@ -46,6 +52,10 @@ defmodule Barkpark.Search.QueryPipeline do
        parsed: QueryParser.to_map(parsed),
        highlights: highlights,
        recovery: recovery,
+       # Indx-only engine diagnostics (absent for Postgres): dataset-wide facet
+       # buckets and the coverage truncation boundary.
+       facets: Map.get(engine_meta, :facets),
+       truncation: Map.get(engine_meta, :truncation),
        ms: ms
      }}
   end
@@ -97,21 +107,27 @@ defmodule Barkpark.Search.QueryPipeline do
         Retrievers.resolve(%{"engine" => engine})
       end
 
-    {hits, total, _meta} = retriever.search(scope, parsed, config, retriever_opts)
+    {hits, total, engine_meta} = retriever.search(scope, parsed, config, retriever_opts)
 
-    case {total, Map.get(config, "zero_hit_strategy", "drop_tokens")} do
-      {0, "none"} ->
-        {hits, total, nil}
+    {final_hits, final_total, recovery} =
+      case {total, Map.get(config, "zero_hit_strategy", "drop_tokens")} do
+        {0, "none"} ->
+          {hits, total, nil}
 
-      {0, strategy} ->
-        case recover_documents(scope, parsed, config, retriever_opts, strategy) do
-          {rh, rt, recovery} -> {rh, rt, recovery}
-          nil -> {hits, total, nil}
-        end
+        {0, strategy} ->
+          case recover_documents(scope, parsed, config, retriever_opts, strategy) do
+            {rh, rt, recovery} -> {rh, rt, recovery}
+            nil -> {hits, total, nil}
+          end
 
-      _ ->
-        {hits, total, nil}
-    end
+        _ ->
+          {hits, total, nil}
+      end
+
+    # Carry the PRIMARY retriever's engine meta (Indx facets + truncation)
+    # regardless of zero-hit recovery — facets describe the whole dataset, so
+    # they stay meaningful even when the text matched nothing.
+    {final_hits, final_total, recovery, engine_meta}
   end
 
   defp recover_documents(scope, parsed, config, opts, strategy) do
