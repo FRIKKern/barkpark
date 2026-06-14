@@ -63,9 +63,20 @@ function TypeChip({ type }: { type: string }) {
 function ResultRow({
   hit,
   terms,
+  master = false,
+  queryString = "",
+  selected = false,
 }: {
   hit: FindHit;
   terms: string[];
+  /** In master mode the row opens the doc in the right pane (no navigate-away)
+   * and carries the live finder query params so search/engine state survives. */
+  master?: boolean;
+  /** Current finder query string (no leading `?`) — appended to the doc href so
+   * the open doc and the finder's search params coexist in the URL. */
+  queryString?: string;
+  /** Whether this row is the doc currently open in the right pane. */
+  selected?: boolean;
 }) {
   const date = shortDate(hit.date);
   const inner = (
@@ -99,12 +110,27 @@ function ResultRow({
 
   const cls =
     "group -mx-3 flex flex-col gap-1.5 rounded-lg px-3 py-5 transition-colors";
-  return hit.href ? (
-    <Link href={hit.href} className={`${cls} hover:bg-zinc-100 dark:hover:bg-zinc-900/60`}>
+  // Selected = the doc currently open in the right pane: a quiet highlight ring.
+  const selectedCls = selected
+    ? " bg-zinc-100 ring-1 ring-zinc-300 dark:bg-zinc-900/60 dark:ring-zinc-700"
+    : " hover:bg-zinc-100 dark:hover:bg-zinc-900/60";
+
+  if (!hit.href) return <div className={cls}>{inner}</div>;
+
+  // Master mode: append the live finder query string so opening a doc preserves
+  // search/engine/facets. Because <Finder> lives in the (finder) LAYOUT, this
+  // navigation swaps only the `children` (detail) segment — the Finder never
+  // remounts.
+  const href = master && queryString ? `${hit.href}?${queryString}` : hit.href;
+  return (
+    <Link
+      href={href}
+      prefetch
+      aria-current={selected ? "page" : undefined}
+      className={`${cls}${selectedCls}`}
+    >
       {inner}
     </Link>
-  ) : (
-    <div className={cls}>{inner}</div>
   );
 }
 
@@ -115,7 +141,7 @@ export function Finder({
   initialData = null,
   initialEngine = "indx",
 }: {
-  variant?: "page" | "home";
+  variant?: "page" | "home" | "master";
   /** Server-rendered browse result for the landing — seeds the first paint so
    * results show in the initial HTML instead of after a client round-trip. */
   initialData?: FindResponse | null;
@@ -124,6 +150,13 @@ export function Finder({
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+
+  // Master mode: left column inside the (finder) layout; rows open docs in the
+  // right @detail slot via in-place navigation (no remount, no full reload).
+  const master = variant === "master";
+  // Live finder params (q/engine/cache/sort/facets) — appended to each row's
+  // doc href so the open doc and the search state coexist in the URL path+query.
+  const currentQueryString = sp.toString();
 
   const q = sp.get("q") ?? "";
   // Default to Indx — the landing then showcases native facets + fuzzy recall.
@@ -368,8 +401,27 @@ export function Finder({
   const activeEngine = ENGINES.find((e) => e.id === engine)!;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-8 px-6 py-12">
-      {variant === "home" ? (
+    <main
+      className={
+        master
+          ? // Left master column: fills its parent column (which scrolls); no
+            // page-centering, no min-h-screen, tighter gutters than the page view.
+            "flex w-full flex-col gap-6 px-5 py-6"
+          : "mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-8 px-6 py-12"
+      }
+    >
+      {master ? (
+        // Compact strip: wordmark eyebrow only — no hero h1/description. The
+        // facet rail + results are what matter in a narrow column.
+        <header className="flex flex-col gap-1 border-b border-zinc-200 pb-4 dark:border-zinc-800">
+          <Link
+            href="/"
+            className="text-xs font-medium uppercase tracking-widest text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+          >
+            Barkpark · Headless CMS
+          </Link>
+        </header>
+      ) : variant === "home" ? (
         <header className="flex flex-col gap-4 border-b border-zinc-200 pb-8 dark:border-zinc-800">
           <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
             Barkpark · Headless CMS
@@ -468,13 +520,15 @@ export function Finder({
             ))}
           </div>
         </div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">
-            {activeEngine.label}:
-          </span>{" "}
-          {activeEngine.tagline}
-        </p>
-        <div className="flex items-center gap-2 text-xs">
+        {master ? null : (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {activeEngine.label}:
+            </span>{" "}
+            {activeEngine.tagline}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-zinc-400">Cache</span>
           <button
             role="switch"
@@ -513,17 +567,19 @@ export function Finder({
             </button>
           ) : null}
         </div>
-        <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
-          <span>
-            <code className="font-mono">&quot;exact phrase&quot;</code> phrase
-          </span>
-          <span>
-            <code className="font-mono">-word</code> exclude
-          </span>
-          <span>
-            <code className="font-mono">prefix*</code> starts-with
-          </span>
-        </p>
+        {master ? null : (
+          <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+            <span>
+              <code className="font-mono">&quot;exact phrase&quot;</code> phrase
+            </span>
+            <span>
+              <code className="font-mono">-word</code> exclude
+            </span>
+            <span>
+              <code className="font-mono">prefix*</code> starts-with
+            </span>
+          </p>
+        )}
       </div>
 
       {/* banners */}
@@ -591,9 +647,23 @@ export function Finder({
         </div>
       ) : null}
 
-      <div className="grid gap-8 md:grid-cols-[12rem_1fr]">
+      <div
+        className={
+          master
+            ? // Narrow column: stack the facet rail above the results.
+              "flex flex-col gap-6"
+            : "grid gap-8 md:grid-cols-[12rem_1fr]"
+        }
+      >
         {/* facets — Indx-computed dimensions (type/status/author/category) */}
-        <aside className="flex flex-col gap-5">
+        <aside
+          className={
+            master
+              ? // Horizontal-flowing facet groups so the rail stays shallow.
+                "flex flex-row flex-wrap gap-x-6 gap-y-4"
+              : "flex flex-col gap-5"
+          }
+        >
           {facetCount > 0 ? (
             <button
               onClick={resetFacets}
@@ -784,7 +854,17 @@ export function Finder({
                     </li>
                   ) : null}
                   <li>
-                    <ResultRow hit={hit} terms={highlightTerms} />
+                    <ResultRow
+                      hit={hit}
+                      terms={highlightTerms}
+                      master={master}
+                      queryString={currentQueryString}
+                      selected={
+                        master &&
+                        (pathname === hit.href ||
+                          pathname === `/d/${hit.type}/${hit.slug}`)
+                      }
+                    />
                   </li>
                 </Fragment>
               ))}

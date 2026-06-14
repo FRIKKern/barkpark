@@ -1,5 +1,6 @@
 import type { ReactNode, Key } from "react";
 import type { Block, Inline } from "@/lib/papers";
+import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -316,6 +317,22 @@ function renderBlock(block: Block, key: Key): ReactNode {
           </a>
         </p>
       );
+    case "sheet": {
+      // Embedded sheet block — carries a dense, pre-computed snapshot. The
+      // grid itself is a client component; rendering it from here keeps this
+      // module a server component.
+      const snapshot = block.snapshot as DenseSnapshot | undefined;
+      if (!snapshot) return null;
+      const caption = str(block.caption);
+      return (
+        <figure key={key} className="flex flex-col gap-2">
+          <SheetSnapshot snapshot={snapshot} />
+          {caption ? (
+            <figcaption className="text-sm text-zinc-500">{caption}</figcaption>
+          ) : null}
+        </figure>
+      );
+    }
     default:
       // Unknown / not-yet-supported block (e.g. sheet embeds). Render nothing
       // visible but leave a quiet marker for debugging rather than crashing.

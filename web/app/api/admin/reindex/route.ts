@@ -11,7 +11,10 @@ export const runtime = "nodejs";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const TOKEN = process.env.BARKPARK_READ_TOKEN;
 const DATASET = "production";
-const TYPES = "post,page,author,category,project,paper";
+// Mirrors the finder's content types (lib/find.ts DOC_TYPES) so Indx indexes
+// everything the finder can browse — including sheets, so /d/sheet/:slug docs
+// are findable on the Indx engine (not just Postgres).
+const TYPES = "post,page,author,category,project,paper,sheet";
 
 export async function POST(): Promise<NextResponse> {
   if (!TOKEN) {

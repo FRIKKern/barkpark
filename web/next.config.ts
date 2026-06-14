@@ -11,6 +11,19 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  // The unified detail route is `/d/[type]/[slug]`. Old per-type reader links
+  // (`/posts/:slug`, `/papers/:slug`) 308-redirect into it. `:slug` requires a
+  // segment, so the bare `/papers` LIST page is unaffected (it doesn't match).
+  async redirects() {
+    return [
+      { source: "/posts/:slug", destination: "/d/post/:slug", permanent: true },
+      {
+        source: "/papers/:slug",
+        destination: "/d/paper/:slug",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

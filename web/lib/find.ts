@@ -29,21 +29,23 @@ export const ENGINES: ReadonlyArray<{
   },
 ];
 
-/** Document types the finder knows how to surface. `href` returns a reader path
- * when this app has a reader for the type, else null (the hit still shows). */
+/** Document types the finder knows how to surface. Every type now has a reader
+ * via the unified `/d/[type]/[slug]` detail route — there are no dead-end types
+ * anymore (view-only types render a MetaCard). `href` builds that path. */
 export interface DocType {
   type: string;
   label: string;
-  href: ((slug: string) => string) | null;
+  href: (slug: string) => string;
 }
 
 export const DOC_TYPES: ReadonlyArray<DocType> = [
-  { type: "post", label: "Posts", href: (s) => `/posts/${s}` },
-  { type: "paper", label: "Papers", href: (s) => `/papers/${s}` },
-  { type: "page", label: "Pages", href: null },
-  { type: "author", label: "Authors", href: null },
-  { type: "category", label: "Categories", href: null },
-  { type: "project", label: "Projects", href: null },
+  { type: "post", label: "Posts", href: (s) => `/d/post/${s}` },
+  { type: "paper", label: "Papers", href: (s) => `/d/paper/${s}` },
+  { type: "sheet", label: "Sheets", href: (s) => `/d/sheet/${s}` },
+  { type: "page", label: "Pages", href: (s) => `/d/page/${s}` },
+  { type: "author", label: "Authors", href: (s) => `/d/author/${s}` },
+  { type: "category", label: "Categories", href: (s) => `/d/category/${s}` },
+  { type: "project", label: "Projects", href: (s) => `/d/project/${s}` },
 ];
 
 const TYPE_BY_NAME = new Map(DOC_TYPES.map((t) => [t.type, t]));
@@ -52,9 +54,11 @@ export function typeLabel(type: string): string {
   return TYPE_BY_NAME.get(type)?.label ?? type;
 }
 
-export function readerHref(type: string, slug: string): string | null {
-  const fn = TYPE_BY_NAME.get(type)?.href;
-  return fn ? fn(slug) : null;
+/** Reader path for any document. The unified detail route serves EVERY type, so
+ * this never returns null — unknown types still get a `/d/<type>/<slug>` path
+ * (the detail page resolves what to render, falling back to a MetaCard). */
+export function readerHref(type: string, slug: string): string {
+  return `/d/${type}/${slug}`;
 }
 
 /** A parsed Barkpark query — how the engine understood the raw string. */
@@ -74,8 +78,8 @@ export interface FindHit {
   /** ISO date (publishedAt → _updatedAt → _createdAt), or null. */
   date: string | null;
   slug: string;
-  /** Reader path when available, else null. */
-  href: string | null;
+  /** Reader path — always set now (every type has a `/d/[type]/[slug]` page). */
+  href: string;
   /** Facet-dimension values for client-side facet filtering (type/status/…). */
   facets: Record<string, string>;
 }

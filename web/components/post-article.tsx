@@ -5,8 +5,16 @@ interface PostArticleProps {
   post: PostDocument | null;
   error: string | null;
   /** Where the "back" link points (home for flat, the project for scoped). */
-  backHref: string;
-  backLabel: string;
+  backHref?: string;
+  backLabel?: string;
+  /**
+   * Rendered inside the master/detail pane rather than as a standalone page.
+   * Drops the `min-h-screen` `<main>` chrome and the back-link — the detail
+   * pane owns its own scroll container and a `<DetailChrome>` close affordance —
+   * and emits just the `<article>` (or the error panel) so it sits flush in the
+   * pane. The standalone path (no `embedded`) is byte-identical to before.
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -40,18 +48,14 @@ export function PostArticle({
   error,
   backHref,
   backLabel,
+  embedded,
 }: PostArticleProps) {
   const published = resolveDate(post?.publishedAt, post?._updatedAt);
 
-  return (
-    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16">
-      <Link
-        href={backHref}
-        className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
-      >
-        ← {backLabel}
-      </Link>
-
+  // The error panel / article body is identical for both surfaces; only the
+  // outer chrome (page `<main>` + back-link, vs. nothing) differs.
+  const inner = (
+    <>
       {error ? (
         <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
           <strong className="font-medium">Failed to load post.</strong>
@@ -95,6 +99,25 @@ export function PostArticle({
           ) : null}
         </article>
       ) : null}
+    </>
+  );
+
+  // Embedded in the master/detail pane: no page chrome, no back-link — the
+  // detail pane owns the scroll container and a close affordance.
+  if (embedded) {
+    return inner;
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16">
+      <Link
+        href={backHref ?? "/"}
+        className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
+      >
+        ← {backLabel ?? "back"}
+      </Link>
+
+      {inner}
     </main>
   );
 }

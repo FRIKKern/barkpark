@@ -70,7 +70,7 @@ async function PapersListing() {
             return (
               <li key={paper._id}>
                 <Link
-                  href={`/papers/${paperSlug(paper)}`}
+                  href={`/d/paper/${paperSlug(paper)}`}
                   className="group -mx-3 flex flex-col gap-1.5 rounded-lg px-3 py-5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-900/60"
                 >
                   <span className="flex items-center gap-2 text-lg font-medium tracking-tight">
@@ -90,7 +90,7 @@ async function PapersListing() {
                   <span className="flex flex-wrap items-center gap-x-2 text-xs text-zinc-400">
                     {date ? <span>{date}</span> : null}
                     {date ? <span aria-hidden>·</span> : null}
-                    <span className="font-mono">/papers/{paperSlug(paper)}</span>
+                    <span className="font-mono">/d/paper/{paperSlug(paper)}</span>
                   </span>
                 </Link>
               </li>
