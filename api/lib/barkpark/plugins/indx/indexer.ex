@@ -637,11 +637,13 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   # :content JSONB — because the deeply-nested 1.5 MB block trees timed out
   # AnalyzeString (see the :content drop). A flat, truncated string is cheap to
   # analyze. `@body_max` keeps the whole corpus well under the timeout budget.
-  # 8000 (raised from 4000): the timeout risk was the raw 1.5 MB NESTED block
-  # trees, not flat text — a flat, truncated 8 KB/doc string is still trivial to
-  # analyze, and it stops long-form papers losing their second half from the
-  # index (a term in the tail of a 10k-word paper was previously invisible).
-  @body_max 8000
+  # Kept at 4000: raising it to 8000 REGRESSED ranking — a long paper that
+  # mentions a term several times in its body accumulated enough BM25F
+  # term-frequency to overtake a TITLE match on that term (q="fork" ranked a
+  # long CLI paper above the paper titled "Fork reconciliation"). Indexing more
+  # of long docs safely needs BM25 `b` length-normalization tuning per field +
+  # a golden_eval pass first — deferred, not a blind cap raise.
+  @body_max 4000
   # Leaf keys that are structure/refs, not prose — skipped so the index isn't
   # polluted with "paragraph"/"strong"/urls/ids.
   @body_skip_keys ~w(marks href src url id _id _type _rev type slug rev kind lang)
