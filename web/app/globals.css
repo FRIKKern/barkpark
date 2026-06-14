@@ -66,3 +66,14 @@ body {
 ::selection {
   background: color-mix(in oklab, var(--foreground) 16%, transparent);
 }
+
+/* Disclosure chevron — rotate when the parent <details> is open. Plain CSS on
+   the `rotate` property (Tailwind's transition-transform doesn't animate it),
+   so it works regardless of the group-open variant and animates smoothly. */
+.disclosure-chevron {
+  transition: rotate 0.15s ease;
+}
+
+details[open] .disclosure-chevron {
+  rotate: 180deg;
+}

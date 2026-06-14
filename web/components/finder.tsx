@@ -516,62 +516,88 @@ export function Finder({
             ))}
           </div>
         </div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">
-            {activeEngine.label}:
-          </span>{" "}
-          {activeEngine.tagline}
-        </p>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-zinc-400">Cache</span>
-          <button
-            role="switch"
-            aria-checked={cacheOn}
-            onClick={() => setParams({ cache: cacheOn ? null : "on" })}
-            className={`rounded-full px-2.5 py-0.5 font-medium transition-colors ${
-              cacheOn
-                ? "bg-emerald-600 text-white"
-                : "border border-zinc-300 text-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:hover:text-zinc-200"
-            }`}
-          >
-            {cacheOn ? "on" : "off"}
-          </button>
-          <span className="text-zinc-400">
-            {cacheOn
-              ? "Next Data Cache — warm hits skip the API round-trip"
-              : "always fresh (no-store)"}
-          </span>
-          {cacheOn ? (
-            <button
-              onClick={resetCache}
-              disabled={resetting}
-              className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:hover:text-zinc-200"
-            >
-              {resetting ? "resetting…" : "reset cache"}
-            </button>
-          ) : null}
-          {engine === "indx" ? (
-            <button
-              onClick={reindexNow}
-              disabled={!!reindexMsg}
-              title="Trigger an Indx blue/green rebuild"
-              className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:hover:text-zinc-200"
-            >
-              {reindexMsg ?? "reindex"}
-            </button>
-          ) : null}
-        </div>
-        <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
-          <span>
-            <code className="font-mono">&quot;exact phrase&quot;</code> phrase
-          </span>
-          <span>
-            <code className="font-mono">-word</code> exclude
-          </span>
-          <span>
-            <code className="font-mono">prefix*</code> starts-with
-          </span>
-        </p>
+        {/* Engine tagline doubles as the disclosure summary; the advanced /
+            benchmark controls (cache mode, reindex) + query syntax tuck inside,
+            collapsed by default so the primary surface stays clean. */}
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm text-zinc-500 [&::-webkit-details-marker]:hidden dark:text-zinc-400">
+            <span>
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                {activeEngine.label}:
+              </span>{" "}
+              {activeEngine.tagline}
+            </span>
+            <span className="flex shrink-0 items-center gap-1 text-xs text-zinc-400 transition-colors group-hover:text-zinc-600 dark:group-hover:text-zinc-300">
+              Options
+              <svg
+                aria-hidden
+                viewBox="0 0 12 12"
+                className="disclosure-chevron h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path
+                  d="M3 4.5 6 7.5 9 4.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </summary>
+          <div className="mt-3 flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-zinc-400">Cache</span>
+              <button
+                role="switch"
+                aria-checked={cacheOn}
+                onClick={() => setParams({ cache: cacheOn ? null : "on" })}
+                className={`rounded-full px-2.5 py-0.5 font-medium transition-colors ${
+                  cacheOn
+                    ? "bg-emerald-600 text-white"
+                    : "border border-zinc-300 text-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:hover:text-zinc-200"
+                }`}
+              >
+                {cacheOn ? "on" : "off"}
+              </button>
+              <span className="text-zinc-400">
+                {cacheOn
+                  ? "Next Data Cache — warm hits skip the API round-trip"
+                  : "always fresh (no-store)"}
+              </span>
+              {cacheOn ? (
+                <button
+                  onClick={resetCache}
+                  disabled={resetting}
+                  className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:hover:text-zinc-200"
+                >
+                  {resetting ? "resetting…" : "reset cache"}
+                </button>
+              ) : null}
+              {engine === "indx" ? (
+                <button
+                  onClick={reindexNow}
+                  disabled={!!reindexMsg}
+                  title="Trigger an Indx blue/green rebuild"
+                  className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:hover:text-zinc-200"
+                >
+                  {reindexMsg ?? "reindex"}
+                </button>
+              ) : null}
+            </div>
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+              <span>
+                <code className="font-mono">&quot;exact phrase&quot;</code> phrase
+              </span>
+              <span>
+                <code className="font-mono">-word</code> exclude
+              </span>
+              <span>
+                <code className="font-mono">prefix*</code> starts-with
+              </span>
+            </p>
+          </div>
+        </details>
       </div>
 
       {/* banners */}
