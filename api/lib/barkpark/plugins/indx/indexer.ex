@@ -623,9 +623,43 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     doc
     |> stringify_top()
     |> Map.merge(facet_fields(doc))
+    |> Map.put("body", body_text(doc))
     |> Map.put("id", key)
     |> Map.put("_id", id)
   end
+
+  # Bounded, FLAT plain-text projection of a doc's content for full-text search
+  # (papers' block bodies, post/page body strings). We index this — NOT the raw
+  # :content JSONB — because the deeply-nested 1.5 MB block trees timed out
+  # AnalyzeString (see the :content drop). A flat, truncated string is cheap to
+  # analyze. `@body_max` keeps the whole corpus well under the timeout budget.
+  @body_max 4000
+  # Leaf keys that are structure/refs, not prose — skipped so the index isn't
+  # polluted with "paragraph"/"strong"/urls/ids.
+  @body_skip_keys ~w(marks href src url id _id _type _rev type slug rev kind lang)
+
+  defp body_text(doc) do
+    doc
+    |> doc_content()
+    |> collect_text([])
+    |> Enum.reverse()
+    |> Enum.join(" ")
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+    |> String.slice(0, @body_max)
+  end
+
+  defp collect_text(m, acc) when is_map(m) and not is_struct(m) do
+    Enum.reduce(m, acc, fn {k, v}, a ->
+      if k in @body_skip_keys, do: a, else: collect_text(v, a)
+    end)
+  end
+
+  defp collect_text(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_text/2)
+
+  defp collect_text(s, acc) when is_binary(s), do: [s | acc]
+  defp collect_text(_, acc), do: acc
 
   # Surface a couple of scalar fields out of the (dropped) :content JSONB so
   # Indx can facet/filter on them — `type` and `status` are already top-level
@@ -712,6 +746,7 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   defp default_weights(settings) do
     [
       {"title", settings.weight_high},
+      {"body", settings.weight_medium},
       {"_id", settings.weight_low}
     ]
   end
