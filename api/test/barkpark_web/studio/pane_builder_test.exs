@@ -76,6 +76,43 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
     end
   end
 
+  # Goal ges/graph-edge-seam, FIX 2 — the `graph/<doc_id>` nav segment must
+  # resolve into a `view: :graph` editor for ANY content doc. Before the fix
+  # walk_path/7 only descended a node whose id/type_name matched the segment,
+  # and NO structure node has type_name "graph", so this returned nil — the
+  # entire Studio GraphView pane was unreachable.
+  describe "graph blast-radius pane (FIX 2)" do
+    test "build(dataset, [\"graph\", doc_id]) returns an editor with view: :graph" do
+      seed_basic("pb_graph")
+      {_panes, editor} = PaneBuilder.build("pb_graph", ["graph", "p1"])
+
+      assert is_map(editor), "expected a graph editor, got nil (the dead-seam regression)"
+      assert editor.view == :graph
+      assert editor.doc.doc_id =~ "p1"
+      # The payload slice GraphView renders — present even when empty.
+      assert is_map(editor.graph)
+      assert Map.has_key?(editor.graph, :nodes)
+      assert Map.has_key?(editor.graph, :edges)
+    end
+
+    test "graph pane roots on a doc REGARDLESS of its schema type (gap #4)" do
+      seed_basic("pb_graph_any")
+      # `post` is an ordinary content type — proving the pane is NOT gated on a
+      # non-existent "graph" schema/type.
+      {_panes, editor} = PaneBuilder.build("pb_graph_any", ["graph", "p2"])
+
+      assert editor.view == :graph
+      assert editor.type == "post"
+    end
+
+    test "graph pane with an unknown doc_id returns no editor" do
+      seed_basic("pb_graph_missing")
+      {_panes, editor} = PaneBuilder.build("pb_graph_missing", ["graph", "nope"])
+
+      assert editor == nil
+    end
+  end
+
   describe "collapse?/3" do
     test "no collapse with 1 or 2 panes (no editor)" do
       refute PaneBuilder.collapse?(0, 1, false)

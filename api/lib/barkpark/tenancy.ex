@@ -100,6 +100,27 @@ defmodule Barkpark.Tenancy do
   end
 
   @doc """
+  True when MORE THAN ONE workspace exists — i.e. the install is multi-tenant.
+
+  The content-edge projection write path uses this to decide whether a doc with
+  an UNRESOLVABLE workspace may have its edges materialised globally. In a
+  single-tenant install (zero/one workspace) a nil workspace is the documented
+  legacy back-compat row, so a global edge is correct. In a MULTI-tenant install
+  a nil workspace must FAIL CLOSED (mirror `Scope.scope_to_workspace/3`): a
+  globally-resolved slug can collide with another tenant's same-slug doc and
+  durably store a cross-tenant `content_edges` row. Cheap: a single bounded
+  COUNT (`LIMIT 2`) — never returns true on a fresh single-workspace seed.
+  """
+  @spec multi_tenant?() :: boolean()
+  def multi_tenant? do
+    Repo.aggregate(from(w in Workspace, limit: 2), :count, :id) > 1
+  rescue
+    # A read failure (no DB, mid-migration) must never crash a projection
+    # lifecycle hook. Degrade to the SAFE multi-tenant posture: fail closed.
+    _ -> true
+  end
+
+  @doc """
   List the Workspaces a principal is a MEMBER of, ordered by slug.
 
   Accepts an `%ApiToken{}` struct or a raw principal id binary. The hard

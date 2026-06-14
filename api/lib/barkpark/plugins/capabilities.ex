@@ -426,6 +426,15 @@ defmodule Barkpark.Plugins.Capabilities do
         "summary" =>
           "Scoped network shares — expose a workspace/project/dataset surface on the LAN.",
         "plugin" => nil
+      },
+      # Content graph — CORE, not the Tasks plugin (Goal ges/graph-edge-seam).
+      # The graph roots on ANY content doc, so its read verbs are core: they
+      # survive the `config :barkpark, :plugins, []` kill switch alongside the
+      # CORE-mounted /v1/graph/* routes (fresh-install invariant).
+      %{
+        "name" => "graph",
+        "summary" => "Content graph — traverse references, find orphans + dangling edges.",
+        "plugin" => nil
       }
     ]
   end
@@ -701,6 +710,56 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("scope", true, "string", "ws[/project[/dataset]] to stop sharing.")],
         writes: true,
         default_output: "minimal"
+      ),
+      # ── Content graph (Goal ges/graph-edge-seam) ─────────────────────────
+      # Mounted from CORE so the verbs survive the `:plugins, []` kill switch
+      # (the graph roots on ANY content doc). All `auth_tier: "read"`: the
+      # /v1/graph/* routes sit behind the `[:api, :require_token]` pipeline —
+      # bearer-gated, NOT admin. No scoped_prefix — these are global
+      # content-graph reads, not scoped to a single doc prefix.
+      core_cmd(
+        "graph.show",
+        "graph",
+        "show",
+        "Traverse the content graph from a root document (any type).",
+        "GET",
+        "/v1/graph/:id",
+        "read",
+        args: [arg("id", true, "string", "Root document id.")],
+        flags: [
+          flag("depth", "int", "Traversal depth (clamped 1..5).", default: 2),
+          flag("direction", "string", "out | in | both (default both)."),
+          flag("kinds", "string", "Comma-separated edge kinds to keep."),
+          flag("sources", "string", "Comma-separated plugin_source filters."),
+          flag(
+            "perspective",
+            "string",
+            "published (default) | drafts (live extract over the drafts corpus)."
+          )
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "graph.orphans",
+        "graph",
+        "orphans",
+        "List documents with zero inbound and zero outbound edges.",
+        "GET",
+        "/v1/graph/orphans",
+        "read",
+        flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "graph.dangling",
+        "graph",
+        "dangling",
+        "List broken references (targets unresolvable under the published lens).",
+        "GET",
+        "/v1/graph/dangling",
+        "read",
+        flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        default_output: "json"
       )
     ]
   end

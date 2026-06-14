@@ -31,6 +31,10 @@ defmodule Barkpark.PluginFreeBootTest do
   @moduletag :boot_test
 
   import Phoenix.ConnTest
+  # `put_req_header/3` (used to attach the Bearer token for the /v1/graph
+  # kill-switch request) lives in Plug.Conn, which Phoenix.ConnTest does not
+  # re-export — import it directly.
+  import Plug.Conn, only: [put_req_header: 3]
 
   @endpoint BarkparkWeb.Endpoint
 
@@ -346,6 +350,83 @@ defmodule Barkpark.PluginFreeBootTest do
         refute body =~ token,
                "Studio HTML must not contain plugin token #{inspect(token)}"
       end
+    end
+
+    # ── Content graph CORE-mount kill-switch guard (Goal ges/graph-edge-seam,
+    # FIX 1) ───────────────────────────────────────────────────────────────────
+    #
+    # The /v1/graph/* HTTP surface and the graph.* CLI verbs were RELOCATED out
+    # of the disable-able Tasks plugin into CORE (router.ex `scope "/v1" …
+    # get("/graph/…")` + Capabilities.core_commands/0) because the content graph
+    # roots on ANY content doc, not just tasks. They MUST therefore survive the
+    # documented `config :barkpark, :plugins, []` kill switch this case engages.
+    #
+    # This is the ONLY context that exercises the graph surface with plugins []:
+    # graph_controller_test runs under default ConnCase config (Tasks loaded from
+    # disk), and plugin_routes_test only asserts Registry.collect_routes/1 == [].
+    # Here we make a REAL HTTP request through the booted :plugins [] endpoint AND
+    # read the read-tier manifest directly — the two halves of "still works
+    # end-to-end with all plugins off".
+    test "GET /v1/graph/<id> is NOT 404 under :plugins [] (core route survives the kill switch)" do
+      # Seed a graph root under the Default scope the :api pipeline's
+      # AssignDefaultScope plug resolves for a flat /v1/graph request. The `post`
+      # schema is one of the 8 host seeds reseeded in setup_all, so a non-task
+      # content doc proves the route roots on ANY type (gap #4).
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+      doc_id = "graph-killswitch-#{System.unique_integer([:positive])}"
+
+      {:ok, _doc} =
+        Barkpark.Content.create_document(
+          "post",
+          %{"doc_id" => doc_id, "title" => doc_id, "content" => %{}},
+          "production",
+          scope
+        )
+
+      raw_token = "barkpark-plugin-free-graph-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "plugin-free-graph", "test", [
+          "read",
+          "write",
+          "admin"
+        ])
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> raw_token)
+        |> get("/v1/graph/#{doc_id}")
+
+      # The CARDINAL assertion: a CORE-mounted route resolves even with plugins
+      # []. If these routes had stayed in the Tasks plugin, the request would 404
+      # here (Registry.collect_routes/1 == [] under the kill switch).
+      refute conn.status == 404,
+             "GET /v1/graph/:id 404ed under :plugins [] — the route is NOT core-mounted"
+
+      assert conn.status == 200
+    end
+
+    test "read-tier manifest lists the graph.* verbs under :plugins []" do
+      manifest = Barkpark.Plugins.Capabilities.manifest("read")
+
+      command_ids =
+        manifest
+        |> Map.get("commands", [])
+        |> Enum.map(&Map.get(&1, "id"))
+
+      for id <- ["graph.show", "graph.orphans", "graph.dangling"] do
+        assert id in command_ids,
+               "expected core verb #{inspect(id)} in the read-tier manifest under :plugins [], " <>
+                 "got #{inspect(command_ids)}"
+      end
+
+      # And the `graph` noun survives (a noun is kept only when >= 1 of its
+      # commands is visible — proving the verbs are CORE, not plugin-stamped).
+      noun_names = manifest |> Map.get("nouns", []) |> Enum.map(&Map.get(&1, "name"))
+
+      assert "graph" in noun_names,
+             "expected the core `graph` noun in the read-tier manifest under :plugins []"
     end
 
     test "host code in lib/ does not reference Barkpark.Plugins.OnixEdit by name" do

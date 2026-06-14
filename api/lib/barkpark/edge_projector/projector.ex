@@ -43,7 +43,7 @@ defmodule Barkpark.EdgeProjector.Projector do
   import Ecto.Query
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, Edge}
+  alias Barkpark.Content.{Document, Edge, Scope}
   alias Barkpark.Plugins.Registry
   alias Barkpark.Repo
 
@@ -235,6 +235,19 @@ defmodule Barkpark.EdgeProjector.Projector do
 
   # Resolve a doc to its published `documents.id` PK (publish-preferred), or nil.
   # Pure-ish read used ONLY on the write paths (never inside project/3).
+  #
+  # TENANCY FAIL-CLOSED (FIX 3). This PK resolution feeds the DELETE/prune side
+  # of the projector — `corpus_from_pks/2 -> delete_outbound_for/1` (rebuild) and
+  # `remove_stale_outbound/2` (upsert) and `delete_record/2`. Resolving by
+  # `doc_id` + `dataset` ALONE ignores the workspace, so a colliding slug shared
+  # across two tenants on the same dataset string could resolve to ANOTHER
+  # tenant's row and DELETE its outbound edges (cross-tenant destruction). Thread
+  # the caller's workspace scope through, mirroring `Content.scope_edge_endpoint`:
+  # with `require_workspace: true` (the multi-tenant projector) use the STRICT
+  # `Scope.scope_to_workspace/3` — a nil workspace FAILS CLOSED (`where: false`),
+  # so a nil/unresolvable scope resolves to NOTHING rather than crossing tenants;
+  # without the flag (single-tenant / unflagged callers) it is the documented
+  # or-global back-compat resolution, byte-identical to before.
   defp doc_pk(doc, opts) do
     doc_id = Map.get(doc, :doc_id) || Map.get(doc, "doc_id")
     dataset = Map.get(doc, :dataset) || Map.get(doc, "dataset") || Keyword.get(opts, :dataset)
@@ -246,6 +259,7 @@ defmodule Barkpark.EdgeProjector.Projector do
       Document
       |> where([d], d.doc_id == ^pub or d.doc_id == ^draft)
       |> maybe_scope_dataset(dataset)
+      |> scope_doc_pk_to_workspace(opts)
       |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
       |> Repo.all()
       |> case do
@@ -263,10 +277,28 @@ defmodule Barkpark.EdgeProjector.Projector do
 
   defp maybe_scope_dataset(query, _), do: query
 
+  # Tenancy scope for a write-path PK resolution. Mirrors
+  # `Content.scope_edge_endpoint/2`: strict (fail-closed-on-nil) under
+  # `require_workspace: true`, else the or-global back-compat resolution.
+  defp scope_doc_pk_to_workspace(query, opts) do
+    ws = Keyword.get(opts, :workspace_id)
+    proj = Keyword.get(opts, :project_id)
+
+    if Keyword.get(opts, :require_workspace, false) do
+      Scope.scope_to_workspace(query, ws, proj)
+    else
+      Scope.scope_to_workspace_or_global(query, ws, proj)
+    end
+  end
+
   defp add_opts(scope, opts) do
     [dataset: Keyword.get(opts, :dataset, scope)]
     |> maybe_put(:workspace_id, Keyword.get(opts, :workspace_id))
     |> maybe_put(:project_id, Keyword.get(opts, :project_id))
+    # FAIL-CLOSED tenancy (FIX 3) — forwarded to Content.add_edges/2 so a
+    # multi-tenant projection refuses to resolve a nil-workspace endpoint
+    # across tenants. The worker sets `:require_workspace` per Tenancy.multi_tenant?/0.
+    |> maybe_put(:require_workspace, Keyword.get(opts, :require_workspace))
   end
 
   defp opts_scope(doc, opts) do

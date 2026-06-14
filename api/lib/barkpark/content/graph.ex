@@ -64,7 +64,7 @@ defmodule Barkpark.Content.Graph do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, Edge}
+  alias Barkpark.Content.{Document, Edge, Scope}
 
   @node_budget 1000
   @fan_out 200
@@ -491,11 +491,19 @@ defmodule Barkpark.Content.Graph do
   defp maybe_filter(edges, list, pred) when is_list(list), do: Enum.filter(edges, pred)
 
   # Hydrate the visited documents.id UUIDs into node maps via one keyed read.
+  # Defense-in-depth tenancy: the keyed read is scoped to the caller's
+  # workspace/project (via `scope_to_workspace_or_global/3`) so a UUID that
+  # belongs to ANOTHER tenant — e.g. one that reached `state.visited` through a
+  # cross-tenant `content_edges` row — hydrates to NOTHING instead of leaking
+  # its title/doc_id/type. An unscoped caller (`opts` without `:workspace_id`,
+  # e.g. a single-tenant back-compat read) keeps the global read via the
+  # `_or_global` bridge, matching the documented Scope posture.
   defp hydrate_nodes([], _opts), do: []
 
-  defp hydrate_nodes(ids, _opts) do
+  defp hydrate_nodes(ids, opts) do
     Document
     |> where([d], d.id in ^ids)
+    |> scope_query(opts)
     |> Repo.all()
     |> Enum.map(fn %Document{} = d ->
       %{
@@ -520,7 +528,7 @@ defmodule Barkpark.Content.Graph do
     else
       real_nodes
       |> Enum.flat_map(fn node ->
-        case fetch_doc(node.id) do
+        case fetch_doc(node.id, opts) do
           %Document{} = doc ->
             doc
             |> Content.extract_edges(opts)
@@ -570,8 +578,11 @@ defmodule Barkpark.Content.Graph do
     end
   end
 
-  defp fetch_doc(id) do
-    Document |> where([d], d.id == ^id) |> Repo.one()
+  # Scoped keyed read for phantom re-extraction. Same tenancy posture as
+  # `hydrate_nodes/2`: a node.id that belongs to another tenant resolves to nil
+  # (and contributes no phantoms) instead of being re-read across the boundary.
+  defp fetch_doc(id, opts) do
+    Document |> where([d], d.id == ^id) |> scope_query(opts) |> Repo.one()
   end
 
   defp render_edge(%Edge{} = e) do
@@ -644,7 +655,7 @@ defmodule Barkpark.Content.Graph do
         inbound = Content.list_inbound_edges(pk, edge_opts(opts))
 
         from_ids = Enum.map(inbound, & &1.from_id)
-        docs_by_id = docs_by_id(from_ids)
+        docs_by_id = docs_by_id(from_ids, opts)
 
         Enum.map(inbound, fn %Edge{} = e ->
           src = Map.get(docs_by_id, e.from_id)
@@ -756,12 +767,26 @@ defmodule Barkpark.Content.Graph do
     end
   end
 
-  defp docs_by_id([]), do: %{}
+  defp docs_by_id([], _opts), do: %{}
 
-  defp docs_by_id(ids) do
+  defp docs_by_id(ids, opts) do
     Document
     |> where([d], d.id in ^ids)
+    |> scope_query(opts)
     |> Repo.all()
     |> Map.new(fn d -> {d.id, d} end)
+  end
+
+  # Apply the caller's tenancy scope to a keyed Document read. Pulls
+  # `:workspace_id` / `:project_id` off `opts` and pipes through
+  # `Scope.scope_to_workspace_or_global/3` — a real workspace scopes the read
+  # (out-of-scope ids drop), an absent one is a deliberate global read (the
+  # documented single-tenant / direct-caller back-compat bridge).
+  defp scope_query(query, opts) do
+    Scope.scope_to_workspace_or_global(
+      query,
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
   end
 end

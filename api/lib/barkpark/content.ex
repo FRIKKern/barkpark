@@ -33,7 +33,8 @@ defmodule Barkpark.Content do
     Validation
   }
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope,
+    only: [scope_to_workspace_or_global: 3, scope_to_workspace: 3]
 
   alias Barkpark.PortableDoc.{Patch, Projection, Render, Synthesis}
 
@@ -1734,10 +1735,7 @@ defmodule Barkpark.Content do
     query =
       Document
       |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft or d.id == ^id)
-      |> scope_to_workspace_or_global(
-        Keyword.get(scope_opts, :workspace_id),
-        Keyword.get(scope_opts, :project_id)
-      )
+      |> scope_edge_endpoint(scope_opts)
       |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
 
     query =
@@ -1764,10 +1762,7 @@ defmodule Barkpark.Content do
     query =
       Document
       |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
-      |> scope_to_workspace_or_global(
-        Keyword.get(scope_opts, :workspace_id),
-        Keyword.get(scope_opts, :project_id)
-      )
+      |> scope_edge_endpoint(scope_opts)
       |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
 
     query =
@@ -1783,12 +1778,40 @@ defmodule Barkpark.Content do
     end
   end
 
+  # Tenancy scope for an edge endpoint resolution. With `require_workspace:
+  # true` (the multi-tenant projector, FIX 3) the STRICT `scope_to_workspace/3`
+  # is used — a nil workspace_id FAILS CLOSED (where: false), so a nil-scope
+  # endpoint resolves to NOTHING and add_edge/4 returns {:error, :no_target}
+  # rather than crossing into another tenant's colliding-slug doc. Without the
+  # flag (single-tenant / unflagged callers) it is the documented or-global
+  # back-compat resolution, byte-identical to before.
+  defp scope_edge_endpoint(query, scope_opts) do
+    ws = Keyword.get(scope_opts, :workspace_id)
+    proj = Keyword.get(scope_opts, :project_id)
+
+    if Keyword.get(scope_opts, :require_workspace, false) do
+      scope_to_workspace(query, ws, proj)
+    else
+      scope_to_workspace_or_global(query, ws, proj)
+    end
+  end
+
   defp edge_scope_opts(attrs) do
     []
     |> maybe_put_kw(:dataset_id, attrs["dataset_id"])
     |> maybe_put_kw(:workspace_id, attrs["workspace_id"])
     |> maybe_put_kw(:project_id, attrs["project_id"])
+    # FAIL-CLOSED flag (FIX 3) — carried so resolve_doc_pk/3 can refuse a
+    # cross-tenant slug match when the multi-tenant projector demands a
+    # resolved workspace. Only put when truthy so single-tenant callers keep
+    # the default or-global resolution.
+    |> maybe_put_kw(:require_workspace, truthy(attrs["require_workspace"]))
   end
+
+  # Keep only a genuinely-true flag (drop nil/false) so `maybe_put_kw` leaves
+  # the default resolution untouched on a single-tenant / unflagged caller.
+  defp truthy(true), do: true
+  defp truthy(_), do: nil
 
   defp maybe_put_kw(opts, _key, nil), do: opts
   defp maybe_put_kw(opts, key, value), do: Keyword.put(opts, key, value)
@@ -1812,7 +1835,14 @@ defmodule Barkpark.Content do
       "dataset" => Keyword.get(opts, :dataset),
       "dataset_id" => Keyword.get(opts, :dataset_id),
       "workspace_id" => Keyword.get(opts, :workspace_id),
-      "project_id" => Keyword.get(opts, :project_id)
+      "project_id" => Keyword.get(opts, :project_id),
+      # FAIL-CLOSED tenancy (Goal ges/graph-edge-seam, FIX 3). When the
+      # projector runs in a multi-tenant install it sets this so a nil-workspace
+      # endpoint is REFUSED across tenants (→ {:error, :no_target}) instead of
+      # resolving a colliding-slug doc in another tenant and storing a
+      # cross-tenant content_edges row. Absent/false = the documented
+      # single-tenant or-global back-compat resolution.
+      "require_workspace" => Keyword.get(opts, :require_workspace, false)
     }
 
     Enum.map(edges, fn e ->
@@ -1825,6 +1855,7 @@ defmodule Barkpark.Content do
         |> Map.put("dataset", (e[:dataset] || e["dataset"]) || scope["dataset"])
         |> Map.put("weight", e[:weight] || e["weight"])
         |> Map.put("plugin_source", e[:plugin_source] || e["plugin_source"])
+        |> Map.put("require_workspace", scope["require_workspace"])
 
       add_edge(from_id, to_id, kind, attrs)
     end)

@@ -72,6 +72,42 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         ) :: {[map()], map() | nil}
   def walk_path([], _depth, _current, panes, editor, _dataset, _opts), do: {panes, editor}
 
+  # RESERVED literal `"graph"` segment — the per-doc blast-radius action (Goal
+  # ges/graph-edge-seam, FIX 2). The graph pane roots on ANY content doc, so it
+  # is NOT a schema/structure node: a `graph/<doc_id>` nav path opens the
+  # Cytoscape `view: :graph` editor for `<doc_id>` regardless of its type. This
+  # clause runs BEFORE the structure `Enum.find` below — which would otherwise
+  # return nil (no node has `type_name == "graph"`) and drop the pane to nil,
+  # leaving the whole GraphView half of Phase 5 unreachable. The 'View blast
+  # radius' affordance on the document editor push_patches to this path.
+  def walk_path(["graph" | rest], _depth, _current, panes, _editor, dataset, opts) do
+    editor =
+      case rest do
+        [doc_id | _] ->
+          case resolve_graph_doc(doc_id, dataset, scope(opts)) do
+            nil ->
+              nil
+
+            doc ->
+              %{
+                view: :graph,
+                doc: doc,
+                schema: nil,
+                type: graph_doc_type(doc),
+                is_draft: Content.draft?(doc.doc_id),
+                has_published: not Content.draft?(doc.doc_id),
+                form: %{},
+                graph: graph_payload(doc, dataset, scope(opts))
+              }
+          end
+
+        _ ->
+          nil
+      end
+
+    {panes, editor}
+  end
+
   def walk_path([id | rest], depth, current, panes, _editor, dataset, opts) do
     found =
       Enum.find(current.items, fn node ->
@@ -360,6 +396,38 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   end
 
   defp graph_payload(_doc, _dataset, _scope_kw), do: %{nodes: [], edges: []}
+
+  # Resolve a doc_id to its `%Document{}` WITHOUT knowing its schema type — the
+  # blast-radius pane roots on ANY content doc, so type-agnostic resolution is
+  # the point (FIX 2). Published row preferred over its `drafts.` twin
+  # (publish-stable, mirroring resolve_doc_pk/3). Scoped to the caller's tenant
+  # via `Content.Graph` is not reused here (it traverses, not resolves), so we
+  # read the keyed row through the tenant-aware `Content.list_documents`-style
+  # scope. Returns nil when nothing in scope matches.
+  defp resolve_graph_doc(doc_id, dataset, scope_kw) when is_binary(doc_id) do
+    pub_id = Content.published_id(doc_id)
+    draft = Content.draft_id(pub_id)
+
+    import Ecto.Query
+
+    Barkpark.Content.Document
+    |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
+    |> where([d], d.dataset == ^dataset)
+    |> Barkpark.Content.Scope.scope_to_workspace_or_global(
+      Keyword.get(scope_kw, :workspace_id),
+      Keyword.get(scope_kw, :project_id)
+    )
+    |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
+    |> limit(1)
+    |> Barkpark.Repo.one()
+  end
+
+  defp resolve_graph_doc(_doc_id, _dataset, _scope_kw), do: nil
+
+  # The open doc's schema type — surfaced on the editor map so StudioLive's
+  # toolbar can label/route correctly. A %Document{} carries it as :type.
+  defp graph_doc_type(%{type: t}) when is_binary(t), do: t
+  defp graph_doc_type(_), do: nil
 
   # Pull the tenancy scope keyword threaded in via `build(.., scope: scope_opts)`.
   # Returns the `[workspace_id: …, project_id: …]` list (or `[]` when no scope

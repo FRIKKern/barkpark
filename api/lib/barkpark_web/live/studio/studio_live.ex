@@ -1710,6 +1710,23 @@ defmodule BarkparkWeb.Studio.StudioLive do
      )}
   end
 
+  # 'View blast radius' — open the Cytoscape graph pane for the currently-open
+  # doc (Goal ges/graph-edge-seam, FIX 2). push_patch to the reserved
+  # `graph/<doc_id>` nav segment, which PaneBuilder resolves (type-agnostically)
+  # into a `view: :graph` editor. Published id so the path is publish-stable.
+  # No-op when no doc is open (the action only renders with an editor_doc).
+  def handle_event("view-graph", _, socket) do
+    case socket.assigns[:editor_doc] do
+      %{doc_id: doc_id} when is_binary(doc_id) ->
+        pub_id = Content.published_id(doc_id)
+        path = ["graph", pub_id]
+        {:noreply, push_patch(socket, to: studio_path(socket, path, socket.assigns.dataset))}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_event("close-secondary-picker", _, socket) do
     {:noreply, assign(socket, show_secondary_picker: false, secondary_search: "")}
   end
@@ -3375,6 +3392,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
             "class" => "btn btn-ghost btn-sm",
             "data_test_id" => "open-secondary-picker",
             "icon" => "panel-right-open"
+          }
+        }
+      end,
+      # 'View blast radius' — opens the Cytoscape graph pane for THIS doc (Goal
+      # ges/graph-edge-seam, FIX 2). Fires `view-graph`, which push_patches to
+      # the reserved `graph/<doc_id>` nav segment PaneBuilder resolves into a
+      # `view: :graph` editor. Without this affordance the GraphView half of
+      # Phase 5 was unreachable (no nav anywhere produced a `graph/<id>` path).
+      if editor_doc do
+        %{
+          "name" => "view-graph",
+          "label" => "View blast radius",
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "view-graph",
+            "class" => "btn btn-ghost btn-sm",
+            "data_test_id" => "view-graph",
+            "icon" => "git-fork"
           }
         }
       end

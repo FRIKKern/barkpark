@@ -29,7 +29,10 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   @onixedit_routes MapSet.new(["/v1/plugins/onixedit/export/:dataset/:id"])
 
   # The flat `/v1/tasks` paths the Tasks plugin's cli verbs are grounded in
-  # (every one is mounted by Tasks.register_routes/1).
+  # (every one is mounted by Tasks.register_routes/1). The content-graph verbs
+  # are NOT here — they moved to the CORE verb registry (Goal
+  # ges/graph-edge-seam) so they survive the `:plugins, []` kill switch; see
+  # the "core graph verbs" describe block below.
   @tasks_paths MapSet.new([
                  "/v1/tasks",
                  "/v1/tasks/ready",
@@ -88,6 +91,11 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.claim" in ids
       assert "task.close" in ids
       assert "task.next" in ids
+      # The content-graph read verbs are NOT on the Tasks plugin — they moved
+      # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
+      refute "task.graph" in ids
+      refute "task.graph-orphans" in ids
+      refute "task.graph-dangling" in ids
       assert length(cmds) == 7
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
@@ -161,6 +169,54 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       end
 
       assert "task" in declared
+    end
+  end
+
+  describe "core content-graph verbs (Goal ges/graph-edge-seam)" do
+    # FRESH-INSTALL invariant: the content graph roots on ANY content doc, so
+    # its read verbs are CORE (not the disable-able Tasks plugin). They must be
+    # in the superset manifest tagged `source: "core"` and under the `graph`
+    # noun — so they survive `config :barkpark, :plugins, []`.
+    test "graph.show/orphans/dangling are CORE verbs over /v1/graph/*, not plugin" do
+      manifest = Capabilities.manifest("admin", project: false)
+      cmds = manifest["commands"]
+
+      graph_ids = ~w(graph.show graph.orphans graph.dangling)
+
+      graph_cmds = Enum.filter(cmds, fn c -> c["id"] in graph_ids end)
+      assert length(graph_cmds) == 3
+
+      for c <- graph_cmds do
+        assert c["source"] == "core"
+        assert c["noun"] == "graph"
+        # read-tier: the /v1/graph/* routes sit behind [:api, :require_token].
+        assert c["auth_tier"] == "read"
+        assert String.starts_with?(c["http"]["path_template"], "/v1/graph")
+      end
+
+      paths = MapSet.new(graph_cmds, fn c -> c["http"]["path_template"] end)
+      assert MapSet.equal?(paths, MapSet.new(["/v1/graph/:id", "/v1/graph/orphans", "/v1/graph/dangling"]))
+
+      # The `graph` noun is a CORE noun (plugin: nil).
+      graph_noun = Enum.find(manifest["nouns"], fn n -> n["name"] == "graph" end)
+      assert graph_noun
+      assert graph_noun["plugin"] == nil
+    end
+
+    test "an anonymous (none) caller still sees the graph verbs hidden (read-tier)" do
+      # read-tier verbs are existence-hidden from anon — but VISIBLE to a read+
+      # caller. This proves they project through the normal tier ladder rather
+      # than being plugin-gated.
+      anon = Capabilities.manifest("none")
+      read = Capabilities.manifest("read")
+
+      anon_ids = anon["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
+      read_ids = read["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      refute "graph.show" in anon_ids
+      assert "graph.show" in read_ids
+      assert "graph.orphans" in read_ids
+      assert "graph.dangling" in read_ids
     end
   end
 

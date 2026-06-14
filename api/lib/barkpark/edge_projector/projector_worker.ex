@@ -70,6 +70,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
 
   alias Barkpark.Content
   alias Barkpark.EdgeProjector.Projector
+  alias Barkpark.Tenancy
 
   @debounce_seconds 5
   @snooze_seconds 60
@@ -171,16 +172,41 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   # Full per-scope rebuild: list the published corpus across the declared types
   # and hand it to Projector.rebuild_scope/3 (atomic DELETE+bulk-add in a
   # transaction). A DB blip surfaces as an exception → snooze.
+  #
+  # FAIL-CLOSED tenancy (Goal ges/graph-edge-seam, FIX 3): in a multi-tenant
+  # install a rebuild enqueued with NO workspace_id (a nil-scope doc whose
+  # workspace could not be resolved by Lifecycle.scope_opts/1) would list the
+  # corpus ACROSS ALL tenants sharing the dataset string and materialise
+  # cross-tenant edges. Skip it — a global-corpus rebuild is unsafe when tenants
+  # coexist. With a workspace_id present we set `require_workspace: true` so each
+  # endpoint resolution stays inside that workspace (a colliding slug in another
+  # tenant can't be picked).
   defp run_rebuild(scope, types, args) do
+    ws = Map.get(args, "workspace_id")
+
+    if is_nil(ws) and Tenancy.multi_tenant?() do
+      Logger.warning(
+        "EdgeProjector.ProjectorWorker: rebuild for scope=#{scope} has NO workspace_id in a " <>
+          "multi-tenant install — skipping (fail-closed, would build a cross-tenant corpus)"
+      )
+
+      {:cancel, :nil_workspace_multi_tenant}
+    else
+      run_rebuild_scoped(scope, types, args, ws)
+    end
+  end
+
+  defp run_rebuild_scoped(scope, types, args, ws) do
     list_opts =
       [perspective: :published, limit: 1000]
-      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+      |> maybe_put(:workspace_id, ws)
       |> maybe_put(:project_id, Map.get(args, "project_id"))
 
     project_opts =
       [dataset: scope]
-      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+      |> maybe_put(:workspace_id, ws)
       |> maybe_put(:project_id, Map.get(args, "project_id"))
+      |> maybe_put(:require_workspace, require_workspace?(ws))
 
     docs =
       types
@@ -254,10 +280,18 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   end
 
   defp do_upsert(scope, id, doc, args) do
+    # FAIL-CLOSED tenancy (FIX 3): prefer the enqueue's workspace_id, else the
+    # fetched doc's OWN workspace_id (the upsert path has the real doc in hand,
+    # so it can recover the scope the rebuild path cannot). When a multi-tenant
+    # install still resolves NO workspace, set `require_workspace: true` so the
+    # endpoint resolutions fail closed rather than crossing tenants.
+    ws = Map.get(args, "workspace_id") || doc_workspace_id(doc)
+
     project_opts =
       [dataset: scope]
-      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+      |> maybe_put(:workspace_id, ws)
       |> maybe_put(:project_id, Map.get(args, "project_id"))
+      |> maybe_put(:require_workspace, require_workspace?(ws))
 
     case projector_mod(args).upsert_record(doc, project_opts) do
       {:ok, %{added: added, removed: removed}} ->
@@ -288,10 +322,19 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     if not is_binary(id) or id == "" do
       {:cancel, :missing_id}
     else
+      ws = Map.get(args, "workspace_id")
+
+      # FAIL-CLOSED tenancy (FIX 3): the delete path resolves the doc's PK via
+      # Projector.doc_pk/2 before removing its edges. Forward the same
+      # `require_workspace` decision the rebuild/upsert paths use so a
+      # nil-workspace delete in a multi-tenant install resolves to NOTHING
+      # (Scope.scope_to_workspace/3 fail-closed) rather than resolving — and
+      # deleting the edges of — a colliding-slug doc in another tenant.
       project_opts =
         [dataset: scope]
-        |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+        |> maybe_put(:workspace_id, ws)
         |> maybe_put(:project_id, Map.get(args, "project_id"))
+        |> maybe_put(:require_workspace, require_workspace?(ws))
 
       case projector_mod(args).delete_record(%{"doc_id" => id, "dataset" => scope}, project_opts) do
         {:ok, count} ->
@@ -358,6 +401,21 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       _ -> Content
     end
   end
+
+  # FAIL-CLOSED decision (FIX 3). Returns `true` ONLY when the install is
+  # multi-tenant AND no workspace could be resolved — the exact case where a
+  # nil-workspace endpoint resolution would otherwise cross tenants. With a
+  # workspace in hand the within-workspace scope already isolates the read, so
+  # the strict flag is unnecessary (and `false` keeps the or-global back-compat
+  # untouched on single-tenant installs).
+  defp require_workspace?(nil), do: Tenancy.multi_tenant?()
+  defp require_workspace?(ws) when is_binary(ws), do: false
+
+  # The fetched doc's own workspace_id (struct atom key OR map string key), used
+  # by the upsert path to recover the scope when the enqueue args omitted it.
+  defp doc_workspace_id(%{workspace_id: ws}) when is_binary(ws), do: ws
+  defp doc_workspace_id(%{"workspace_id" => ws}) when is_binary(ws), do: ws
+  defp doc_workspace_id(_), do: nil
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

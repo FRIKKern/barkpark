@@ -753,6 +753,30 @@ defmodule BarkparkWeb.Router do
   # `scope "/v1" … plugin_routes(scope: :token_root)` wrapper above (C4-3b).
   # The flat `scope "/v1/tasks"` block was deleted — the plugin OWNS its routes.
 
+  # ── Content graph reads — CORE, not the Tasks plugin (fresh-install) ────
+  # Goal ges/graph-edge-seam. The content graph roots on ANY content doc (gap
+  # #4 — not task-specific), so its read surface is mounted from CORE here,
+  # NOT inside the disable-able Tasks plugin. Under the documented kill switch
+  # `config :barkpark, :plugins, []` the plugin's `register_routes/1` /
+  # `cli_commands/0` collapse to `[]`; mounting these in core keeps
+  # `/v1/graph/*` (and the matching `graph.*` core verbs) alive so the feature
+  # still works end-to-end with all plugins off (the '/v1/graph serves a
+  # non-empty graph' invariant). Same `[:api, :require_token]` pipeline the
+  # plugin's `:token_root` bucket used (authenticated bearer, NOT admin).
+  #
+  # Static routes (orphans/dangling) MUST mount BEFORE the dynamic `/graph/:id`
+  # or Phoenix matches the literals as `:id` (the documented static/dynamic
+  # disambiguation idiom, same as `/tasks/prime`). The `TasksController` keeps
+  # the `graph_orphans` / `graph_dangling` / `graph_show` actions — only the
+  # route DECLARATION moved from the plugin into core.
+  scope "/v1", BarkparkWeb do
+    pipe_through([:api, :require_token])
+
+    get("/graph/orphans", TasksController, :graph_orphans)
+    get("/graph/dangling", TasksController, :graph_dangling)
+    get("/graph/:id", TasksController, :graph_show)
+  end
+
   scope "/v1/data", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
