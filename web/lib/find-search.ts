@@ -10,6 +10,7 @@ import {
   type SearchEngine,
 } from "@/lib/find";
 import { bpAll } from "@/lib/bp-tags";
+import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -85,9 +86,19 @@ function searchHeaders(signals: UpstreamSignals): HeadersInit {
  * `cachedUpstream` so the Data Cache stores the parsed payload, not the HTTP
  * response (which the origin marks private/uncacheable). */
 async function rawUpstream(url: string, signals: UpstreamSignals = {}): Promise<UpstreamJson> {
-  const res = await fetch(url, { headers: searchHeaders(signals), cache: "no-store" });
-  if (!res.ok) throw new Error(`search ${res.status}: ${await res.text()}`);
-  return (await res.json()) as UpstreamJson;
+  // bpFetchJson layers the shared resilience (15s timeout, retry over the
+  // API-restart window, res.ok guard, defensive JSON parse) and bakes in auth;
+  // searchHeaders adds the per-search X-BP-SEARCH-* signals on top (caller
+  // headers win over the injected bearer). Re-wrap into a `search …` message so
+  // the route's error envelope keeps the same human-facing prefix.
+  try {
+    return (await bpFetchJson(url, { headers: searchHeaders(signals) })) as UpstreamJson;
+  } catch (e) {
+    if (e instanceof BpUpstreamError) {
+      throw new Error(`search ${e.status}: ${humanUpstreamMessage(e)}`);
+    }
+    throw e;
+  }
 }
 
 /** Cached variant — keyed on the full URL, 5-min revalidate, tagged for

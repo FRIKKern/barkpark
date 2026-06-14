@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { PopularQuery, SearchEngine } from "@/lib/find";
 import { emptyResponse, runSearch } from "@/lib/find-search";
+import { API_URL, bpFetchJson } from "@/lib/bp-fetch";
 
 // Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
@@ -8,30 +9,24 @@ import { emptyResponse, runSearch } from "@/lib/find-search";
 // search caching lives in `runSearch`'s `unstable_cache`, not a route directive.
 export const runtime = "nodejs";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const TOKEN = process.env.BARKPARK_READ_TOKEN;
 const DATASET = "production";
-
-function authHeaders(): HeadersInit {
-  return TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
-}
 
 /* ── suggestions (popular / no-hit past queries) ───────────────────────── */
 
 async function suggestions(): Promise<NextResponse> {
   try {
-    const res = await fetch(
+    // bpFetchJson bakes in auth + timeout and guards res.ok before parsing, so a
+    // 5xx HTML page during an API restart no longer throws a cryptic
+    // SyntaxError — it throws a structured error caught below.
+    const json = (await bpFetchJson(
       `${API_URL}/v1/data/search/${DATASET}/suggestions?q=&limit=8`,
-      { headers: authHeaders(), cache: "no-store" },
-    );
-    const json = (await res.json()) as {
-      result?: { popular?: PopularQuery[]; nohits?: PopularQuery[] };
-    };
+    )) as { result?: { popular?: PopularQuery[]; nohits?: PopularQuery[] } };
     return NextResponse.json({
       popular: json.result?.popular ?? [],
       nohits: json.result?.nohits ?? [],
     });
   } catch {
+    // Empty suggestions is a harmless degrade — keep the existing default.
     return NextResponse.json({ popular: [], nohits: [] });
   }
 }
