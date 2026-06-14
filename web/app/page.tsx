@@ -1,30 +1,26 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
-import { client } from "@/lib/barkpark-client";
-import { fetchPosts, type PostDocument } from "@/lib/posts";
-import { PostsList, PostsListSkeleton } from "@/components/posts-list";
+import { Finder } from "@/components/finder";
 
-// Live surface: render fresh each request so <BarkparkLive/>'s router.refresh()
-// reflects content changes immediately (ISR caching would lag up to revalidate).
-export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Barkpark — search the whole CMS",
+  description:
+    "A headless CMS demo: one content model behind a Go TUI, a Phoenix Studio, a JS SDK, and this Next.js app. Find any document across every type — Postgres precision or Indx fuzzy/typo-tolerant search.",
+};
 
-/** Async data boundary — streams the list in behind the skeleton fallback. */
-async function FlatPosts() {
-  let posts: PostDocument[] = [];
-  let error: string | null = null;
-
-  try {
-    posts = await fetchPosts(client);
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-  }
-
-  return <PostsList posts={posts} error={error} basePath="/posts" />;
-}
-
+/** The frontpage IS the finder — it showcases the CMS best: every document
+ * type, faceted, searchable two ways. `<Finder>` reads `useSearchParams`, so it
+ * needs a Suspense boundary. */
 export default function Home() {
   return (
-    <Suspense fallback={<PostsListSkeleton />}>
-      <FlatPosts />
+    <Suspense
+      fallback={
+        <main className="mx-auto w-full max-w-4xl px-6 py-12">
+          <div className="h-12 w-72 max-w-full animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" />
+        </main>
+      }
+    >
+      <Finder variant="home" />
     </Suspense>
   );
 }

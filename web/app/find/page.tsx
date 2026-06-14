@@ -1,24 +1,18 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
-import { Finder } from "@/components/finder";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Find anything · Barkpark",
-  description:
-    "Advanced finder across every Barkpark document type — Postgres precision or Indx fuzzy/typo-tolerant search, faceted by type.",
-};
-
-/** `<Finder>` reads `useSearchParams`, which requires a Suspense boundary. */
-export default function FindPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="mx-auto w-full max-w-4xl px-6 py-12">
-          <div className="h-9 w-48 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" />
-        </main>
-      }
-    >
-      <Finder />
-    </Suspense>
-  );
+/** The finder is now the frontpage. Keep `/find` as a permanent alias so old
+ * links (and bookmarked queries) still work — preserve the query string. */
+export default async function FindRedirect({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (typeof v === "string") qs.set(k, v);
+    else if (Array.isArray(v) && v[0]) qs.set(k, v[0]);
+  }
+  const s = qs.toString();
+  redirect(s ? `/?${s}` : "/");
 }
