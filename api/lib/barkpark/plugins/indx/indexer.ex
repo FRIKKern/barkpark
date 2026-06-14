@@ -744,10 +744,13 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   end
 
   defp default_weights(settings) do
+    # `_id` is intentionally NOT searchable: indexing it let short ids fuzzy-match
+    # unrelated docs (e.g. "cli" ≈ category id "c1"), adding noise. It still rides
+    # in every record (render_record) for hit→Postgres mapping; it's just not a
+    # searched field. Searchable = title (high) + body (medium).
     [
       {"title", settings.weight_high},
-      {"body", settings.weight_medium},
-      {"_id", settings.weight_low}
+      {"body", settings.weight_medium}
     ]
   end
 
