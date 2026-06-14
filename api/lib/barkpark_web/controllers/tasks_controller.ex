@@ -38,8 +38,9 @@ defmodule BarkparkWeb.TasksController do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.{Repo, Tasks}
+  alias Barkpark.{Content, Repo, Tasks}
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -471,6 +472,145 @@ defmodule BarkparkWeb.TasksController do
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
+  end
+
+  # ─── GET /v1/graph/:id ──────────────────────────────────────────────────
+  #
+  # Goal ges/graph-edge-seam Phase 4. BFS over `content_edges` from ANY content
+  # doc (gap #4 — mediaAsset, post, book; the blast-radius use case), NOT just
+  # tasks. We therefore resolve the root GENERICALLY (no `type == "task"`
+  # filter) — see resolve_graph_root/2 — and hand the resolved root's
+  # `documents.id` UUID to `Content.Graph.traverse/2`.
+  #
+  # Query params: depth (clamp 1..5, never 4xx), direction (out|in|both),
+  # kinds (csv), sources (csv plugin_source), perspective (published default;
+  # `drafts`/`?drafts=true` token-gated — already inside the :require_token
+  # tier — flips to a live extract over the drafts corpus, NOT the materialised
+  # published-only table).
+  def graph_show(conn, %{"id" => id} = params) do
+    case resolve_graph_root(id, conn) do
+      {:ok, %Document{} = root} ->
+        opts = graph_traverse_opts(root, params, conn)
+        result = Graph.traverse(root.id, opts)
+
+        json(conn, %{
+          ok: true,
+          # Published-coalesced so a draft-only root still reports its stable
+          # published id (the graph identity), never the `drafts.` twin.
+          root: Content.published_id(root.doc_id),
+          nodes: result.nodes,
+          edges: result.edges,
+          dependents: result.dependents,
+          truncated: result.truncated,
+          truncation_reason: result.truncation_reason
+        })
+
+      {:error, :not_found} ->
+        not_found(conn, "document not found")
+    end
+  end
+
+  # ─── GET /v1/graph/orphans ──────────────────────────────────────────────
+
+  def graph_orphans(conn, _params) do
+    opts = scope_opts(conn) |> Keyword.put(:dataset, request_dataset(conn))
+    json(conn, %{ok: true, orphans: Graph.orphans(opts)})
+  end
+
+  # ─── GET /v1/graph/dangling ─────────────────────────────────────────────
+
+  def graph_dangling(conn, _params) do
+    opts = scope_opts(conn) |> Keyword.put(:dataset, request_dataset(conn))
+    json(conn, %{ok: true, dangling: Graph.dangling(opts)})
+  end
+
+  # GRAPH ROOT RESOLUTION (gap #4 BOUND DECISION). Roots on ANY content doc, so
+  # we DELIBERATELY do NOT call find_task_by_doc_id/2 (which hard-filters
+  # d.type == "task" via fetch_task_exact/3 and returns not_found for every
+  # non-task root). Instead we replicate find_task_by_doc_id's tenancy
+  # discipline (workspace_id + project_id) AND reference_title/4's
+  # published-before-draft ordering, but WITHOUT the type filter. When a doc_id
+  # collides across types in one scope, the published-preferred first row wins
+  # (v1 graph roots on the published-preferred row — documented contract).
+  defp resolve_graph_root(id, conn) do
+    scope = scope_opts(conn)
+    workspace_id = Keyword.get(scope, :workspace_id)
+    project_id = Keyword.get(scope, :project_id)
+    dataset = conn.params["dataset"]
+
+    pub_id = Content.published_id(id)
+    draft = Content.draft_id(pub_id)
+
+    query =
+      from(d in Document,
+        where: d.doc_id == ^pub_id or d.doc_id == ^draft,
+        order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
+      )
+      |> maybe_filter_workspace(workspace_id)
+      |> maybe_filter_project(project_id)
+      |> maybe_filter_dataset(dataset)
+
+    case query |> Repo.all() |> List.first() do
+      %Document{} = doc -> {:ok, doc}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  # Dataset discriminator (gap #4 fix). Without it a doc_id that collides across
+  # DATASETS in one workspace/project resolves by drafts-CASE ordering alone —
+  # effectively arbitrary across datasets, rooting the graph on the wrong doc and
+  # silently dictating the traversal dataset via root.dataset. Mirrors add_edge's
+  # resolve_doc_pk dataset branch and Graph.resolve_pk. v1 graph roots are
+  # dataset-scoped to the optional `dataset` param (default: all datasets in
+  # scope, published-preferred first row).
+  defp maybe_filter_dataset(query, nil), do: query
+  defp maybe_filter_dataset(query, ""), do: query
+  defp maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
+
+  # Build the keyword opts for Content.Graph.traverse/2 from query params + the
+  # resolved root (for dataset/scope). perspective=drafts (alias ?drafts=true)
+  # is token-gated — this whole controller is already behind :require_token, so
+  # honouring the param here IS the gate.
+  defp graph_traverse_opts(%Document{} = root, params, conn) do
+    scope_opts(conn)
+    |> Keyword.put(:dataset, root.dataset)
+    # The drafts live-extract path works in published-slug space (extract_edges/2),
+    # so it roots on the slug, not the UUID. The published path ignores this key.
+    |> Keyword.put(:root_pub_id, Content.published_id(root.doc_id))
+    |> Keyword.put(:depth, parse_int(params["depth"], nil))
+    |> Keyword.put(:direction, parse_direction(params["direction"]))
+    |> Keyword.put(:kinds, csv_list(params["kinds"]))
+    |> Keyword.put(:sources, csv_list(params["sources"]))
+    |> Keyword.put(:perspective, parse_perspective(params))
+  end
+
+  defp parse_direction("out"), do: :out
+  defp parse_direction("in"), do: :in
+  defp parse_direction(_), do: :both
+
+  # perspective=drafts OR ?drafts=true → :drafts (token-gated, live extract).
+  # Anything else → :published (the materialised default).
+  defp parse_perspective(%{"perspective" => "drafts"}), do: :drafts
+  defp parse_perspective(%{"drafts" => v}) when v in ["true", "1", true], do: :drafts
+  defp parse_perspective(_), do: :published
+
+  # Comma-separated query value → list of non-empty strings, or nil when absent.
+  defp csv_list(nil), do: nil
+
+  defp csv_list(v) when is_binary(v) do
+    case v |> String.split(",", trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> nil
+      list -> list
+    end
+  end
+
+  defp csv_list(_), do: nil
+
+  # The dataset string a graph read scopes to. The graph endpoints have no
+  # :doc_id segment to derive a dataset from, so we read the optional `dataset`
+  # query param (defaulting to "production", the canonical content dataset).
+  defp request_dataset(conn) do
+    conn.params["dataset"] || "production"
   end
 
   # ─── POST /v1/tasks/edges ───────────────────────────────────────────────

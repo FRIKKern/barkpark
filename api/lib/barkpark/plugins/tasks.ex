@@ -155,7 +155,18 @@ defmodule Barkpark.Plugins.Tasks do
        auth: :token_root},
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
-      {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root}
+      {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
+      # Goal ges/graph-edge-seam Phase 4 — content-graph reads. The two STATIC
+      # paths MUST mount BEFORE /graph/:id or Phoenix matches the literals
+      # ("orphans"/"dangling") as :id (the documented static/dynamic
+      # disambiguation idiom, same as /tasks/prime above). These routes are
+      # NET-NEW: register_routes/1 is read at MACRO EXPANSION via
+      # Registry.collect_routes/1, so a STALE router beam yields a 404 identical
+      # to a missing route — recompile the router (or `make rebuild` in prod)
+      # after touching this list.
+      {:get, "/graph/orphans", BarkparkWeb.TasksController, :graph_orphans, auth: :token_root},
+      {:get, "/graph/dangling", BarkparkWeb.TasksController, :graph_dangling, auth: :token_root},
+      {:get, "/graph/:id", BarkparkWeb.TasksController, :graph_show, auth: :token_root}
     ]
   end
 
@@ -373,6 +384,74 @@ defmodule Barkpark.Plugins.Tasks do
         paginated: false,
         dry_run: false,
         default_output: "minimal",
+        scoped_prefix: nil
+      },
+      # Goal ges/graph-edge-seam Phase 4 — content-graph read verbs over the
+      # /v1/graph/* routes register_routes/1 mounts above. All auth_tier "read"
+      # (the routes are :token_root, bearer-gated). scoped_prefix: nil — these
+      # are global content-graph reads, not scoped to a single doc prefix.
+      %{
+        id: "task.graph",
+        noun: "task",
+        verb: "graph",
+        summary: "Traverse the content graph from a root document (any type).",
+        http: %{method: "GET", path_template: "/v1/graph/:id"},
+        auth_tier: "read",
+        args: [
+          %{name: "id", required: true, type: "string", summary: "Root document id."}
+        ],
+        flags: [
+          %{name: "depth", type: "int", summary: "Traversal depth (clamped 1..5).", default: 2},
+          %{name: "direction", type: "string", summary: "out | in | both (default both)."},
+          %{name: "kinds", type: "string", summary: "Comma-separated edge kinds to keep."},
+          %{name: "sources", type: "string", summary: "Comma-separated plugin_source filters."},
+          %{
+            name: "perspective",
+            type: "string",
+            summary: "published (default) | drafts (live extract over the drafts corpus)."
+          }
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.graph-orphans",
+        noun: "task",
+        verb: "graph-orphans",
+        summary: "List documents with zero inbound and zero outbound edges.",
+        http: %{method: "GET", path_template: "/v1/graph/orphans"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{name: "dataset", type: "string", summary: "Dataset to scope to (default production)."}
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.graph-dangling",
+        noun: "task",
+        verb: "graph-dangling",
+        summary: "List broken references (targets unresolvable under the published lens).",
+        http: %{method: "GET", path_template: "/v1/graph/dangling"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{name: "dataset", type: "string", summary: "Dataset to scope to (default production)."}
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
         scoped_prefix: nil
       }
     ]
