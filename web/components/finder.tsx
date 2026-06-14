@@ -408,24 +408,33 @@ export function Finder({
     <main
       className={
         master
-          ? // Left master column: fills its parent column (which scrolls); no
-            // page-centering, no min-h-screen, tighter gutters than the page view.
-            "flex w-full flex-col gap-6 px-5 py-6"
+          ? // Left frontpage column (the ~1080px aside, which scrolls). Cap +
+            // centre the content at max-w-4xl so it keeps the original landing
+            // page's proportions inside the wide column — spacious, not sprawled.
+            "mx-auto flex w-full max-w-4xl flex-col gap-8 px-8 py-12"
           : "mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-8 px-6 py-12"
       }
     >
-      {master ? (
-        // Compact strip: wordmark eyebrow only — no hero h1/description. The
-        // facet rail + results are what matter in a narrow column.
-        <header className="flex flex-col gap-1 border-b border-zinc-200 pb-4 dark:border-zinc-800">
+      {variant === "page" ? (
+        <header className="flex flex-col gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
           <Link
             href="/"
-            className="text-xs font-medium uppercase tracking-widest text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+            className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
           >
-            Barkpark · Headless CMS
+            ← Barkpark
           </Link>
+          <h1 className="text-4xl font-semibold tracking-tight">Find anything</h1>
+          <p className="text-zinc-500 dark:text-zinc-400">
+            Search across every document type in the{" "}
+            <code className="rounded bg-zinc-200/70 px-1.5 py-0.5 font-mono text-[0.8em] dark:bg-zinc-800/70">
+              production
+            </code>{" "}
+            dataset — posts, papers, pages, authors, categories, projects.
+          </p>
         </header>
-      ) : variant === "home" ? (
+      ) : (
+        // Frontpage hero — shown for the home AND the master split, so the left
+        // column reads like the landing page it replaced.
         <header className="flex flex-col gap-4 border-b border-zinc-200 pb-8 dark:border-zinc-800">
           <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
             Barkpark · Headless CMS
@@ -460,23 +469,6 @@ export function Finder({
               Engine benchmark →
             </Link>
           </nav>
-        </header>
-      ) : (
-        <header className="flex flex-col gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
-          <Link
-            href="/"
-            className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
-          >
-            ← Barkpark
-          </Link>
-          <h1 className="text-4xl font-semibold tracking-tight">Find anything</h1>
-          <p className="text-zinc-500 dark:text-zinc-400">
-            Search across every document type in the{" "}
-            <code className="rounded bg-zinc-200/70 px-1.5 py-0.5 font-mono text-[0.8em] dark:bg-zinc-800/70">
-              production
-            </code>{" "}
-            dataset — posts, papers, pages, authors, categories, projects.
-          </p>
         </header>
       )}
 
@@ -524,14 +516,12 @@ export function Finder({
             ))}
           </div>
         </div>
-        {master ? null : (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              {activeEngine.label}:
-            </span>{" "}
-            {activeEngine.tagline}
-          </p>
-        )}
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            {activeEngine.label}:
+          </span>{" "}
+          {activeEngine.tagline}
+        </p>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-zinc-400">Cache</span>
           <button
@@ -571,19 +561,17 @@ export function Finder({
             </button>
           ) : null}
         </div>
-        {master ? null : (
-          <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
-            <span>
-              <code className="font-mono">&quot;exact phrase&quot;</code> phrase
-            </span>
-            <span>
-              <code className="font-mono">-word</code> exclude
-            </span>
-            <span>
-              <code className="font-mono">prefix*</code> starts-with
-            </span>
-          </p>
-        )}
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+          <span>
+            <code className="font-mono">&quot;exact phrase&quot;</code> phrase
+          </span>
+          <span>
+            <code className="font-mono">-word</code> exclude
+          </span>
+          <span>
+            <code className="font-mono">prefix*</code> starts-with
+          </span>
+        </p>
       </div>
 
       {/* banners */}
@@ -651,22 +639,11 @@ export function Finder({
         </div>
       ) : null}
 
-      <div
-        className={
-          master
-            ? // Narrow column: stack the facet rail above the results.
-              "flex flex-col gap-6"
-            : "grid gap-8 md:grid-cols-[12rem_1fr]"
-        }
-      >
+      {/* The ~720px column is wide enough for the original facet-rail-beside-
+          results layout, so master uses the same grid as the standalone page. */}
+      <div className="grid gap-8 md:grid-cols-[12rem_1fr]">
         {/* facets — Indx-computed dimensions (type/status/author/category) */}
-        <aside
-          className={
-            master
-              ? // Horizontal-flowing facet groups so the rail stays shallow.
-                "flex flex-row flex-wrap gap-x-6 gap-y-4"
-              : "flex flex-col gap-5"
-          }
+        <aside className="flex flex-col gap-5"
         >
           {facetCount > 0 ? (
             <button
