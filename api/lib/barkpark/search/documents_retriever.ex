@@ -35,6 +35,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
     base = if type, do: where(base, [d], d.type == ^type), else: base
+    # Optional type allowlist (the finder's content types) — applied to `base`
+    # so results, count, AND facets are all consistent over the same set.
+    types = Keyword.get(opts, :types)
+    base = if is_list(types) and types != [], do: where(base, [d], d.type in ^types), else: base
     base = perspective_filter(base, perspective)
 
     docs =

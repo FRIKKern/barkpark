@@ -10,6 +10,13 @@ import {
   type SearchEngine,
 } from "@/lib/find";
 
+// The finder is a CONTENT browser: scope every search to the known content
+// types via the API's `types` allowlist. The backend filters results, count,
+// AND facets to this set, so both engines are consistent (Indx indexes only
+// these; Postgres would otherwise also surface private config schemas —
+// siteSettings, navigation, colors, … — in browse + facet counts).
+const CONTENT_TYPES_CSV = DOC_TYPES.map((t) => t.type).join(",");
+
 // Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
 export const runtime = "nodejs";
@@ -73,6 +80,7 @@ async function search(
   const params = new URLSearchParams({
     q: browse ? " " : q,
     engine: engineUsed,
+    types: CONTENT_TYPES_CSV,
     perspective: "published",
     limit: String(MAX_HITS),
   });
@@ -113,54 +121,6 @@ async function search(
   };
 }
 
-/* ── browse (no q) ─────────────────────────────────────────────────────── */
-
-async function browse(requestedEngine: SearchEngine): Promise<FindResponse> {
-  const perType = Math.ceil(MAX_HITS / DOC_TYPES.length);
-  const settled = await Promise.all(
-    DOC_TYPES.map(async (t) => {
-      try {
-        const res = await fetch(
-          `${API_URL}/v1/data/query/${DATASET}/${t.type}?order=_updatedAt:desc&limit=${perType}`,
-          { headers: authHeaders(), cache: "no-store" },
-        );
-        if (!res.ok) return [];
-        const json = (await res.json()) as {
-          documents?: unknown[];
-          result?: { documents?: unknown[] };
-        };
-        return json.documents ?? json.result?.documents ?? [];
-      } catch {
-        return [];
-      }
-    }),
-  );
-
-  const hits = settled
-    .flat()
-    .map(normalizeHit)
-    .filter((h): h is FindHit => h !== null)
-    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
-    .slice(0, MAX_HITS);
-
-  return {
-    mode: "browse",
-    hits,
-    total: hits.length,
-    engine: requestedEngine,
-    engineUsed: "postgres",
-    // Postgres browse can't produce Indx facets; flag it when Indx was wanted
-    // but unreachable (no token) so the UI can explain the fallback.
-    indxUnavailable: requestedEngine === "indx" && !TOKEN,
-    parsedQuery: null,
-    recovery: null,
-    facets: null,
-    truncation: null,
-    ms: null,
-    error: null,
-  };
-}
-
 /* ── handler ───────────────────────────────────────────────────────────── */
 
 export async function GET(request: Request): Promise<NextResponse> {
@@ -173,16 +133,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     searchParams.get("engine") === "indx" ? "indx" : "postgres";
 
   try {
-    let payload: FindResponse;
-    if (q) {
-      payload = await search(q, engine);
-    } else if (engine === "indx" && TOKEN) {
-      // Indx browse-with-facets (the landing) — facets + coverage from Indx.
-      payload = await search(" ", "indx", true);
-    } else {
-      // Postgres browse (no facets), or Indx wanted but no token.
-      payload = await browse(engine);
-    }
+    // Browse (no query) is a single-space search: both engines treat it as
+    // "enumerate + facet" the dataset, so the landing gets facets either way.
+    const payload = q ? await search(q, engine) : await search(" ", engine, true);
     return NextResponse.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -22,6 +22,7 @@ defmodule BarkparkWeb.SearchController do
         opts =
           [
             type: params["type"],
+            types: parse_types(params["types"]),
             perspective: parse_perspective(params["perspective"]),
             limit: parse_int(params["limit"], 50),
             offset: parse_int(params["offset"], 0),
@@ -198,6 +199,19 @@ defmodule BarkparkWeb.SearchController do
   defp parse_perspective("drafts"), do: :drafts
   defp parse_perspective("raw"), do: :raw
   defp parse_perspective(_), do: :published
+
+  # Optional comma-separated allowlist restricting results + facets to a set of
+  # document types (the finder passes its content types). nil = no restriction.
+  defp parse_types(nil), do: nil
+
+  defp parse_types(csv) when is_binary(csv) do
+    case csv |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> nil
+      types -> types
+    end
+  end
+
+  defp parse_types(_), do: nil
 
   defp parse_int(nil, default), do: default
 

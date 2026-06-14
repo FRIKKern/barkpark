@@ -86,6 +86,7 @@ defmodule Barkpark.Search.QueryPipeline do
     retriever_opts =
       [
         type: type,
+        types: Keyword.get(opts, :types),
         perspective: perspective,
         limit: limit,
         offset: offset,
