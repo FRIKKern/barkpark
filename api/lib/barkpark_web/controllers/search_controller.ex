@@ -71,8 +71,12 @@ defmodule BarkparkWeb.SearchController do
     end
   end
 
-  # Default content types reindexed when the caller doesn't pass `types`.
-  @reindex_types ~w(post page author category project paper)
+  # Default content types reindexed when the caller doesn't pass `types`. Must
+  # list every indexable published type — a type missing here is silently absent
+  # from search until a caller remembers to pass it (sheet was, dropping the
+  # sheet doc from the index on a default reindex). TODO: derive this from the
+  # registered schemas so it can't drift when a new public type is added.
+  @reindex_types ~w(post page author category project paper sheet)
 
   @doc """
   Enqueue an Indx blue/green rebuild for the scope. Token-gated (router); any
