@@ -14,6 +14,13 @@ defmodule Barkpark.Content.Document do
     field :rev, :string
     field :search_vector, :any, virtual: true
 
+    # Carries a task doc's hydrated `task_edges` rows (resolved PK→doc_id) so
+    # the PURE `Barkpark.Plugins.Tasks.extract_edges/2` callback can project the
+    # authoritative dependency graph WITHOUT a DB call. Populated only by
+    # `Barkpark.Plugins.Tasks.hydrate_edges/1` in the EdgeProjector worker;
+    # never persisted. See that module's docstring for the purity rationale.
+    field :task_edges, :any, virtual: true
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 

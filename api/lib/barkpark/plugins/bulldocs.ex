@@ -218,4 +218,88 @@ defmodule Barkpark.Plugins.Bulldocs do
       }
     ]
   end
+
+  @doc """
+  Projects a paper document's internal references into the content graph
+  (Goal ges/graph-edge-seam Phase 3).
+
+  Implemented as the RESOLVER form directly (like Tasks) — the
+  `@resolver_callbacks` entry is `{nil, nil, nil, :none}`, so only the resolver
+  form is collected; the additive lift `prev ++ extract_edges(ctx.doc)` is
+  supplied here.
+
+  PURE — no `get_document`, no DB. Walks ONLY the doc payload's `content`,
+  collecting internal references:
+
+    * embed/sheet blocks carrying a `"ref"` (an internal doc id) → a
+      `references` edge.
+    * inline `PdLink` / `link` nodes whose `href` points at an internal
+      `/papers/<slug>` → a `references` edge to `<slug>`.
+
+  Emits `%{from_id: paper_pubid, to_id: linked_pubid, kind: "references",
+  plugin_source: "bulldocs"}`. The core Projector pass resolves dangling.
+  Guards a `nil` `ctx.doc` → returns `prev` unchanged.
+  """
+  @impl Barkpark.Plugin
+  def resolve_extract_edges(prev, ctx) do
+    case Map.get(ctx, :doc) do
+      nil -> prev
+      doc -> prev ++ extract_edges(doc, ctx)
+    end
+  end
+
+  @impl Barkpark.Plugin
+  def extract_edges(nil, _ctx), do: []
+
+  def extract_edges(doc, _ctx) do
+    doc_id = Map.get(doc, :doc_id) || Map.get(doc, "doc_id")
+    content = Map.get(doc, :content) || Map.get(doc, "content") || %{}
+
+    if is_binary(doc_id) do
+      from_id = Barkpark.Content.published_id(doc_id)
+
+      content
+      |> collect_refs([])
+      |> Enum.uniq()
+      |> Enum.reject(fn ref -> ref == "" or ref == from_id end)
+      |> Enum.map(fn ref ->
+        %{
+          from_id: from_id,
+          to_id: ref,
+          kind: "references",
+          plugin_source: "bulldocs"
+        }
+      end)
+    else
+      []
+    end
+  end
+
+  # Recursively walk the paper content, harvesting internal-reference targets.
+  # Pure tree walk — no DB. Two signals:
+  #   * a map with a "ref" string (embed/sheet block) → the ref doc id.
+  #   * a map with an "href" string pointing at an internal "/papers/<slug>" →
+  #     the <slug>. External (http...) and anchor (#...) hrefs are skipped.
+  defp collect_refs(node, acc) when is_map(node) and not is_struct(node) do
+    acc = ref_target(Map.get(node, "ref"), acc)
+    acc = href_target(Map.get(node, "href"), acc)
+
+    Enum.reduce(node, acc, fn {_k, v}, a -> collect_refs(v, a) end)
+  end
+
+  defp collect_refs(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_refs/2)
+
+  defp collect_refs(_other, acc), do: acc
+
+  defp ref_target(ref, acc) when is_binary(ref) and ref != "",
+    do: [Barkpark.Content.published_id(ref) | acc]
+
+  defp ref_target(_ref, acc), do: acc
+
+  defp href_target("/papers/" <> slug, acc) when slug != "" do
+    [slug |> String.split(["?", "#"]) |> List.first() | acc]
+  end
+
+  defp href_target(_href, acc), do: acc
 end

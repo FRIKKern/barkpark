@@ -31,6 +31,15 @@ config :phoenix,
   sort_verified_routes_query_params: true
 
 # Drive Oban manually in tests so we can drain queues from assertions.
+#
+# This block sets ONLY `testing: :manual` — it does NOT override `:queues`, so
+# the queue list from `config/config.exs` (which now includes `edge_projector: 2`
+# alongside `indx: 2`) is INHERITED here verbatim. Config import order is
+# config.exs then test.exs, and Oban merges on the keys each file sets, so the
+# `:edge_projector` queue flows into the test env. The EdgeProjector tests still
+# drive the worker via `Oban.Testing.with_testing_mode(:inline, fn -> ... end)`
+# or `perform_job/2` — `testing: :manual` means enqueued jobs do NOT auto-run.
+# If a future edit adds a `:queues` key here, `edge_projector` MUST be added too.
 config :barkpark, Oban, testing: :manual
 
 # Search analytics inserts run synchronously in tests (no Task race).

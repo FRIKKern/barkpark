@@ -100,6 +100,15 @@ defmodule Barkpark.Plugins.Registry do
     resolve_top_menu_entries: {:top_menu_entries, 0, [], :list_concat},
     resolve_desk_items: {:desk_items, 1, [], :list_concat},
     resolve_doc_actions: {nil, nil, nil, :none},
+    # {nil, nil, nil, :none} — the resolve_doc_actions precedent: NO additive
+    # lift. The `__using__` default `resolve_extract_edges/2` provides the lift
+    # `prev ++ extract_edges(ctx.doc, ctx)` itself, so the registry threads ONLY
+    # the resolver form. The nil additive makes `apply_resolver/8`'s additive
+    # branch (guarded `is_atom(additive) and not is_nil(additive)`) and
+    # `warn_duplicate_forms/0` (same guard) both skip this entry — so
+    # `resolver_is_default_lift?/4` (whose Map.fetch! case has clauses ONLY for
+    # :map_merge/[] defaults) is NEVER reached for it.
+    resolve_extract_edges: {nil, nil, nil, :none},
     resolve_api_tests: {:api_tests, 0, [], :list_concat},
     resolve_cli_commands: {:cli_commands, 0, [], :list_concat}
   }
@@ -374,6 +383,29 @@ defmodule Barkpark.Plugins.Registry do
     baseline = Keyword.get(opts, :baseline, [])
     ctx = Keyword.get(opts, :ctx, %{})
     reduce_resolvers(:resolve_doc_actions, baseline, ctx)
+  end
+
+  @doc """
+  Drives the `resolve_extract_edges/2` chain — the content-graph edge
+  collector. The core `Barkpark.EdgeProjector.Projector` seeds `:baseline` with
+  the document's CORE reference-field edges (`Content.extract_edges/2`) and
+  passes `ctx = %{doc: doc, dataset: dataset}`; each plugin's
+  `resolve_extract_edges/2` UNIONS its projected edges via the `prev ++
+  extract_edges(ctx.doc, ctx)` default lift.
+
+  With plugins `[]` this returns the baseline unchanged — the fresh-install
+  invariant holds automatically (the non-empty fresh-install graph comes from
+  the direct core enqueue in `Content.fire_after/3`, NOT this collector).
+
+  NOT cached: this is per-document and ctx-dependent, so `refresh_snapshot/1`
+  deliberately excludes it — exactly like `collect_doc_actions/1`, which is
+  also uncached for the same per-document reason.
+  """
+  @spec collect_edge_extractors(keyword()) :: [Barkpark.Plugin.edge()]
+  def collect_edge_extractors(opts \\ []) do
+    baseline = Keyword.get(opts, :baseline, [])
+    ctx = Keyword.get(opts, :ctx, %{})
+    reduce_resolvers(:resolve_extract_edges, baseline, ctx)
   end
 
   @doc """

@@ -87,7 +87,21 @@ config :barkpark, Oban,
   # be declared statically here. Without it, every reindex job sits `available`
   # forever and the Indx index silently goes stale (engine=indx → empty →
   # Postgres recovery). Low concurrency: rebuilds are debounced + scope-unique.
-  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1, tasks_compact: 1, indx: 2],
+  # `edge_projector` drives Barkpark.EdgeProjector.ProjectorWorker (content-graph
+  # edge projection into the durable `content_edges` table). Like `indx` it is a
+  # core subsystem, not a registered plugin, so its queue MUST be declared
+  # statically here — without it every projection job sits `available` forever
+  # and the graph silently goes stale. Own named queue (concurrency 2) so it
+  # never competes with `:indx`.
+  queues: [
+    default: 10,
+    bokbasen: 4,
+    plugins: 6,
+    tasks_ttl: 1,
+    tasks_compact: 1,
+    indx: 2,
+    edge_projector: 2
+  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,

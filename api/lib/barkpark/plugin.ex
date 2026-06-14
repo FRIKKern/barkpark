@@ -263,6 +263,22 @@ defmodule Barkpark.Plugin do
         }
 
   @typedoc """
+  A single RAW (unresolved) content-graph edge a plugin projects from a
+  document. `from_id`/`to_id` are scope-relative slug `doc_id`s (the core
+  Projector pass coalesces them to published twins and resolves dangling).
+
+  `extract_edges/2` is PURE — no DB, no `get_document`. It returns these raw
+  edges; the core `Barkpark.EdgeProjector.Projector` pass resolves targets and
+  drops the unstorable (dangling) ones. A plugin that resolves targets itself
+  double-counts DB round-trips and runs at unexpected times — don't.
+  """
+  @type edge :: %{
+          from_id: String.t(),
+          to_id: String.t(),
+          kind: String.t()
+        }
+
+  @typedoc """
   A registered checker — pair of `{name, module}` where `module`
   implements `Barkpark.Plugins.Checker`.
   """
@@ -688,6 +704,40 @@ defmodule Barkpark.Plugin do
               }
             ) :: [doc_action()]
 
+  # ── Content-graph edge extraction (Goal ges/graph-edge-seam) ─────────
+
+  @doc """
+  Project the RAW (unresolved) content-graph edges a document contributes.
+
+  Called by the core `Barkpark.EdgeProjector.Projector` pass via
+  `Barkpark.Plugins.Registry.collect_edge_extractors/1`. MUST be PURE — no DB,
+  no `get_document`. Return the raw edges off the document payload ONLY;
+  dangling resolution belongs to the core Projector pass, never here.
+
+  Default implementation (supplied by `use Barkpark.Plugin`) returns `[]` —
+  it ignores its first arg, so a `nil` doc is safe in the default.
+  """
+  @callback extract_edges(doc :: map(), ctx :: map()) :: [edge()]
+
+  @doc """
+  Resolve the content-graph edge list for one document.
+
+  No additive predecessor in the registry metadata — the `@resolver_callbacks`
+  entry is `{nil, nil, nil, :none}` (the `resolve_doc_actions` precedent), so
+  plugins implement `resolve_extract_edges/2` DIRECTLY. The default
+  implementation supplied by `use Barkpark.Plugin` provides the additive lift
+  `prev ++ extract_edges(ctx.doc, ctx)` via a `function_exported?` guard.
+
+  A plugin override MUST guard a `nil` `ctx.doc` and return `prev` unchanged —
+  unlike `resolve_doc_actions`, this seam reads `ctx.doc`, and the
+  `{nil, nil, nil, :none}` entry skips the registration-time fingerprint, so a
+  nil-doc crash surfaces only at collection time. Guard it.
+  """
+  @callback resolve_extract_edges(
+              prev :: [edge()],
+              ctx :: %{optional(:doc) => map()}
+            ) :: [edge()]
+
   @doc """
   Resolve the list of API test specs the runner can fire on demand.
 
@@ -850,6 +900,8 @@ defmodule Barkpark.Plugin do
                       resolve_top_menu_entries: 2,
                       resolve_desk_items: 2,
                       resolve_doc_actions: 2,
+                      extract_edges: 2,
+                      resolve_extract_edges: 2,
                       lifecycle_hooks: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
@@ -999,6 +1051,25 @@ defmodule Barkpark.Plugin do
       @impl Barkpark.Plugin
       def resolve_doc_actions(prev, _ctx), do: prev
 
+      # No-op edge extraction by default. `extract_edges/2` ignores its first
+      # arg so a nil doc is safe; the default `resolve_extract_edges/2` lifts
+      # the additive `extract_edges/2` form (when the plugin exports an
+      # override) onto `prev` — `prev ++ extract_edges(ctx.doc, ctx)`. With no
+      # override the lift adds the default's `[]`, so `prev` is returned
+      # unchanged. PURE — no DB.
+      @impl Barkpark.Plugin
+      def extract_edges(_doc, _ctx), do: []
+
+      @impl Barkpark.Plugin
+      def resolve_extract_edges(prev, ctx) do
+        if function_exported?(__MODULE__, :extract_edges, 2) do
+          result = __MODULE__.extract_edges(Map.get(ctx, :doc), ctx)
+          if is_list(result), do: prev ++ result, else: prev
+        else
+          prev
+        end
+      end
+
       @impl Barkpark.Plugin
       def lifecycle_hooks, do: %{}
 
@@ -1062,6 +1133,8 @@ defmodule Barkpark.Plugin do
                      resolve_top_menu_entries: 2,
                      resolve_desk_items: 2,
                      resolve_doc_actions: 2,
+                     extract_edges: 2,
+                     resolve_extract_edges: 2,
                      lifecycle_hooks: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,

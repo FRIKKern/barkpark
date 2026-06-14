@@ -377,4 +377,190 @@ defmodule Barkpark.Plugins.Tasks do
       }
     ]
   end
+
+  @doc """
+  Projects a task document's dependency + hierarchy edges into the content
+  graph (Goal ges/graph-edge-seam Phase 3).
+
+  Implemented as the RESOLVER form directly (not the bare additive
+  `extract_edges/2`) — the `@resolver_callbacks` entry for
+  `resolve_extract_edges` is `{nil, nil, nil, :none}`, so the registry collects
+  ONLY the resolver form. This mirrors how plugins implement
+  `resolve_doc_actions/2`. The default lift is supplied here explicitly:
+  `prev ++ extract_edges(ctx.doc)`.
+
+  PURE — no `get_document`, no `task_edges` query, no DB. It reads ONLY the doc
+  payload:
+
+    * `doc.task_edges` — the doc's HYDRATED `task_edges` rows. The authoritative
+      dependency store is the `task_edges` table, NOT `content.dependencies`
+      (which `Barkpark.Tasks.schema_definitions/1` documents as a DEAD KEY the
+      engine never writes/reads). Because this callback must be pure, it cannot
+      query `task_edges` itself — the EdgeProjector worker hydrates the rows onto
+      the payload via `Tasks.hydrate_edges/1` BEFORE projection (see
+      `Barkpark.EdgeProjector.ProjectorWorker`). Each hydrated row carries its
+      real `:kind` (`"blocks"` | `"discovered-from"`) which is mapped STRAIGHT
+      THROUGH — never hardcoded `"blocks"`. Both kinds are whitelisted in
+      `Barkpark.Content.Edge`, so they pass changeset validation.
+    * `content.parent_id` — the hierarchy parent → one `parent` edge
+      (`from_id` = child, `to_id` = parent).
+
+  When `doc.task_edges` is absent (an un-hydrated payload — e.g. a task saved
+  outside the projector worker, or a non-task doc), NO dependency edge is
+  emitted: the dead `content.dependencies` key is NEVER read, so an un-hydrated
+  task simply contributes only its `parent` edge until the worker re-hydrates it
+  on the next rebuild. The core Projector pass resolves dangling targets; this
+  callback never does. Guards a `nil` `ctx.doc` (the `{nil, nil, nil, :none}`
+  entry skips the registration-time fingerprint, so a nil-doc crash would only
+  surface at collection time) → returns `prev` unchanged.
+  """
+  @impl Barkpark.Plugin
+  def resolve_extract_edges(prev, ctx) do
+    case Map.get(ctx, :doc) do
+      nil -> prev
+      doc -> prev ++ extract_edges(doc, ctx)
+    end
+  end
+
+  @impl Barkpark.Plugin
+  def extract_edges(nil, _ctx), do: []
+
+  def extract_edges(doc, _ctx) do
+    doc_id = Map.get(doc, :doc_id) || Map.get(doc, "doc_id")
+    content = Map.get(doc, :content) || Map.get(doc, "content") || %{}
+
+    if is_binary(doc_id) do
+      from_id = Barkpark.Content.published_id(doc_id)
+
+      dep_edges = dep_edges_from_task_edges(doc, from_id)
+      parent_edges = parent_edge(content, from_id)
+
+      dep_edges ++ parent_edges
+    else
+      []
+    end
+  end
+
+  # Read the HYDRATED `task_edges` rows off the payload. The worker attaches
+  # them as `doc.task_edges` — a list of `%{to_id: <doc_id>, kind: <kind>}` maps
+  # (PKs already resolved back to doc_ids by `hydrate_edges/1`). Each row's real
+  # `kind` is carried straight through (NEVER hardcoded "blocks"), so both
+  # `blocks` AND `discovered-from` edges surface. An un-hydrated payload (no
+  # `:task_edges` key) yields []. NEVER reads `content.dependencies` (DEAD KEY).
+  defp dep_edges_from_task_edges(doc, from_id) do
+    doc
+    |> hydrated_task_edges()
+    |> Enum.flat_map(fn row ->
+      to = Map.get(row, :to_id) || Map.get(row, "to_id")
+      kind = Map.get(row, :kind) || Map.get(row, "kind")
+
+      if is_binary(to) and to != "" and is_binary(kind) and kind != "" do
+        [
+          %{
+            from_id: from_id,
+            to_id: Barkpark.Content.published_id(to),
+            kind: kind,
+            plugin_source: "tasks"
+          }
+        ]
+      else
+        []
+      end
+    end)
+  end
+
+  defp hydrated_task_edges(doc) do
+    case Map.get(doc, :task_edges) || Map.get(doc, "task_edges") do
+      rows when is_list(rows) -> rows
+      _ -> []
+    end
+  end
+
+  defp parent_edge(content, from_id) do
+    case Map.get(content, "parent_id") do
+      parent when is_binary(parent) and parent != "" ->
+        [
+          %{
+            from_id: from_id,
+            to_id: Barkpark.Content.published_id(parent),
+            kind: "parent",
+            plugin_source: "tasks"
+          }
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  @doc """
+  Hydrate a task document's payload with its authoritative `task_edges` rows so
+  the PURE `extract_edges/2` callback can project them WITHOUT a DB call.
+
+  This is the seam that resolves the purity-vs-correctness contradiction: the
+  real dependency data lives in the `task_edges` table (keyed on
+  `documents.id`), but `extract_edges/2` must be pure. The EdgeProjector worker
+  — which already touches the DB to list the corpus — calls this on each task
+  doc BEFORE handing it to the projector. It:
+
+    1. resolves the doc's PK (`documents.id`) — a `%Document{}` already carries
+       it as `:id`;
+    2. fetches the doc's OUTBOUND `task_edges` rows (`Tasks.edges(pk, direction:
+       :outbound, kind: :all)` — every kind, not just `:blocks`);
+    3. maps each row's `to_id` (a PK) back to its `doc_id` string, carrying the
+       row's `kind`;
+    4. attaches the result as `doc.task_edges` (`[%{to_id: doc_id, kind: kind}]`).
+
+  Only `type == "task"` docs are hydrated; any other doc (or a doc whose PK
+  cannot be resolved) is returned UNCHANGED. Returns the (possibly hydrated)
+  doc.
+  """
+  @spec hydrate_edges(map()) :: map()
+  def hydrate_edges(doc) when is_map(doc) do
+    if task_doc?(doc) do
+      case doc_pk(doc) do
+        pk when is_binary(pk) ->
+          rows =
+            pk
+            |> Barkpark.Tasks.edges(direction: :outbound, kind: :all)
+            |> Enum.flat_map(&edge_row_to_payload/1)
+
+          put_task_edges(doc, rows)
+
+        _ ->
+          doc
+      end
+    else
+      doc
+    end
+  end
+
+  def hydrate_edges(doc), do: doc
+
+  # Map a `task_edges` row (PK-keyed) to the payload shape the pure callback
+  # reads: `%{to_id: <doc_id>, kind: <kind>}`. Resolves the `to_id` PK back to
+  # its `doc_id` string; drops the row if the target row no longer exists.
+  defp edge_row_to_payload(%Barkpark.Tasks.Edge{to_id: to_pk, kind: kind}) do
+    case Barkpark.Repo.get(Barkpark.Content.Document, to_pk) do
+      %Barkpark.Content.Document{doc_id: to_doc_id} when is_binary(to_doc_id) ->
+        [%{to_id: to_doc_id, kind: kind}]
+
+      _ ->
+        []
+    end
+  end
+
+  defp edge_row_to_payload(_), do: []
+
+  defp task_doc?(doc) do
+    (Map.get(doc, :type) || Map.get(doc, "type") || Map.get(doc, "_type")) == "task"
+  end
+
+  defp doc_pk(%Barkpark.Content.Document{id: id}) when is_binary(id), do: id
+  defp doc_pk(doc), do: Map.get(doc, :id) || Map.get(doc, "id")
+
+  defp put_task_edges(%Barkpark.Content.Document{} = doc, rows),
+    do: Map.put(doc, :task_edges, rows)
+
+  defp put_task_edges(doc, rows) when is_map(doc), do: Map.put(doc, :task_edges, rows)
 end

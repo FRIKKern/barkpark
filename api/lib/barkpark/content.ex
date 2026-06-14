@@ -2461,6 +2461,25 @@ defmodule Barkpark.Content do
   defp fire_after({:ok, doc}, event, payload) do
     after_payload = %{payload | event: event, doc: doc}
     _ = Barkpark.Plugins.Hooks.fire(event, after_payload)
+
+    # CORE fresh-install wiring (Goal ges/graph-edge-seam Phase 3, gap #1).
+    # `Hooks.fire/2` dispatches ONLY to plugins' `lifecycle_hooks/0` — core is
+    # not a plugin, so on a plugins-[] install ZERO edge projection would fire
+    # and the content graph would be empty. This DIRECT enqueue fires the
+    # projector for CORE docs on every save/publish/unpublish/delete regardless
+    # of plugins — the load-bearing fresh-install hook. The Lifecycle module
+    # branches event→op (save/publish→rebuild|upsert, unpublish/delete→delete),
+    # so one call covers all four events.
+    #
+    # RECURSION GUARD: gated on `ctx.source != :worker`. The projector writes
+    # the `content_edges` table, not documents through `Content.*`, so it cannot
+    # re-fire this today. INVARIANT: if any FUTURE projector path EVER re-saves a
+    # doc, it MUST stamp `ctx.source == :worker` or this will re-enqueue
+    # indefinitely. A payload with no `:ctx` is treated as source nil → enqueue.
+    if get_in(after_payload, [:ctx, :source]) != :worker do
+      _ = Barkpark.EdgeProjector.Lifecycle.enqueue_rebuild(after_payload)
+    end
+
     {:ok, doc}
   end
 
