@@ -5,9 +5,10 @@ import { getPaper } from "@/lib/get-paper";
 import { paperBlocks, paperTitle, paperExcerpt } from "@/lib/papers";
 import { PortableDoc } from "@/components/portable-doc";
 
-// Live surface: render fresh each request so <BarkparkLive/>'s router.refresh()
-// reflects content changes immediately.
-export const dynamic = "force-dynamic";
+// ISR: the reader is cached (via getPaper's unstable_cache) and revalidated
+// every 5 min; on-demand for unknown slugs. revalidateTag("doc:paper") busts it
+// for a published change.
+export const revalidate = 300;
 
 type Params = Promise<{ slug: string }>;
 

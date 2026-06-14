@@ -311,6 +311,29 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
     }
   };
 
+  const [reindexMsg, setReindexMsg] = useState<string | null>(null);
+  const reindexNow = async () => {
+    setReindexMsg("queuing…");
+    try {
+      const r = await fetch("/api/admin/reindex", { method: "POST" });
+      const d = (await r.json()) as { ok?: boolean; error?: string };
+      if (d.ok) {
+        setReindexMsg("rebuilding ~30s…");
+        // The rebuild runs async on the API node; refetch once it should be live.
+        setTimeout(() => {
+          setBust((b) => b + 1);
+          setReindexMsg(null);
+        }, 32000);
+      } else {
+        setReindexMsg(d.error ?? "reindex failed");
+        setTimeout(() => setReindexMsg(null), 4000);
+      }
+    } catch (e) {
+      setReindexMsg((e as Error).message);
+      setTimeout(() => setReindexMsg(null), 4000);
+    }
+  };
+
   const activeEngine = ENGINES.find((e) => e.id === engine)!;
 
   return (
@@ -443,6 +466,16 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
               className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:hover:text-zinc-200"
             >
               {resetting ? "resetting…" : "reset cache"}
+            </button>
+          ) : null}
+          {engine === "indx" ? (
+            <button
+              onClick={reindexNow}
+              disabled={!!reindexMsg}
+              title="Trigger an Indx blue/green rebuild"
+              className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:hover:text-zinc-200"
+            >
+              {reindexMsg ?? "reindex"}
             </button>
           ) : null}
         </div>

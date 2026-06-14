@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { client, createClient } from "./barkpark-client";
 import { fetchPostBySlug, type PostDocument } from "./posts";
 
@@ -7,6 +8,18 @@ export interface PostResult {
   post: PostDocument | null;
   error: string | null;
 }
+
+// Data Cache layer (enables ISR on the reader): keyed on slug + scope strings,
+// 5-min revalidate, tagged for invalidation. Empty scope strings = flat client.
+const cachedPost = unstable_cache(
+  (slug: string, workspace: string, project: string) =>
+    fetchPostBySlug(
+      workspace && project ? createClient({ workspace, project }) : client,
+      slug,
+    ),
+  ["post-by-slug"],
+  { revalidate: 300, tags: ["doc", "doc:post"] },
+);
 
 /**
  * Request-deduped single-post fetch.
@@ -26,10 +39,11 @@ export const getPost = cache(
     workspace?: string,
     project?: string,
   ): Promise<PostResult> => {
-    const c =
-      workspace && project ? createClient({ workspace, project }) : client;
     try {
-      return { post: await fetchPostBySlug(c, slug), error: null };
+      return {
+        post: await cachedPost(slug, workspace ?? "", project ?? ""),
+        error: null,
+      };
     } catch (err) {
       return {
         post: null,
