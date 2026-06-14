@@ -125,7 +125,14 @@ export interface FindResponse {
   /** Indx coverage boundary: hits before `index` are coverage-confirmed
    * matches, after are softer pattern hits. Null for Postgres / no query. */
   truncation: { index: number } | null;
+  /** Engine-reported compute time (ms). */
   ms: number | null;
+  /** Whether the route handler served this through the Next Data Cache. */
+  cache: boolean;
+  /** Wall-clock the route handler spent on the upstream fetch (ms). A warm
+   * Data-Cache hit is ~0–2ms; a cold miss pays the Barkpark round-trip. The
+   * benchmark signal. */
+  upstreamMs: number | null;
   error: string | null;
 }
 

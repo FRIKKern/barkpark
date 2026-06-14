@@ -19,8 +19,12 @@ const CONTENT_TYPES_CSV = DOC_TYPES.map((t) => t.type).join(",");
 
 // Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
+// NOT force-dynamic: the handler is dynamic anyway (reads searchParams), but
+// dropping the directive lets the per-fetch Data Cache engage in cache mode.
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+
+/** Cache tag for the find Data Cache — `revalidateTag(FIND_TAG)` busts it. */
+export const FIND_TAG = "find";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const TOKEN = process.env.BARKPARK_READ_TOKEN;
@@ -35,6 +39,14 @@ const MAX_HITS = 100;
 
 function authHeaders(): HeadersInit {
   return TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+}
+
+/** Per-fetch options: cache mode → Next Data Cache (tagged, 5-min revalidate);
+ * else always-fresh `no-store`. */
+function fetchOpts(cacheOn: boolean): RequestInit {
+  return cacheOn
+    ? { headers: authHeaders(), next: { revalidate: 300, tags: [FIND_TAG] } }
+    : { headers: authHeaders(), cache: "no-store" };
 }
 
 function emptyParsed(): ParsedQuery {
@@ -67,6 +79,7 @@ async function search(
   q: string,
   engine: SearchEngine,
   browse = false,
+  cacheOn = false,
 ): Promise<FindResponse> {
   const wantIndx = engine === "indx";
   // Indx only activates on the token-scoped route; without a token we cannot
@@ -85,10 +98,12 @@ async function search(
     limit: String(MAX_HITS),
   });
 
+  const t0 = performance.now();
   const res = await fetch(
     `${base}/v1/data/search/${DATASET}?${params.toString()}`,
-    { headers: authHeaders(), cache: "no-store" },
+    fetchOpts(cacheOn),
   );
+  const upstreamMs = Math.round(performance.now() - t0);
   if (!res.ok) {
     throw new Error(`search ${res.status}: ${await res.text()}`);
   }
@@ -117,6 +132,8 @@ async function search(
     facets: json.facets ?? null,
     truncation: json.truncation ?? null,
     ms: typeof json.ms === "number" ? json.ms : null,
+    cache: cacheOn,
+    upstreamMs,
     error: null,
   };
 }
@@ -131,11 +148,14 @@ export async function GET(request: Request): Promise<NextResponse> {
   const q = (searchParams.get("q") ?? "").trim();
   const engine: SearchEngine =
     searchParams.get("engine") === "indx" ? "indx" : "postgres";
+  const cacheOn = searchParams.get("cache") === "on";
 
   try {
     // Browse (no query) is a single-space search: both engines treat it as
     // "enumerate + facet" the dataset, so the landing gets facets either way.
-    const payload = q ? await search(q, engine) : await search(" ", engine, true);
+    const payload = q
+      ? await search(q, engine, false, cacheOn)
+      : await search(" ", engine, true, cacheOn);
     return NextResponse.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -151,6 +171,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       facets: null,
       truncation: null,
       ms: null,
+      cache: cacheOn,
+      upstreamMs: null,
       error: message,
     };
     return NextResponse.json(fallback, { status: 200 });
