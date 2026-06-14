@@ -81,7 +81,13 @@ config :barkpark, :search_retrievers, %{"indx" => Barkpark.Plugins.Indx.Retrieve
 # `task_lease_sweep_interval_seconds`).
 config :barkpark, Oban,
   repo: Barkpark.Repo,
-  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1, tasks_compact: 1],
+  # `indx` drives Barkpark.Plugins.Indx.IndexerWorker (blue/green corpus
+  # rebuild + per-doc upsert/delete). Indx is a retriever-SEAM, not a registered
+  # plugin, so it contributes nothing via the plugin oban-merge — its queue MUST
+  # be declared statically here. Without it, every reindex job sits `available`
+  # forever and the Indx index silently goes stale (engine=indx → empty →
+  # Postgres recovery). Low concurrency: rebuilds are debounced + scope-unique.
+  queues: [default: 10, bokbasen: 4, plugins: 6, tasks_ttl: 1, tasks_compact: 1, indx: 2],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
