@@ -23,7 +23,11 @@ function shortDate(value: string | null): string | null {
   if (!value) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
+  // timeZone:"UTC" makes the formatted text identical on server and client —
+  // without it the server (UTC) and the browser (local TZ) can render different
+  // days near a date boundary, which is a React #418 hydration mismatch.
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
     year: "numeric",
     month: "short",
     day: "numeric",

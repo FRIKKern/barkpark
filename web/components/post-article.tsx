@@ -31,7 +31,9 @@ function resolveDate(
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) continue;
     return {
+      // timeZone:"UTC" → deterministic server/client text (no React #418).
       label: new Intl.DateTimeFormat("en-US", {
+        timeZone: "UTC",
         year: "numeric",
         month: "long",
         day: "numeric",

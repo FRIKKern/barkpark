@@ -16,7 +16,9 @@ function shortDate(value?: string): string | null {
   if (!value) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
+  // timeZone:"UTC" → deterministic server/client text (no React #418).
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
     year: "numeric",
     month: "short",
     day: "numeric",

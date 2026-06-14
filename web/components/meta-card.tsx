@@ -30,7 +30,10 @@ function formatDate(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
+  // timeZone:"UTC" → identical server/client text (avoids a React #418
+  // hydration mismatch when the server is UTC and the browser is not).
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
     year: "numeric",
     month: "long",
     day: "numeric",
