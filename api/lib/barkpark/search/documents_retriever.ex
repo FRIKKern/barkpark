@@ -70,10 +70,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp group_content(base, key) do
+    # `selected_as` so GROUP BY references the SELECT alias — a parameterized
+    # `content->>$1` in both clauses reads as two different params to Postgres
+    # ("must appear in GROUP BY"); grouping by the alias avoids that.
     base
     |> exclude(:order_by)
-    |> group_by([d], fragment("?->>?", d.content, ^key))
-    |> select([d], {fragment("?->>?", d.content, ^key), count(d.id)})
+    |> select([d], {selected_as(fragment("?->>?", d.content, ^key), :facet_val), count(d.id)})
+    |> group_by([d], selected_as(:facet_val))
     |> Repo.all()
   end
 
