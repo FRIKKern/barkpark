@@ -18,6 +18,7 @@ defmodule Barkpark.Search.QueryPipeline do
           parsed: map(),
           highlights: map(),
           recovery: String.t() | nil,
+          corrected_to: String.t() | nil,
           ms: non_neg_integer()
         }
 
@@ -27,7 +28,7 @@ defmodule Barkpark.Search.QueryPipeline do
     config = SurfaceConfigs.get(surface, scope)
     raw_query = Map.get(context, :query, "") || ""
     parsed = QueryParser.parse(raw_query)
-    parsed = expand_synonyms(surface, scope, parsed)
+    {parsed, corrected_to} = expand_synonyms(surface, scope, parsed)
 
     {hits, total, recovery, engine_meta} =
       case surface do
@@ -52,6 +53,9 @@ defmodule Barkpark.Search.QueryPipeline do
        parsed: QueryParser.to_map(parsed),
        highlights: highlights,
        recovery: recovery,
+       # The canonical corrected term when a LEARNED/synonym correction fired
+       # for a query term (nil otherwise). The UI shows "Showing results for …".
+       corrected_to: corrected_to,
        # Indx-only engine diagnostics (absent for Postgres): dataset-wide facet
        # buckets and the coverage truncation boundary.
        facets: Map.get(engine_meta, :facets),
@@ -64,7 +68,7 @@ defmodule Barkpark.Search.QueryPipeline do
     positive = Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, [])
 
     if positive == [] do
-      parsed
+      {parsed, nil}
     else
       extra =
         positive
@@ -72,7 +76,14 @@ defmodule Barkpark.Search.QueryPipeline do
         |> Enum.reject(&(&1 in positive or &1 == ""))
         |> Enum.uniq()
 
-      %{parsed | terms: parsed.terms ++ extra}
+      # The corrected term is the canonical to_query of the FIRST positive term
+      # for which an enabled synonym fired — null when nothing matched.
+      corrected_to =
+        Enum.find_value(positive, fn term ->
+          Synonyms.correction_for(surface, scope, term)
+        end)
+
+      {%{parsed | terms: parsed.terms ++ extra}, corrected_to}
     end
   end
 

@@ -47,13 +47,16 @@ export async function GET(request: Request): Promise<NextResponse> {
   const engine: SearchEngine =
     searchParams.get("engine") === "indx" ? "indx" : "postgres";
   const cacheOn = searchParams.get("cache") === "on";
+  // Browser session id (localStorage `bp-search-client`) — forwarded upstream as
+  // X-BP-SEARCH-CLIENT so the recorded query event is attributed to a session.
+  const sid = searchParams.get("sid");
 
   try {
     // Browse (no query) is a single-space search: both engines treat it as
     // "enumerate + facet" the dataset, so the landing gets facets either way.
     const payload = q
-      ? await runSearch({ q, engine, browse: false, cacheOn })
-      : await runSearch({ q: " ", engine, browse: true, cacheOn });
+      ? await runSearch({ q, engine, browse: false, cacheOn, sessionId: sid })
+      : await runSearch({ q: " ", engine, browse: true, cacheOn, sessionId: sid });
     return NextResponse.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

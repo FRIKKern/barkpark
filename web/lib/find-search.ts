@@ -57,13 +57,35 @@ interface UpstreamJson {
   facets?: FacetMap | null;
   truncation?: { index: number } | null;
   ms?: number;
+  /** Opaque id for the query event the API logged — threaded back on a result
+   * click so the interaction endpoint can attribute the click to the search. */
+  searchEventId?: string;
+  /** Canonical corrected term when a LEARNED/synonym correction fired for the
+   * query (expand_synonyms matched a synonym). Null when no correction. */
+  correctedTo?: string | null;
+}
+
+/** Per-search signals the route handler threads to the upstream so a search can
+ * be recorded against the browser's distinct session. `sessionId` becomes the
+ * `X-BP-SEARCH-CLIENT` header; presence of either flag flips on the record
+ * header so the API logs the query event (returning its `searchEventId`). */
+interface UpstreamSignals {
+  sessionId?: string | null;
+  record?: boolean;
+}
+
+function searchHeaders(signals: UpstreamSignals): HeadersInit {
+  const h: Record<string, string> = { ...(authHeaders() as Record<string, string>) };
+  if (signals.sessionId) h["X-BP-SEARCH-CLIENT"] = signals.sessionId;
+  if (signals.record) h["X-BP-SEARCH-RECORD"] = "1";
+  return h;
 }
 
 /** Raw upstream call — always no-store; caching is layered above by
  * `cachedUpstream` so the Data Cache stores the parsed payload, not the HTTP
  * response (which the origin marks private/uncacheable). */
-async function rawUpstream(url: string): Promise<UpstreamJson> {
-  const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+async function rawUpstream(url: string, signals: UpstreamSignals = {}): Promise<UpstreamJson> {
+  const res = await fetch(url, { headers: searchHeaders(signals), cache: "no-store" });
   if (!res.ok) throw new Error(`search ${res.status}: ${await res.text()}`);
   return (await res.json()) as UpstreamJson;
 }
@@ -82,6 +104,10 @@ export interface RunSearchArgs {
   engine: SearchEngine;
   browse?: boolean;
   cacheOn?: boolean;
+  /** Browser session id (localStorage `bp-search-client`) — forwarded as
+   * `X-BP-SEARCH-CLIENT` so the recorded query event is attributed to a
+   * distinct session (the anti-gaming key for correction auto-promotion). */
+  sessionId?: string | null;
 }
 
 /**
@@ -95,6 +121,7 @@ export async function runSearch({
   engine,
   browse = false,
   cacheOn = false,
+  sessionId = null,
 }: RunSearchArgs): Promise<FindResponse> {
   const wantIndx = engine === "indx";
   // Indx only activates on the token-scoped route; without a token, fall back
@@ -114,8 +141,17 @@ export async function runSearch({
   });
   const url = `${base}/v1/data/search/${DATASET}?${params.toString()}`;
 
+  // Record a real (non-browse) query event when we have a session to attribute
+  // it to. Recording must bypass the Data Cache — a cached hit would skip the
+  // origin and never log the event — so a recorded search always goes raw.
+  const record = Boolean(sessionId) && !browse && Boolean(q);
+  const signals: UpstreamSignals = { sessionId, record };
+
   const t0 = performance.now();
-  const json = cacheOn ? await cachedUpstream(url) : await rawUpstream(url);
+  const json =
+    cacheOn && !record
+      ? await cachedUpstream(url)
+      : await rawUpstream(url, signals);
   const upstreamMs = Math.round(performance.now() - t0);
 
   const hits = (json.documents ?? [])
@@ -134,8 +170,10 @@ export async function runSearch({
     facets: json.facets ?? null,
     truncation: json.truncation ?? null,
     ms: typeof json.ms === "number" ? json.ms : null,
-    cache: cacheOn,
+    cache: cacheOn && !record,
     upstreamMs,
+    searchEventId: typeof json.searchEventId === "string" ? json.searchEventId : null,
+    correctedTo: typeof json.correctedTo === "string" ? json.correctedTo : null,
     error: null,
   };
 }
@@ -161,6 +199,8 @@ export function emptyResponse(
     ms: null,
     cache: cacheOn,
     upstreamMs: null,
+    searchEventId: null,
+    correctedTo: null,
     error,
   };
 }

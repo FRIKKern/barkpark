@@ -58,6 +58,9 @@ defmodule BarkparkWeb.SearchController do
           parsedQuery: meta[:parsed],
           highlights: meta[:highlights] || %{},
           recovery: meta[:recovery],
+          # Canonical corrected term when a learned/synonym correction fired
+          # for the query (null otherwise) — drives "Showing results for …".
+          correctedTo: meta[:corrected_to],
           # Indx-only (null for Postgres): dataset-wide facet buckets +
           # coverage truncation boundary.
           facets: meta[:facets],
@@ -212,6 +215,20 @@ defmodule BarkparkWeb.SearchController do
       {:ok, id} -> json(conn, %{ok: true, interactionEventId: id})
       _ -> json(conn, %{ok: true})
     end
+  end
+
+  def correction(conn, %{"dataset" => dataset} = params) do
+    record_opts = [
+      actor_key: SearchIntel.actor_key(conn),
+      session_key: SearchIntel.session_key(conn),
+      source: SearchIntel.source(conn, "web"),
+      disabled: SearchIntel.recording_disabled?(conn)
+    ]
+
+    {:ok, %{promoted: promoted, distinct_sessions: distinct}} =
+      SearchIntelligence.record_correction(dataset, params, record_opts)
+
+    json(conn, %{ok: true, promoted: promoted, distinctSessions: distinct})
   end
 
   defp missing_q(conn) do

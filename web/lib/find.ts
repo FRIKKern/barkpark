@@ -137,6 +137,14 @@ export interface FindResponse {
    * Data-Cache hit is ~0–2ms; a cold miss pays the Barkpark round-trip. The
    * benchmark signal. */
   upstreamMs: number | null;
+  /** Opaque id of the query event the API logged for this search — threaded
+   * back as `queryEventId` on a result-click interaction. Null when the search
+   * wasn't recorded (browse, no session, or a cached/empty response). */
+  searchEventId: string | null;
+  /** Canonical corrected term when a LEARNED/synonym correction fired server-
+   * side (the synonym's `to_query`). Drives "Showing results for …". Null when
+   * no correction applied. */
+  correctedTo: string | null;
   error: string | null;
 }
 

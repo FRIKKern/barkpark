@@ -314,6 +314,137 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
+  @doc """
+  Record a query correction (`from` → `to`) and auto-promote a synonym once at
+  least two DISTINCT sessions have signalled the same correction.
+
+  Behaviour:
+
+    1. Normalize `from`/`to` via the `Sanitizer`.
+    2. Insert a `correction` event (`object_id` = normalized `to`) so distinct
+       sessions can be counted.
+    3. Count DISTINCT `session_key` for the same `(surface, scope, from→to)`
+       correction. A nil `session_key` is treated as its own single bucket so
+       an anonymous client can never alone trip the gate.
+    4. When the distinct-session count is `>= 2` and no enabled synonym already
+       maps `from → to`, write an `alt_correction` synonym via
+       `Synonyms.promote/3` (`source: "auto"`); a unique-constraint conflict is
+       treated as "already exists".
+
+  Returns `{:ok, %{promoted: boolean, distinct_sessions: non_neg_integer}}`.
+  Never raises — wraps insert + promote so a correction signal can't break the
+  request.
+  """
+  @spec record_correction(String.t(), String.t(), map(), keyword()) ::
+          {:ok, %{promoted: boolean(), distinct_sessions: non_neg_integer()}}
+  def record_correction(surface, scope, attrs, opts \\ [])
+      when is_binary(surface) and is_binary(scope) and is_map(attrs) do
+    if Keyword.get(opts, :disabled, false) do
+      {:ok, %{promoted: false, distinct_sessions: 0}}
+    else
+      safe_record_correction(surface, scope, attrs, opts)
+    end
+  rescue
+    _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+  catch
+    _, _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+  end
+
+  defp safe_record_correction(surface, scope, attrs, opts) do
+    do_record_correction(surface, scope, attrs, opts)
+  rescue
+    _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+  catch
+    _, _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+  end
+
+  defp do_record_correction(surface, scope, attrs, opts) do
+    from_raw = correction_string(attrs, :from, "from")
+    to_raw = correction_string(attrs, :to, "to")
+    from_norm = if from_raw, do: Sanitizer.normalize(from_raw), else: ""
+    to_norm = if to_raw, do: Sanitizer.normalize(to_raw), else: ""
+    session_key = Keyword.get(opts, :session_key)
+
+    cond do
+      from_norm == "" or to_norm == "" ->
+        {:ok, %{promoted: false, distinct_sessions: 0}}
+
+      from_norm == to_norm ->
+        {:ok, %{promoted: false, distinct_sessions: 0}}
+
+      true ->
+        _ =
+          insert_event(%{
+            surface: surface,
+            scope: scope,
+            event_type: "correction",
+            query: from_raw,
+            query_normalized: from_norm,
+            object_id: to_norm,
+            result_count: 0,
+            zero_hits: false,
+            actor_key: Keyword.get(opts, :actor_key, "anon"),
+            source: Keyword.get(opts, :source, "api"),
+            session_key: session_key,
+            quality: "accepted",
+            reject_reason: nil,
+            duration_ms: nil
+          })
+
+        distinct = count_distinct_correction_sessions(surface, scope, from_norm, to_norm)
+
+        promoted =
+          distinct >= 2 and not synonym_exists?(surface, scope, from_norm, to_norm) and
+            promote_correction(surface, scope, from_norm, to_norm)
+
+        {:ok, %{promoted: promoted, distinct_sessions: distinct}}
+    end
+  end
+
+  defp count_distinct_correction_sessions(surface, scope, from_norm, to_norm) do
+    from(e in Event,
+      where:
+        e.surface == ^surface and e.scope == ^scope and e.event_type == "correction" and
+          e.query_normalized == ^from_norm and e.object_id == ^to_norm,
+      select: e.session_key,
+      distinct: true
+    )
+    |> Repo.all()
+    |> length()
+  end
+
+  defp synonym_exists?(surface, scope, from_norm, to_norm) do
+    surface
+    |> Synonyms.list(scope)
+    |> Enum.any?(fn s ->
+      s.enabled and s.from == from_norm and s.to == to_norm
+    end)
+  end
+
+  defp promote_correction(surface, scope, from_norm, to_norm) do
+    case Synonyms.promote(surface, scope, %{
+           "from" => from_norm,
+           "to" => to_norm,
+           "kind" => "alt_correction"
+         }) do
+      {:ok, _row} -> true
+      # Unique-constraint conflict (a concurrent promote landed first): treat as
+      # already-exists, not a failure.
+      {:error, _reason} -> false
+    end
+  end
+
+  defp correction_string(attrs, atom_key, string_key) do
+    case Map.get(attrs, atom_key) || Map.get(attrs, string_key) do
+      value when is_binary(value) ->
+        trimmed = String.trim(value)
+        if trimmed == "", do: nil, else: String.slice(trimmed, 0, 256)
+
+      _ ->
+        nil
+    end
+  end
+
   defp interaction_uuid(attrs, atom_key, string_key) do
     value = Map.get(attrs, atom_key) || Map.get(attrs, string_key)
 

@@ -708,6 +708,7 @@ defmodule BarkparkWeb.Router do
 
     get("/search/:dataset/suggestions", SearchController, :search_suggestions)
     post("/search/:dataset/interaction", SearchController, :search_interaction)
+    post("/search/:dataset/correction", SearchController, :correction)
     get("/search/:dataset", SearchController, :search)
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
@@ -969,6 +970,7 @@ defmodule BarkparkWeb.Router do
     # Public reads (mirror of /v1/data public scope)
     get("/v1/data/search/:dataset/suggestions", SearchController, :search_suggestions)
     post("/v1/data/search/:dataset/interaction", SearchController, :search_interaction)
+    post("/v1/data/search/:dataset/correction", SearchController, :correction)
     get("/v1/data/search/:dataset", SearchController, :search)
     get("/v1/search/:dataset", FederatedSearchController, :search)
 

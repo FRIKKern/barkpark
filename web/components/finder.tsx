@@ -17,6 +17,29 @@ import {
   type SortId,
 } from "@/lib/find";
 import { suggestCorrection } from "@/lib/did-you-mean";
+import { getSearchSessionId } from "@/lib/search-session";
+
+/** Fire-and-forget feedback POST — never throws, never blocks the caller. */
+function recordFindEvent(body: {
+  kind: "correction" | "click";
+  from?: string;
+  to?: string;
+  queryEventId?: string | null;
+  objectId?: string;
+  position?: number;
+  sid?: string;
+}): void {
+  try {
+    void fetch("/api/find-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* never let recording break the UI */
+  }
+}
 
 /* ── small pieces ──────────────────────────────────────────────────────── */
 
@@ -71,6 +94,9 @@ function ResultRow({
   master = false,
   queryString = "",
   selected = false,
+  searchEventId = null,
+  sessionId,
+  position,
 }: {
   hit: FindHit;
   terms: string[];
@@ -82,8 +108,26 @@ function ResultRow({
   queryString?: string;
   /** Whether this row is the doc currently open in the right pane. */
   selected?: boolean;
+  /** Query event id from the current search — attributes a click interaction. */
+  searchEventId?: string | null;
+  /** Browser session id forwarded as X-BP-SEARCH-CLIENT on the interaction. */
+  sessionId?: string;
+  /** Zero-based rank of this row in the visible result set. */
+  position?: number;
 }) {
   const date = shortDate(hit.date);
+  // Fire-and-forget click signal — non-blocking so it never delays navigation.
+  const onResultClick = () => {
+    if (searchEventId) {
+      recordFindEvent({
+        kind: "click",
+        queryEventId: searchEventId,
+        objectId: hit.id,
+        position,
+        sid: sessionId,
+      });
+    }
+  };
   const inner = (
     <>
       <span className="flex items-center gap-2 text-lg font-medium tracking-tight">
@@ -131,6 +175,7 @@ function ResultRow({
     <Link
       href={href}
       prefetch
+      onClick={onResultClick}
       aria-current={selected ? "page" : undefined}
       className={`${cls}${selectedCls}`}
     >
@@ -155,6 +200,12 @@ export function Finder({
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+
+  // Stable per-browser session id (localStorage `bp-search-client`). The lazy
+  // initialiser returns "" on the server (no window) and the real id on the
+  // client's first render — so it threads into the search fetch + feedback POSTs
+  // once hydrated, and the SSR markup never depends on it.
+  const [sessionId] = useState(() => getSearchSessionId());
 
   // Master mode: left column inside the (finder) layout; rows open docs in the
   // right @detail slot via in-place navigation (no remount, no full reload).
@@ -245,6 +296,9 @@ export function Finder({
     const params = new URLSearchParams({ engine });
     if (q) params.set("q", q);
     if (cacheOn) params.set("cache", "on");
+    // Thread the session so the search is recorded against this browser — the
+    // X-BP-SEARCH-CLIENT key the API counts for correction auto-promotion.
+    if (sessionId) params.set("sid", sessionId);
     const t0 = performance.now();
     fetch(`/api/find?${params.toString()}`, { signal: ctrl.signal })
       .then((r) => r.json())
@@ -274,13 +328,15 @@ export function Finder({
               ms: null,
               cache: cacheOn,
               upstreamMs: null,
+              searchEventId: null,
+              correctedTo: null,
               error: (e as Error).message,
             },
           });
         }
       });
     return () => ctrl.abort();
-  }, [reqKey, engine, q, cacheOn, seedKey]);
+  }, [reqKey, engine, q, cacheOn, seedKey, sessionId]);
   const data = result?.data ?? null;
   const roundTripMs = result?.key === reqKey ? result.roundTripMs : null;
   // Stale-while-revalidate: only blank to a skeleton when there's NOTHING to
@@ -378,10 +434,20 @@ export function Finder({
       ? data.truncation.index
       : null;
 
+  // Server-side learned correction (synonym fired). Shown as "Showing results
+  // for …" and folded into highlighting so the corrected term lights up.
+  const correctedTo =
+    data?.correctedTo && data.correctedTo.toLowerCase() !== q.toLowerCase()
+      ? data.correctedTo
+      : null;
+  // Query event id for the current search — attributes result-click signals.
+  const searchEventId = data?.searchEventId ?? null;
+
   const highlightTerms = useMemo(() => {
     const p = data?.parsedQuery;
-    return p ? [...p.terms, ...p.phrases] : [];
-  }, [data]);
+    const base = p ? [...p.terms, ...p.phrases] : [];
+    return correctedTo ? [...base, correctedTo] : base;
+  }, [data, correctedTo]);
 
   const toggleFacet = (dim: string, value: string) => {
     const next = new Set(selectedFacets[dim] ?? []);
@@ -650,12 +716,38 @@ export function Finder({
         </section>
       ) : null}
 
-      {/* did you mean — a clickable spelling correction (both engines) */}
-      {suggestion ? (
+      {/* Showing results for — server already auto-corrected via a LEARNED
+          synonym. Preferred over the client "Did you mean?" when present. */}
+      {correctedTo ? (
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          Showing results for{" "}
+          <strong className="font-medium text-zinc-900 dark:text-zinc-50">
+            {correctedTo}
+          </strong>
+          {" · "}
+          <button
+            onClick={() => setParams({ q })}
+            className="text-zinc-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-zinc-900 hover:decoration-solid dark:hover:text-zinc-200"
+          >
+            search {q} instead
+          </button>
+        </p>
+      ) : suggestion ? (
+        /* did you mean — a client spelling correction (not-yet-learned case) */
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
           Did you mean{" "}
           <button
-            onClick={() => setParams({ q: suggestion })}
+            onClick={() => {
+              // Record the correction-accept BEFORE navigating so distinct
+              // sessions accumulate toward synonym auto-promotion.
+              recordFindEvent({
+                kind: "correction",
+                from: q,
+                to: suggestion,
+                sid: sessionId,
+              });
+              setParams({ q: suggestion });
+            }}
             className="font-medium text-zinc-900 underline decoration-dotted underline-offset-2 transition-colors hover:decoration-solid dark:text-zinc-50"
           >
             {suggestion}
@@ -908,6 +1000,9 @@ export function Finder({
                       terms={highlightTerms}
                       master={master}
                       queryString={currentQueryString}
+                      searchEventId={searchEventId}
+                      sessionId={sessionId}
+                      position={i}
                       selected={
                         master &&
                         (pathname === hit.href ||

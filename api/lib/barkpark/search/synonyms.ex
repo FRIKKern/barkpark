@@ -109,6 +109,54 @@ defmodule Barkpark.Search.Synonyms do
     end
   end
 
+  @doc """
+  The canonical corrected spelling for a raw query, or `nil` when no enabled
+  synonym fires for it.
+
+  Semantics — given the normalized query `q`:
+
+    * a `one_way` row with `from_query == q` → its `to_query` (the target term);
+    * an `alt_correction` row with `from_query == q` → its `to_query`
+      (the counterpart "correct" side);
+    * an `alt_correction` row with `to_query == q` → its `from_query`
+      (the other side).
+
+  Only enabled rows count. When several rows match, the first by stable
+  `(from_query, to_query)` order wins. Used by the query pipeline to surface
+  `corrected_to` so the UI can show "Showing results for <term>".
+  """
+  @spec correction_for(String.t(), String.t(), String.t()) :: String.t() | nil
+  def correction_for(surface, scope, query)
+      when is_binary(surface) and is_binary(scope) and is_binary(query) do
+    normalized = Sanitizer.normalize(query)
+
+    if normalized == "" do
+      nil
+    else
+      from(s in Synonym,
+        where:
+          s.surface == ^surface and s.scope == ^scope and s.enabled == true and
+            (s.from_query == ^normalized or
+               (s.kind == "alt_correction" and s.to_query == ^normalized)),
+        order_by: [asc: s.from_query, asc: s.to_query],
+        limit: 1
+      )
+      |> Repo.one()
+      |> case do
+        nil ->
+          nil
+
+        %Synonym{kind: "alt_correction", to_query: ^normalized, from_query: from_q} ->
+          if from_q in [nil, "", normalized], do: nil, else: from_q
+
+        %Synonym{to_query: to_q} ->
+          if to_q in [nil, "", normalized], do: nil, else: to_q
+      end
+    end
+  end
+
+  def correction_for(_surface, _scope, _query), do: nil
+
   @spec candidates(String.t(), String.t(), keyword()) :: [map()]
   def candidates(surface, scope, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
