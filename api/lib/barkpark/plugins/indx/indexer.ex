@@ -623,6 +623,10 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     doc
     |> stringify_top()
     |> Map.merge(facet_fields(doc))
+    # slug: a searchable field (low weight) so section/slug terms match on Indx
+    # too, at parity with the Postgres slug (weight C). Lives in :content JSONB,
+    # which stringify_top drops, so surface it explicitly here.
+    |> Map.put("slug", facet_val(doc_content(doc), "slug"))
     |> Map.put("body", body_text(doc))
     |> Map.put("id", key)
     |> Map.put("_id", id)
@@ -633,7 +637,11 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   # :content JSONB — because the deeply-nested 1.5 MB block trees timed out
   # AnalyzeString (see the :content drop). A flat, truncated string is cheap to
   # analyze. `@body_max` keeps the whole corpus well under the timeout budget.
-  @body_max 4000
+  # 8000 (raised from 4000): the timeout risk was the raw 1.5 MB NESTED block
+  # trees, not flat text — a flat, truncated 8 KB/doc string is still trivial to
+  # analyze, and it stops long-form papers losing their second half from the
+  # index (a term in the tail of a 10k-word paper was previously invisible).
+  @body_max 8000
   # Leaf keys that are structure/refs, not prose — skipped so the index isn't
   # polluted with "paragraph"/"strong"/urls/ids.
   @body_skip_keys ~w(marks href src url id _id _type _rev type slug rev kind lang)
@@ -747,10 +755,16 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     # `_id` is intentionally NOT searchable: indexing it let short ids fuzzy-match
     # unrelated docs (e.g. "cli" ≈ category id "c1"), adding noise. It still rides
     # in every record (render_record) for hit→Postgres mapping; it's just not a
-    # searched field. Searchable = title (high) + body (medium).
+    # searched field. Searchable, by weight: title (high) > author/category
+    # (medium — a person/section name should rank, mirroring the Postgres
+    # author/category weight B) > body (medium) > slug (low, mirroring Postgres
+    # slug weight C). author/category are also facetable (see field_proxies).
     [
       {"title", settings.weight_high},
-      {"body", settings.weight_medium}
+      {"author", settings.weight_medium},
+      {"category", settings.weight_medium},
+      {"body", settings.weight_medium},
+      {"slug", settings.weight_low}
     ]
   end
 
@@ -759,16 +773,25 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   # word-level indexing (`wordIndexing: true` is REQUIRED for word-level
   # title search — confirmed by the 2026-06-03 spike) and carries the
   # field's weight plus the engine's default BM25 knobs.
+  # Fields that are BOTH searchable (a name should rank) AND facetable (drive the
+  # facet rail). author/category get ONE FieldProxy each carrying both flags —
+  # listing them separately in facet_proxies too would double-configure the same
+  # fieldName and SetFieldConfiguration would reject it.
+  @search_facet_fields ~w(author category)
+
   defp field_proxies(weights) do
     searchable =
       Enum.map(weights, fn {field, weight} ->
+        f = to_string(field)
+        also_facet = f in @search_facet_fields
+
         %{
-          "fieldName" => to_string(field),
+          "fieldName" => f,
           "fieldType" => "String",
           "isArray" => false,
           "searchable" => true,
-          "filterable" => false,
-          "facetable" => false,
+          "filterable" => also_facet,
+          "facetable" => also_facet,
           "sortable" => false,
           "wordIndexing" => true,
           "embeddable" => false,
@@ -784,9 +807,10 @@ defmodule Barkpark.Plugins.Indx.Indexer do
 
   # Facetable + filterable (not searchable) fields. `enableFacets` in the query
   # makes the engine return dataset-wide value-counts for each of these; the
-  # fields must exist in the corpus records (render_record surfaces author /
-  # category; type / status are top-level columns).
-  @facet_fields ~w(type status author category)
+  # fields must exist in the corpus records (type / status are top-level
+  # columns). author / category are configured in field_proxies above as
+  # searchable+facetable, so they are NOT repeated here.
+  @facet_fields ~w(type status)
 
   defp facet_proxies do
     Enum.map(@facet_fields, fn field ->
