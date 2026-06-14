@@ -76,6 +76,26 @@ if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
 end
 
+# Indx search-engine credentials (retriever seam). `Barkpark.Plugins.Indx.Settings`
+# reads these from `Application.get_env(:barkpark, Barkpark.Plugins.Indx)` (env
+# wins, else the encrypted plugin_settings row, else defaults) — but nothing
+# populated that app-env key, so api_base/user_email/user_password resolved to
+# nil and Indx.Auth raised "user_password not configured", failing every
+# rebuild. Map the INDX_* OS env vars here, mirroring the Bokbasen block above.
+# (INDX_INCREMENTAL_UPSERT is read directly via System.get_env in Settings, so
+# it is intentionally not mapped here.)
+indx_env =
+  [
+    api_base: System.get_env("INDX_API_BASE"),
+    user_email: System.get_env("INDX_USER_EMAIL"),
+    user_password: System.get_env("INDX_USER_PASSWORD")
+  ]
+  |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+if indx_env != [] do
+  config :barkpark, Barkpark.Plugins.Indx, indx_env
+end
+
 # Plugin selection from `bp setup` (BARKPARK_PLUGINS in .env). This is the
 # runtime side of the registry kill switch — see
 # `Barkpark.Plugins.Registry.discover_and_register/0`:
