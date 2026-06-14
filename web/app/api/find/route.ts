@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   DOC_TYPES,
   normalizeHit,
+  type FacetMap,
   type FindHit,
   type FindResponse,
   type ParsedQuery,
@@ -58,6 +59,7 @@ async function suggestions(): Promise<NextResponse> {
 async function search(
   q: string,
   engine: SearchEngine,
+  browse = false,
 ): Promise<FindResponse> {
   const wantIndx = engine === "indx";
   // Indx only activates on the token-scoped route; without a token we cannot
@@ -66,8 +68,10 @@ async function search(
   const base = useIndx ? `${API_URL}${SCOPE}` : API_URL;
   const engineUsed: SearchEngine = useIndx ? "indx" : "postgres";
 
+  // Browse mode sends a single space: the q-required guard passes, but it parses
+  // to an empty query, which Indx treats as "enumerate + facet" the dataset.
   const params = new URLSearchParams({
-    q,
+    q: browse ? " " : q,
     engine: engineUsed,
     perspective: "published",
     limit: String(MAX_HITS),
@@ -85,6 +89,8 @@ async function search(
     count?: number;
     parsedQuery?: ParsedQuery;
     recovery?: string | null;
+    facets?: FacetMap | null;
+    truncation?: { index: number } | null;
     ms?: number;
   };
   const hits = (json.documents ?? [])
@@ -92,14 +98,16 @@ async function search(
     .filter((h): h is FindHit => h !== null);
 
   return {
-    mode: "search",
+    mode: browse ? "browse" : "search",
     hits,
     total: typeof json.count === "number" ? json.count : hits.length,
     engine,
     engineUsed,
     indxUnavailable: wantIndx && !useIndx,
-    parsedQuery: json.parsedQuery ?? emptyParsed(),
+    parsedQuery: browse ? null : (json.parsedQuery ?? emptyParsed()),
     recovery: json.recovery ?? null,
+    facets: json.facets ?? null,
+    truncation: json.truncation ?? null,
     ms: typeof json.ms === "number" ? json.ms : null,
     error: null,
   };
@@ -107,7 +115,7 @@ async function search(
 
 /* ── browse (no q) ─────────────────────────────────────────────────────── */
 
-async function browse(): Promise<FindResponse> {
+async function browse(requestedEngine: SearchEngine): Promise<FindResponse> {
   const perType = Math.ceil(MAX_HITS / DOC_TYPES.length);
   const settled = await Promise.all(
     DOC_TYPES.map(async (t) => {
@@ -139,11 +147,15 @@ async function browse(): Promise<FindResponse> {
     mode: "browse",
     hits,
     total: hits.length,
-    engine: "postgres",
+    engine: requestedEngine,
     engineUsed: "postgres",
-    indxUnavailable: false,
+    // Postgres browse can't produce Indx facets; flag it when Indx was wanted
+    // but unreachable (no token) so the UI can explain the fallback.
+    indxUnavailable: requestedEngine === "indx" && !TOKEN,
     parsedQuery: null,
     recovery: null,
+    facets: null,
+    truncation: null,
     ms: null,
     error: null,
   };
@@ -161,7 +173,16 @@ export async function GET(request: Request): Promise<NextResponse> {
     searchParams.get("engine") === "indx" ? "indx" : "postgres";
 
   try {
-    const payload = q ? await search(q, engine) : await browse();
+    let payload: FindResponse;
+    if (q) {
+      payload = await search(q, engine);
+    } else if (engine === "indx" && TOKEN) {
+      // Indx browse-with-facets (the landing) — facets + coverage from Indx.
+      payload = await search(" ", "indx", true);
+    } else {
+      // Postgres browse (no facets), or Indx wanted but no token.
+      payload = await browse(engine);
+    }
     return NextResponse.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -174,6 +195,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       indxUnavailable: false,
       parsedQuery: q ? emptyParsed() : null,
       recovery: null,
+      facets: null,
+      truncation: null,
       ms: null,
       error: message,
     };

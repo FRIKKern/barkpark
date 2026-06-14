@@ -76,7 +76,34 @@ export interface FindHit {
   slug: string;
   /** Reader path when available, else null. */
   href: string | null;
+  /** Facet-dimension values for client-side facet filtering (type/status/…). */
+  facets: Record<string, string>;
 }
+
+/** One facet bucket: a value and how many docs carry it (counted by Indx). */
+export interface FacetBucket {
+  label: string;
+  count: number;
+}
+
+/** Facet dimension → buckets, as computed by Indx across the result set. */
+export type FacetMap = Record<string, FacetBucket[]>;
+
+/** Facet dimensions surfaced in the rail, in display order. */
+export const FACET_DIMENSIONS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "type", label: "Type" },
+  { key: "status", label: "Status" },
+  { key: "author", label: "Author" },
+  { key: "category", label: "Category" },
+];
+
+export const SORTS = [
+  { id: "relevance", label: "Relevance" },
+  { id: "newest", label: "Newest" },
+  { id: "title", label: "Title" },
+] as const;
+
+export type SortId = (typeof SORTS)[number]["id"];
 
 export interface FindResponse {
   mode: "search" | "browse";
@@ -92,6 +119,12 @@ export interface FindResponse {
   parsedQuery: ParsedQuery | null;
   /** "drop_tokens" | "typo_widen" when a fallback widened the search, else null. */
   recovery: string | null;
+  /** Indx-computed facet buckets (dataset-wide for browse, match-set for a
+   * query). Null for the Postgres engine — the gateway doesn't expose them. */
+  facets: FacetMap | null;
+  /** Indx coverage boundary: hits before `index` are coverage-confirmed
+   * matches, after are softer pattern hits. Null for Postgres / no query. */
+  truncation: { index: number } | null;
   ms: number | null;
   error: string | null;
 }
@@ -186,6 +219,23 @@ export function normalizeHit(raw: unknown): FindHit | null {
   const type = str(doc._type);
   if (!id || !type) return null;
   const slug = deriveSlug(doc);
+  // `Envelope.render` spreads `content` to the top level (no nested `content`
+  // key); `status` is a column it doesn't render, so derive it from `_draft`.
+  const content = (doc.content as RawDoc | undefined) ?? {};
+  const facets: Record<string, string> = { type };
+  const status =
+    str(doc.status) ??
+    str(content.status) ??
+    (typeof doc._draft === "boolean"
+      ? doc._draft
+        ? "draft"
+        : "published"
+      : undefined);
+  const author = str(doc.author) ?? str(content.author);
+  const category = str(doc.category) ?? str(content.category);
+  if (status) facets.status = status;
+  if (author) facets.author = author;
+  if (category) facets.category = category;
   return {
     id,
     type,
@@ -194,5 +244,6 @@ export function normalizeHit(raw: unknown): FindHit | null {
     date: deriveDate(doc),
     slug,
     href: readerHref(type, slug),
+    facets,
   };
 }
