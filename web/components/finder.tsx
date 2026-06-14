@@ -16,6 +16,7 @@ import {
   type SearchEngine,
   type SortId,
 } from "@/lib/find";
+import { suggestCorrection } from "@/lib/did-you-mean";
 
 /* ── small pieces ──────────────────────────────────────────────────────── */
 
@@ -300,6 +301,33 @@ export function Finder({
   }, []);
 
   const hits = useMemo(() => data?.hits ?? [], [data]);
+
+  // Vocabulary from the browse seed (all docs' titles/excerpts) — broadens the
+  // "did you mean" candidate pool beyond the current query's results + popular.
+  const corpusWords = useMemo(
+    () =>
+      (initialData?.hits ?? []).flatMap((h) =>
+        `${h.title} ${h.excerpt ?? ""}`.toLowerCase().split(/[^a-z0-9-]+/),
+      ),
+    [initialData],
+  );
+
+  // "Did you mean …?" — both engines fuzzy-match a typo to docs containing the
+  // real term, so the correction is derivable from the results + popular
+  // queries + corpus (no engine support needed). Null when nothing's confident.
+  const suggestion = useMemo(
+    () =>
+      q
+        ? suggestCorrection({
+            query: q,
+            parsed: data?.parsedQuery ?? null,
+            hits,
+            popular,
+            corpus: corpusWords,
+          })
+        : null,
+    [q, data, hits, popular, corpusWords],
+  );
 
   // Facet groups: prefer Indx's dataset-wide buckets; fall back to a client
   // type-count when the engine returned none (Postgres path).
@@ -620,6 +648,20 @@ export function Finder({
           No exact matches — widened to fuzzy results (
           <code className="font-mono">{data.recovery}</code>).
         </section>
+      ) : null}
+
+      {/* did you mean — a clickable spelling correction (both engines) */}
+      {suggestion ? (
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          Did you mean{" "}
+          <button
+            onClick={() => setParams({ q: suggestion })}
+            className="font-medium text-zinc-900 underline decoration-dotted underline-offset-2 transition-colors hover:decoration-solid dark:text-zinc-50"
+          >
+            {suggestion}
+          </button>
+          ?
+        </p>
       ) : null}
 
       {/* parsed-query chips */}
