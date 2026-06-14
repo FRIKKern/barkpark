@@ -38,6 +38,10 @@ async function benchCell(q: string, engine: SearchEngine): Promise<Cell> {
   const noStore: number[] = [];
   for (let i = 0; i < NO_STORE_RUNS; i++) noStore.push((await timeCall(q, engine, false)).rt);
 
+  // Purge the find Data Cache so the first cache=on call is a genuine cold miss
+  // (makes the cached-cold column repeatable across runs).
+  await fetch("/api/cache/reset", { method: "POST" });
+
   let cachedCold = 0;
   const warm: number[] = [];
   let upstreamWarm = 0;

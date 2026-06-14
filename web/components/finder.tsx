@@ -167,7 +167,9 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
   // Fetch whenever the committed query or engine changes. `loading` is derived
   // (the in-flight key differs from the resolved result's key) so the effect
   // never calls setState synchronously — only inside the async resolution.
-  const reqKey = `${engine} ${cacheOn ? "c" : "f"} ${q}`;
+  // `bust` lets "reset cache" force a cold refetch after revalidateTag.
+  const [bust, setBust] = useState(0);
+  const reqKey = `${engine} ${cacheOn ? "c" : "f"} ${bust} ${q}`;
   const [result, setResult] = useState<{
     key: string;
     data: FindResponse;
@@ -298,6 +300,17 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
     setParams(patch);
   };
 
+  const [resetting, setResetting] = useState(false);
+  const resetCache = async () => {
+    setResetting(true);
+    try {
+      await fetch("/api/cache/reset", { method: "POST" });
+      setBust((b) => b + 1); // force a cold refetch against the emptied cache
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const activeEngine = ENGINES.find((e) => e.id === engine)!;
 
   return (
@@ -423,6 +436,15 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
               ? "Next Data Cache — warm hits skip the API round-trip"
               : "always fresh (no-store)"}
           </span>
+          {cacheOn ? (
+            <button
+              onClick={resetCache}
+              disabled={resetting}
+              className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:hover:text-zinc-200"
+            >
+              {resetting ? "resetting…" : "reset cache"}
+            </button>
+          ) : null}
         </div>
         <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
           <span>
