@@ -694,6 +694,22 @@ export function Finder({
         </details>
       </div>
 
+      {/* popular searches — quick shortcuts right under the search bar (idle) */}
+      {!q && popular.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-zinc-400">Popular:</span>
+          {popular.map((p) => (
+            <button
+              key={p.query}
+              onClick={() => setParams({ q: p.query })}
+              className="rounded-full border border-zinc-300 px-3 py-1 text-zinc-600 transition-colors hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
+            >
+              {p.query}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {/* banners */}
       {data?.error ? (
         <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
@@ -945,22 +961,6 @@ export function Finder({
               </div>
             ) : null}
           </div>
-
-          {/* popular searches when idle */}
-          {!q && popular.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 pb-2 text-sm">
-              <span className="text-zinc-400">Popular:</span>
-              {popular.map((p) => (
-                <button
-                  key={p.query}
-                  onClick={() => setParams({ q: p.query })}
-                  className="rounded-full border border-zinc-300 px-3 py-1 text-zinc-600 transition-colors hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
-                >
-                  {p.query}
-                </button>
-              ))}
-            </div>
-          ) : null}
 
           {showSkeleton ? (
             <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
