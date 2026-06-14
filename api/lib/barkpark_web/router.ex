@@ -726,6 +726,10 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     get("/listen/:dataset", ListenController, :listen)
+    # Trigger an Indx blue/green rebuild for the scope (token-gated; any member
+    # token, e.g. the public-read token the web demo holds). Oban-unique per
+    # scope, so concurrent triggers collapse into one rebuild.
+    post("/search/:dataset/reindex", SearchController, :reindex)
     get("/export/:dataset", ExportController, :export)
 
     get("/analytics/:dataset", AnalyticsController, :index)

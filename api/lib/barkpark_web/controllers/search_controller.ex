@@ -68,6 +68,35 @@ defmodule BarkparkWeb.SearchController do
     end
   end
 
+  # Default content types reindexed when the caller doesn't pass `types`.
+  @reindex_types ~w(post page author category project paper)
+
+  @doc """
+  Enqueue an Indx blue/green rebuild for the scope. Token-gated (router); any
+  member token works. Oban-unique per scope, so spamming collapses to one
+  rebuild. Returns immediately with the enqueued job id — the live node's
+  `:indx` queue runs the rebuild (~30s) and atomically swaps the dataset.
+  """
+  def reindex(conn, %{"dataset" => dataset} = params) do
+    types =
+      case parse_types(params["types"]) do
+        nil -> @reindex_types
+        list -> list
+      end
+
+    opts = [types: types, perspective: :published] ++ scope_opts(conn)
+
+    case Barkpark.Plugins.Indx.IndexerWorker.enqueue(dataset, opts) do
+      {:ok, job} ->
+        json(conn, %{ok: true, scope: dataset, jobId: job.id, types: types})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{error: %{code: "reindex_failed", message: inspect(reason)}})
+    end
+  end
+
   def search_suggestions(conn, %{"dataset" => dataset} = params) do
     prefix = params["q"] || params["prefix"]
     limit = parse_int(params["limit"], 8) |> min(20)
