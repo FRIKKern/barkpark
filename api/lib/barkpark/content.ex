@@ -25,6 +25,7 @@ defmodule Barkpark.Content do
 
   alias Barkpark.Content.{
     Document,
+    Edge,
     Envelope,
     MutationEvent,
     Revision,
@@ -1405,6 +1406,409 @@ defmodule Barkpark.Content do
           :ok
       end
     end)
+  end
+
+  # ── Content graph edges (reference-field extraction + CRUD) ─────────────────
+  #
+  # extract_edges/2 walks a document's schema reference fields (scalar AND
+  # arrayOf-of-reference) and emits one raw edge per target. from_id/to_id are
+  # ALWAYS published-coalesced (published_id/1) so keys are publish-stable and a
+  # draft is never a from_id. Dangling is computed here at READ time — there is
+  # no dangling column (the to_id FK makes a dangling edge unstorable; see
+  # `Barkpark.Content.Edge` moduledoc). The closest live precedents are the
+  # scalar-only find_referencing_docs/3 and the untyped reference_title/4.
+
+  @doc """
+  Extract the outbound reference-field edges of a document.
+
+  For the doc's schema (`list_schemas/2` → matched by `doc.type`) enumerate
+  BOTH:
+
+    * scalar fields where `f["type"] == "reference"` — value is
+      `doc.content[field]`, refType `f["refType"]` (MAY be nil); and
+    * arrayOf fields where `get_in(f, ["of", "type"]) == "reference"` — value is
+      `List.wrap(doc.content[field])` (one edge per element), refType
+      `get_in(f, ["of", "refType"])` (MAY be nil).
+
+  Each raw target value becomes one edge map with `from_id` =
+  `published_id(doc.doc_id)`, `to_id` = `published_id(target)`. `dangling` is
+  resolved per target via `resolve_target_existence/4` (typed `get_document/4`
+  when refType is a non-empty binary; type-agnostic `Repo.exists?` when refType
+  is nil/empty — NEVER `get_document` with a nil type, which would short-circuit
+  to `:not_found` and false-flag every untyped ref). Resolution runs under the
+  `:published` lens (mirrors anonymous reads); a target whose published twin
+  does not yet exist is reported dangling.
+
+  Pure of plugins — reads only core schema reference fields, so it still emits
+  core edges with `Application.put_env(:barkpark, :plugins, [])` (fresh-install
+  invariant). Resolves EACH target → O(edges) DB round-trips; the Phase-3
+  projector runs it off the request path.
+
+  Returns `[%{from_id, to_id, kind, field, refType, dangling}]`. `kind` is
+  always `"references"` here; plugin-projected kinds (Phase 3) arrive via the
+  registry collector, not this function.
+  """
+  @spec extract_edges(map() | Document.t(), keyword()) :: [
+          %{
+            from_id: String.t(),
+            to_id: String.t(),
+            kind: String.t(),
+            field: String.t(),
+            refType: String.t() | nil,
+            dangling: boolean()
+          }
+        ]
+  def extract_edges(doc, opts \\ []) do
+    doc_id = Map.get(doc, :doc_id) || Map.get(doc, "doc_id")
+    type = Map.get(doc, :type) || Map.get(doc, "type")
+    dataset = Map.get(doc, :dataset) || Map.get(doc, "dataset")
+    content = Map.get(doc, :content) || Map.get(doc, "content") || %{}
+
+    from_id = published_id(doc_id)
+
+    schema =
+      dataset
+      |> list_schemas(opts)
+      |> Enum.find(fn s -> s.name == type end)
+
+    case schema do
+      nil ->
+        []
+
+      %SchemaDefinition{fields: fields} ->
+        fields
+        |> Enum.flat_map(fn field -> extract_field_edges(field, content) end)
+        |> Enum.map(fn {raw_target, field_name, ref_type} ->
+          to_id = published_id(raw_target)
+
+          dangling =
+            not resolve_target_existence(to_id, ref_type, dataset, opts)
+
+          %{
+            from_id: from_id,
+            to_id: to_id,
+            kind: "references",
+            field: field_name,
+            refType: ref_type,
+            dangling: dangling
+          }
+        end)
+    end
+  end
+
+  # Scalar reference field → at most one {raw_target, field_name, ref_type}.
+  defp extract_field_edges(%{"type" => "reference"} = field, content) do
+    field_name = field["name"]
+    ref_type = field["refType"]
+
+    case Map.get(content, field_name) do
+      value when is_binary(value) and value != "" ->
+        [{value, field_name, ref_type}]
+
+      _ ->
+        []
+    end
+  end
+
+  # arrayOf-of-reference field → one entry per non-blank element (bare-id
+  # string array, the task.attachments shape).
+  defp extract_field_edges(%{"type" => "arrayOf", "of" => %{"type" => "reference"} = of} = field, content) do
+    field_name = field["name"]
+    ref_type = of["refType"]
+
+    content
+    |> Map.get(field_name)
+    |> List.wrap()
+    |> Enum.filter(fn v -> is_binary(v) and v != "" end)
+    |> Enum.map(fn value -> {value, field_name, ref_type} end)
+  end
+
+  defp extract_field_edges(_field, _content), do: []
+
+  # The SHARED resolve-and-dangling helper (gap #2). TWO branches that MUST
+  # agree on lens (:published) + scope so a typed and an untyped ref to the same
+  # target never disagree:
+  #
+  #   (i)  refType is a non-empty binary → typed get_document/4; resolvable
+  #        unless it returns {:error, :not_found}.
+  #   (ii) refType is nil OR "" → DO NOT call get_document with a nil type
+  #        (get_document/4 short-circuits to :not_found on a nil type and would
+  #        false-positive EVERY untyped ref). Instead run a type-agnostic
+  #        existence query — present? under the :published lens means
+  #        resolvable.
+  #
+  # BOTH branches share the :published lens: the typed branch resolves only the
+  # published row (get_document/4 matches `doc_id == to_id` where to_id is
+  # already published-coalesced), and the untyped branch matches the published
+  # id ONLY — NOT the `drafts.` twin. A draft-only target (no published twin)
+  # is therefore dangling under EITHER branch, so a typed ref and an untyped ref
+  # to the same target never disagree on dangling (gap #2 contract). This is
+  # why we do NOT copy reference_title/4's `or doc_id == draft` clause —
+  # reference_title intentionally falls back to the draft twin for a cosmetic
+  # title, which is the WRONG lens for published-dangling.
+  #
+  # Returns true when the target is resolvable (NOT dangling).
+  @spec resolve_target_existence(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
+          boolean()
+  defp resolve_target_existence(to_id, ref_type, dataset, opts)
+       when is_binary(ref_type) and ref_type != "" do
+    case get_document(to_id, ref_type, dataset, opts) do
+      {:ok, _doc} -> true
+      {:error, :not_found} -> false
+    end
+  end
+
+  defp resolve_target_existence(to_id, _ref_type, dataset, opts) do
+    pub_id = published_id(to_id)
+
+    Document
+    |> where([d], d.doc_id == ^pub_id)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Insert (or REPLACE) a single content edge by its `(from_id, to_id, kind)`
+  triple.
+
+  ## Id model — slug `doc_id` IN, `documents.id` UUID stored
+
+  `extract_edges/2` emits `from_id`/`to_id` as STRING slug `doc_id`s (e.g.
+  `"art-1"`), but the `content_edges` FKs reference `documents.id` — the
+  binary_id UUID PK, NOT the `doc_id` slug (same contract as `task_edges`,
+  whose `Tasks.add_dep/3` is called with `child.id`/`parent.id` UUIDs). So
+  `add_edge/4` RESOLVES each endpoint slug to its `documents.id` before
+  inserting, preferring the published row (mirroring `reference_title/4`'s
+  published-before-draft pick). A value that is already a UUID for an existing
+  `documents.id` is used as-is. An unresolvable endpoint → `{:error, :no_target}`
+  (a dangling edge is UNSTORABLE — the read-time `extract_edges/2` dangling
+  signal is the place that surfaces it, not this writer).
+
+  Resolution scope is read from `attrs` (`dataset`, optional `workspace_id` /
+  `project_id`) — `extract_edges/2`'s slugs are scope-relative, so a caller
+  MUST pass the same `dataset` it extracted under.
+
+  `on_conflict: {:replace, [:weight, :plugin_source, :updated_at]}` with
+  `conflict_target: [:from_id, :to_id, :kind]` — REPLACE (not `:nothing`) so a
+  re-extracted edge with changed `weight`/`plugin_source` UPDATES rather than
+  keeping stale values (gap #9). `updated_at` exists per the schema divergence
+  so it is bumped on conflict. The row is reloaded by its unique triple so
+  callers always get the canonical struct (same shape as `Tasks.add_dep/3`).
+
+  Returns `{:ok, %Edge{}}` on success, `{:error, :no_target}` when an endpoint
+  cannot be resolved to a `documents.id`, or `{:error, %Ecto.Changeset{}}` on
+  validation failure (self-edge, unknown kind).
+  """
+  @spec add_edge(binary(), binary(), String.t(), map()) ::
+          {:ok, Edge.t()} | {:error, :no_target} | {:error, Ecto.Changeset.t()}
+  def add_edge(from_id, to_id, kind, attrs \\ %{}) do
+    attrs = Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
+    dataset = attrs["dataset"]
+    scope_opts = edge_scope_opts(attrs)
+
+    with from_pk when is_binary(from_pk) <- resolve_doc_pk(from_id, dataset, scope_opts),
+         to_pk when is_binary(to_pk) <- resolve_doc_pk(to_id, dataset, scope_opts) do
+      base = %{"from_id" => from_pk, "to_id" => to_pk, "kind" => to_string(kind)}
+
+      changeset =
+        Edge.changeset(
+          %Edge{},
+          Map.merge(base, %{
+            "weight" => attrs["weight"],
+            "plugin_source" => attrs["plugin_source"]
+          })
+        )
+
+      if changeset.valid? do
+        case Repo.insert(changeset,
+               on_conflict: {:replace, [:weight, :plugin_source, :updated_at]},
+               conflict_target: [:from_id, :to_id, :kind]
+             ) do
+          {:ok, %Edge{}} ->
+            {:ok, fetch_content_edge!(from_pk, to_pk, to_string(kind))}
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            {:error, cs}
+        end
+      else
+        {:error, changeset}
+      end
+    else
+      _ -> {:error, :no_target}
+    end
+  end
+
+  # Resolve a slug `doc_id` (or an already-resolved `documents.id` UUID) to the
+  # `documents.id` binary_id PK the content_edges FKs reference. Published row
+  # preferred over its `drafts.` twin (CASE-ordered, mirroring reference_title/4)
+  # so the stored edge is publish-stable. Returns the UUID string, or nil when
+  # nothing in scope matches (caller turns that into {:error, :no_target} — a
+  # dangling edge is unstorable).
+  defp resolve_doc_pk(nil, _dataset, _scope_opts), do: nil
+
+  defp resolve_doc_pk(id, dataset, scope_opts) when is_binary(id) do
+    pub_id = published_id(id)
+    draft = draft_id(pub_id)
+
+    query =
+      Document
+      |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft or d.id == ^id)
+      |> scope_to_workspace_or_global(
+        Keyword.get(scope_opts, :workspace_id),
+        Keyword.get(scope_opts, :project_id)
+      )
+      |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
+
+    query =
+      if is_binary(dataset) and dataset != "" do
+        scope_to_dataset(query, dataset, scope_opts)
+      else
+        query
+      end
+
+    case query |> Repo.all() |> List.first() do
+      %Document{id: pk} -> pk
+      _ -> nil
+    end
+  rescue
+    # An `id` that is not a valid binary_id makes `d.id == ^id` raise on cast.
+    # Fall back to the slug-only match (drop the `d.id == ^id` disjunct).
+    Ecto.Query.CastError -> resolve_doc_pk_by_slug(id, dataset, scope_opts)
+  end
+
+  defp resolve_doc_pk_by_slug(id, dataset, scope_opts) do
+    pub_id = published_id(id)
+    draft = draft_id(pub_id)
+
+    query =
+      Document
+      |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
+      |> scope_to_workspace_or_global(
+        Keyword.get(scope_opts, :workspace_id),
+        Keyword.get(scope_opts, :project_id)
+      )
+      |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
+
+    query =
+      if is_binary(dataset) and dataset != "" do
+        scope_to_dataset(query, dataset, scope_opts)
+      else
+        query
+      end
+
+    case query |> Repo.all() |> List.first() do
+      %Document{id: pk} -> pk
+      _ -> nil
+    end
+  end
+
+  defp edge_scope_opts(attrs) do
+    []
+    |> maybe_put_kw(:dataset_id, attrs["dataset_id"])
+    |> maybe_put_kw(:workspace_id, attrs["workspace_id"])
+    |> maybe_put_kw(:project_id, attrs["project_id"])
+  end
+
+  defp maybe_put_kw(opts, _key, nil), do: opts
+  defp maybe_put_kw(opts, key, value), do: Keyword.put(opts, key, value)
+
+  @doc """
+  Insert/replace a batch of edge maps (the `extract_edges/2` shape, or any map
+  carrying `from_id`/`to_id`/`kind` + optional `weight`/`plugin_source`).
+  Returns the list of CRUD results in order. `dangling`/`field`/`refType` keys
+  on the input maps are ignored (they are read-time signals, not stored).
+
+  Because `extract_edges/2` emits scope-relative slug `doc_id`s, the resolution
+  `dataset` (and optional `workspace_id`/`project_id`) MUST be passed via
+  `opts` so each `add_edge/4` can resolve the slugs to `documents.id` UUIDs in
+  the SAME scope they were extracted under. A per-edge `dataset` key wins over
+  the batch `opts` default.
+  """
+  @spec add_edges([map()], keyword()) ::
+          [{:ok, Edge.t()} | {:error, :no_target} | {:error, Ecto.Changeset.t()}]
+  def add_edges(edges, opts \\ []) when is_list(edges) do
+    scope = %{
+      "dataset" => Keyword.get(opts, :dataset),
+      "dataset_id" => Keyword.get(opts, :dataset_id),
+      "workspace_id" => Keyword.get(opts, :workspace_id),
+      "project_id" => Keyword.get(opts, :project_id)
+    }
+
+    Enum.map(edges, fn e ->
+      from_id = e[:from_id] || e["from_id"]
+      to_id = e[:to_id] || e["to_id"]
+      kind = e[:kind] || e["kind"]
+
+      attrs =
+        scope
+        |> Map.put("dataset", (e[:dataset] || e["dataset"]) || scope["dataset"])
+        |> Map.put("weight", e[:weight] || e["weight"])
+        |> Map.put("plugin_source", e[:plugin_source] || e["plugin_source"])
+
+      add_edge(from_id, to_id, kind, attrs)
+    end)
+  end
+
+  @doc """
+  Outbound edges of a document id (indexed `(from_id, kind)` scan). Ordered by
+  `inserted_at` ASC — the forward-BFS input for Phase 4. `:kind` opt narrows to
+  one kind.
+  """
+  @spec list_outbound_edges(binary(), keyword()) :: [Edge.t()]
+  def list_outbound_edges(from_id, opts \\ []) do
+    Edge
+    |> where([e], e.from_id == ^from_id)
+    |> maybe_filter_edge_kind(opts)
+    |> order_by([e], asc: e.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Inbound edges of a document id (indexed `(to_id, kind)` scan). Ordered by
+  `inserted_at` ASC — the reverse-walk input for the Studio unpublish guard
+  (Phase 4/5). `:kind` opt narrows to one kind.
+  """
+  @spec list_inbound_edges(binary(), keyword()) :: [Edge.t()]
+  def list_inbound_edges(to_id, opts \\ []) do
+    Edge
+    |> where([e], e.to_id == ^to_id)
+    |> maybe_filter_edge_kind(opts)
+    |> order_by([e], asc: e.inserted_at)
+    |> Repo.all()
+  end
+
+  defp maybe_filter_edge_kind(query, opts) do
+    case Keyword.get(opts, :kind) do
+      nil -> query
+      kind -> where(query, [e], e.kind == ^to_string(kind))
+    end
+  end
+
+  defp fetch_content_edge!(from_id, to_id, kind) do
+    Repo.one!(
+      from(e in Edge,
+        where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
+      )
+    )
+  end
+
+  @doc """
+  The projection SOURCE corpus — fold `extract_edges/2` over every published
+  document of the given `type` in `dataset`. `perspective: :published` so no
+  `drafts.<id>` is ever a from_id (drafts decision guard a). The Phase-3
+  projector folds this across all types to build the materialised graph.
+  """
+  @spec corpus_edges(String.t(), String.t(), keyword()) :: [map()]
+  def corpus_edges(type, dataset, opts \\ []) do
+    list_opts = Keyword.put(opts, :perspective, :published)
+
+    type
+    |> list_documents(dataset, list_opts)
+    |> Enum.flat_map(fn doc -> extract_edges(doc, opts) end)
   end
 
   # ── Sheet formula recompute (M3) ────────────────────────────────────────────
