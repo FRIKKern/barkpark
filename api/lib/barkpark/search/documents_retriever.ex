@@ -21,29 +21,70 @@ defmodule Barkpark.Search.DocumentsRetriever do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
-    if terms == [] and Map.get(parsed, :phrases, []) == [] and
-         Map.get(parsed, :prefixes, []) == [] do
-      {[], 0, %{}}
-    else
-      base =
-        Document
-        |> scope_to_dataset(scope, project_id)
-        |> scope_to_workspace_or_global(workspace_id, project_id)
-        |> where_match(parsed, terms, config, relaxed)
+    browse? =
+      terms == [] and Map.get(parsed, :phrases, []) == [] and
+        Map.get(parsed, :prefixes, []) == []
 
-      base = if type, do: where(base, [d], d.type == ^type), else: base
-      base = perspective_filter(base, perspective)
+    # Browse (empty query) enumerates the scoped published set — mirrors Indx's
+    # empty-query browse so the finder's landing has docs + facets on Postgres
+    # too. A real query adds the full-text/trigram match.
+    base =
+      Document
+      |> scope_to_dataset(scope, project_id)
+      |> scope_to_workspace_or_global(workspace_id, project_id)
 
-      docs =
-        base
-        |> order_rank(terms, config)
-        |> limit(^limit)
-        |> offset(^offset)
-        |> Repo.all()
+    base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
+    base = if type, do: where(base, [d], d.type == ^type), else: base
+    base = perspective_filter(base, perspective)
 
-      count = base |> select([d], count(d.id)) |> Repo.one() || 0
-      {docs, count, %{}}
-    end
+    docs =
+      base
+      |> order_rank(terms, config)
+      |> limit(^limit)
+      |> offset(^offset)
+      |> Repo.all()
+
+    count = base |> exclude(:order_by) |> select([d], count(d.id)) |> Repo.one() || 0
+    # Facet counts via GROUP BY over the matching set — Postgres's parity with
+    # Indx's native facets, surfaced through the same `meta.facets` channel.
+    {docs, count, %{facets: facet_counts(base)}}
+  end
+
+  # Dataset-wide (browse) / match-set (query) facet buckets per dimension, in
+  # the same shape the Indx retriever returns: %{field => [%{"label","count"}]},
+  # empty-label buckets dropped, biggest first.
+  defp facet_counts(base) do
+    %{}
+    |> put_facet("type", group_column(base, :type))
+    |> put_facet("status", group_column(base, :status))
+    |> put_facet("author", group_content(base, "author"))
+    |> put_facet("category", group_content(base, "category"))
+  end
+
+  defp group_column(base, field) do
+    base
+    |> exclude(:order_by)
+    |> group_by([d], field(d, ^field))
+    |> select([d], {field(d, ^field), count(d.id)})
+    |> Repo.all()
+  end
+
+  defp group_content(base, key) do
+    base
+    |> exclude(:order_by)
+    |> group_by([d], fragment("?->>?", d.content, ^key))
+    |> select([d], {fragment("?->>?", d.content, ^key), count(d.id)})
+    |> Repo.all()
+  end
+
+  defp put_facet(map, name, rows) do
+    buckets =
+      rows
+      |> Enum.reject(fn {label, _} -> label in [nil, ""] end)
+      |> Enum.sort_by(fn {_, count} -> -count end)
+      |> Enum.map(fn {label, count} -> %{"label" => to_string(label), "count" => count} end)
+
+    if buckets == [], do: map, else: Map.put(map, name, buckets)
   end
 
   # Mirror of Content.scope_to_dataset for the search read path (barkpark-y9ee).
