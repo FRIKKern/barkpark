@@ -634,6 +634,12 @@ defmodule Barkpark.Plugins.Indx.Indexer do
     struct
     |> Map.from_struct()
     |> Map.drop([:__meta__])
+    # Drop unloaded associations (e.g. the D9 tenancy `:dataset_entity`,
+    # `:workspace`, `:project` belongs_to refs) — `Content.list_documents/3`
+    # doesn't preload them, and Jason raises on an `Ecto.Association.NotLoaded`
+    # value, which crashed every rebuild. They are tenancy refs, not searchable
+    # content, so dropping them is correct, not just defensive.
+    |> Enum.reject(fn {_k, v} -> match?(%Ecto.Association.NotLoaded{}, v) end)
     |> Map.new(fn {k, v} -> {to_string(k), v} end)
   end
 
