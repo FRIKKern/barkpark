@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { LiveBridge } from "@/components/live-bridge";
 
@@ -32,6 +33,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         {children}
         <LiveBridge />
+        {/* Real-user Core Web Vitals (LCP/CLS/INP/TTFB) → Vercel Speed Insights.
+            Lab data was all-green; this surfaces what real devices actually see. */}
+        <SpeedInsights />
       </body>
     </html>
   );

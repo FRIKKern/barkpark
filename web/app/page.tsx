@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { Finder } from "@/components/finder";
 import { runSearch } from "@/lib/find-search";
 import type { FindResponse, SearchEngine } from "@/lib/find";
@@ -39,15 +38,11 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
     }
   }
 
+  // No Suspense wrapper: the route is force-dynamic, so `searchParams` is known
+  // server-side and the Finder renders WITH its seeded results in the first
+  // paint — no skeleton-then-swap. (The audit showed the old skeleton fallback
+  // was the home's only LCP outlier vs the single-shot reader pages.)
   return (
-    <Suspense
-      fallback={
-        <main className="mx-auto w-full max-w-4xl px-6 py-12">
-          <div className="h-12 w-72 max-w-full animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" />
-        </main>
-      }
-    >
-      <Finder variant="home" initialData={initialData} initialEngine={engine} />
-    </Suspense>
+    <Finder variant="home" initialData={initialData} initialEngine={engine} />
   );
 }
