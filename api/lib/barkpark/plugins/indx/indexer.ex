@@ -632,8 +632,13 @@ defmodule Barkpark.Plugins.Indx.Indexer do
 
   defp stringify_top(%{__struct__: _} = struct) do
     struct
+    # Drop :__meta__ and the heavy :content JSONB body. Only `title` is wired
+    # searchable (set_field_configuration), and the read path re-reads full docs
+    # from Postgres by _id — so shipping content (paper block-bodies are ~98% of
+    # the corpus, 1.5 MB) only bloats LoadString/AnalyzeString until they time
+    # out on the 2-vCPU box. _id/title/type/status/slug-cols stay.
     |> Map.from_struct()
-    |> Map.drop([:__meta__])
+    |> Map.drop([:__meta__, :content])
     # Drop unloaded associations (e.g. the D9 tenancy `:dataset_entity`,
     # `:workspace`, `:project` belongs_to refs) — `Content.list_documents/3`
     # doesn't preload them, and Jason raises on an `Ecto.Association.NotLoaded`
