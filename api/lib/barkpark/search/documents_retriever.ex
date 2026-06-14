@@ -43,7 +43,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     docs =
       base
-      |> order_rank(terms, config)
+      |> order_rank(parsed, config)
       |> limit(^limit)
       |> offset(^offset)
       |> Repo.all()
@@ -116,7 +116,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp where_match(queryable, parsed, terms, config, relaxed) do
-    include_dyn = include_dynamic(terms, config, relaxed)
+    include_dyn = include_dynamic(terms, parsed, config, relaxed)
     exclude_dyn = exclude_dynamic(Map.get(parsed, :excludes, []), relaxed)
 
     queryable =
@@ -131,28 +131,54 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end
   end
 
-  defp include_dynamic(terms, config, relaxed) do
+  defp include_dynamic(terms, parsed, config, relaxed) do
     threshold = similarity_threshold(config, relaxed)
+    # Min token length below which the pg_trgm fuzzy arm is suppressed (still
+    # matchable via tsvector/ilike). Short tokens like "hi"/"by" otherwise
+    # trigram-match almost anything above threshold — pure false positives.
+    min_fuzzy_len = fuzzy_min_len(config)
 
-    Enum.reduce(terms, nil, fn term, dyn ->
-      pattern = like_pattern(term)
-      prefix_pattern = prefix_pattern(term)
+    term_dyn =
+      Enum.reduce(terms, nil, fn term, dyn ->
+        pattern = like_pattern(term)
+        prefix_pattern = prefix_pattern(term)
 
+        clause =
+          dynamic(
+            [d],
+            fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
+              ilike(d.title, ^pattern) or
+              ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern)
+          )
+
+        # Fuzzy title arm only for tokens long enough to be meaningful.
+        clause =
+          if String.length(term) >= min_fuzzy_len do
+            dynamic([d], ^clause or fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold))
+          else
+            clause
+          end
+
+        clause =
+          if prefix_pattern do
+            dynamic([d], ^clause or ilike(d.title, ^prefix_pattern))
+          else
+            clause
+          end
+
+        if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
+      end)
+
+    # Phrase arms: phraseto_tsquery enforces true word adjacency, so the
+    # advertised "exact phrase" syntax actually matches adjacent words (a phrase
+    # also still matches its words individually via the term arms above, since
+    # each phrase is folded into `terms` by search_terms/1).
+    Enum.reduce(Map.get(parsed, :phrases, []), term_dyn, fn phrase, dyn ->
       clause =
         dynamic(
           [d],
-          fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
-            ilike(d.title, ^pattern) or
-            ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern) or
-            fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold)
+          fragment("?.search_vector @@ phraseto_tsquery('english', ?)", d, ^phrase)
         )
-
-      clause =
-        if prefix_pattern do
-          dynamic([d], ^clause or ilike(d.title, ^prefix_pattern))
-        else
-          clause
-        end
 
       if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
     end)
@@ -177,24 +203,46 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end)
   end
 
-  defp order_rank(queryable, terms, _config) when terms == [] do
-    order_by(queryable, [d], desc: d.updated_at)
+  defp order_rank(queryable, parsed, _config) do
+    # Rank on the WHOLE positive query (every term + phrase), not just the first
+    # token. plainto_tsquery AND-chains the words, so a multi-word query ranks
+    # on ALL of them; for a single term this is identical to the old hd(terms).
+    positive_query =
+      (Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, []))
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join(" ")
+
+    if positive_query == "" do
+      # Browse path (empty query) — recency only.
+      order_by(queryable, [d], desc: d.updated_at)
+    else
+      order_by(queryable, [d],
+        # 1) Exact title match wins outright — typing a doc's exact title
+        #    guarantees it ranks #1, ahead of any relevance score.
+        desc: fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query),
+        # 2) Relevance over the whole query: best of full-text rank and title
+        #    trigram similarity.
+        desc:
+          fragment(
+            "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?))",
+            d,
+            ^positive_query,
+            d.title,
+            ^positive_query
+          ),
+        # 3) Recency tiebreak.
+        desc: d.updated_at
+      )
+    end
   end
 
-  defp order_rank(queryable, terms, _config) do
-    primary = hd(terms)
-
-    order_by(queryable, [d],
-      desc:
-        fragment(
-          "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?))",
-          d,
-          ^primary,
-          d.title,
-          ^primary
-        ),
-      desc: d.updated_at
-    )
+  # Minimum token length for the pg_trgm fuzzy title arm — reads
+  # typo_policy.min_len_1typo, defaulting to 4 when absent. Tokens shorter than
+  # this skip the similarity() arm (they still match via tsvector/ilike).
+  defp fuzzy_min_len(config) do
+    config
+    |> Map.get("typo_policy", %{})
+    |> Map.get("min_len_1typo", 4)
   end
 
   defp similarity_threshold(config, true) do

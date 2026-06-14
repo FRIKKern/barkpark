@@ -119,6 +119,13 @@ defmodule Barkpark.Application do
         # knows the box is now exposed on the local network.
         log_sharing_banner()
 
+        # Fresh-install safety: the Postgres search engine's fuzzy/typo recovery
+        # relies on pg_trgm (similarity()). If the extension is missing — common
+        # on managed Postgres where CREATE EXTENSION needs an explicit allowlist
+        # — log a clear, actionable warning. Fully guarded: any failure (DB not
+        # ready, query error) is swallowed so it can never block boot.
+        check_pg_trgm()
+
         ok
 
       other ->
@@ -190,6 +197,32 @@ defmodule Barkpark.Application do
     end
 
     :ok
+  end
+
+  # Fresh-install guard: warn (don't crash) when pg_trgm is absent, since the
+  # default Postgres search engine degrades fuzzy/typo recovery without it.
+  @spec check_pg_trgm() :: :ok
+  defp check_pg_trgm do
+    case Barkpark.Repo.query("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", []) do
+      {:ok, %{num_rows: rows}} when rows > 0 ->
+        :ok
+
+      {:ok, _} ->
+        Logger.warning("""
+        [Search] pg_trgm extension is NOT installed — fuzzy/typo search is degraded.
+        Trigram similarity() matching and typo recovery will be skipped on Postgres.
+        Run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` (or enable it in your managed
+        Postgres extension allowlist) to restore full fuzzy search.
+        """)
+
+      _other ->
+        :ok
+    end
+  rescue
+    # Never let the boot-time probe take the app down (e.g. DB not yet ready).
+    error ->
+      Logger.debug("[Search] pg_trgm check skipped: #{inspect(error)}")
+      :ok
   end
 
   # Tell Phoenix to update the endpoint configuration

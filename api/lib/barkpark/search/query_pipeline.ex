@@ -121,18 +121,38 @@ defmodule Barkpark.Search.QueryPipeline do
 
     {hits, total, engine_meta} = retriever.search(scope, parsed, config, retriever_opts)
 
+    strategy = Map.get(config, "zero_hit_strategy", "drop_tokens")
+    # Thin-results threshold: when a query returns SOME but few hits, widening
+    # the fuzzy net often surfaces near-miss docs the strict pass dropped. Fires
+    # below this count (the zero-hit path below is unchanged).
+    low_hit_threshold = Map.get(config, "low_hit_threshold", 3)
+
     {final_hits, final_total, recovery} =
-      case {total, Map.get(config, "zero_hit_strategy", "drop_tokens")} do
-        {0, "none"} ->
+      cond do
+        # No recovery configured.
+        total == 0 and strategy == "none" ->
           {hits, total, nil}
 
-        {0, strategy} ->
+        # Zero-hit path — unchanged: drop_tokens then typo_widen.
+        total == 0 ->
           case recover_documents(scope, parsed, config, retriever_opts, strategy) do
             {rh, rt, recovery} -> {rh, rt, recovery}
             nil -> {hits, total, nil}
           end
 
-        _ ->
+        # Thin-results path — widen fuzzy on a positive-but-small result set and
+        # keep it ONLY when it strictly improves the hit count. Postgres engine
+        # ONLY: try_typo_widen runs the Postgres retriever, and Indx is already
+        # natively typo-tolerant, so widening an Indx result set would just
+        # replace its hits with Postgres ones (a surprising engine swap). The
+        # zero-hit path above still falls back to Postgres for any engine.
+        engine == "postgres" and total < low_hit_threshold and strategy != "none" ->
+          case try_typo_widen(scope, parsed, config, retriever_opts, strategy) do
+            {rh, rt, _r} when rt > total -> {rh, rt, "typo_widen"}
+            _ -> {hits, total, nil}
+          end
+
+        true ->
           {hits, total, nil}
       end
 

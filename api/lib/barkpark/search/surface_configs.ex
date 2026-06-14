@@ -22,6 +22,10 @@ defmodule Barkpark.Search.SurfaceConfigs do
       "similarity_threshold_relaxed" => 0.15
     },
     "zero_hit_strategy" => "drop_tokens",
+    # Below this hit count a positive-but-thin result set triggers a fuzzy widen
+    # in the pipeline (kept only if it returns more hits). Distinct from the
+    # zero-hit recovery path. See QueryPipeline.search_documents/5.
+    "low_hit_threshold" => 3,
     "highlight_fields" => ["title"]
   }
 
