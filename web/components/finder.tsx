@@ -110,7 +110,17 @@ function ResultRow({
 
 /* ── main ──────────────────────────────────────────────────────────────── */
 
-export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
+export function Finder({
+  variant = "page",
+  initialData = null,
+  initialEngine = "indx",
+}: {
+  variant?: "page" | "home";
+  /** Server-rendered browse result for the landing — seeds the first paint so
+   * results show in the initial HTML instead of after a client round-trip. */
+  initialData?: FindResponse | null;
+  initialEngine?: SearchEngine;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -170,13 +180,29 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
   // `bust` lets "reset cache" force a cold refetch after revalidateTag.
   const [bust, setBust] = useState(0);
   const reqKey = `${engine} ${cacheOn ? "c" : "f"} ${bust} ${q}`;
+  // Key the server-rendered seed corresponds to: the landing (cache off, bust 0,
+  // empty query) on the page's engine. When it matches `reqKey` on mount we use
+  // the seed instead of refetching — the first paint already has the results.
+  const seedKey = initialData ? `${initialEngine} f 0 ` : null;
   const [result, setResult] = useState<{
     key: string;
     data: FindResponse;
-    roundTripMs: number;
-  } | null>(null);
+    roundTripMs: number | null;
+    prerendered?: boolean;
+  } | null>(
+    initialData && seedKey
+      ? { key: seedKey, data: initialData, roundTripMs: null, prerendered: true }
+      : null,
+  );
   const loading = result?.key !== reqKey;
+  const consumedSeed = useRef(false);
   useEffect(() => {
+    // First mount: if the server already rendered exactly this view, keep the
+    // seed and skip the round-trip. Any later param change always fetches.
+    if (!consumedSeed.current) {
+      consumedSeed.current = true;
+      if (seedKey && reqKey === seedKey) return;
+    }
     const ctrl = new AbortController();
     const params = new URLSearchParams({ engine });
     if (q) params.set("q", q);
@@ -216,9 +242,14 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
         }
       });
     return () => ctrl.abort();
-  }, [reqKey, engine, q, cacheOn]);
+  }, [reqKey, engine, q, cacheOn, seedKey]);
   const data = result?.data ?? null;
   const roundTripMs = result?.key === reqKey ? result.roundTripMs : null;
+  // Stale-while-revalidate: only blank to a skeleton when there's NOTHING to
+  // show. Once we have any result, a new query keeps the old list visible
+  // (dimmed) until the fresh one lands — the search feels continuous.
+  const showSkeleton = loading && !data;
+  const prerendered = result?.key === reqKey && result.prerendered === true;
 
   // Popular past queries (search-intelligence) — shown when the box is empty.
   const [popular, setPopular] = useState<PopularQuery[]>([]);
@@ -405,6 +436,9 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
             </span>
             <input
               type="search"
+              id="finder-search"
+              name="q"
+              aria-label="Search documents"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder='Try: headless · "cli guide" · phoenex · report -draft'
@@ -616,7 +650,7 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
         {/* results */}
         <section className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-400">
-            {loading ? (
+            {showSkeleton ? (
               <span>Searching…</span>
             ) : (
               <span className="flex flex-wrap items-center gap-x-2">
@@ -647,7 +681,14 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
                     · rt {roundTripMs}ms
                   </span>
                 ) : null}
-                {data ? (
+                {prerendered ? (
+                  <span
+                    className="rounded bg-emerald-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                    title="server-rendered into the first byte (ISR Data Cache)"
+                  >
+                    prerendered
+                  </span>
+                ) : data ? (
                   <span
                     className={`rounded px-1.5 py-0.5 text-[0.7rem] font-medium ${
                       data.cache
@@ -661,6 +702,9 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
                         : "cached"
                       : "no-store"}
                   </span>
+                ) : null}
+                {loading ? (
+                  <span className="animate-pulse text-zinc-400">· searching…</span>
                 ) : null}
               </span>
             )}
@@ -707,7 +751,7 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
             </div>
           ) : null}
 
-          {loading ? (
+          {showSkeleton ? (
             <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
               {Array.from({ length: 5 }).map((_, i) => (
                 <li key={i} className="flex flex-col gap-2 py-5">
@@ -723,7 +767,11 @@ export function Finder({ variant = "page" }: { variant?: "page" | "home" }) {
                 : "No documents found."}
             </p>
           ) : (
-            <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
+            <ul
+              className={`flex flex-col divide-y divide-zinc-200 transition-opacity dark:divide-zinc-800 ${
+                loading ? "opacity-50" : "opacity-100"
+              }`}
+            >
               {visibleHits.map((hit, i) => (
                 <Fragment key={`${hit.type}:${hit.id}`}>
                   {boundary === i ? (

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { FIND_TAG } from "@/app/api/find/route";
+import { FIND_TAG } from "@/lib/find-search";
 
 // Trigger an Indx blue/green rebuild via the token-gated Barkpark endpoint
 // (uses the server-only read token — never bundled). The rebuild runs async on

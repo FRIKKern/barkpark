@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "ignoreCommand": "exit 1"
+  "ignoreCommand": "exit 1",
+  "regions": ["fra1"]
 }
