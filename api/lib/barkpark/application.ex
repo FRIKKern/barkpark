@@ -63,6 +63,16 @@ defmodule Barkpark.Application do
           # schemas) before starting Oban, so Oban can never dequeue a job
           # against an unregistered schema. No paused queues, no resume loop.
           Barkpark.SchemaBootstrap,
+          # Indx retriever-seam runtime. Indx is NOT a registered plugin, so it
+          # contributes nothing via collect_workers/1 — its supervised processes
+          # MUST be declared statically here. Order matters: Auth first (the
+          # :indx Oban queue jobs and Recovery's boot login both call
+          # Auth.token/0), then Recovery (re-seats the live-dataset pointer
+          # after a restart), then Oban. Without these, every IndexerWorker job
+          # crashes on a dead Auth process and engine=indx silently falls back
+          # to Postgres recovery.
+          Barkpark.Plugins.Indx.Auth,
+          Barkpark.Plugins.Indx.Recovery,
           {Oban, oban_config},
           {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
           {Phoenix.PubSub, name: Barkpark.PubSub},
