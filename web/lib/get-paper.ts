@@ -3,6 +3,7 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { client } from "./barkpark-client";
 import { fetchPaperBySlug, type PaperDocument } from "./papers";
+import { bpAll, bpType } from "./bp-tags";
 
 export interface PaperResult {
   paper: PaperDocument | null;
@@ -15,7 +16,9 @@ export interface PaperResult {
 const cachedPaper = unstable_cache(
   (slug: string) => fetchPaperBySlug(client, slug),
   ["paper-by-slug"],
-  { revalidate: 300, tags: ["doc", "doc:paper"] },
+  // 300s safety net; the webhook (revalidateTag bp:ds:production:type:paper)
+  // is the real freshness path on publish.
+  { revalidate: 300, tags: ["doc", "doc:paper", bpAll(), bpType("paper")] },
 );
 
 /**

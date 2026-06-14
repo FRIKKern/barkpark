@@ -3,6 +3,7 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { client, createClient } from "./barkpark-client";
 import { fetchPostBySlug, type PostDocument } from "./posts";
+import { bpAll, bpType } from "./bp-tags";
 
 export interface PostResult {
   post: PostDocument | null;
@@ -18,7 +19,11 @@ const cachedPost = unstable_cache(
       slug,
     ),
   ["post-by-slug"],
-  { revalidate: 300, tags: ["doc", "doc:post"] },
+  // 300s is now a SAFETY NET, not the freshness mechanism: a publish in Studio
+  // fires the webhook → revalidateTag(bp:ds:production:type:post) → instant
+  // bust. (Tag granularity is per-type, not per-slug — coarse but correct: the
+  // slug→id map isn't known at cache-wrap time.)
+  { revalidate: 300, tags: ["doc", "doc:post", bpAll(), bpType("post")] },
 );
 
 /**

@@ -9,6 +9,7 @@ import {
   type ParsedQuery,
   type SearchEngine,
 } from "@/lib/find";
+import { bpAll } from "@/lib/bp-tags";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -68,10 +69,12 @@ async function rawUpstream(url: string): Promise<UpstreamJson> {
 }
 
 /** Cached variant — keyed on the full URL, 5-min revalidate, tagged for
- * on-demand busting. Ignores the origin's Cache-Control (the whole point). */
+ * on-demand busting. Ignores the origin's Cache-Control (the whole point).
+ * Tagged with FIND_TAG (manual reset/reindex buttons) AND the dataset `_all`
+ * tag so a published change anywhere refreshes search via the webhook. */
 const cachedUpstream = unstable_cache(rawUpstream, ["find-upstream"], {
   revalidate: 300,
-  tags: [FIND_TAG],
+  tags: [FIND_TAG, bpAll()],
 });
 
 export interface RunSearchArgs {
