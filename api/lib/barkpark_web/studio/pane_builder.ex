@@ -392,7 +392,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     result =
       Graph.traverse(id, [dataset: dataset, direction: :both, depth: 2] ++ scope_kw)
 
-    %{nodes: result.nodes, edges: result.edges}
+    # Thread `root` through — the renderer pins it dead-center as the
+    # gravitational sun and bands dependents into BFS blast-rings. Dropping it
+    # would silently re-center the graph on an arbitrary serialization-order
+    # node. Fall back to the queried id (a real node id) when traverse omits it.
+    %{nodes: result.nodes, edges: result.edges, root: result.root || id}
   end
 
   defp graph_payload(_doc, _dataset, _scope_kw), do: %{nodes: [], edges: []}
