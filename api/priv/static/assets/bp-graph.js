@@ -63,11 +63,15 @@
   // Label color (muted grey) + zoom-fade thresholds.
   var LABEL_COLOR_DARK = "#8b92a3"; // muted grey
   var LABEL_COLOR_LIGHT = "#5a5f6e";
-  // Obsidian text-fade: labels essentially HIDDEN at the default fit zoom
-  // (~scale 1-2), start appearing ~2.2, fully in by ~3.5. Hubs bias earlier;
-  // hovered node + 1-hop neighbors always show regardless of zoom.
-  var LABEL_FADE_LO = 2.2; // below this camera scale: labels hidden
-  var LABEL_FADE_HI = 3.5; // at/above this scale: labels fully in
+  // Obsidian text-fade is FIT-RELATIVE: the auto-fit scale for a spread layout
+  // can land well below any fixed value, so we gate labels off the ratio of the
+  // current camera scale to the captured fitScale rather than absolute scale.
+  //   currentScale <= fitScale * LABEL_FADE_LO_MULT  -> opacity 0  (default/wide = clean)
+  //   ramp (easeOutCubic) to opacity 1 by fitScale * LABEL_FADE_HI_MULT
+  // On first load cam.scale == fitScale, so the ratio is 1.0 < 1.2 → no labels.
+  // Hovered node + its 1-hop neighbors are the ONLY always-on exceptions.
+  var LABEL_FADE_LO_MULT = 1.2; // <= fitScale*this → hidden (default view)
+  var LABEL_FADE_HI_MULT = 2.4; // >= fitScale*this → fully in (~2.4x zoom-in)
 
   var FONT_STACK =
     "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, system-ui, sans-serif";
@@ -330,6 +334,13 @@
     var camTargetScale = 1; // scale glides toward this; cursor world-point pinned
     var camZoomAnchor = null; // {wx, wy, px, py} kept fixed during the glide
     var camAnimating = false; // animateCam (fit) in flight
+
+    // Auto-fit ("default/wide") zoom baseline — captured every time fitInternal
+    // computes its target scale. Labels are gated RELATIVE to this: at/near
+    // fitScale the view is clean (no labels); the ramp fades them in only once
+    // the user has zoomed IN past it. null until the first fit runs, in which
+    // case label code falls back to the live cam.scale as the baseline.
+    var fitScale = null;
 
     // One-shot auto-fit: the sim settles as a small centroid clump, so frame it
     // ONCE when alpha first cools below the settle threshold. Never again (so a
@@ -1462,17 +1473,31 @@
       }
     }
 
-    // ── LABELS (screen-space, zoom-fade + degree bias + greedy declutter) ──
-    // Obsidian: labels are HIDDEN zoomed out, fade in smoothly as the camera
-    // scale climbs from LABEL_FADE_LO toward LABEL_FADE_HI. Hub nodes (higher
-    // degree) cross their threshold first; the root + hovered node + 1-hop
-    // neighbors are ALWAYS shown. Greedy collision-skip keeps it from piling.
+    // ── LABELS (screen-space, FIT-RELATIVE zoom-fade + degree bias + declutter) ──
+    // Obsidian text-fade: labels are HIDDEN at the default/wide auto-fit view and
+    // fade in (easeOutCubic) only as the user zooms IN past it. The window is
+    // RELATIVE to fitScale (the captured auto-fit baseline), not absolute scale,
+    // because the auto-fit scale for a spread layout can land far below any fixed
+    // value. The ONLY always-on exception is the hovered node + its 1-hop
+    // neighbors — the active/root node is marked by accent color, NOT a label,
+    // until hovered or zoomed (Obsidian-pure). Greedy collision-skip keeps it calm.
     function drawLabels(now) {
       var s = cam.scale;
-      if (s < LABEL_FADE_LO && hoverId == null && focusIdx < 0) return; // calm void
+      // Baseline: the auto-fit scale. Until the first fit runs, fall back to the
+      // live scale so the ratio is 1.0 (default view = clean) and nothing breaks.
+      var base = fitScale != null ? fitScale : s;
+      var lo = base * LABEL_FADE_LO_MULT; // <= this scale → labels hidden
+      var hi = base * LABEL_FADE_HI_MULT; // >= this scale → labels fully in
+      var hovering = hoverId != null || focusIdx >= 0;
+      // calm void: at/under the wide default with no hover, draw nothing.
+      if (s <= lo && !hovering) return;
       var focusNode = focusIdx >= 0 && a11yOrder[focusIdx] ? a11yOrder[focusIdx] : null;
-      // normalize the zoom fade window into 0..1
-      var zoomT = clamp((s - LABEL_FADE_LO) / (LABEL_FADE_HI - LABEL_FADE_LO), 0, 1);
+      // normalize the zoom-in distance past the floor into 0..1, then ease.
+      // zoomT rises only as s climbs from lo→hi, so zooming IN reveals labels and
+      // zooming OUT (back toward fitScale) hides them. Direction is correct by
+      // construction: larger s → larger zoomT → higher opacity.
+      var zoomT = hi > lo ? clamp((s - lo) / (hi - lo), 0, 1) : (s >= hi ? 1 : 0);
+      zoomT = easeOutCubic(zoomT);
       // degree bias: hubs surface earlier. Bias the effective fade-in per node
       // by its share of the max degree so high-degree labels appear first.
       var maxDeg = 1;
@@ -1490,12 +1515,14 @@
         var deg = node.degree;
         var show = false;
         var labelA = 1;
-        if (isRoot || isHov) {
-          // root + hovered + 1-hop neighbors always show, full opacity.
+        if (isHov) {
+          // hovered node + its 1-hop neighbors: ALWAYS shown, full opacity, even
+          // at the wide default zoom. This is the focused ego-network reveal.
           show = true;
-        } else if (s < LABEL_FADE_LO) {
-          // Below the fade floor only root + hovered ego-net carry labels —
-          // the wide view reads as clean dots + faint threads, no word-pile.
+        } else if (s <= lo) {
+          // at/under the fit-relative floor, only the hovered ego-net carries
+          // labels — the wide view reads as clean dots + faint threads. The
+          // root is NOT exempt here: it's marked by accent color, not a label.
           continue;
         } else {
           // per-node fade: shift the zoom ramp earlier for hubs (degree bias)
@@ -1507,7 +1534,7 @@
           if (labelA > 0.05) show = true;
         }
         if (!show || labelA <= 0.001) continue;
-        if (node.phantom && s < LABEL_FADE_HI && !isHov) continue;
+        if (node.phantom && s < hi && !isHov) continue;
         // importance: root > hovered/adjacent > by degree. High importance wins
         // contested space in the greedy declutter below.
         var prio = isRoot ? 3 : isHov ? 2 : deg / 1000;
@@ -2178,6 +2205,10 @@
       // graph can't over-zoom its compact layout into big discs.
       var scale = Math.min((W - inset * 2) / bw, (H - inset * 2) / bh, 2.0);
       scale = clamp(scale, 0.08, 2.0);
+      // Record the default/wide zoom baseline. Both the animated and the
+      // instant (settle / reduced-motion) paths funnel through here, so this
+      // is the single capture point for the fit-relative label gate.
+      fitScale = scale;
       var cx = (minX + maxX) / 2,
         cy = (minY + maxY) / 2;
       var target = {
