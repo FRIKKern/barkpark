@@ -86,6 +86,8 @@
         label: "data(label)",
         "font-size": "10px",
         color: "#1f2937",
+        "text-outline-color": "#f8fafc",
+        "text-outline-width": 2,
         "text-valign": "bottom",
         "text-margin-y": 4,
         width: 28,

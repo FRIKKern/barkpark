@@ -88,6 +88,7 @@ defmodule BarkparkWeb.Studio.GraphView do
       <div
         id="studio-graph"
         class="graph-pane"
+        style="height: calc(100vh - 56px); min-height: 480px;"
         phx-hook="GraphPane"
         phx-update="ignore"
         data-nodes={@nodes_json}
