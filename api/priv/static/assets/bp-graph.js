@@ -26,42 +26,48 @@
   // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
   // monochrome, generous void. Beauty through restraint. The luminous-nebula
   // language (orbs, corona, blast-rings, vignette, glyphs) is gone.
-  var ACCENT = "#7C6CF0"; // root / active / selection — soft Obsidian violet
-  var ACCENT_RGB = [124, 108, 240];
+  var ACCENT = "#9a8cff"; // root / active / selection — soft Obsidian violet
+  var ACCENT_RGB = [154, 140, 255];
   var A11Y_RING = "#60A5FA"; // keyboard-focus ring, kept DISTINCT from accent
   var SLATE = "#94A3B8"; // _unknown + phantom + ash mix target
   var AMBER = "#FBBF24"; // the only warm pixel — parse-error state
 
   // Monochrome node tint — one muted desaturated lavender-grey for EVERY node
   // on dark (the default look). Per-type color is the opt-in "Full color" toggle.
-  var MONO_DARK = "#b9bdd0"; // dark-theme resting node fill
+  var MONO_DARK = "#a6adc0"; // dark-theme resting node fill (soft cool blue-grey)
   var MONO_LIGHT = "#5a5f6e"; // light-theme resting node fill (dark dot on white)
   var NODE_WHITE = "#f2f3f8"; // hovered/neighbor brighten target (dark)
 
   // Flat theme backgrounds (no gradient, no vignette).
-  var BG_DARK = "#1a1a1f";
+  var BG_DARK = "#16161a";
   var BG_LIGHT = "#f4f4f6";
 
   // Link base color/opacity — very faint thin threads.
-  var LINK_RGB_DARK = "230,230,240";
+  var LINK_RGB_DARK = "170,180,205";
   var LINK_RGB_LIGHT = "40,44,58";
-  var LINK_A_DARK = 0.10; // resting link alpha (dark)
+  var LINK_A_DARK = 0.09; // resting link alpha (dark) — very faint thread
   var LINK_A_LIGHT = 0.14; // resting link alpha (light)
-  var LINK_A_FOCUS = 0.45; // incident-to-hover link alpha
-  var LINK_A_DIM = 0.04; // non-incident link alpha under hover
+  var LINK_A_FOCUS = 0.5; // incident-to-hover link alpha (bright)
+  var LINK_A_DIM = 0.03; // non-incident link alpha under hover (dim hard)
 
-  // Node radius range (gentle sqrt scale with degree).
-  var NODE_R_MIN = 4;
-  var NODE_R_MAX = 7;
+  // Node radius range (gentle sqrt scale with degree). Small flat dots.
+  var NODE_R_MIN = 3.5;
+  var NODE_R_MAX = 6;
+
+  // On-screen drawn-radius cap (px): even zoomed in, a dot never becomes a disc.
+  var NODE_R_SCREEN_MAX = 10;
 
   // Hover focus: non-focus nodes fade to this; their links to LINK_A_DIM.
-  var HOVER_DIM_ALPHA = 0.22;
+  var HOVER_DIM_ALPHA = 0.15; // dim hard so the focused ego-network pops
 
   // Label color (muted grey) + zoom-fade thresholds.
-  var LABEL_COLOR_DARK = "#8a8f9e";
+  var LABEL_COLOR_DARK = "#8b92a3"; // muted grey
   var LABEL_COLOR_LIGHT = "#5a5f6e";
-  var LABEL_FADE_LO = 0.85; // below this camera scale: labels hidden
-  var LABEL_FADE_HI = 1.6; // at/above this scale: labels fully in
+  // Obsidian text-fade: labels essentially HIDDEN at the default fit zoom
+  // (~scale 1-2), start appearing ~2.2, fully in by ~3.5. Hubs bias earlier;
+  // hovered node + 1-hop neighbors always show regardless of zoom.
+  var LABEL_FADE_LO = 2.2; // below this camera scale: labels hidden
+  var LABEL_FADE_HI = 3.5; // at/above this scale: labels fully in
 
   var FONT_STACK =
     "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, system-ui, sans-serif";
@@ -641,10 +647,12 @@
           node.r = radiusForDegree(node.degree);
         }
       });
-      // root is only SLIGHTLY larger — a small accent dot, never a sun.
+      // root is only SLIGHTLY larger — ~+1px over a normal dot, never a sun.
+      // Obsidian's open-note highlight is understated: accent fill + a hair
+      // bigger, not a dominant ball.
       var rootNode = nextById[newRootId];
       if (rootNode) {
-        rootNode.r = clamp(radiusForDegree(rootNode.degree) + 1.5, NODE_R_MIN + 1.5, NODE_R_MAX + 1.5);
+        rootNode.r = clamp(radiusForDegree(rootNode.degree) + 1, NODE_R_MIN + 1, NODE_R_MAX + 1);
       }
 
       // hash for view-state restore
@@ -869,7 +877,9 @@
 
       var n = nodes.length;
       var root = rootId ? byId[rootId] : null;
-      var repel = n < 12 ? -950 : -680;
+      // Airier field: a touch more repulsion so the smaller dots still sit in
+      // generous dark space (Obsidian's whole-graph breathing room).
+      var repel = n < 12 ? -1050 : -780;
 
       // (2) link springs
       for (var i = 0; i < edges.length; i++) {
@@ -880,7 +890,7 @@
         var dx = b.x - a.x,
           dy = b.y - a.y;
         var dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-        var rest = 215 * (0.7 + 0.3 * e.wBand);
+        var rest = 240 * (0.7 + 0.3 * e.wBand);
         var k = 0.6 * alpha;
         var force = ((dist - rest) / dist) * k * 0.5;
         var fx = dx * force,
@@ -1341,6 +1351,9 @@
       if (node.alpha < 0.02) return;
       var p = worldToScreen(node.x, node.y);
       var r = node.r * node.scaleK * cam.scale;
+      // Cap the on-screen radius so even zoomed all the way in a node never
+      // becomes a big disc — Obsidian's dots stay tiny at every zoom.
+      if (r > NODE_R_SCREEN_MAX) r = NODE_R_SCREEN_MAX;
       if (r < 0.4) return;
       var isRoot = node.id === rootId;
       var hovered = hoverId != null && node.id === hoverId;
@@ -1405,6 +1418,19 @@
       ctx.fill();
       ctx.restore();
 
+      // ACTIVE NODE: a subtle 1px brighter accent ring — Obsidian's understated
+      // open-note highlight. Not a glow, not a halo, just a thin lift.
+      if (isRoot && !forced && !frosted) {
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = shiftL(ACCENT, 0.18);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], r + 0.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // in_progress task badge — a single thin accent quarter-ring (kept, calm).
       if (!frosted && node.type === "task" && node.status === "in_progress" && !forced) {
         ctx.save();
@@ -1467,12 +1493,18 @@
         if (isRoot || isHov) {
           // root + hovered + 1-hop neighbors always show, full opacity.
           show = true;
+        } else if (s < LABEL_FADE_LO) {
+          // Below the fade floor only root + hovered ego-net carry labels —
+          // the wide view reads as clean dots + faint threads, no word-pile.
+          continue;
         } else {
           // per-node fade: shift the zoom ramp earlier for hubs (degree bias)
-          // so high-degree nodes label first. degBias in [0, ~0.4].
-          var degBias = 0.4 * (Math.sqrt(deg) / Math.sqrt(maxDeg));
-          labelA = clamp((zoomT + degBias - 0.15) / 0.5, 0, 1);
-          if (labelA > 0.001) show = true;
+          // so high-degree nodes label SLIGHTLY first. degBias in [0, ~0.25] —
+          // kept gentle so even the biggest hub is still hidden at the fade
+          // floor (zoomT≈0) and only surfaces once the user zooms past it.
+          var degBias = 0.25 * (Math.sqrt(deg) / Math.sqrt(maxDeg));
+          labelA = clamp(zoomT + degBias, 0, 1);
+          if (labelA > 0.05) show = true;
         }
         if (!show || labelA <= 0.001) continue;
         if (node.phantom && s < LABEL_FADE_HI && !isHov) continue;
@@ -1492,10 +1524,10 @@
         var it = cand[c];
         var nd = it.node;
         var p = worldToScreen(nd.x, nd.y);
-        var r = nd.r * cam.scale;
+        var r = Math.min(nd.r * cam.scale, NODE_R_SCREEN_MAX);
         var x = Math.round(p[0]);
-        var y = Math.round(p[1] + r + (it.isRoot ? 13 : 11));
-        var fontPx = it.isRoot ? 12 : nd.phantom ? 10 : 11;
+        var y = Math.round(p[1] + r + (it.isRoot ? 12 : 10));
+        var fontPx = it.isRoot ? 11 : nd.phantom ? 9 : 10;
         var label = nd.phantom ? nd.broken_id || nd.title : nd.title;
         var halfW = Math.min(String(label).length * fontPx * 0.3, 55);
         var box = [x - halfW, y - 7, x + halfW, y + 7];
@@ -1550,21 +1582,21 @@
     function drawLabel(node, isRoot, isHov, labelA) {
       if (labelA == null) labelA = 1;
       var p = worldToScreen(node.x, node.y);
-      var r = node.r * cam.scale;
+      var r = Math.min(node.r * cam.scale, NODE_R_SCREEN_MAX);
       var baseColor = theme === "light" ? LABEL_COLOR_LIGHT : LABEL_COLOR_DARK;
       var font, color, track;
       if (isRoot) {
         // active node label — accent-tinted, a hair larger. Not a sun, just
         // gently distinguished.
-        font = "500 12px " + FONT_STACK;
+        font = "500 11px " + FONT_STACK;
         color = ACCENT;
         track = "0.005em";
       } else if (node.phantom) {
-        font = "italic 400 10px " + FONT_STACK;
+        font = "italic 400 9px " + FONT_STACK;
         color = theme === "light" ? rgba(MONO_LIGHT, 0.65) : rgba(MONO_DARK, 0.5);
         track = "0.01em";
       } else {
-        font = "400 11px " + FONT_STACK;
+        font = "400 10px " + FONT_STACK;
         // hovered node + neighbors brighten their label toward the node color.
         color = isHov
           ? (theme === "light" ? "#2a2e3a" : "#d8dae6")
@@ -1578,7 +1610,7 @@
       var text = isHov ? label : truncate(label, font, maxW, track);
 
       var x = Math.round(p[0]);
-      var y = Math.round(p[1] + r + (isRoot ? 13 : 11));
+      var y = Math.round(p[1] + r + (isRoot ? 12 : 10));
       ctx.save();
       ctx.font = font;
       if ("letterSpacing" in ctx) ctx.letterSpacing = track;
@@ -2141,8 +2173,11 @@
       var inset = 48;
       var bw = maxX - minX,
         bh = maxY - minY;
-      var scale = Math.min((W - inset * 2) / bw, (H - inset * 2) / bh, 4.0);
-      scale = clamp(scale, 0.08, 4.0);
+      // Fit MAX-ZOOM cap is 2.0 (was 4.0): the default fit view stays zoomed
+      // OUT, so dots stay small with lots of dark space, and a sparse 3-node
+      // graph can't over-zoom its compact layout into big discs.
+      var scale = Math.min((W - inset * 2) / bw, (H - inset * 2) / bh, 2.0);
+      scale = clamp(scale, 0.08, 2.0);
       var cx = (minX + maxX) / 2,
         cy = (minY + maxY) / 2;
       var target = {
