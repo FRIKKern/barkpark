@@ -1,7 +1,7 @@
-// bp-graph.js — Northern Night constellation renderer for the Studio
-// blast-radius pane. Self-contained vanilla Canvas2D + a hand-rolled
-// velocity-Verlet force simulation. ZERO npm, ZERO network-fetched libs,
-// ZERO font fetch (Golden Rule). Cytoscape is fully gutted.
+// bp-graph.js — Obsidian-style graph renderer for the Studio blast-radius
+// pane. Self-contained vanilla Canvas2D + a hand-rolled velocity-Verlet force
+// simulation. ZERO npm, ZERO network-fetched libs, ZERO font fetch (Golden
+// Rule). Cytoscape is fully gutted.
 //
 // PUBLIC SURFACE (the integration contract):
 //   window.BarkparkGraphRenderer(containerEl, {nodes, edges}, opts)
@@ -14,24 +14,62 @@
 // it parses in a try/catch and renders an authored amber PARSE-ERROR state
 // instead of the old silent JSON.parse -> [] swallow.
 //
-// THE THESIS: emissive depth (luminance is the only depth language on dark),
-// generous negative space, slow physics that says "complete, not loading."
-// The root is pinned dead-center as the gravitational sun; dependents band
-// into concentric BFS blast-rings so radial distance encodes impact rank.
+// THE THESIS: restraint. Small flat dots, thin faint threads, near-monochrome,
+// generous empty space, a calm sim that settles to rest. Structure legible at
+// a glance — Obsidian's graph view, not a glowing nebula. The root/active node
+// wears the accent and is only slightly larger; hovering a node lifts it and
+// its 1-hop neighbors while everything else fades back.
 (function () {
   "use strict";
 
   // ───────────────────────────────────────────────────────────── constants ──
-  var ACCENT = "#9B8CFF"; // root halo / selection / hover corona / guides
-  var ACCENT_RGB = [155, 140, 255];
+  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
+  // monochrome, generous void. Beauty through restraint. The luminous-nebula
+  // language (orbs, corona, blast-rings, vignette, glyphs) is gone.
+  var ACCENT = "#7C6CF0"; // root / active / selection — soft Obsidian violet
+  var ACCENT_RGB = [124, 108, 240];
   var A11Y_RING = "#60A5FA"; // keyboard-focus ring, kept DISTINCT from accent
   var SLATE = "#94A3B8"; // _unknown + phantom + ash mix target
   var AMBER = "#FBBF24"; // the only warm pixel — parse-error state
 
+  // Monochrome node tint — one muted desaturated lavender-grey for EVERY node
+  // on dark (the default look). Per-type color is the opt-in "Full color" toggle.
+  var MONO_DARK = "#b9bdd0"; // dark-theme resting node fill
+  var MONO_LIGHT = "#5a5f6e"; // light-theme resting node fill (dark dot on white)
+  var NODE_WHITE = "#f2f3f8"; // hovered/neighbor brighten target (dark)
+
+  // Flat theme backgrounds (no gradient, no vignette).
+  var BG_DARK = "#1a1a1f";
+  var BG_LIGHT = "#f4f4f6";
+
+  // Link base color/opacity — very faint thin threads.
+  var LINK_RGB_DARK = "230,230,240";
+  var LINK_RGB_LIGHT = "40,44,58";
+  var LINK_A_DARK = 0.10; // resting link alpha (dark)
+  var LINK_A_LIGHT = 0.14; // resting link alpha (light)
+  var LINK_A_FOCUS = 0.45; // incident-to-hover link alpha
+  var LINK_A_DIM = 0.04; // non-incident link alpha under hover
+
+  // Node radius range (gentle sqrt scale with degree).
+  var NODE_R_MIN = 4;
+  var NODE_R_MAX = 7;
+
+  // Hover focus: non-focus nodes fade to this; their links to LINK_A_DIM.
+  var HOVER_DIM_ALPHA = 0.22;
+
+  // Label color (muted grey) + zoom-fade thresholds.
+  var LABEL_COLOR_DARK = "#8a8f9e";
+  var LABEL_COLOR_LIGHT = "#5a5f6e";
+  var LABEL_FADE_LO = 0.85; // below this camera scale: labels hidden
+  var LABEL_FADE_HI = 1.6; // at/above this scale: labels fully in
+
   var FONT_STACK =
     "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, system-ui, sans-serif";
 
-  // OKLCH L~0.70 -> sRGB hex, hues >=25 apart. Capacity, not a mandate.
+  // Per-type hues — used ONLY when the optional "Full color" toggle is on.
+  // The default look is monochrome (MONO_DARK/MONO_LIGHT), so this is capacity,
+  // not a mandate. Every node is a plain filled circle; type is not a shape or
+  // glyph channel anymore (Obsidian draws plain dots).
   var TYPE_HEX = {
     post: "#7C8CEF",
     page: "#9B82ED",
@@ -46,44 +84,6 @@
     project: "#A3E635",
     "game-data": "#E879F9",
     _unknown: SLATE
-  };
-
-  // Mandatory non-color channel #1: a per-type glyph (WCAG 1.4.1).
-  var TYPE_GLYPH = {
-    post: "P",
-    page: "G",
-    paper: "R",
-    task: "K",
-    author: "A",
-    category: "C",
-    book: "B",
-    asset: "M",
-    mediaAsset: "M",
-    sheet: "S",
-    project: "J",
-    "game-data": "D",
-    _unknown: "·"
-  };
-
-  // Northern Night uses ROUND luminous glass orbs / cabochons for every node —
-  // the Obsidian-faithful read. Shape is therefore NO LONGER a type channel;
-  // the non-color WCAG channels are the per-type GLYPH (above) + per-type HUE.
-  // Kept as an all-"circle" map so the legend / shapePath callers stay uniform
-  // (and a future shape revival has one place to change). Phantoms still draw a
-  // dashed ghost ring, handled inline in drawNode, not via this map.
-  var TYPE_SHAPE = {
-    post: "circle",
-    page: "circle",
-    paper: "circle",
-    asset: "circle",
-    mediaAsset: "circle",
-    book: "circle",
-    author: "circle",
-    category: "circle",
-    project: "circle",
-    task: "circle",
-    sheet: "circle",
-    "game-data": "circle"
   };
 
   // ─────────────────────────────────────────────────────────── color utils ──
@@ -158,13 +158,6 @@
       B = hue2rgb(p, q, h - 1 / 3);
     }
     return rgbToHex(R * 255, G * 255, B * 255);
-  }
-  function hslL(hex) {
-    var c = hexToRgb(hex);
-    var r = c[0] / 255,
-      g = c[1] / 255,
-      b = c[2] / 255;
-    return (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
   }
 
   function clamp(v, lo, hi) {
@@ -321,10 +314,10 @@
 
     var R_RING = 0; // recomputed on layout = 0.22*min(W,H)
     var flowOn = !!opts.flow;
-    // Full-color is the HERO state by default — the luminous focal hierarchy is
-    // the wow moment, so the first impression must NOT be the desaturated one.
-    // Ash (60% toward slate) is the opt-in RESTRAINT, flipped from the legend.
-    var fullColor = opts.fullColor != null ? !!opts.fullColor : true;
+    // Monochrome is the DEFAULT — the elegant near-monochrome Obsidian look is
+    // the resting state, so the first impression is the calm desaturated one.
+    // Per-type "Full color" is the opt-in toggle, flipped from the legend.
+    var fullColor = opts.fullColor != null ? !!opts.fullColor : false;
     var nowT = 0;
 
     // ── eased camera scale (luxe wheel/button zoom) ──
@@ -627,38 +620,31 @@
         if (ndepth[n.id] == null) ndepth[n.id] = maxD + 1;
       });
 
-      // node radii: clamp(8+5*sqrt(degree),8,32); sqrt-compressed.
+      // node radii: small flat dots, gentle sqrt scale with degree (4..9px).
+      // Obsidian's read — a leaf is a tiny dot, a hub is only modestly bigger.
       var n = nextNodes.length;
       var degs = nextNodes.filter(function (x) { return !x.phantom; }).map(function (x) { return x.degree; });
       var dMax = degs.length ? Math.max.apply(null, degs) : 0;
-      var dMin = degs.length ? Math.min.apply(null, degs) : 0;
+      function radiusForDegree(deg) {
+        // sqrt ramp from NODE_R_MIN (deg 0) toward NODE_R_MAX, normalized by the
+        // graph's own max degree so the range is used regardless of scale.
+        if (dMax <= 0) return NODE_R_MIN + 1;
+        var t = Math.sqrt(deg) / Math.sqrt(dMax); // 0..1
+        return NODE_R_MIN + (NODE_R_MAX - NODE_R_MIN) * clamp(t, 0, 1);
+      }
       nextNodes.forEach(function (node) {
         if (node.phantom) {
-          node.r = 7;
+          node.r = NODE_R_MIN; // phantom: a dim hollow dot, smallest tier
         } else if (node.id === newRootId) {
-          node.r = 0; // set after base formula below
-        } else if (dMax === dMin) {
-          node.r = 14; // guard: all degrees equal -> neutral mid-size
+          node.r = 0; // set just below
         } else {
-          var base;
-          if (n === 1) base = 28;
-          else if (n <= 3) base = 22;
-          else if (n <= 10) base = 16;
-          else base = clamp(8 + 5 * Math.sqrt(node.degree), 8, 32);
-          node.r = base;
+          node.r = radiusForDegree(node.degree);
         }
       });
-      // root gets x1.4 of its formula size
+      // root is only SLIGHTLY larger — a small accent dot, never a sun.
       var rootNode = nextById[newRootId];
       if (rootNode) {
-        var rb;
-        if (n === 1) rb = 28;
-        else rb = clamp(8 + 5 * Math.sqrt(rootNode.degree), 8, 32);
-        // 1.2 (was 1.55): the root must read as clearly the LARGEST node, NOT a
-        // dominating blob that occupies a third of the frame. Primacy now comes
-        // from the accent ring + breathing pulse + soft corona, not raw size, so
-        // a restrained 1.2x keeps the sun elegant without washing the center.
-        rootNode.r = rb * 1.2;
+        rootNode.r = clamp(radiusForDegree(rootNode.degree) + 1.5, NODE_R_MIN + 1.5, NODE_R_MAX + 1.5);
       }
 
       // hash for view-state restore
@@ -743,7 +729,7 @@
           camZoomAnchor = null;
           _autoFitDone = true; // a restored view is authoritative — don't refit
           // honor an explicit saved choice in BOTH directions (the default is
-          // now full-color, so a saved `false` must still restore to ash)
+          // now monochrome, so a saved `true` must still restore to full-color)
           if (saved.full != null) fullColor = !!saved.full;
           if (saved.flow != null) flowOn = saved.flow;
         } else {
@@ -883,7 +869,7 @@
 
       var n = nodes.length;
       var root = rootId ? byId[rootId] : null;
-      var repel = n < 12 ? -350 : -250;
+      var repel = n < 12 ? -950 : -680;
 
       // (2) link springs
       for (var i = 0; i < edges.length; i++) {
@@ -894,7 +880,7 @@
         var dx = b.x - a.x,
           dy = b.y - a.y;
         var dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-        var rest = 130 * (0.7 + 0.3 * e.wBand);
+        var rest = 215 * (0.7 + 0.3 * e.wBand);
         var k = 0.6 * alpha;
         var force = ((dist - rest) / dist) * k * 0.5;
         var fx = dx * force,
@@ -928,11 +914,13 @@
         }
       }
 
-      // (4) soft collision (only while warm AND only for smaller graphs — it is
-      // a second O(n^2) loop and purely cosmetic anti-overlap; above ~150 nodes
-      // the repulsion + ring banding already keep nodes apart, so we drop it to
-      // halve the per-tick physics bill).
-      if (alpha > 0.1 && n <= 150) {
+      // (4) HARD collision (only for smaller graphs — it is a second O(n^2) loop;
+      // above ~150 nodes the stronger repulsion already keeps nodes apart, so we
+      // drop it to halve the per-tick physics bill). The push is near-rigid (0.85)
+      // with a small padding gap so dots NEVER overlap — the airy Obsidian look
+      // demands clear separation even on small-degree leaves. Runs down to a very
+      // low alpha so the settled layout stays overlap-free, not just the warm one.
+      if (alpha > 0.005 && n <= 150) {
         for (var c = 0; c < n; c++) {
           var nc = nodes[c];
           for (var d = c + 1; d < n; d++) {
@@ -940,9 +928,9 @@
             var cdx = nc.x - nd.x,
               cdy = nc.y - nd.y;
             var cl = Math.sqrt(cdx * cdx + cdy * cdy) || 0.0001;
-            var minD = nc.r + nd.r + 4;
+            var minD = nc.r + nd.r + 5; // hard radius + small padding gap
             if (cl < minD) {
-              var push = ((minD - cl) / cl) * 0.7 * 0.5;
+              var push = ((minD - cl) / cl) * 0.85;
               nc.vx += cdx * push;
               nc.vy += cdy * push;
               nd.vx -= cdx * push;
@@ -957,27 +945,26 @@
         cy = H / 2;
       for (var g = 0; g < n; g++) {
         var ng = nodes[g];
-        ng.vx += (cx - ng.x) * 0.012;
-        ng.vy += (cy - ng.y) * 0.012;
+        ng.vx += (cx - ng.x) * 0.009;
+        ng.vy += (cy - ng.y) * 0.009;
       }
 
-      // (6) BLAST-RING radial banding (hero) — after center gravity.
-      // F_ring = -k_ring*(|r|-depth*R)*r_hat, alpha-scaled, decays below 0.05.
-      if (!sparseMode && root && R_RING > 0) {
-        var ringScale = Math.max(alpha, 0.03);
-        if (alpha >= 0.05) {
-          for (var rr = 0; rr < n; rr++) {
-            var nr = nodes[rr];
-            if (nr.id === rootId) continue;
-            var rdx = nr.x - root.x,
-              rdy = nr.y - root.y;
-            var rlen = Math.sqrt(rdx * rdx + rdy * rdy) || 0.0001;
-            var depth = depthMap[nr.id] || 1;
-            var target = depth * R_RING;
-            var fr = -0.04 * (rlen - target) * ringScale;
-            nr.vx += (rdx / rlen) * fr;
-            nr.vy += (rdy / rlen) * fr;
-          }
+      // (6) gentle depth bias — a WEAK pull keeping deeper nodes a little
+      // farther from the root so the cluster has organic radial order WITHOUT
+      // the old hard concentric blast-rings. Far weaker (0.008) and it decays
+      // with alpha, so the layout reads as an Obsidian organic clump, not bands.
+      if (!sparseMode && root && R_RING > 0 && alpha >= 0.05) {
+        for (var rr = 0; rr < n; rr++) {
+          var nr = nodes[rr];
+          if (nr.id === rootId) continue;
+          var rdx = nr.x - root.x,
+            rdy = nr.y - root.y;
+          var rlen = Math.sqrt(rdx * rdx + rdy * rdy) || 0.0001;
+          var depth = depthMap[nr.id] || 1;
+          var target = depth * R_RING;
+          var fr = -0.008 * (rlen - target) * alpha;
+          nr.vx += (rdx / rlen) * fr;
+          nr.vy += (rdy / rlen) * fr;
         }
       }
 
@@ -1005,81 +992,24 @@
     }
 
     // ════════════════════════════════════════════════════════════════ DRAW ══
-    function present() {
-      // present ring radii for guide-circles
-      var depths = {};
-      nodes.forEach(function (n) {
-        if (n.phantom || n.id === rootId) return;
-        var d = depthMap[n.id] || 1;
-        depths[d] = true;
-      });
-      return depths;
-    }
 
-    // bgGradient is cached — it only changes on resize / theme / a meaningful
-    // shift of its anchor. The anchor is PINNED TO THE ROOT screen position
-    // (the gravitational sun), not the wandering centroid, so the void feels
-    // anchored and still as the sim cools (no swimming vignette).
-    var _bgGrad = null,
-      _bgKey = "";
+    // FLAT background — Obsidian's calm dark (or near-white in light mode). No
+    // gradient, no vignette, no root-anchored cast. Just the theme floor so the
+    // dots and threads read against generous empty space. `_bgGrad` is retained
+    // as a no-op cache slot only because ingest()/resize() clear it; the value
+    // returned is a plain CSS color string.
+    var _bgGrad = null;
     function bgGradient() {
-      var root = rootId ? byId[rootId] : null;
-      var ax = root ? root.x * cam.scale + cam.tx : W / 2;
-      var ay = root ? root.y * cam.scale + cam.ty : H / 2;
-      // quantize the anchor so sub-pixel drift doesn't rebuild every frame
-      var key =
-        theme + "|" + W + "x" + H + "|" + Math.round(ax / 24) + "," + Math.round(ay / 24);
-      if (_bgGrad && key === _bgKey) return _bgGrad;
-      var rr = 0.7 * Math.max(W, H);
-      var g = ctx.createRadialGradient(ax, ay, 0, ax, ay, rr);
-      if (theme === "light") {
-        g.addColorStop(0, "#F4F4F8");
-        g.addColorStop(1, "#E8EDF8");
-      } else {
-        // Cool-blue center cast easing to a DEEPER blue-black at the edge: the
-        // darker floor raises the node-to-ground luminance ratio (every glow
-        // reads brighter for free), the cool center makes the warm amber/rose
-        // hues sing, and the gentle blue→near-black falloff (paired with the
-        // vignette pass) makes the scene read cinematic and deep, not flat. The
-        // 0.20 stop (≈ first blast-ring fraction) carves a subtly brighter
-        // clearing FROM the root so the void feels authored, not incidental.
-        g.addColorStop(0, "#0D1019");
-        g.addColorStop(0.20, "#0A0C13");
-        g.addColorStop(0.62, "#06080E");
-        g.addColorStop(1, "#030409");
-      }
-      _bgGrad = g;
-      _bgKey = key;
-      return g;
-    }
-
-    // Full-canvas VIGNETTE — a canvas-CENTER-anchored radial (independent of the
-    // wandering root) that stays transparent across the inner ~58% then darkens
-    // gently toward the corners. Drawn ON TOP of the scene so it frames every
-    // pixel and reads cinematic/deep. Cached per-size (corners don't move). Kept
-    // subtle so label legibility at the edges survives. Dark theme only.
-    var _vigGrad = null,
-      _vigKey = "";
-    function vignetteGradient() {
-      var key = W + "x" + H;
-      if (_vigGrad && key === _vigKey) return _vigGrad;
-      var cx = W / 2,
-        cy = H / 2;
-      var rr = 0.72 * Math.sqrt(W * W + H * H) / 2; // reach to the corners
-      var g = ctx.createRadialGradient(cx, cy, rr * 0.5, cx, cy, rr);
-      g.addColorStop(0, "rgba(2,3,7,0)");
-      g.addColorStop(0.7, "rgba(2,3,7,0.16)");
-      g.addColorStop(1, "rgba(2,3,7,0.42)");
-      _vigGrad = g;
-      _vigKey = key;
-      return g;
+      return theme === "light" ? BG_LIGHT : BG_DARK;
     }
 
     function worldToScreen(x, y) {
       return [x * cam.scale + cam.tx, y * cam.scale + cam.ty];
     }
 
-    // hover constellation alpha targets
+    // Obsidian focus behavior — hovering a node lifts it + its 1-hop neighbors
+    // + connecting links to full opacity, fading EVERYTHING else back to
+    // HOVER_DIM_ALPHA (links to LINK_A_DIM). Smooth via the alpha lerp.
     function computeAlphaTargets() {
       if (hoverId == null) {
         nodes.forEach(function (n) {
@@ -1101,20 +1031,18 @@
         } else if (n.id === hoverId) {
           n.alphaTarget = 1;
           n.frosted = false;
-        } else if (neigh[n.id] && !n.phantom) {
-          n.alphaTarget = 0.85;
+        } else if (neigh[n.id]) {
+          // 1-hop neighbor — stays lit (phantoms too, dim hollow but in-focus)
+          n.alphaTarget = 1;
           n.frosted = false;
-        } else if (neigh[n.id] && n.phantom) {
-          n.alphaTarget = 0.08; // phantoms join frosted set
-          n.frosted = true;
         } else {
-          n.alphaTarget = 0.08;
+          n.alphaTarget = HOVER_DIM_ALPHA;
           n.frosted = true;
         }
       });
       edges.forEach(function (e) {
         if (e.srcId === hoverId || e.dstId === hoverId) e.alphaTarget = 1;
-        else e.alphaTarget = 0.04;
+        else e.alphaTarget = LINK_A_DIM / LINK_A_DARK; // dim relative to resting
       });
     }
 
@@ -1123,8 +1051,9 @@
     // when we most want to be cheap (deciding whether to park).
     var _lerpDirty = 0;
     function lerpAlphas(dt) {
-      var kin = kStep(0.18, dt);
-      var kout = kStep(0.1, dt);
+      // ~150ms smooth opacity ramp both ways (the Obsidian focus crossfade).
+      var kin = kStep(0.22, dt);
+      var kout = kStep(0.18, dt);
       var dirty = 0;
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
@@ -1188,11 +1117,6 @@
         stepMorph(now);
       }
 
-      // guide circles (blast boundary) — under edges, gated tier>=1
-      if (!sparseMode && glowTier <= 1 && !forced) {
-        drawGuideCircles();
-      }
-
       // entrance ramp — scale (easeOutBack) leads, alpha (easeOutCubic) lags
       nodes.forEach(function (n) {
         if (n._enterAt) {
@@ -1219,15 +1143,6 @@
 
       // ── labels (screen-space) ──
       drawLabels(now);
-
-      // ── full-canvas vignette (cinematic frame) — over the scene, under the
-      // a11y focus ring so keyboard focus stays crisp. Dark, non-forced only.
-      if (theme !== "light" && !forced) {
-        ctx.save();
-        ctx.fillStyle = vignetteGradient();
-        ctx.fillRect(0, 0, W, H);
-        ctx.restore();
-      }
 
       // a11y focus ring
       if (focusIdx >= 0 && a11yOrder[focusIdx]) {
@@ -1286,24 +1201,6 @@
       ctx.restore();
     }
 
-    function drawGuideCircles() {
-      var root = byId[rootId];
-      if (!root) return;
-      var depths = present();
-      var rs = worldToScreen(root.x, root.y);
-      var fadeIn = clamp((perfNow() - mountTime - 600) / 600, 0, 1);
-      ctx.save();
-      ctx.strokeStyle = rgba(ACCENT, 0.06 * fadeIn);
-      ctx.lineWidth = 1;
-      for (var d in depths) {
-        var r = parseInt(d, 10) * R_RING * cam.scale;
-        ctx.beginPath();
-        ctx.arc(rs[0], rs[1], r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
     // ── EDGES ──
     function drawEdges(now) {
       for (var i = 0; i < edges.length; i++) {
@@ -1317,32 +1214,16 @@
       }
     }
 
+    // Straight-line endpoints (screen space). No bezier control point — Obsidian
+    // draws plain segments. Kept as {p0,p2} so flow's bezierAt(p0,c,p2) with
+    // c==midpoint degenerates to a straight interpolation.
     function edgeGeom(e) {
-      var a = e.src,
-        b = e.dst;
-      var p0 = worldToScreen(a.x, a.y);
-      var p2 = worldToScreen(b.x, b.y);
+      var p0 = worldToScreen(e.src.x, e.src.y);
+      var p2 = worldToScreen(e.dst.x, e.dst.y);
+      var c = [(p0[0] + p2[0]) / 2, (p0[1] + p2[1]) / 2];
       var dx = p2[0] - p0[0],
         dy = p2[1] - p0[1];
-      var len = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-      // perpendicular control offset
-      var heavy = e.wBand > 0.6;
-      var offFrac = heavy ? 0.08 : 0.18;
-      var off = Math.min(offFrac * len, 60);
-      // sign: alternate by parallel index AND angular sector off root
-      var sign = e.parallelIndex % 2 === 0 ? 1 : -1;
-      if (rootId && (e.srcId === rootId || e.dstId === rootId)) {
-        var other = e.srcId === rootId ? e.dst : e.src;
-        var ang = Math.atan2(other.y - byId[rootId].y, other.x - byId[rootId].x);
-        var sector = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 8);
-        sign = sector % 2 === 0 ? 1 : -1;
-      }
-      var mx = (p0[0] + p2[0]) / 2,
-        my = (p0[1] + p2[1]) / 2;
-      var nx = -dy / len,
-        ny = dx / len;
-      var c = [mx + nx * off * sign, my + ny * off * sign];
-      return { p0: p0, p2: p2, c: c, len: len };
+      return { p0: p0, p2: p2, c: c, len: Math.sqrt(dx * dx + dy * dy) || 0.0001 };
     }
 
     function bezierAt(p0, c, p2, t) {
@@ -1352,206 +1233,69 @@
         u * u * p0[1] + 2 * u * t * c[1] + t * t * p2[1]
       ];
     }
-    function bezierTangent(p0, c, p2, t) {
-      return [
-        2 * (1 - t) * (c[0] - p0[0]) + 2 * t * (p2[0] - c[0]),
-        2 * (1 - t) * (c[1] - p0[1]) + 2 * t * (p2[1] - c[1])
-      ];
+
+    // Resting link color/opacity for the current theme.
+    function linkRGB() {
+      return theme === "light" ? LINK_RGB_LIGHT : LINK_RGB_DARK;
+    }
+    function linkBaseAlpha() {
+      return theme === "light" ? LINK_A_LIGHT : LINK_A_DARK;
     }
 
-    // Kind is pre-attentive WITHOUT zoom or flow via a distinct DASH signature
-    // per kind (pattern survives where low-alpha hue does not) PLUS a raised
-    // resting alpha floor so backlink/plugin_source don't vanish on the near-
-    // black bed. reference solid · backlink dotted · plugin_source dash-dot.
-    function edgeTier(kind) {
-      if (kind === "backlink") return { s: 0.26, t: 0.12, dash: [1, 4] };
-      if (kind === "plugin_source") return { s: 0.22, t: 0.1, dash: [5, 4, 1, 4] };
-      return { s: 0.32, t: 0.14, dash: null };
-    }
-
+    // Thin, faint, straight, no arrowhead. e.alpha carries the hover focus
+    // (1 for incident links, LINK_A_DIM/base for the dimmed field). Weight
+    // modulates width subtly (0.75–1.5px on-screen). Phantom links: dim dashed.
     function drawEdge(e, now) {
       var g = edgeGeom(e);
-      var tier = edgeTier(e.kind);
-      var srcHex = nodeFill(e.src);
-      var dstHex = nodeFill(e.dst);
-
-      // Along-edge alpha gradient leans BRIGHTER toward the higher-relevance
-      // end — relevance = closeness to the root (lower BFS depth). The brighter
-      // tier alpha (tier.s) is parked on whichever endpoint is shallower so the
-      // eye is drawn up-hierarchy toward the sun; the dimmer (tier.t) trails to
-      // the leaf. Light theme keeps its fixed src/dst ramp.
-      var srcDepth = depthMap[e.srcId] == null ? 99 : depthMap[e.srcId];
-      var dstDepth = depthMap[e.dstId] == null ? 99 : depthMap[e.dstId];
-      var srcBrighter = srcDepth <= dstDepth; // tie → source end
-      var aHi = (theme === "light" ? 0.20 : tier.s) * e.alpha;
-      var aLo = (theme === "light" ? 0.35 : tier.t) * e.alpha;
-      var sAlpha = theme === "light" ? aHi : srcBrighter ? aHi : aLo;
-      var tAlpha = theme === "light" ? aLo : srcBrighter ? aLo : aHi;
+      var rgbStr = linkRGB();
+      var incident = e.srcId === hoverId || e.dstId === hoverId;
 
       ctx.save();
-      if (forced) {
-        ctx.strokeStyle = "CanvasText";
-      } else {
-        var grad = ctx.createLinearGradient(g.p0[0], g.p0[1], g.p2[0], g.p2[1]);
-        grad.addColorStop(0, rgba(srcHex, sAlpha));
-        // mid stop keeps the ramp from looking like a hard two-tone band
-        grad.addColorStop(0.5, rgba(mixHex(srcHex, dstHex, 0.5), (sAlpha + tAlpha) * 0.5));
-        grad.addColorStop(1, rgba(dstHex, tAlpha));
-        ctx.strokeStyle = grad;
-      }
       if (e.phantom) {
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = rgba(SLATE, 0.45 * e.alpha);
-        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 4]);
+        ctx.strokeStyle = forced
+          ? "GrayText"
+          : "rgba(" + rgbStr + "," + linkBaseAlpha() * 1.4 * e.alpha + ")";
+        ctx.lineWidth = 1;
       } else {
-        if (tier.dash && !forced) ctx.setLineDash(tier.dash);
-        var lw = clamp(0.8 + 0.5 * e.wBand, 0.8, 3.5);
-        if (e.srcId === hoverId || e.dstId === hoverId) lw *= 1.5;
-        // Floor the ON-SCREEN width at ~0.75px so structure never vanishes at
-        // overview scale (a node cloud with no visible connections defeats the
-        // tool's reason to exist).
-        ctx.lineWidth = Math.max(0.75, lw * cam.scale * 0.6 + lw * 0.4);
+        var base = linkBaseAlpha();
+        var a = incident && hoverId != null ? LINK_A_FOCUS : base * e.alpha;
+        ctx.strokeStyle = forced ? "GrayText" : "rgba(" + rgbStr + "," + clamp(a, 0, 1) + ")";
+        // width: 0.75 → 1.5px on weight, brighten incident links a touch wider.
+        var lw = 0.75 + 0.75 * e.wBand;
+        if (incident && hoverId != null) lw += 0.4;
+        ctx.lineWidth = lw;
       }
       ctx.beginPath();
       ctx.moveTo(g.p0[0], g.p0[1]);
-      ctx.quadraticCurveTo(g.c[0], g.c[1], g.p2[0], g.p2[1]);
+      ctx.lineTo(g.p2[0], g.p2[1]);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
 
-      // DIRECTION at all zooms. The arrowhead is the crisp cue when zoomed in
-      // (scale>0.5); below that a mid-edge chevron carries direction so the
-      // fit-view is never left with ZERO direction cues.
-      if (!e.phantom) {
-        if (cam.scale > 0.5) {
-          drawArrowhead(g, e, dstHex, tAlpha);
-        } else if (e.alpha > 0.2) {
-          drawMidChevron(g, e, dstHex);
-        }
-      }
-
-      // flow particles
-      if (
-        flowOn &&
-        !e.phantom &&
-        glowTier <= 1 &&
-        cam.scale > 0.35 &&
-        e.alpha > 0.5 &&
-        !reduced
-      ) {
-        drawFlowParticles(e, g, now, srcHex);
-      } else if (reduced && flowOn && !e.phantom) {
-        drawStaticFlowMarkers(e, g, srcHex);
+      // Optional, OFF by default: a single very subtle flow dot along the link.
+      if (flowOn && !e.phantom && cam.scale > 0.35 && e.alpha > 0.5 && !reduced) {
+        drawFlowParticles(e, g, now, rgbStr);
       }
     }
 
-    function drawArrowhead(g, e, hex, baseA) {
-      var t = 0.92;
-      var tip = bezierAt(g.p0, g.c, g.p2, t);
-      var tan = bezierTangent(g.p0, g.c, g.p2, t);
-      var tl = Math.sqrt(tan[0] * tan[0] + tan[1] * tan[1]) || 0.0001;
-      var ux = tan[0] / tl,
-        uy = tan[1] / tl;
-      // pull tip inward by node radius + 2
-      var rr = (e.dst.r + 2) * cam.scale;
-      var tx = tip[0] - ux * rr,
-        ty = tip[1] - uy * rr;
-      var barb = 8;
-      var ang = (22 * Math.PI) / 180;
-      var aa = baseA / (theme === "light" ? 0.35 : 0.12) * 0.65;
-      ctx.save();
-      ctx.fillStyle = forced ? "CanvasText" : rgba(hex, clamp(aa, 0, 0.65) * e.alpha);
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(
-        tx - ux * barb * Math.cos(ang) + uy * barb * Math.sin(ang),
-        ty - uy * barb * Math.cos(ang) - ux * barb * Math.sin(ang)
-      );
-      ctx.lineTo(
-        tx - ux * barb * Math.cos(ang) - uy * barb * Math.sin(ang),
-        ty - uy * barb * Math.cos(ang) + ux * barb * Math.sin(ang)
-      );
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // A small chevron at the curve midpoint pointing toward the target — the
-    // direction channel that survives at overview scale (<=0.5) where the
-    // node-anchored arrowhead is suppressed.
-    function drawMidChevron(g, e, hex) {
-      var mid = bezierAt(g.p0, g.c, g.p2, 0.52);
-      var tan = bezierTangent(g.p0, g.c, g.p2, 0.52);
-      var tl = Math.sqrt(tan[0] * tan[0] + tan[1] * tan[1]) || 0.0001;
-      var ux = tan[0] / tl,
-        uy = tan[1] / tl;
-      var barb = 4.5;
-      var ang = (28 * Math.PI) / 180;
-      var aa = clamp(0.5 * e.alpha, 0, 0.6);
-      ctx.save();
-      ctx.strokeStyle = forced ? "CanvasText" : rgba(hex, aa);
-      ctx.lineWidth = 1.2;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(
-        mid[0] - ux * barb * Math.cos(ang) + uy * barb * Math.sin(ang),
-        mid[1] - uy * barb * Math.cos(ang) - ux * barb * Math.sin(ang)
-      );
-      ctx.lineTo(mid[0], mid[1]);
-      ctx.lineTo(
-        mid[0] - ux * barb * Math.cos(ang) - uy * barb * Math.sin(ang),
-        mid[1] - uy * barb * Math.cos(ang) + ux * barb * Math.sin(ang)
-      );
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    function drawFlowParticles(e, g, now, srcHex) {
-      // SLOW + LOW-ALPHA flowing dots that convey direction without reading as a
-      // busy marquee. Period lengthened ~1.7x (≈7.6s base) so a single dot
-      // drifts gently along the curve. Travel runs from the higher-relevance end
-      // (shallower BFS depth) toward the leaf, matching the alpha gradient — so
-      // the eye learns "flow points down-hierarchy, away from the sun".
-      var period = (e.kind === "backlink" || e.kind === "plugin_source" ? 7600 * 1.33 : 7600);
+    function drawFlowParticles(e, g, now, rgbStr) {
+      // A lone, very faint dot drifting from the shallower (more-relevant) end
+      // toward the leaf. Kept minimal — Obsidian's flow toggle is a whisper, not
+      // a marquee. No 'lighter' bloom; just a small low-alpha dot.
+      var period = 8000;
       var srcDepth = depthMap[e.srcId] == null ? 99 : depthMap[e.srcId];
       var dstDepth = depthMap[e.dstId] == null ? 99 : depthMap[e.dstId];
-      var forward = srcDepth <= dstDepth; // dot travels src→dst when true
-      var hex = shiftL(srcHex, 0.12);
-      var count = e.wBand > 0.6 ? 2 : 1; // at most two dots — never a stream
+      var forward = srcDepth <= dstDepth;
+      var raw = (((now - e.phaseSeed) % period) + period) % period / period;
+      var tt = forward ? raw : 1 - raw;
+      var pos = bezierAt(g.p0, g.c, g.p2, tt);
+      var edgeFade = clamp(Math.sin(raw * Math.PI), 0, 1);
       ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      for (var i = 0; i < count; i++) {
-        var phase = (e.phaseSeed + (i * period) / count);
-        var raw = (((now - phase) % period) + period) % period / period;
-        var tt = forward ? raw : 1 - raw;
-        var pos = bezierAt(g.p0, g.c, g.p2, tt);
-        // gently fade the dot in at the start of its run and out at the end so
-        // it materialises and dissolves rather than popping at the endpoints.
-        var travel = forward ? raw : 1 - tt; // 0..1 along its own direction
-        var edgeFade = clamp(Math.sin(travel * Math.PI), 0, 1);
-        var dotA = 0.5 * e.alpha * edgeFade;
-        var grad = ctx.createRadialGradient(pos[0], pos[1], 0, pos[0], pos[1], 3.0);
-        grad.addColorStop(0, rgba(hex, dotA));
-        grad.addColorStop(1, rgba(hex, 0));
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(pos[0], pos[1], 1.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-
-    function drawStaticFlowMarkers(e, g, srcHex) {
-      var hex = shiftL(srcHex, 0.15);
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      [0.3, 0.55, 0.82].forEach(function (tt, i) {
-        var pos = bezierAt(g.p0, g.c, g.p2, tt);
-        ctx.fillStyle = rgba(hex, 0.7 * e.alpha);
-        ctx.beginPath();
-        ctx.arc(pos[0], pos[1], i === 2 ? 2.2 : 1.6, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      ctx.fillStyle = "rgba(" + rgbStr + "," + 0.28 * e.alpha * edgeFade + ")";
+      ctx.beginPath();
+      ctx.arc(pos[0], pos[1], 1.2, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
@@ -1562,473 +1306,116 @@
       var ox = p[0] + a.r * cam.scale,
         oy = p[1] - a.r * cam.scale;
       ctx.save();
-      ctx.strokeStyle = rgba(nodeFill(a), 0.4 * e.alpha);
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = forced
+        ? "GrayText"
+        : "rgba(" + linkRGB() + "," + linkBaseAlpha() * 1.6 * e.alpha + ")";
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(ox, oy, r, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
 
-    // ── NODE FILL (ash default, full-color toggle) ──
+    // ── NODE FILL ──
+    // DEFAULT: near-monochrome (one muted lavender-grey for every node). The
+    // root/active node wears the accent. "Full color" toggle restores per-type
+    // hue. Phantoms get the slate tint (drawn hollow/dim in drawNode).
     function nodeFill(node) {
-      if (node.phantom) return SLATE;
-      var hex = TYPE_HEX[node.type] || SLATE;
-      if (theme === "light") {
-        return shiftL(hex, -0.22); // L0.70 -> ~0.48, un-ashed
+      var mono = theme === "light" ? MONO_LIGHT : MONO_DARK;
+      if (node.phantom) return mono;
+      if (node.id === rootId) return ACCENT;
+      if (fullColor) {
+        var hex = TYPE_HEX[node.type] || SLATE;
+        return theme === "light" ? shiftL(hex, -0.22) : hex;
       }
-      if (fullColor) return hex;
-      // ash: mix 60% toward slate
-      return mixHex(hex, SLATE, 0.6);
+      return mono;
     }
 
-    function shapePath(cx, cy, r, shape) {
-      ctx.beginPath();
-      if (shape === "rounded") {
-        var rr = r * 1.6;
-        roundRectCentered(ctx, cx, cy, rr, rr, r * 0.35);
-      } else if (shape === "hex") {
-        for (var i = 0; i < 6; i++) {
-          var ang = (Math.PI / 3) * i - Math.PI / 2;
-          var x = cx + r * Math.cos(ang),
-            y = cy + r * Math.sin(ang);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-      } else {
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      }
-    }
-
+    // Small FLAT filled circle. No glow, no gradient, no ring. Anti-aliased
+    // edge only. The active/root node wears the accent and is only slightly
+    // larger; the hovered node + its 1-hop neighbors brighten toward white.
+    // Phantom/broken nodes: a dim hollow dot. node.alpha carries the hover
+    // focus dim. frosted (dimmed context) is the same dot at lower alpha — no
+    // depth-of-field bloom.
     function drawNode(node, now, frosted) {
       if (node.alpha < 0.02) return;
       var p = worldToScreen(node.x, node.y);
       var r = node.r * node.scaleK * cam.scale;
-      if (r < 0.5) return;
-      var hex = nodeFill(node);
+      if (r < 0.4) return;
       var isRoot = node.id === rootId;
-      var shape = node.phantom ? "dashed" : TYPE_SHAPE[node.type] || "circle";
+      var hovered = hoverId != null && node.id === hoverId;
+      var neighbor = hoverId != null && adj[hoverId] && adj[hoverId][node.id];
 
-      // ── PHANTOM: dashed, zero glow ──
+      // search dim (chrome search) folds into the same fade.
+      var a = node.alpha;
+      if (node.searchDim) a *= 0.18;
+
+      // ── PHANTOM: dim hollow ring, no fill ──
       if (node.phantom) {
         ctx.save();
-        ctx.globalAlpha = node.alpha;
-        ctx.setLineDash([4, 4]);
-        ctx.fillStyle = "rgba(148,163,184,0.12)";
-        ctx.strokeStyle = "rgba(148,163,184,0.45)";
-        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = a * 0.7;
+        ctx.strokeStyle = forced
+          ? "GrayText"
+          : theme === "light"
+          ? rgba(MONO_LIGHT, 0.5)
+          : rgba(MONO_DARK, 0.45);
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
-        ctx.fill();
         ctx.stroke();
-        ctx.setLineDash([]);
         ctx.restore();
         return;
       }
 
-      // hover corona BEFORE node (gradient ring, not shadowBlur). Intensity is
-      // sprung via hoverCoronaK so it LEAPS in (snappy) and GLIDES out (luxe)
-      // rather than popping binary — the marquee asymmetry of the direction.
-      if (!frosted && hoverCoronaK > 0.004 && hoverId != null &&
-          (node.id === hoverId || (adj[hoverId] && adj[hoverId][node.id]))) {
-        var coronaA = (node.id === hoverId ? 0.22 : 0.13) * hoverCoronaK;
-        var cg = ctx.createRadialGradient(p[0], p[1], r * 0.8, p[0], p[1], r * 2.4);
-        cg.addColorStop(0, rgba(ACCENT, coronaA));
-        cg.addColorStop(0.5, rgba(ACCENT, coronaA * 0.55));
-        cg.addColorStop(1, rgba(ACCENT, 0));
-        ctx.save();
-        ctx.fillStyle = cg;
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], r * 2.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // selection-ring pulse (snappy click acknowledgement) — ring expands
-      // outward and fades as selectPulse decays 1->0.
-      if (!frosted && selectPulse > 0 && node.id === selectId) {
-        // Both channels drive off one eased phase. Radius expands with a
-        // decelerating ease (4→16); opacity uses the OPPOSITE curve (ease-in
-        // quad) so the ring holds bright, then drops fast — a "release" rather
-        // than a constant-velocity "dissolve" (linear fades read as cheap).
+      // selection-ring pulse (kept — a calm thin accent ring on click).
+      if (!frosted && selectPulse > 0 && node.id === selectId && !reduced) {
         var sp = easeOutCubic(1 - selectPulse);
-        var ringR = r + (4 + 12 * sp) * cam.scale;
+        var ringR = r + (3 + 9 * sp) * cam.scale;
         ctx.save();
-        ctx.globalAlpha = (1 - sp) * (1 - sp);
+        ctx.globalAlpha = (1 - sp) * (1 - sp) * 0.7;
         ctx.strokeStyle = forced ? "CanvasText" : ACCENT;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(p[0], p[1], ringR, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
 
-      // ── FROSTED (dimmed context under hover): PASS-1 halo SOLE ──
-      // The depth-of-field eases in WITH the dim (frost alpha tracks the lerped
-      // node.alpha, normalized) so the dimmed field GLIDES to frost instead of
-      // popping in one frame. Sprite blit, no shadowBlur.
-      if (frosted) {
-        if (theme !== "light" && glowTier <= 2 && !forced) {
-          var frostA = 0.08 * clamp(node.alpha / 0.45, 0, 1);
-          blitGlow(shiftL(hex, -0.01), p[0], p[1], (r + 1) * 1.9, frostA);
-        } else {
-          // light/forced: faint flat outline (forced keeps a CanvasText stroke
-          // so dimmed nodes stay VISIBLE — Canvas-on-Canvas would erase them).
-          ctx.save();
-          ctx.globalAlpha = 0.18 * clamp(node.alpha / 0.45, 0, 1) + 0.04;
-          if (forced) {
-            ctx.strokeStyle = "GrayText";
-            ctx.lineWidth = 1.25;
-            shapePath(p[0], p[1], r, shape);
-            ctx.stroke();
-          } else {
-            ctx.fillStyle = hex;
-            shapePath(p[0], p[1], r, shape);
-            ctx.fill();
-          }
-          ctx.restore();
-        }
-        return;
-      }
-
-      var depth = depthMap[node.id] || 0;
-      // base luminance by ring (impact rank made luminance)
-      // Steeper 0.14/ring falloff with a 0.42 floor: the 1.05 base keeps
-      // depth-1 essentially full-bright while pushing rings 3+ visibly dimmer,
-      // so radial distance AND luminance both encode blast rank — the two
-      // channels reinforce instead of luminance being a near-no-op.
-      var ringAlpha = isRoot ? 1 : clamp(1.05 - 0.14 * (depth - 1), 0.42, 1.0);
-
+      // resolve fill — brighten the hovered node + neighbors toward white/accent.
+      var fill;
       if (forced) {
-        drawNodeForced(node, p, r, shape);
-        return;
-      }
-
-      if (theme === "light") {
-        drawNodeLight(node, p, r, shape, hex);
+        fill = isRoot ? "Highlight" : "CanvasText";
+      } else if (isRoot) {
+        // active node: accent, lifting toward a lighter accent on hover.
+        fill = hovered || neighbor ? shiftL(ACCENT, 0.1) : ACCENT;
+      } else if (hovered) {
+        // hovered node brightens toward white (dark) / dark (light).
+        fill = theme === "light" ? "#2a2e3a" : NODE_WHITE;
+      } else if (neighbor) {
+        fill = theme === "light" ? mixHex(nodeFill(node), "#2a2e3a", 0.4) : mixHex(nodeFill(node), NODE_WHITE, 0.45);
       } else {
-        drawNodeDark(node, p, r, shape, hex, isRoot, depth, ringAlpha, now);
+        fill = nodeFill(node);
       }
-    }
 
-    // ── glow-sprite cache ──
-    // Canvas shadowBlur is one of the most expensive 2D ops (a full gaussian
-    // convolution, scaling with device-pixel area). Using it per-node per-frame
-    // under 'lighter' is the single biggest GPU cost. Instead we bake a soft
-    // radial bloom into an offscreen sprite ONCE per (color-bucket) and
-    // drawImage it per node — the spec's own T2 sprite-cache, promoted to the
-    // DEFAULT for every non-root halo at all tiers. shadowBlur is reserved for
-    // the ONE root node (1/frame is fine).
-    var _glowSprites = {};
-    function glowSprite(hex) {
-      var key = hex;
-      if (_glowSprites[key]) return _glowSprites[key];
-      var S = 64; // sprite is sampled and scaled per node
-      var off = document.createElement("canvas");
-      off.width = S;
-      off.height = S;
-      var c = off.getContext("2d");
-      var g = c.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-      var rgb = hexToRgb(hex);
-      // Chromatic bloom: a hot, lightened core bleeds to the saturated hue at
-      // the edge (how real emissive light scatters). A flat-hue radial under
-      // 'lighter' reads as a hard CG disc; this 4-stop curve gives every
-      // satellite a luminous orb with a long bloom tail. Cache key stays `hex`.
-      var coreRgb = hexToRgb(shiftL(hex, 0.18));
-      g.addColorStop(0, "rgba(" + coreRgb[0] + "," + coreRgb[1] + "," + coreRgb[2] + ",1)");
-      g.addColorStop(0.22, "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ",0.70)");
-      g.addColorStop(0.55, "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ",0.22)");
-      g.addColorStop(1, "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ",0)");
-      c.fillStyle = g;
-      c.fillRect(0, 0, S, S);
-      _glowSprites[key] = off;
-      return off;
-    }
-    function blitGlow(hex, x, y, radius, alpha) {
-      if (alpha <= 0.001 || radius <= 0) return;
-      var spr = glowSprite(hex);
-      var d = radius * 2;
       ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = clamp(alpha, 0, 1);
-      ctx.drawImage(spr, x - radius, y - radius, d, d);
-      ctx.restore();
-    }
-
-    function drawNodeDark(node, p, r, shape, hex, isRoot, depth, ringAlpha, now) {
-      var a = node.alpha * ringAlpha;
-      var haloBias = depth === 1 ? 0.06 : 0;
-      // Hoisted breath: the root halo AND its concentric blast rings exhale on
-      // the SAME sine so the gravitational pulse is one coherent motion rather
-      // than a pulsing core inside two dead circles. Reduced-motion → 0 (today's
-      // exact rest values), preserving the accessibility guarantee verbatim.
-      var breath = reduced ? 0 : Math.sin(now * 0.0028);
-      // Subtle breathing SCALE for the sun: ±1.8% on the same ~3.5s sine. The
-      // orb gently swells/contracts so the focal anchor reads "alive at rest"
-      // through structure, not flicker. Frozen to 1.0 under reduced-motion.
-      if (isRoot) r = r * (1 + 0.018 * breath);
-
-      if (glowTier <= 1) {
-        // The breathing sine MODULATES halo intensity — the signature
-        // "alive-at-rest" move. Under reduced-motion the sine collapses to its
-        // mid-rest value (0) so frozen frames land on the DESIGNED rest
-        // luminance, not a random phase.
-        if (isRoot) {
-          // The root is a CLEAR focal anchor — it reads as "the center" through
-          // STRUCTURE + SIZE + the ring, NOT raw brightness. Three layers:
-          //   1. a WIDE soft CORONA (large-radius, very-low-alpha radial that
-          //      falls off gently) — the atmospheric "this is the sun" halo that
-          //      must NOT wash out the depth-1 orbs sitting just outside it.
-          //   2. a smaller, crisp bright CORE — the contained luminous heart.
-          //   3. the thin accent rings (drawn below, after the glass core).
-          // A slow gentle BREATHING pulse rides a ~3.5s sine (period =
-          // 2π/0.0028): a subtle scale + glow-alpha swell. Under reduced-motion
-          // `breath` is 0, so frozen frames land on the designed rest values.
-          var breath01 = (breath + 1) / 2; // 0..1 for monotonic alpha swells
-
-          // (1) WIDE soft corona — a big low-alpha radial blitted via the sprite
-          // cache (cheap, no shadowBlur). Peak alpha pulled WAY down and the
-          // radius TIGHTENED (4.0, was 4.6) so the inner falloff steepens and the
-          // glow stops short of the depth-1 orbs — neighbors stay legible.
-          var coronaR = (r + 6) * 4.0;
-          var coronaA = (0.05 + 0.018 * breath01) * node.alpha;
-          blitGlow(ACCENT, p[0], p[1], coronaR, coronaA);
-
-          // (2) crisp bright CORE — a smaller, tight bloom (blur 14) that hugs
-          // the orb. The ONLY place real brightness lives, and now pulled down
-          // (alpha 0.10/+0.035, lightness shift 0.16) so the orb reads as a
-          // luminous GEM with depth, not a flat near-white disc.
-          ctx.save();
-          ctx.globalCompositeOperation = "lighter";
-          ctx.globalAlpha = (0.1 + 0.035 * breath01) * node.alpha;
-          ctx.shadowColor = shiftL(ACCENT, 0.18);
-          ctx.shadowBlur = 14;
-          ctx.fillStyle = shiftL(ACCENT, 0.16);
-          shapePath(p[0], p[1], r * 0.86, shape);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          ctx.shadowColor = "transparent";
-          ctx.restore();
-        } else {
-          // Satellites: cached glow SPRITE (no shadowBlur). Per-node STABLE
-          // breathing phase (seeded once, not from live x — dragging must not
-          // jump the pulse). The clamp ceiling now exceeds the floor so
-          // haloBias (depth-1 boost) survives — depth-1 visibly out-glows deep
-          // rings (impact-rank-as-luminance).
-          var sbreath = reduced ? 0 : Math.sin(now * 0.0018 + node.phaseSeed);
-          var shaloA = 0.12 + 0.06 * sbreath;
-          var outerA = clamp(0.18 + haloBias, 0.1, 0.3) * a + shaloA * 0.5 * a;
-          // Orb bloom: a wide soft halo (the luminous corona around the glass
-          // bead) under a tighter inner glow. Two blits read as a real emissive
-          // orb rather than a flat lit disc.
-          blitGlow(hex, p[0], p[1], (r + 5) * 2.2, outerA * 0.85);
-          blitGlow(hex, p[0], p[1], r * 1.35, 0.5 * a);
-        }
-      } else if (glowTier === 2) {
-        // sprite-tier: single soft bloom blit (no shadowBlur)
-        blitGlow(hex, p[0], p[1], r * 1.5, 0.5 * a);
-      }
-
-      // PASS 3 — glass-orb / cabochon core ('source-over'). A bright emissive
-      // off-center core bleeds through the saturated type hue to a darkened,
-      // slightly-transparent edge: the read of a luminous bead, not a flat disc.
-      ctx.save();
-      ctx.globalAlpha = node.alpha;
-      var coreHex = isRoot ? ACCENT : hex;
-      var grad = ctx.createRadialGradient(
-        p[0] - 0.32 * r,
-        p[1] - 0.34 * r,
-        r * 0.06,
-        p[0],
-        p[1],
-        r
-      );
-      // hot emissive heart -> mid type-color -> darkened, fading edge.
-      // The root uses a RESTRAINED ramp: a dimmer hot center (0.18 vs 0.34) that
-      // fades to the accent hue SOONER (full accent by 0.5, not 0.7) so the orb
-      // reads as a luminous gem with depth instead of a flat bright violet disc
-      // washing out the canvas center. Satellites keep the brighter cabochon.
-      if (isRoot) {
-        grad.addColorStop(0, shiftL(coreHex, 0.18));
-        grad.addColorStop(0.28, shiftL(coreHex, 0.05));
-        grad.addColorStop(0.5, coreHex);
-        grad.addColorStop(1, rgba(shiftL(coreHex, -0.3), 0.82));
-      } else {
-        grad.addColorStop(0, shiftL(coreHex, 0.34));
-        grad.addColorStop(0.32, shiftL(coreHex, 0.1));
-        grad.addColorStop(0.7, coreHex);
-        grad.addColorStop(1, rgba(shiftL(coreHex, -0.3), 0.82));
-      }
-      ctx.fillStyle = grad;
-      shapePath(p[0], p[1], r, shape);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
       ctx.fill();
-      // soft rim (kept thin so the orb reads as glass, not a chip)
-      ctx.lineWidth = 1.25;
-      ctx.strokeStyle = rgba(shiftL(coreHex, 0.08), 0.85);
-      ctx.globalAlpha = node.alpha * 0.85;
-      shapePath(p[0], p[1], r, shape);
-      ctx.stroke();
-      // specular glint — a tiny soft highlight at the upper-left, the cabochon
-      // tell. Skipped on the root (its hot-core pass already supplies one) and
-      // on tiny on-screen orbs where it would just be noise.
-      if (!isRoot && r >= 6) {
-        ctx.globalAlpha = node.alpha * 0.5;
-        var sg = ctx.createRadialGradient(
-          p[0] - 0.34 * r, p[1] - 0.38 * r, 0,
-          p[0] - 0.34 * r, p[1] - 0.38 * r, r * 0.5
-        );
-        sg.addColorStop(0, "rgba(255,255,255,0.9)");
-        sg.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.fillStyle = sg;
-        ctx.beginPath();
-        ctx.arc(p[0] - 0.34 * r, p[1] - 0.38 * r, r * 0.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
       ctx.restore();
 
-      // status badge (in_progress quarter-ring)
-      if (node.type === "task" && node.status === "in_progress") {
+      // in_progress task badge — a single thin accent quarter-ring (kept, calm).
+      if (!frosted && node.type === "task" && node.status === "in_progress" && !forced) {
         ctx.save();
-        ctx.globalAlpha = node.alpha;
+        ctx.globalAlpha = a;
         ctx.strokeStyle = ACCENT;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(p[0], p[1], r + 2, -Math.PI / 2, 0);
         ctx.stroke();
         ctx.restore();
       }
-
-      // root concentric blast rings — breathe in sympathy with the sun (same
-      // hoisted breath phase), alpha and radius exhaling together.
-      if (isRoot) {
-        ctx.save();
-        ctx.globalAlpha = node.alpha;
-        // thin crisp accent ring hugging the orb — the primary "this is the
-        // center" tell now that the bloom is tamed. A defined edge reads as
-        // focal far more cheaply (and without washing neighbors) than brightness.
-        ctx.strokeStyle = rgba(shiftL(ACCENT, 0.12), 0.85);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], r + 2.5 * cam.scale, 0, Math.PI * 2);
-        ctx.stroke();
-        // outer concentric blast rings — faint, breathing in sympathy.
-        ctx.strokeStyle = rgba(ACCENT, 0.16 + 0.05 * breath);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], r + (9 + 1.5 * breath) * cam.scale, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.strokeStyle = rgba(ACCENT, 0.06 + 0.03 * breath);
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], r + (17 + 3 * breath) * cam.scale, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      drawGlyph(node, p, r, hex, isRoot ? 1 : ringAlpha);
-    }
-
-    function drawNodeLight(node, p, r, shape, hex) {
-      // Light-mode luxe tell: a soft accent ground-glow under the ROOT so light
-      // mode has ONE signature identity (its answer to dark's breathing sun)
-      // rather than reading as a flat corporate graph.
-      if (node.id === rootId && !forced) {
-        ctx.save();
-        ctx.globalCompositeOperation = "multiply";
-        ctx.globalAlpha = 0.5 * node.alpha;
-        var rg = ctx.createRadialGradient(p[0], p[1], r * 0.6, p[0], p[1], r * 3);
-        rg.addColorStop(0, rgba(ACCENT, 0.35));
-        rg.addColorStop(1, rgba(ACCENT, 0));
-        ctx.fillStyle = rg;
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], r * 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-      // light depth: ground shadow + inner-top highlight + rim-darken
-      ctx.save();
-      // ground shadow ellipse
-      ctx.globalAlpha = node.alpha;
-      ctx.save();
-      ctx.translate(p[0], p[1] + 0.35 * r);
-      ctx.scale(1.1, 1);
-      var sg = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-      sg.addColorStop(0, "rgba(15,23,42,0.10)");
-      sg.addColorStop(1, "rgba(15,23,42,0)");
-      ctx.fillStyle = sg;
-      ctx.beginPath();
-      ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // disc with inner-top highlight
-      var grad = ctx.createRadialGradient(
-        p[0] - 0.3 * r,
-        p[1] - 0.4 * r,
-        r * 0.1,
-        p[0],
-        p[1],
-        r
-      );
-      grad.addColorStop(0, shiftL(hex, 0.22));
-      grad.addColorStop(1, hex);
-      ctx.fillStyle = grad;
-      shapePath(p[0], p[1], r, shape);
-      ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = shiftL(hex, -0.12);
-      shapePath(p[0], p[1], r, shape);
-      ctx.stroke();
-      ctx.restore();
-
-      if (node.id === rootId) {
-        ctx.save();
-        ctx.globalAlpha = node.alpha;
-        ctx.strokeStyle = rgba(ACCENT, 0.4);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], r + 8 * cam.scale, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
-      drawGlyph(node, p, r, hex);
-    }
-
-    function drawNodeForced(node, p, r, shape) {
-      ctx.save();
-      ctx.globalAlpha = node.alpha;
-      ctx.fillStyle = "Canvas";
-      ctx.strokeStyle = "CanvasText";
-      ctx.lineWidth = node.id === rootId ? 3 : 1.5;
-      shapePath(p[0], p[1], r, shape);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      drawGlyph(node, p, r, "#000");
-    }
-
-    function drawGlyph(node, p, r, hex, aMul) {
-      // In forced-colors the glyph is the ONLY type channel (color is gone), so
-      // it must NEVER be gated by zoom — drop the scale cutoff when forced and
-      // keep a minimum readable size. Non-forced keeps the LOD cutoff.
-      if (!forced && cam.scale < 0.5) return;
-      var glyph = node.phantom ? "" : TYPE_GLYPH[node.type] || "·";
-      if (!glyph) return;
-      var lightLabel = forced ? "CanvasText" : hslL(hex) > 0.75 ? "rgba(15,17,23,0.85)" : "rgba(240,242,248,0.85)";
-      var fontPx = forced ? Math.max(10, Math.min(13, r * 0.9)) : 10;
-      ctx.save();
-      ctx.font = "700 " + fontPx + "px " + FONT_STACK;
-      // The lone cap wants NO kerning so it centers true on its rounded x.
-      if ("fontKerning" in ctx) ctx.fontKerning = "none";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = lightLabel;
-      // Glyph alpha tracks the disc's ring luminance (aMul = ringAlpha) so a
-      // deep-ring glyph isn't MORE opaque than its disc — consistent with the
-      // impact-rank-as-luminance story.
-      ctx.globalAlpha = forced ? 1 : node.alpha * (aMul == null ? 1 : aMul);
-      ctx.fillText(glyph, Math.round(p[0]), Math.round(p[1]));
-      ctx.restore();
     }
 
     // Top-degree allow-set for at-rest labels, recomputed only when the node
@@ -2049,12 +1436,24 @@
       }
     }
 
-    // ── LABELS (screen-space, aggressive LOD + greedy declutter) ──
+    // ── LABELS (screen-space, zoom-fade + degree bias + greedy declutter) ──
+    // Obsidian: labels are HIDDEN zoomed out, fade in smoothly as the camera
+    // scale climbs from LABEL_FADE_LO toward LABEL_FADE_HI. Hub nodes (higher
+    // degree) cross their threshold first; the root + hovered node + 1-hop
+    // neighbors are ALWAYS shown. Greedy collision-skip keeps it from piling.
     function drawLabels(now) {
       var s = cam.scale;
-      if (s < 0.4 && hoverId == null) return; // overview: labels off
+      if (s < LABEL_FADE_LO && hoverId == null && focusIdx < 0) return; // calm void
       var focusNode = focusIdx >= 0 && a11yOrder[focusIdx] ? a11yOrder[focusIdx] : null;
-      // ── pass 1: collect eligible labels with their LOD fade alpha ──
+      // normalize the zoom fade window into 0..1
+      var zoomT = clamp((s - LABEL_FADE_LO) / (LABEL_FADE_HI - LABEL_FADE_LO), 0, 1);
+      // degree bias: hubs surface earlier. Bias the effective fade-in per node
+      // by its share of the max degree so high-degree labels appear first.
+      var maxDeg = 1;
+      for (var di = 0; di < nodes.length; di++) {
+        if (!nodes[di].phantom && nodes[di].degree > maxDeg) maxDeg = nodes[di].degree;
+      }
+      // ── pass 1: collect eligible labels with their fade alpha ──
       var cand = [];
       for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
@@ -2063,35 +1462,23 @@
         var isRoot = node.id === rootId;
         var isHov = isFocused || node.id === hoverId || (hoverId != null && adj[hoverId] && adj[hoverId][node.id]);
         var deg = node.degree;
-        // LOD policy:
-        //   • root + hovered + hovered's 1-hop neighbors  → ALWAYS (win collision)
-        //   • at REST (s < 1.5): only the top-4 highest-degree nodes are even
-        //     candidates — everything else stays silent so the field is calm
-        //     (Obsidian-sparse: a few labels, not a wall of text).
-        //   • zoomed in (s >= 1.5): progressively reveal more by degree as you
-        //     push further in, highest-degree first, each fading in over a band.
         var show = false;
         var labelA = 1;
         if (isRoot || isHov) {
+          // root + hovered + 1-hop neighbors always show, full opacity.
           show = true;
-        } else if (_topDegIds[node.id]) {
-          // top-degree tier: visible from a near-overview, fades in by s>=0.46.
-          show = true;
-          labelA = clamp((s - 0.34) / 0.12, 0, 1);
-        } else if (s >= 1.5) {
-          // progressive reveal: each 0.35 of extra zoom past 1.5x lowers the
-          // degree bar by ~2, so deeper zoom surfaces more (lower-degree) labels.
-          var degBar = Math.max(1, 8 - Math.floor((s - 1.5) / 0.35) * 2);
-          if (deg >= degBar) {
-            show = true;
-            labelA = clamp((s - 1.5) / 0.18, 0, 1);
-          }
+        } else {
+          // per-node fade: shift the zoom ramp earlier for hubs (degree bias)
+          // so high-degree nodes label first. degBias in [0, ~0.4].
+          var degBias = 0.4 * (Math.sqrt(deg) / Math.sqrt(maxDeg));
+          labelA = clamp((zoomT + degBias - 0.15) / 0.5, 0, 1);
+          if (labelA > 0.001) show = true;
         }
         if (!show || labelA <= 0.001) continue;
-        if (node.phantom && s < 1.2 && !isHov) continue;
-        // importance: root > hovered/adjacent > top-degree > by degree. High
-        // importance wins contested space in the greedy declutter below.
-        var prio = isRoot ? 3 : isHov ? 2 : _topDegIds[node.id] ? 1 + deg / 1000 : deg / 1000;
+        if (node.phantom && s < LABEL_FADE_HI && !isHov) continue;
+        // importance: root > hovered/adjacent > by degree. High importance wins
+        // contested space in the greedy declutter below.
+        var prio = isRoot ? 3 : isHov ? 2 : deg / 1000;
         cand.push({ node: node, isRoot: isRoot, isHov: isHov, labelA: labelA, prio: prio });
       }
       // ── pass 2: priority-greedy declutter ──
@@ -2107,8 +1494,8 @@
         var p = worldToScreen(nd.x, nd.y);
         var r = nd.r * cam.scale;
         var x = Math.round(p[0]);
-        var y = Math.round(p[1] + r + (it.isRoot ? 16 : 11));
-        var fontPx = it.isRoot ? 15 : nd.phantom ? 9 : nd.degree >= 4 ? 11 : 10;
+        var y = Math.round(p[1] + r + (it.isRoot ? 13 : 11));
+        var fontPx = it.isRoot ? 12 : nd.phantom ? 10 : 11;
         var label = nd.phantom ? nd.broken_id || nd.title : nd.title;
         var halfW = Math.min(String(label).length * fontPx * 0.3, 55);
         var box = [x - halfW, y - 7, x + halfW, y + 7];
@@ -2158,63 +1545,55 @@
       return result;
     }
 
+    // Obsidian label: small system-UI text, muted grey, just under the dot, NO
+    // pill background — only a very subtle 1px dark shadow for legibility.
     function drawLabel(node, isRoot, isHov, labelA) {
       if (labelA == null) labelA = 1;
       var p = worldToScreen(node.x, node.y);
       var r = node.r * cam.scale;
+      var baseColor = theme === "light" ? LABEL_COLOR_LIGHT : LABEL_COLOR_DARK;
       var font, color, track;
       if (isRoot) {
-        // 15px/650 reads as the sun, not a slightly-bigger satellite — a clear
-        // 1.36x ratio over the 11px tier (was a too-timid 1.18x at 13px).
-        font = "650 15px " + FONT_STACK;
-        color = "#FFFFFF";
+        // active node label — accent-tinted, a hair larger. Not a sun, just
+        // gently distinguished.
+        font = "500 12px " + FONT_STACK;
+        color = ACCENT;
         track = "0.005em";
       } else if (node.phantom) {
-        font = "italic 400 9px " + FONT_STACK;
-        color = rgba(SLATE, 0.55);
-        track = "0.02em";
-      } else if (node.degree >= 4) {
-        font = "500 11px " + FONT_STACK;
-        color = "rgba(226,232,240,0.92)";
-        track = "0.012em";
+        font = "italic 400 10px " + FONT_STACK;
+        color = theme === "light" ? rgba(MONO_LIGHT, 0.65) : rgba(MONO_DARK, 0.5);
+        track = "0.01em";
       } else {
-        font = "400 10px " + FONT_STACK;
-        color = "rgba(226,232,240,0.92)";
-        track = "0.012em";
+        font = "400 11px " + FONT_STACK;
+        // hovered node + neighbors brighten their label toward the node color.
+        color = isHov
+          ? (theme === "light" ? "#2a2e3a" : "#d8dae6")
+          : baseColor;
+        track = "0.008em";
       }
-      // bright node -> dark label
-      var hex = nodeFill(node);
-      if (!isRoot && !node.phantom && hslL(hex) > 0.75) color = "rgba(15,17,23,0.95)";
-      if (theme === "light") color = node.phantom ? rgba(SLATE, 0.7) : "rgba(15,23,42,0.85)";
       if (forced) color = "CanvasText";
 
       var label = node.phantom ? node.broken_id || node.title : node.title;
-      var maxW = isHov ? 9999 : 110;
+      var maxW = isHov ? 9999 : 120;
       var text = isHov ? label : truncate(label, font, maxW, track);
 
-      // Scale the label gap with the disc so the big root doesn't crowd its
-      // title (16px under the sun, 11px for satellites).
       var x = Math.round(p[0]);
-      var y = Math.round(p[1] + r + (isRoot ? 16 : 11));
+      var y = Math.round(p[1] + r + (isRoot ? 13 : 11));
       ctx.save();
       ctx.font = font;
-      // Optical tracking loosens as size drops so Inter stops looking cramped
-      // at 9-11px. Same value the truncate measured with.
       if ("letterSpacing" in ctx) ctx.letterSpacing = track;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      // Fade across LOD boundaries (labelA) on top of the node's own alpha.
+      // Fade with zoom (labelA) on top of the node's own alpha.
       ctx.globalAlpha = node.alpha * labelA;
-      // halo (replaces 2px outline) — widened for the root so its title reads
-      // clean against the bright disc.
-      ctx.lineWidth = isRoot ? (dpr >= 2 ? 7 : 6) : dpr >= 2 ? 5 : 4;
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = forced
-        ? "Canvas"
-        : theme === "light"
-        ? "rgba(248,250,252,0.92)"
-        : "rgba(13,15,20,0.85)";
-      ctx.strokeText(text, x, y);
+      // Subtle 1px dark drop shadow for legibility — no pill. Skip in light/forced.
+      if (!forced && theme !== "light") {
+        ctx.fillStyle = "rgba(10,10,14,0.85)";
+        ctx.fillText(text, x + 0.6, y + 0.8);
+      } else if (theme === "light" && !forced) {
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fillText(text, x + 0.6, y + 0.8);
+      }
       ctx.fillStyle = color;
       ctx.fillText(text, x, y);
       ctx.restore();
@@ -2373,16 +1752,16 @@
 
       draw(now);
 
-      // decide whether to keep running. The root breathes perpetually (the
-      // "alive at rest" signature), so once data is present we keep the loop
-      // alive UNLESS reduced-motion is on (then the breathing sine is frozen
-      // to its rest value and we may park). coronaK lerps are also kept alive.
+      // decide whether to keep running. Obsidian-calm: the scene SETTLES to
+      // rest and the loop PARKS — no perpetual redraw. We keep the loop alive
+      // only while something is actually changing: the sim is still cooling, the
+      // camera/pan is moving, a hover-focus crossfade is in flight, OR the fetch
+      // ring is breathing while we await data. coronaK lerps are kept alive too.
       var stillFocus = isFocusLerping();
       var alive = !reduced && (alpha > 0 || alphaTarget > alphaMin);
-      // The root breathes perpetually when data is present; the fetch ring
-      // breathes while awaiting data. Both keep the loop alive UNLESS reduced.
-      var hasBreathingNode =
-        !reduced && !errorState && (nodes.length > 0 || fetching);
+      // Only the fetch ring breathes now (nodes no longer pulse), so the
+      // perpetual keep-alive is limited to the awaiting-data state.
+      var hasBreathingNode = !reduced && !errorState && fetching && nodes.length === 0;
       var interacting =
         dragging ||
         Math.abs(panVX) > 0.1 ||
@@ -3004,7 +2383,9 @@
       overlay.appendChild(strip);
       chromeEls.push(strip);
 
-      // legend (always; collapses past 8 types)
+      // legend (always). In the DEFAULT monochrome look there is nothing to key
+      // by color, so we show a single muted dot. When "Full color" is on, the
+      // per-type color key appears — small round swatches, no glyph letters.
       var presentTypes = {};
       nodes.forEach(function (nd) {
         if (!nd.phantom) presentTypes[nd.type] = true;
@@ -3013,36 +2394,31 @@
       var legend = mkPanel("position:absolute;left:12px;top:12px;padding:9px 11px;max-width:200px;");
       var title = document.createElement("div");
       title.style.cssText = "font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:rgba(255,255,255,0.45);margin-bottom:6px;";
-      title.textContent = "Types";
+      title.textContent = fullColor ? "Types" : "Legend";
       legend.appendChild(title);
-      typeList.slice(0, 8).forEach(function (ty) {
-        var row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);letter-spacing:0.03em;";
-        // Shape-correct swatch: the canvas treats shape (circle|rounded|hex) as
-        // a MANDATORY non-color channel (WCAG 1.4.1), so the legend must match —
-        // a 'task' hexagon on canvas was rendering as a circle in the key.
-        var sh = TYPE_SHAPE[ty] || "circle";
-        var swStyle = "width:12px;height:12px;flex:0 0 auto;background:" +
-          (fullColor ? TYPE_HEX[ty] : mixHex(TYPE_HEX[ty] || SLATE, SLATE, 0.6)) + ";";
-        if (sh === "hex") {
-          swStyle += "border-radius:0;clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0% 50%);";
-        } else if (sh === "rounded") {
-          swStyle += "border-radius:3px;";
-        } else {
-          swStyle += "border-radius:50%;";
-        }
-        row.innerHTML =
-          "<span style='" + swStyle + "'></span>" +
-          "<b style='font-weight:700;color:rgba(255,255,255,0.5)'>" +
-          (TYPE_GLYPH[ty] || "·") +
-          "</b> " +
-          ty;
-        legend.appendChild(row);
-      });
+      if (fullColor) {
+        typeList.slice(0, 8).forEach(function (ty) {
+          var row = document.createElement("div");
+          row.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);letter-spacing:0.03em;";
+          var swStyle = "width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" +
+            (TYPE_HEX[ty] || SLATE) + ";";
+          row.innerHTML = "<span style='" + swStyle + "'></span>" + ty;
+          legend.appendChild(row);
+        });
+      } else {
+        var mrow = document.createElement("div");
+        mrow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);";
+        mrow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + MONO_DARK + "'></span> document";
+        legend.appendChild(mrow);
+        var arow = document.createElement("div");
+        arow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);";
+        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + ACCENT + "'></span> active";
+        legend.appendChild(arow);
+      }
       // phantom ghost entry
       var prow = document.createElement("div");
       prow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.5);font-style:italic;";
-      prow.innerHTML = "<span style='width:10px;height:10px;border-radius:50%;border:1px dashed rgba(148,163,184,0.6)'></span> broken ref";
+      prow.innerHTML = "<span style='width:9px;height:9px;border-radius:50%;border:1px solid rgba(148,163,184,0.5)'></span> broken ref";
       legend.appendChild(prow);
 
       // full-color toggle (pill with state dot)

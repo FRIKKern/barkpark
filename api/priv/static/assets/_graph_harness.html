@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Northern Night — bp-graph harness</title>
+  <title>bp-graph harness — Obsidian style</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #0D0F14; overflow: hidden; }
+    html, body { margin: 0; height: 100%; background: #1a1a1f; overflow: hidden; }
     body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
     #studio-graph { position: absolute; inset: 0; }
     #harness-controls {
@@ -26,7 +26,7 @@
 <body>
   <div id="studio-graph"></div>
   <div id="harness-controls">
-    <strong style="color:#9B8CFF;letter-spacing:.04em">NORTHERN NIGHT</strong>
+    <strong style="color:#7C6CF0;letter-spacing:.04em">BP-GRAPH</strong>
     <select id="dataset">
       <option value="full">Full (~60)</option>
       <option value="drafts">Drafts (ash, type:nil)</option>
@@ -208,6 +208,7 @@
           theme: light ? "light" : "dark",
           reducedMotion: reduce,
           flow: flow,
+          fullColor: false, // load monochrome by default (Obsidian resting look)
           rootId: ds.rootId,
           onNodeClick: function (n) { console.log("click", n); },
           onNodeHover: function (n) { /* hover */ }
