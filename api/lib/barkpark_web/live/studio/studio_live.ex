@@ -3923,10 +3923,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # never leaks across nav switches (the verified 3-site gotcha).
 
   defp setup_graph_view(socket, %{} = doc, graph) when is_map(graph) do
+    # Pass the FULL graph map through verbatim — PaneBuilder threads `:root`
+    # (the navigated-to doc id) alongside `:nodes`/`:edges`, and the GraphView
+    # component reads `Map.get(graph, :root)` in update/2 to emit `data-root=`.
+    # Rebuilding the map with only nodes/edges (the prior bug) dropped `:root`,
+    # so root-sun centering fell back to the highest-degree node. Merge defaults
+    # UNDER the original so `:root` survives and nodes/edges stay non-nil.
     assign(socket,
       editor_view: :graph,
       graph_doc: doc,
-      graph_data: %{nodes: Map.get(graph, :nodes, []), edges: Map.get(graph, :edges, [])}
+      graph_data: Map.merge(%{nodes: [], edges: []}, graph)
     )
   end
 

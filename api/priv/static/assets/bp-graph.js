@@ -654,9 +654,11 @@
         var rb;
         if (n === 1) rb = 28;
         else rb = clamp(8 + 5 * Math.sqrt(rootNode.degree), 8, 32);
-        // 1.55 (was 1.4) restores clear primacy: at the sqrt cap a 1.4 root is
-        // only marginally larger than a high-degree depth-1 hub.
-        rootNode.r = rb * 1.55;
+        // 1.2 (was 1.55): the root must read as clearly the LARGEST node, NOT a
+        // dominating blob that occupies a third of the frame. Primacy now comes
+        // from the accent ring + breathing pulse + soft corona, not raw size, so
+        // a restrained 1.2x keeps the sun elegant without washing the center.
+        rootNode.r = rb * 1.2;
       }
 
       // hash for view-state restore
@@ -713,7 +715,7 @@
       });
 
       buildA11yTree();
-      recomputeTopDegree(); // at-rest label allow-set (root + top-6 by degree)
+      recomputeTopDegree(); // at-rest label allow-set (root + top-4 by degree)
 
       if (sparseMode) {
         layoutSparse();
@@ -1034,18 +1036,42 @@
         g.addColorStop(0, "#F4F4F8");
         g.addColorStop(1, "#E8EDF8");
       } else {
-        // Cool-blue center cast + near-black edge: a darker floor raises the
-        // node-to-ground luminance ratio (every glow reads brighter for free),
-        // and the cool center makes the warm amber/orange/rose node hues sing
-        // instead of muddying against a near-same-hue purple ground. The 0.22
-        // stop (≈ first blast-ring fraction) carves a subtly brighter clearing
-        // FROM the root so the void feels authored, not incidental.
-        g.addColorStop(0, "#0D1018");
-        g.addColorStop(0.22, "#0A0C13");
-        g.addColorStop(1, "#050609");
+        // Cool-blue center cast easing to a DEEPER blue-black at the edge: the
+        // darker floor raises the node-to-ground luminance ratio (every glow
+        // reads brighter for free), the cool center makes the warm amber/rose
+        // hues sing, and the gentle blue→near-black falloff (paired with the
+        // vignette pass) makes the scene read cinematic and deep, not flat. The
+        // 0.20 stop (≈ first blast-ring fraction) carves a subtly brighter
+        // clearing FROM the root so the void feels authored, not incidental.
+        g.addColorStop(0, "#0D1019");
+        g.addColorStop(0.20, "#0A0C13");
+        g.addColorStop(0.62, "#06080E");
+        g.addColorStop(1, "#030409");
       }
       _bgGrad = g;
       _bgKey = key;
+      return g;
+    }
+
+    // Full-canvas VIGNETTE — a canvas-CENTER-anchored radial (independent of the
+    // wandering root) that stays transparent across the inner ~58% then darkens
+    // gently toward the corners. Drawn ON TOP of the scene so it frames every
+    // pixel and reads cinematic/deep. Cached per-size (corners don't move). Kept
+    // subtle so label legibility at the edges survives. Dark theme only.
+    var _vigGrad = null,
+      _vigKey = "";
+    function vignetteGradient() {
+      var key = W + "x" + H;
+      if (_vigGrad && key === _vigKey) return _vigGrad;
+      var cx = W / 2,
+        cy = H / 2;
+      var rr = 0.72 * Math.sqrt(W * W + H * H) / 2; // reach to the corners
+      var g = ctx.createRadialGradient(cx, cy, rr * 0.5, cx, cy, rr);
+      g.addColorStop(0, "rgba(2,3,7,0)");
+      g.addColorStop(0.7, "rgba(2,3,7,0.16)");
+      g.addColorStop(1, "rgba(2,3,7,0.42)");
+      _vigGrad = g;
+      _vigKey = key;
       return g;
     }
 
@@ -1194,6 +1220,15 @@
       // ── labels (screen-space) ──
       drawLabels(now);
 
+      // ── full-canvas vignette (cinematic frame) — over the scene, under the
+      // a11y focus ring so keyboard focus stays crisp. Dark, non-forced only.
+      if (theme !== "light" && !forced) {
+        ctx.save();
+        ctx.fillStyle = vignetteGradient();
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+
       // a11y focus ring
       if (focusIdx >= 0 && a11yOrder[focusIdx]) {
         drawFocusRing(a11yOrder[focusIdx]);
@@ -1340,8 +1375,18 @@
       var srcHex = nodeFill(e.src);
       var dstHex = nodeFill(e.dst);
 
-      var sAlpha = (theme === "light" ? 0.20 : tier.s) * e.alpha;
-      var tAlpha = (theme === "light" ? 0.35 : tier.t) * e.alpha;
+      // Along-edge alpha gradient leans BRIGHTER toward the higher-relevance
+      // end — relevance = closeness to the root (lower BFS depth). The brighter
+      // tier alpha (tier.s) is parked on whichever endpoint is shallower so the
+      // eye is drawn up-hierarchy toward the sun; the dimmer (tier.t) trails to
+      // the leaf. Light theme keeps its fixed src/dst ramp.
+      var srcDepth = depthMap[e.srcId] == null ? 99 : depthMap[e.srcId];
+      var dstDepth = depthMap[e.dstId] == null ? 99 : depthMap[e.dstId];
+      var srcBrighter = srcDepth <= dstDepth; // tie → source end
+      var aHi = (theme === "light" ? 0.20 : tier.s) * e.alpha;
+      var aLo = (theme === "light" ? 0.35 : tier.t) * e.alpha;
+      var sAlpha = theme === "light" ? aHi : srcBrighter ? aHi : aLo;
+      var tAlpha = theme === "light" ? aLo : srcBrighter ? aLo : aHi;
 
       ctx.save();
       if (forced) {
@@ -1349,6 +1394,8 @@
       } else {
         var grad = ctx.createLinearGradient(g.p0[0], g.p0[1], g.p2[0], g.p2[1]);
         grad.addColorStop(0, rgba(srcHex, sAlpha));
+        // mid stop keeps the ramp from looking like a hard two-tone band
+        grad.addColorStop(0.5, rgba(mixHex(srcHex, dstHex, 0.5), (sAlpha + tAlpha) * 0.5));
         grad.addColorStop(1, rgba(dstHex, tAlpha));
         ctx.strokeStyle = grad;
       }
@@ -1460,21 +1507,35 @@
     }
 
     function drawFlowParticles(e, g, now, srcHex) {
-      var period = (e.kind === "backlink" || e.kind === "plugin_source" ? 4500 * 1.33 : 4500);
-      var hex = shiftL(srcHex, 0.15);
-      var count = e.wBand > 0.6 ? 3 : e.wBand > 0.3 ? 2 : 1;
+      // SLOW + LOW-ALPHA flowing dots that convey direction without reading as a
+      // busy marquee. Period lengthened ~1.7x (≈7.6s base) so a single dot
+      // drifts gently along the curve. Travel runs from the higher-relevance end
+      // (shallower BFS depth) toward the leaf, matching the alpha gradient — so
+      // the eye learns "flow points down-hierarchy, away from the sun".
+      var period = (e.kind === "backlink" || e.kind === "plugin_source" ? 7600 * 1.33 : 7600);
+      var srcDepth = depthMap[e.srcId] == null ? 99 : depthMap[e.srcId];
+      var dstDepth = depthMap[e.dstId] == null ? 99 : depthMap[e.dstId];
+      var forward = srcDepth <= dstDepth; // dot travels src→dst when true
+      var hex = shiftL(srcHex, 0.12);
+      var count = e.wBand > 0.6 ? 2 : 1; // at most two dots — never a stream
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (var i = 0; i < count; i++) {
         var phase = (e.phaseSeed + (i * period) / count);
-        var tt = (((now - phase) % period) + period) % period / period;
+        var raw = (((now - phase) % period) + period) % period / period;
+        var tt = forward ? raw : 1 - raw;
         var pos = bezierAt(g.p0, g.c, g.p2, tt);
-        var grad = ctx.createRadialGradient(pos[0], pos[1], 0, pos[0], pos[1], 3.2);
-        grad.addColorStop(0, rgba(hex, 0.9 * e.alpha));
+        // gently fade the dot in at the start of its run and out at the end so
+        // it materialises and dissolves rather than popping at the endpoints.
+        var travel = forward ? raw : 1 - tt; // 0..1 along its own direction
+        var edgeFade = clamp(Math.sin(travel * Math.PI), 0, 1);
+        var dotA = 0.5 * e.alpha * edgeFade;
+        var grad = ctx.createRadialGradient(pos[0], pos[1], 0, pos[0], pos[1], 3.0);
+        grad.addColorStop(0, rgba(hex, dotA));
         grad.addColorStop(1, rgba(hex, 0));
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(pos[0], pos[1], 1.6, 0, Math.PI * 2);
+        ctx.arc(pos[0], pos[1], 1.5, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -1703,6 +1764,10 @@
       // than a pulsing core inside two dead circles. Reduced-motion → 0 (today's
       // exact rest values), preserving the accessibility guarantee verbatim.
       var breath = reduced ? 0 : Math.sin(now * 0.0028);
+      // Subtle breathing SCALE for the sun: ±1.8% on the same ~3.5s sine. The
+      // orb gently swells/contracts so the focal anchor reads "alive at rest"
+      // through structure, not flicker. Frozen to 1.0 under reduced-motion.
+      if (isRoot) r = r * (1 + 0.018 * breath);
 
       if (glowTier <= 1) {
         // The breathing sine MODULATES halo intensity — the signature
@@ -1710,34 +1775,37 @@
         // mid-rest value (0) so frozen frames land on the DESIGNED rest
         // luminance, not a random phase.
         if (isRoot) {
-          // The root is a CLEAR focal anchor, NOT a blast lamp. The old huge
-          // bright disc (blur 32 @ ~0.67α over r+4) washed adjacent depth-1
-          // orbs to white. Its primacy now rides on SIZE (1.55x) + the thin
-          // accent rings below — the glow is deliberately tight and gentle so
-          // neighbors stay legible. Still the only perpetually-breathing node.
-          var haloA = 0.06 + 0.035 * breath;
-          // tight outer bloom — radius pulled in (r+2, blur 16) and peak alpha
-          // roughly halved so the corona hugs the orb instead of flooding out.
+          // The root is a CLEAR focal anchor — it reads as "the center" through
+          // STRUCTURE + SIZE + the ring, NOT raw brightness. Three layers:
+          //   1. a WIDE soft CORONA (large-radius, very-low-alpha radial that
+          //      falls off gently) — the atmospheric "this is the sun" halo that
+          //      must NOT wash out the depth-1 orbs sitting just outside it.
+          //   2. a smaller, crisp bright CORE — the contained luminous heart.
+          //   3. the thin accent rings (drawn below, after the glass core).
+          // A slow gentle BREATHING pulse rides a ~3.5s sine (period =
+          // 2π/0.0028): a subtle scale + glow-alpha swell. Under reduced-motion
+          // `breath` is 0, so frozen frames land on the designed rest values.
+          var breath01 = (breath + 1) / 2; // 0..1 for monotonic alpha swells
+
+          // (1) WIDE soft corona — a big low-alpha radial blitted via the sprite
+          // cache (cheap, no shadowBlur). Peak alpha pulled WAY down and the
+          // radius TIGHTENED (4.0, was 4.6) so the inner falloff steepens and the
+          // glow stops short of the depth-1 orbs — neighbors stay legible.
+          var coronaR = (r + 6) * 4.0;
+          var coronaA = (0.05 + 0.018 * breath01) * node.alpha;
+          blitGlow(ACCENT, p[0], p[1], coronaR, coronaA);
+
+          // (2) crisp bright CORE — a smaller, tight bloom (blur 14) that hugs
+          // the orb. The ONLY place real brightness lives, and now pulled down
+          // (alpha 0.10/+0.035, lightness shift 0.16) so the orb reads as a
+          // luminous GEM with depth, not a flat near-white disc.
           ctx.save();
           ctx.globalCompositeOperation = "lighter";
-          ctx.globalAlpha = (0.26 + haloA) * node.alpha;
-          ctx.shadowColor = ACCENT;
-          ctx.shadowBlur = 16;
-          ctx.fillStyle = ACCENT;
-          shapePath(p[0], p[1], r + 2, shape);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          ctx.shadowColor = "transparent";
-          ctx.restore();
-          // hot core pass — a slightly-brighter heart so it still reads as the
-          // star at the center, but contained (blur 10, lower alpha).
-          ctx.save();
-          ctx.globalCompositeOperation = "lighter";
-          ctx.globalAlpha = 0.3 * node.alpha;
-          ctx.shadowColor = shiftL(ACCENT, 0.28);
-          ctx.shadowBlur = 10;
-          ctx.fillStyle = shiftL(ACCENT, 0.3);
-          shapePath(p[0], p[1], r * 0.9, shape);
+          ctx.globalAlpha = (0.1 + 0.035 * breath01) * node.alpha;
+          ctx.shadowColor = shiftL(ACCENT, 0.18);
+          ctx.shadowBlur = 14;
+          ctx.fillStyle = shiftL(ACCENT, 0.16);
+          shapePath(p[0], p[1], r * 0.86, shape);
           ctx.fill();
           ctx.shadowBlur = 0;
           ctx.shadowColor = "transparent";
@@ -1776,11 +1844,22 @@
         p[1],
         r
       );
-      // hot emissive heart -> mid type-color -> darkened, fading edge
-      grad.addColorStop(0, shiftL(coreHex, 0.34));
-      grad.addColorStop(0.32, shiftL(coreHex, 0.1));
-      grad.addColorStop(0.7, coreHex);
-      grad.addColorStop(1, rgba(shiftL(coreHex, -0.3), 0.82));
+      // hot emissive heart -> mid type-color -> darkened, fading edge.
+      // The root uses a RESTRAINED ramp: a dimmer hot center (0.18 vs 0.34) that
+      // fades to the accent hue SOONER (full accent by 0.5, not 0.7) so the orb
+      // reads as a luminous gem with depth instead of a flat bright violet disc
+      // washing out the canvas center. Satellites keep the brighter cabochon.
+      if (isRoot) {
+        grad.addColorStop(0, shiftL(coreHex, 0.18));
+        grad.addColorStop(0.28, shiftL(coreHex, 0.05));
+        grad.addColorStop(0.5, coreHex);
+        grad.addColorStop(1, rgba(shiftL(coreHex, -0.3), 0.82));
+      } else {
+        grad.addColorStop(0, shiftL(coreHex, 0.34));
+        grad.addColorStop(0.32, shiftL(coreHex, 0.1));
+        grad.addColorStop(0.7, coreHex);
+        grad.addColorStop(1, rgba(shiftL(coreHex, -0.3), 0.82));
+      }
       ctx.fillStyle = grad;
       shapePath(p[0], p[1], r, shape);
       ctx.fill();
@@ -1956,7 +2035,7 @@
     // set changes (cheap: a single sort of the real nodes by degree). At rest
     // we label ONLY the root + these few, then collision-skip the rest, so a
     // settled constellation reads clean instead of an overlapping word-pile.
-    var REST_TOP_N = 6;
+    var REST_TOP_N = 4;
     var _topDegIds = {};
     function recomputeTopDegree() {
       _topDegIds = {};
@@ -1986,9 +2065,10 @@
         var deg = node.degree;
         // LOD policy:
         //   • root + hovered + hovered's 1-hop neighbors  → ALWAYS (win collision)
-        //   • at REST (s < 1.4): only the top-6 highest-degree nodes are even
-        //     candidates — everything else stays silent so the field is calm.
-        //   • zoomed in (s >= 1.4): progressively reveal more by degree as you
+        //   • at REST (s < 1.5): only the top-4 highest-degree nodes are even
+        //     candidates — everything else stays silent so the field is calm
+        //     (Obsidian-sparse: a few labels, not a wall of text).
+        //   • zoomed in (s >= 1.5): progressively reveal more by degree as you
         //     push further in, highest-degree first, each fading in over a band.
         var show = false;
         var labelA = 1;
@@ -1998,13 +2078,13 @@
           // top-degree tier: visible from a near-overview, fades in by s>=0.46.
           show = true;
           labelA = clamp((s - 0.34) / 0.12, 0, 1);
-        } else if (s >= 1.4) {
-          // progressive reveal: each 0.35 of extra zoom past 1.4x lowers the
+        } else if (s >= 1.5) {
+          // progressive reveal: each 0.35 of extra zoom past 1.5x lowers the
           // degree bar by ~2, so deeper zoom surfaces more (lower-degree) labels.
-          var degBar = Math.max(1, 8 - Math.floor((s - 1.4) / 0.35) * 2);
+          var degBar = Math.max(1, 8 - Math.floor((s - 1.5) / 0.35) * 2);
           if (deg >= degBar) {
             show = true;
-            labelA = clamp((s - 1.4) / 0.18, 0, 1);
+            labelA = clamp((s - 1.5) / 0.18, 0, 1);
           }
         }
         if (!show || labelA <= 0.001) continue;
