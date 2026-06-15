@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Northern Night — bp-graph harness</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0D0F14; overflow: hidden; }
+    body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    #studio-graph { position: absolute; inset: 0; }
+    #harness-controls {
+      position: absolute; left: 12px; bottom: 12px; z-index: 40;
+      display: flex; gap: 8px; align-items: center;
+      background: rgba(15,17,23,0.7); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+      padding: 8px 10px; color: rgba(255,255,255,0.7); font-size: 12px;
+    }
+    #harness-controls button, #harness-controls select {
+      background: rgba(40,44,58,0.6); border: 1px solid rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.8); border-radius: 7px; padding: 5px 9px;
+      font-size: 12px; cursor: pointer; font-family: inherit;
+    }
+    #harness-controls label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="studio-graph"></div>
+  <div id="harness-controls">
+    <strong style="color:#9B8CFF;letter-spacing:.04em">NORTHERN NIGHT</strong>
+    <select id="dataset">
+      <option value="full">Full (~60)</option>
+      <option value="drafts">Drafts (ash, type:nil)</option>
+      <option value="sparse3">Sparse (3)</option>
+      <option value="sparse1">Single (1)</option>
+      <option value="void">Void (0)</option>
+      <option value="fetch">Fetch→populate</option>
+      <option value="error">Parse-error</option>
+    </select>
+    <label><input type="checkbox" id="light" /> light</label>
+    <label><input type="checkbox" id="reduce" /> reduced</label>
+    <label><input type="checkbox" id="flow" /> flow</label>
+    <button id="refit">fit</button>
+    <button id="kbd" title="Tab into the canvas, then arrow-key to traverse nodes (focus recenters the camera)">⌨ kbd</button>
+  </div>
+  <!-- Forced-colors / high-contrast: emulate via DevTools
+       (Rendering → "Emulate CSS forced-colors: active") to exercise the
+       drawNodeForced / glyph-at-all-zooms / dimmed-CanvasText paths. The
+       renderer also re-reads the MQ live on change. -->
+  <!-- Keyboard: the canvas is tabindex=0; Tab focuses the graph, focus
+       delegates into the role=tree, arrows traverse and recenter the camera. -->
+
+  <script src="bp-graph.js"></script>
+  <script>
+    // ── rich sample dataset (~60 nodes) ──────────────────────────────────
+    // Root = a hub "page" referenced by many; an author hub referenced by
+    // many papers; clusters of posts/papers/tasks; a few phantoms.
+    function fullDataset() {
+      var nodes = [], edges = [];
+      function N(id, type, title, extra) {
+        var n = { id: id, doc_id: id, type: type, title: title, phantom: false };
+        if (extra) for (var k in extra) n[k] = extra[k];
+        nodes.push(n);
+      }
+      function E(from, to, kind, weight, src) {
+        edges.push({ from_id: from, to_id: to, kind: kind || "reference", weight: weight == null ? null : weight, plugin_source: src || null });
+      }
+
+      // root: a landing page
+      N("page:home", "page", "Home — Editorial Index");
+
+      // author hubs
+      N("author:wren", "author", "Wren Halloway");
+      N("author:soto", "author", "Mira Soto");
+      N("author:kade", "author", "Kade Lin");
+
+      // categories
+      N("category:fiction", "category", "Fiction");
+      N("category:essays", "category", "Essays");
+      N("category:research", "category", "Research");
+
+      // projects
+      N("project:atlas", "project", "Atlas Anthology");
+      N("project:nightfall", "project", "Nightfall Series");
+
+      // posts (cluster A — around author:wren)
+      for (var i = 1; i <= 10; i++) {
+        N("post:wren-" + i, "post", "Field Note " + i);
+        E("page:home", "post:wren-" + i, "reference", 1 + (i % 3));
+        E("post:wren-" + i, "author:wren", "reference", 2);
+        if (i % 2 === 0) E("post:wren-" + i, "category:essays", "backlink", 1);
+      }
+
+      // papers (cluster B — research, around author:soto)
+      for (var j = 1; j <= 9; j++) {
+        N("paper:soto-" + j, "paper", "On Liminal Spaces, Pt." + j);
+        E("page:home", "paper:soto-" + j, "reference", 1);
+        E("paper:soto-" + j, "author:soto", "reference", 3);
+        E("paper:soto-" + j, "category:research", "backlink", 1);
+        E("paper:soto-" + j, "project:atlas", "plugin_source", 1, "bulldocs");
+      }
+
+      // pages (sub-pages)
+      for (var p = 1; p <= 5; p++) {
+        N("page:sub-" + p, "page", "Section " + p);
+        E("page:home", "page:sub-" + p, "reference", 4);
+      }
+
+      // tasks with status
+      var statuses = ["open", "in_progress", "closed", "open", "in_progress", "done"];
+      for (var t = 1; t <= 6; t++) {
+        N("task:edit-" + t, "task", "Edit pass #" + t, { status: statuses[t - 1] });
+        E("project:nightfall", "task:edit-" + t, "reference", 2);
+      }
+      E("page:home", "project:nightfall", "reference", 5);
+      E("page:home", "project:atlas", "reference", 5);
+
+      // books + media + sheets + game-data (variety of shapes/glyphs)
+      N("book:anthology", "book", "The Atlas Anthology");
+      E("project:atlas", "book:anthology", "reference", 4);
+      N("mediaAsset:cover", "mediaAsset", "Cover Art v3");
+      E("book:anthology", "mediaAsset:cover", "reference", 2);
+      N("sheet:budget", "sheet", "Production Budget");
+      E("project:nightfall", "sheet:budget", "reference", 1);
+      N("game-data:lore", "game-data", "Lore Bible");
+      E("project:nightfall", "game-data:lore", "plugin_source", 1, "tasks");
+
+      // a couple of cross-links (bidirectional + self-loop)
+      E("author:wren", "author:soto", "backlink", 1); // collaboration
+      E("author:soto", "author:wren", "reference", 1); // bidirectional pair
+      E("page:home", "page:home", "reference", 1); // self-loop guard test
+
+      // phantoms — dangling broken references (real wire shape)
+      nodes.push({ id: null, broken_id: "post:deleted-draft", via_field: "related", refType: "post", source: "page:home", phantom: true, title: "post:deleted-draft" });
+      edges.push({ from_id: "page:home", to_id: "post:deleted-draft", kind: "reference", weight: null, plugin_source: null });
+      nodes.push({ id: null, broken_id: "author:ghost", via_field: "", refType: "", source: "paper:soto-1", phantom: true, title: "author:ghost" });
+      edges.push({ from_id: "paper:soto-1", to_id: "author:ghost", kind: "reference", weight: null, plugin_source: null });
+      nodes.push({ id: null, broken_id: "paper:retracted", via_field: "supersedes", refType: "paper", source: "paper:soto-5", phantom: true, title: "paper:retracted" });
+      edges.push({ from_id: "paper:soto-5", to_id: "paper:retracted", kind: "backlink", weight: null, plugin_source: null });
+
+      return { nodes: nodes, edges: edges, rootId: "page:home" };
+    }
+
+    // Drafts path: type:nil, title==slug, id==doc_id==slug (graph.ex:194)
+    function draftsDataset() {
+      var full = fullDataset();
+      var nodes = full.nodes.map(function (n) {
+        if (n.phantom) return n;
+        return { id: n.id, doc_id: n.id, type: null, title: n.id, phantom: false };
+      });
+      return { nodes: nodes, edges: full.edges, rootId: "page:home" };
+    }
+
+    function sparse(n) {
+      var nodes = [], edges = [];
+      var names = ["page:home", "post:alpha", "paper:beta"];
+      for (var i = 0; i < n; i++) {
+        nodes.push({ id: names[i], doc_id: names[i], type: names[i].split(":")[0], title: names[i].split(":")[1], phantom: false });
+        if (i > 0) edges.push({ from_id: "page:home", to_id: names[i], kind: "reference", weight: 1, plugin_source: null });
+      }
+      return { nodes: nodes, edges: edges, rootId: "page:home" };
+    }
+
+    // ── bootstrap ────────────────────────────────────────────────────────
+    var container = document.getElementById("studio-graph");
+    var renderer = null;
+
+    function build() {
+      if (renderer) { renderer.destroy(); renderer = null; }
+      container.innerHTML = "";
+      var which = document.getElementById("dataset").value;
+      var light = document.getElementById("light").checked;
+      var reduce = document.getElementById("reduce").checked;
+      var flow = document.getElementById("flow").checked;
+
+      if (which === "void") {
+        renderer = window.BarkparkGraphRenderer(container, { nodes: [], edges: [] },
+          { theme: light ? "light" : "dark", reducedMotion: reduce, flow: flow });
+        return;
+      }
+      if (which === "fetch") {
+        // INITIAL-FETCH continuity: breathing ring, then populate into the graph
+        // after a beat (mirrors the production hook's empty-mount → first update).
+        renderer = window.BarkparkGraphRenderer(container, { nodes: [], edges: [] },
+          { theme: light ? "light" : "dark", reducedMotion: reduce, flow: flow });
+        renderer.setFetching(true);
+        var fds = fullDataset();
+        setTimeout(function () {
+          if (renderer) renderer.update(fds.nodes, fds.edges, { rootId: "page:home" });
+        }, 1600);
+        return;
+      }
+      if (which === "error") {
+        renderer = window.BarkparkGraphRenderer(container, { nodes: [], edges: [] },
+          { theme: light ? "light" : "dark", reducedMotion: reduce });
+        renderer.setError(true);
+        return;
+      }
+
+      var ds;
+      if (which === "drafts") ds = draftsDataset();
+      else if (which === "sparse3") ds = sparse(3);
+      else if (which === "sparse1") ds = sparse(1);
+      else ds = fullDataset();
+
+      renderer = window.BarkparkGraphRenderer(container,
+        { nodes: ds.nodes, edges: ds.edges },
+        {
+          theme: light ? "light" : "dark",
+          reducedMotion: reduce,
+          flow: flow,
+          rootId: ds.rootId,
+          onNodeClick: function (n) { console.log("click", n); },
+          onNodeHover: function (n) { /* hover */ }
+        });
+    }
+
+    document.getElementById("dataset").addEventListener("change", build);
+    document.getElementById("light").addEventListener("change", build);
+    document.getElementById("reduce").addEventListener("change", build);
+    document.getElementById("flow").addEventListener("change", build);
+    document.getElementById("refit").addEventListener("click", function () { if (renderer) renderer.fit(); });
+    document.getElementById("kbd").addEventListener("click", function () {
+      // focus the renderer's canvas so Tab/arrow traversal can be smoke-tested
+      var cv = container.querySelector("canvas");
+      if (cv) cv.focus();
+    });
+
+    build();
+  </script>
+</body>
+</html>
