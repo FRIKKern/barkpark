@@ -285,7 +285,20 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     cond do
       String.contains?(token, " ") -> String.contains?(title, token)
       MapSet.member?(words, token) -> true
-      true -> Enum.any?(words, &String.starts_with?(&1, token))
+      Enum.any?(words, &String.starts_with?(&1, token)) -> true
+      # Typo tolerance: a query token within a close Jaro distance of a title
+      # WORD still counts as a title hit (q="workspce" → title "Workspace"). This
+      # is what lets Indx's fuzzy recall — its signature strength — win the title
+      # TIER, not merely land the doc somewhere in the pool. Guarded to tokens
+      # AND words ≥4 chars + a strict 0.88 threshold (measured: real typos score
+      # ≥0.95, unrelated words ≤0.73 — a wide, safe gap, so no false promotions).
+      String.length(token) >= 4 ->
+        Enum.any?(words, fn w ->
+          String.length(w) >= 4 and String.jaro_distance(w, token) >= 0.88
+        end)
+
+      true ->
+        false
     end
   end
 
