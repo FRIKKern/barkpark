@@ -16,6 +16,7 @@ import {
   type SearchEngine,
   type SortId,
 } from "@/lib/find";
+import { useHoveredDoc } from "@/lib/hovered-doc-context";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
 
@@ -116,6 +117,10 @@ function ResultRow({
   position?: number;
 }) {
   const date = shortDate(hit.date);
+  // Cross-surface highlight: lit when the landing graph hovers this doc's node
+  // (matched by doc_id == slug). A no-op outside the provider (default null).
+  const { hoveredId } = useHoveredDoc();
+  const graphHovered = hoveredId != null && hoveredId === hit.slug;
   // Fire-and-forget click signal — non-blocking so it never delays navigation.
   const onResultClick = () => {
     if (searchEventId) {
@@ -159,12 +164,15 @@ function ResultRow({
 
   const cls =
     "group -mx-3 flex flex-col gap-1.5 rounded-lg px-3 py-5 transition-colors";
-  // Selected = the doc currently open in the right pane: a quiet highlight ring.
-  const selectedCls = selected
+  // State ring: the open doc (selected) wins; else a graph-hover accent (violet,
+  // tied to the graph's accent node); else the normal hover wash.
+  const stateCls = selected
     ? " bg-zinc-100 ring-1 ring-zinc-300 dark:bg-zinc-900/60 dark:ring-zinc-700"
-    : " hover:bg-zinc-100 dark:hover:bg-zinc-900/60";
+    : graphHovered
+      ? " bg-violet-50 ring-1 ring-violet-300 dark:bg-violet-950/30 dark:ring-violet-600/60"
+      : " hover:bg-zinc-100 dark:hover:bg-zinc-900/60";
 
-  if (!hit.href) return <div className={cls}>{inner}</div>;
+  if (!hit.href) return <div className={`${cls}${stateCls}`}>{inner}</div>;
 
   // Master mode: append the live finder query string so opening a doc preserves
   // search/engine/facets. Because <Finder> lives in the (finder) LAYOUT, this
@@ -177,7 +185,7 @@ function ResultRow({
       prefetch
       onClick={onResultClick}
       aria-current={selected ? "page" : undefined}
-      className={`${cls}${selectedCls}`}
+      className={`${cls}${stateCls}`}
     >
       {inner}
     </Link>

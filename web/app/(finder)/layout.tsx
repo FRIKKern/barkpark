@@ -1,6 +1,7 @@
 import { Finder } from "@/components/finder";
 import { runSearch } from "@/lib/find-search";
 import type { FindResponse } from "@/lib/find";
+import { HoveredDocProvider } from "@/lib/hovered-doc-context";
 
 // Force-dynamic so the Finder's server-seeded browse renders straight into the
 // HTML — no `useSearchParams` CSR-bailout skeleton, so the master column keeps
@@ -49,15 +50,17 @@ export default async function FinderLayout({
   const initialData: FindResponse | null = r ? { ...r, upstreamMs: null } : null;
 
   return (
-    <div className="mx-auto flex h-screen w-full max-w-[2200px] overflow-hidden">
-      <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[440px] lg:w-[480px] xl:w-[540px] 2xl:w-[600px] dark:border-zinc-800">
-        <Finder
-          variant="master"
-          initialData={initialData}
-          initialEngine="indx"
-        />
-      </aside>
-      <section className="min-w-0 flex-1 overflow-y-auto">{children}</section>
-    </div>
+    <HoveredDocProvider>
+      <div className="mx-auto flex h-screen w-full max-w-[2200px] overflow-hidden">
+        <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[440px] lg:w-[480px] xl:w-[540px] 2xl:w-[600px] dark:border-zinc-800">
+          <Finder
+            variant="master"
+            initialData={initialData}
+            initialEngine="indx"
+          />
+        </aside>
+        <section className="min-w-0 flex-1 overflow-y-auto">{children}</section>
+      </div>
+    </HoveredDocProvider>
   );
 }

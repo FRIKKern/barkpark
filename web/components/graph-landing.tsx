@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GraphView } from "@/components/graph-view";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
+import { useHoveredDoc } from "@/lib/hovered-doc-context";
 
 export interface GraphLandingProps {
   nodes: GraphNode[];
@@ -25,6 +26,7 @@ export interface GraphLandingProps {
 export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps) {
   const router = useRouter();
   const sp = useSearchParams();
+  const { setHoveredId } = useHoveredDoc();
 
   const onNodeClick = useCallback(
     (node: GraphNode) => {
@@ -36,6 +38,15 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
       router.push(qs ? `${href}?${qs}` : href);
     },
     [router, sp],
+  );
+
+  // Cross-surface highlight: hovering a graph node lights up its finder result
+  // (matched by doc_id == hit.slug). Phantom/missing nodes clear the highlight.
+  const onNodeHover = useCallback(
+    (node: GraphNode | null) => {
+      setHoveredId(node && !node.phantom && node.doc_id ? node.doc_id : null);
+    },
+    [setHoveredId],
   );
 
   return (
@@ -56,6 +67,7 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
         edges={edges}
         rootId={rootId}
         onNodeClick={onNodeClick}
+        onNodeHover={onNodeHover}
       />
     </div>
   );
