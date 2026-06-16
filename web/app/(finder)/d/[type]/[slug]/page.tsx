@@ -19,6 +19,10 @@ const KNOWN_TYPES = new Set([
   "author",
   "category",
   "project",
+  // Media types are graph nodes too — render them as MetaCards so clicking a
+  // media node in the landing graph opens a summary instead of a 404 dead-end.
+  "mediaAsset",
+  "mediaCollection",
 ]);
 
 type Params = Promise<{ type: string; slug: string }>;
