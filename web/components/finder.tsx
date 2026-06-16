@@ -151,11 +151,14 @@ function localSearch(
  */
 function partitionExact(hits: FindHit[], tokens: string[]): FindHit[] {
   if (tokens.length === 0) return hits;
+  // Lowercase the tokens — the haystack is lowercased, so a camelCase query like
+  // "WebSocket" must be folded too, or NOTHING matches and the partition no-ops.
+  const needles = tokens.map((t) => t.toLowerCase());
   const exact: FindHit[] = [];
   const fuzzy: FindHit[] = [];
   for (const h of hits) {
     const hay = `${h.title} ${h.body ?? h.excerpt ?? ""} ${h.slug ?? ""}`.toLowerCase();
-    (tokens.every((t) => hay.includes(t)) ? exact : fuzzy).push(h);
+    (needles.every((t) => hay.includes(t)) ? exact : fuzzy).push(h);
   }
   // Only reorder on a genuine mix — otherwise keep the engine's order intact.
   return exact.length > 0 && fuzzy.length > 0 ? [...exact, ...fuzzy] : hits;
