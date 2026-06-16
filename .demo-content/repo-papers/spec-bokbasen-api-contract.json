@@ -1,0 +1,7095 @@
+{
+  "slug": "spec-bokbasen-api-contract",
+  "title": "Bokbasen ingestion — wire-level API contract",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "Phase 7 WI1 deliverable.",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " This pins the HTTP-level contract Phase 7 WI2–WI7 will implement against. All claims trace to a public Bokbasen source (URL + retrieval date) or are explicitly tagged as a Boss-escalation question in §9. No Elixir code is shipped in WI1. Companion recon: see "
+        },
+        {
+          "type": "text",
+          "value": "bokbasen-onix-pre-flight.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " for ONIX-content gaps and Phase 7 candidate task list."
+        }
+      ]
+    },
+    {
+      "id": "b2",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "All Confluence URLs accessed via the Confluence REST API ("
+        },
+        {
+          "type": "text",
+          "value": "/wiki/rest/api/content/<id>?expand=body.storage",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") on "
+        },
+        {
+          "type": "text",
+          "value": "2026-04-30",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Page IDs are the canonical identifiers; human-readable URLs may rewrite."
+        }
+      ]
+    },
+    {
+      "id": "b3",
+      "type": "divider"
+    },
+    {
+      "id": "b4",
+      "type": "heading",
+      "level": 2,
+      "text": "1. Overview & scope"
+    },
+    {
+      "id": "b5",
+      "type": "heading",
+      "level": 3,
+      "text": "1.1 What this contract covers"
+    },
+    {
+      "id": "b6",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The wire-level contract for "
+        },
+        {
+          "type": "text",
+          "value": "publishing one or more ONIX 3.0/3.1 products to Bokbasen's metadata import service",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", including:"
+        }
+      ]
+    },
+    {
+      "id": "b7",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "OAuth2 client-credentials authentication (token acquisition + caching)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The single-phase async ingestion POST (Onix Import V2)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Status polling (per-item + list) until terminal state ("
+          },
+          {
+            "type": "text",
+            "value": "COMPLETED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " /"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "FAILED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Object Import for cover images and audio samples (separate endpoint,"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "binary upload, synchronous 201)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Error-envelope shape and HTTP status mapping."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Rate-limit / retry / Retry-After semantics (best-known; one open"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "question remains)."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b8",
+      "type": "heading",
+      "level": 3,
+      "text": "1.2 What this contract defers"
+    },
+    {
+      "id": "b9",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Deferred to"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "What"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Phase 7 WI2",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Credential plumbing: encrypted storage in the "
+            },
+            {
+              "type": "text",
+              "value": "plugin_settings",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " table + env-var fallback; this doc only specifies the *header format* the credential lands in."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Phase 7 WI3",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The actual "
+            },
+            {
+              "type": "text",
+              "value": "Req",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "-based HTTP client module (function names, struct shapes, telemetry). This doc specifies the URLs, methods, headers, bodies, and error mapping; WI3 turns those into Elixir code."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Phase 7 WI4",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Oban worker that orchestrates stage → poll → terminal-state and writes back to the publish-job row. This doc specifies the state machine; WI4 implements the worker."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Phase 7 WI5–WI7",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Studio UI hooks, queue back-pressure, ops dashboard."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Phase 8 / Task #12",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Bokbasen → barkpark *acknowledgement loop* (Bokbasen pushing back catalogue-entry confirmations). The Phase 7 flow stops at \"Bokbasen says "
+            },
+            {
+              "type": "text",
+              "value": "COMPLETED",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "\"; downstream \"did the record actually land in DDS / surface to retailers\" is a future task."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Object Import",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Listed here for completeness because the contract is needed for the cover-image flow, but the WI4 worker is metadata-only — Object Import becomes its own WI in a later phase (it is not in Task #1's WI2–WI7 acceptance criteria)."
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b10",
+      "type": "heading",
+      "level": 3,
+      "text": "1.3 ⚠️ Important contract finding — re-framing \"two-phase claim\""
+    },
+    {
+      "id": "b11",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The Phase 7 task brief refers to a "
+        },
+        {
+          "type": "text",
+          "value": "two-phase claim",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " lifecycle. This language does "
+        },
+        {
+          "type": "text",
+          "value": "not",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " match Bokbasen's actual public API. Bokbasen exposes a "
+        },
+        {
+          "type": "text",
+          "value": "single-phase asynchronous ingestion",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " model:"
+        }
+      ]
+    },
+    {
+      "id": "b12",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\"The Onix Import API allows clients to post a single Onix "
+        },
+        {
+          "type": "text",
+          "value": "Product",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " or multiple "
+        },
+        {
+          "type": "text",
+          "value": "Products",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " within an "
+        },
+        {
+          "type": "text",
+          "value": "ONIXMessage",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " for registration in the Bokbasen system. […] If posted data validates as Onix the client receives a \"202 Accepted\" response with a Location header pointing to a service where the client can retrieve the current status of the import request.\"* — Bokbasen Confluence, *Import Service*, page id 48955439, retrieved 2026-04-30.[^import]"
+        }
+      ]
+    },
+    {
+      "id": "b13",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "There is "
+        },
+        {
+          "type": "text",
+          "value": "no separate `claim` / `confirm` step",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", and no "
+        },
+        {
+          "type": "text",
+          "value": "abort",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " endpoint. Once the synchronous POST returns "
+        },
+        {
+          "type": "text",
+          "value": "202 Accepted",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", the record is committed to the asynchronous queue; the only way to \"abort\" is to let the record fail and either resubmit or "
+        },
+        {
+          "type": "text",
+          "value": "NotificationType=05",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "-delete it. See §4 for how this maps onto the WI4 worker state machine."
+        }
+      ]
+    },
+    {
+      "id": "b14",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The remaining \"two-phase\" semantics in the task brief should be read as:"
+        }
+      ]
+    },
+    {
+      "id": "b15",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Phase A (synchronous):",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " stage POST returns 202 + status URL."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Phase B (asynchronous):",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " poll the status URL until terminal state."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b16",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "This is captured as "
+        },
+        {
+          "type": "text",
+          "value": "[blocking] Q-A",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9 — Boss confirms whether that re-framing is the intended Phase 7 acceptance criterion before WI4 codes the state machine."
+        }
+      ]
+    },
+    {
+      "id": "b17",
+      "type": "divider"
+    },
+    {
+      "id": "b18",
+      "type": "heading",
+      "level": 2,
+      "text": "2. Auth"
+    },
+    {
+      "id": "b19",
+      "type": "heading",
+      "level": 3,
+      "text": "2.1 Decision"
+    },
+    {
+      "id": "b20",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Item"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pinned value"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Source"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Method"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "OAuth2 "
+            },
+            {
+              "type": "text",
+              "value": "`client_credentials`",
+              "marks": [
+                "strong"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " flow"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[Authentication Service][^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Token endpoint (PROD)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST https://auth.bokbasen.io/oauth/token",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Token endpoint (TEST/sandbox)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST https://auth.stage.bokbasen.io/oauth/token",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Audience (metadata import)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "https://api.bokbasen.io/metadata/",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth] [^import]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Request body content-type (preferred)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "application/x-www-form-urlencoded",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (also accepts "
+            },
+            {
+              "type": "text",
+              "value": "application/json",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", also accepts Basic-auth-encoded credentials)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Required body params"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "client_id",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "client_secret",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "audience",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "grant_type=client_credentials",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Response"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "JSON: "
+            },
+            {
+              "type": "text",
+              "value": "{access_token, expires_in, token_type:\"Bearer\"}",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Authorization header on subsequent calls"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authorization: Bearer <access_token>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "[^auth] [^import]"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b21",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\"Each environment has it's own set of credentials. PROD https://auth.bokbasen.io/oauth/token TEST https://auth.stage.bokbasen.io/oauth/token\"* — [^auth]"
+        }
+      ]
+    },
+    {
+      "id": "b22",
+      "type": "heading",
+      "level": 3,
+      "text": "2.2 Caching"
+    },
+    {
+      "id": "b23",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Bokbasen actively documents caching:"
+        }
+      ]
+    },
+    {
+      "id": "b24",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\"We are optimizing when new tokens are generated and therefore you will see that "
+        },
+        {
+          "type": "text",
+          "value": "expires_in",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " will change dynamically through out the day. We are then serving you cached access_token while it is valid (we will not give you a token with less than 5 minutes left). […] If you want to reduce number of needed calls, we encourage you to cache it, just look at the "
+        },
+        {
+          "type": "text",
+          "value": "expires_in",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (seconds) or look at "
+        },
+        {
+          "type": "text",
+          "value": "exp",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in the payload-part of the JWT-token (right before you do the API-call).\"* — [^auth]"
+        }
+      ]
+    },
+    {
+      "id": "b25",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "WI3 client must cache the bearer token",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " keyed by "
+        },
+        {
+          "type": "text",
+          "value": "(audience, client_id)",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and refresh at "
+        },
+        {
+          "type": "text",
+          "value": "exp - 60s",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Token lifetime is variable but typically "
+        },
+        {
+          "type": "text",
+          "value": "expires_in: 86400",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (24 h) per the published JWT example.[^auth]"
+        }
+      ]
+    },
+    {
+      "id": "b26",
+      "type": "heading",
+      "level": 3,
+      "text": "2.3 Credential plumbing (forward-reference WI2)"
+    },
+    {
+      "id": "b27",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "WI2 owns credential storage; this doc only fixes the "
+        },
+        {
+          "type": "text",
+          "value": "shape of the secret",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and the "
+        },
+        {
+          "type": "text",
+          "value": "env-var override names",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Proposed:"
+        }
+      ]
+    },
+    {
+      "id": "b28",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Setting"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "plugin_settings",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " key"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Env override"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Notes"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Client ID"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bokbasen.oauth.client_id",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "BOKBASEN_CLIENT_ID",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Plain text"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Client secret"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bokbasen.oauth.client_secret",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "BOKBASEN_CLIENT_SECRET",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Encrypted at rest via Cloak ("
+            },
+            {
+              "type": "text",
+              "value": "cloak_ecto",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " already in "
+            },
+            {
+              "type": "text",
+              "value": "api/mix.exs",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Audience"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bokbasen.oauth.audience",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "BOKBASEN_AUDIENCE",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Default "
+            },
+            {
+              "type": "text",
+              "value": "https://api.bokbasen.io/metadata/",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "; allows future audience switching"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Environment"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bokbasen.environment",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "BOKBASEN_ENV",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "One of "
+            },
+            {
+              "type": "text",
+              "value": "prod",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "stage",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "; selects token endpoint and base URL"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b29",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "Note re task-brief env-var names.",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " The brief lists "
+        },
+        {
+          "type": "text",
+          "value": "BOKBASEN_API_KEY",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " / "
+        },
+        {
+          "type": "text",
+          "value": "BOKBASEN_USERNAME",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " / "
+        },
+        {
+          "type": "text",
+          "value": "BOKBASEN_PASSWORD",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Those match the "
+        },
+        {
+          "type": "text",
+          "value": "legacy",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Bokbasen TGT auth flow used by the "
+        },
+        {
+          "type": "text",
+          "value": "Bokbasen/php-sdk-auth",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " repo ("
+        },
+        {
+          "type": "text",
+          "value": "POST https://login.boknett.no/v1/tickets",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " with form-encoded "
+        },
+        {
+          "type": "text",
+          "value": "username",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " + "
+        },
+        {
+          "type": "text",
+          "value": "password",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", response header "
+        },
+        {
+          "type": "text",
+          "value": "Boknett-TGT: …",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ").[^php-auth] The current public docs explicitly deprecate that: > *\"Change to how Authorization-header is constructed. No longer > use "
+        },
+        {
+          "type": "text",
+          "value": "Authorization: Boknett TGT-...",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Instead use: > "
+        },
+        {
+          "type": "text",
+          "value": "Authorization: Bearer <access_token_here>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "\"* — [^auth] WI1 pins "
+        },
+        {
+          "type": "text",
+          "value": "OAuth2 client_credentials",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", not username/password. Env-var names follow the OAuth2 vocabulary ("
+        },
+        {
+          "type": "text",
+          "value": "BOKBASEN_CLIENT_ID",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " / "
+        },
+        {
+          "type": "text",
+          "value": "BOKBASEN_CLIENT_SECRET",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "), not API-key / username/password. This is a "
+        },
+        {
+          "type": "text",
+          "value": "deviation from the task-brief env-var hint",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and is tagged as "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking] Q-B",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9."
+        }
+      ]
+    },
+    {
+      "id": "b30",
+      "type": "divider"
+    },
+    {
+      "id": "b31",
+      "type": "heading",
+      "level": 2,
+      "text": "3. Endpoints"
+    },
+    {
+      "id": "b32",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "All endpoints accessed at base host "
+        },
+        {
+          "type": "text",
+          "value": "https://api.bokbasen.io",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (PROD). Sandbox base host is "
+        },
+        {
+          "type": "text",
+          "value": "OPEN — see §9 Q-C",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "b33",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Name"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Method"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Path"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Content-Type (req.)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Required headers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Body shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Response shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Notes"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Token (auth)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "https://auth.bokbasen.io/oauth/token",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "application/x-www-form-urlencoded",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " *or* "
+            },
+            {
+              "type": "text",
+              "value": "application/json",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(none)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Form: "
+            },
+            {
+              "type": "text",
+              "value": "client_id",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "client_secret",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "audience",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "grant_type=client_credentials",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "JSON "
+            },
+            {
+              "type": "text",
+              "value": "{access_token,expires_in,token_type}",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Returns "
+            },
+            {
+              "type": "text",
+              "value": "200 OK",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "401",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "403",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". [^auth]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Stage (V2 — preferred)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/metadata/import/onix/v2",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "application/xml",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authorization: Bearer …",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Raw ONIX XML — accepts a "
+            },
+            {
+              "type": "text",
+              "value": "<Product>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " element *or* a full "
+            },
+            {
+              "type": "text",
+              "value": "<ONIXMessage>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " with one or more "
+            },
+            {
+              "type": "text",
+              "value": "<Product>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " children. ONIX 3.0.x or 3.1.x. "
+            },
+            {
+              "type": "text",
+              "value": "No multipart, no gzip in public docs.",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "202 Accepted",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (no body) + "
+            },
+            {
+              "type": "text",
+              "value": "Location: https://api.bokbasen.io/metadata/import/onix/v2/status/<uuid>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". On "
+            },
+            {
+              "type": "text",
+              "value": "400",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " returns error XML (see §5)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Audience must be "
+            },
+            {
+              "type": "text",
+              "value": "https://api.bokbasen.io/metadata/",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". [^import]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Stage (V1 — legacy)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/metadata/import/onix/v1",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "application/xml",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authorization: Bearer …",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Raw ONIX XML — "
+            },
+            {
+              "type": "text",
+              "value": "single peeled `<Product>` element only",
+              "marks": [
+                "strong"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", no "
+            },
+            {
+              "type": "text",
+              "value": "<ONIXMessage>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " wrapper, no "
+            },
+            {
+              "type": "text",
+              "value": "<Header>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". ONIX 3.0.x."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "202 Accepted",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (no body) + "
+            },
+            {
+              "type": "text",
+              "value": "Location: https://api.bokbasen.io/metadata/import/onix/v1/status/<uuid>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The barkpark Phase 6 export currently emits a full "
+            },
+            {
+              "type": "text",
+              "value": "<ONIXMessage>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", so V2 is the natural fit. [^import]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Status (poll one)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/metadata/import/onix/v1/status/{uuid}",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " *(see §3.1 on V2 path)*"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authorization: Bearer …",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(none)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "XML "
+            },
+            {
+              "type": "text",
+              "value": "<importItem>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " with "
+            },
+            {
+              "type": "text",
+              "value": "<id>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<registered>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<state>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", optional "
+            },
+            {
+              "type": "text",
+              "value": "<errors>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<warnings>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<actionsCompleted>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". State ∈ "
+            },
+            {
+              "type": "text",
+              "value": "{UNPROCESSED, COMPLETED, FAILED}",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "200 OK",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "400",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "401",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "403",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "500",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". [^import]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Status (list all)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/metadata/import/onix/v1/status/all",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authorization: Bearer …",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(none)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "XML list of "
+            },
+            {
+              "type": "text",
+              "value": "<importItem>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " summaries ("
+            },
+            {
+              "type": "text",
+              "value": "<id>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<url>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<registered>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "<state>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ")."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "200 OK",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "400",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "401",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "403",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "500",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". [^import]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Object import (cover/audio)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/metadata/import/object/v1/{ean}/{type}",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image/jpeg",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " | "
+            },
+            {
+              "type": "text",
+              "value": "image/png",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " | "
+            },
+            {
+              "type": "text",
+              "value": "audio/mpeg",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (per "
+            },
+            {
+              "type": "text",
+              "value": "{type}",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authorization: Bearer …",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Binary file content. "
+            },
+            {
+              "type": "text",
+              "value": "≤ 10 MB.",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "201 Created",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (no body) on success; XML on validation error."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "{type}",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " ∈ "
+            },
+            {
+              "type": "text",
+              "value": "productimage",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (jpeg/png) or "
+            },
+            {
+              "type": "text",
+              "value": "audiosample",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (mp3). [^import]"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b34",
+      "type": "heading",
+      "level": 3,
+      "text": "3.1 Status path notes"
+    },
+    {
+      "id": "b35",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The V2 stage endpoint *returns* a Location header pointing at "
+        },
+        {
+          "type": "text",
+          "value": "/metadata/import/onix/v2/status/<uuid>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "[^import]:"
+        }
+      ]
+    },
+    {
+      "id": "b36",
+      "type": "code",
+      "value": "HTTP/1.1 202 Accepted\nLocation: https://api.bokbasen.io/metadata/import/onix/v2/status/b64555a0-1d4b-472c-91e5-461a034a8fde"
+    },
+    {
+      "id": "b37",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "…but the public docs only spec the "
+        },
+        {
+          "type": "text",
+          "value": "status response shape",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " under the V1 path ("
+        },
+        {
+          "type": "text",
+          "value": "/metadata/import/onix/v1/status/{uuid}",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "). The V2-mounted status URL is presumed to return the same XML schema. This is "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking] Q-D",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9. Action for WI3: "
+        },
+        {
+          "type": "text",
+          "value": "always read the URL from the `Location` header verbatim",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", never construct a status URL by string-templating the version segment."
+        }
+      ]
+    },
+    {
+      "id": "b38",
+      "type": "heading",
+      "level": 3,
+      "text": "3.2 Idempotency"
+    },
+    {
+      "id": "b39",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Bokbasen's public docs do "
+        },
+        {
+          "type": "text",
+          "value": "not",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " spec an "
+        },
+        {
+          "type": "text",
+          "value": "Idempotency-Key",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " header. Record-level idempotency is provided implicitly by ONIX "
+        },
+        {
+          "type": "text",
+          "value": "<RecordReference>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " plus "
+        },
+        {
+          "type": "text",
+          "value": "<NotificationType>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ":"
+        }
+      ]
+    },
+    {
+      "id": "b40",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "A duplicate POST with the same "
+          },
+          {
+            "type": "text",
+            "value": "<RecordReference>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " and updated"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "content overwrites the prior record (semantics defined per Onix Block"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "in [^import] §\"Deletion of data\")."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "<NotificationType>05",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (\"delete this record\") is the explicit delete"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "path — there is no separate DELETE endpoint."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b41",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "WI4 worker idempotency strategy: deduplicate at the "
+        },
+        {
+          "type": "text",
+          "value": "publish-job",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " layer (one Oban job per "
+        },
+        {
+          "type": "text",
+          "value": "(book_id, attempt)",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "); rely on Bokbasen to overwrite a republished record by "
+        },
+        {
+          "type": "text",
+          "value": "<RecordReference>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " if the worker retries after a network blip. This avoids needing a Bokbasen-side idempotency key. Tagged "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking] Q-E",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9 for confirmation."
+        }
+      ]
+    },
+    {
+      "id": "b42",
+      "type": "divider"
+    },
+    {
+      "id": "b43",
+      "type": "heading",
+      "level": 2,
+      "text": "4. Lifecycle (re-framed two-phase)"
+    },
+    {
+      "id": "b44",
+      "type": "heading",
+      "level": 3,
+      "text": "4.1 State machine"
+    },
+    {
+      "id": "b45",
+      "type": "code",
+      "value": "                   ┌────────────────────────────────────────┐\n                   │                                        │\n                   │  WI4 Oban worker — per publish-job     │\n                   │                                        │\n                   └────────────────────────────────────────┘\n\n   PENDING ──[render ONIX XML]──▶ READY_TO_STAGE\n                                         │\n                                         │ POST /metadata/import/onix/v2\n                                         ▼\n                          ┌──────────────────────────────┐\n                          │ HTTP 202 Accepted            │\n                          │ Location: …/status/<uuid>    │\n                          └──────────────────────────────┘\n                                         │\n                                         │  persist <uuid> + status URL\n                                         │  on the publish-job row\n                                         ▼\n                                    STAGED\n                                         │\n                                         │ schedule poll (initial delay 5s,\n                                         │ exp. backoff capped at 60s; see §6)\n                                         ▼\n                                  ┌─────────────┐\n                          GET ───▶│ POLL_STATE  │◀── reschedule if still\n                                  └─────────────┘    UNPROCESSED\n                                    │  │   │\n        ┌───────────────────────────┘  │   └─────────────────────────┐\n        │                              │                             │\n        │ state=COMPLETED              │ state=FAILED                │ no terminal\n        │                              │                             │ within budget\n        ▼                              ▼                             ▼\n  ┌───────────┐                  ┌──────────┐                ┌────────────────┐\n  │ COMPLETED │                  │  FAILED  │                │ TIMEOUT        │\n  │ + actions │                  │ + errors │                │ (operator      │\n  │ Imported  │                  │ + warns  │                │  intervention) │\n  └───────────┘                  └──────────┘                └────────────────┘\n        │                              │                             │\n        ▼                              ▼                             ▼\n  publish-job:                   publish-job:                   publish-job:\n  status=published               status=rejected                status=stuck\n  bokbasen_id=<uuid>             bokbasen_errors=[…]            requires manual\n                                                                 status check"
+    },
+    {
+      "id": "b46",
+      "type": "heading",
+      "level": 3,
+      "text": "4.2 Transitions in detail"
+    },
+    {
+      "id": "b47",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Transition"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Trigger"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Side effects"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "PENDING → READY_TO_STAGE",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Worker pulled job; renders ONIX XML via existing "
+            },
+            {
+              "type": "text",
+              "value": "Barkpark.Plugins.OnixEdit.Export.export/2",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Validate locally against vendored XSD before any network call. If local validation fails, transition straight to "
+            },
+            {
+              "type": "text",
+              "value": "FAILED",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " with "
+            },
+            {
+              "type": "text",
+              "value": "error_source: \"local_xsd\"",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " — never POST a known-invalid file."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "READY_TO_STAGE → STAGED",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /metadata/import/onix/v2",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " returns "
+            },
+            {
+              "type": "text",
+              "value": "202",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Persist "
+            },
+            {
+              "type": "text",
+              "value": "(bokbasen_status_url, bokbasen_uuid, staged_at)",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " on the publish-job row."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "READY_TO_STAGE → FAILED",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (sync)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stage POST returns "
+            },
+            {
+              "type": "text",
+              "value": "400",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (XML errors envelope) or "
+            },
+            {
+              "type": "text",
+              "value": "401",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Persist parsed "
+            },
+            {
+              "type": "text",
+              "value": "<error>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " entries. "
+            },
+            {
+              "type": "text",
+              "value": "401",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " triggers token refresh + one retry."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "STAGED → POLL_STATE",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Oban schedule fires."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "None."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "POLL_STATE → STAGED",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (re-armed)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET status returns "
+            },
+            {
+              "type": "text",
+              "value": "<state>UNPROCESSED</state>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reschedule next poll per backoff schedule."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "POLL_STATE → COMPLETED",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET status returns "
+            },
+            {
+              "type": "text",
+              "value": "<state>COMPLETED</state>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Record "
+            },
+            {
+              "type": "text",
+              "value": "actionsCompleted",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (which Onix Blocks were imported); broadcast a Phoenix PubSub event so Studio's publish dashboard can react in real time."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "POLL_STATE → FAILED",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (async)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET status returns "
+            },
+            {
+              "type": "text",
+              "value": "<state>FAILED</state>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Record "
+            },
+            {
+              "type": "text",
+              "value": "<errors>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " and "
+            },
+            {
+              "type": "text",
+              "value": "<warnings>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". Do *not* auto-retry — Bokbasen explicitly says: *\"A Product that is FAILED will not be acted upon by Bokbasen. It is the Senders responsibility to act upon FAILED Products and resubmit the Product with valid data.\"*[^import]"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "* → TIMEOUT",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Total elapsed exceeds polling budget (proposed: 30 min)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Job ends in "
+            },
+            {
+              "type": "text",
+              "value": "stuck",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "; operator runs the status-list endpoint to recover."
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b48",
+      "type": "heading",
+      "level": 3,
+      "text": "4.3 No abort, no claim"
+    },
+    {
+      "id": "b49",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "There is "
+        },
+        {
+          "type": "text",
+          "value": "no abort/cancel endpoint",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " on the import service. To \"undo\" a published record, the publisher submits a fresh ONIX message with "
+        },
+        {
+          "type": "text",
+          "value": "<NotificationType>05</NotificationType>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ":"
+        }
+      ]
+    },
+    {
+      "id": "b50",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\"05 = 'delete this record' (record MUST be deleted on receipt)\"* — ["
+        },
+        {
+          "type": "text",
+          "value": "bokbasen-onix-pre-flight.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "][pre-flight] §3.2 F2."
+        }
+      ]
+    },
+    {
+      "id": "b51",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "There is also "
+        },
+        {
+          "type": "text",
+          "value": "no separate claim/confirm step",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". The 202 response *is* the commit; the async work is purely catalogue ingestion."
+        }
+      ]
+    },
+    {
+      "id": "b52",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[pre-flight]: ./bokbasen-onix-pre-flight.md"
+        }
+      ]
+    },
+    {
+      "id": "b53",
+      "type": "heading",
+      "level": 3,
+      "text": "4.4 Expiry / staleness"
+    },
+    {
+      "id": "b54",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Bokbasen's public docs do "
+        },
+        {
+          "type": "text",
+          "value": "not",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " publish an expiry on the "
+        },
+        {
+          "type": "text",
+          "value": "status/{uuid}",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " URL. The status-list endpoint ("
+        },
+        {
+          "type": "text",
+          "value": "/status/all",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ")[^import] strongly implies status records are retained at least long enough for operators to see all currently-"
+        },
+        {
+          "type": "text",
+          "value": "UNPROCESSED",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " items, but the retention window is undocumented. Treated as "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking] Q-F",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9; WI4 will use a 30-minute polling budget by default and surface stuck jobs to ops."
+        }
+      ]
+    },
+    {
+      "id": "b55",
+      "type": "divider"
+    },
+    {
+      "id": "b56",
+      "type": "heading",
+      "level": 2,
+      "text": "5. Error semantics"
+    },
+    {
+      "id": "b57",
+      "type": "heading",
+      "level": 3,
+      "text": "5.1 Status-code → error-class mapping"
+    },
+    {
+      "id": "b58",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "HTTP"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Class"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Source endpoint(s)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "WI4 handling"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "200 OK",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "success"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "status endpoints"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Parse "
+            },
+            {
+              "type": "text",
+              "value": "<importItem>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "201 Created",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "success"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "object import"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "No body."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "202 Accepted",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "success (async)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "stage V1, V2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Read "
+            },
+            {
+              "type": "text",
+              "value": "Location",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " header; persist UUID; schedule poll."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "400 Bad Request",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "validation error (terminal)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "stage V1, V2; object import"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Parse error-XML envelope (§5.2); transition publish-job to "
+            },
+            {
+              "type": "text",
+              "value": "rejected",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". "
+            },
+            {
+              "type": "text",
+              "value": "Do not retry.",
+              "marks": [
+                "strong"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "401 Unauthorized",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "auth"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Refresh OAuth2 token (§2.2); retry "
+            },
+            {
+              "type": "text",
+              "value": "once",
+              "marks": [
+                "strong"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". If still "
+            },
+            {
+              "type": "text",
+              "value": "401",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", mark job "
+            },
+            {
+              "type": "text",
+              "value": "auth_error",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " and alert ops."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "403 Forbidden",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "auth/scope"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "status endpoints"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Wrong audience, no permission for the resource. Mark job "
+            },
+            {
+              "type": "text",
+              "value": "auth_error",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "; do not retry."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "413 Payload Too Large",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "size"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(export only — listed for completeness)[^export]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Not expected on import; log + alert if seen."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "500 Internal Server Error",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "transient"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "stage V1, V2; status endpoints"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Retry with exponential backoff (§6)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "502 / 503 / 504",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "transient"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(inferred from typical Bokbasen Apache-Coyote frontend in "
+            },
+            {
+              "type": "text",
+              "value": "Via:",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " headers — see [^import] sample bodies)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Retry with backoff."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "429 Too Many Requests",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "rate-limited"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "OPEN",
+              "marks": [
+                "strong"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " — see §6.2 + §9 Q-G"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "If "
+            },
+            {
+              "type": "text",
+              "value": "Retry-After",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " present, honour it; else exponential backoff."
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b59",
+      "type": "heading",
+      "level": 3,
+      "text": "5.2 Sample error envelope (V1, real, quoted)"
+    },
+    {
+      "id": "b60",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The Confluence \"Import Service\" page documents the V1 400 body schema verbatim[^import]:"
+        }
+      ]
+    },
+    {
+      "id": "b61",
+      "type": "code",
+      "value": "<errors>\n  <error ref=\"...\" code=\"...\" message=\"...\"/>\n  <error ref=\"...\" code=\"...\" message=\"...\"/>\n</errors>"
+    },
+    {
+      "id": "b62",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Element / attribute meaning (verbatim):"
+        }
+      ]
+    },
+    {
+      "id": "b63",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\""
+        },
+        {
+          "type": "text",
+          "value": "errors",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Top element, can contain multiple "
+        },
+        {
+          "type": "text",
+          "value": "error",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " elements. […] "
+        },
+        {
+          "type": "text",
+          "value": "ref",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Internal error reference. Include this if you are contacting Bokbasen about this error. […] "
+        },
+        {
+          "type": "text",
+          "value": "code",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Error code used to categorize errors. […] "
+        },
+        {
+          "type": "text",
+          "value": "message",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Error message in clear text\"* — [^import]"
+        }
+      ]
+    },
+    {
+      "id": "b64",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The V2 documentation is currently marked *\"documentation in progress..\"* on the Confluence page; the V2 envelope shape is "
+        },
+        {
+          "type": "text",
+          "value": "assumed identical to V1",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (Bokbasen has not stated otherwise) but this is flagged as "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking] Q-H",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9. WI3 will parse V1 and V2 errors with the same code path."
+        }
+      ]
+    },
+    {
+      "id": "b65",
+      "type": "heading",
+      "level": 3,
+      "text": "5.3 Sample status-detail body (real, quoted)"
+    },
+    {
+      "id": "b66",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "V1 status detail, "
+        },
+        {
+          "type": "text",
+          "value": "COMPLETED",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " with a warning, verbatim Confluence example[^import]:"
+        }
+      ]
+    },
+    {
+      "id": "b67",
+      "type": "code",
+      "value": "<importItem>\n  <id>a47ad10b-58cc-4372-a567-0e2342c3d479</id>\n  <registered>20140907233000</registered>\n  <state>COMPLETED</state>\n  <warnings>\n    <warning ref=\"xxx\" message=\"Some warning text\"/>\n  </warnings>\n  <actionsCompleted>\n    <action type=\"onixBlockImported\" value=\"1\"/>\n    <action type=\"onixBlockImported\" value=\"4\"/>\n  </actionsCompleted>\n</importItem>"
+    },
+    {
+      "id": "b68",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\""
+        },
+        {
+          "type": "text",
+          "value": "action.type",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Type of action that is completed. Currently the only possible value is "
+        },
+        {
+          "type": "text",
+          "value": "onixBlockImported",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". […] "
+        },
+        {
+          "type": "text",
+          "value": "action.value",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Value related to the specific action type. For action.type "
+        },
+        {
+          "type": "text",
+          "value": "onixBlockImported",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " the possible values are 1-6.\"* — [^import]"
+        }
+      ]
+    },
+    {
+      "id": "b69",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The barkpark Phase 6 export currently emits Onix Blocks 1+2+3+4 (per ["
+        },
+        {
+          "type": "text",
+          "value": "bokbasen-onix-pre-flight.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "][pre-flight] §3.1 T6); a successful "
+        },
+        {
+          "type": "text",
+          "value": "COMPLETED",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " should therefore enumerate "
+        },
+        {
+          "type": "text",
+          "value": "value=\"1\"",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "/"
+        },
+        {
+          "type": "text",
+          "value": "\"2\"",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "/"
+        },
+        {
+          "type": "text",
+          "value": "\"3\"",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "/"
+        },
+        {
+          "type": "text",
+          "value": "\"4\"",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", modulo the per-sender-role filtering rule documented in [^import] §\"Onix Blocks\". WI4 should *log* the imported blocks and surface them in the publish-job audit trail; missing blocks are not an error."
+        }
+      ]
+    },
+    {
+      "id": "b70",
+      "type": "heading",
+      "level": 3,
+      "text": "5.4 Sample status-list body (real, quoted, illustrative)"
+    },
+    {
+      "id": "b71",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "V1 status list[^import]:"
+        }
+      ]
+    },
+    {
+      "id": "b72",
+      "type": "code",
+      "value": "<importItems>\n  <importItem>\n    <id>2b6eea56-f448-4210-a1d3-2dd49479567d</id>\n    <url>https://api.bokbasen.io/metadata/import/onix/v1/status/2b6eea56-f448-4210-a1d3-2dd49479567d</url>\n    <registered>20141002101349</registered>\n    <state>UNPROCESSED</state>\n  </importItem>\n  <importItem>\n    <id>b64555a0-1d4b-472c-91e5-461a034a8fde</id>\n    <url>https://api.bokbasen.io/metadata/import/onix/v1/status/b64555a0-1d4b-472c-91e5-461a034a8fde</url>\n    <registered>20141002142426</registered>\n    <state>UNPROCESSED</state>\n  </importItem>\n</importItems>"
+    },
+    {
+      "id": "b73",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "<registered>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " is in "
+        },
+        {
+          "type": "text",
+          "value": "yyyyMMddHHmmss",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (no timezone — assumed Europe/Oslo per Bokbasen's locale; flagged "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking] Q-I",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9)."
+        }
+      ]
+    },
+    {
+      "id": "b74",
+      "type": "divider"
+    },
+    {
+      "id": "b75",
+      "type": "heading",
+      "level": 2,
+      "text": "6. Rate limits & retry policy"
+    },
+    {
+      "id": "b76",
+      "type": "heading",
+      "level": 3,
+      "text": "6.1 What the public docs say"
+    },
+    {
+      "id": "b77",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Bokbasen's public Confluence pages "
+        },
+        {
+          "type": "text",
+          "value": "do not document a rate-limit policy",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " for the metadata import endpoints. The most explicit operational guidance is on the *export* side, where "
+        },
+        {
+          "type": "text",
+          "value": "413 Try with a smaller pagesize",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " is documented[^export] — that is a *payload-size* hint, not a request-rate limit, and only applies to export."
+        }
+      ]
+    },
+    {
+      "id": "b78",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "There is no documented:"
+        }
+      ]
+    },
+    {
+      "id": "b79",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "X-RateLimit-Remaining",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "X-RateLimit-Reset",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " header"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Retry-After",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " header (neither documented nor forbidden)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "requests-per-minute ceiling"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "concurrent-uploads ceiling"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b80",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "This is captured as "
+        },
+        {
+          "type": "text",
+          "value": "[blocking] Q-G",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in §9 — the WI4 Oban worker needs *some* rate to throttle to, even if Bokbasen's silent on the matter, so Boss must either (a) get a number from a Bokbasen partner contact, or (b) sign off on the proposed conservative defaults below."
+        }
+      ]
+    },
+    {
+      "id": "b81",
+      "type": "heading",
+      "level": 3,
+      "text": "6.2 Proposed conservative retry policy"
+    },
+    {
+      "id": "b82",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Until §9 Q-G resolves, WI3 should pin Req's retry mode to "
+        },
+        {
+          "type": "text",
+          "value": ":transient",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " with the following parameters. All claims here are *engineering defaults*, not Bokbasen-quoted numbers — they are explicitly safe under-shoots."
+        }
+      ]
+    },
+    {
+      "id": "b83",
+      "type": "code",
+      "value": "# Pseudocode for WI3 — illustrative, not for paste\nReq.new(\n  retry: :transient,                # retry on network errors + 408/429/5xx\n  max_retries: 5,                   # 5 attempts ≈ ~62s ceiling at 2^n\n  retry_delay: fn attempt ->\n    base_ms = min(60_000, :math.pow(2, attempt) * 1_000 |> trunc())\n    jitter_ms = :rand.uniform(div(base_ms, 4))   # up to 25% jitter\n    base_ms + jitter_ms\n  end,\n  retry_log_level: :warning\n)"
+    },
+    {
+      "id": "b84",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Backoff math (per attempt index, before jitter):"
+        }
+      ]
+    },
+    {
+      "id": "b85",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "attempt"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "delay (s)"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "16"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "32"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "≥6"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "60 (cap)"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b86",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Honour "
+        },
+        {
+          "type": "text",
+          "value": "Retry-After",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " if present (Req does this automatically in "
+        },
+        {
+          "type": "text",
+          "value": ":transient",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " mode for 429 responses; this is built into Req 0.5.x[^req-retry]). Cap total retry budget at "
+        },
+        {
+          "type": "text",
+          "value": "5 minutes",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " per HTTP call — anything longer must surface to ops."
+        }
+      ]
+    },
+    {
+      "id": "b87",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Status-poll cadence (orthogonal to HTTP retry — this is *intra-job* polling, not retry of a failed call):"
+        }
+      ]
+    },
+    {
+      "id": "b88",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "poll #"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "delay since previous"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "5 s after 202"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "5 s"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "10 s"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "20 s"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "5+"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "60 s (cap)"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b89",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Total polling budget: 30 minutes (matches "
+        },
+        {
+          "type": "text",
+          "value": "* → TIMEOUT",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " rule in §4.1)."
+        }
+      ]
+    },
+    {
+      "id": "b90",
+      "type": "heading",
+      "level": 3,
+      "text": "6.3 Concurrency"
+    },
+    {
+      "id": "b91",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "WI4 Oban worker queue "
+        },
+        {
+          "type": "text",
+          "value": "`:bokbasen_publish`",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " with concurrency = "
+        },
+        {
+          "type": "text",
+          "value": "1",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (one upload in flight per node) until §9 Q-G clears. This is deliberately conservative; raising it requires either a quoted Bokbasen ceiling or Boss sign-off."
+        }
+      ]
+    },
+    {
+      "id": "b92",
+      "type": "divider"
+    },
+    {
+      "id": "b93",
+      "type": "heading",
+      "level": 2,
+      "text": "7. HTTP client decision: Req"
+    },
+    {
+      "id": "b94",
+      "type": "heading",
+      "level": 3,
+      "text": "7.1 Decision"
+    },
+    {
+      "id": "b95",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Pinned: `Req` ~> 0.5 (latest stable: 0.5.17).",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "[^req-hex]"
+        }
+      ]
+    },
+    {
+      "id": "b96",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Already a direct dep in "
+        },
+        {
+          "type": "text",
+          "value": "api/mix.exs:55",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ":"
+        }
+      ]
+    },
+    {
+      "id": "b97",
+      "type": "code",
+      "value": "{:req, \"~> 0.5\"},"
+    },
+    {
+      "id": "b98",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "WI1 does "
+        },
+        {
+          "type": "text",
+          "value": "not",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " add a Mix dep — the dep is already present and was introduced in Phase 6. WI2 / WI3 will use it as-is; if a newer 0.5.x patch lands during Phase 7, the "
+        },
+        {
+          "type": "text",
+          "value": "~>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " constraint picks it up at "
+        },
+        {
+          "type": "text",
+          "value": "mix deps.update",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "b99",
+      "type": "callout",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "*\"Req is a batteries-included HTTP client for Elixir. It provides automatic response body decompression & decoding, following redirects, retrying on errors, and much more.\"* — [Req README, accessed 2026-04-30][^req-hex]"
+        }
+      ]
+    },
+    {
+      "id": "b100",
+      "type": "heading",
+      "level": 3,
+      "text": "7.2 Why Req"
+    },
+    {
+      "id": "b101",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Need"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Req"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Comment"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Retry on transient errors"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "retry: :transient",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " built-in[^req-retry]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Honors "
+            },
+            {
+              "type": "text",
+              "value": "Retry-After",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " automatically; backoff via "
+            },
+            {
+              "type": "text",
+              "value": "retry_delay",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " lambda"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "application/xml",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " body"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pass "
+            },
+            {
+              "type": "text",
+              "value": "body: iodata",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", set "
+            },
+            {
+              "type": "text",
+              "value": "Content-Type",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " header"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Matches Bokbasen V1/V2 stage payload exactly"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "OAuth2 bearer header"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "auth: {:bearer, token}",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " shorthand[^req-readme]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Plumbs token without manual header juggling"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Streaming (object import 10 MB)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Req.post!(url, body: file_stream)",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " accepts iodata or "
+            },
+            {
+              "type": "text",
+              "value": "Stream",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Works for ≤10 MB cover uploads"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Already in tree"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "yes"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Phase 6 already shipped Req as a transitive dep; WI1 keeps the choice consistent"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b102",
+      "type": "heading",
+      "level": 3,
+      "text": "7.3 Alternatives considered"
+    },
+    {
+      "id": "b103",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Library"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Why not"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Finch (raw)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Lower-level — would force WI3 to hand-roll retry, redirect, decoding, content-type defaults. Req sits on top of Finch already, so we get Finch's pool benefits without re-implementing the ergonomics."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "HTTPoison",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Maintenance mode; no first-class "
+            },
+            {
+              "type": "text",
+              "value": "Retry-After",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " support; older hackney transport. No reason to introduce it alongside Req."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Tesla",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Middleware-stack model is heavier than needed for two endpoints; adds a 2nd HTTP abstraction to a project that already has Req."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Mint (raw)",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Same argument as Finch: too low-level for an integration that needs retry + auth refresh out of the box."
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b104",
+      "type": "heading",
+      "level": 3,
+      "text": "7.4 Pinned version & dep line"
+    },
+    {
+      "id": "b105",
+      "type": "code",
+      "value": "# api/mix.exs (UNCHANGED — already present; WI1 makes no mix.exs edit):\n# {:req, \"~> 0.5\"},\n#\n# Latest stable on hex: 0.5.17 (verified 2026-04-30 via hex.pm/api/packages/req)\n# Phase 7 may bump to \"~> 0.5.17\" if a specific feature lands; see WI3."
+    },
+    {
+      "id": "b106",
+      "type": "divider"
+    },
+    {
+      "id": "b107",
+      "type": "heading",
+      "level": 2,
+      "text": "8. Test mocking decision: Bypass"
+    },
+    {
+      "id": "b108",
+      "type": "heading",
+      "level": 3,
+      "text": "8.1 Decision"
+    },
+    {
+      "id": "b109",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Pinned: `Bypass` ~> 2.1 (latest stable: 2.1.0).",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "[^bypass-hex]"
+        }
+      ]
+    },
+    {
+      "id": "b110",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Bypass",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " is "
+        },
+        {
+          "type": "text",
+          "value": "not yet",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " in "
+        },
+        {
+          "type": "text",
+          "value": "api/mix.exs",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". WI3 (or WI3a, at WI3's discretion) will add the dep:"
+        }
+      ]
+    },
+    {
+      "id": "b111",
+      "type": "code",
+      "value": "# api/mix.exs — proposed addition for WI3 (not WI1):\n# {:bypass, \"~> 2.1\", only: :test},"
+    },
+    {
+      "id": "b112",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "WI1 does not add this dep — that is WI3's job."
+        }
+      ]
+    },
+    {
+      "id": "b113",
+      "type": "heading",
+      "level": 3,
+      "text": "8.2 Why Bypass"
+    },
+    {
+      "id": "b114",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "In-process Plug-based mock server.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Tests can "
+          },
+          {
+            "type": "text",
+            "value": "start_supervised",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "a Bypass instance, register "
+          },
+          {
+            "type": "text",
+            "value": "expect",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "-style handlers per route, and"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "drive the real "
+          },
+          {
+            "type": "text",
+            "value": "Req",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " client at it. No external service."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Compatible with Phoenix's existing test stack",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — bandit + plug"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "are already in the tree."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Zero Mox required for the integration tests.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " The HTTP boundary"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "is mocked at the *socket*, so the WI3 client module under test runs"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "unmocked — gives us higher fidelity than function-level mocks."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Recorded golden-path fixtures",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " can live alongside Bypass tests"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "without any extra runtime: tests load XML fixtures from"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "api/test/support/fixtures/bokbasen/",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " and the Bypass handler simply"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "echoes them. ExVCR (cassette-based playback) is "
+          },
+          {
+            "type": "text",
+            "value": "not",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " needed"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "because Bokbasen's responses are deterministic per"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "<RecordReference>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " + "
+          },
+          {
+            "type": "text",
+            "value": "<NotificationType>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " and Phase 6 already has"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "golden ONIX fixtures."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b115",
+      "type": "heading",
+      "level": 3,
+      "text": "8.3 Fixture layout (proposed for WI3)"
+    },
+    {
+      "id": "b116",
+      "type": "code",
+      "value": "api/test/support/fixtures/bokbasen/\n├── auth/\n│   ├── token-response.json                    # 200 OK token JSON\n│   └── token-401.json                         # 401 Unauthorized\n├── stage/\n│   ├── 202-accepted.headers                   # response headers including Location\n│   ├── 400-validation-errors.xml              # error envelope §5.2\n│   └── 401-unauthorized.json\n├── status/\n│   ├── unprocessed.xml                        # state=UNPROCESSED\n│   ├── completed-blocks-1234.xml              # state=COMPLETED, full §5.3 sample\n│   ├── failed-with-errors.xml                 # state=FAILED\n│   └── list.xml                               # multi-item list per §5.4\n└── object/\n    ├── 201-created.headers\n    └── 400-payload-too-large.xml"
+    },
+    {
+      "id": "b117",
+      "type": "heading",
+      "level": 3,
+      "text": "8.4 Alternatives considered"
+    },
+    {
+      "id": "b118",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Library"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Why not"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Mox",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Function-level mocking — would require defining a behaviour for the WI3 client and substituting a stub in tests. That moves the mock seam *above* the HTTP layer, missing the very integration risks (header serialization, status-code parsing, error-XML decode) that WI1 needs to harden. Useful if/when WI3 grows internal collaborators worth mocking, but not for the primary HTTP contract test."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ExVCR",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Cassette-based replay. Strong choice for *recording* real Bokbasen interactions, but: (1) no sandbox credentials available yet (§9 Q-C), (2) cassettes go stale silently, (3) we don't get error-injection control (Bypass lets each test return any HTTP status). Re-evaluate once sandbox creds land — at that point ExVCR could *complement* Bypass for one or two recorded golden-path tests."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Hand-rolled `Plug.Test` server",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Re-implements Bypass. No reason to."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Tesla mock adapter",
+              "marks": [
+                "strong"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "We're not using Tesla."
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b119",
+      "type": "divider"
+    },
+    {
+      "id": "b120",
+      "type": "heading",
+      "level": 2,
+      "text": "9. Open questions for Boss"
+    },
+    {
+      "id": "b121",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Each entry tagged "
+        },
+        {
+          "type": "text",
+          "value": "[blocking]",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (must resolve before WI4 codes) or "
+        },
+        {
+          "type": "text",
+          "value": "[non-blocking]",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (WI4 ships with a documented assumption; resolution becomes a follow-up). All cross-link the relevant contract section."
+        }
+      ]
+    },
+    {
+      "id": "b122",
+      "type": "heading",
+      "level": 3,
+      "text": "9.1 Blocking"
+    },
+    {
+      "id": "b123",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "[blocking] Q-A — \"two-phase claim\" re-framing.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " The task brief"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "uses the phrase \"two-phase claim\". Bokbasen's actual API is a"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "single-phase async-poll model (§1.3). Confirm the WI4 worker should"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "implement *Phase A = stage POST, Phase B = poll-until-terminal* and"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "that there is no expectation of a separate Bokbasen-side \"claim\""
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "step. Without this confirmation, WI4 cannot pin its Oban state"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "machine."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[blocking] Q-C — Sandbox credential availability.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " §2.1 confirms"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "a sandbox auth endpoint ("
+          },
+          {
+            "type": "text",
+            "value": "https://auth.stage.bokbasen.io/oauth/token",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "exists. The corresponding "
+          },
+          {
+            "type": "text",
+            "value": "metadata import sandbox base URL",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " is"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "*not* in public docs — "
+          },
+          {
+            "type": "text",
+            "value": "https://api.stage.bokbasen.io/metadata/",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "is the obvious mirror but is not stated. We also need real"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "client_id",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "client_secret",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " for the sandbox. This blocks WI3"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "integration tests from running against a live mock host (Bypass"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "covers unit tests; sandbox covers smoke tests)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[blocking] Q-G — Rate limits.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Bokbasen publishes no documented"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "rate limit for metadata imports (§6.1). Either get a number from"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "Bokbasen partner contact or sign off on the conservative defaults"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "in §6.2 (queue concurrency 1, max 5 retries, 60 s ceiling). WI4"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "needs *some* number to compile against."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[blocking] Q-J — Onix Block matrix for barkpark's sender role.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "Bokbasen scopes import permissions per sender role. A *Distributor*"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "may write Blocks 1, 2, 4, 6; a *Publisher* gets a different (still"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "partner-only) matrix.[^import] Phase 6 emits Blocks 1+2+3+4. We"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "need to confirm what role barkpark's OAuth2 client lands under, so"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "WI4 can correctly interpret "
+          },
+          {
+            "type": "text",
+            "value": "actionsCompleted",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (silently-dropped"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "blocks vs. genuine failures). Cross-references"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "value": "bokbasen-onix-pre-flight.md",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "][pre-flight] §3.1 T6 + §5 Q5."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b124",
+      "type": "heading",
+      "level": 3,
+      "text": "9.2 Non-blocking"
+    },
+    {
+      "id": "b125",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-B — Env-var naming deviation.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Task brief"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "hints "
+          },
+          {
+            "type": "text",
+            "value": "BOKBASEN_API_KEY",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "BOKBASEN_USERNAME",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "BOKBASEN_PASSWORD",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ";"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "this contract pins the OAuth2 vocabulary"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "BOKBASEN_CLIENT_ID",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "BOKBASEN_CLIENT_SECRET",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Boss confirms the"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "rename is acceptable (it is the wire protocol's vocabulary)."
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "Default WI2 ships with the OAuth2 names."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-D — V2 status path schema.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " The V2 stage"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "endpoint returns a Location header at "
+          },
+          {
+            "type": "text",
+            "value": "…/onix/v2/status/<uuid>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ","
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "but only the V1 path's status-response schema is documented. WI3"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "will assume V1 == V2 schema and read the URL verbatim from the"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "Location header (§3.1)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-E — Idempotency-key support.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " No documented"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "Idempotency-Key",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " header (§3.2). WI4 dedupes at the publish-job"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "layer and relies on "
+          },
+          {
+            "type": "text",
+            "value": "<RecordReference>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "-based overwrite. Confirm"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "this is acceptable end-state behaviour (no risk of double-publish"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "events flowing to retailers)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-F — Status URL retention.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Bokbasen does not"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "publish how long "
+          },
+          {
+            "type": "text",
+            "value": "…/status/<uuid>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " URLs remain queryable (§4.4)."
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "WI4 uses a 30-min polling budget; long-lived monitoring assumes"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "list-endpoint scrape."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-H — V2 error envelope shape.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Confluence labels"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "V2 docs *\"in progress..\"*; V1 envelope is documented. WI3 assumes"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "V1 == V2 and parses both with one code path; revisit if a real V2"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "body diverges."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-I — Status `<registered>` timezone.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Format is"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "yyyyMMddHHmmss",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (no offset); assumed Europe/Oslo per Bokbasen"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "locale. WI4 normalises to UTC on persist; flag if drift observed."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-K — Object Import ownership.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Object Import"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "(cover image / audio sample) is in the contract for completeness"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "but not in WI4's metadata-only scope. Confirm cover uploads land"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "in a later WI/phase, not bolted onto WI4."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[non-blocking] Q-L — V1 vs V2 endpoint preference.",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Both V1"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "and V2 are live; V2 accepts the existing "
+          },
+          {
+            "type": "text",
+            "value": "<ONIXMessage>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " wrapper"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "barkpark already emits, V1 requires a peeled "
+          },
+          {
+            "type": "text",
+            "value": "<Product>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " element."
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "WI3 should default to V2; confirm Boss has no Bokbasen-side"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "preference. (Cross-references"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "value": "bokbasen-onix-pre-flight.md",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "][pre-flight] §5 Q8.)"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b126",
+      "type": "divider"
+    },
+    {
+      "id": "b127",
+      "type": "heading",
+      "level": 2,
+      "text": "How to test"
+    },
+    {
+      "id": "b128",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The Phase 7 deliverables ship with a tagged end-to-end integration test that drives the full publishing pipeline against a [Bypass][^bypass-hex] HTTP mock. The test is the executable, version-controlled counterpart to this contract — it confirms WI2/WI3/WI4 production code parses the exact response shapes documented above."
+        }
+      ]
+    },
+    {
+      "id": "b129",
+      "type": "heading",
+      "level": 3,
+      "text": "File layout"
+    },
+    {
+      "id": "b130",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Test:",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs",
+            "marks": [
+              "code"
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Redacted fixtures:",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "api/test/fixtures/bokbasen/",
+            "marks": [
+              "code"
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "oauth_token_response.json",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — OAuth2 client_credentials token reply"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "(synthetic "
+          },
+          {
+            "type": "text",
+            "value": "test_access_token_xyz",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", see §2.2)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "stage_202_location.txt",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — 202 "
+          },
+          {
+            "type": "text",
+            "value": "Location",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " header value the worker"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "parses to recover "
+          },
+          {
+            "type": "text",
+            "value": "submission_id",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " + "
+          },
+          {
+            "type": "text",
+            "value": "poll_url",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (see §3.1)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "poll_pending.xml",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "poll_accepted.xml",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "poll_rejected.xml",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " —"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "XML poll-status fixtures with "
+          },
+          {
+            "type": "text",
+            "value": "<state>UNPROCESSED</state>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " /"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "<state>COMPLETED</state>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "<state>FAILED</state>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (see §3.2)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "error_401.json",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "error_429.json",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "error_500.json",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — error"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "envelopes the WI3 "
+          },
+          {
+            "type": "text",
+            "value": "Errors",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " module surfaces as "
+          },
+          {
+            "type": "text",
+            "value": "AuthError",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ","
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "text",
+            "value": "RateLimitError",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "text",
+            "value": "HTTPError",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b131",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "All fixture credentials are synthetic — "
+        },
+        {
+          "type": "text",
+          "value": "test_*",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " prefixes, "
+        },
+        {
+          "type": "text",
+          "value": "api.example.com",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " URLs, no real bearer tokens, no real submission IDs. The fixture filenames + shapes are CI-stable; treat them as the contract's executable annex."
+        }
+      ]
+    },
+    {
+      "id": "b132",
+      "type": "heading",
+      "level": 3,
+      "text": "Default mix test excludes the suite"
+    },
+    {
+      "id": "b133",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The suite is tagged "
+        },
+        {
+          "type": "text",
+          "value": "@moduletag :bokbasen_integration",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and excluded by default via "
+        },
+        {
+          "type": "text",
+          "value": "api/test/test_helper.exs",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " so CI's standard "
+        },
+        {
+          "type": "text",
+          "value": "mix test",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " invocation stays free of any external-shape fixtures and cannot leak real credentials. The "
+        },
+        {
+          "type": "text",
+          "value": "format",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and "
+        },
+        {
+          "type": "text",
+          "value": "mix-prod-compile",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " gates run unaffected."
+        }
+      ]
+    },
+    {
+      "id": "b134",
+      "type": "heading",
+      "level": 3,
+      "text": "Run the integration suite locally"
+    },
+    {
+      "id": "b135",
+      "type": "code",
+      "value": "cd api\nmix test --include bokbasen_integration"
+    },
+    {
+      "id": "b136",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "To run only the Bokbasen E2E test:"
+        }
+      ]
+    },
+    {
+      "id": "b137",
+      "type": "code",
+      "value": "cd api\nmix test --include bokbasen_integration \\\n  test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs"
+    },
+    {
+      "id": "b138",
+      "type": "heading",
+      "level": 3,
+      "text": "Run against the real Bokbasen sandbox"
+    },
+    {
+      "id": "b139",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Set the five env vars (see §2.2 *Authentication* for the published URLs) and clear the test-only stub:"
+        }
+      ]
+    },
+    {
+      "id": "b140",
+      "type": "code",
+      "value": "export BOKBASEN_API_BASE=\"<api base from §2.2>\"\nexport BOKBASEN_OAUTH_TOKEN_URL=\"<token endpoint from §2.2>\"\nexport BOKBASEN_CLIENT_ID=\"<sandbox client id>\"\nexport BOKBASEN_CLIENT_SECRET=\"<sandbox client secret>\"\nexport BOKBASEN_CLIENT_ROLE=\"publisher\"\n\ncd api && mix run priv/scripts/publish_demo.exs   # if/when added"
+    },
+    {
+      "id": "b141",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The integration test itself "
+        },
+        {
+          "type": "text",
+          "value": "never",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " reaches a real Bokbasen endpoint; it only exercises the local Bypass mock against the redacted fixtures."
+        }
+      ]
+    },
+    {
+      "id": "b142",
+      "type": "divider"
+    },
+    {
+      "id": "b143",
+      "type": "heading",
+      "level": 2,
+      "text": "Footnotes / sources"
+    },
+    {
+      "id": "b144",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^import]: Bokbasen Confluence — *Import Service*, page id 48955439. Retrieved via "
+        },
+        {
+          "type": "text",
+          "value": "https://bokbasen.jira.com/wiki/rest/api/content/48955439?expand=body.storage",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " on "
+        },
+        {
+          "type": "text",
+          "value": "2026-04-30",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Human URL: https://bokbasen.jira.com/wiki/spaces/api/pages/48955439/Import+Service"
+        }
+      ]
+    },
+    {
+      "id": "b145",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^auth]: Bokbasen Confluence — *Authentication Service*, page id 2994962433. Retrieved via REST API on "
+        },
+        {
+          "type": "text",
+          "value": "2026-04-30",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Human URL: https://bokbasen.jira.com/wiki/spaces/api/pages/2994962433/Authentication+Service"
+        }
+      ]
+    },
+    {
+      "id": "b146",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^export]: Bokbasen Confluence — *ONIX*, page id 67993632. Documents the export endpoint with the "
+        },
+        {
+          "type": "text",
+          "value": "413 Try with a smaller pagesize",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " language. Retrieved 2026-04-30. Human URL: https://bokbasen.jira.com/wiki/spaces/api/pages/67993632/ONIX"
+        }
+      ]
+    },
+    {
+      "id": "b147",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^php-auth]: Bokbasen GitHub — *php-sdk-auth*, file "
+        },
+        {
+          "type": "text",
+          "value": "src/Auth/Login.php",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Source verifies the legacy TGT auth flow ("
+        },
+        {
+          "type": "text",
+          "value": "POST https://login.boknett.no/v1/tickets",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", header "
+        },
+        {
+          "type": "text",
+          "value": "Boknett-TGT",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") that the modern OAuth2 endpoint replaces. Retrieved 2026-04-30 via https://raw.githubusercontent.com/Bokbasen/php-sdk-auth/master/src/Auth/Login.php"
+        }
+      ]
+    },
+    {
+      "id": "b148",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^req-hex]: Hex.pm package metadata for "
+        },
+        {
+          "type": "text",
+          "value": "req",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — "
+        },
+        {
+          "type": "text",
+          "value": "latest_stable_version: 0.5.17",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", total downloads ~12 M. Verified 2026-04-30 via https://hex.pm/api/packages/req"
+        }
+      ]
+    },
+    {
+      "id": "b149",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^req-readme]: Req README on hexdocs — https://hexdocs.pm/req/readme.html retrieved 2026-04-30. Documents "
+        },
+        {
+          "type": "text",
+          "value": "auth: {:bearer, token}",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " shorthand and "
+        },
+        {
+          "type": "text",
+          "value": ":transient",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " retry mode."
+        }
+      ]
+    },
+    {
+      "id": "b150",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^req-retry]: Req docs — "
+        },
+        {
+          "type": "text",
+          "value": "Req",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " "
+        },
+        {
+          "type": "text",
+          "value": ":retry",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " option "
+        },
+        {
+          "type": "text",
+          "value": ":transient",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " mode retries on "
+        },
+        {
+          "type": "text",
+          "value": "408/429/500/502/503/504",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and honors "
+        },
+        {
+          "type": "text",
+          "value": "Retry-After",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". https://hexdocs.pm/req/Req.Steps.html#retry/1 retrieved 2026-04-30."
+        }
+      ]
+    },
+    {
+      "id": "b151",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "[^bypass-hex]: Hex.pm package metadata for "
+        },
+        {
+          "type": "text",
+          "value": "bypass",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — "
+        },
+        {
+          "type": "text",
+          "value": "latest_stable_version: 2.1.0",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Verified 2026-04-30 via https://hex.pm/api/packages/bypass"
+        }
+      ]
+    }
+  ],
+  "related": []
+}

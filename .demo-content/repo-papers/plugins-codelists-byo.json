@@ -1,0 +1,412 @@
+{
+  "slug": "plugins-codelists-byo",
+  "title": "EDItEUR Codelists — bundled default + Bring-Your-Own",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "Barkpark ships a bundled EDItEUR "
+        },
+        {
+          "type": "text",
+          "value": "Issue 73",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " snapshot at "
+        },
+        {
+          "type": "text",
+          "value": "api/priv/codelists/onix-issue-73.xml",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (~1.4 MB), seeded on every boot via "
+        },
+        {
+          "type": "text",
+          "value": "Barkpark.Codelists.EDItEUR.seed_bundled/0",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Out of the box, a fresh install has Issue 73 codes available."
+        }
+      ]
+    },
+    {
+      "id": "b2",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "License:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " see "
+        },
+        {
+          "type": "text",
+          "value": "api/priv/codelists/README.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (CANONICAL). Short form: © EDItEUR, DOI "
+        },
+        {
+          "type": "text",
+          "value": "10.4400/nwgj",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", internal-use OK, notify-on-redistribute."
+        }
+      ]
+    },
+    {
+      "id": "b3",
+      "type": "heading",
+      "level": 2,
+      "text": "Precedence order"
+    },
+    {
+      "id": "b4",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The seeder resolves the XML path by this fixed precedence:"
+        }
+      ]
+    },
+    {
+      "id": "b5",
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "--source PATH",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " argument to "
+          },
+          {
+            "type": "text",
+            "value": "mix barkpark.codelists.seed",
+            "marks": [
+              "code"
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "BARKPARK_ONIX_CODELIST_PATH",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " env var"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Plugin settings key "
+          },
+          {
+            "type": "text",
+            "value": "\"codelist_path\"",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " for plugin "
+          },
+          {
+            "type": "text",
+            "value": "\"onixedit\"",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (Studio: "
+          },
+          {
+            "type": "text",
+            "value": "/studio/:dataset/_plugins/onixedit/settings",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b6",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Exit-1 policy:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " if none are configured and "
+        },
+        {
+          "type": "text",
+          "value": "seed_bundled/0",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " is not wired, the Mix task exits 1 with a guided message — no silent fallback."
+        }
+      ]
+    },
+    {
+      "id": "b7",
+      "type": "heading",
+      "level": 2,
+      "text": "Seeding"
+    },
+    {
+      "id": "b8",
+      "type": "code",
+      "value": "cd api\nmix barkpark.codelists.seed \\\n    --plugin onixedit \\\n    --issue  73 \\\n    --source /var/lib/barkpark/codelists/onix-issue-73.xml"
+    },
+    {
+      "id": "b9",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Re-running with the same "
+        },
+        {
+          "type": "text",
+          "value": "--issue",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " is "
+        },
+        {
+          "type": "text",
+          "value": "idempotent",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (upserts). A different "
+        },
+        {
+          "type": "text",
+          "value": "--issue",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (e.g. 74) inserts alongside the prior issue — "
+        },
+        {
+          "type": "text",
+          "value": "Codelists.lookup/3",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " resolves to the latest issue by default."
+        }
+      ]
+    },
+    {
+      "id": "b10",
+      "type": "heading",
+      "level": 2,
+      "text": "Thema hierarchy caveat"
+    },
+    {
+      "id": "b11",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "ONIX list 93 is "
+        },
+        {
+          "type": "text",
+          "value": "Supplier role",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (16 entries), not Thema. Thema is registered under the friendly key "
+        },
+        {
+          "type": "text",
+          "value": "onixedit:thema",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "; the alias resolver in "
+        },
+        {
+          "type": "text",
+          "value": "Barkpark.Content.Codelists",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " ("
+        },
+        {
+          "type": "text",
+          "value": "@external_scheme_friendlies",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") bypasses the "
+        },
+        {
+          "type": "text",
+          "value": "friendly → list_<N>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " rewrite that would otherwise mis-route Thema lookups to Supplier role."
+        }
+      ]
+    },
+    {
+      "id": "b12",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "If your Thema snapshot encodes hierarchy by code-prefix instead of explicit "
+        },
+        {
+          "type": "text",
+          "value": "<ParentCode>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", run a one-time conversion before seeding — or file an issue for "
+        },
+        {
+          "type": "text",
+          "value": "--derive-thema-hierarchy",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " support."
+        }
+      ]
+    },
+    {
+      "id": "b13",
+      "type": "heading",
+      "level": 2,
+      "text": "Tests"
+    },
+    {
+      "id": "b14",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Synthetic fixture: "
+        },
+        {
+          "type": "text",
+          "value": "api/test/fixtures/codelists/synthetic.xml",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (lists 1, 7, 17, 64 — not production codes). CI runs the parser end-to-end:"
+        }
+      ]
+    },
+    {
+      "id": "b15",
+      "type": "code",
+      "value": "cd api\nmix test test/barkpark/codelists/editeur_test.exs"
+    }
+  ],
+  "related": []
+}

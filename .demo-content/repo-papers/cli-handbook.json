@@ -1,0 +1,102 @@
+{"slug":"cli-handbook","title":"Barkpark `bp` CLI — Handbook (M4 GA)","blocks":[
+{"id":"b1","type":"ingress","content":[{"type":"text","value":"The same Go binary is the interactive TUI (no args) and the CLI (with a command), with a command tree that is a pure function of "},{"type":"text","value":"GET /v1/capabilities","marks":["code"]},{"type":"text","value":"."}]},
+{"id":"b2","type":"callout","tone":"info","content":[{"type":"text","value":"The same Go binary is the interactive TUI (no args) and the CLI (with a command). Source: "},{"type":"text","value":"internal/cli/","marks":["code"]},{"type":"text","value":", "},{"type":"text","value":"internal/manifest/","marks":["code"]},{"type":"text","value":". Frozen contracts: "},{"type":"text","value":"docs/cli/manifest.schema.json","marks":["code"]},{"type":"text","value":", the M0 decisions doc, and the error-exit table."}]},
+{"id":"b3","type":"divider"},
+{"id":"b4","type":"heading","level":2,"text":"Install & upgrade"},
+{"id":"b5","type":"code","value":"curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh\nbp version   # -> barkpark <version>"},
+{"id":"b6","type":"paragraph","content":[{"type":"text","value":"Detects OS ("},{"type":"text","value":"darwin","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"linux","marks":["code"]},{"type":"text","value":") + arch ("},{"type":"text","value":"arm64","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"amd64","marks":["code"]},{"type":"text","value":"), installs to "},{"type":"text","value":"/usr/local/bin","marks":["code"]},{"type":"text","value":" (fallback "},{"type":"text","value":"~/.local/bin","marks":["code"]},{"type":"text","value":"), sha256-verifies against the release's "},{"type":"text","value":"checksums.txt","marks":["code"]},{"type":"text","value":". Wizard walkthrough: the QUICKSTART setup doc."}]},
+{"id":"b7","type":"table","head":[
+[{"type":"text","value":"Env"}],
+[{"type":"text","value":"Effect"}]
+],"rows":[
+[[{"type":"text","value":"BARKPARK_CLI_VERSION","marks":["code"]}],[{"type":"text","value":"pin a release, e.g. "},{"type":"text","value":"1.0.1","marks":["code"]},{"type":"text","value":" (installer only)"}]],
+[[{"type":"text","value":"BARKPARK_CLI_RELEASE_BASE","marks":["code"]}],[{"type":"text","value":"mirror override — asset DIR for the installer, release-tree ROOT for "},{"type":"text","value":"bp upgrade","marks":["code"]}]],
+[[{"type":"text","value":"BARKPARK_BIN_DIR","marks":["code"]}],[{"type":"text","value":"install dir"}]]
+]},
+{"id":"b8","type":"paragraph","content":[{"type":"text","value":"bp upgrade","marks":["code"]},{"type":"text","value":" self-updates from the latest "},{"type":"text","value":"cli-v*","marks":["code"]},{"type":"text","value":" GitHub release: redirect-based latest detection (no API), sha256-verified, atomic same-dir rename; refuses on "},{"type":"text","value":"dev","marks":["code"]},{"type":"text","value":" builds; on EACCES prints the sudo re-install one-liner. "},{"type":"text","value":"bp upgrade --check","marks":["code"]},{"type":"text","value":" prints current vs latest — exit 1 when behind."}]},
+{"id":"b9","type":"paragraph","content":[{"type":"text","value":"Release runbook:","marks":["strong"]},{"type":"text","value":" tag "},{"type":"text","value":"cli-vX.Y.Z","marks":["code"]},{"type":"text","value":" → the "},{"type":"text","value":"cli-release","marks":["code"]},{"type":"text","value":" workflow runs "},{"type":"text","value":"go test","marks":["code"]},{"type":"text","value":", cross-compiles 4 binaries + "},{"type":"text","value":"checksums.txt","marks":["code"]},{"type":"text","value":", publishes the GitHub Release (hyphenated versions get "},{"type":"text","value":"--prerelease","marks":["code"]},{"type":"text","value":", which "},{"type":"text","value":"releases/latest","marks":["code"]},{"type":"text","value":" skips). Re-cut a botched release via workflow_dispatch with the tag. "},{"type":"text","value":"cli-v*","marks":["code"]},{"type":"text","value":" owns "},{"type":"text","value":"releases/latest","marks":["code"]},{"type":"text","value":" — the npm pipeline's "},{"type":"text","value":"v1.*","marks":["code"]},{"type":"text","value":" tags create no GitHub Releases; keep it that way."}]},
+{"id":"b10","type":"heading","level":2,"text":"Grammar"},
+{"id":"b11","type":"code","value":"bp [global flags] <noun> <verb> [args] [command flags]"},
+{"id":"b12","type":"paragraph","content":[{"type":"text","value":"Command tree is a "},{"type":"text","value":"pure function","marks":["strong"]},{"type":"text","value":" of "},{"type":"text","value":"GET /v1/capabilities","marks":["code"]},{"type":"text","value":" — plugins add noun/verb with zero client code change."}]},
+{"id":"b13","type":"heading","level":2,"text":"Context precedence"},
+{"id":"b14","type":"code","value":"flags  >  env (BARKPARK_*)  >  active context  >  defaults"},
+{"id":"b15","type":"paragraph","content":[{"type":"text","value":"Source: "},{"type":"text","value":"manifest.Resolve","marks":["code"]},{"type":"text","value":". Active context is persisted "},{"type":"text","value":"config.json","marks":["code"]},{"type":"text","value":" ("},{"type":"text","value":"bp setup","marks":["code"]},{"type":"text","value":", "},{"type":"text","value":"bp use <name>","marks":["code"]},{"type":"text","value":")."}]},
+{"id":"b16","type":"heading","level":2,"text":"Auth tiers"},
+{"id":"b17","type":"table","head":[
+[{"type":"text","value":"auth_tier","marks":["code"]}],
+[{"type":"text","value":"What the CLI sends"}]
+],"rows":[
+[[{"type":"text","value":"none","marks":["code"]}],[{"type":"text","value":"nothing"}]],
+[[{"type":"text","value":"read","marks":["code"]}],[{"type":"text","value":"bearer only when path is scoped"}]],
+[[{"type":"text","value":"write","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"admin","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"scoped_admin","marks":["code"]}],[{"type":"text","value":"Authorization: Bearer <token>","marks":["code"]}]],
+[[{"type":"text","value":"ingest","marks":["code"]}],[{"type":"text","value":"Authorization: Bearer <secret>","marks":["code"]},{"type":"text","value":" (reads "},{"type":"text","value":"BARKPARK_INGEST_TOKEN","marks":["code"]},{"type":"text","value":" → "},{"type":"text","value":"PAPERFLOW_INGEST_TOKEN","marks":["code"]},{"type":"text","value":" → bearer fallback)"}]]
+]},
+{"id":"b18","type":"paragraph","content":[{"type":"text","value":"scoped_admin","marks":["code"]},{"type":"text","value":" is never client-refused","marks":["strong"]},{"type":"text","value":" (M0 contract rule #2) — the server's 403 is surfaced cleanly."}]},
+{"id":"b19","type":"heading","level":2,"text":"Core verbs (summary)"},
+{"id":"b20","type":"table","head":[
+[{"type":"text","value":"Command"}],
+[{"type":"text","value":"Tier"}]
+],"rows":[
+[[{"type":"text","value":"bp doc get/ls/query/mutate","marks":["code"]}],[{"type":"text","value":"none / write"}]],
+[[{"type":"text","value":"bp schema get/apply","marks":["code"]}],[{"type":"text","value":"none / admin"}]],
+[[{"type":"text","value":"bp media ls/upload","marks":["code"]}],[{"type":"text","value":"none / write"}]],
+[[{"type":"text","value":"bp search query","marks":["code"]}],[{"type":"text","value":"none"}]],
+[[{"type":"text","value":"bp workspace ls/project-create","marks":["code"]}],[{"type":"text","value":"read / scoped_admin"}]],
+[[{"type":"text","value":"bp webhook ls/create","marks":["code"]}],[{"type":"text","value":"admin / write"}]],
+[[{"type":"text","value":"bp plugin ls/settings","marks":["code"]}],[{"type":"text","value":"read / admin"}]],
+[[{"type":"text","value":"bp bulldocs publish/patch/intents","marks":["code"]}],[{"type":"text","value":"ingest"}]],
+[[{"type":"text","value":"bp onixedit export","marks":["code"]}],[{"type":"text","value":"admin"}]],
+[[{"type":"text","value":"bp task ls/ready/get/claim/close/next","marks":["code"]}],[{"type":"text","value":"read (plugin:tasks)"}]]
+]},
+{"id":"b21","type":"heading","level":2,"text":"Output"},
+{"id":"b22","type":"paragraph","content":[{"type":"text","value":"-o table|json|yaml|minimal","marks":["code"]},{"type":"text","value":" (or "},{"type":"text","value":"--json","marks":["code"]},{"type":"text","value":", "},{"type":"text","value":"-q","marks":["code"]},{"type":"text","value":"). Default: "},{"type":"text","value":"table","marks":["code"]},{"type":"text","value":" on TTY, "},{"type":"text","value":"json","marks":["code"]},{"type":"text","value":" piped. The CLI "},{"type":"text","value":"unwraps","marks":["strong"]},{"type":"text","value":" "},{"type":"text","value":"{\"result\":…}","marks":["code"]},{"type":"text","value":" envelopes."}]},
+{"id":"b23","type":"paragraph","content":[{"type":"text","value":"Minimal receipts (writes, shape-keyed — never per-verb): "},{"type":"text","value":"rev:","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"id:","marks":["code"]},{"type":"text","value":" lines when the body carries them; an "},{"type":"text","value":"{\"ok\":true,\"doc\":{…}}","marks":["code"]},{"type":"text","value":" body prints the doc's identity line — "},{"type":"text","value":"<doc_id>","marks":["code"]},{"type":"text","value":" plus "},{"type":"text","value":"epoch=<n>","marks":["code"]},{"type":"text","value":" when the doc carries a claim (e.g. "},{"type":"text","value":"drafts.task-992199 epoch=2","marks":["code"]},{"type":"text","value":"); a 2xx "},{"type":"text","value":"{\"ok\":false,\"reason\":…}","marks":["code"]},{"type":"text","value":" body prints the reason token (e.g. "},{"type":"text","value":"no_ready","marks":["code"]},{"type":"text","value":", exit 0); otherwise a bare "},{"type":"text","value":"ok","marks":["code"]},{"type":"text","value":"."}]},
+{"id":"b24","type":"heading","level":2,"text":"--dry-run (client-side only in v1)"},
+{"id":"b25","type":"paragraph","content":[{"type":"text","value":"Prints the resolved request (method, URL, headers redacted, body) then exits 0 "},{"type":"text","value":"without sending","marks":["strong"]},{"type":"text","value":". Always announces:"}]},
+{"id":"b26","type":"code","value":"dry-run: client-side preview only (server validate-only not available)"},
+{"id":"b27","type":"paragraph","content":[{"type":"text","value":"The manifest's per-command "},{"type":"text","value":"dry_run","marks":["code"]},{"type":"text","value":" is "},{"type":"text","value":"false","marks":["code"]},{"type":"text","value":" everywhere in v1. Flips to "},{"type":"text","value":"true","marks":["code"]},{"type":"text","value":" (sends the request) only when a server later supports validate-only for a command."}]},
+{"id":"b28","type":"heading","level":3,"text":"Production write-guard"},
+{"id":"b29","type":"paragraph","content":[{"type":"text","value":"Writes against a prod-looking target ("},{"type":"text","value":"prod","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"production","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"api.barkpark.cloud","marks":["code"]},{"type":"text","value":") prompt "},{"type":"text","value":"⚠ PROD: … Continue? [y/N]","marks":["code"]},{"type":"text","value":" unless "},{"type":"text","value":"--yes","marks":["code"]},{"type":"text","value":". "},{"type":"text","value":"localhost","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"127.0.0.1","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"0.0.0.0","marks":["code"]},{"type":"text","value":" are never prod. Local UX only — does not client-refuse "},{"type":"text","value":"scoped_admin","marks":["code"]},{"type":"text","value":"."}]},
+{"id":"b30","type":"heading","level":2,"text":"Exit codes"},
+{"id":"b31","type":"paragraph","content":[{"type":"text","value":"Source of truth: the error-exit table, "},{"type":"text","value":"internal/cli/errors.go","marks":["code"]},{"type":"text","value":". The CLI "},{"type":"text","value":"never","marks":["strong"]},{"type":"text","value":" re-derives from HTTP status (contract rule #3)."}]},
+{"id":"b32","type":"table","head":[
+[{"type":"text","value":"Exit"}],
+[{"type":"text","value":"When"}]
+],"rows":[
+[[{"type":"text","value":"0"}],[{"type":"text","value":"success"}]],
+[[{"type":"text","value":"1"}],[{"type":"text","value":"generic / network / unknown error code"}]],
+[[{"type":"text","value":"2"}],[{"type":"text","value":"usage / bad args / malformed"}]],
+[[{"type":"text","value":"3"}],[{"type":"text","value":"auth / forbidden"}]],
+[[{"type":"text","value":"4"}],[{"type":"text","value":"not-found"}]],
+[[{"type":"text","value":"5"}],[{"type":"text","value":"validation"}]],
+[[{"type":"text","value":"6"}],[{"type":"text","value":"conflict / rev mismatch / precondition"}]],
+[[{"type":"text","value":"7"}],[{"type":"text","value":"rate-limited"}]],
+[[{"type":"text","value":"8"}],[{"type":"text","value":"server 5xx"}]]
+]},
+{"id":"b33","type":"heading","level":2,"text":"scoped_prefix is INERT in v1"},
+{"id":"b34","type":"paragraph","content":[{"type":"text","value":"A command's manifest "},{"type":"text","value":"scoped_prefix","marks":["code"]},{"type":"text","value":" hint does nothing in v1 — the CLI calls the flat "},{"type":"text","value":"http.path_template","marks":["code"]},{"type":"text","value":". Prepending against a flat-only server 404/403s (contract rule #4, "},{"type":"text","value":"manifest.BuildURL","marks":["code"]},{"type":"text","value":"). Activates only when a future server advertises the mirror ("},{"type":"text","value":"Context.ScopedMirror","marks":["code"]},{"type":"text","value":", currently "},{"type":"text","value":"false","marks":["code"]},{"type":"text","value":" everywhere)."}]},
+{"id":"b35","type":"heading","level":2,"text":"bp setup"},
+{"id":"b36","type":"paragraph","content":[{"type":"text","value":"On-ramp CLI-native built-in (no manifest needed). Four targets:"}]},
+{"id":"b37","type":"table","head":[
+[{"type":"text","value":"Target"}],
+[{"type":"text","value":"Effect"}]
+],"rows":[
+[[{"type":"text","value":"connect","marks":["code"]}],[{"type":"text","value":"Points bp at an existing server; non-destructive"}]],
+[[{"type":"text","value":"local","marks":["code"]}],[{"type":"text","value":"Brings up a local dev server (destructive — resets DB)"}]],
+[[{"type":"text","value":"deploy","marks":["code"]}],[{"type":"text","value":"Installs Barkpark on a remote over SSH (destructive/outbound)"}]],
+[[{"type":"text","value":"provision","marks":["code"]}],[{"type":"text","value":"STAGED — plans only unless provider CLI + credential + "},{"type":"text","value":"--yes","marks":["code"]},{"type":"text","value":" present"}]]
+]},
+{"id":"b38","type":"paragraph","content":[{"type":"text","value":"--dry-run","marks":["code"]},{"type":"text","value":" prints the plan object ("},{"type":"text","value":"-o json","marks":["code"]},{"type":"text","value":" → machine-readable Plan). "},{"type":"text","value":"--yes","marks":["code"]},{"type":"text","value":" gates destructive/outbound runs. Wizard on bare "},{"type":"text","value":"bp setup","marks":["code"]},{"type":"text","value":" only when stdin+stdout are a TTY with no "},{"type":"text","value":"--target","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"-o json","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"--yes","marks":["code"]},{"type":"text","value":"."}]},
+{"id":"b39","type":"paragraph","content":[{"type":"text","value":"Server cache: every successful "},{"type":"text","value":"connect","marks":["code"]},{"type":"text","value":" upserts into "},{"type":"text","value":"known_servers","marks":["code"]},{"type":"text","value":" in "},{"type":"text","value":"~/.config/barkpark/config.json","marks":["code"]},{"type":"text","value":" (0600, 0700 dir; tokens never exposed). "},{"type":"text","value":"bp use <name>","marks":["code"]},{"type":"text","value":" switches the active server. "},{"type":"text","value":"bp servers","marks":["code"]},{"type":"text","value":" lists all. "},{"type":"text","value":"-s <name>","marks":["code"]},{"type":"text","value":" targets one command without switching."}]},
+{"id":"b40","type":"heading","level":2,"text":"bp migrate"},
+{"id":"b41","type":"paragraph","content":[{"type":"text","value":"Copies documents between saved servers. Dry-run by default; "},{"type":"text","value":"--yes","marks":["code"]},{"type":"text","value":" gates writes. Cloud-target guard prints "},{"type":"text","value":"⚠ writing N docs to <url> [cloud]","marks":["code"]},{"type":"text","value":". Uses "},{"type":"text","value":"createOrReplace","marks":["code"]},{"type":"text","value":" mutations keyed by "},{"type":"text","value":"_id","marks":["code"]},{"type":"text","value":" (both drafts and published via "},{"type":"text","value":"perspective=raw","marks":["code"]},{"type":"text","value":"). 50 docs/batch, paged 100 at a time from source."}]},
+{"id":"b42","type":"code","value":"bp migrate local barkpark               # dry-run plan (nothing written)\nbp migrate local barkpark --type post --yes   # execute one type\nbp migrate prod local --include-schemas --yes -o json"},
+{"id":"b43","type":"heading","level":2,"text":"v1 deferrals"},
+{"id":"b44","type":"list","ordered":false,"items":[
+[{"type":"text","value":"--dry-run","marks":["code"]},{"type":"text","value":" is client-side only; no server validate-only."}],
+[{"type":"text","value":"Dataset discovery absent; "},{"type":"text","value":"production","marks":["code"]},{"type":"text","value":" is the assumed default."}],
+[{"type":"text","value":"login","marks":["code"]},{"type":"text","value":" and "},{"type":"text","value":"completion","marks":["code"]},{"type":"text","value":" are stubs."}],
+[{"type":"text","value":"scoped_prefix","marks":["code"]},{"type":"text","value":" is inert."}],
+[{"type":"text","value":"Named contexts not persisted; no "},{"type":"text","value":"context use","marks":["code"]},{"type":"text","value":"."}]
+]}
+],"related":["cli-m0-decisions","cli-error-exit-table","setup-quickstart"]}

@@ -1,0 +1,927 @@
+{
+  "slug": "cheatsheets-tui",
+  "title": "TUI — cheatsheet",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "Launch "
+        },
+        {
+          "type": "text",
+          "value": "barkpark",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (no args). Miller columns: structure → doc lists → editor. "
+        },
+        {
+          "type": "text",
+          "value": "?",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " shows this map in-app. Connect once with "
+        },
+        {
+          "type": "text",
+          "value": "bp setup connect",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "b2",
+      "type": "heading",
+      "level": 2,
+      "text": "Navigate"
+    },
+    {
+      "id": "b3",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Key"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Does"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "j/k",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " "
+            },
+            {
+              "type": "text",
+              "value": "h/l",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "move · pane left/right ("
+            },
+            {
+              "type": "text",
+              "value": "l",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " drills in)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "drill in / open document"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "/",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "search the scope (modal: "
+            },
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " opens a hit)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "s",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "workspace / project / dataset selector"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "?",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " · "
+            },
+            {
+              "type": "text",
+              "value": "q",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "key overlay · quit"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b4",
+      "type": "heading",
+      "level": 2,
+      "text": "Documents (list pane)"
+    },
+    {
+      "id": "b5",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Key"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Does"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "n",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "new doc — type a title, "
+            },
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "y",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "duplicate (verbatim content, \" (copy)\" title)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "space",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mark row (✓) for bulk"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ctrl+p",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "U",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "publish / unpublish "
+            },
+            {
+              "type": "text",
+              "value": "all marked",
+              "marks": [
+                "strong"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "R R",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "D D",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "discard draft / delete (twice = confirm)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "c",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "x",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "claim / close (task lists)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "esc",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "clear marks, then go back"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b6",
+      "type": "heading",
+      "level": 2,
+      "text": "Editor"
+    },
+    {
+      "id": "b7",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Key"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Does"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "edit field — reference opens a picker ("
+            },
+            {
+              "type": "text",
+              "value": "/",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " filters it live); image edits the URL"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "text/richText/arrays open a "
+            },
+            {
+              "type": "text",
+              "value": "textarea",
+              "marks": [
+                "strong"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ": "
+            },
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " = newline / new item, "
+            },
+            {
+              "type": "text",
+              "value": "ctrl+s",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " = confirm"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "space",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "toggle bool / cycle select (5+ options: "
+            },
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " opens a picker)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " on empty slug"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "pre-fills from the title — "
+            },
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " again accepts"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "datetime"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "now",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "YYYY-MM-DD",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "text",
+              "value": "YYYY-MM-DD HH:MM",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "validation"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "required shows "
+            },
+            {
+              "type": "text",
+              "value": "*",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "; patterns/number/datetime/color refuse bad commits"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ctrl+s",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " → "
+            },
+            {
+              "type": "text",
+              "value": "ctrl+p",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "save, then publish the draft"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "U",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "unpublish (back to draft)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "d",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "diff draft ↔ published (− published, + draft)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "H",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "revision history — "
+            },
+            {
+              "type": "text",
+              "value": "enter",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " diffs a revision vs current"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "R R",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "discard the draft (keeps the published twin)"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b8",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Draft lifecycle:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " edits autosave to "
+        },
+        {
+          "type": "text",
+          "value": "drafts.<id>",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "; "
+        },
+        {
+          "type": "text",
+          "value": "ctrl+p",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " promotes, "
+        },
+        {
+          "type": "text",
+          "value": "U",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " demotes, "
+        },
+        {
+          "type": "text",
+          "value": "R R",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " throws the draft away. Use "
+        },
+        {
+          "type": "text",
+          "value": "d",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " before either — look before you leap. Restore-from-revision lives in Studio."
+        }
+      ]
+    },
+    {
+      "id": "b9",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Blocks-doc bodies",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (edited in Studio's block editor) show a read-only preview — the TUI refuses to edit them so it can never corrupt block structure. "
+        },
+        {
+          "type": "text",
+          "value": "Papers are read-only",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " here (scroll with "
+        },
+        {
+          "type": "text",
+          "value": "j/k",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "type": "text",
+          "value": "ctrl+d/u",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "); edit them in Studio."
+        }
+      ]
+    },
+    {
+      "id": "b10",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Scope selector:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " pick from lists, or "
+        },
+        {
+          "type": "text",
+          "value": "n",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " creates a workspace/project (server slugs the name and seeds Default/production), "
+        },
+        {
+          "type": "text",
+          "value": "m",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " for manual entry."
+        }
+      ]
+    },
+    {
+      "id": "b11",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Tasks in depth: "
+        },
+        {
+          "type": "text",
+          "value": "tasks.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " · CLI: "
+        },
+        {
+          "type": "text",
+          "value": "bp.md",
+          "marks": [
+            "code"
+          ]
+        }
+      ]
+    }
+  ],
+  "related": [
+    "cheatsheets-bp",
+    "cheatsheets-tasks"
+  ]
+}

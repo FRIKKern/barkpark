@@ -1,0 +1,793 @@
+{
+  "slug": "cheatsheets-bp",
+  "title": "bp — cheatsheet",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "code",
+      "value": "bp [globals] <noun> <verb> [args] [flags]"
+    },
+    {
+      "id": "b2",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Command"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Effect"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Example"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp setup",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "wizard (TTY) / scripted"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp setup --target connect --server URL --token $TOKEN",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp servers",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "bp use <name>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "list / switch saved servers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp use prod",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp whoami",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "active server + auth tier"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp whoami",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp capabilities",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the whole API surface, one call"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp capabilities",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp doc ls <type>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "list documents"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp doc ls post",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp doc get <type> <id>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one document"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp doc get post p1",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp doc query <type>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "filtered read"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp doc query post --filter 'status=draft' --perspective raw",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp doc mutate",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "atomic batch (create/patch/publish/…)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp doc mutate -f muts.json",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp schema get/apply",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "read / upsert schema"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp schema apply --file post.json",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp media ls/upload",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "assets"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp media upload photo.jpg",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp workspace create/ls",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sandbox workspace"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp workspace create Spike",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp search query <q>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "full-text search"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp search query norway",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp paper view <slug>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "render a paper"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp paper view welcome",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task ls",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " / "
+            },
+            {
+              "type": "text",
+              "value": "ready",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all / unblocked tasks"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp task ready --limit 5",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task prime",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "agent rehydration, one call"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp task prime --worker a1",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task next <worker>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "claim the NEXT ready task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp task next a1",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task get <id>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task + child rail"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp task get task-101",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task claim <id> <worker>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fenced claim"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "--resources a.go,b.go",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " fences files"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task close <id> <worker> <epoch>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "close, CAS on epoch"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp task close task-101 a1 1",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp migrate <from> <to>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "copy docs between servers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp migrate prod local --yes",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp upgrade",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "self-update from "
+            },
+            {
+              "type": "text",
+              "value": "cli-v*",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " releases"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp upgrade --check",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp uninstall",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "remove config / dev stack"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp uninstall --local --dry-run",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b3",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "Globals: "
+        },
+        {
+          "type": "text",
+          "value": "-s/-w/-p/-d",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (server/workspace/project/dataset) · "
+        },
+        {
+          "type": "text",
+          "value": "-o table|json|yaml|minimal",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (json when piped) · "
+        },
+        {
+          "type": "text",
+          "value": "-q",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " minimal receipt · "
+        },
+        {
+          "type": "text",
+          "value": "--set k:=json",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " typed values · "
+        },
+        {
+          "type": "text",
+          "value": "--dry-run",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " preview · "
+        },
+        {
+          "type": "text",
+          "value": "--yes",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " confirm · "
+        },
+        {
+          "type": "text",
+          "value": "--file -",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " stdin."
+        }
+      ]
+    },
+    {
+      "id": "b4",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Exit codes: "
+        },
+        {
+          "type": "text",
+          "value": "docs/cli/error-exit-table.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (0 ok · 2 usage · 3 auth · 4 not-found · 5 validation · 6 conflict · 7 rate-limited · 8 server)."
+        }
+      ]
+    },
+    {
+      "id": "b5",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Canon: "
+        },
+        {
+          "type": "text",
+          "value": "../cli/HANDBOOK.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " · tasks: "
+        },
+        {
+          "type": "text",
+          "value": "tasks.md",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    }
+  ],
+  "related": [
+    "cheatsheets-tasks",
+    "cli-error-exit-table",
+    "cli-handbook"
+  ]
+}

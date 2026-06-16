@@ -1,0 +1,550 @@
+{
+  "slug": "snippets-readme",
+  "title": "Barkpark runnable snippets",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "Every file in this directory is a "
+        },
+        {
+          "type": "text",
+          "value": "single, self-contained",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " TypeScript example. Type-checked as part of docs CI ("
+        },
+        {
+          "type": "text",
+          "value": "tsc --noEmit",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") and included verbatim in MDX guides via Fumadocs' include directive."
+        }
+      ]
+    },
+    {
+      "id": "b2",
+      "type": "heading",
+      "level": 2,
+      "text": "Authoring contract"
+    },
+    {
+      "id": "b3",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Valid TypeScript/TSX, passes "
+          },
+          {
+            "type": "text",
+            "value": "tsc --noEmit",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " against "
+          },
+          {
+            "type": "text",
+            "value": "js/tsconfig.base.json",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " ("
+          },
+          {
+            "type": "text",
+            "value": "strict: true",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "text",
+            "value": "noUncheckedIndexedAccess: true",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "text",
+            "value": "exactOptionalPropertyTypes: true",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Imports "
+          },
+          {
+            "type": "text",
+            "value": "only",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " from "
+          },
+          {
+            "type": "text",
+            "value": "@barkpark/*",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "text",
+            "value": "next/*",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "text",
+            "value": "react",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ", and the Node standard library. No imports between snippets."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "First block comment is the \"expected output\" — concrete enough to smoke-test end-to-end. "
+          },
+          {
+            "type": "text",
+            "value": "_meta.json",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " duplicates this in structured form."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Each file exports a single function (or App Router convention: "
+          },
+          {
+            "type": "text",
+            "value": "GET",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "POST",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "default",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "b4",
+      "type": "heading",
+      "level": 2,
+      "text": "Required env vars"
+    },
+    {
+      "id": "b5",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Snippets assume a Phoenix API at "
+        },
+        {
+          "type": "text",
+          "value": "https://cms.example.com",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and:"
+        }
+      ]
+    },
+    {
+      "id": "b6",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Var"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Purpose"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "BARKPARK_TOKEN",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "read-tier bearer token"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "BARKPARK_SERVER_TOKEN",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "server-only bearer token"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "BARKPARK_PREVIEW_SECRET",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "draft-mode HMAC secret"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "BARKPARK_WEBHOOK_SECRET",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "webhook HMAC secret"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b7",
+      "type": "heading",
+      "level": 2,
+      "text": "Type-check the whole directory"
+    },
+    {
+      "id": "b8",
+      "type": "code",
+      "value": "cd js\npnpm typecheck      # runs turbo across all workspace packages, incl. docs"
+    },
+    {
+      "id": "b9",
+      "type": "heading",
+      "level": 2,
+      "text": "Index"
+    },
+    {
+      "id": "b10",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "File"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Purpose"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "01-create-document.ts",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Transaction: create draft, then publish"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "02-query-with-filters.ts",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "DocsBuilder: where / order / limit / findOne"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "03-listen-for-updates.ts",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Async-iterate "
+            },
+            {
+              "type": "text",
+              "value": "client.listen()",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " SSE events"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "04-mutate-optimistic.tsx",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Client form with "
+            },
+            {
+              "type": "text",
+              "value": "useOptimisticDocument",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "05-publish-unpublish.ts",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "defineActions",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " publish + unpublish round-trip"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "06-server-component-fetch.tsx",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "App Router RSC via "
+            },
+            {
+              "type": "text",
+              "value": "barkparkFetch",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "07-server-action-mutate.tsx",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "'use server'",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " module wiring defineActions"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "08-revalidate-on-webhook.ts",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Webhook route: HMAC + dedup + revalidate"
+            }
+          ]
+        ]
+      ]
+    }
+  ],
+  "related": []
+}

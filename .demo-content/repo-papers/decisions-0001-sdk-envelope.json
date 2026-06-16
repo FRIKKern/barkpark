@@ -1,0 +1,28 @@
+{"slug":"decisions-0001-sdk-envelope","title":"0001 — SDK envelope contract: nested result, Phoenix is canonical","blocks":[
+{"id":"b1","type":"ingress","content":[{"type":"text","value":"The SDK adapts to the API; the API is canonical — Phoenix wraps every response in a "},{"type":"text","value":"result","marks":["code"]},{"type":"text","value":" key and the SDK reads through that wrapper, never the reverse."}]},
+{"id":"b2","type":"paragraph","content":[{"type":"text","value":"Status:","marks":["strong"]},{"type":"text","value":" Accepted 2026-04-19. Corrected 2026-06-10 (prior text described the wrong wire shape). Full record attic'd under "},{"type":"text","value":"_attic/docs-2026-06/docs/adr/","marks":["code"]},{"type":"text","value":" (file "},{"type":"text","value":"0001-sdk-envelope-contract.md","marks":["code"]},{"type":"text","value":")."}]},
+{"id":"b3","type":"paragraph","content":[{"type":"text","value":"The SDK adapts to the API; the API is canonical.","marks":["strong"]},{"type":"text","value":" Phoenix wraps every response in a "},{"type":"text","value":"result","marks":["code"]},{"type":"text","value":" key with outer metadata. The SDK reads through that wrapper — never the reverse:"}]},
+{"id":"b4","type":"table","head":[
+[{"type":"text","value":"Endpoint"}],
+[{"type":"text","value":"Canonical wire shape"}]
+],"rows":[
+[[{"type":"text","value":"GET /v1/data/query/{dataset}/{type}","marks":["code"]}],[{"type":"text","value":"{\"result\":{\"count\":N,\"offset\":N,\"limit\":N,\"perspective\":\"...\",\"documents\":[...]},\"schemaHash\":\"...\",\"etag\":\"...\",\"ms\":N,\"syncTags\":[...]}","marks":["code"]}]],
+[[{"type":"text","value":"GET /v1/data/doc/{dataset}/{type}/{id}","marks":["code"]}],[{"type":"text","value":"{\"result\":{_id,...fields},\"schemaHash\":\"...\",\"etag\":\"...\",\"ms\":N,\"syncTags\":[...]}","marks":["code"]}]]
+]},
+{"id":"b5","type":"paragraph","content":[{"type":"text","value":"SDK read path (introduced in "},{"type":"text","value":"@barkpark/core@1.0.0-preview.1","marks":["code"]},{"type":"text","value":"):"}]},
+{"id":"b6","type":"list","ordered":false,"items":[
+[{"type":"text","value":"Query: "},{"type":"text","value":"data.result?.documents ?? data.documents ?? []","marks":["code"]},{"type":"text","value":" (graceful fallback for transient callers that bypass the wrapper)"}],
+[{"type":"text","value":"Doc: "},{"type":"text","value":"data.result","marks":["code"]},{"type":"text","value":" (the inner object is the document envelope)"}]
+]},
+{"id":"b7","type":"paragraph","content":[{"type":"text","value":"schemaHash","marks":["code"]},{"type":"text","value":" enables schema-sensitive caching. "},{"type":"text","value":"etag","marks":["code"]},{"type":"text","value":" supports conditional "},{"type":"text","value":"GET","marks":["code"]},{"type":"text","value":" ("},{"type":"text","value":"If-None-Match","marks":["code"]},{"type":"text","value":"). "},{"type":"text","value":"ms","marks":["code"]},{"type":"text","value":" is server processing time. "},{"type":"text","value":"syncTags","marks":["code"]},{"type":"text","value":" are cache-tag hints for on-demand ISR revalidation."}]},
+{"id":"b8","type":"paragraph","content":[{"type":"text","value":"Binding:","marks":["strong"]}]},
+{"id":"b9","type":"list","ordered":false,"items":[
+[{"type":"text","value":"Any envelope change requires an API version bump and a new ADR."}],
+[{"type":"text","value":"Regression fixtures in "},{"type":"text","value":"js/packages/core/tests","marks":["code"]},{"type":"text","value":" fail any PR that breaks the "},{"type":"text","value":"result","marks":["code"]},{"type":"text","value":"-unwrap path."}]
+]},
+{"id":"b10","type":"heading","level":2,"text":"Code anchors"},
+{"id":"b11","type":"list","ordered":false,"items":[
+[{"type":"text","value":"js/packages/core/src/client.ts","marks":["code"]},{"type":"text","value":" — envelope read path"}],
+[{"type":"text","value":"api/lib/barkpark_web/controllers/query_controller.ex","marks":["code"]},{"type":"text","value":" — envelope producer"}]
+]}
+],"related":[]}

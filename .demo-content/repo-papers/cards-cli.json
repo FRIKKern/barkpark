@@ -1,0 +1,24 @@
+{"slug":"cards-cli","title":"bp CLI","blocks":[
+{"id":"b1","type":"ingress","content":[{"type":"text","value":"Plugin-dynamic Go CLI in "},{"type":"text","value":"internal/cli/","marks":["code"]},{"type":"text","value":". The verb tree is a pure function of the server's capabilities manifest ("},{"type":"text","value":"/v1/capabilities","marks":["code"]},{"type":"text","value":")."}]},
+{"id":"b2","type":"paragraph","content":[{"type":"text","value":"Plugin-dynamic Go CLI in "},{"type":"text","value":"internal/cli/","marks":["code"]},{"type":"text","value":". The verb tree is a pure function of the server's capabilities manifest ("},{"type":"text","value":"/v1/capabilities","marks":["code"]},{"type":"text","value":"); "},{"type":"text","value":"Execute()","marks":["code"]},{"type":"text","value":" in cli.go dispatches a static builtins switch (version, completion, login, capabilities, whoami, use, servers, server, setup, migrate, paper) and then manifest-driven verbs. Write bodies: declared args seed, "},{"type":"text","value":"--set k=v","marks":["code"]},{"type":"text","value":" merges strings, "},{"type":"text","value":"--set k:=json","marks":["code"]},{"type":"text","value":" sends TYPED values (number/bool/array/object — the server patch path stores types verbatim, no coercion), "},{"type":"text","value":"--file","marks":["code"]},{"type":"text","value":"/stdin overrides all."}]},
+{"id":"b3","type":"list","ordered":false,"items":[
+[{"type":"text","value":"New builtin verb: copy the pattern in builtins.go ("},{"type":"text","value":"runWhoami","marks":["code"]},{"type":"text","value":" / "},{"type":"text","value":"runCapabilities","marks":["code"]},{"type":"text","value":" — "},{"type":"text","value":"*writer","marks":["code"]},{"type":"text","value":" + "},{"type":"text","value":"globals","marks":["code"]},{"type":"text","value":" + "},{"type":"text","value":"manifest.Context","marks":["code"]},{"type":"text","value":" in, exit int out)."}],
+[{"type":"text","value":"bp paper","marks":["code"]},{"type":"text","value":" renders Bulldocs portable-docs in the terminal via "},{"type":"text","value":"internal/pdrender","marks":["code"]},{"type":"text","value":" (see docs/cards/tui.md)."}],
+[{"type":"text","value":"Error → exit-code mapping lives in errors.go and is specified in the canonical table below."}],
+[{"type":"text","value":"docs/cli/**","marks":["code"]},{"type":"text","value":" is PATH FROZEN — cli.go comments reference it; never move these files."}]
+]},
+{"id":"b4","type":"paragraph","content":[{"type":"text","value":"Canonical references:"}]},
+{"id":"b5","type":"list","ordered":false,"items":[
+[{"type":"text","value":"docs/cli/error-exit-table.md — exit codes + error-envelope mapping (canonical)."}],
+[{"type":"text","value":"docs/cli/m0-decisions.md — M0 decisions, incl. scoped_admin no-blanket-hide and content-addressed tier-projected ETag rules."}],
+[{"type":"text","value":"docs/cli/HANDBOOK.md — operator manual (config precedence, migration semantics, safety philosophy)."}],
+[{"type":"text","value":"docs/cli/manifest.schema.json — manifest shape; docs/cli/fixtures/*.json are load-bearing for Go tests (manifest_test.go, cli_test.go)."}]
+]},
+{"id":"b6","type":"heading","level":2,"text":"Code anchors"},
+{"id":"b7","type":"list","ordered":false,"items":[
+[{"type":"text","value":"internal/cli/cli.go — func Execute"}],
+[{"type":"text","value":"internal/cli/builtins.go — func runWhoami, func runCapabilities"}],
+[{"type":"text","value":"internal/cli/paper_cmd.go — func runPaper"}],
+[{"type":"text","value":"internal/cli/errors.go — func exitForCode, func classifyError"}]
+]}
+],"related":["cards-tui","cli-error-exit-table","cli-m0-decisions","cli-handbook"]}

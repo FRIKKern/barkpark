@@ -1,0 +1,762 @@
+{
+  "slug": "cheatsheets-tasks",
+  "title": "tasks — cheatsheet",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "Tasks are "
+        },
+        {
+          "type": "text",
+          "value": "type:task",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " docs. Root task = goal; nest via "
+        },
+        {
+          "type": "text",
+          "value": "content.parent_id",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Create via mutate (admin); endpoints resolve bare ids ("
+        },
+        {
+          "type": "text",
+          "value": "drafts.",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " prefix = exact). All "
+        },
+        {
+          "type": "text",
+          "value": "/v1/tasks/*",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " routes bearer-token (read tier). Plugin must be on ("
+        },
+        {
+          "type": "text",
+          "value": "BARKPARK_PLUGINS",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " unset or contains "
+        },
+        {
+          "type": "text",
+          "value": "tasks",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ")."
+        }
+      ]
+    },
+    {
+      "id": "b2",
+      "type": "table",
+      "head": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "HTTP"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Effect · example"
+            }
+          ]
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task ls",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET /v1/tasks",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "list; filters "
+            },
+            {
+              "type": "text",
+              "value": "kind/lifecycle_status/phase_id/parent/label",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " · "
+            },
+            {
+              "type": "text",
+              "value": "parent=",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " = child rail"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task ready",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET /v1/tasks/ready",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "unblocked queue, priority ASC"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task prime",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET /v1/tasks/prime",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one-call rehydration: in-progress ("
+            },
+            {
+              "type": "text",
+              "value": "--worker W",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ") + ready head + events + counts"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task get <id>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET /v1/tasks/:id",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "doc + one level of "
+            },
+            {
+              "type": "text",
+              "value": "children",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " inline"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task next <worker>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/claim",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "queue claim · no_ready if none"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task claim <id> <worker>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/:id/claim",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "targeted · "
+            },
+            {
+              "type": "text",
+              "value": "--resources a.go,b.go",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " fences files: 409 "
+            },
+            {
+              "type": "text",
+              "value": "resource_conflict",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " names holders; freed on close/sweep"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task close <id> <worker> <epoch> [status] [reason]",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/:id/close",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "close, CAS on epoch; reason → "
+            },
+            {
+              "type": "text",
+              "value": "close_reason",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/claim",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "queue claim body: "
+            },
+            {
+              "type": "text",
+              "value": "{\"worker_id\":\"agent-1\"}",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GET /v1/tasks/:id/edges",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "dependencies + dependents ("
+            },
+            {
+              "type": "text",
+              "value": "?kind=all",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/edges",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "{\"from_id\":\"t2\",\"to_id\":\"t1\"}",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " — t2 waits on t1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/:id/labels",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "{\"add\":[\"sprint-3\"],\"remove\":[]}",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "POST /v1/tasks/:id/papers",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "link paper slugs: "
+            },
+            {
+              "type": "text",
+              "value": "{\"add\":[\"notes\"]}",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "b3",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Lifecycle:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " "
+        },
+        {
+          "type": "text",
+          "value": "open · in_progress · blocked · done · cancelled",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Ready = open/blocked AND every "
+        },
+        {
+          "type": "text",
+          "value": "blocks",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " target "
+        },
+        {
+          "type": "text",
+          "value": "done",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Closing "
+        },
+        {
+          "type": "text",
+          "value": "done",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " auto-flips dependents blocked → open."
+        }
+      ]
+    },
+    {
+      "id": "b4",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Claim/close contract:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " claim → "
+        },
+        {
+          "type": "text",
+          "value": "lifecycle_status=in_progress",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", stamps "
+        },
+        {
+          "type": "text",
+          "value": "content.claim {worker, ts_iso, epoch}",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "; epoch bumps every claim. Close needs "
+        },
+        {
+          "type": "text",
+          "value": "worker_id",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " + "
+        },
+        {
+          "type": "text",
+          "value": "observed_epoch",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (CAS — mismatch → 409 "
+        },
+        {
+          "type": "text",
+          "value": "fenced_off",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "; race → "
+        },
+        {
+          "type": "text",
+          "value": "stale_claim",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "); optional "
+        },
+        {
+          "type": "text",
+          "value": "lifecycle_status",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " done|cancelled|blocked (default done), "
+        },
+        {
+          "type": "text",
+          "value": "observed_rev",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Leases sweep after 300s ("
+        },
+        {
+          "type": "text",
+          "value": "task_lease_ttl_seconds",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") → "
+        },
+        {
+          "type": "text",
+          "value": "task.lease_expired",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "b5",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Events",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (SSE "
+        },
+        {
+          "type": "text",
+          "value": "/v1/data/listen/:dataset",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "): "
+        },
+        {
+          "type": "text",
+          "value": "task.claimed/closed/mutated/relabeled/referenced/lease_expired",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "b6",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Guide: "
+        },
+        {
+          "type": "text",
+          "value": "../setup/TASK-SYSTEM.md",
+          "marks": [
+            "code"
+          ]
+        }
+      ]
+    }
+  ],
+  "related": [
+    "setup-task-system"
+  ]
+}
