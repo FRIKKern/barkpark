@@ -202,6 +202,78 @@ function matchSnippet(hit: FindHit, terms: string[]): string | null {
   return snip;
 }
 
+/**
+ * A QUALITATIVE match-strength signal — deliberately NOT a numeric engine score
+ * (Postgres ts_rank, Indx BM25F, and fuzzy trigram aren't comparable across
+ * engines or queries, and a number reads as false precision). Instead it's
+ * derived from explainable, engine-agnostic facts the client already has —
+ * WHERE and HOW COMPLETELY the query matched:
+ *
+ *   title   — every term is in the title        (strongest)
+ *   body    — every term appears in the text     (solid)
+ *   partial — only some terms matched            (weak)
+ *   fuzzy   — no term matches exactly; the engine widened to similarity (loosest)
+ *
+ * It's relative-within-a-query and self-explaining (tooltip), so it informs
+ * without the foot-gun of a precise-looking cross-query score.
+ */
+type MatchStrength = "title" | "body" | "partial" | "fuzzy";
+
+function matchStrength(hit: FindHit, terms: string[]): MatchStrength {
+  const t = terms.map((x) => x.toLowerCase()).filter(Boolean);
+  if (t.length === 0) return "title";
+  const title = hit.title.toLowerCase();
+  const rest = `${hit.body ?? hit.excerpt ?? ""} ${hit.slug ?? ""}`.toLowerCase();
+  const inTitle = (x: string) => title.includes(x);
+  const inAny = (x: string) => title.includes(x) || rest.includes(x);
+  if (t.every(inTitle)) return "title";
+  if (t.every(inAny)) return "body";
+  if (t.some(inAny)) return "partial";
+  return "fuzzy";
+}
+
+const STRENGTH_META: Record<
+  MatchStrength,
+  { bars: number; label: string; fuzzy?: boolean }
+> = {
+  title: { bars: 3, label: "Strong match — every term is in the title" },
+  body: { bars: 2, label: "Solid match — every term appears in the text" },
+  partial: { bars: 1, label: "Partial match — only some terms matched" },
+  fuzzy: {
+    bars: 1,
+    label: "Fuzzy match — no exact term; found by similarity",
+    fuzzy: true,
+  },
+};
+
+/** A tiny ascending 3-bar meter for {@link MatchStrength}. Emerald for real
+ * matches, amber for fuzzy; the label rides in a tooltip (no bare number). */
+function StrengthMeter({ level }: { level: MatchStrength }) {
+  const { bars, label, fuzzy } = STRENGTH_META[level];
+  const heights = ["h-1", "h-1.5", "h-2"];
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className="inline-flex shrink-0 items-end gap-px"
+    >
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={`w-[3px] rounded-sm ${heights[i]} ${
+            i < bars
+              ? fuzzy
+                ? "bg-amber-400/90"
+                : "bg-emerald-500/80"
+              : "bg-zinc-200 dark:bg-zinc-700"
+          }`}
+        />
+      ))}
+    </span>
+  );
+}
+
 /* ── small pieces ──────────────────────────────────────────────────────── */
 
 function shortDate(value: string | null): string | null {
@@ -303,6 +375,13 @@ function ResultRow({
             className="translate-x-0 text-zinc-400 opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100"
           >
             →
+          </span>
+        ) : null}
+        {/* Match-strength meter — only with an active query, right-aligned so the
+            rows form a strength column you can scan. */}
+        {terms.length > 0 ? (
+          <span className="ml-auto pl-2">
+            <StrengthMeter level={matchStrength(hit, terms)} />
           </span>
         ) : null}
       </span>
