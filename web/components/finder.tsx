@@ -777,9 +777,12 @@ export function Finder({
     }
   };
 
-  const activeEngine = ENGINES.find((e) => e.id === engine)!;
-  // The parsed-query chips ("Understood as: …") share the engine-tagline row and
-  // replace it when present, so the chips appearing don't push the page down.
+  // Advanced options panel (cache/reindex/syntax) — a stateful toggle rather
+  // than <details>, so the interactive Popular chips can share its header row
+  // without a click also toggling the panel.
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  // The parsed-query chips ("Understood as: …") share the status row and replace
+  // the idle Popular shortcuts when a query parses — no extra line, no shift.
   const parsed = data?.parsedQuery ?? null;
   const hasParsedChips =
     !!parsed &&
@@ -886,101 +889,110 @@ export function Finder({
             ))}
           </div>
         </div>
-        {/* Engine tagline doubles as the disclosure summary; the advanced /
-            benchmark controls (cache mode, reindex) + query syntax tuck inside,
+        {/* Status row (fixed height): Popular shortcuts when idle, parsed-query
+            chips when searching, + the fuzzy pill — with the Options toggle on
+            the right. The benchmark/advanced controls tuck into the panel below,
             collapsed by default so the primary surface stays clean. */}
-        <details className="group">
-          <summary className="flex min-h-7 cursor-pointer list-none items-center justify-between gap-3 text-sm text-zinc-500 [&::-webkit-details-marker]:hidden dark:text-zinc-400">
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              {hasParsedChips && parsed ? (
-                // Parsed-query chips REPLACE the engine tagline in this row, so
-                // they don't appear as an extra line that pushes the page down.
-                <>
-                  <span className="text-zinc-400">Understood as:</span>
-                  {parsed.terms.map((t) => (
-                    <span
-                      key={`t-${t}`}
-                      className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                  {parsed.phrases.map((t) => (
-                    <span
-                      key={`p-${t}`}
-                      className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
-                    >
-                      &quot;{t}&quot;
-                    </span>
-                  ))}
-                  {parsed.prefixes.map((t) => (
-                    <span
-                      key={`x-${t}`}
-                      className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
-                    >
-                      {t}*
-                    </span>
-                  ))}
-                  {parsed.excludes.map((t) => (
-                    <span
-                      key={`e-${t}`}
-                      className="rounded bg-red-100 px-2 py-0.5 font-mono text-xs text-red-700 line-through dark:bg-red-950/40 dark:text-red-300"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </>
-              ) : (
-                <span>
-                  <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                    {activeEngine.label}:
-                  </span>{" "}
-                  {activeEngine.tagline}
-                </span>
-              )}
-              {/* Fuzzy/widened indicator — a compact pill in this same row
-                  instead of a banner block, so it never shifts the layout. */}
-              {data?.recovery ? (
-                <span
-                  className="inline-flex shrink-0 items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
-                  title={`No exact matches — widened to fuzzy results (${data.recovery})`}
-                >
-                  <svg
-                    aria-hidden
-                    viewBox="0 0 12 12"
-                    className="h-3 w-3"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.3"
+        <div className="flex min-h-7 items-center justify-between gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {hasParsedChips && parsed ? (
+              <>
+                <span className="text-zinc-400">Understood as:</span>
+                {parsed.terms.map((t) => (
+                  <span
+                    key={`t-${t}`}
+                    className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
                   >
-                    <path
-                      d="M2 4c2 0 2 4 4 4s2-4 4-4"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  fuzzy
-                </span>
-              ) : null}
-            </span>
-            <span className="flex shrink-0 items-center gap-1 text-xs text-zinc-400 transition-colors group-hover:text-zinc-600 dark:group-hover:text-zinc-300">
-              Options
-              <svg
-                aria-hidden
-                viewBox="0 0 12 12"
-                className="disclosure-chevron h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
+                    {t}
+                  </span>
+                ))}
+                {parsed.phrases.map((t) => (
+                  <span
+                    key={`p-${t}`}
+                    className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
+                  >
+                    &quot;{t}&quot;
+                  </span>
+                ))}
+                {parsed.prefixes.map((t) => (
+                  <span
+                    key={`x-${t}`}
+                    className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
+                  >
+                    {t}*
+                  </span>
+                ))}
+                {parsed.excludes.map((t) => (
+                  <span
+                    key={`e-${t}`}
+                    className="rounded bg-red-100 px-2 py-0.5 font-mono text-xs text-red-700 line-through dark:bg-red-950/40 dark:text-red-300"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </>
+            ) : popular.length > 0 ? (
+              // Default (idle) state: Popular shortcuts live HERE instead of the
+              // old engine tagline.
+              <>
+                <span className="text-zinc-400">Popular:</span>
+                {popular.map((p) => (
+                  <button
+                    key={p.query}
+                    onClick={() => setParams({ q: p.query })}
+                    className="rounded-full border border-zinc-300 px-2.5 py-0.5 text-xs text-zinc-600 transition-colors hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
+                  >
+                    {p.query}
+                  </button>
+                ))}
+              </>
+            ) : null}
+            {/* Fuzzy/widened indicator — a compact pill in this same row instead
+                of a banner block, so it never shifts the layout. */}
+            {data?.recovery ? (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                title={`No exact matches — widened to fuzzy results (${data.recovery})`}
               >
-                <path
-                  d="M3 4.5 6 7.5 9 4.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-          </summary>
-          <div className="mt-3 flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
+                <svg
+                  aria-hidden
+                  viewBox="0 0 12 12"
+                  className="h-3 w-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                >
+                  <path d="M2 4c2 0 2 4 4 4s2-4 4-4" strokeLinecap="round" />
+                </svg>
+                fuzzy
+              </span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => setOptionsOpen((o) => !o)}
+            aria-expanded={optionsOpen}
+            className="flex shrink-0 items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
+          >
+            Options
+            <svg
+              aria-hidden
+              viewBox="0 0 12 12"
+              className={`h-3 w-3 transition-transform ${optionsOpen ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path
+                d="M3 4.5 6 7.5 9 4.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        {optionsOpen ? (
+          <div className="flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-zinc-400">Cache</span>
               <button
@@ -1032,24 +1044,11 @@ export function Finder({
               </span>
             </p>
           </div>
-        </details>
+        ) : null}
       </div>
 
-      {/* popular searches — quick shortcuts right under the search bar (idle) */}
-      {!q && popular.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-zinc-400">Popular:</span>
-          {popular.map((p) => (
-            <button
-              key={p.query}
-              onClick={() => setParams({ q: p.query })}
-              className="rounded-full border border-zinc-300 px-3 py-1 text-zinc-600 transition-colors hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
-            >
-              {p.query}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {/* Popular shortcuts now live in the status row above (idle state),
+          replacing the old engine tagline — no separate line. */}
 
       {/* banners */}
       {data?.error ? (
