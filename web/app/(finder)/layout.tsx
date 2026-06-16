@@ -51,7 +51,7 @@ export default async function FinderLayout({
 
   return (
     <HoveredDocProvider>
-      <div className="mx-auto flex h-screen w-full max-w-[2200px] overflow-hidden">
+      <div className="flex h-screen w-full overflow-hidden">
         <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800">
           <Finder
             variant="master"
