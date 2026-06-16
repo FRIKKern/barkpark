@@ -42,6 +42,37 @@ function recordFindEvent(body: {
   }
 }
 
+/**
+ * Optimistic local ranking over the browse-seed corpus (up to 100 docs already
+ * in the client). Mirrors the server's title-affinity intent — exact title >
+ * title-prefix > title-contains / all-terms-in-title > body-or-slug — so the
+ * instant local list is ordered like the authoritative one that replaces it.
+ * Substring-only (no fuzzy): typo tolerance is exactly what the backend verify
+ * adds on top. Stable (original index tiebreak) so the order is deterministic.
+ */
+function localSearch(corpus: FindHit[], query: string): FindHit[] {
+  const q = query.toLowerCase().trim();
+  if (!q) return corpus;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const scored: { hit: FindHit; score: number; i: number }[] = [];
+  corpus.forEach((hit, i) => {
+    const title = hit.title.toLowerCase();
+    const slug = (hit.slug ?? "").toLowerCase();
+    const body = (hit.excerpt ?? "").toLowerCase();
+    let score = 0;
+    if (title === q) score = 1000;
+    else if (title.startsWith(q)) score = 700;
+    else if (title.includes(q)) score = 500;
+    const titleHits = tokens.filter((t) => title.includes(t)).length;
+    const bodyHits = tokens.filter((t) => slug.includes(t) || body.includes(t)).length;
+    if (titleHits === tokens.length) score = Math.max(score, 400);
+    score += titleHits * 40 + bodyHits * 8;
+    if (score > 0) scored.push({ hit, score, i });
+  });
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  return scored.map((s) => s.hit);
+}
+
 /* ── small pieces ──────────────────────────────────────────────────────── */
 
 function shortDate(value: string | null): string | null {
@@ -257,21 +288,32 @@ export function Finder({
     [router, pathname, sp],
   );
 
-  // Input is local + debounced into the URL's `q` (the source of truth).
+  // Input is local + debounced into the URL's `q` (the source of truth). The
+  // box OWNS its text; we only pull `q` back in on an EXTERNAL change (back/
+  // forward nav, a popular chip, a "did you mean" accept) — never on the echo
+  // of our own debounced write, which lags behind what the user has since
+  // typed. Adopting that echo is what used to wipe characters typed mid-debounce
+  // (type "headl" fast → the "head" echo lands → box snaps back to "head").
   const [input, setInput] = useState(q);
-  const [syncedQ, setSyncedQ] = useState(q);
-  // When the URL's q changes externally (popular chip, back nav), pull it into
-  // the box — done during render via React's previous-state pattern, not an
-  // effect (avoids a cascading-render setState-in-effect).
-  if (q !== syncedQ) {
-    setSyncedQ(q);
-    setInput(q);
+  // `lastSent` = the last q WE pushed (debounce); `prevQ` = the q we last
+  // reconciled. Both are STATE so the render-phase reconciliation is React's
+  // sanctioned "adjust state during render" pattern (refs can't be read in
+  // render). When the incoming q equals `lastSent` it is our own echo → leave
+  // the box alone; anything else is an external change → adopt it.
+  const [lastSent, setLastSent] = useState(q);
+  const [prevQ, setPrevQ] = useState(q);
+  if (q !== prevQ) {
+    setPrevQ(q);
+    if (q !== lastSent) setInput(q);
   }
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (input === q) return;
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => setParams({ q: input || null }), 250);
+    timer.current = setTimeout(() => {
+      setLastSent(input);
+      setParams({ q: input || null });
+    }, 250);
     return () => clearTimeout(timer.current);
   }, [input, q, setParams]);
 
@@ -351,10 +393,6 @@ export function Finder({
   }, [reqKey, engine, q, cacheOn, seedKey, sessionId]);
   const data = result?.data ?? null;
   const roundTripMs = result?.key === reqKey ? result.roundTripMs : null;
-  // Stale-while-revalidate: only blank to a skeleton when there's NOTHING to
-  // show. Once we have any result, a new query keeps the old list visible
-  // (dimmed) until the fresh one lands — the search feels continuous.
-  const showSkeleton = loading && !data;
   const prerendered = result?.key === reqKey && result.prerendered === true;
 
   // Popular past queries (search-intelligence) — shown when the box is empty.
@@ -369,6 +407,30 @@ export function Finder({
   }, []);
 
   const hits = useMemo(() => data?.hits ?? [], [data]);
+
+  // ── optimistic-local-then-verify ──────────────────────────────────────────
+  // The browse seed (initialData) is a local corpus of up to 100 docs. While
+  // the debounced backend call for the CURRENT box text is still in flight, we
+  // filter that corpus locally so the list narrows on EVERY keystroke with zero
+  // latency. The authoritative result (full corpus + fuzzy + engine ranking)
+  // swaps in the instant it lands — optimistic, but verified. With no seed we
+  // fall back to the old stale-while-revalidate (keep `hits` until the fetch).
+  const corpus = useMemo(() => initialData?.hits ?? [], [initialData]);
+  const trimmedInput = input.trim();
+  const optimisticHits = useMemo(
+    () => localSearch(corpus, trimmedInput),
+    [corpus, trimmedInput],
+  );
+  // Backend data is authoritative for what's typed only when the committed query
+  // matches the box AND its fetch has landed (not loading).
+  const backendFresh = data != null && !loading && q.trim() === trimmedInput;
+  const optimisticActive = !backendFresh && corpus.length > 0;
+  const baseHits = optimisticActive ? optimisticHits : hits;
+
+  // Skeleton only when there is genuinely NOTHING to show — no backend result
+  // AND no optimistic local set. With the browse seed present we always have an
+  // instant local list, so the skeleton is effectively never hit in practice.
+  const showSkeleton = loading && !data && !optimisticActive;
 
   // Vocabulary from the browse seed (all docs' titles/excerpts) — broadens the
   // "did you mean" candidate pool beyond the current query's results + popular.
@@ -399,9 +461,12 @@ export function Finder({
 
   // Facet groups: prefer Indx's dataset-wide buckets; fall back to a client
   // type-count when the engine returned none (Postgres path).
-  const facetsFromIndx = Boolean(data?.facets);
+  // Prefer the engine's dataset-wide facets, but only when the authoritative
+  // result is the one on screen — while showing optimistic local hits, count
+  // types from those hits so the rail matches the list the user sees.
+  const facetsFromIndx = Boolean(data?.facets) && !optimisticActive;
   const facetGroups = useMemo(() => {
-    if (data?.facets) {
+    if (data?.facets && !optimisticActive) {
       return FACET_DIMENSIONS.map(({ key, label }) => ({
         key,
         label,
@@ -409,18 +474,18 @@ export function Finder({
       })).filter((g) => g.buckets.length > 0);
     }
     const counts = new Map<string, number>();
-    for (const h of hits) counts.set(h.type, (counts.get(h.type) ?? 0) + 1);
+    for (const h of baseHits) counts.set(h.type, (counts.get(h.type) ?? 0) + 1);
     const buckets = DOC_TYPES.map((t) => ({
       label: t.type,
       count: counts.get(t.type) ?? 0,
     })).filter((b) => b.count > 0);
     return buckets.length ? [{ key: "type", label: "Type", buckets }] : [];
-  }, [data, hits]);
+  }, [data, baseHits, optimisticActive]);
 
   const facetCount = Object.values(selectedFacets).reduce((n, s) => n + s.size, 0);
 
   const visibleHits = useMemo(() => {
-    let out = hits;
+    let out = baseHits;
     for (const [dim, vals] of Object.entries(selectedFacets)) {
       out = out.filter((h) => vals.has(h.facets[dim] ?? ""));
     }
@@ -430,12 +495,13 @@ export function Finder({
       out = [...out].sort((a, b) => a.title.localeCompare(b.title));
     }
     return out;
-  }, [hits, selectedFacets, sort]);
+  }, [baseHits, selectedFacets, sort]);
 
-  // A filter is "active" when the user has narrowed the corpus — a real query or
-  // any facet selection. Idle browse (empty box, no facets) lists ~everything,
-  // so it should leave the graph whole rather than dim it to the browse page.
-  const filterActive = Boolean(q) || facetCount > 0;
+  // A filter is "active" when the user has narrowed the corpus — text in the box
+  // (the LIVE input, so the graph reacts on the keystroke, not after the debounce
+  // commits to the URL) or any facet selection. Idle browse leaves the graph
+  // whole rather than dimming it to the browse page.
+  const filterActive = trimmedInput.length > 0 || facetCount > 0;
 
   // Rank → score weight. Both engines return hits in score-descending order, so
   // a hit's index in the (unfiltered, engine-ordered) result list IS its
@@ -444,16 +510,16 @@ export function Finder({
   // the tail stays visibly above the dimmed non-matches.
   const rankBySlug = useMemo(() => {
     const m = new Map<string, number>();
-    hits.forEach((h, i) => {
+    baseHits.forEach((h, i) => {
       if (h.slug && !m.has(h.slug)) m.set(h.slug, i);
     });
     return m;
-  }, [hits]);
+  }, [baseHits]);
 
   // The visible results as weighted graph matches (null when idle → full graph).
   const graphMatches = useMemo(() => {
     if (!filterActive) return null;
-    const n = hits.length;
+    const n = baseHits.length;
     return visibleHits
       .filter((h) => h.slug)
       .map((h) => {
@@ -462,7 +528,7 @@ export function Finder({
         const w = Math.round((0.2 + 0.8 * Math.pow(1 - t, 1.4)) * 1000) / 1000;
         return { id: h.slug, w };
       });
-  }, [filterActive, visibleHits, hits.length, rankBySlug]);
+  }, [filterActive, visibleHits, baseHits.length, rankBySlug]);
 
   // Publish to the landing graph. While loading, hold the previous publish
   // (don't flash the graph to empty between keystrokes).
@@ -471,11 +537,14 @@ export function Finder({
     : "";
   useEffect(() => {
     if (!master) return;
-    if (loading) return;
+    // Publish on every change — `baseHits` is always populated (optimistic local
+    // while the backend verifies, authoritative once it lands), so the graph
+    // tracks the visible set in lockstep and never flashes to empty. The context
+    // dedupes identical publishes.
     setMatches(graphMatches);
     // matchKey captures the weighted set; graphMatches is read fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, loading, matchKey, setMatches]);
+  }, [master, matchKey, setMatches]);
 
   // Indx coverage boundary — only meaningful over the unfiltered,
   // relevance-ordered result set of a real query (not browse/recovery).
@@ -941,59 +1010,83 @@ export function Finder({
               <span className="flex flex-wrap items-center gap-x-2">
                 <span>
                   {visibleHits.length}
-                  {data && data.total > hits.length ? ` of ${data.total}` : ""}{" "}
+                  {!optimisticActive && data && data.total > hits.length
+                    ? ` of ${data.total}`
+                    : ""}{" "}
                   {visibleHits.length === 1 ? "result" : "results"}
                 </span>
-                {data?.engineUsed ? (
-                  <span className="font-mono">· {data.engineUsed}</span>
-                ) : null}
-                {/* engine compute · upstream fetch (cache-hit proxy) · client round-trip */}
-                {typeof data?.ms === "number" ? (
-                  <span className="font-mono" title="engine compute time">
-                    · {data.ms}ms
+                {optimisticActive ? (
+                  // Optimistic local hit shown instantly; the backend is
+                  // verifying the exact query in the background.
+                  <span className="flex items-center gap-x-2">
+                    <span
+                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                      title="filtered locally from the loaded corpus — instant"
+                    >
+                      instant
+                    </span>
+                    {loading ? (
+                      <span className="animate-pulse text-zinc-400">
+                        · verifying…
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-                {typeof data?.upstreamMs === "number" ? (
-                  <span
-                    className="font-mono"
-                    title="route handler → API (≈0ms = Data Cache hit)"
-                  >
-                    · api {data.upstreamMs}ms
-                  </span>
-                ) : null}
-                {typeof roundTripMs === "number" ? (
-                  <span className="font-mono" title="browser round-trip">
-                    · rt {roundTripMs}ms
-                  </span>
-                ) : null}
-                {prerendered ? (
-                  <span
-                    className="rounded bg-emerald-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                    title="server-rendered into the first byte (ISR Data Cache)"
-                  >
-                    prerendered
-                  </span>
-                ) : data ? (
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-[0.7rem] font-medium ${
-                      data.cache
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                        : "bg-zinc-200/70 text-zinc-500 dark:bg-zinc-800/70"
-                    }`}
-                  >
-                    {data.cache
-                      ? data.upstreamMs !== null && data.upstreamMs <= 8
-                        ? "cache HIT"
-                        : "cached"
-                      : "no-store"}
-                  </span>
-                ) : null}
-                {loading ? (
-                  <span className="animate-pulse text-zinc-400">· searching…</span>
-                ) : null}
+                ) : (
+                  <>
+                    {data?.engineUsed ? (
+                      <span className="font-mono">· {data.engineUsed}</span>
+                    ) : null}
+                    {/* engine compute · upstream fetch (cache-hit proxy) · client round-trip */}
+                    {typeof data?.ms === "number" ? (
+                      <span className="font-mono" title="engine compute time">
+                        · {data.ms}ms
+                      </span>
+                    ) : null}
+                    {typeof data?.upstreamMs === "number" ? (
+                      <span
+                        className="font-mono"
+                        title="route handler → API (≈0ms = Data Cache hit)"
+                      >
+                        · api {data.upstreamMs}ms
+                      </span>
+                    ) : null}
+                    {typeof roundTripMs === "number" ? (
+                      <span className="font-mono" title="browser round-trip">
+                        · rt {roundTripMs}ms
+                      </span>
+                    ) : null}
+                    {prerendered ? (
+                      <span
+                        className="rounded bg-emerald-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                        title="server-rendered into the first byte (ISR Data Cache)"
+                      >
+                        prerendered
+                      </span>
+                    ) : data ? (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[0.7rem] font-medium ${
+                          data.cache
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                            : "bg-zinc-200/70 text-zinc-500 dark:bg-zinc-800/70"
+                        }`}
+                      >
+                        {data.cache
+                          ? data.upstreamMs !== null && data.upstreamMs <= 8
+                            ? "cache HIT"
+                            : "cached"
+                          : "no-store"}
+                      </span>
+                    ) : null}
+                    {loading ? (
+                      <span className="animate-pulse text-zinc-400">
+                        · searching…
+                      </span>
+                    ) : null}
+                  </>
+                )}
               </span>
             )}
-            {hits.length > 0 ? (
+            {baseHits.length > 0 ? (
               <div
                 role="tablist"
                 aria-label="Sort"
@@ -1031,14 +1124,19 @@ export function Finder({
             </ul>
           ) : visibleHits.length === 0 ? (
             <p className="py-8 text-zinc-500">
-              {q
-                ? "No documents match your search."
-                : "No documents found."}
+              {optimisticActive && loading
+                ? // No LOCAL (substring) match yet — but the backend's fuzzy /
+                  // typo-tolerant pass may still find some, so don't claim "no
+                  // results" until it lands.
+                  "Searching…"
+                : trimmedInput
+                  ? "No documents match your search."
+                  : "No documents found."}
             </p>
           ) : (
             <ul
               className={`flex flex-col divide-y divide-zinc-200 transition-opacity dark:divide-zinc-800 ${
-                loading ? "opacity-50" : "opacity-100"
+                loading && !optimisticActive ? "opacity-50" : "opacity-100"
               }`}
             >
               {visibleHits.map((hit, i) => (
