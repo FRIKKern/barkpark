@@ -538,7 +538,11 @@ defmodule BarkparkWeb.TasksController do
 
   def graph_corpus(conn, _params) do
     dataset = request_dataset(conn)
-    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset)
+    # limit 1000 (the list_documents hard cap) so the corpus isn't silently
+    # truncated at the default page size of 100 — BOTH the node list and
+    # corpus_edges read through this opts, so a large dataset still yields a
+    # complete graph (the node budget below is the real ceiling).
+    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset) |> Keyword.put(:limit, 1000)
     list_opts = Keyword.put(opts, :perspective, :published)
 
     types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
