@@ -1874,8 +1874,15 @@
         Math.abs(cam.scale - camTargetScale) > 0.0005;
       var keepGoing =
         alive || interacting || stillFocus || hasBreathingNode || hoverCoronaK > 0.001 || selectPulse > 0;
-      // Off-screen: park UNLESS mid-interaction/morph (those must complete).
-      if (!visible && !interacting && !stillFocus) keepGoing = false;
+      // Off-screen: park UNLESS mid-interaction/morph (those must complete) OR
+      // the one-shot auto-fit hasn't run yet. The IntersectionObserver can report
+      // not-visible on its FIRST async callback when the canvas is in-flow inside
+      // overflow/scroll ancestors (e.g. a React pane), which would park the loop
+      // before the sim ever settles + frames — leaving a blank canvas that never
+      // re-wakes (the element's visibility never CHANGES, so no wake fires). Hold
+      // the loop alive until the initial fit completes; normal off-screen parking
+      // (CPU saving) resumes after that.
+      if (!visible && !interacting && !stillFocus && _autoFitDone) keepGoing = false;
       if (keepGoing) {
         rafId = requestAnimationFrame(frame);
       } else {
