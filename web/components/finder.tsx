@@ -829,24 +829,9 @@ export function Finder({
           <p className="max-w-2xl text-lg leading-relaxed text-zinc-600 dark:text-zinc-300">
             Every page here is a Paper — Barkpark&rsquo;s own documentation plus a
             1:1 mirror of its GitHub docs, stored as structured content and
-            rendered live. Search two ways —{" "}
-            <span className="font-medium text-zinc-900 dark:text-zinc-100">
-              Postgres
-            </span>{" "}
-            for exact precision,{" "}
-            <span className="font-medium text-zinc-900 dark:text-zinc-100">
-              Indx
-            </span>{" "}
-            for fuzzy, typo-tolerant recall — or explore the docs as one
-            interconnected, Obsidian-style graph.
+            rendered live.
           </p>
           <nav className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-            <Link
-              href="/papers"
-              className="font-medium text-zinc-700 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-zinc-50"
-            >
-              Browse Papers (Portable Docs) →
-            </Link>
             <Link
               href="/bench"
               className="text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
