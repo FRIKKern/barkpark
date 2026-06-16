@@ -1121,12 +1121,16 @@ export function Finder({
 
         {/* results */}
         <section className="flex min-w-0 flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-400">
+          {/* Fixed single-row header: never wraps, fixed min-height, so the
+              sort tabs stay put and the row doesn't grow/shrink between the
+              optimistic ("verifying") and verified states. The left metadata
+              CLIPS rather than pushing the tabs to a second line. */}
+          <div className="flex min-h-8 items-center justify-between gap-3 text-sm text-zinc-400">
             {showSkeleton ? (
-              <span>Searching…</span>
+              <span className="min-w-0 truncate">Searching…</span>
             ) : (
-              <span className="flex flex-wrap items-center gap-x-2">
-                <span>
+              <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
+                <span className="shrink-0">
                   {visibleHits.length}
                   {!optimisticActive && data && data.total > hits.length
                     ? ` of ${data.total}`
@@ -1208,7 +1212,7 @@ export function Finder({
               <div
                 role="tablist"
                 aria-label="Sort"
-                className="flex rounded-md border border-zinc-300 p-0.5 dark:border-zinc-700"
+                className="flex shrink-0 rounded-md border border-zinc-300 p-0.5 dark:border-zinc-700"
               >
                 {SORTS.map((s) => (
                   <button
