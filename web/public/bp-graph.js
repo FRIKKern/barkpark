@@ -1366,7 +1366,17 @@
         // e.alpha is the ABSOLUTE link alpha — the BFS hop cascade lives there
         // (ring 0 / touching the hover = 100%, then 50/25/12.5/… per ring out),
         // floored to the resting thread. No base-multiply, no incident override.
-        ctx.strokeStyle = forced ? "GrayText" : "rgba(" + rgbStr + "," + clamp(e.alpha, 0, 1) + ")";
+        var ea = e.alpha;
+        // Under a finder filter (and not hovering, which owns its own cascade),
+        // lift threads BETWEEN two matches so the result set reads as a connected
+        // constellation, and recede threads that touch a dimmed non-match.
+        if (externalMatch != null && hoverId == null) {
+          var sm = e.src && e.src.matchW > 0,
+            dm = e.dst && e.dst.matchW > 0;
+          if (sm && dm) ea = Math.max(ea, 0.16 + 0.22 * Math.min(e.src.matchW, e.dst.matchW));
+          else ea = ea * 0.22;
+        }
+        ctx.strokeStyle = forced ? "GrayText" : "rgba(" + rgbStr + "," + clamp(ea, 0, 1) + ")";
         // width: 0.75 → 1.5px on weight, brighten incident links a touch wider.
         var lw = 0.75 + 0.75 * e.wBand;
         if (incident && hoverId != null) lw += 0.4;
@@ -1446,10 +1456,20 @@
     function drawNode(node, now, frosted) {
       if (node.alpha < 0.02) return;
       var p = worldToScreen(node.x, node.y);
+      var matchOn = externalMatch != null;
+      var mw = node.matchW || 0;
       var r = node.r * node.scaleK * cam.scale;
+      // Score-scaled emphasis: under an active finder filter, the better a
+      // result's rank the larger its dot — and we lift the on-screen cap for
+      // matches so the top hits can actually grow past the resting clamp.
+      var screenCap = NODE_R_SCREEN_MAX;
+      if (matchOn && mw > 0) {
+        r *= 1 + 0.9 * mw;
+        screenCap = NODE_R_SCREEN_MAX + 9 * mw;
+      }
       // Cap the on-screen radius so even zoomed all the way in a node never
       // becomes a big disc — Obsidian's dots stay tiny at every zoom.
-      if (r > NODE_R_SCREEN_MAX) r = NODE_R_SCREEN_MAX;
+      if (r > screenCap) r = screenCap;
       if (r < 0.4) return;
       var isRoot = node.id === rootId;
       var hovered = hoverId != null && node.id === hoverId;
@@ -1504,6 +1524,12 @@
         fill = theme === "light" ? mixHex(nodeFill(node), "#2a2e3a", 0.4) : mixHex(nodeFill(node), NODE_WHITE, 0.45);
       } else {
         fill = nodeFill(node);
+      }
+      // Score-scaled accent: the stronger a match, the more its fill pulls toward
+      // the accent — a warmth ramp, not a glow (Obsidian-pure). Root keeps its
+      // own accent; hovered/forced paths are left untouched.
+      if (matchOn && mw > 0 && !isRoot && !hovered && !forced) {
+        fill = mixHex(fill, ACCENT, 0.28 + 0.55 * mw);
       }
 
       ctx.save();
@@ -1589,6 +1615,10 @@
       for (var di = 0; di < nodes.length; di++) {
         if (!nodes[di].phantom && nodes[di].degree > maxDeg) maxDeg = nodes[di].degree;
       }
+      // Finder filter active? Then the visible results OWN the labels: every
+      // match is labeled (regardless of zoom), scaled by its score, and the
+      // dimmed non-matches stay text-free so the result set's titles read clean.
+      var matchOn = externalMatch != null;
       // ── pass 1: collect eligible labels with their fade alpha ──
       var cand = [];
       for (var i = 0; i < nodes.length; i++) {
@@ -1597,6 +1627,11 @@
         if (node.alpha < 0.3 && !isFocused) continue;
         var isRoot = node.id === rootId;
         var isHov = isFocused || node.id === hoverId || (hoverId != null && adj[hoverId] && adj[hoverId][node.id]);
+        var mw = node.matchW || 0;
+        var isMatch = matchOn && mw > 0;
+        // Under a filter, non-matches carry no label (unless the pointer is on
+        // their ego-network) — keeps the matched titles uncluttered.
+        if (matchOn && !isMatch && !isHov) continue;
         var deg = node.degree;
         var show = false;
         var labelA = 1;
@@ -1604,6 +1639,11 @@
           // hovered node + its 1-hop neighbors: ALWAYS shown, full opacity, even
           // at the wide default zoom. This is the focused ego-network reveal.
           show = true;
+        } else if (isMatch) {
+          // a visible result — always labeled, opacity ramped by search score so
+          // the best hits read strongest even at the wide default zoom.
+          show = true;
+          labelA = clamp(0.45 + 0.55 * mw, 0, 1);
         } else if (s <= lo) {
           // at/under the fit-relative floor, only the hovered ego-net carries
           // labels — the wide view reads as clean dots + faint threads. The
@@ -1620,10 +1660,14 @@
         }
         if (!show || labelA <= 0.001) continue;
         if (node.phantom && s < hi && !isHov) continue;
-        // importance: root > hovered/adjacent > by degree. High importance wins
-        // contested space in the greedy declutter below.
-        var prio = isRoot ? 3 : isHov ? 2 : deg / 1000;
-        cand.push({ node: node, isRoot: isRoot, isHov: isHov, labelA: labelA, prio: prio });
+        // importance: root > hovered/adjacent > strong match (by score) > degree.
+        // High importance wins contested space in the greedy declutter below.
+        var prio = isRoot ? 3 : isHov ? 2.6 : isMatch ? 1.6 + mw : deg / 1000;
+        // Only the very top matches are never decluttered away — their title
+        // must always show. Everything below still yields to collisions, so a
+        // dense result cluster can't pile its labels into an unreadable stack.
+        var forceKeep = isMatch && mw >= 0.8;
+        cand.push({ node: node, isRoot: isRoot, isHov: isHov, isMatch: isMatch, forceKeep: forceKeep, labelA: labelA, prio: prio });
       }
       // ── pass 2: priority-greedy declutter ──
       // Iterate high-importance first; skip any non-root/non-hover label whose
@@ -1635,15 +1679,17 @@
       for (var c = 0; c < cand.length; c++) {
         var it = cand[c];
         var nd = it.node;
+        var ndW = nd.matchW || 0;
         var p = worldToScreen(nd.x, nd.y);
-        var r = Math.min(nd.r * cam.scale, NODE_R_SCREEN_MAX);
+        var rBoost = it.isMatch && ndW > 0 ? 1 + 0.9 * ndW : 1;
+        var r = Math.min(nd.r * cam.scale * rBoost, NODE_R_SCREEN_MAX + 9 * ndW);
         var x = Math.round(p[0]);
         var y = Math.round(p[1] + r + (it.isRoot ? 12 : 10));
-        var fontPx = it.isRoot ? 11 : nd.phantom ? 9 : 10;
+        var fontPx = it.isRoot ? 11 : nd.phantom ? 9 : it.isMatch ? 10 + Math.round(2 * ndW) : 10;
         var label = nd.phantom ? nd.broken_id || nd.title : nd.title;
-        var halfW = Math.min(String(label).length * fontPx * 0.3, 55);
+        var halfW = Math.min(String(label).length * fontPx * 0.3, it.isMatch ? 80 : 55);
         var box = [x - halfW, y - 7, x + halfW, y + 7];
-        if (!it.isRoot && !it.isHov) {
+        if (!it.isRoot && !it.isHov && !it.forceKeep) {
           var hit = false;
           for (var k = 0; k < placed.length; k++) {
             var pb = placed[k];
@@ -1694,7 +1740,9 @@
     function drawLabel(node, isRoot, isHov, labelA) {
       if (labelA == null) labelA = 1;
       var p = worldToScreen(node.x, node.y);
-      var r = Math.min(node.r * cam.scale, NODE_R_SCREEN_MAX);
+      var mw = externalMatch != null ? node.matchW || 0 : 0;
+      var rBoost = mw > 0 ? 1 + 0.9 * mw : 1;
+      var r = Math.min(node.r * cam.scale * rBoost, NODE_R_SCREEN_MAX + 9 * mw);
       var baseColor = theme === "light" ? LABEL_COLOR_LIGHT : LABEL_COLOR_DARK;
       var font, color, track;
       if (isRoot) {
@@ -1707,6 +1755,15 @@
         font = "italic 400 9px " + FONT_STACK;
         color = theme === "light" ? rgba(MONO_LIGHT, 0.65) : rgba(MONO_DARK, 0.5);
         track = "0.01em";
+      } else if (mw > 0) {
+        // a visible result — score-scaled: the better the rank, the larger and
+        // brighter the title (node carries the accent; the label stays in the
+        // high-legibility grey→white family).
+        font = (mw >= 0.55 ? "500 " : "400 ") + (10 + Math.round(2 * mw)) + "px " + FONT_STACK;
+        color = isHov
+          ? (theme === "light" ? "#2a2e3a" : "#e6e7f0")
+          : mixHex(baseColor, theme === "light" ? "#1e2230" : "#e8e9f2", 0.35 + 0.5 * mw);
+        track = "0.006em";
       } else {
         font = "400 10px " + FONT_STACK;
         // hovered node + neighbors brighten their label toward the node color.
@@ -1718,11 +1775,13 @@
       if (forced) color = "CanvasText";
 
       var label = node.phantom ? node.broken_id || node.title : node.title;
-      var maxW = isHov ? 9999 : 120;
+      // Matched results get more room for their title (the user wants to read
+      // them); the strongest match shows the most.
+      var maxW = isHov ? 9999 : mw > 0 ? 150 + Math.round(110 * mw) : 120;
       var text = isHov ? label : truncate(label, font, maxW, track);
 
       var x = Math.round(p[0]);
-      var y = Math.round(p[1] + r + (isRoot ? 12 : 10));
+      var y = Math.round(p[1] + r + (isRoot ? 12 : mw > 0 ? 11 : 10));
       ctx.save();
       ctx.font = font;
       if ("letterSpacing" in ctx) ctx.letterSpacing = track;
@@ -2667,20 +2726,30 @@
     }
 
     // ── external match (finder ↔ graph) ──
-    // The host app (web finder) publishes the set of doc-ids currently visible
-    // in its result list; the graph dims everything else so the two surfaces
-    // read as one. `externalMatch === null` means "no active filter" — the full
-    // graph shows, undimmed. Matching mirrors the hover bridge: a node matches
-    // when its doc_id (or, as a fallback, its id) is in the set.
+    // The host app (web finder) publishes the docs currently visible in its
+    // result list, each with a WEIGHT in (0..1] derived from its search rank
+    // (1 = the top hit). The graph dims everything else AND scales each match's
+    // emphasis — dot size, accent warmth, label prominence — by that weight, so
+    // the strongest results read loudest. `externalMatch === null` = no filter
+    // (full graph, undimmed). Matching mirrors the hover bridge: by doc_id, with
+    // id as a fallback. `node.matchW` (0 when unmatched) carries the weight into
+    // drawNode/drawLabels.
     var externalMatch = null;
+    function matchWeight(n) {
+      if (!externalMatch) return -1;
+      var w = externalMatch[n.doc_id];
+      if (w === undefined) w = externalMatch[n.id];
+      return w === undefined ? -1 : w; // -1 → not a match
+    }
     function applyExternalMatch() {
       if (!externalMatch) {
-        nodes.forEach(function (n) { n.searchDim = false; });
+        nodes.forEach(function (n) { n.searchDim = false; n.matchW = 0; });
         return;
       }
       nodes.forEach(function (n) {
-        var key = n.doc_id || n.id;
-        n.searchDim = !(externalMatch[key] || externalMatch[n.id]);
+        var w = matchWeight(n);
+        if (w < 0) { n.searchDim = true; n.matchW = 0; }
+        else { n.searchDim = false; n.matchW = w; }
       });
     }
 
@@ -2777,18 +2846,23 @@
         wake();
       },
       // Drive the graph from an external search/filter (the web finder's left
-      // rail). `ids` is an array of doc-ids currently visible there — the graph
-      // dims everything else. Pass `null` (or omit) to clear the filter and show
-      // the full corpus undimmed. Idempotent and safe before/after data loads.
-      setMatches: function (ids) {
-        if (ids == null) {
+      // rail). `list` is the visible results — either plain doc-id strings or
+      // `{ id, w }` objects where `w` ∈ (0..1] is the rank-derived weight (1 =
+      // top hit). The graph dims everything else and scales each match's
+      // emphasis by `w`. Pass `null` (or omit) to clear the filter and show the
+      // full corpus undimmed. Idempotent and safe before/after data loads.
+      setMatches: function (list) {
+        if (list == null) {
           externalMatch = null;
         } else {
-          var set = {};
-          for (var i = 0; i < ids.length; i++) {
-            if (ids[i] != null) set[ids[i]] = true;
+          var m = {};
+          for (var i = 0; i < list.length; i++) {
+            var it = list[i];
+            if (it == null) continue;
+            if (typeof it === "string") m[it] = 1;
+            else if (it.id != null) m[it.id] = typeof it.w === "number" ? it.w : 1;
           }
-          externalMatch = set;
+          externalMatch = m;
         }
         applyExternalMatch();
         wake();

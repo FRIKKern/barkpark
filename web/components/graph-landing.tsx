@@ -27,8 +27,9 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
   const router = useRouter();
   const sp = useSearchParams();
   const { setHoveredId } = useHoveredDoc();
-  // The finder's visible result set drives which nodes the graph keeps lit.
-  const { matchIds } = useGraphMatches();
+  // The finder's visible result set drives which nodes the graph keeps lit, and
+  // how strongly (by search rank).
+  const { matches } = useGraphMatches();
 
   const onNodeClick = useCallback(
     (node: GraphNode) => {
@@ -60,8 +61,8 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
           Barkpark documentation graph
         </p>
         <p className="mt-1 text-[0.7rem] leading-relaxed text-zinc-500">
-          {matchIds
-            ? `${matchIds.length} ${matchIds.length === 1 ? "match" : "matches"} from your search · click to read`
+          {matches
+            ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} from your search · brightest = best · click to read`
             : "Search on the left to filter · click a node to read it"}
         </p>
       </div>
@@ -70,7 +71,7 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
         nodes={nodes}
         edges={edges}
         rootId={rootId}
-        matchIds={matchIds}
+        matches={matches}
         onNodeClick={onNodeClick}
         onNodeHover={onNodeHover}
       />

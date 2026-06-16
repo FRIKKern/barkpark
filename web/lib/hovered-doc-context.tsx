@@ -28,23 +28,34 @@ const HoveredDocContext = createContext<HoveredDocValue>({
 });
 
 /**
- * The reverse channel: the finder publishes the set of doc-ids currently
- * visible in its result list, and the landing graph dims everything else so the
- * two halves read as a single instrument. `matchIds === null` means "no active
- * filter" (idle browse) — the graph shows the whole corpus, undimmed. The ids
- * are finder hit `slug`s, which the graph matches against node `doc_id` (same
- * key the hover bridge uses). Split from the hovered-doc context on purpose:
- * graph-node hover (frequent) must not re-render the graph, and a result-set
- * change must not re-render every result row through the hover value.
+ * One visible result, published from the finder to the graph: its doc-id (a hit
+ * `slug`, matched against the graph node's `doc_id` — same key the hover bridge
+ * uses) plus a `w`eight in (0..1] derived from its search rank (1 = top hit).
+ * The graph scales each match's emphasis — dot size, accent warmth, label
+ * prominence — by `w`, so the strongest results read loudest.
+ */
+export interface GraphMatch {
+  id: string;
+  w: number;
+}
+
+/**
+ * The reverse channel: the finder publishes its currently-visible results (with
+ * per-result weights), and the landing graph dims everything else so the two
+ * halves read as a single instrument. `matches === null` means "no active
+ * filter" (idle browse) — the graph shows the whole corpus, undimmed. Split from
+ * the hovered-doc context on purpose: graph-node hover (frequent) must not
+ * re-render the graph, and a result-set change must not re-render every result
+ * row through the hover value.
  */
 interface GraphMatchValue {
-  matchIds: string[] | null;
-  setMatchIds: (ids: string[] | null) => void;
+  matches: GraphMatch[] | null;
+  setMatches: (matches: GraphMatch[] | null) => void;
 }
 
 const GraphMatchContext = createContext<GraphMatchValue>({
-  matchIds: null,
-  setMatchIds: () => {},
+  matches: null,
+  setMatches: () => {},
 });
 
 export function HoveredDocProvider({ children }: { children: ReactNode }) {
@@ -58,28 +69,28 @@ export function HoveredDocProvider({ children }: { children: ReactNode }) {
     [hoveredId, setHoveredId],
   );
 
-  const [matchIds, setMatchIdsState] = useState<string[] | null>(null);
-  const setMatchIds = useCallback((ids: string[] | null) => {
+  const [matches, setMatchesState] = useState<GraphMatch[] | null>(null);
+  const setMatches = useCallback((next: GraphMatch[] | null) => {
     // Skip identical publishes so a re-render of the finder with the same
-    // visible set doesn't churn the graph's match effect.
-    setMatchIdsState((prev) => {
-      if (prev === ids) return prev;
-      if (prev && ids && prev.length === ids.length) {
+    // visible set + weights doesn't churn the graph's match effect.
+    setMatchesState((prev) => {
+      if (prev === next) return prev;
+      if (prev && next && prev.length === next.length) {
         let same = true;
-        for (let i = 0; i < ids.length; i++) {
-          if (prev[i] !== ids[i]) {
+        for (let i = 0; i < next.length; i++) {
+          if (prev[i].id !== next[i].id || prev[i].w !== next[i].w) {
             same = false;
             break;
           }
         }
         if (same) return prev;
       }
-      return ids;
+      return next;
     });
   }, []);
   const matchValue = useMemo(
-    () => ({ matchIds, setMatchIds }),
-    [matchIds, setMatchIds],
+    () => ({ matches, setMatches }),
+    [matches, setMatches],
   );
 
   return (

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import Script from "next/script";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
+import type { GraphMatch } from "@/lib/hovered-doc-context";
 
 /* ── renderer contract (mirrors public/bp-graph.js public surface) ──────── */
 
@@ -30,8 +31,8 @@ interface GraphController {
   fit: () => void;
   setError: (on: boolean) => void;
   setFetching: (on: boolean) => void;
-  /** Dim every node whose doc-id isn't in `ids`; `null` clears the filter. */
-  setMatches: (ids: string[] | null) => void;
+  /** Emphasize each match by weight and dim the rest; `null` clears the filter. */
+  setMatches: (matches: GraphMatch[] | null) => void;
   destroy: () => void;
 }
 
@@ -58,9 +59,10 @@ export interface GraphViewProps {
   onNodeClick?: (node: GraphNode) => void;
   /** Forwarded to the renderer — hover entered a node, or null on leave. */
   onNodeHover?: (node: GraphNode | null) => void;
-  /** Doc-ids of the host finder's visible results — the graph keeps these lit
-   * and dims the rest. `null`/undefined = no filter (full graph). */
-  matchIds?: string[] | null;
+  /** The host finder's visible results with per-result score weights — the graph
+   * keeps these lit (size/color/label scaled by weight) and dims the rest.
+   * `null`/undefined = no filter (full graph). */
+  matches?: GraphMatch[] | null;
   /** Extra classes on the host div. It is always `relative` + full-size. */
   className?: string;
 }
@@ -88,14 +90,14 @@ export function GraphView({
   rootId = null,
   onNodeClick,
   onNodeHover,
-  matchIds = null,
+  matches = null,
   className,
 }: GraphViewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const ctlRef = useRef<GraphController | null>(null);
   // Latest match set in a ref so init (which may run after a script-load poll)
   // can stamp the current filter the moment the controller exists.
-  const matchRef = useRef<string[] | null>(matchIds);
+  const matchRef = useRef<GraphMatch[] | null>(matches);
   /** Flipped true once the script reports ready (load/ready handler). Lets the
    * init effect short-circuit its poll the moment the factory is guaranteed. */
   const scriptReadyRef = useRef(false);
@@ -170,12 +172,13 @@ export function GraphView({
     ctlRef.current?.update(nodes, edges, { rootId });
   }, [nodes, edges, rootId]);
 
-  // MATCHES — the finder's visible set drives which nodes stay lit. Keep the ref
-  // current (for the init-race stamp) and push into the live controller.
+  // MATCHES — the finder's visible set drives which nodes stay lit and how
+  // strongly. Keep the ref current (for the init-race stamp) and push into the
+  // live controller.
   useEffect(() => {
-    matchRef.current = matchIds;
-    ctlRef.current?.setMatches(matchIds);
-  }, [matchIds]);
+    matchRef.current = matches;
+    ctlRef.current?.setMatches(matches);
+  }, [matches]);
 
   return (
     <>

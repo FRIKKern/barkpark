@@ -218,9 +218,10 @@ export function Finder({
   // Master mode: left column inside the (finder) layout; rows open docs in the
   // right @detail slot via in-place navigation (no remount, no full reload).
   const master = variant === "master";
-  // Finder → graph bridge: publish the visible result set so the landing graph
-  // can dim everything else. A no-op outside the (finder) layout's provider.
-  const { setMatchIds } = useGraphMatches();
+  // Finder → graph bridge: publish the visible result set (with score weights)
+  // so the landing graph can emphasize each match by rank and dim the rest. A
+  // no-op outside the (finder) layout's provider.
+  const { setMatches } = useGraphMatches();
   // Live finder params (q/engine/cache/sort/facets) — appended to each row's
   // doc href so the open doc and the search state coexist in the URL path+query.
   const currentQueryString = sp.toString();
@@ -435,17 +436,46 @@ export function Finder({
   // any facet selection. Idle browse (empty box, no facets) lists ~everything,
   // so it should leave the graph whole rather than dim it to the browse page.
   const filterActive = Boolean(q) || facetCount > 0;
-  // Publish the visible set (by slug — the key the graph matches on doc_id) to
-  // the landing graph. While loading, hold the previous publish (don't flash the
-  // graph to empty between keystrokes); null when idle so the full graph shows.
-  const matchKey = filterActive ? visibleHits.map((h) => h.slug).join(",") : "";
+
+  // Rank → score weight. Both engines return hits in score-descending order, so
+  // a hit's index in the (unfiltered, engine-ordered) result list IS its
+  // relative search score — independent of the display sort. Map it to a weight
+  // in [0.2, 1] with a gentle head bias: the top results clearly dominate while
+  // the tail stays visibly above the dimmed non-matches.
+  const rankBySlug = useMemo(() => {
+    const m = new Map<string, number>();
+    hits.forEach((h, i) => {
+      if (h.slug && !m.has(h.slug)) m.set(h.slug, i);
+    });
+    return m;
+  }, [hits]);
+
+  // The visible results as weighted graph matches (null when idle → full graph).
+  const graphMatches = useMemo(() => {
+    if (!filterActive) return null;
+    const n = hits.length;
+    return visibleHits
+      .filter((h) => h.slug)
+      .map((h) => {
+        const rank = rankBySlug.get(h.slug) ?? n;
+        const t = n <= 1 ? 0 : Math.min(rank, n - 1) / (n - 1);
+        const w = Math.round((0.2 + 0.8 * Math.pow(1 - t, 1.4)) * 1000) / 1000;
+        return { id: h.slug, w };
+      });
+  }, [filterActive, visibleHits, hits.length, rankBySlug]);
+
+  // Publish to the landing graph. While loading, hold the previous publish
+  // (don't flash the graph to empty between keystrokes).
+  const matchKey = graphMatches
+    ? graphMatches.map((m) => `${m.id}:${m.w}`).join(",")
+    : "";
   useEffect(() => {
     if (!master) return;
     if (loading) return;
-    setMatchIds(filterActive ? visibleHits.map((h) => h.slug) : null);
-    // matchKey captures the slug set; visibleHits/filterActive are read fresh.
+    setMatches(graphMatches);
+    // matchKey captures the weighted set; graphMatches is read fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, loading, filterActive, matchKey, setMatchIds]);
+  }, [master, loading, matchKey, setMatches]);
 
   // Indx coverage boundary — only meaningful over the unfiltered,
   // relevance-ordered result set of a real query (not browse/recovery).
