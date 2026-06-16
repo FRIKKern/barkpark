@@ -524,6 +524,73 @@ defmodule BarkparkWeb.TasksController do
     json(conn, %{ok: true, dangling: Graph.dangling(opts)})
   end
 
+  # ─── GET /v1/graph (whole-dataset corpus graph) ─────────────────────────
+  #
+  # Returns EVERY published node + EVERY reference edge in the dataset so the
+  # Web finder can render the full interactive graph as its landing view (the
+  # Obsidian "show the whole vault" surface). Built on the LIVE corpus extractor
+  # (slug-keyed, projection-independent) so node ids and edge endpoints share
+  # ONE id space (the published doc-id). Orphans are included on purpose — like
+  # Obsidian's showOrphans. A node budget guards a pathological corpus; the
+  # tenancy + dataset scope ride scope_opts/request_dataset exactly like the
+  # sibling graph actions.
+  @graph_corpus_node_budget 2000
+
+  def graph_corpus(conn, _params) do
+    dataset = request_dataset(conn)
+    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset)
+    list_opts = Keyword.put(opts, :perspective, :published)
+
+    types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
+
+    real_nodes =
+      types
+      |> Enum.flat_map(fn type -> Content.list_documents(type, dataset, list_opts) end)
+      |> Enum.map(fn d ->
+        pid = Content.published_id(d.doc_id)
+        %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
+      end)
+      |> Enum.uniq_by(& &1.id)
+
+    node_ids = MapSet.new(real_nodes, & &1.id)
+
+    raw_edges =
+      types
+      |> Enum.flat_map(fn type -> Content.corpus_edges(type, dataset, opts) end)
+      |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
+
+    edges =
+      Enum.map(raw_edges, fn e ->
+        %{
+          from_id: e.from_id,
+          to_id: e.to_id,
+          kind: e.kind || "references",
+          weight: nil,
+          plugin_source: nil
+        }
+      end)
+
+    phantom_nodes =
+      raw_edges
+      |> Enum.reject(fn e -> MapSet.member?(node_ids, e.to_id) end)
+      |> Enum.map(& &1.to_id)
+      |> Enum.uniq()
+      |> Enum.map(fn tid -> %{id: tid, doc_id: tid, type: nil, title: tid, phantom: true} end)
+
+    all_nodes = real_nodes ++ phantom_nodes
+    truncated = length(all_nodes) > @graph_corpus_node_budget
+    nodes = if truncated, do: Enum.take(all_nodes, @graph_corpus_node_budget), else: all_nodes
+
+    json(conn, %{
+      ok: true,
+      dataset: dataset,
+      nodes: nodes,
+      edges: edges,
+      truncated: truncated,
+      truncation_reason: if(truncated, do: "node_budget", else: nil)
+    })
+  end
+
   # GRAPH ROOT RESOLUTION (gap #4 BOUND DECISION). Roots on ANY content doc, so
   # we DELIBERATELY do NOT call find_task_by_doc_id/2 (which hard-filters
   # d.type == "task" via fetch_task_exact/3 and returns not_found for every

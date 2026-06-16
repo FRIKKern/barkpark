@@ -772,6 +772,9 @@ defmodule BarkparkWeb.Router do
   scope "/v1", BarkparkWeb do
     pipe_through([:api, :require_token])
 
+    # Whole-dataset graph (all nodes + all edges) — backs the Web finder's
+    # interactive landing graph. MUST precede the dynamic `/graph/:id`.
+    get("/graph", TasksController, :graph_corpus)
     get("/graph/orphans", TasksController, :graph_orphans)
     get("/graph/dangling", TasksController, :graph_dangling)
     get("/graph/:id", TasksController, :graph_show)
