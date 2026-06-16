@@ -1,0 +1,87 @@
+{
+  "type": "sheet",
+  "slug": "search-benchmarks",
+  "title": "Search Benchmarks — Postgres vs Indx",
+  "fields": {
+    "title": "Search Benchmarks — Postgres vs Indx",
+    "locale": "en-US",
+    "tabs": [
+      {
+        "name": "Latency (p50, ms)",
+        "frozen_rows": "1",
+        "frozen_cols": "1",
+        "col_widths": { "1": 220, "2": 130, "3": 110, "4": 100 },
+        "row_heights": { "1": 30 },
+        "merges": [],
+        "cells": {
+          "A1": { "v": "Query", "t": "s", "s": { "b": true, "bg": "#1f2933", "al": "left" } },
+          "B1": { "v": "Postgres ms", "t": "s", "s": { "b": true, "bg": "#1f2933", "al": "right" } },
+          "C1": { "v": "Indx ms", "t": "s", "s": { "b": true, "bg": "#1f2933", "al": "right" } },
+          "D1": { "v": "Winner", "t": "s", "s": { "b": true, "bg": "#1f2933", "al": "left" } },
+
+          "A2": { "v": "headless cms onboarding", "t": "s" },
+          "B2": { "v": 42, "t": "n", "fmt": "fixed" },
+          "C2": { "v": 11, "t": "n", "fmt": "fixed" },
+          "D2": { "v": "Indx", "t": "s", "s": { "b": true } },
+
+          "A3": { "v": "schema v2 field types", "t": "s" },
+          "B3": { "v": 28, "t": "n", "fmt": "fixed" },
+          "C3": { "v": 9, "t": "n", "fmt": "fixed" },
+          "D3": { "v": "Indx", "t": "s", "s": { "b": true } },
+
+          "A4": { "v": "did you mean headless (typo)", "t": "s" },
+          "B4": { "v": 19, "t": "n", "fmt": "fixed" },
+          "C4": { "v": 14, "t": "n", "fmt": "fixed" },
+          "D4": { "v": "Indx", "t": "s", "s": { "b": true } },
+
+          "A5": { "v": "webhook cache revalidation", "t": "s" },
+          "B5": { "v": 24, "t": "n", "fmt": "fixed" },
+          "C5": { "v": 26, "t": "n", "fmt": "fixed" },
+          "D5": { "v": "Postgres", "t": "s" },
+
+          "A6": { "v": "exact slug lookup: bulldocs", "t": "s" },
+          "B6": { "v": 6, "t": "n", "fmt": "fixed" },
+          "C6": { "v": 8, "t": "n", "fmt": "fixed" },
+          "D6": { "v": "Postgres", "t": "s" },
+
+          "A7": { "v": "fuzzy: content grph (typo)", "t": "s" },
+          "B7": { "v": 51, "t": "n", "fmt": "fixed" },
+          "C7": { "v": 13, "t": "n", "fmt": "fixed" },
+          "D7": { "v": "Indx", "t": "s", "s": { "b": true } },
+
+          "A9": { "v": "Median", "t": "s", "s": { "b": true } },
+          "B9": { "v": null, "f": "=MEDIAN(B2:B7)", "t": "n", "fmt": "fixed", "stale": true },
+          "C9": { "v": null, "f": "=MEDIAN(C2:C7)", "t": "n", "fmt": "fixed", "stale": true },
+          "D9": { "v": "Indx wins 4/6", "t": "s", "s": { "i": true } }
+        }
+      },
+      {
+        "name": "Notes",
+        "frozen_rows": "0",
+        "frozen_cols": "0",
+        "col_widths": { "1": 140, "2": 520 },
+        "row_heights": {},
+        "merges": [],
+        "cells": {
+          "A1": { "v": "Field", "t": "s", "s": { "b": true } },
+          "B1": { "v": "Value", "t": "s", "s": { "b": true } },
+
+          "A2": { "v": "Dataset", "t": "s" },
+          "B2": { "v": "68 documentation Papers + demo content (posts, pages, authors)", "t": "s" },
+
+          "A3": { "v": "Postgres engine", "t": "s" },
+          "B3": { "v": "tsvector full-text search, title weighted above body in search_vector", "t": "s" },
+
+          "A4": { "v": "Indx engine", "t": "s" },
+          "B4": { "v": "retriever-seam engine; ranks by embedding similarity, strong on typos and fuzzy intent", "t": "s" },
+
+          "A5": { "v": "Hardware", "t": "s" },
+          "B5": { "v": "Hetzner cax21 ARM64, warm page cache, single connection", "t": "s" },
+
+          "A6": { "v": "Takeaway", "t": "s" },
+          "B6": { "v": "Indx wins on fuzzy/typo/semantic intent; Postgres wins on exact slug + already-indexed prefix lookups. The demo runs both side by side.", "t": "s" }
+        }
+      }
+    ]
+  }
+}

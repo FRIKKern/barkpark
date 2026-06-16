@@ -1,0 +1,48 @@
+{
+  "type": "mediaAsset",
+  "slug": "asset-team-photo",
+  "title": "The Barkpark Team",
+  "fields": {
+    "mediaFileId": "demo-asset-3",
+    "fileInfo": {
+      "url": "https://images.barkpark.cloud/team/barkpark-team-2026.jpg",
+      "path": "team/barkpark-team-2026.jpg",
+      "mimeType": "image/jpeg",
+      "size": "987136",
+      "originalName": "barkpark-team-2026.jpg",
+      "width": "2400",
+      "height": "1600"
+    },
+    "bp_asset_kind": "image",
+    "bp_processing_status": "ready",
+    "bp_cdn_status": "published",
+    "bp_visibility": "public",
+    "altText": {
+      "nob": "Barkpark-teamet samlet utenfor kontoret, ni personer som smiler mot kamera.",
+      "eng": "The Barkpark team gathered outside the office — nine people smiling at the camera."
+    },
+    "caption": {
+      "nob": "Folkene bak Barkpark — kjernebidragsyterne til det åpne hodeløse CMS-et.",
+      "eng": "The people behind Barkpark — the core contributors to the open-source headless CMS, photographed at the 2026 team offsite."
+    },
+    "description": "Group photo of the Barkpark team used on the About page and in the team section of the marketing site. A friendly, high-resolution hero shot for the people behind the open-source headless CMS.",
+    "collection": "collection-hero",
+    "collections": ["collection-hero"],
+    "tags": ["team", "about", "people", "marketing"],
+    "focalPoint": {
+      "x": "0.5",
+      "y": "0.35"
+    },
+    "relatedAssets": [
+      {
+        "relation": "related",
+        "target": "asset-og-cover"
+      }
+    ],
+    "rights": {
+      "copyrightHolder": "Barkpark",
+      "usageNotes": "Cleared for marketing and editorial use with attribution. Get consent before re-cropping individual faces.",
+      "watermarkProfile": "none"
+    }
+  }
+}

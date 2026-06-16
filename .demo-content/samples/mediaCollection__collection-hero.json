@@ -1,0 +1,17 @@
+{
+  "type": "mediaCollection",
+  "slug": "collection-hero",
+  "title": "Hero & Brand Assets",
+  "fields": {
+    "slug": "collection-hero",
+    "description": "The Barkpark brand library — open-graph covers, architecture diagrams, and team photography used across the marketing site, the engineering blog, and social cards. Every published asset here is cleared for public CDN delivery and carries Norwegian + English alt text.",
+    "kind": "folder",
+    "sortOrder": "manual",
+    "coverAsset": "asset-og-cover",
+    "shareLink": {
+      "enabled": true,
+      "token": "demo-share-hero",
+      "expiresAt": ""
+    }
+  }
+}

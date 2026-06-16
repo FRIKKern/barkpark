@@ -1,0 +1,13 @@
+{
+  "type": "page",
+  "slug": "pricing",
+  "title": "Pricing",
+  "fields": {
+    "title": "Pricing",
+    "slug": "pricing",
+    "body": "## Pricing that scales with you, not against you\n\nBarkpark is open source and free to self-host, forever. The paid tiers exist for teams who would rather we run the cluster, watch the dashboards, and answer the pager at 3 a.m. No per-seat pricing — invite your whole editorial team without doing arithmetic.\n\n## Community — $0\n\nThe full Barkpark, self-hosted. Unlimited content types, unlimited documents, unlimited editors. The Go TUI, the `bp` CLI, the Phoenix API, LiveView Studio, the JavaScript SDK, and every first-party plugin — Media, Bulldocs, Tasks, ONIX, and the Indx retriever seam. You bring the server; we bring the binary. Community support via GitHub and Discord.\n\n## Cloud — $49 / month\n\nManaged Barkpark on our infrastructure. We handle deploys, backups, TLS, and upgrades. Includes the hosted Studio, webhook delivery with cache revalidation, search powered by the content graph, and the Indx semantic engine. Generous usage limits that fit most production sites, with transparent overage pricing and no egress surprises. Email support with a one-business-day response.\n\n## Enterprise — let's talk\n\nFor publishers and platforms running Barkpark at scale. Dedicated capacity, SSO, audit logging, custom plugins on the `Barkpark.Plugin` behaviour, ONIX/Bokbasen export pipelines, and a named support engineer. SLAs on uptime and response. Volume discounts and annual contracts.\n\n## Frequently asked\n\n**Is the open-source version really complete?** Yes. Cloud and Enterprise add operations and support, not features locked behind a paywall. The fresh-install invariant guarantees the core works on its own.\n\n**Can I move between tiers?** Self-host today, migrate to Cloud later, or export your dataset and walk away — your content is portable [documents](document) in standard formats, never trapped.\n\n**What about search?** Every tier ships full-text [search](search); Cloud and Enterprise add the [Indx](indx-engine) semantic engine and graph-aware ranking out of the box.",
+    "seoTitle": "Barkpark Pricing — free self-host, managed Cloud, Enterprise",
+    "seoDescription": "Barkpark is free and open source to self-host. Managed Cloud from $49/month adds hosted Studio, webhooks, and semantic search. Enterprise adds SSO, SLAs, and dedicated support. No per-seat pricing.",
+    "heroAsset": "asset-og-cover"
+  }
+}

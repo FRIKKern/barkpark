@@ -1,0 +1,48 @@
+{
+  "type": "mediaAsset",
+  "slug": "asset-og-cover",
+  "title": "Barkpark Open-Graph Cover",
+  "fields": {
+    "mediaFileId": "demo-asset-1",
+    "fileInfo": {
+      "url": "https://images.barkpark.cloud/brand/og-cover-1200x630.png",
+      "path": "brand/og-cover-1200x630.png",
+      "mimeType": "image/png",
+      "size": "184320",
+      "originalName": "barkpark-og-cover.png",
+      "width": "1200",
+      "height": "630"
+    },
+    "bp_asset_kind": "image",
+    "bp_processing_status": "ready",
+    "bp_cdn_status": "published",
+    "bp_visibility": "public",
+    "altText": {
+      "nob": "Barkpark-logoen på mørk bakgrunn med teksten «Ett innholdsmodell, mange flater».",
+      "eng": "The Barkpark logo on a dark background with the tagline “One content model, many surfaces.”"
+    },
+    "caption": {
+      "nob": "Standard delingsbilde for Barkpark — brukes på sosiale medier og som Open Graph-kort.",
+      "eng": "The default Barkpark share image — used on social media and as the Open Graph card across the marketing site."
+    },
+    "description": "1200×630 open-graph cover for the Barkpark headless CMS. Rendered when a Barkpark page is shared on social platforms; pairs with the marketing homepage and the search-powered web demo.",
+    "collection": "collection-hero",
+    "collections": ["collection-hero"],
+    "tags": ["brand", "open-graph", "social", "marketing"],
+    "focalPoint": {
+      "x": "0.5",
+      "y": "0.42"
+    },
+    "relatedAssets": [
+      {
+        "relation": "variant",
+        "target": "asset-team-photo"
+      }
+    ],
+    "rights": {
+      "copyrightHolder": "Barkpark",
+      "usageNotes": "Free to use on any surface that links back to barkpark.cloud. Do not crop the wordmark.",
+      "watermarkProfile": "none"
+    }
+  }
+}

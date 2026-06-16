@@ -1,0 +1,14 @@
+{
+  "type": "project",
+  "slug": "the-content-graph",
+  "title": "The Content Graph",
+  "fields": {
+    "title": "The Content Graph",
+    "slug": "the-content-graph",
+    "client": "Barkpark (core engineering)",
+    "status": "completed",
+    "description": "## The Content Graph — references as first-class edges\n\nThe Content Graph project rebuilt how Barkpark thinks about relationships. Instead of treating a reference field as an opaque foreign key, every reference now materialises as a typed edge in a live graph — so content carries its connections wherever it goes.\n\n### The problem\n\nA headless CMS is only as useful as the links between its documents. An author has posts; a page has a hero asset; a project has the case study that explains it. Historically those links were resolved one query at a time, and search returned isolated rows that gave no sense of how the site fit together. We wanted search results that arrive already connected.\n\n### The approach\n\nWe modelled the dataset as a directed graph where documents are nodes and reference fields are edges, dogfooded natively in Barkpark's own production dataset. Plain-slug references — the v1 model — resolve into edges at write time, so a page pointing its hero asset at a media slug, or a post pointing at its author, immediately produces a traversable relationship. The graph view became the visual dual of the Indx retriever seam: search finds the node, the graph shows the neighbourhood.\n\n### The outcome\n\nSearch results now read like a real, polished site. Click a project and see the pages that link to it; open an author and find their posts; land on a page and follow its hero asset straight into the Media collection. The Content Graph turned a pile of documents into a navigable web — and proved the model by shipping it to barkpark.cloud first.",
+    "startDate": "2025-11-03T10:00:00Z",
+    "featured": true
+  }
+}

@@ -1,0 +1,1 @@
+{"type":"category","slug":"engineering","title":"Engineering","fields":{"title":"Engineering","slug":"engineering","description":"Deep dives into how Barkpark is built — the Phoenix API, the Postgres-backed search index, the content-graph model, and the trade-offs behind a headless CMS that works with every plugin turned off.","color":"#2563eb"}}

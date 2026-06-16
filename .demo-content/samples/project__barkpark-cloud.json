@@ -1,0 +1,14 @@
+{
+  "type": "project",
+  "slug": "barkpark-cloud",
+  "title": "barkpark.cloud",
+  "fields": {
+    "title": "barkpark.cloud",
+    "slug": "barkpark-cloud",
+    "client": "Barkpark (internal platform)",
+    "status": "active",
+    "description": "## barkpark.cloud — the managed home for Barkpark\n\nbarkpark.cloud is the hosted control plane that turns the open-source Barkpark headless CMS into a zero-ops product. The brief was blunt: take the same single binary we ship to self-hosters and run it so reliably that a two-person editorial team never thinks about servers again.\n\n### The challenge\n\nBarkpark deploys as one Go binary plus a Phoenix release on ARM64 — beautifully simple for a hobbyist, deceptively involved at fleet scale. We needed multi-tenant isolation without forking the core, automated TLS and domain cutovers, webhook delivery with cache revalidation that survives restarts, and a Studio that stays click-alive through every deploy.\n\n### What we built\n\nWe stood up barkpark.cloud on commodity Hetzner ARM64 hardware behind a managed load balancer, each tenant on an isolated dataset with its own schema. A `make domain-cutover` workflow handles DNS, TLS, and the Phoenix `check_origin` rewrite in one motion — the same cutover that once silently killed Studio LiveView now ships in a single command. Backups are continuous, upgrades are blue-green, and the whole fleet is observable from one dashboard.\n\n### The result\n\nCloud customers get hosted Studio, durable webhook delivery, full-text and semantic search via the Indx engine, and graph-aware ranking — with no servers to patch and no egress invoices to decode. The same binary, the same content model, now run for you.",
+    "startDate": "2026-01-15T09:00:00Z",
+    "featured": true
+  }
+}

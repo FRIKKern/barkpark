@@ -1,0 +1,48 @@
+{
+  "type": "mediaAsset",
+  "slug": "asset-architecture-diagram",
+  "title": "Barkpark Architecture Diagram",
+  "fields": {
+    "mediaFileId": "demo-asset-2",
+    "fileInfo": {
+      "url": "https://images.barkpark.cloud/diagrams/architecture-overview.svg",
+      "path": "diagrams/architecture-overview.svg",
+      "mimeType": "image/svg+xml",
+      "size": "42117",
+      "originalName": "barkpark-architecture.svg",
+      "width": "1600",
+      "height": "1000"
+    },
+    "bp_asset_kind": "image",
+    "bp_processing_status": "ready",
+    "bp_cdn_status": "published",
+    "bp_visibility": "public",
+    "altText": {
+      "nob": "Systemdiagram som viser Phoenix-API-en, Postgres-laget, søkemotoren og innholdsgrafen i Barkpark.",
+      "eng": "A system diagram showing the Phoenix API, the Postgres layer, the search engine, and the content graph that make up Barkpark."
+    },
+    "caption": {
+      "nob": "Slik henger Barkpark sammen: én innholdsmodell, mange flater — TUI, CLI, web-demo og SDK leser samme API.",
+      "eng": "How Barkpark fits together: one content model feeding many surfaces — the Go TUI, the bp CLI, the Next.js web demo, and the JS SDK all read the same API."
+    },
+    "description": "Reference architecture for the Barkpark headless CMS — the Phoenix API at the center, Postgres for storage and full-text search, the Indx retriever seam, and the content graph that turns reference fields into edges. Used in engineering blog posts about schema, search, and the content-graph.",
+    "collection": "collection-hero",
+    "collections": ["collection-hero"],
+    "tags": ["architecture", "diagram", "engineering", "search", "content-graph"],
+    "focalPoint": {
+      "x": "0.5",
+      "y": "0.5"
+    },
+    "relatedAssets": [
+      {
+        "relation": "related",
+        "target": "asset-og-cover"
+      }
+    ],
+    "rights": {
+      "copyrightHolder": "Barkpark",
+      "usageNotes": "Diagram is open-source under the same license as the Barkpark repo. Re-export from the source file before editing.",
+      "watermarkProfile": "none"
+    }
+  }
+}
