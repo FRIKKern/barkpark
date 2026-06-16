@@ -189,7 +189,13 @@ const cachedGraph = unstable_cache(rawCorpusGraph, ["corpus-graph", DATASET], {
  */
 export async function fetchCorpusGraph(): Promise<CorpusGraph> {
   try {
-    return await cachedGraph();
+    const cached = await cachedGraph();
+    if (cached.nodes.length > 0) return cached;
+    // The cache held an empty/transiently-failed graph (e.g. a render that
+    // happened during an upstream restart). Retry LIVE so one hiccup can't pin
+    // the landing empty for the whole revalidate window; the next cache
+    // revalidation re-populates from the live API once it's healthy.
+    return await rawCorpusGraph();
   } catch {
     return { nodes: [], edges: [], rootId: null };
   }
