@@ -531,15 +531,15 @@ export function Finder({
         // column reads like the landing page it replaced.
         <header className="flex flex-col gap-4 border-b border-zinc-200 pb-8 dark:border-zinc-800">
           <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
-            Barkpark · Headless CMS
+            Barkpark · Living documentation
           </span>
           <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-            Search the whole CMS.
+            Barkpark, documented in Barkpark.
           </h1>
           <p className="max-w-2xl text-lg leading-relaxed text-zinc-600 dark:text-zinc-300">
-            One content model, many surfaces — a Go TUI, a Phoenix Studio, a JS
-            SDK, and this Next.js app, all reading one API. Find any document
-            across every type below, two ways:{" "}
+            Every page here is a Paper — Barkpark&rsquo;s own documentation plus a
+            1:1 mirror of its GitHub docs, stored as structured content and
+            rendered live. Search two ways —{" "}
             <span className="font-medium text-zinc-900 dark:text-zinc-100">
               Postgres
             </span>{" "}
@@ -547,7 +547,8 @@ export function Finder({
             <span className="font-medium text-zinc-900 dark:text-zinc-100">
               Indx
             </span>{" "}
-            for fuzzy, typo-tolerant recall.
+            for fuzzy, typo-tolerant recall — or explore the docs as one
+            interconnected, Obsidian-style graph.
           </p>
           <nav className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
             <Link
