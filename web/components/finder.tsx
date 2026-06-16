@@ -778,6 +778,15 @@ export function Finder({
   };
 
   const activeEngine = ENGINES.find((e) => e.id === engine)!;
+  // The parsed-query chips ("Understood as: …") share the engine-tagline row and
+  // replace it when present, so the chips appearing don't push the page down.
+  const parsed = data?.parsedQuery ?? null;
+  const hasParsedChips =
+    !!parsed &&
+    (parsed.terms.length > 0 ||
+      parsed.phrases.length > 0 ||
+      parsed.excludes.length > 0 ||
+      parsed.prefixes.length > 0);
 
   return (
     <main
@@ -896,12 +905,77 @@ export function Finder({
             benchmark controls (cache mode, reindex) + query syntax tuck inside,
             collapsed by default so the primary surface stays clean. */}
         <details className="group">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm text-zinc-500 [&::-webkit-details-marker]:hidden dark:text-zinc-400">
-            <span>
-              <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                {activeEngine.label}:
-              </span>{" "}
-              {activeEngine.tagline}
+          <summary className="flex min-h-7 cursor-pointer list-none items-center justify-between gap-3 text-sm text-zinc-500 [&::-webkit-details-marker]:hidden dark:text-zinc-400">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              {hasParsedChips && parsed ? (
+                // Parsed-query chips REPLACE the engine tagline in this row, so
+                // they don't appear as an extra line that pushes the page down.
+                <>
+                  <span className="text-zinc-400">Understood as:</span>
+                  {parsed.terms.map((t) => (
+                    <span
+                      key={`t-${t}`}
+                      className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                  {parsed.phrases.map((t) => (
+                    <span
+                      key={`p-${t}`}
+                      className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
+                    >
+                      &quot;{t}&quot;
+                    </span>
+                  ))}
+                  {parsed.prefixes.map((t) => (
+                    <span
+                      key={`x-${t}`}
+                      className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
+                    >
+                      {t}*
+                    </span>
+                  ))}
+                  {parsed.excludes.map((t) => (
+                    <span
+                      key={`e-${t}`}
+                      className="rounded bg-red-100 px-2 py-0.5 font-mono text-xs text-red-700 line-through dark:bg-red-950/40 dark:text-red-300"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </>
+              ) : (
+                <span>
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                    {activeEngine.label}:
+                  </span>{" "}
+                  {activeEngine.tagline}
+                </span>
+              )}
+              {/* Fuzzy/widened indicator — a compact pill in this same row
+                  instead of a banner block, so it never shifts the layout. */}
+              {data?.recovery ? (
+                <span
+                  className="inline-flex shrink-0 items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                  title={`No exact matches — widened to fuzzy results (${data.recovery})`}
+                >
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 12 12"
+                    className="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                  >
+                    <path
+                      d="M2 4c2 0 2 4 4 4s2-4 4-4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  fuzzy
+                </span>
+              ) : null}
             </span>
             <span className="flex shrink-0 items-center gap-1 text-xs text-zinc-400 transition-colors group-hover:text-zinc-600 dark:group-hover:text-zinc-300">
               Options
@@ -1007,12 +1081,8 @@ export function Finder({
           fuzzy/typo search.
         </section>
       ) : null}
-      {data?.recovery ? (
-        <section className="rounded-lg border border-blue-300/70 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
-          No exact matches — widened to fuzzy results (
-          <code className="font-mono">{data.recovery}</code>).
-        </section>
-      ) : null}
+      {/* Recovery/fuzzy-widen is now a compact pill in the engine row above
+          (no banner block → no layout shift). */}
 
       {/* Showing results for — server already auto-corrected via a LEARNED
           synonym. Preferred over the client "Did you mean?" when present. */}
@@ -1054,48 +1124,8 @@ export function Finder({
         </p>
       ) : null}
 
-      {/* parsed-query chips */}
-      {data?.parsedQuery &&
-      (data.parsedQuery.terms.length ||
-        data.parsedQuery.phrases.length ||
-        data.parsedQuery.excludes.length ||
-        data.parsedQuery.prefixes.length) ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-zinc-400">Understood as:</span>
-          {data.parsedQuery.terms.map((t) => (
-            <span
-              key={`t-${t}`}
-              className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono dark:bg-zinc-800/70"
-            >
-              {t}
-            </span>
-          ))}
-          {data.parsedQuery.phrases.map((t) => (
-            <span
-              key={`p-${t}`}
-              className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono dark:bg-zinc-800/70"
-            >
-              &quot;{t}&quot;
-            </span>
-          ))}
-          {data.parsedQuery.prefixes.map((t) => (
-            <span
-              key={`x-${t}`}
-              className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono dark:bg-zinc-800/70"
-            >
-              {t}*
-            </span>
-          ))}
-          {data.parsedQuery.excludes.map((t) => (
-            <span
-              key={`e-${t}`}
-              className="rounded bg-red-100 px-2 py-0.5 font-mono text-red-700 line-through dark:bg-red-950/40 dark:text-red-300"
-            >
-              {t}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      {/* Parsed-query chips now live in the engine-tagline row above (they
+          replace the tagline there), so there's no separate chip line to shift. */}
 
       {/* The ~720px column is wide enough for the original facet-rail-beside-
           results layout, so master uses the same grid as the standalone page. */}
