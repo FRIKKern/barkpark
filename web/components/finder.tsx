@@ -42,35 +42,100 @@ function recordFindEvent(body: {
   }
 }
 
+/** Per-hit local relevance signals, computed once and ranked per-engine. */
+interface LocalScore {
+  hit: FindHit;
+  i: number;
+  /** Title affinity, lower = stronger. 0 exact · 1 prefix · 2 all-tokens ·
+   * 3 partial · 4 body-only. Both engines lead with this (Postgres exact-title
+   * wins + title-weighted rank; Indx via the server's title-affinity re-rank). */
+  tier: number;
+  titleHits: number;
+  bodyHits: number;
+  /** Total token occurrences in the body — the local stand-in for BM25 term
+   * frequency (Indx weights body matches; Postgres barely does). */
+  bodyFreq: number;
+}
+
 /**
  * Optimistic local ranking over the browse-seed corpus (up to 100 docs already
- * in the client). Mirrors the server's title-affinity intent — exact title >
- * title-prefix > title-contains / all-terms-in-title > body-or-slug — so the
- * instant local list is ordered like the authoritative one that replaces it.
+ * in the client), ranked to MIRROR THE SELECTED ENGINE so the instant list is
+ * ordered like the authoritative one that replaces it:
+ *
+ *   • Both lead with title affinity (exact > prefix > all-tokens > partial >
+ *     body) — Postgres' exact-title-wins + title-weighted rank, and Indx's
+ *     server-side title-affinity re-rank.
+ *   • Within a tier they diverge like the engines do:
+ *       – Postgres: denser title match, then RECENCY (its ORDER BY tiebreak).
+ *       – Indx: BM25F-style body term-frequency, then title density, then position.
+ *
  * Substring-only (no fuzzy): typo tolerance is exactly what the backend verify
- * adds on top. Stable (original index tiebreak) so the order is deterministic.
+ * adds on top. Fully deterministic (original index is the final tiebreak).
  */
-function localSearch(corpus: FindHit[], query: string): FindHit[] {
+function localSearch(
+  corpus: FindHit[],
+  query: string,
+  engine: SearchEngine,
+): FindHit[] {
   const q = query.toLowerCase().trim();
   if (!q) return corpus;
   const tokens = q.split(/\s+/).filter(Boolean);
-  const scored: { hit: FindHit; score: number; i: number }[] = [];
+
+  const rows: LocalScore[] = [];
   corpus.forEach((hit, i) => {
     const title = hit.title.toLowerCase();
+    const titleWords = new Set(title.split(/[^a-z0-9]+/).filter(Boolean));
+    const inTitle = (t: string) =>
+      titleWords.has(t) || [...titleWords].some((w) => w.startsWith(t));
+    const titleHits = tokens.filter(inTitle).length;
+
+    let tier: number;
+    if (title === q) tier = 0;
+    else if (title.startsWith(q)) tier = 1;
+    else if (titleHits === tokens.length) tier = 2;
+    else if (titleHits > 0) tier = 3;
+    else tier = 4; // no title signal — qualifies on body/slug only
+
+    const body = (hit.body ?? hit.excerpt ?? "").toLowerCase();
     const slug = (hit.slug ?? "").toLowerCase();
-    const body = (hit.excerpt ?? "").toLowerCase();
-    let score = 0;
-    if (title === q) score = 1000;
-    else if (title.startsWith(q)) score = 700;
-    else if (title.includes(q)) score = 500;
-    const titleHits = tokens.filter((t) => title.includes(t)).length;
-    const bodyHits = tokens.filter((t) => slug.includes(t) || body.includes(t)).length;
-    if (titleHits === tokens.length) score = Math.max(score, 400);
-    score += titleHits * 40 + bodyHits * 8;
-    if (score > 0) scored.push({ hit, score, i });
+    let bodyHits = 0;
+    let bodyFreq = 0;
+    for (const t of tokens) {
+      let count = 0;
+      let from = body.indexOf(t);
+      while (from !== -1 && count < 25) {
+        count++;
+        from = body.indexOf(t, from + t.length);
+      }
+      if (count === 0 && slug.includes(t)) count = 1;
+      if (count > 0) {
+        bodyHits++;
+        bodyFreq += count;
+      }
+    }
+
+    // Drop genuine non-matches (no title signal AND nothing in body/slug).
+    if (tier === 4 && bodyHits === 0) return;
+    rows.push({ hit, i, tier, titleHits, bodyHits, bodyFreq });
   });
-  scored.sort((a, b) => b.score - a.score || a.i - b.i);
-  return scored.map((s) => s.hit);
+
+  rows.sort((a, b) => {
+    if (a.tier !== b.tier) return a.tier - b.tier; // title affinity first
+    if (engine === "postgres") {
+      // Postgres: denser title, then recency (its ORDER BY recency tiebreak).
+      if (a.titleHits !== b.titleHits) return b.titleHits - a.titleHits;
+      const da = a.hit.date ?? "";
+      const db = b.hit.date ?? "";
+      if (da !== db) return db.localeCompare(da); // newer first
+      return a.i - b.i;
+    }
+    // Indx: BM25F-style — body term-frequency weighs in, then title density.
+    if (a.bodyFreq !== b.bodyFreq) return b.bodyFreq - a.bodyFreq;
+    if (a.titleHits !== b.titleHits) return b.titleHits - a.titleHits;
+    return a.i - b.i;
+  });
+
+  return rows.map((r) => r.hit);
 }
 
 /**
@@ -461,8 +526,8 @@ export function Finder({
   const corpus = useMemo(() => initialData?.hits ?? [], [initialData]);
   const trimmedInput = input.trim();
   const optimisticHits = useMemo(
-    () => localSearch(corpus, trimmedInput),
-    [corpus, trimmedInput],
+    () => localSearch(corpus, trimmedInput, engine),
+    [corpus, trimmedInput, engine],
   );
   // Backend data is authoritative for what's typed only when the committed query
   // matches the box AND its fetch has landed (not loading).
