@@ -162,10 +162,11 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   original index is the tiebreak, so the sort is fully deterministic regardless
   of `Enum.sort_by`'s stability). Tiers — lower wins:
 
-    * `0` exact title — normalized title == the positive query
-    * `1` title hit   — title starts with the query, or every query token is in it
-    * `2` partial     — at least one query token appears in the title
-    * `3` body/fuzzy  — no title signal; the engine's order is kept as-is
+    * `0` exact title  — normalized title == the positive query
+    * `1` title prefix — title STARTS WITH the query ("Studio (LiveView)" for q="studio")
+    * `2` whole title  — every query token appears in the title (any position)
+    * `3` partial      — at least one query token appears in the title
+    * `4` body/fuzzy   — no title signal; the engine's order is kept as-is
 
   Browse (empty query) yields no tokens, so the hits pass through untouched —
   the engine's relevance/recency order is authoritative there.
@@ -214,20 +215,22 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
     cond do
       title == "" ->
-        3
+        4
 
       query_join != "" and title == query_join ->
         0
 
-      (query_join != "" and String.starts_with?(title, query_join)) or
-          Enum.all?(tokens, &token_in_title?(title, words, &1)) ->
+      query_join != "" and String.starts_with?(title, query_join) ->
         1
 
-      Enum.any?(tokens, &token_in_title?(title, words, &1)) ->
+      Enum.all?(tokens, &token_in_title?(title, words, &1)) ->
         2
 
-      true ->
+      Enum.any?(tokens, &token_in_title?(title, words, &1)) ->
         3
+
+      true ->
+        4
     end
   end
 

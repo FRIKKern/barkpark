@@ -48,6 +48,13 @@ defmodule Barkpark.Search.IndxRetrieverRerankTest do
     assert ids(rerank(hits, "phoenix")) == ["exact", "contains"]
   end
 
+  test "a title that STARTS WITH the query beats one that merely contains it" do
+    # The live q=\"studio\" case: \"Studio (LiveView)\" (prefix) should lead
+    # \"LiveView Studio\" (contains), even when the engine returned them reversed.
+    hits = [doc("contains", "LiveView Studio"), doc("prefix", "Studio (LiveView)")]
+    assert ids(rerank(hits, "studio")) == ["prefix", "contains"]
+  end
+
   test "all query terms in the title (tier 1) beats only-some-terms (tier 2)" do
     hits = [
       doc("some", "Phoenix in production"),
