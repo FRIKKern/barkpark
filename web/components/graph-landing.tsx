@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GraphView } from "@/components/graph-view";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
-import { useHoveredDoc } from "@/lib/hovered-doc-context";
+import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 
 export interface GraphLandingProps {
   nodes: GraphNode[];
@@ -27,6 +27,8 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
   const router = useRouter();
   const sp = useSearchParams();
   const { setHoveredId } = useHoveredDoc();
+  // The finder's visible result set drives which nodes the graph keeps lit.
+  const { matchIds } = useGraphMatches();
 
   const onNodeClick = useCallback(
     (node: GraphNode) => {
@@ -58,7 +60,9 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
           Barkpark documentation graph
         </p>
         <p className="mt-1 text-[0.7rem] leading-relaxed text-zinc-500">
-          Search to filter · click a node to read it
+          {matchIds
+            ? `${matchIds.length} ${matchIds.length === 1 ? "match" : "matches"} from your search · click to read`
+            : "Search on the left to filter · click a node to read it"}
         </p>
       </div>
 
@@ -66,6 +70,7 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
         nodes={nodes}
         edges={edges}
         rootId={rootId}
+        matchIds={matchIds}
         onNodeClick={onNodeClick}
         onNodeHover={onNodeHover}
       />

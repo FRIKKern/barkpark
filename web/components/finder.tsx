@@ -16,7 +16,7 @@ import {
   type SearchEngine,
   type SortId,
 } from "@/lib/find";
-import { useHoveredDoc } from "@/lib/hovered-doc-context";
+import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
 
@@ -218,6 +218,9 @@ export function Finder({
   // Master mode: left column inside the (finder) layout; rows open docs in the
   // right @detail slot via in-place navigation (no remount, no full reload).
   const master = variant === "master";
+  // Finder → graph bridge: publish the visible result set so the landing graph
+  // can dim everything else. A no-op outside the (finder) layout's provider.
+  const { setMatchIds } = useGraphMatches();
   // Live finder params (q/engine/cache/sort/facets) — appended to each row's
   // doc href so the open doc and the search state coexist in the URL path+query.
   const currentQueryString = sp.toString();
@@ -427,6 +430,22 @@ export function Finder({
     }
     return out;
   }, [hits, selectedFacets, sort]);
+
+  // A filter is "active" when the user has narrowed the corpus — a real query or
+  // any facet selection. Idle browse (empty box, no facets) lists ~everything,
+  // so it should leave the graph whole rather than dim it to the browse page.
+  const filterActive = Boolean(q) || facetCount > 0;
+  // Publish the visible set (by slug — the key the graph matches on doc_id) to
+  // the landing graph. While loading, hold the previous publish (don't flash the
+  // graph to empty between keystrokes); null when idle so the full graph shows.
+  const matchKey = filterActive ? visibleHits.map((h) => h.slug).join(",") : "";
+  useEffect(() => {
+    if (!master) return;
+    if (loading) return;
+    setMatchIds(filterActive ? visibleHits.map((h) => h.slug) : null);
+    // matchKey captures the slug set; visibleHits/filterActive are read fresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [master, loading, filterActive, matchKey, setMatchIds]);
 
   // Indx coverage boundary — only meaningful over the unfiltered,
   // relevance-ordered result set of a real query (not browse/recovery).

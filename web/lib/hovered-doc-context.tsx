@@ -27,23 +27,74 @@ const HoveredDocContext = createContext<HoveredDocValue>({
   setHoveredId: () => {},
 });
 
+/**
+ * The reverse channel: the finder publishes the set of doc-ids currently
+ * visible in its result list, and the landing graph dims everything else so the
+ * two halves read as a single instrument. `matchIds === null` means "no active
+ * filter" (idle browse) — the graph shows the whole corpus, undimmed. The ids
+ * are finder hit `slug`s, which the graph matches against node `doc_id` (same
+ * key the hover bridge uses). Split from the hovered-doc context on purpose:
+ * graph-node hover (frequent) must not re-render the graph, and a result-set
+ * change must not re-render every result row through the hover value.
+ */
+interface GraphMatchValue {
+  matchIds: string[] | null;
+  setMatchIds: (ids: string[] | null) => void;
+}
+
+const GraphMatchContext = createContext<GraphMatchValue>({
+  matchIds: null,
+  setMatchIds: () => {},
+});
+
 export function HoveredDocProvider({ children }: { children: ReactNode }) {
   const [hoveredId, setHoveredIdState] = useState<string | null>(null);
   // Stable setter so callers (the graph's onNodeHover) don't churn identity.
   const setHoveredId = useCallback((id: string | null) => {
     setHoveredIdState((prev) => (prev === id ? prev : id));
   }, []);
-  const value = useMemo(
+  const hoveredValue = useMemo(
     () => ({ hoveredId, setHoveredId }),
     [hoveredId, setHoveredId],
   );
+
+  const [matchIds, setMatchIdsState] = useState<string[] | null>(null);
+  const setMatchIds = useCallback((ids: string[] | null) => {
+    // Skip identical publishes so a re-render of the finder with the same
+    // visible set doesn't churn the graph's match effect.
+    setMatchIdsState((prev) => {
+      if (prev === ids) return prev;
+      if (prev && ids && prev.length === ids.length) {
+        let same = true;
+        for (let i = 0; i < ids.length; i++) {
+          if (prev[i] !== ids[i]) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return prev;
+      }
+      return ids;
+    });
+  }, []);
+  const matchValue = useMemo(
+    () => ({ matchIds, setMatchIds }),
+    [matchIds, setMatchIds],
+  );
+
   return (
-    <HoveredDocContext.Provider value={value}>
-      {children}
+    <HoveredDocContext.Provider value={hoveredValue}>
+      <GraphMatchContext.Provider value={matchValue}>
+        {children}
+      </GraphMatchContext.Provider>
     </HoveredDocContext.Provider>
   );
 }
 
 export function useHoveredDoc(): HoveredDocValue {
   return useContext(HoveredDocContext);
+}
+
+export function useGraphMatches(): GraphMatchValue {
+  return useContext(GraphMatchContext);
 }

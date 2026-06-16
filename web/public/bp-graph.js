@@ -777,6 +777,10 @@
         }
       }
       buildChrome();
+      // A re-ingest rebuilds the node objects, clearing their searchDim flags —
+      // re-stamp the active external match so a data update never drops the
+      // finder-driven dimming.
+      applyExternalMatch();
     }
 
     // ── sparse deterministic layout (n<=3) ──
@@ -2594,8 +2598,10 @@
       overlay.appendChild(legend);
       chromeEls.push(legend);
 
-      // search (medium+; ghost)
-      if (n > 30) {
+      // search (medium+; ghost). Suppressed when an EXTERNAL search owns the
+      // query — e.g. the web finder's left rail drives the graph via
+      // setMatches(), so a second in-canvas box would be a confusing duplicate.
+      if (n > 30 && !opts.externalSearch) {
         var sw = document.createElement("input");
         sw.placeholder = "Search…";
         sw.style.cssText =
@@ -2658,6 +2664,24 @@
         n.searchDim = String(n.title).toLowerCase().indexOf(q) === -1;
       });
       wake();
+    }
+
+    // ── external match (finder ↔ graph) ──
+    // The host app (web finder) publishes the set of doc-ids currently visible
+    // in its result list; the graph dims everything else so the two surfaces
+    // read as one. `externalMatch === null` means "no active filter" — the full
+    // graph shows, undimmed. Matching mirrors the hover bridge: a node matches
+    // when its doc_id (or, as a fallback, its id) is in the set.
+    var externalMatch = null;
+    function applyExternalMatch() {
+      if (!externalMatch) {
+        nodes.forEach(function (n) { n.searchDim = false; });
+        return;
+      }
+      nodes.forEach(function (n) {
+        var key = n.doc_id || n.id;
+        n.searchDim = !(externalMatch[key] || externalMatch[n.id]);
+      });
     }
 
     function zoomBy(factor) {
@@ -2750,6 +2774,23 @@
       },
       setFetching: function (on) {
         fetching = !!on;
+        wake();
+      },
+      // Drive the graph from an external search/filter (the web finder's left
+      // rail). `ids` is an array of doc-ids currently visible there — the graph
+      // dims everything else. Pass `null` (or omit) to clear the filter and show
+      // the full corpus undimmed. Idempotent and safe before/after data loads.
+      setMatches: function (ids) {
+        if (ids == null) {
+          externalMatch = null;
+        } else {
+          var set = {};
+          for (var i = 0; i < ids.length; i++) {
+            if (ids[i] != null) set[ids[i]] = true;
+          }
+          externalMatch = set;
+        }
+        applyExternalMatch();
         wake();
       },
       destroy: function () {
