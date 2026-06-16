@@ -139,6 +139,29 @@ function localSearch(
 }
 
 /**
+ * Promote results that contain the query terms EXACTLY (case-insensitive
+ * substring across title + body + slug) above results that only fuzzy-match.
+ *
+ * When an engine finds no full-text hit it widens to fuzzy (Postgres'
+ * `typo_widen`), and a trigram TITLE match ("Webhooks" ≈ "websocket") can
+ * outrank a doc that literally contains the term in its body. This pulls the
+ * real mentions back to the top. Stable within each group, and a pure no-op
+ * when the query is a genuine typo that nothing contains — so fuzzy recall is
+ * fully preserved. Applies to the verified result of EITHER engine.
+ */
+function partitionExact(hits: FindHit[], tokens: string[]): FindHit[] {
+  if (tokens.length === 0) return hits;
+  const exact: FindHit[] = [];
+  const fuzzy: FindHit[] = [];
+  for (const h of hits) {
+    const hay = `${h.title} ${h.body ?? h.excerpt ?? ""} ${h.slug ?? ""}`.toLowerCase();
+    (tokens.every((t) => hay.includes(t)) ? exact : fuzzy).push(h);
+  }
+  // Only reorder on a genuine mix — otherwise keep the engine's order intact.
+  return exact.length > 0 && fuzzy.length > 0 ? [...exact, ...fuzzy] : hits;
+}
+
+/**
  * Build a CONTEXTUAL snippet around the first query-term match in the body, so
  * a result shows the text that actually triggered it — not just a generic
  * opening excerpt. Windows ~70 chars before / ~120 after the earliest match,
@@ -525,6 +548,17 @@ export function Finder({
   // fall back to the old stale-while-revalidate (keep `hits` until the fetch).
   const corpus = useMemo(() => initialData?.hits ?? [], [initialData]);
   const trimmedInput = input.trim();
+  // Cleaned literal query tokens (drop excludes/quotes, len ≥ 2) — the words the
+  // user actually typed; used for the exact-match partition + optimistic highlight.
+  const queryTokens = useMemo(
+    () =>
+      trimmedInput
+        .split(/\s+/)
+        .filter((t) => t && !t.startsWith("-"))
+        .map((t) => t.replace(/"/g, ""))
+        .filter((t) => t.length >= 2),
+    [trimmedInput],
+  );
   const optimisticHits = useMemo(
     () => localSearch(corpus, trimmedInput, engine),
     [corpus, trimmedInput, engine],
@@ -533,7 +567,14 @@ export function Finder({
   // matches the box AND its fetch has landed (not loading).
   const backendFresh = data != null && !loading && q.trim() === trimmedInput;
   const optimisticActive = !backendFresh && corpus.length > 0;
-  const baseHits = optimisticActive ? optimisticHits : hits;
+  // Verified results get an exact-match-first pass so a fuzzy/widened title
+  // match can't outrank a doc that literally contains the term (the optimistic
+  // local list is already substring-only, so it needs no partition).
+  const verifiedHits = useMemo(
+    () => partitionExact(hits, queryTokens),
+    [hits, queryTokens],
+  );
+  const baseHits = optimisticActive ? optimisticHits : verifiedHits;
 
   // Skeleton only when there is genuinely NOTHING to show — no backend result
   // AND no optimistic local set. With the browse seed present we always have an
@@ -682,16 +723,9 @@ export function Finder({
     // Once the backend result is authoritative, use its parsed terms; while
     // showing optimistic local hits, use the LIVE typed tokens so the snippet
     // and title highlight track the box (parsedQuery still reflects the old q).
-    const base =
-      p && !optimisticActive
-        ? [...p.terms, ...p.phrases]
-        : trimmedInput
-            .split(/\s+/)
-            .filter((t) => t && !t.startsWith("-"))
-            .map((t) => t.replace(/"/g, ""))
-            .filter((t) => t.length >= 2);
+    const base = p && !optimisticActive ? [...p.terms, ...p.phrases] : queryTokens;
     return correctedTo ? [...base, correctedTo] : base;
-  }, [data, correctedTo, optimisticActive, trimmedInput]);
+  }, [data, correctedTo, optimisticActive, queryTokens]);
 
   const toggleFacet = (dim: string, value: string) => {
     const next = new Set(selectedFacets[dim] ?? []);
