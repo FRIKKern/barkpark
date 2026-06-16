@@ -73,6 +73,44 @@ function localSearch(corpus: FindHit[], query: string): FindHit[] {
   return scored.map((s) => s.hit);
 }
 
+/**
+ * Build a CONTEXTUAL snippet around the first query-term match in the body, so
+ * a result shows the text that actually triggered it — not just a generic
+ * opening excerpt. Windows ~70 chars before / ~120 after the earliest match,
+ * snapped to word boundaries, with ellipses. Falls back to the static excerpt
+ * when there's no query or nothing matches in the (capped) body.
+ */
+function matchSnippet(hit: FindHit, terms: string[]): string | null {
+  const clean = terms.map((t) => t.toLowerCase()).filter((t) => t.length >= 2);
+  const body = hit.body ?? "";
+  if (clean.length === 0 || !body) return hit.excerpt;
+
+  const lower = body.toLowerCase();
+  let idx = -1;
+  let matchLen = 0;
+  for (const t of clean) {
+    const at = lower.indexOf(t);
+    if (at !== -1 && (idx === -1 || at < idx)) {
+      idx = at;
+      matchLen = t.length;
+    }
+  }
+  // No match in the body → keep the default excerpt (the title still highlights).
+  if (idx === -1) return hit.excerpt;
+
+  let start = Math.max(0, idx - 70);
+  const end = Math.min(body.length, idx + matchLen + 120);
+  // Snap the start forward to a word boundary so we don't begin mid-word.
+  if (start > 0) {
+    const sp = body.indexOf(" ", start);
+    if (sp !== -1 && sp < idx) start = sp + 1;
+  }
+  let snip = body.slice(start, end).trim();
+  if (start > 0) snip = `… ${snip}`;
+  if (end < body.length) snip = `${snip} …`;
+  return snip;
+}
+
 /* ── small pieces ──────────────────────────────────────────────────────── */
 
 function shortDate(value: string | null): string | null {
@@ -177,11 +215,16 @@ function ResultRow({
           </span>
         ) : null}
       </span>
-      {hit.excerpt ? (
-        <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
-          {hit.excerpt}
-        </span>
-      ) : null}
+      {(() => {
+        // Contextual snippet (the matched body text, highlighted) when there's a
+        // query; the plain opening excerpt otherwise.
+        const snippet = matchSnippet(hit, terms);
+        return snippet ? (
+          <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
+            {highlight(snippet, terms)}
+          </span>
+        ) : null;
+      })()}
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
         <TypeChip type={hit.type} />
         {date ? <span>{date}</span> : null}
@@ -571,9 +614,19 @@ export function Finder({
 
   const highlightTerms = useMemo(() => {
     const p = data?.parsedQuery;
-    const base = p ? [...p.terms, ...p.phrases] : [];
+    // Once the backend result is authoritative, use its parsed terms; while
+    // showing optimistic local hits, use the LIVE typed tokens so the snippet
+    // and title highlight track the box (parsedQuery still reflects the old q).
+    const base =
+      p && !optimisticActive
+        ? [...p.terms, ...p.phrases]
+        : trimmedInput
+            .split(/\s+/)
+            .filter((t) => t && !t.startsWith("-"))
+            .map((t) => t.replace(/"/g, ""))
+            .filter((t) => t.length >= 2);
     return correctedTo ? [...base, correctedTo] : base;
-  }, [data, correctedTo]);
+  }, [data, correctedTo, optimisticActive, trimmedInput]);
 
   const toggleFacet = (dim: string, value: string) => {
     const next = new Set(selectedFacets[dim] ?? []);

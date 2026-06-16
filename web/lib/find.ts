@@ -75,6 +75,10 @@ export interface FindHit {
   type: string;
   title: string;
   excerpt: string | null;
+  /** Flattened plain-text body (capped) — used to build a CONTEXTUAL match
+   * snippet in the results (the text that triggered the hit), not just the
+   * title. Null when the doc has no prose body. */
+  body: string | null;
   /** ISO date (publishedAt → _updatedAt → _createdAt), or null. */
   date: string | null;
   slug: string;
@@ -215,6 +219,48 @@ function deriveExcerpt(doc: RawDoc): string | null {
   return trimmed.length > 180 ? `${trimmed.slice(0, 177)}…` : trimmed;
 }
 
+// Structure/ref leaf keys to skip when flattening a block tree to prose — so
+// the body text isn't polluted with mark names, ids, urls, types (mirrors the
+// server indexer's @body_skip_keys).
+const BODY_SKIP_KEYS = new Set([
+  "marks", "href", "src", "url", "id", "_id", "_type", "_rev", "type",
+  "rev", "kind", "lang", "slug", "style",
+]);
+
+/** Recursively collect all human text out of a PortableDoc block tree (every
+ * `value`/string leaf), skipping structural keys. Bounded by the caller's cap. */
+function collectText(node: unknown, out: string[]): void {
+  if (typeof node === "string") {
+    out.push(node);
+  } else if (Array.isArray(node)) {
+    for (const n of node) collectText(n, out);
+  } else if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node as RawDoc)) {
+      if (!BODY_SKIP_KEYS.has(k)) collectText(v, out);
+    }
+  }
+}
+
+/** A flattened, capped plain-text body for contextual match snippets. Walks the
+ * paper block tree (or a string body / description), collapses whitespace, and
+ * caps the length so the client can window a snippet around a match without
+ * bloating the payload. */
+function deriveBody(doc: RawDoc): string | null {
+  const out: string[] = [];
+  collectText(doc.blocks, out);
+  if (out.length === 0) collectText((doc.body as RawDoc | undefined)?.blocks, out);
+  if (out.length === 0 && typeof doc.body === "string") out.push(doc.body);
+  if (out.length === 0) {
+    const d = str(doc.description) ?? str(doc.bio);
+    if (d) out.push(d);
+  }
+  const text = out.join(" ").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  // Cap to keep the seed/landing payload bounded — covers near-top matches; a
+  // deep match falls back to the static excerpt.
+  return text.length > 1000 ? text.slice(0, 1000) : text;
+}
+
 function deriveSlug(doc: RawDoc): string {
   const content = doc.content as RawDoc | undefined;
   return (
@@ -260,6 +306,7 @@ export function normalizeHit(raw: unknown): FindHit | null {
     type,
     title: deriveTitle(doc),
     excerpt: deriveExcerpt(doc),
+    body: deriveBody(doc),
     date: deriveDate(doc),
     slug,
     href: readerHref(type, slug),
