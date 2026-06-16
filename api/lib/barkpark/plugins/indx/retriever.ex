@@ -24,18 +24,20 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
     1. Parse the query terms out of `parsed` and join them into a CloudQuery
        text string.
-    2. `Client.search/3` against the scope's live dataset (from
-       `Indexer.current_dataset/1`) → `documentKey` records (score-ordered
-       by the engine).
-    3. `Client.get_json/3` hydrates those keys → docs carrying the embedded
-       Barkpark `"_id"` and `"_type"`.
-    4. Each `_id`/`_type` is re-read from Postgres via
-       `Content.get_document/3` (tenant-scoped) so the returned structs are
-       authoritative — the index is a relevance oracle, Postgres is the
-       source of truth.
-    5. `rerank_by_title/2` applies a stable title-affinity re-rank so the
-       engine's flat BM25F order gains the Postgres ranker's decisive
-       "exact/whole title wins" behaviour (see that function's docs).
+    2. `Client.search_full/3` against the scope's live dataset (from
+       `Indexer.current_dataset/1`) → a WIDE pool of `documentKey` records
+       (score-ordered by the engine — `@candidate_pool`, the whole matched
+       set, NOT just the display limit; see `do_search/6`).
+    3. `Client.get_json/3` hydrates those keys → light index records carrying
+       the embedded Barkpark `"_id"`/`"_type"` plus `title`/`slug`/`body`.
+    4. `rerank_by_title/2` applies a stable title-affinity re-rank over those
+       light records so the engine's flat BM25F order gains the Postgres
+       ranker's decisive "exact/whole title wins" behaviour — across the WHOLE
+       pool, so a title-perfect doc BM25F buried at rank 100+ still surfaces.
+    5. The top `display_limit` re-ranked records are re-read from Postgres via
+       `Content.get_document/4` (tenant-scoped) so the returned structs are
+       authoritative — the index is a relevance oracle, Postgres is the source
+       of truth. Only the display slice is hydrated, never the whole pool.
 
   Indx-down / empty corpus / unconfigured all degrade to `{[], 0, %{}}` — a
   search never crashes the pipeline because the engine is unreachable.
@@ -66,23 +68,40 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     end
   end
 
-  defp do_search(scope, dataset, text, parsed, config, opts) do
+  # Candidate pool fetched from the engine before re-ranking — deliberately far
+  # wider than any display limit. A doc TITLED for the query can sit at raw
+  # BM25F-rank 100+ because dozens of docs mention the term in their bodies
+  # (q="search relevance" buried the doc literally titled "Search Relevance…" at
+  # raw-rank 128 of 131). `rerank_by_title/2` can only promote a doc it can SEE,
+  # so we fetch the whole matched set, re-rank, and truncate to the display limit
+  # AFTERWARDS. 200 is the engine's max page and covers the demo corpus whole.
+  @candidate_pool 200
+
+  defp do_search(scope, dataset, text, parsed, _config, opts) do
     client = Keyword.get(opts, :client, Client)
-    limit = Keyword.get(opts, :limit, 50) |> min(200)
+    display_limit = Keyword.get(opts, :limit, 50)
+    pool = display_limit |> max(@candidate_pool) |> min(@candidate_pool)
     client_opts = client_opts(opts)
 
     with {:ok, %{records: records, facets: facets, truncation_index: tindex}} <-
-           client.search_full(dataset, text, [max: limit] ++ client_opts),
+           client.search_full(dataset, text, [max: pool] ++ client_opts),
          keys = Enum.map(records, &record_key/1) |> Enum.reject(&is_nil/1),
-         {:ok, docs} <- hydrate(client, dataset, keys, client_opts) do
-      hits =
-        docs
-        |> Enum.map(&load_document(&1, scope, opts))
-        |> Enum.reject(&is_nil/1)
-        |> apply_excludes(parsed, config)
+         {:ok, indx_docs} <- hydrate(client, dataset, keys, client_opts) do
+      # Re-rank + exclude on the LIGHT embedded index records (title/slug/body
+      # ride in each), THEN hydrate only the display slice from Postgres — so a
+      # wide pool never costs 200 authoritative re-reads per keystroke.
+      ranked =
+        indx_docs
+        |> reject_excluded(parsed)
         |> rerank_by_title(parsed)
 
-      {hits, length(hits), engine_meta(facets, tindex)}
+      hits =
+        ranked
+        |> Enum.take(display_limit)
+        |> Enum.map(&load_document(&1, scope, opts))
+        |> Enum.reject(&is_nil/1)
+
+      {hits, length(ranked), engine_meta(facets, tindex)}
     else
       {:error, err} ->
         Logger.warning("Indx.Retriever: search failed for #{dataset}: #{inspect(err)}")
@@ -125,24 +144,32 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
   # Indx has no native negation in this path: query_text/1 builds only the
   # POSITIVE query for the engine. The parsed `:excludes` are honored here as a
-  # post-filter on the resolved Barkpark Documents, mirroring
+  # pre-hydration filter on the EMBEDDED index records, mirroring
   # DocumentsRetriever's exclude semantics — a hit is dropped when an excluded
   # term appears (case-insensitive substring, like Postgres' `ilike '%t%'`) in
-  # any of the surface's searchable fields (title + content.slug by default).
-  defp apply_excludes(hits, parsed, config) do
+  # the record's title, slug or body. Running it before hydration keeps an
+  # excluded doc from consuming a display slot and needs no Postgres read (the
+  # index record already carries title/slug/body).
+  defp reject_excluded(indx_docs, parsed) do
     excludes =
       Map.get(parsed, :excludes, [])
       |> Enum.map(&String.downcase(to_string(&1)))
       |> Enum.reject(&(&1 == ""))
 
     case excludes do
-      [] ->
-        hits
-
-      _ ->
-        fields = searchable_paths(config)
-        Enum.reject(hits, &excluded?(&1, excludes, fields))
+      [] -> indx_docs
+      _ -> Enum.reject(indx_docs, &indx_excluded?(&1, excludes))
     end
+  end
+
+  defp indx_excluded?(indx_doc, excludes) do
+    haystack =
+      [Map.get(indx_doc, "title"), Map.get(indx_doc, "slug"), Map.get(indx_doc, "body")]
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.join(" ")
+      |> String.downcase()
+
+    haystack != "" and Enum.any?(excludes, &String.contains?(haystack, &1))
   end
 
   @doc """
@@ -171,7 +198,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   Browse (empty query) yields no tokens, so the hits pass through untouched —
   the engine's relevance/recency order is authoritative there.
   """
-  @spec rerank_by_title([struct()], map()) :: [struct()]
+  @spec rerank_by_title([map()], map()) :: [map()]
   def rerank_by_title(hits, parsed) do
     tokens = title_tokens(parsed)
 
@@ -261,46 +288,6 @@ defmodule Barkpark.Plugins.Indx.Retriever do
       true -> Enum.any?(words, &String.starts_with?(&1, token))
     end
   end
-
-  defp searchable_paths(config) do
-    config
-    |> Map.get("searchable_fields", [])
-    |> Enum.map(fn
-      %{"path" => p} -> p
-      %{path: p} -> p
-      p when is_binary(p) -> p
-      _ -> nil
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> case do
-      [] -> ["title", "content.slug"]
-      paths -> paths
-    end
-  end
-
-  defp excluded?(doc, excludes, fields) do
-    haystack =
-      fields
-      |> Enum.map(&field_text(doc, &1))
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.join(" ")
-      |> String.downcase()
-
-    haystack != "" and Enum.any?(excludes, &String.contains?(haystack, &1))
-  end
-
-  # Path resolution mirrors Search.Highlighter.document_field_text/2 so the
-  # exclude filter reads the same fields the surface searches/highlights.
-  defp field_text(doc, "title"), do: doc.title
-
-  defp field_text(doc, "content.slug") do
-    case doc.content do
-      %{"slug" => slug} when is_binary(slug) -> slug
-      _ -> nil
-    end
-  end
-
-  defp field_text(_doc, _field), do: nil
 
   defp hydrate(_client, _dataset, [], _opts), do: {:ok, []}
   defp hydrate(client, dataset, keys, opts), do: client.get_json(dataset, keys, opts)
