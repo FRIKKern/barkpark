@@ -386,8 +386,19 @@
     function storageKey() {
       return "bpgraph:" + (rootId || "anon");
     }
+    function camFinite(c) {
+      return (
+        c &&
+        isFinite(c.tx) && isFinite(c.ty) && isFinite(c.scale) &&
+        Math.abs(c.tx) < 1e7 && Math.abs(c.ty) < 1e7 &&
+        c.scale > 0 && c.scale < 100
+      );
+    }
     function saveView() {
       try {
+        // Never persist a diverged camera (a runaway sim could write ~1e44 here,
+        // which would then be restored every load and paint the graph off-canvas).
+        if (!camFinite(cam)) return;
         localStorage.setItem(
           storageKey(),
           JSON.stringify({
@@ -404,7 +415,11 @@
       try {
         var raw = localStorage.getItem(storageKey());
         if (!raw) return null;
-        return JSON.parse(raw);
+        var v = JSON.parse(raw);
+        // Drop a persisted diverged camera (written by a pre-fix blowup) so we
+        // fall back to a fresh auto-fit instead of restoring an off-canvas view.
+        if (v && v.cam && !camFinite(v.cam)) return null;
+        return v;
       } catch (e) {
         return null;
       }
@@ -1007,8 +1022,30 @@
         }
         nz.vx *= 1 - velocityDecay;
         nz.vy *= 1 - velocityDecay;
+        // Stability guard. A near-zero inter-node distance can spike the 1/dist
+        // repulsion and blow this velocity-Verlet step up to ~1e45 — then
+        // fitInternal frames empty space, the canvas reads blank, AND the
+        // diverged camera gets persisted to localStorage (so it stays blank on
+        // reload). Cap per-step speed; sanitize any non-finite / runaway
+        // position back near centre with a deterministic per-node spread so the
+        // next frame has a non-zero distance and can't re-diverge.
+        var MAXV = 120;
+        if (nz.vx > MAXV) nz.vx = MAXV;
+        else if (nz.vx < -MAXV) nz.vx = -MAXV;
+        if (nz.vy > MAXV) nz.vy = MAXV;
+        else if (nz.vy < -MAXV) nz.vy = -MAXV;
         nz.x += nz.vx;
         nz.y += nz.vy;
+        if (
+          !isFinite(nz.x) || !isFinite(nz.y) ||
+          nz.x < -1e5 || nz.x > 1e5 || nz.y < -1e5 || nz.y > 1e5
+        ) {
+          var spread = 40 + ((nz.id ? nz.id.length * 17 + nz.id.charCodeAt(0) : 0) % 240);
+          nz.x = cx + (z % 2 ? spread : -spread);
+          nz.y = cy + ((z % 4) < 2 ? spread : -spread);
+          nz.vx = 0;
+          nz.vy = 0;
+        }
       }
     }
 
