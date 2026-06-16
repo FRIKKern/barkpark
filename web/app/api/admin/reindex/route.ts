@@ -8,6 +8,7 @@ import {
   humanUpstreamMessage,
   isTransient,
 } from "@/lib/bp-fetch";
+import { DATASET } from "@/lib/config";
 
 // Trigger an Indx blue/green rebuild via the token-gated Barkpark endpoint
 // (uses the server-only read token — never bundled). The rebuild runs async on
@@ -16,7 +17,7 @@ import {
 export const runtime = "nodejs";
 
 const TOKEN = process.env.BARKPARK_READ_TOKEN;
-const DATASET = "production";
+// DATASET imported from lib/config (one source of truth, env-overridable).
 // Mirrors the finder's content types (lib/find.ts DOC_TYPES) so Indx indexes
 // everything the finder can browse — including sheets, so /d/sheet/:slug docs
 // are findable on the Indx engine (not just Postgres).

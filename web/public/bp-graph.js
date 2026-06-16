@@ -27,6 +27,7 @@
   // monochrome, generous void. Beauty through restraint. The luminous-nebula
   // language (orbs, corona, blast-rings, vignette, glyphs) is gone.
   var ACCENT = "#9a8cff"; // root / active / selection — soft Obsidian violet
+  var ACCENT_RGB = [154, 140, 255];
   var A11Y_RING = "#60A5FA"; // keyboard-focus ring, kept DISTINCT from accent
   var SLATE = "#94A3B8"; // _unknown + phantom + ash mix target
   var AMBER = "#FBBF24"; // the only warm pixel — parse-error state
@@ -46,6 +47,7 @@
   var LINK_RGB_LIGHT = "40,44,58";
   var LINK_A_DARK = 0.09; // resting link alpha (dark) — very faint thread
   var LINK_A_LIGHT = 0.14; // resting link alpha (light)
+  var LINK_A_FOCUS = 0.5; // incident-to-hover link alpha (bright)
   var LINK_A_DIM = 0.03; // non-incident link alpha under hover (dim hard)
 
   // Node radius range (gentle sqrt scale with degree). Small flat dots.
@@ -215,7 +217,7 @@
     var prefersDark = true;
     try {
       prefersDark = !window.matchMedia("(prefers-color-scheme: light)").matches;
-    } catch {}
+    } catch (e) {}
     var themeChoice = opts.theme || "auto";
     var theme = themeChoice === "auto" ? (prefersDark ? "dark" : "light") : themeChoice;
 
@@ -227,7 +229,7 @@
     function safeMQ(q) {
       try {
         return window.matchMedia(q);
-      } catch {
+      } catch (e) {
         return null;
       }
     }
@@ -245,7 +247,7 @@
     var ctx;
     try {
       ctx = canvas.getContext("2d");
-    } catch {
+    } catch (e) {
       ctx = null;
     }
     if (!ctx) {
@@ -298,8 +300,10 @@
       edges = [];
     var byId = {};
     var adj = {}; // id -> Set neighbor ids
+    var adjEdges = {}; // id -> Set edge objs
     var depthMap = {}; // id -> BFS depth from root
     var rootId = null;
+    var dataRev = 0;
     var nodeSetHash = "";
 
     var hoverId = null;
@@ -324,6 +328,7 @@
     // the resting state, so the first impression is the calm desaturated one.
     // Per-type "Full color" is the opt-in toggle, flipped from the legend.
     var fullColor = opts.fullColor != null ? !!opts.fullColor : false;
+    var nowT = 0;
 
     // ── eased camera scale (luxe wheel/button zoom) ──
     var camTargetScale = 1; // scale glides toward this; cursor world-point pinned
@@ -393,14 +398,14 @@
             hash: nodeSetHash
           })
         );
-      } catch {}
+      } catch (e) {}
     }
     function loadView() {
       try {
         var raw = localStorage.getItem(storageKey());
         if (!raw) return null;
         return JSON.parse(raw);
-      } catch {
+      } catch (e) {
         return null;
       }
     }
@@ -411,6 +416,7 @@
       rawEdges = rawEdges || [];
       if (explicitRootId == null) explicitRootId = opts.rootId;
       truncCache = {}; // bounded: cleared on every data-rev (no cross-nav creep)
+      _bgGrad = null; // node set changed -> root anchor moved; rebuild vignette
 
       // Build a published-sibling type hint map (doc_id -> type) for resolution.
       var siblingType = {};
@@ -565,16 +571,23 @@
         if (!e.dst.phantom) e.dst.degree++;
       });
 
-      // adjacency (self-loops excluded from adjacency to keep BFS
+      // adjacency + edge sets (self-loops excluded from adjacency to keep BFS
       // and the connection-count truthful)
-      var nadj = {};
+      var nadj = {},
+        nadjE = {};
       nextNodes.forEach(function (n) {
         nadj[n.id] = {};
+        nadjE[n.id] = [];
       });
       nextEdges.forEach(function (e) {
-        if (e.selfLoop) return;
+        if (e.selfLoop) {
+          nadjE[e.srcId].push(e); // keep for drawing only
+          return;
+        }
         nadj[e.srcId][e.dstId] = true;
         nadj[e.dstId][e.srcId] = true;
+        nadjE[e.srcId].push(e);
+        nadjE[e.dstId].push(e);
       });
 
       // ── root fallback (deferred until degree exists) ──
@@ -588,7 +601,7 @@
                 "' not found in graph; falling back to highest-degree node. " +
                 "This usually means data-root drifted from the node set."
             );
-          } catch {}
+          } catch (e) {}
         }
         var bestDeg = -1;
         for (var ri = 0; ri < nextNodes.length; ri++) {
@@ -659,11 +672,13 @@
 
       // ── transition decision ──
       var hadData = nodes.length > 0;
+      var rootChanged = rootId && newRootId && rootId !== newRootId;
 
       nodes = nextNodes;
       byId = nextById;
       edges = nextEdges;
       adj = nadj;
+      adjEdges = nadjE;
       depthMap = ndepth;
       rootId = newRootId;
       nodeSetHash = newHash;
@@ -866,7 +881,7 @@
     }
 
     // ════════════════════════════════════════════════════════════ PHYSICS ══
-    function tick() {
+    function tick(dt, warming) {
       // (1) alpha cooling
       alpha += (alphaTarget - alpha) * alphaDecay;
       if (alpha < alphaMin && alphaTarget <= alphaMin) alpha = 0;
@@ -1001,8 +1016,10 @@
 
     // FLAT background — Obsidian's calm dark (or near-white in light mode). No
     // gradient, no vignette, no root-anchored cast. Just the theme floor so the
-    // dots and threads read against generous empty space. Returns a plain CSS
-    // color string.
+    // dots and threads read against generous empty space. `_bgGrad` is retained
+    // as a no-op cache slot only because ingest()/resize() clear it; the value
+    // returned is a plain CSS color string.
+    var _bgGrad = null;
     function bgGradient() {
       return theme === "light" ? BG_LIGHT : BG_DARK;
     }
@@ -1138,6 +1155,7 @@
 
     function draw(now) {
       var t = now;
+      nowT = now;
 
       // full-canvas clear in device space
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1507,7 +1525,7 @@
     // value. The ONLY always-on exception is the hovered node + its 1-hop
     // neighbors — the active/root node is marked by accent color, NOT a label,
     // until hovered or zoomed (Obsidian-pure). Greedy collision-skip keeps it calm.
-    function drawLabels() {
+    function drawLabels(now) {
       var s = cam.scale;
       // Baseline: the auto-fit scale. Until the first fit runs, fall back to the
       // live scale so the ratio is 1.0 (default view = clean) and nothing breaks.
@@ -1737,6 +1755,7 @@
       tooltip.style.opacity = "1";
 
       // flip-and-clamp
+      var rect = containerEl.getBoundingClientRect();
       var tw = tooltip.offsetWidth || 200,
         th = tooltip.offsetHeight || 60;
       var tx = p[0] + 16,
@@ -2057,7 +2076,7 @@
     }
 
     function onPointerDown(ev) {
-      if (canvas.setPointerCapture) canvas.setPointerCapture(ev.pointerId);
+      canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId);
       var hit = hitTest(ev.clientX, ev.clientY);
       pointerStart = { x: ev.clientX, y: ev.clientY, t: perfNow() };
       dragging = true;
@@ -2073,7 +2092,7 @@
     }
 
     function onPointerUp(ev) {
-      if (canvas.releasePointerCapture) canvas.releasePointerCapture(ev.pointerId);
+      canvas.releasePointerCapture && canvas.releasePointerCapture(ev.pointerId);
       var wasDrag = pointerStart && (Math.abs(ev.clientX - pointerStart.x) > 4 || Math.abs(ev.clientY - pointerStart.y) > 4);
       dragging = false;
       if (dragNode) {
@@ -2200,6 +2219,7 @@
         canvas.height = bh;
         _lastBackW = bw;
         _lastBackH = bh;
+        _bgGrad = null; // backing store changed -> rebuild cached vignette
       }
       R_RING = 0.22 * Math.min(W, H);
     }
@@ -2636,7 +2656,7 @@
     try {
       ro = new ResizeObserver(onResize);
       ro.observe(containerEl);
-    } catch {}
+    } catch (e) {}
 
     // Park the loop when the pane is scrolled out of view. rAF throttles
     // background TABS but not an on-screen-but-occluded/scrolled pane, so the
@@ -2650,7 +2670,7 @@
         if (visible && !wasVisible) wake(); // resume on re-entry
       });
       io.observe(containerEl);
-    } catch {}
+    } catch (e) {}
 
     var vv = window.visualViewport || null;
     if (vv) {
@@ -2715,7 +2735,7 @@
           if (a11yRoot.parentNode) a11yRoot.parentNode.removeChild(a11yRoot);
           if (liveRegion.parentNode) liveRegion.parentNode.removeChild(liveRegion);
           if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
-        } catch {}
+        } catch (e) {}
       }
     };
   }
@@ -2730,6 +2750,17 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
+  function roundRectCentered(ctx, cx, cy, w, h, r) {
+    var x = cx - w / 2,
+      y = cy - h / 2;
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
   window.BarkparkGraphRenderer = BarkparkGraphRenderer;
 
   // ════════════════════════════════════════════ PHOENIX LIVEVIEW HOOK ══
@@ -2742,7 +2773,7 @@
       try {
         var probe = document.createElement("canvas").getContext("2d");
         if (!probe) canvas2d = false;
-      } catch {
+      } catch (e) {
         canvas2d = false;
       }
       if (!canvas2d) {
@@ -2751,6 +2782,7 @@
       }
 
       this._rev = this.el.dataset.rev;
+      var self = this;
       var parsed = this._parse();
       var rootId = this.el.dataset.root || null;
 
@@ -2760,8 +2792,8 @@
         {
           theme: "auto",
           rootId: rootId,
-          onNodeClick: (n) => {
-            if (n && n.id) this.pushEvent("node-clicked", { id: n.id });
+          onNodeClick: function (n) {
+            if (n && n.id) self.pushEvent("node-clicked", { id: n.id });
           }
         }
       );
@@ -2782,11 +2814,11 @@
       // SAME rev source of truth as the data-rev attr path: stamp this._rev
       // from the payload so a subsequent identical attr-rev is correctly
       // deduped (no double-apply, no skip). Payload carries its own root.
-      this.handleEvent("graph-update", (payload) => {
-        if (!this._renderer || !payload) return;
-        if (payload.rev != null) this._rev = String(payload.rev);
-        this._renderer.update(payload.nodes, payload.edges, {
-          rootId: payload.root != null ? String(payload.root) : this.el.dataset.root || null
+      this.handleEvent("graph-update", function (payload) {
+        if (!self._renderer || !payload) return;
+        if (payload.rev != null) self._rev = String(payload.rev);
+        self._renderer.update(payload.nodes, payload.edges, {
+          rootId: payload.root != null ? String(payload.root) : self.el.dataset.root || null
         });
       });
     },

@@ -51,7 +51,7 @@ async function fetchByTypeSlug(
 // collide on a shared slug.
 //
 // 300s is a SAFETY NET, not the freshness mechanism: a publish in Studio fires
-// the webhook → revalidateTag(bp:ds:production:type:<type>) → instant bust.
+// the webhook → revalidateTag(bp:ds:<dataset>:type:<type>) → instant bust.
 // (Tag granularity is per-type, not per-slug — the slug→id map isn't known at
 // cache-wrap time.)
 const cachedDoc = (type: string) =>

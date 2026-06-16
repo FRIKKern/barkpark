@@ -4,6 +4,7 @@ import {
   type BarkparkClient,
   type BarkparkClientConfig,
 } from "@barkpark/core";
+import { DATASET } from "./config";
 
 const projectUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -24,7 +25,7 @@ const readToken = process.env.BARKPARK_READ_TOKEN;
 /** Defaults shared by every client this app builds. */
 const BASE_CONFIG = {
   projectUrl,
-  dataset: "production",
+  dataset: DATASET,
   apiVersion: "2026-04-01",
   perspective: "published",
   ...(readToken ? { token: readToken } : {}),

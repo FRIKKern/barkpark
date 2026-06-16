@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { DATASET } from "@/lib/config";
 
 // Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
@@ -9,7 +10,7 @@ export const runtime = "nodejs";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const TOKEN = process.env.BARKPARK_READ_TOKEN;
-const DATASET = "production";
+// DATASET imported from lib/config (one source of truth, env-overridable).
 
 interface FindEventBody {
   kind?: "correction" | "click";

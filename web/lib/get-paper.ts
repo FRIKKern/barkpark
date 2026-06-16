@@ -16,7 +16,7 @@ export interface PaperResult {
 const cachedPaper = unstable_cache(
   (slug: string) => fetchPaperBySlug(client, slug),
   ["paper-by-slug"],
-  // 300s safety net; the webhook (revalidateTag bp:ds:production:type:paper)
+  // 300s safety net; the webhook (revalidateTag bp:ds:<dataset>:type:paper)
   // is the real freshness path on publish.
   { revalidate: 300, tags: ["doc", "doc:paper", bpAll(), bpType("paper")] },
 );

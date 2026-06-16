@@ -11,6 +11,7 @@ import {
 } from "@/lib/find";
 import { bpAll } from "@/lib/bp-tags";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
+import { DATASET } from "@/lib/config";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -32,7 +33,7 @@ export const FIND_TAG = "find";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const TOKEN = process.env.BARKPARK_READ_TOKEN;
-const DATASET = "production";
+// DATASET is imported from lib/config (one source of truth, env-overridable).
 // Default tenancy — Indx only activates on the token-scoped route.
 const SCOPE = "/w/default/p/default";
 /** Cap the working set; the client facets + sorts + paginates over it. */

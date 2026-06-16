@@ -3,6 +3,7 @@ import { revalidateTag } from "next/cache";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { FIND_TAG } from "@/lib/find-search";
 import { bpAll } from "@/lib/bp-tags";
+import { DATASET } from "@/lib/config";
 
 // Node runtime: HMAC verification needs node:crypto. Force-dynamic: this is a
 // pure side-effect endpoint (verify → revalidate), never cached.
@@ -93,7 +94,7 @@ interface WebhookPayload {
  * the finder's tag (any content change can change search results). */
 function tagsFor(p: WebhookPayload): string[] {
   const out = new Set<string>(p.sync_tags ?? []);
-  const ds = p.dataset ?? "production";
+  const ds = p.dataset ?? DATASET;
   out.add(bpAll(ds));
   if (p.workspace && p.project) {
     out.add(`bp:ws:${p.workspace}:p:${p.project}:ds:${ds}:_all`);

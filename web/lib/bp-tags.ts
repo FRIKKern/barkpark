@@ -12,7 +12,11 @@
  * the doc/type tags (scoped + flat); `_all` is reconstructed handler-side.
  */
 
-export const DATASET = "production";
+import { DATASET } from "./config";
+
+// Re-exported so existing `import { DATASET } from "@/lib/bp-tags"` call sites
+// keep working while the literal lives in ONE place (lib/config.ts).
+export { DATASET };
 
 export const bpAll = (dataset: string = DATASET): string =>
   `bp:ds:${dataset}:_all`;

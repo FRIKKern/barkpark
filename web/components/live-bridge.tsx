@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { createClient } from "@barkpark/core";
 import { BarkparkLive } from "@barkpark/nextjs/client";
+import { DATASET } from "@/lib/config";
 
 /**
  * Mounts the live-content subscription for the flat published surface.
@@ -26,7 +27,7 @@ export function LiveBridge() {
     if (typeof window === "undefined") return null;
     return createClient({
       projectUrl: window.location.origin,
-      dataset: "production",
+      dataset: DATASET,
       apiVersion: "2026-04-01",
       perspective: "published",
       // No token: the same-origin proxy authenticates upstream.

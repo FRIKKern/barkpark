@@ -2,14 +2,13 @@ import { NextResponse } from "next/server";
 import type { PopularQuery, SearchEngine } from "@/lib/find";
 import { emptyResponse, runSearch } from "@/lib/find-search";
 import { API_URL, bpFetchJson } from "@/lib/bp-fetch";
+import { DATASET } from "@/lib/config";
 
 // Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
 // NOT force-dynamic: the handler is dynamic anyway (reads searchParams), but the
 // search caching lives in `runSearch`'s `unstable_cache`, not a route directive.
 export const runtime = "nodejs";
-
-const DATASET = "production";
 
 /* ── suggestions (popular / no-hit past queries) ───────────────────────── */
 
