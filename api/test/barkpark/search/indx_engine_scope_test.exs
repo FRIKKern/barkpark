@@ -52,8 +52,16 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
   # on hydrate, the embedded Barkpark `_id`/`_type` for both. The ONLY thing
   # that can drop A's doc on B's search is the Postgres source-read scope.
   defmodule BothDocsClient do
-    def search(_dataset, _text, _opts) do
-      {:ok, [%{"documentKey" => 1}, %{"documentKey" => 2}]}
+    # The retriever calls `search_full/3` and destructures
+    # `{:ok, %{records:, facets:, truncation_index:}}`. Return both workspaces'
+    # documentKeys so only the Postgres source-read scope can drop A's doc.
+    def search_full(_dataset, _text, _opts) do
+      {:ok,
+       %{
+         records: [%{"documentKey" => 1}, %{"documentKey" => 2}],
+         facets: %{},
+         truncation_index: nil
+       }}
     end
 
     def get_json(_dataset, _keys, _opts) do

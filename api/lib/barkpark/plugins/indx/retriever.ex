@@ -33,6 +33,9 @@ defmodule Barkpark.Plugins.Indx.Retriever do
        `Content.get_document/3` (tenant-scoped) so the returned structs are
        authoritative — the index is a relevance oracle, Postgres is the
        source of truth.
+    5. `rerank_by_title/2` applies a stable title-affinity re-rank so the
+       engine's flat BM25F order gains the Postgres ranker's decisive
+       "exact/whole title wins" behaviour (see that function's docs).
 
   Indx-down / empty corpus / unconfigured all degrade to `{[], 0, %{}}` — a
   search never crashes the pipeline because the engine is unreachable.
@@ -77,6 +80,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         |> Enum.map(&load_document(&1, scope, opts))
         |> Enum.reject(&is_nil/1)
         |> apply_excludes(parsed, config)
+        |> rerank_by_title(parsed)
 
       {hits, length(hits), engine_meta(facets, tindex)}
     else
@@ -138,6 +142,120 @@ defmodule Barkpark.Plugins.Indx.Retriever do
       _ ->
         fields = searchable_paths(config)
         Enum.reject(hits, &excluded?(&1, excludes, fields))
+    end
+  end
+
+  @doc """
+  Stable title-affinity re-rank applied to the engine's score-ordered hits.
+
+  Indx hands back a flat BM25F ordering with no equivalent of the Postgres
+  ranker's decisive rules (`DocumentsRetriever`: an EXACT title match wins
+  outright; a title match outranks a body-only match). On a long corpus that
+  lets a long, body-heavy document accumulate enough term-frequency to overtake
+  the document actually TITLED for the query — the documented `@body_max`
+  regression in `Indexer` (q="fork" ranked a long CLI paper above the paper
+  titled "Fork reconciliation").
+
+  This pass restores Postgres-parity intent WITHOUT discarding Indx's superior
+  fuzzy / BM25F recall: it buckets hits into title-affinity tiers and
+  stable-sorts by tier, preserving the engine's order WITHIN each tier (the
+  original index is the tiebreak, so the sort is fully deterministic regardless
+  of `Enum.sort_by`'s stability). Tiers — lower wins:
+
+    * `0` exact title — normalized title == the positive query
+    * `1` title hit   — title starts with the query, or every query token is in it
+    * `2` partial     — at least one query token appears in the title
+    * `3` body/fuzzy  — no title signal; the engine's order is kept as-is
+
+  Browse (empty query) yields no tokens, so the hits pass through untouched —
+  the engine's relevance/recency order is authoritative there.
+  """
+  @spec rerank_by_title([struct()], map()) :: [struct()]
+  def rerank_by_title(hits, parsed) do
+    tokens = title_tokens(parsed)
+
+    if tokens == [] do
+      hits
+    else
+      query_join = positive_query(parsed)
+
+      hits
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {doc, idx} -> {title_tier(doc, tokens, query_join), idx} end)
+      |> Enum.map(fn {doc, _idx} -> doc end)
+    end
+  end
+
+  # Downcased query tokens (terms + phrases + prefixes) for the in-title test.
+  defp title_tokens(parsed) when is_map(parsed) do
+    (Map.get(parsed, :terms, []) ++
+       Map.get(parsed, :phrases, []) ++
+       Map.get(parsed, :prefixes, []))
+    |> Enum.map(&(&1 |> to_string() |> String.downcase() |> String.trim()))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp title_tokens(_), do: []
+
+  # The positive query (terms + phrases) joined + normalized — mirrors the
+  # Postgres ranker's `positive_query` for the exact / starts-with compare.
+  defp positive_query(parsed) do
+    (Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, []))
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" ")
+    |> normalize_title()
+  end
+
+  defp title_tier(doc, tokens, query_join) do
+    title = normalize_title(doc_title(doc))
+    words = title_word_set(title)
+
+    cond do
+      title == "" ->
+        3
+
+      query_join != "" and title == query_join ->
+        0
+
+      (query_join != "" and String.starts_with?(title, query_join)) or
+          Enum.all?(tokens, &token_in_title?(title, words, &1)) ->
+        1
+
+      Enum.any?(tokens, &token_in_title?(title, words, &1)) ->
+        2
+
+      true ->
+        3
+    end
+  end
+
+  defp doc_title(%{title: t}), do: t
+  defp doc_title(%{"title" => t}), do: t
+  defp doc_title(_), do: nil
+
+  defp normalize_title(t) do
+    t
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
+
+  defp title_word_set(title) do
+    title
+    |> String.split(~r/[^\p{L}\p{N}]+/u, trim: true)
+    |> MapSet.new()
+  end
+
+  # A token "hits" the title when it is a whole word, a word PREFIX (mirrors the
+  # prefix* / typo-tolerant intent), or — for a multi-word phrase — a substring.
+  defp token_in_title?(title, words, token) do
+    cond do
+      String.contains?(token, " ") -> String.contains?(title, token)
+      MapSet.member?(words, token) -> true
+      true -> Enum.any?(words, &String.starts_with?(&1, token))
     end
   end
 
