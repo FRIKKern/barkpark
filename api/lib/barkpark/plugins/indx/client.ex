@@ -130,7 +130,15 @@ defmodule Barkpark.Plugins.Indx.Client do
   """
   @spec get_user_datasets(keyword()) :: {:ok, [String.t()]} | {:error, struct()}
   def get_user_datasets(opts \\ []) do
-    case index_request(:get, "#{api_base(opts)}/api/GetUserDatasets", nil, opts) do
+    # v5: `GET /api/teams/<team>/datasets` lists the team's datasets; legacy:
+    # `GET /api/GetUserDatasets`. Both come back as a JSON list we name-extract.
+    url =
+      case team(opts) do
+        t when is_binary(t) and t != "" -> "#{api_base(opts)}/api/teams/#{t}/datasets"
+        _ -> "#{api_base(opts)}/api/GetUserDatasets"
+      end
+
+    case index_request(:get, url, nil, opts) do
       {:ok, resp} -> {:ok, extract_dataset_names(resp.body)}
       {:error, _} = err -> err
     end
@@ -318,7 +326,16 @@ defmodule Barkpark.Plugins.Indx.Client do
   @spec delete_json_record(String.t(), integer(), keyword()) :: :ok | {:error, struct()}
   def delete_json_record(dataset, document_key, opts \\ [])
       when is_binary(dataset) and is_integer(document_key) do
-    url = "#{api_base(opts)}/api/#{dataset}/#{document_key}"
+    # v5: `DELETE /api/teams/<team>/datasets/<ds>/documents/<key>`.
+    # Legacy v5-alpha: `DELETE /api/<ds>/<key>`.
+    url =
+      case team(opts) do
+        t when is_binary(t) and t != "" ->
+          "#{api_base(opts)}/api/teams/#{t}/datasets/#{dataset}/documents/#{document_key}"
+
+        _ ->
+          "#{api_base(opts)}/api/#{dataset}/#{document_key}"
+      end
 
     case index_request(:delete, url, nil, opts) do
       {:ok, _resp} -> :ok
@@ -682,16 +699,41 @@ defmodule Barkpark.Plugins.Indx.Client do
   # Configuration helpers
   # ---------------------------------------------------------------------------
 
+  # Dataset op route. v5 scopes every operation under the owning team:
+  # `/api/teams/<team>/datasets/<ds>/<Verb>`. Legacy (team unset) keeps the
+  # v5-alpha `/api/<Verb>/<ds>`. The verbs (CreateOrOpen, AnalyzeString,
+  # SetFieldConfiguration, LoadString, IndexDataSet, GetStatus, Search, …) are
+  # unchanged between the two — only the prefix moved.
   defp path(verb, dataset, opts) do
-    "#{api_base(opts)}/api/#{verb}/#{dataset}"
+    case team(opts) do
+      t when is_binary(t) and t != "" ->
+        "#{api_base(opts)}/api/teams/#{t}/datasets/#{dataset}/#{verb}"
+
+      _ ->
+        "#{api_base(opts)}/api/#{verb}/#{dataset}"
+    end
   end
 
-  # v5-alpha per-document routes put the DATASET first and carry a trailing
-  # `/{key}`: `POST /api/{ds}/insert/{key}`, `PUT /api/{ds}/update/{key}`,
-  # `PUT /api/{ds}/field/{key}`. Distinct from `path/3`'s legacy
-  # `/api/{verb}/{ds}` shape — do not collapse the two.
+  # Per-document routes. v5: `/api/teams/<team>/datasets/<ds>/<verb>/<key>`
+  # (insert/update/field). Legacy v5-alpha: `/api/<ds>/<verb>/<key>`. (The v5
+  # DELETE route is `/documents/<key>` — built directly by delete_json_record.)
   defp path_with_key(verb, dataset, key, opts) do
-    "#{api_base(opts)}/api/#{dataset}/#{verb}/#{key}"
+    case team(opts) do
+      t when is_binary(t) and t != "" ->
+        "#{api_base(opts)}/api/teams/#{t}/datasets/#{dataset}/#{verb}/#{key}"
+
+      _ ->
+        "#{api_base(opts)}/api/#{dataset}/#{verb}/#{key}"
+    end
+  end
+
+  # The team that owns the datasets (v5 route scope), from opts or settings.
+  # Empty/nil ⇒ legacy routing.
+  defp team(opts) do
+    case Keyword.get(opts, :team) do
+      t when is_binary(t) and t != "" -> t
+      _ -> Settings.get().team
+    end
   end
 
   defp api_base(opts) do

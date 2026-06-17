@@ -781,6 +781,12 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   # fieldName and SetFieldConfiguration would reject it.
   @search_facet_fields ~w(author category)
 
+  # v5 high-resolution indexing: extra delimiter-removed N-grams that sharpen
+  # run-together / split-word matches ("websocket" ⇄ "web socket"). Costs index
+  # space, so the v5 docs recommend it on a FEW key fields only — we apply it to
+  # the title (where compound/run-together queries matter most).
+  @high_res_fields ~w(title)
+
   defp field_proxies(weights) do
     searchable =
       Enum.map(weights, fn {field, weight} ->
@@ -796,8 +802,10 @@ defmodule Barkpark.Plugins.Indx.Indexer do
           "facetable" => also_facet,
           "sortable" => false,
           "wordIndexing" => true,
+          "highResolution" => f in @high_res_fields,
           "embeddable" => false,
           "preloadFilters" => false,
+          # v5: float multiplier (0.5–3.0, higher = more influence).
           "weight" => weight,
           "bM25b" => 0.75,
           "bM25k1" => 1.2
@@ -867,7 +875,11 @@ defmodule Barkpark.Plugins.Indx.Indexer do
       |> to_string()
       |> String.downcase()
 
-    done == true or state in ["ready", "indexed", "completed", "done", "idle"]
+    # v5 reports a numeric `systemState`; Ready == 4.
+    system_state = Map.get(status, "systemState") || Map.get(status, "SystemState")
+
+    done == true or system_state == 4 or
+      state in ["ready", "indexed", "completed", "done", "idle"]
   end
 
   defp ready?(status) when is_binary(status) do

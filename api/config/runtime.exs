@@ -88,7 +88,12 @@ indx_env =
   [
     api_base: System.get_env("INDX_API_BASE"),
     user_email: System.get_env("INDX_USER_EMAIL"),
-    user_password: System.get_env("INDX_USER_PASSWORD")
+    user_password: System.get_env("INDX_USER_PASSWORD"),
+    # v5: team that owns the datasets (route scope) + static JWT API token from
+    # the Indx portal (/Account/ApiKey). Setting INDX_TEAM flips the client to
+    # v5 team-scoped routes + token auth; until both are set, legacy behavior.
+    team: System.get_env("INDX_TEAM"),
+    api_token: System.get_env("INDX_API_TOKEN")
   ]
   |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
 

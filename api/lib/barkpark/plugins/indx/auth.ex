@@ -108,6 +108,12 @@ defmodule Barkpark.Plugins.Indx.Auth do
     settings = Settings.get()
 
     cond do
+      # v5: a static JWT API token from the portal (/Account/ApiKey) is used
+      # directly as the Bearer — no `/api/Login` round-trip. Set via env
+      # `INDX_API_TOKEN`. Takes precedence when present.
+      present?(settings.api_token) ->
+        {:ok, settings.api_token}
+
       not present?(settings.api_base) ->
         {:error, %AuthError{status: 0, endpoint: nil, message: "Indx api_base not configured"}}
 

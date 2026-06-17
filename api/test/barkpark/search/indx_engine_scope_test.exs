@@ -130,12 +130,16 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     b_ids = Enum.map(b_hits, & &1.doc_id)
 
-    assert b_total == 1
+    # The leak invariant is about VISIBLE hits: exactly one survives the
+    # Postgres source-read scope, and it is B's. (`total` now reflects the
+    # pre-scope candidate pool count, not the visible slice.)
+    assert b_total == 2
+    assert length(b_ids) == 1
     assert "drafts.b-hit" in b_ids
     refute "drafts.a-hit" in b_ids
 
     # Mirror: A's scoped search excludes B's doc, same fake index.
-    {a_hits, a_total, _meta} =
+    {a_hits, _a_total, _meta} =
       IndxRetriever.search(
         @ds,
         parsed,
@@ -145,7 +149,7 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     a_ids = Enum.map(a_hits, & &1.doc_id)
 
-    assert a_total == 1
+    assert length(a_ids) == 1
     assert "drafts.a-hit" in a_ids
     refute "drafts.b-hit" in a_ids
   end
