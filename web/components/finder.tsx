@@ -1,7 +1,11 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type {
+  ReactNode,
+  KeyboardEvent as ReactKeyboardEvent,
+  FocusEvent as ReactFocusEvent,
+} from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -17,6 +21,7 @@ import {
   type SortId,
 } from "@/lib/find";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
+import { useFinderNav } from "@/lib/finder-nav-context";
 import { useLiveSearch } from "@/lib/use-live-search";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
@@ -289,8 +294,20 @@ function ResultRow({
   const date = shortDate(hit.date);
   // Cross-surface highlight: lit when the landing graph hovers this doc's node
   // (matched by doc_id == slug). A no-op outside the provider (default null).
-  const { hoveredId } = useHoveredDoc();
+  const { hoveredId, setHoveredId } = useHoveredDoc();
   const graphHovered = hoveredId != null && hoveredId === hit.slug;
+  // Publish this row's hover so the landing graph focuses the matching node
+  // (the list → graph half of the bridge; graphHovered above is the graph → list
+  // half that lights this row). setHoveredId dedups, so re-publishing is cheap.
+  const onHoverEnter = () => setHoveredId(hit.slug);
+  const onHoverLeave = () => setHoveredId(null);
+  // Keyboard focus on a row IS a hover (lights the graph node + the violet ring).
+  // Clear only when focus leaves the result list entirely — not when moving
+  // between rows, which would flicker the graph node off/on each step.
+  const onBlurOut = (e: ReactFocusEvent) => {
+    const to = e.relatedTarget as HTMLElement | null;
+    if (!to || !to.closest("[data-nav-result]")) onHoverLeave();
+  };
   // Fire-and-forget click signal — non-blocking so it never delays navigation.
   const onResultClick = () => {
     if (searchEventId) {
@@ -354,7 +371,20 @@ function ResultRow({
       ? " bg-violet-50 ring-1 ring-violet-300 dark:bg-violet-950/30 dark:ring-violet-600/60"
       : " hover:bg-zinc-100 dark:hover:bg-zinc-900/60";
 
-  if (!hit.href) return <div className={`${cls}${stateCls}`}>{inner}</div>;
+  if (!hit.href)
+    return (
+      <div
+        data-nav-result=""
+        tabIndex={0}
+        className={`${cls}${stateCls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500`}
+        onMouseEnter={onHoverEnter}
+        onMouseLeave={onHoverLeave}
+        onFocus={onHoverEnter}
+        onBlur={onBlurOut}
+      >
+        {inner}
+      </div>
+    );
 
   // Master mode: append the live finder query string so opening a doc preserves
   // search/engine/facets. Because <Finder> lives in the (finder) LAYOUT, this
@@ -371,9 +401,14 @@ function ResultRow({
       // low-end clients and hammered the server. Navigation on click is
       // unaffected; Next still prefetches on hover/touchstart.
       prefetch={false}
+      data-nav-result=""
       onClick={onResultClick}
+      onMouseEnter={onHoverEnter}
+      onMouseLeave={onHoverLeave}
+      onFocus={onHoverEnter}
+      onBlur={onBlurOut}
       aria-current={selected ? "page" : undefined}
-      className={`${cls}${stateCls}`}
+      className={`${cls}${stateCls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500`}
     >
       {inner}
     </Link>
@@ -410,6 +445,13 @@ export function Finder({
   // so the landing graph can emphasize each match by rank and dim the rest. A
   // no-op outside the (finder) layout's provider.
   const { setMatches } = useGraphMatches();
+  // Cross-segment keyboard bridge: List →→ Document (open) and Document → List
+  // (return). The left grid (Search/Facets/List) is handled inline below.
+  const { listFocusNonce, requestDocFocus } = useFinderNav();
+  // Keyboard-nav anchors: the finder root (focus queries scope here) and the
+  // last-active result index (so a return from the Document lands on it).
+  const rootRef = useRef<HTMLElement | null>(null);
+  const activeIdxRef = useRef(0);
   // Per-keystroke live search over a direct WebSocket (browser → API, no Vercel
   // hop). Ships dark: `enabled` only when the NEXT_PUBLIC_BARKPARK_WS_* env is
   // provisioned, `ready` only once the channel joins — until then the search
@@ -709,6 +751,110 @@ export function Finder({
     ? visibleHits
     : visibleHits.slice(0, RESULT_RENDER_CAP);
 
+  // ── keyboard navigation ─────────────────────────────────────────────────
+  //   Search  ↕  List  ←→  Facets        List →→ Document (open) · Doc → List
+  // Roving DOM focus, NO per-step React state — arrow keys move focus among the
+  // live [data-nav-*] elements, so navigating the list never re-renders the
+  // Finder shell. The active row's own onFocus publishes its slug to the hover
+  // bridge (lighting the graph node + its violet row ring), so the graph sync
+  // and active highlight come for free. activeIdxRef remembers the opened row so
+  // a ← out of the Document returns focus exactly there.
+  const navEls = (sel: string) =>
+    Array.from(rootRef.current?.querySelectorAll<HTMLElement>(sel) ?? []);
+  const resultEls = () => navEls("[data-nav-result]");
+  const facetEls = () => navEls("[data-nav-facet]");
+  const indexOfActive = (els: HTMLElement[]) =>
+    els.indexOf(document.activeElement as HTMLElement);
+  const focusSearch = () => document.getElementById("finder-search")?.focus();
+  const focusFacet = (i: number) => {
+    const els = facetEls();
+    if (els.length) els[Math.max(0, Math.min(i, els.length - 1))].focus();
+  };
+  const focusResult = (i: number) => {
+    const els = resultEls();
+    if (!els.length) return;
+    const idx = Math.max(0, Math.min(i, els.length - 1));
+    activeIdxRef.current = idx;
+    els[idx].focus();
+  };
+  const openActiveResult = () => {
+    const els = resultEls();
+    const cur = indexOfActive(els);
+    const idx = cur >= 0 ? cur : activeIdxRef.current;
+    activeIdxRef.current = idx;
+    const hit = visibleHits[idx];
+    if (!hit?.href) return;
+    const href =
+      master && currentQueryString
+        ? `${hit.href}?${currentQueryString}`
+        : hit.href;
+    router.push(href);
+    requestDocFocus(); // hand whole-doc focus to the Document pane
+  };
+
+  const onSearchKeyDown = (e: ReactKeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      focusResult(activeIdxRef.current);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      openActiveResult();
+    }
+  };
+  const onListKeyDown = (e: ReactKeyboardEvent) => {
+    const cur = indexOfActive(resultEls());
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusResult(cur + 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        if (cur <= 0) focusSearch();
+        else focusResult(cur - 1);
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        focusFacet(0);
+        break;
+      case "ArrowRight":
+      case "Enter":
+        e.preventDefault();
+        openActiveResult();
+        break;
+    }
+  };
+  const onFacetsKeyDown = (e: ReactKeyboardEvent) => {
+    const cur = indexOfActive(facetEls());
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusFacet(cur + 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        if (cur <= 0) focusSearch();
+        else focusFacet(cur - 1);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        focusResult(activeIdxRef.current);
+        break;
+      // Enter / Space toggles the facet via the button's native click.
+    }
+  };
+
+  // A new result set resets the keyboard position to the top.
+  useEffect(() => {
+    activeIdxRef.current = 0;
+  }, [visibleHits]);
+
+  // Document → List: a ← out of the doc pane refocuses the row we opened from.
+  useEffect(() => {
+    if (listFocusNonce > 0) focusResult(activeIdxRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listFocusNonce]);
+
   // A filter is "active" when the user has narrowed the corpus — text in the box
   // (the LIVE input, so the graph reacts on the keystroke, not after the debounce
   // commits to the URL) or any facet selection. Idle browse leaves the graph
@@ -842,6 +988,7 @@ export function Finder({
 
   return (
     <main
+      ref={rootRef}
       className={
         master
           ? // Left frontpage column (the ~1080px aside, which scrolls). Cap +
@@ -911,6 +1058,8 @@ export function Finder({
               aria-label="Search documents"
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onSearchKeyDown}
+              aria-keyshortcuts="ArrowDown"
               placeholder='Try: headless · "cli guide" · phoenex · report -draft'
               autoFocus
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
@@ -1141,7 +1290,10 @@ export function Finder({
           results layout, so master uses the same grid as the standalone page. */}
       <div className="grid gap-8 md:grid-cols-[12rem_1fr]">
         {/* facets — Indx-computed dimensions (type/status/author/category) */}
-        <aside className="flex flex-col gap-5"
+        <aside
+          className="flex flex-col gap-5"
+          onKeyDown={onFacetsKeyDown}
+          aria-label="Filters — ↑/↓ to move, → to results, Enter to toggle"
         >
           {facetCount > 0 ? (
             <button
@@ -1164,8 +1316,10 @@ export function Finder({
                   return (
                     <li key={b.label}>
                       <button
+                        data-nav-facet=""
+                        aria-pressed={on}
                         onClick={() => toggleFacet(g.key, b.label)}
-                        className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                        className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${
                           on
                             ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                             : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900/60"
@@ -1292,6 +1446,8 @@ export function Finder({
             </p>
           ) : (
             <ul
+              onKeyDown={onListKeyDown}
+              aria-label="Results — ↑/↓ to move, → to open, ← to filters"
               className={`flex flex-col divide-y divide-zinc-200 transition-opacity dark:divide-zinc-800 ${
                 loading ? "opacity-50" : "opacity-100"
               }`}

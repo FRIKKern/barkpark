@@ -1,7 +1,9 @@
 import { Finder } from "@/components/finder";
+import { DocumentNav } from "@/components/document-nav";
 import { runSearch } from "@/lib/find-search";
 import type { FindResponse } from "@/lib/find";
 import { HoveredDocProvider } from "@/lib/hovered-doc-context";
+import { FinderNavProvider } from "@/lib/finder-nav-context";
 
 // Force-dynamic so the Finder's server-seeded browse renders straight into the
 // HTML — no `useSearchParams` CSR-bailout skeleton, so the master column keeps
@@ -50,16 +52,18 @@ export default async function FinderLayout({
 
   return (
     <HoveredDocProvider>
-      <div className="flex h-screen w-full overflow-hidden">
-        <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800">
-          <Finder
-            variant="master"
-            initialData={initialData}
-            initialEngine="indx"
-          />
-        </aside>
-        <section className="min-w-0 flex-1 overflow-y-auto">{children}</section>
-      </div>
+      <FinderNavProvider>
+        <div className="flex h-screen w-full overflow-hidden">
+          <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800">
+            <Finder
+              variant="master"
+              initialData={initialData}
+              initialEngine="indx"
+            />
+          </aside>
+          <DocumentNav>{children}</DocumentNav>
+        </div>
+      </FinderNavProvider>
     </HoveredDocProvider>
   );
 }

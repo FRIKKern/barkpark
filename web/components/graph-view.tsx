@@ -33,6 +33,9 @@ interface GraphController {
   setFetching: (on: boolean) => void;
   /** Emphasize each match by weight and dim the rest; `null` clears the filter. */
   setMatches: (matches: GraphMatch[] | null) => void;
+  /** Focus the node whose `doc_id` matches (same hop-cascade as a real hover);
+   * `null` clears it. Drives the list→graph half of the hover bridge. */
+  setHovered: (docId: string | null) => void;
   destroy: () => void;
 }
 
@@ -63,6 +66,9 @@ export interface GraphViewProps {
    * keeps these lit (size/color/label scaled by weight) and dims the rest.
    * `null`/undefined = no filter (full graph). */
   matches?: GraphMatch[] | null;
+  /** Doc-id currently hovered elsewhere (a finder result row). The graph focuses
+   * the matching node with the same cascade as an in-canvas hover. `null` = none. */
+  hoveredId?: string | null;
   /** Extra classes on the host div. It is always `relative` + full-size. */
   className?: string;
 }
@@ -91,6 +97,7 @@ export function GraphView({
   onNodeClick,
   onNodeHover,
   matches = null,
+  hoveredId = null,
   className,
 }: GraphViewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +186,14 @@ export function GraphView({
     matchRef.current = matches;
     ctlRef.current?.setMatches(matches);
   }, [matches]);
+
+  // HOVER (list → graph) — a finder result row published a hovered doc-id; focus
+  // the matching node. No-op until init; hover is transient so a miss during the
+  // script-load race just means focus appears on the next hover. The reverse
+  // direction (graph node hover → finder row) flows out via onNodeHover.
+  useEffect(() => {
+    ctlRef.current?.setHovered(hoveredId);
+  }, [hoveredId]);
 
   return (
     <>

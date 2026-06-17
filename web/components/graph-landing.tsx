@@ -26,7 +26,7 @@ export interface GraphLandingProps {
 export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps) {
   const router = useRouter();
   const sp = useSearchParams();
-  const { setHoveredId } = useHoveredDoc();
+  const { hoveredId, setHoveredId } = useHoveredDoc();
   // The finder's visible result set drives which nodes the graph keeps lit, and
   // how strongly (by search rank).
   const { matches } = useGraphMatches();
@@ -72,6 +72,7 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
         edges={edges}
         rootId={rootId}
         matches={matches}
+        hoveredId={hoveredId}
         onNodeClick={onNodeClick}
         onNodeHover={onNodeHover}
       />

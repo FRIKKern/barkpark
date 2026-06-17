@@ -2907,6 +2907,28 @@
         applyExternalMatch();
         wake();
       },
+      setHovered: function (docId) {
+        // External hover bridge — the finder result list hovers a row and the
+        // graph focuses the matching node with the SAME hop-cascade + corona as
+        // a real canvas hover. Keyed by doc_id (== a finder hit's slug — the same
+        // key the graph→list direction publishes). Does NOT echo through
+        // opts.onNodeHover (the finder is the source here; echoing is redundant
+        // and risks a feedback loop). No-op when it resolves to the current hover
+        // (e.g. the user is already hovering that very node on the canvas).
+        var nextId = null;
+        if (docId != null) {
+          for (var i = 0; i < nodes.length; i++) {
+            if (!nodes[i].phantom && nodes[i].doc_id === docId) {
+              nextId = nodes[i].id;
+              break;
+            }
+          }
+        }
+        if (nextId === hoverId) return;
+        hoverId = nextId;
+        if (nextId != null) reheat(0.25);
+        else wake();
+      },
       destroy: function () {
         destroyed = true;
         if (rafId) cancelAnimationFrame(rafId);
