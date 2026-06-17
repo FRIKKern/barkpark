@@ -98,8 +98,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
       hits =
         ranked
         |> Enum.take(display_limit)
-        |> Enum.map(&load_document(&1, scope, opts))
-        |> Enum.reject(&is_nil/1)
+        |> hydrate_documents(scope, opts)
 
       {hits, length(ranked), engine_meta(facets, tindex)}
     else
@@ -312,20 +311,44 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # forwards them into `scope_to_workspace_or_global/3`, so the index can never
   # surface another workspace's row even when two workspaces share a dataset
   # STRING. The index is a relevance oracle, Postgres is the source of truth.
-  defp load_document(indx_doc, scope, opts) when is_map(indx_doc) do
-    id = Map.get(indx_doc, "_id") || Map.get(indx_doc, "id")
-    type = Map.get(indx_doc, "_type") || Map.get(indx_doc, "type")
+  # Hydrate a page of light index records into authoritative Postgres docs in a
+  # SINGLE scoped query (was N per-hit reads — an N+1 that dominated search
+  # latency). Preserves the re-rank ORDER, and keeps `get_document/4`'s
+  # type-match semantics (a row whose Postgres `type` differs from the index's
+  # `_type` is dropped). The batch read is tenant-scoped via
+  # `Content.get_documents_by_ids/3` (same P0 leak guard), so it can never
+  # surface another workspace's row.
+  defp hydrate_documents(indx_docs, scope, opts) do
+    pairs =
+      indx_docs
+      |> Enum.map(&id_type_pair/1)
+      |> Enum.reject(&is_nil/1)
 
-    with id when is_binary(id) and id != "" <- to_string_or_nil(id),
-         type when is_binary(type) and type != "" <- to_string_or_nil(type),
-         {:ok, doc} <- Content.get_document(id, type, scope, scope_opts(opts)) do
-      doc
+    doc_ids = pairs |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+    by_id = Content.get_documents_by_ids(doc_ids, scope, scope_opts(opts))
+
+    pairs
+    |> Enum.map(fn {id, type} ->
+      case Map.get(by_id, id) do
+        %{type: ^type} = doc -> doc
+        _ -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp id_type_pair(indx_doc) when is_map(indx_doc) do
+    id = to_string_or_nil(Map.get(indx_doc, "_id") || Map.get(indx_doc, "id"))
+    type = to_string_or_nil(Map.get(indx_doc, "_type") || Map.get(indx_doc, "type"))
+
+    if is_binary(id) and id != "" and is_binary(type) and type != "" do
+      {id, type}
     else
-      _ -> nil
+      nil
     end
   end
 
-  defp load_document(_other, _scope, _opts), do: nil
+  defp id_type_pair(_other), do: nil
 
   # Forward only the tenant-scope opts into the authoritative Postgres read so
   # the seam cannot bypass `scope_to_workspace_or_global/3` (the P0 leak guard).

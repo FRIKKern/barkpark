@@ -301,6 +301,33 @@ defmodule Barkpark.Content do
   end
 
   @doc """
+  Batch sibling of `get_document/4`: load many documents by `doc_id` in ONE
+  scoped query, returned as a `%{doc_id => %Document{}}` map.
+
+  Applies the EXACT SAME tenant scoping as `get_document/4`
+  (`scope_to_dataset` + `scope_to_workspace_or_global` — the P0 leak guard), so
+  it can never surface another workspace's row even when two workspaces share a
+  dataset string. Used by the search retrievers to hydrate a page of hits with a
+  single round-trip instead of N per-hit reads. `doc_id` is the unique key; the
+  caller re-associates `type` and preserves its own ordering.
+  """
+  @spec get_documents_by_ids([String.t()], String.t(), keyword()) ::
+          %{optional(String.t()) => Document.t()}
+  def get_documents_by_ids([], _dataset, _opts), do: %{}
+
+  def get_documents_by_ids(doc_ids, dataset, opts) when is_list(doc_ids) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.doc_id in ^doc_ids)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> Repo.all()
+    |> Map.new(fn d -> {d.doc_id, d} end)
+  end
+
+  @doc """
   Resolve a referenced document's display title from a stored reference value.
 
   `value` is a plain doc-id string (the v1 reference-field persistence model);
