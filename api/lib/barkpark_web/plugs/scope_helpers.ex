@@ -35,6 +35,11 @@ defmodule BarkparkWeb.ScopeHelpers do
       the underlying dataset row (e.g. workspace cascade-delete) and pin
       reads to a now-deleted id (barkpark-sknf). The fresh-every-call path
       is cheap and stays correct.
+    * `scope_opts(%Phoenix.Socket{})` — the CHANNEL/transport socket (a
+      DIFFERENT struct from `Phoenix.LiveView.Socket`), used by
+      `BarkparkWeb.SearchChannel` for live per-keystroke search. Same
+      reasoning as the LiveView socket: a channel process is long-lived, so
+      no `memoize: true`.
 
   The same logic applies to Oban workers and mix tasks: they don't go through
   this helper, never opt in, and therefore stay on the fresh path. Only the
@@ -52,9 +57,12 @@ defmodule BarkparkWeb.ScopeHelpers do
   Conns ALSO get `memoize: true` so the per-request dataset_id resolver can
   collapse its 9-call fan-out; sockets do NOT (see module doc, barkpark-sknf).
   """
-  @spec scope_opts(Conn.t() | Socket.t()) :: keyword()
+  @spec scope_opts(Conn.t() | Socket.t() | Phoenix.Socket.t()) :: keyword()
   def scope_opts(%Conn{assigns: assigns}), do: [memoize: true] ++ from_assigns(assigns)
   def scope_opts(%Socket{assigns: assigns}), do: from_assigns(assigns)
+  # The channel/transport socket — a distinct struct from the LiveView Socket
+  # aliased above; matched fully-qualified so it can't collide with that alias.
+  def scope_opts(%Phoenix.Socket{assigns: assigns}), do: from_assigns(assigns)
 
   defp from_assigns(assigns) do
     []
