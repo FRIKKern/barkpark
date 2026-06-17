@@ -60,7 +60,11 @@ defmodule BarkparkWeb.SearchChannel do
   def handle_in("query", %{"q" => q} = params, socket) do
     seq = params["seq"]
 
-    case String.trim(to_string(q)) do
+    # Mirror SearchController: ONLY a truly empty string is "no query". A single
+    # space is the BROWSE sentinel (enumerate + facet the dataset) — it must pass
+    # through to the engine, not be trimmed away to empty (that returned 0 hits
+    # for the empty box, which should instead show the full browseable list).
+    case to_string(q) do
       "" ->
         {:reply, {:ok, empty_reply(seq, "")}, socket}
 
