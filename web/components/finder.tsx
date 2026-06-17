@@ -19,6 +19,13 @@ import {
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
+import {
+  stemToken,
+  queryStems,
+  textStems,
+  termMatches,
+  wordMatchesQuery,
+} from "@/lib/stem";
 
 /** Fire-and-forget feedback POST — never throws, never blocks the caller. */
 function recordFindEvent(body: {
@@ -85,8 +92,11 @@ function localSearch(
   corpus.forEach((hit, i) => {
     const title = hit.title.toLowerCase();
     const titleWords = new Set(title.split(/[^a-z0-9]+/).filter(Boolean));
+    const titleStemSet = textStems(hit.title);
     const inTitle = (t: string) =>
-      titleWords.has(t) || [...titleWords].some((w) => w.startsWith(t));
+      titleWords.has(t) ||
+      [...titleWords].some((w) => w.startsWith(t)) ||
+      titleStemSet.has(stemToken(t)); // operators ⇢ operator's in the title
     const titleHits = tokens.filter(inTitle).length;
 
     let tier: number;
@@ -96,8 +106,10 @@ function localSearch(
     else if (titleHits > 0) tier = 3;
     else tier = 4; // no title signal — qualifies on body/slug only
 
-    const body = (hit.body ?? hit.excerpt ?? "").toLowerCase();
+    const bodyRaw = hit.body ?? hit.excerpt ?? "";
+    const body = bodyRaw.toLowerCase();
     const slug = (hit.slug ?? "").toLowerCase();
+    const bodyStemSet = textStems(bodyRaw);
     let bodyHits = 0;
     let bodyFreq = 0;
     for (const t of tokens) {
@@ -107,7 +119,10 @@ function localSearch(
         count++;
         from = body.indexOf(t, from + t.length);
       }
-      if (count === 0 && slug.includes(t)) count = 1;
+      // No substring hit → count a stem/slug presence as one (operators ⇢ operator's).
+      if (count === 0 && (slug.includes(t) || bodyStemSet.has(stemToken(t)))) {
+        count = 1;
+      }
       if (count > 0) {
         bodyHits++;
         bodyFreq += count;
@@ -151,14 +166,15 @@ function localSearch(
  */
 function partitionExact(hits: FindHit[], tokens: string[]): FindHit[] {
   if (tokens.length === 0) return hits;
-  // Lowercase the tokens — the haystack is lowercased, so a camelCase query like
-  // "WebSocket" must be folded too, or NOTHING matches and the partition no-ops.
-  const needles = tokens.map((t) => t.toLowerCase());
   const exact: FindHit[] = [];
   const fuzzy: FindHit[] = [];
   for (const h of hits) {
-    const hay = `${h.title} ${h.body ?? h.excerpt ?? ""} ${h.slug ?? ""}`.toLowerCase();
-    (needles.every((t) => hay.includes(t)) ? exact : fuzzy).push(h);
+    const hayText = `${h.title} ${h.body ?? h.excerpt ?? ""} ${h.slug ?? ""}`;
+    const hayLower = hayText.toLowerCase();
+    const hayStems = textStems(hayText);
+    // A doc "contains" the query when every token appears — by substring (incl.
+    // camelCase like "WebSocket") OR by stem ("operators" ⇢ "operator's").
+    (tokens.every((t) => termMatches(t, hayLower, hayStems)) ? exact : fuzzy).push(h);
   }
   // Only reorder on a genuine mix — otherwise keep the engine's order intact.
   return exact.length > 0 && fuzzy.length > 0 ? [...exact, ...fuzzy] : hits;
@@ -179,11 +195,25 @@ function matchSnippet(hit: FindHit, terms: string[]): string | null {
   const lower = body.toLowerCase();
   let idx = -1;
   let matchLen = 0;
+  // Earliest substring match (exact/prefix).
   for (const t of clean) {
-    const at = lower.indexOf(t);
+    const at = lower.indexOf(t.toLowerCase());
     if (at !== -1 && (idx === -1 || at < idx)) {
       idx = at;
       matchLen = t.length;
+    }
+  }
+  // Earliest STEM match (so "operators" finds "operator's" in the body).
+  const stems = queryStems(clean);
+  const wordRe = /[A-Za-z0-9_'’]+/g;
+  let m: RegExpExecArray | null;
+  while ((m = wordRe.exec(body)) !== null) {
+    if (stems.has(stemToken(m[0]))) {
+      if (idx === -1 || m.index < idx) {
+        idx = m.index;
+        matchLen = m[0].length;
+      }
+      break; // regex is left-to-right, so this is the earliest stem hit
     }
   }
   // No match in the body → keep the default excerpt (the title still highlights).
@@ -220,12 +250,20 @@ function matchSnippet(hit: FindHit, terms: string[]): string | null {
 type MatchStrength = "title" | "body" | "partial" | "fuzzy";
 
 function matchStrength(hit: FindHit, terms: string[]): MatchStrength {
-  const t = terms.map((x) => x.toLowerCase()).filter(Boolean);
+  const t = terms.filter(Boolean);
   if (t.length === 0) return "title";
-  const title = hit.title.toLowerCase();
-  const rest = `${hit.body ?? hit.excerpt ?? ""} ${hit.slug ?? ""}`.toLowerCase();
-  const inTitle = (x: string) => title.includes(x);
-  const inAny = (x: string) => title.includes(x) || rest.includes(x);
+  const titleText = hit.title;
+  const restText = `${hit.body ?? hit.excerpt ?? ""} ${hit.slug ?? ""}`;
+  // Stem-aware membership (so "operator's" counts for "operators"), with the
+  // substring fallback baked into termMatches.
+  const titleLower = titleText.toLowerCase();
+  const restLower = restText.toLowerCase();
+  const titleStemSet = textStems(titleText);
+  const restStemSet = textStems(restText);
+  const inTitle = (x: string) => termMatches(x, titleLower, titleStemSet);
+  const inAny = (x: string) =>
+    termMatches(x, titleLower, titleStemSet) ||
+    termMatches(x, restLower, restStemSet);
   if (t.every(inTitle)) return "title";
   if (t.every(inAny)) return "body";
   if (t.some(inAny)) return "partial";
@@ -291,16 +329,19 @@ function shortDate(value: string | null): string | null {
   }).format(d);
 }
 
-/** Safe client-side highlight — splits on matched terms, never injects HTML. */
+/** Safe client-side highlight — splits text into words and marks each WORD
+ * whose stem matches a query term (so "operator's" lights up for "operators")
+ * or that contains a term as a substring (prefix/partial). Never injects HTML. */
 function highlight(text: string, terms: string[]): ReactNode {
-  const escaped = terms
-    .filter(Boolean)
-    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  if (!escaped.length) return text;
-  const re = new RegExp(`(${escaped.join("|")})`, "ig");
-  const wanted = new Set(escaped.map((s) => s.toLowerCase()));
-  return text.split(re).map((part, i) =>
-    wanted.has(part.toLowerCase()) ? (
+  const clean = terms.filter(Boolean);
+  if (!clean.length) return text;
+  const stems = queryStems(clean);
+  const lowerTerms = clean.map((t) => t.toLowerCase());
+  // Capturing split keeps the delimiters, so words and the gaps between them
+  // both survive — we only ever wrap whole word-runs, never break a word.
+  const parts = text.split(/([A-Za-z0-9_'’]+)/);
+  return parts.map((part, i) =>
+    /[A-Za-z0-9_'’]/.test(part) && wordMatchesQuery(part, lowerTerms, stems) ? (
       <mark
         key={i}
         className="rounded bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-400/30"
