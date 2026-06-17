@@ -364,7 +364,13 @@ function ResultRow({
   return (
     <Link
       href={href}
-      prefetch
+      // Do NOT eagerly prefetch result rows. The list re-renders on every
+      // keystroke with up to MAX_HITS (100) rows; `prefetch` made Next fire an
+      // RSC payload fetch (a full server render of each doc route) for EVERY
+      // row, EVERY keystroke — fast typing => a prefetch avalanche that froze
+      // low-end clients and hammered the server. Navigation on click is
+      // unaffected; Next still prefetches on hover/touchstart.
+      prefetch={false}
       onClick={onResultClick}
       aria-current={selected ? "page" : undefined}
       className={`${cls}${stateCls}`}
@@ -682,6 +688,26 @@ export function Finder({
     }
     return out;
   }, [baseHits, selectedFacets, sort]);
+
+  // Render only the top slice of rows by default. The engine returns up to
+  // MAX_HITS (100); mounting all of them as <Link> rows on every keystroke is a
+  // heavy DOM + reconcile cost on low-end clients (it compounded the prefetch
+  // storm that froze them). The GRAPH still receives the FULL visibleHits as
+  // matches (see graphMatches below) — only the visible DOM list is capped.
+  const RESULT_RENDER_CAP = 25;
+  const [showAllResults, setShowAllResults] = useState(false);
+  // Collapse back to the capped view whenever the result set changes (a new
+  // search). React's "adjust state during render" pattern (not an effect, which
+  // would cascade renders): visibleHits is memoized, so expanding (showAll
+  // toggle) doesn't change its identity and won't fight the user's click.
+  const [prevHits, setPrevHits] = useState(visibleHits);
+  if (prevHits !== visibleHits) {
+    setPrevHits(visibleHits);
+    setShowAllResults(false);
+  }
+  const renderedHits = showAllResults
+    ? visibleHits
+    : visibleHits.slice(0, RESULT_RENDER_CAP);
 
   // A filter is "active" when the user has narrowed the corpus — text in the box
   // (the LIVE input, so the graph reacts on the keystroke, not after the debounce
@@ -1270,7 +1296,7 @@ export function Finder({
                 loading ? "opacity-50" : "opacity-100"
               }`}
             >
-              {visibleHits.map((hit, i) => (
+              {renderedHits.map((hit, i) => (
                 <Fragment key={`${hit.type}:${hit.id}`}>
                   {boundary === i ? (
                     <li className="py-3">
@@ -1299,6 +1325,17 @@ export function Finder({
                   </li>
                 </Fragment>
               ))}
+              {!showAllResults && visibleHits.length > RESULT_RENDER_CAP ? (
+                <li className="py-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAllResults(true)}
+                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100"
+                  >
+                    Show {visibleHits.length - RESULT_RENDER_CAP} more
+                  </button>
+                </li>
+              ) : null}
             </ul>
           )}
         </section>

@@ -411,6 +411,18 @@
         );
       } catch (e) {}
     }
+    var saveViewTimer = null;
+    function scheduleSaveView() {
+      // Coalesce per-wheel-tick persistence. saveView() does a synchronous
+      // JSON.stringify + localStorage.setItem; calling it on EVERY wheel event
+      // (dozens fire per scroll gesture, each a blocking main-thread disk write)
+      // stutters the zoom. Debounce to one write ~250ms after the gesture rests.
+      if (saveViewTimer) clearTimeout(saveViewTimer);
+      saveViewTimer = setTimeout(function () {
+        saveViewTimer = null;
+        saveView();
+      }, 250);
+    }
     function loadView() {
       try {
         var raw = localStorage.getItem(storageKey());
@@ -1961,7 +1973,15 @@
       // camera/pan is moving, a hover-focus crossfade is in flight, OR the fetch
       // ring is breathing while we await data. coronaK lerps are kept alive too.
       var stillFocus = isFocusLerping();
-      var alive = !reduced && (alpha > 0 || alphaTarget > alphaMin);
+      // Park once the sim drops below the tick-engage threshold (0.05 — the SAME
+      // gate the physics loop uses above: below it NO tick() runs, so node
+      // positions are FROZEN and the scene is static, nothing to redraw). The
+      // old test (alpha > 0 / alphaMin) never went false: the layout cools to a
+      // resting alpha≈0.03 (>0 and >alphaMin) to balance the alpha-independent
+      // center gravity, so the loop burned a full 60fps full-canvas redraw
+      // FOREVER at idle. Live crossfades (focus/hover/camera/pan/fetch-ring) all
+      // carry their own keep-alive flags below, so parking a still sim is safe.
+      var alive = !reduced && (alpha >= 0.05 || alphaTarget >= 0.05);
       // Only the fetch ring breathes now (nodes no longer pulse), so the
       // perpetual keep-alive is limited to the awaiting-data state.
       var hasBreathingNode = !reduced && !errorState && fetching && nodes.length === 0;
@@ -2025,8 +2045,14 @@
         wake();
         return;
       }
-      alphaTarget = target;
+      // Re-energize the CURRENT heat (alpha) so the layout responds, but keep the
+      // cooling FLOOR at the resting warmth (0.03, matching init) — do NOT pin
+      // alphaTarget to `target`. Pinning it (e.g. reheat(0.3) on hover/drag) left
+      // alphaTarget ≥ 0.05 permanently, so `alive` above never went false and the
+      // loop never re-parked after the first interaction. Bumping alpha alone
+      // re-runs the sim briefly, then it cools back to rest and parks.
       if (alpha < target) alpha = target;
+      alphaTarget = 0.03;
       wake();
     }
 
@@ -2182,6 +2208,19 @@
       }
     }
 
+    // Clear hover when the pointer LEAVES the canvas. onPointerMove only clears
+    // hoverId on a move to empty space; if the mouse leaves the canvas while over
+    // a node (onto the finder rail, another window) no move fires, so hoverId
+    // stays set and the hover-corona keep-alive pins the rAF loop at 60fps
+    // forever — re-opening the exact perpetual-redraw we just closed. One redraw
+    // of the cleared state, then the loop re-parks.
+    function onPointerLeave() {
+      if (dragging || hoverId == null) return;
+      hoverId = null;
+      if (opts.onNodeHover) opts.onNodeHover(null);
+      wake();
+    }
+
     function onPointerDown(ev) {
       canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId);
       var hit = hitTest(ev.clientX, ev.clientY);
@@ -2251,7 +2290,7 @@
         cam.ty = py - wy * cam.scale;
       }
       wake();
-      saveView();
+      scheduleSaveView();
     }
 
     // Canvas focus delegates into the a11y tree — Tab into the graph lands on
@@ -2779,6 +2818,7 @@
     ingest(data && data.nodes, data && data.edges);
 
     canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
@@ -2872,6 +2912,7 @@
         if (rafId) cancelAnimationFrame(rafId);
         rafId = null;
         canvas.removeEventListener("pointermove", onPointerMove);
+        canvas.removeEventListener("pointerleave", onPointerLeave);
         canvas.removeEventListener("pointerdown", onPointerDown);
         canvas.removeEventListener("pointerup", onPointerUp);
         canvas.removeEventListener("pointercancel", onPointerUp);
@@ -2888,6 +2929,7 @@
         if (reduceMQ && reduceMQ.removeEventListener) reduceMQ.removeEventListener("change", onReduceChange);
         if (forcedMQ && forcedMQ.removeEventListener) forcedMQ.removeEventListener("change", onForcedChange);
         if (announceTimer) clearTimeout(announceTimer);
+        if (saveViewTimer) clearTimeout(saveViewTimer);
         try {
           if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
           if (overlay.parentNode) overlay.parentNode.removeChild(overlay);

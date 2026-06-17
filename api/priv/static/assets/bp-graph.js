@@ -319,7 +319,7 @@
     var alpha = 1.0;
     var alphaTarget = 1.0;
     var alphaDecay = 0.008;
-    var velocityDecay = 0.55;
+    var velocityDecay = 0.58;
     var alphaMin = 0.001;
 
     var R_RING = 0; // recomputed on layout = 0.22*min(W,H)
@@ -410,6 +410,18 @@
           })
         );
       } catch (e) {}
+    }
+    var saveViewTimer = null;
+    function scheduleSaveView() {
+      // Coalesce per-wheel-tick persistence. saveView() does a synchronous
+      // JSON.stringify + localStorage.setItem; calling it on EVERY wheel event
+      // (dozens fire per scroll gesture, each a blocking main-thread disk write)
+      // stutters the zoom. Debounce to one write ~250ms after the gesture rests.
+      if (saveViewTimer) clearTimeout(saveViewTimer);
+      saveViewTimer = setTimeout(function () {
+        saveViewTimer = null;
+        saveView();
+      }, 250);
     }
     function loadView() {
       try {
@@ -727,10 +739,11 @@
           node.y = cy + rad * Math.sin(ang);
           node.alpha = 0;
           node.scaleK = 0;
-          // Stronger depth stagger (55ms/ring, 320ms cap) turns the root→rim
-          // fill into a readable outward ripple — "impact propagating outward"
-          // — while staying under ~0.6s total. Pairs with the easeOutBack settle.
-          node._enterAt = perfNow() + Math.min(depthMap[node.id] * 55, 320);
+          // Slow depth stagger (70ms/ring, 460ms cap) turns the root→rim fill
+          // into a readable, relaxed outward ripple — "impact propagating
+          // outward" — at the chill ~0.5s register. Pairs with the easeOutCubic
+          // (no-overshoot, Obsidian-faithful) entrance settle.
+          node._enterAt = perfNow() + Math.min(depthMap[node.id] * 70, 460);
         }
       });
 
@@ -1152,9 +1165,10 @@
     // when we most want to be cheap (deciding whether to park).
     var _lerpDirty = 0;
     function lerpAlphas(dt) {
-      // ~150ms smooth opacity ramp both ways (the Obsidian focus crossfade).
-      var kin = kStep(0.22, dt);
-      var kout = kStep(0.18, dt);
+      // ~500ms relaxed opacity ramp both ways (the Obsidian focus crossfade —
+      // slow/chill, glides rather than snaps).
+      var kin = kStep(0.1, dt);
+      var kout = kStep(0.085, dt);
       var dirty = 0;
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
@@ -1175,14 +1189,14 @@
     }
 
     // Entrance has TWO decoupled channels so opacity LAGS spatial arrival
-    // (the deliberate luxe fade): scaleK on easeOutBack over ~280ms, alpha on
-    // a slightly-longer, slightly-delayed easeOutCubic so the orb fades in
-    // AFTER it has scaled into place. Returns {scale, alpha} progress, and
-    // clears _enterAt only once BOTH channels have completed.
+    // (the slow, chill fade): scaleK on easeOutCubic (no overshoot — Obsidian
+    // doesn't bounce) over ~460ms, alpha on a longer, delayed easeOutCubic so
+    // the node fades in AFTER it has scaled into place. Returns {scale, alpha}
+    // progress, and clears _enterAt only once BOTH channels have completed.
     function entranceProgress(node, now) {
       if (node._enterAt === 0) return { scale: 1, alpha: 1, done: true };
-      var ts = (now - node._enterAt) / 280; // scale window
-      var ta = (now - node._enterAt - 60) / 360; // alpha: +60ms delay, 360ms
+      var ts = (now - node._enterAt) / 460; // scale window (relaxed)
+      var ta = (now - node._enterAt - 80) / 560; // alpha: +80ms delay, 560ms
       var scaleP = ts < 0 ? 0 : ts >= 1 ? 1 : ts;
       var alphaP = ta < 0 ? 0 : ta >= 1 ? 1 : ta;
       var done = scaleP >= 1 && alphaP >= 1;
@@ -1218,11 +1232,11 @@
         stepMorph(now);
       }
 
-      // entrance ramp — scale (easeOutBack) leads, alpha (easeOutCubic) lags
+      // entrance ramp — scale (easeOutCubic, no bounce) leads, alpha lags
       nodes.forEach(function (n) {
         if (n._enterAt) {
           var ep = entranceProgress(n, now);
-          n.scaleK = easeOutBack(ep.scale);
+          n.scaleK = easeOutCubic(ep.scale);
           n.alpha = easeOutCubic(ep.alpha);
         }
       });
@@ -1845,12 +1859,12 @@
       lerpAlphas(dt);
 
       // eased zoom: glide cam.scale toward camTargetScale, keeping the cursor
-      // world-point pinned (luxe register ~350-450ms). Snap when reduced.
+      // world-point pinned (relaxed ~500ms register). Snap when reduced.
       if (!camAnimating && Math.abs(cam.scale - camTargetScale) > 0.0005) {
         if (reduced) {
           cam.scale = camTargetScale;
         } else {
-          cam.scale += (camTargetScale - cam.scale) * kStep(0.16, dt);
+          cam.scale += (camTargetScale - cam.scale) * kStep(0.1, dt);
           if (Math.abs(cam.scale - camTargetScale) < 0.0008) cam.scale = camTargetScale;
         }
         if (camZoomAnchor) {
@@ -1859,13 +1873,13 @@
         }
       }
 
-      // hover corona spring — SNAPPY in (~100ms), LUXE out (~350ms). This is
-      // the named "fast-in/slow-out" luxe tell, on the most-used interaction.
+      // hover corona spring — relaxed and near-symmetric (~430ms in, ~560ms
+      // out). No snappy "tell": Obsidian's hover is a slow, chill glide.
       var coronaTarget = hoverId != null ? 1 : 0;
       if (reduced) {
         hoverCoronaK = coronaTarget;
       } else {
-        var ck = coronaTarget > hoverCoronaK ? kStep(0.30, dt) : kStep(0.10, dt);
+        var ck = coronaTarget > hoverCoronaK ? kStep(0.11, dt) : kStep(0.085, dt);
         hoverCoronaK += (coronaTarget - hoverCoronaK) * ck;
         if (Math.abs(hoverCoronaK - coronaTarget) < 0.002) hoverCoronaK = coronaTarget;
       }
@@ -1898,7 +1912,15 @@
       // camera/pan is moving, a hover-focus crossfade is in flight, OR the fetch
       // ring is breathing while we await data. coronaK lerps are kept alive too.
       var stillFocus = isFocusLerping();
-      var alive = !reduced && (alpha > 0 || alphaTarget > alphaMin);
+      // Park once the sim drops below the tick-engage threshold (0.05 — the SAME
+      // gate the physics loop uses above: below it NO tick() runs, so node
+      // positions are FROZEN and the scene is static, nothing to redraw). The
+      // old test (alpha > 0 / alphaMin) never went false: the layout cools to a
+      // resting alpha≈0.03 (>0 and >alphaMin) to balance the alpha-independent
+      // center gravity, so the loop burned a full 60fps full-canvas redraw
+      // FOREVER at idle. Live crossfades (focus/hover/camera/pan/fetch-ring) all
+      // carry their own keep-alive flags below, so parking a still sim is safe.
+      var alive = !reduced && (alpha >= 0.05 || alphaTarget >= 0.05);
       // Only the fetch ring breathes now (nodes no longer pulse), so the
       // perpetual keep-alive is limited to the awaiting-data state.
       var hasBreathingNode = !reduced && !errorState && fetching && nodes.length === 0;
@@ -1962,8 +1984,14 @@
         wake();
         return;
       }
-      alphaTarget = target;
+      // Re-energize the CURRENT heat (alpha) so the layout responds, but keep the
+      // cooling FLOOR at the resting warmth (0.03, matching init) — do NOT pin
+      // alphaTarget to `target`. Pinning it (e.g. reheat(0.3) on hover/drag) left
+      // alphaTarget ≥ 0.05 permanently, so `alive` above never went false and the
+      // loop never re-parked after the first interaction. Bumping alpha alone
+      // re-runs the sim briefly, then it cools back to rest and parks.
       if (alpha < target) alpha = target;
+      alphaTarget = 0.03;
       wake();
     }
 
@@ -2119,6 +2147,19 @@
       }
     }
 
+    // Clear hover when the pointer LEAVES the canvas. onPointerMove only clears
+    // hoverId on a move to empty space; if the mouse leaves the canvas while over
+    // a node (onto the finder rail, another window) no move fires, so hoverId
+    // stays set and the hover-corona keep-alive pins the rAF loop at 60fps
+    // forever — re-opening the exact perpetual-redraw we just closed. One redraw
+    // of the cleared state, then the loop re-parks.
+    function onPointerLeave() {
+      if (dragging || hoverId == null) return;
+      hoverId = null;
+      if (opts.onNodeHover) opts.onNodeHover(null);
+      wake();
+    }
+
     function onPointerDown(ev) {
       canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId);
       var hit = hitTest(ev.clientX, ev.clientY);
@@ -2188,7 +2229,7 @@
         cam.ty = py - wy * cam.scale;
       }
       wake();
-      saveView();
+      scheduleSaveView();
     }
 
     // Canvas focus delegates into the a11y tree — Tab into the graph lands on
@@ -2327,11 +2368,11 @@
       camTargetScale = target.scale;
       var start = { tx: cam.tx, ty: cam.ty, scale: cam.scale };
       var t0 = perfNow();
-      // 360ms expo-out: shares one perceived "physics" with the wheel-zoom
-      // (now ~180ms via kStep(0.16)) — fast initial response, long graceful
-      // settle, consistent ~180-360ms band, so both camera paths read as the
-      // same operator rather than two different hands.
-      var dur = 360;
+      // 520ms expo-out: shares one perceived "physics" with the wheel-zoom
+      // (now ~475ms via kStep(0.1)) — gentle initial response, long graceful
+      // settle in the relaxed ~500ms band, so both camera paths read as the
+      // same calm operator rather than two different hands.
+      var dur = 520;
       function step() {
         if (destroyed || myToken !== camAnimToken) return;
         var t = clamp((perfNow() - t0) / dur, 0, 1);
@@ -2686,6 +2727,7 @@
     ingest(data && data.nodes, data && data.edges);
 
     canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
@@ -2757,6 +2799,7 @@
         if (rafId) cancelAnimationFrame(rafId);
         rafId = null;
         canvas.removeEventListener("pointermove", onPointerMove);
+        canvas.removeEventListener("pointerleave", onPointerLeave);
         canvas.removeEventListener("pointerdown", onPointerDown);
         canvas.removeEventListener("pointerup", onPointerUp);
         canvas.removeEventListener("pointercancel", onPointerUp);
@@ -2773,6 +2816,7 @@
         if (reduceMQ && reduceMQ.removeEventListener) reduceMQ.removeEventListener("change", onReduceChange);
         if (forcedMQ && forcedMQ.removeEventListener) forcedMQ.removeEventListener("change", onForcedChange);
         if (announceTimer) clearTimeout(announceTimer);
+        if (saveViewTimer) clearTimeout(saveViewTimer);
         try {
           if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
           if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
