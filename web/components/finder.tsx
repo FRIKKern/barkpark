@@ -1060,6 +1060,17 @@ export function Finder({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onSearchKeyDown}
               aria-keyshortcuts="ArrowDown"
+              // Kill the browser's native autocomplete/history dropdown: it pops
+              // over the field AND hijacks ↓/↑ to drive its own suggestion list,
+              // fighting the keyboard nav (↓ should enter our results, not the
+              // browser popup). The 1Password-style attrs stop password managers
+              // and form tooling from attaching too.
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-1p-ignore
+              data-lpignore="true"
               placeholder='Try: headless · "cli guide" · phoenex · report -draft'
               autoFocus
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
