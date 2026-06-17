@@ -17,6 +17,7 @@ import {
   type SortId,
 } from "@/lib/find";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
+import { useLiveSearch } from "@/lib/use-live-search";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
 import {
@@ -507,6 +508,16 @@ export function Finder({
   // so the landing graph can emphasize each match by rank and dim the rest. A
   // no-op outside the (finder) layout's provider.
   const { setMatches } = useGraphMatches();
+  // Per-keystroke live search over a direct WebSocket (browser → API, no Vercel
+  // hop). Ships dark: `enabled` only when the NEXT_PUBLIC_BARKPARK_WS_* env is
+  // provisioned, `ready` only once the channel joins — until then the search
+  // effect below keeps using the same-origin `/api/find` path, so nothing is
+  // lost when it's off or still connecting.
+  const {
+    enabled: liveEnabled,
+    ready: liveReady,
+    search: liveSearch,
+  } = useLiveSearch();
   // Live finder params (q/engine/cache/sort/facets) — appended to each row's
   // doc href so the open doc and the search state coexist in the URL path+query.
   const currentQueryString = sp.toString();
@@ -608,8 +619,17 @@ export function Finder({
     // X-BP-SEARCH-CLIENT key the API counts for correction auto-promotion.
     if (sessionId) params.set("sid", sessionId);
     const t0 = performance.now();
-    fetch(`/api/find?${params.toString()}`, { signal: ctrl.signal })
-      .then((r) => r.json())
+    // Live socket when it's connected, else the same-origin HTTP route. Both
+    // resolve the identical `FindResponse` (shared shaper), so the `.then`/`.catch`
+    // below don't care which transport answered. A superseded live reply rejects
+    // as an AbortError, which the catch already ignores like a fetch abort.
+    const resultP: Promise<FindResponse> =
+      liveEnabled && liveReady
+        ? liveSearch({ q, engine, browse: !q })
+        : fetch(`/api/find?${params.toString()}`, { signal: ctrl.signal }).then(
+            (r) => r.json() as Promise<FindResponse>,
+          );
+    resultP
       .then((d: FindResponse) =>
         setResult({
           key: reqKey,
@@ -644,7 +664,17 @@ export function Finder({
         }
       });
     return () => ctrl.abort();
-  }, [reqKey, engine, q, cacheOn, seedKey, sessionId]);
+  }, [
+    reqKey,
+    engine,
+    q,
+    cacheOn,
+    seedKey,
+    sessionId,
+    liveEnabled,
+    liveReady,
+    liveSearch,
+  ]);
   const data = result?.data ?? null;
   const roundTripMs = result?.key === reqKey ? result.roundTripMs : null;
   const prerendered = result?.key === reqKey && result.prerendered === true;

@@ -2,13 +2,14 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import {
   DOC_TYPES,
-  normalizeHit,
-  type FacetMap,
-  type FindHit,
   type FindResponse,
-  type ParsedQuery,
   type SearchEngine,
 } from "@/lib/find";
+import {
+  emptyParsed,
+  shapeFindResponse,
+  type UpstreamSearchJson,
+} from "@/lib/find-shape";
 import { bpAll } from "@/lib/bp-tags";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
@@ -47,26 +48,6 @@ function authHeaders(): HeadersInit {
   return TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
 }
 
-function emptyParsed(): ParsedQuery {
-  return { terms: [], phrases: [], excludes: [], prefixes: [] };
-}
-
-interface UpstreamJson {
-  documents?: unknown[];
-  count?: number;
-  parsedQuery?: ParsedQuery;
-  recovery?: string | null;
-  facets?: FacetMap | null;
-  truncation?: { index: number } | null;
-  ms?: number;
-  /** Opaque id for the query event the API logged — threaded back on a result
-   * click so the interaction endpoint can attribute the click to the search. */
-  searchEventId?: string;
-  /** Canonical corrected term when a LEARNED/synonym correction fired for the
-   * query (expand_synonyms matched a synonym). Null when no correction. */
-  correctedTo?: string | null;
-}
-
 /** Per-search signals the route handler threads to the upstream so a search can
  * be recorded against the browser's distinct session. `sessionId` becomes the
  * `X-BP-SEARCH-CLIENT` header; presence of either flag flips on the record
@@ -86,14 +67,14 @@ function searchHeaders(signals: UpstreamSignals): HeadersInit {
 /** Raw upstream call — always no-store; caching is layered above by
  * `cachedUpstream` so the Data Cache stores the parsed payload, not the HTTP
  * response (which the origin marks private/uncacheable). */
-async function rawUpstream(url: string, signals: UpstreamSignals = {}): Promise<UpstreamJson> {
+async function rawUpstream(url: string, signals: UpstreamSignals = {}): Promise<UpstreamSearchJson> {
   // bpFetchJson layers the shared resilience (15s timeout, retry over the
   // API-restart window, res.ok guard, defensive JSON parse) and bakes in auth;
   // searchHeaders adds the per-search X-BP-SEARCH-* signals on top (caller
   // headers win over the injected bearer). Re-wrap into a `search …` message so
   // the route's error envelope keeps the same human-facing prefix.
   try {
-    return (await bpFetchJson(url, { headers: searchHeaders(signals) })) as UpstreamJson;
+    return (await bpFetchJson(url, { headers: searchHeaders(signals) })) as UpstreamSearchJson;
   } catch (e) {
     if (e instanceof BpUpstreamError) {
       throw new Error(`search ${e.status}: ${humanUpstreamMessage(e)}`);
@@ -166,28 +147,13 @@ export async function runSearch({
       : await rawUpstream(url, signals);
   const upstreamMs = Math.round(performance.now() - t0);
 
-  const hits = (json.documents ?? [])
-    .map(normalizeHit)
-    .filter((h): h is FindHit => h !== null);
-
-  return {
-    mode: browse ? "browse" : "search",
-    hits,
-    total: typeof json.count === "number" ? json.count : hits.length,
+  return shapeFindResponse(json, {
     engine,
     engineUsed,
-    indxUnavailable: wantIndx && !useIndx,
-    parsedQuery: browse ? null : (json.parsedQuery ?? emptyParsed()),
-    recovery: json.recovery ?? null,
-    facets: json.facets ?? null,
-    truncation: json.truncation ?? null,
-    ms: typeof json.ms === "number" ? json.ms : null,
+    browse,
     cache: cacheOn && !record,
     upstreamMs,
-    searchEventId: typeof json.searchEventId === "string" ? json.searchEventId : null,
-    correctedTo: typeof json.correctedTo === "string" ? json.correctedTo : null,
-    error: null,
-  };
+  });
 }
 
 /** Empty/error envelope so callers can return a stable shape without throwing. */

@@ -17,6 +17,17 @@ defmodule BarkparkWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Public realtime socket — carries SearchChannel for per-keystroke live search
+  # (browser → API direct, one persistent connection, no per-keystroke TLS/Vercel
+  # hop). No per-socket `check_origin` override on purpose: the websocket inherits
+  # the endpoint-level allowlist from runtime.exs (barkpark.cloud + *.vercel.app +
+  # BARKPARK_EXTRA_ORIGINS). Overriding it here is the Past-Mistake-#11 landmine —
+  # a private list that drifts from the LiveView one and silently 403s. longpoll
+  # off: a search keystroke stream has no use for the fallback transport.
+  socket "/socket", BarkparkWeb.UserSocket,
+    websocket: true,
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
