@@ -1,4 +1,20 @@
 import "server-only";
+import { Agent, fetch as keepAliveFetch } from "undici";
+
+/**
+ * Persistent connection pool to the Barkpark API. Without it, every upstream
+ * call (every search) pays a fresh TLS handshake — the dominant latency on the
+ * Vercel→Hetzner hop (~150–190ms of pure overhead). We use undici's OWN fetch +
+ * Agent rather than the global fetch because Node's built-in fetch keeps its
+ * undici dispatcher internal/unreachable, so a global keep-alive setting won't
+ * stick. Idle sockets stay warm across a typing burst within a serverless
+ * instance; undici transparently re-establishes if the server closed one.
+ */
+const bpDispatcher = new Agent({
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 600_000,
+  connections: 64,
+});
 
 /**
  * The one place server-side routes/libs talk to the Barkpark API over a raw
@@ -94,9 +110,16 @@ function withAuth(init?: RequestInit): RequestInit {
 async function attempt(url: string, init: RequestInit): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  let res: Response;
+  let res: Awaited<ReturnType<typeof keepAliveFetch>>;
   try {
-    res = await fetch(url, { ...init, signal: controller.signal });
+    // undici fetch + the shared keep-alive Agent → reuse the TLS connection.
+    res = await keepAliveFetch(url, {
+      method: init.method,
+      headers: init.headers as Record<string, string> | undefined,
+      body: init.body as string | undefined,
+      signal: controller.signal,
+      dispatcher: bpDispatcher,
+    });
   } catch (e) {
     // Network error or AbortController timeout — both surface as status 0.
     const msg = (e as Error)?.name === "AbortError" ? "request timed out" : (e as Error).message;
