@@ -4,17 +4,15 @@ import { useState } from "react";
 import Link from "next/link";
 import type { FindResponse, SearchEngine } from "@/lib/find";
 
-/* A small fixed query set exercised across both engines × cache modes. */
+/* A small fixed query set exercised across both engines. Search is always
+ * direct (no cache), so this measures the real engine + network round-trip. */
 const QUERIES = ["headless", "cli", "publish", "plugin", "deploy", "barkpark"];
 const ENGINES: SearchEngine[] = ["postgres", "indx"];
-const NO_STORE_RUNS = 4; // repeatable cold-engine samples
-const CACHED_RUNS = 5; // 1 warm-up (cold miss) + 4 warm hits
+const RUNS = 6; // samples per cell; we report the median
 
 interface Cell {
-  noStore: number; // median client round-trip, cache off
-  cachedCold: number; // first cache=on call (miss)
-  cachedWarm: number; // median of warm cache=on calls
-  upstreamWarm: number; // upstream fetch ms on a warm hit (≈0 = Data Cache)
+  rt: number; // median client round-trip (ms)
+  upstreamMs: number; // median upstream fetch (ms)
   total: number;
 }
 
@@ -24,10 +22,8 @@ const median = (xs: number[]) =>
 async function timeCall(
   q: string,
   engine: SearchEngine,
-  cache: boolean,
 ): Promise<{ rt: number; upstreamMs: number | null; total: number }> {
   const params = new URLSearchParams({ q, engine });
-  if (cache) params.set("cache", "on");
   const t0 = performance.now();
   const r = await fetch(`/api/find?${params.toString()}`);
   const d: FindResponse = await r.json();
@@ -35,27 +31,16 @@ async function timeCall(
 }
 
 async function benchCell(q: string, engine: SearchEngine): Promise<Cell> {
-  const noStore: number[] = [];
-  for (let i = 0; i < NO_STORE_RUNS; i++) noStore.push((await timeCall(q, engine, false)).rt);
-
-  // Purge the find Data Cache so the first cache=on call is a genuine cold miss
-  // (makes the cached-cold column repeatable across runs).
-  await fetch("/api/cache/reset", { method: "POST" });
-
-  let cachedCold = 0;
-  const warm: number[] = [];
-  let upstreamWarm = 0;
+  const rts: number[] = [];
+  const ups: number[] = [];
   let total = 0;
-  for (let i = 0; i < CACHED_RUNS; i++) {
-    const c = await timeCall(q, engine, true);
+  for (let i = 0; i < RUNS; i++) {
+    const c = await timeCall(q, engine);
+    rts.push(c.rt);
+    if (typeof c.upstreamMs === "number") ups.push(c.upstreamMs);
     total = c.total;
-    if (i === 0) cachedCold = c.rt;
-    else {
-      warm.push(c.rt);
-      upstreamWarm = c.upstreamMs ?? upstreamWarm;
-    }
   }
-  return { noStore: median(noStore), cachedCold, cachedWarm: median(warm), upstreamWarm, total };
+  return { rt: median(rts), upstreamMs: median(ups), total };
 }
 
 type Grid = Record<string, Partial<Record<SearchEngine, Cell>>>;
@@ -106,8 +91,8 @@ export function Bench() {
           Client round-trip latency across{" "}
           <span className="text-zinc-700 dark:text-zinc-300">{QUERIES.length} queries</span>{" "}
           × <span className="font-mono">postgres</span> /{" "}
-          <span className="font-mono">indx</span> × cache off/on. Cached-warm is
-          served from the Next Data Cache (no API round-trip).
+          <span className="font-mono">indx</span>. Every call is a direct, fresh
+          engine query — no cache.
         </p>
         <button
           onClick={run}
@@ -124,9 +109,8 @@ export function Bench() {
             <tr className="border-b border-zinc-300 text-left dark:border-zinc-700">
               <th className="px-3 py-2 font-medium">query</th>
               <th className="px-3 py-2 font-medium">engine</th>
-              <th className="px-3 py-2 text-right font-medium">no-store</th>
-              <th className="px-3 py-2 text-right font-medium">cached cold</th>
-              <th className="px-3 py-2 text-right font-medium">cached warm</th>
+              <th className="px-3 py-2 text-right font-medium">round-trip</th>
+              <th className="px-3 py-2 text-right font-medium">upstream</th>
               <th className="px-3 py-2 text-right font-medium">hits</th>
             </tr>
           </thead>
@@ -143,10 +127,9 @@ export function Bench() {
                       {engine === "postgres" ? q : ""}
                     </td>
                     <td className="px-3 py-2 font-mono text-zinc-500">{engine}</td>
-                    <td className="px-3 py-2 text-right font-mono">{ms(c?.noStore)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{ms(c?.cachedCold)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-emerald-600 dark:text-emerald-400">
-                      {ms(c?.cachedWarm)}
+                    <td className="px-3 py-2 text-right font-mono">{ms(c?.rt)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-zinc-400">
+                      {ms(c?.upstreamMs)}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-zinc-400">
                       {c ? c.total : "—"}
@@ -162,13 +145,10 @@ export function Bench() {
                 <td className="px-3 py-2 font-medium">median</td>
                 <td className="px-3 py-2 font-mono text-zinc-500">{engine}</td>
                 <td className="px-3 py-2 text-right font-mono font-medium">
-                  {ms(agg(engine, (c) => c.noStore))}
+                  {ms(agg(engine, (c) => c.rt))}
                 </td>
-                <td className="px-3 py-2 text-right font-mono font-medium">
-                  {ms(agg(engine, (c) => c.cachedCold))}
-                </td>
-                <td className="px-3 py-2 text-right font-mono font-medium text-emerald-600 dark:text-emerald-400">
-                  {ms(agg(engine, (c) => c.cachedWarm))}
+                <td className="px-3 py-2 text-right font-mono font-medium text-zinc-500">
+                  {ms(agg(engine, (c) => c.upstreamMs))}
                 </td>
                 <td className="px-3 py-2" />
               </tr>
@@ -178,11 +158,9 @@ export function Bench() {
       </div>
 
       <p className="text-xs leading-relaxed text-zinc-400">
-        no-store = always-fresh (engine + network every call, median of{" "}
-        {NO_STORE_RUNS}). cached cold = first cache=on call (Data Cache miss).
-        cached warm = served from cache (median of {CACHED_RUNS - 1}). Numbers are
-        client-perceived round-trip; the finder shows per-query engine compute +
-        upstream + round-trip live.
+        round-trip = client-perceived latency, median of {RUNS} direct calls per
+        cell. upstream = the route handler → API fetch time. The finder shows
+        per-query engine compute + upstream + round-trip live.
       </p>
     </main>
   );

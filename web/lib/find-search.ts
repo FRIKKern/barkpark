@@ -1,5 +1,4 @@
 import "server-only";
-import { unstable_cache } from "next/cache";
 import {
   DOC_TYPES,
   type FindResponse,
@@ -10,7 +9,6 @@ import {
   shapeFindResponse,
   type UpstreamSearchJson,
 } from "@/lib/find-shape";
-import { bpAll } from "@/lib/bp-tags";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
 
@@ -19,17 +17,17 @@ import { DATASET } from "@/lib/config";
  * Imported by both the `/api/find` route handler (client-driven searches) and
  * the home page (server-rendered initial browse), so the two never drift.
  *
- * WHY a hand-rolled `unstable_cache` instead of per-fetch `next: { revalidate }`:
- * the Phoenix API answers with `Cache-Control: max-age=0, private,
- * must-revalidate`, which Next's PER-FETCH Data Cache honours — so a
- * `fetch(url, { next: { revalidate } })` is never stored and "cache mode" was a
- * silent no-op (every request paid the full round-trip). `unstable_cache`
- * caches the FUNCTION'S RETURN VALUE and ignores the upstream Cache-Control,
- * so warm hits actually skip the origin (~0–5ms vs ~280ms). Same mechanism the
- * reader pages (getPost/getPaper) already use successfully.
+ * Search is ALWAYS fresh: every call goes straight to Postgres/Indx (no-store),
+ * no Data Cache layer. The engine is the single source of truth and is fast
+ * enough (direct WebSocket + keep-alive pool + batch hydration) that caching
+ * search results would only risk serving stale ones. Page-level ISR for the
+ * reader pages (getPost/getPaper) is unaffected — that's standard and lives
+ * elsewhere.
  */
 
-/** Cache tag for the find Data Cache — `revalidateTag(FIND_TAG)` busts it. */
+/** Legacy cache tag, retained because a few revalidation routes still import it
+ * (webhook / reindex / reset). Search no longer caches, so `revalidateTag(FIND_TAG)`
+ * is now a harmless no-op — kept only to avoid churning those call sites. */
 export const FIND_TAG = "find";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -64,9 +62,7 @@ function searchHeaders(signals: UpstreamSignals): HeadersInit {
   return h;
 }
 
-/** Raw upstream call — always no-store; caching is layered above by
- * `cachedUpstream` so the Data Cache stores the parsed payload, not the HTTP
- * response (which the origin marks private/uncacheable). */
+/** Upstream call — always no-store, straight to the engine. */
 async function rawUpstream(url: string, signals: UpstreamSignals = {}): Promise<UpstreamSearchJson> {
   // bpFetchJson layers the shared resilience (15s timeout, retry over the
   // API-restart window, res.ok guard, defensive JSON parse) and bakes in auth;
@@ -83,20 +79,10 @@ async function rawUpstream(url: string, signals: UpstreamSignals = {}): Promise<
   }
 }
 
-/** Cached variant — keyed on the full URL, 5-min revalidate, tagged for
- * on-demand busting. Ignores the origin's Cache-Control (the whole point).
- * Tagged with FIND_TAG (manual reset/reindex buttons) AND the dataset `_all`
- * tag so a published change anywhere refreshes search via the webhook. */
-const cachedUpstream = unstable_cache(rawUpstream, ["find-upstream"], {
-  revalidate: 300,
-  tags: [FIND_TAG, bpAll()],
-});
-
 export interface RunSearchArgs {
   q: string;
   engine: SearchEngine;
   browse?: boolean;
-  cacheOn?: boolean;
   /** Browser session id (localStorage `bp-search-client`) — forwarded as
    * `X-BP-SEARCH-CLIENT` so the recorded query event is attributed to a
    * distinct session (the anti-gaming key for correction auto-promotion). */
@@ -105,15 +91,14 @@ export interface RunSearchArgs {
 
 /**
  * Run one search and shape it into a `FindResponse`. Times the upstream call so
- * a warm cache hit (~0–5ms) is visible in the latency readout. Throws on a hard
- * upstream failure — callers decide how to degrade (the route returns a
- * 200-with-error envelope; the page falls back to a client fetch).
+ * the engine latency is visible in the readout. Throws on a hard upstream
+ * failure — callers decide how to degrade (the route returns a 200-with-error
+ * envelope; the page falls back to a client fetch).
  */
 export async function runSearch({
   q,
   engine,
   browse = false,
-  cacheOn = false,
   sessionId = null,
 }: RunSearchArgs): Promise<FindResponse> {
   const wantIndx = engine === "indx";
@@ -135,23 +120,19 @@ export async function runSearch({
   const url = `${base}/v1/data/search/${DATASET}?${params.toString()}`;
 
   // Record a real (non-browse) query event when we have a session to attribute
-  // it to. Recording must bypass the Data Cache — a cached hit would skip the
-  // origin and never log the event — so a recorded search always goes raw.
+  // it to (the anti-gaming key for correction auto-promotion).
   const record = Boolean(sessionId) && !browse && Boolean(q);
   const signals: UpstreamSignals = { sessionId, record };
 
   const t0 = performance.now();
-  const json =
-    cacheOn && !record
-      ? await cachedUpstream(url)
-      : await rawUpstream(url, signals);
+  const json = await rawUpstream(url, signals);
   const upstreamMs = Math.round(performance.now() - t0);
 
   return shapeFindResponse(json, {
     engine,
     engineUsed,
     browse,
-    cache: cacheOn && !record,
+    cache: false,
     upstreamMs,
   });
 }
@@ -160,7 +141,6 @@ export async function runSearch({
 export function emptyResponse(
   engine: SearchEngine,
   q: string,
-  cacheOn: boolean,
   error: string | null = null,
 ): FindResponse {
   return {
@@ -175,7 +155,7 @@ export function emptyResponse(
     facets: null,
     truncation: null,
     ms: null,
-    cache: cacheOn,
+    cache: false,
     upstreamMs: null,
     searchEventId: null,
     correctedTo: null,

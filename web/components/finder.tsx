@@ -50,110 +50,6 @@ function recordFindEvent(body: {
   }
 }
 
-/** Per-hit local relevance signals, computed once and ranked per-engine. */
-interface LocalScore {
-  hit: FindHit;
-  i: number;
-  /** Title affinity, lower = stronger. 0 exact · 1 prefix · 2 all-tokens ·
-   * 3 partial · 4 body-only. Both engines lead with this (Postgres exact-title
-   * wins + title-weighted rank; Indx via the server's title-affinity re-rank). */
-  tier: number;
-  titleHits: number;
-  bodyHits: number;
-  /** Total token occurrences in the body — the local stand-in for BM25 term
-   * frequency (Indx weights body matches; Postgres barely does). */
-  bodyFreq: number;
-}
-
-/**
- * Optimistic local ranking over the browse-seed corpus (up to 100 docs already
- * in the client), ranked to MIRROR THE SELECTED ENGINE so the instant list is
- * ordered like the authoritative one that replaces it:
- *
- *   • Both lead with title affinity (exact > prefix > all-tokens > partial >
- *     body) — Postgres' exact-title-wins + title-weighted rank, and Indx's
- *     server-side title-affinity re-rank.
- *   • Within a tier they diverge like the engines do:
- *       – Postgres: denser title match, then RECENCY (its ORDER BY tiebreak).
- *       – Indx: BM25F-style body term-frequency, then title density, then position.
- *
- * Substring-only (no fuzzy): typo tolerance is exactly what the backend verify
- * adds on top. Fully deterministic (original index is the final tiebreak).
- */
-function localSearch(
-  corpus: FindHit[],
-  query: string,
-  engine: SearchEngine,
-): FindHit[] {
-  const q = query.toLowerCase().trim();
-  if (!q) return corpus;
-  const tokens = q.split(/\s+/).filter(Boolean);
-
-  const rows: LocalScore[] = [];
-  corpus.forEach((hit, i) => {
-    const title = hit.title.toLowerCase();
-    const titleWords = new Set(title.split(/[^a-z0-9]+/).filter(Boolean));
-    const titleStemSet = textStems(hit.title);
-    const inTitle = (t: string) =>
-      titleWords.has(t) ||
-      [...titleWords].some((w) => w.startsWith(t)) ||
-      titleStemSet.has(stemToken(t)); // operators ⇢ operator's in the title
-    const titleHits = tokens.filter(inTitle).length;
-
-    let tier: number;
-    if (title === q) tier = 0;
-    else if (title.startsWith(q)) tier = 1;
-    else if (titleHits === tokens.length) tier = 2;
-    else if (titleHits > 0) tier = 3;
-    else tier = 4; // no title signal — qualifies on body/slug only
-
-    const bodyRaw = hit.body ?? hit.excerpt ?? "";
-    const body = bodyRaw.toLowerCase();
-    const slug = (hit.slug ?? "").toLowerCase();
-    const bodyStemSet = textStems(bodyRaw);
-    let bodyHits = 0;
-    let bodyFreq = 0;
-    for (const t of tokens) {
-      let count = 0;
-      let from = body.indexOf(t);
-      while (from !== -1 && count < 25) {
-        count++;
-        from = body.indexOf(t, from + t.length);
-      }
-      // No substring hit → count a stem/slug presence as one (operators ⇢ operator's).
-      if (count === 0 && (slug.includes(t) || bodyStemSet.has(stemToken(t)))) {
-        count = 1;
-      }
-      if (count > 0) {
-        bodyHits++;
-        bodyFreq += count;
-      }
-    }
-
-    // Drop genuine non-matches (no title signal AND nothing in body/slug).
-    if (tier === 4 && bodyHits === 0) return;
-    rows.push({ hit, i, tier, titleHits, bodyHits, bodyFreq });
-  });
-
-  rows.sort((a, b) => {
-    if (a.tier !== b.tier) return a.tier - b.tier; // title affinity first
-    if (engine === "postgres") {
-      // Postgres: denser title, then recency (its ORDER BY recency tiebreak).
-      if (a.titleHits !== b.titleHits) return b.titleHits - a.titleHits;
-      const da = a.hit.date ?? "";
-      const db = b.hit.date ?? "";
-      if (da !== db) return db.localeCompare(da); // newer first
-      return a.i - b.i;
-    }
-    // Indx: BM25F-style — body term-frequency weighs in, then title density.
-    if (a.bodyFreq !== b.bodyFreq) return b.bodyFreq - a.bodyFreq;
-    if (a.titleHits !== b.titleHits) return b.titleHits - a.titleHits;
-    return a.i - b.i;
-  });
-
-  return rows.map((r) => r.hit);
-}
-
 /**
  * Promote results that contain the query terms EXACTLY (case-insensitive
  * substring across title + body + slug) above results that only fuzzy-match.
@@ -525,8 +421,6 @@ export function Finder({
   const q = sp.get("q") ?? "";
   // Default to Indx — the landing then showcases native facets + fuzzy recall.
   const engine: SearchEngine = sp.get("engine") === "postgres" ? "postgres" : "indx";
-  // Cache mode: off by default (always-fresh baseline); on → Next Data Cache.
-  const cacheOn = sp.get("cache") === "on";
   const sort: SortId = SORTS.some((s) => s.id === sp.get("sort"))
     ? (sp.get("sort") as SortId)
     : "relevance";
@@ -575,23 +469,30 @@ export function Finder({
   useEffect(() => {
     if (input === q) return;
     clearTimeout(timer.current);
+    // Adaptive debounce: with the live socket a query is a cheap frame on an
+    // open connection, so fire fast for a near-per-keystroke direct feel; on the
+    // HTTP fallback stay conservative to avoid hammering the route per keystroke.
+    const delay = liveEnabled && liveReady ? 90 : 250;
     timer.current = setTimeout(() => {
       setLastSent(input);
       setParams({ q: input || null });
-    }, 250);
+    }, delay);
     return () => clearTimeout(timer.current);
-  }, [input, q, setParams]);
+  }, [input, q, setParams, liveEnabled, liveReady]);
 
   // Fetch whenever the committed query or engine changes. `loading` is derived
   // (the in-flight key differs from the resolved result's key) so the effect
   // never calls setState synchronously — only inside the async resolution.
-  // `bust` lets "reset cache" force a cold refetch after revalidateTag.
-  const [bust, setBust] = useState(0);
-  const reqKey = `${engine} ${cacheOn ? "c" : "f"} ${bust} ${q}`;
-  // Key the server-rendered seed corresponds to: the landing (cache off, bust 0,
-  // empty query) on the page's engine. When it matches `reqKey` on mount we use
-  // the seed instead of refetching — the first paint already has the results.
-  const seedKey = initialData ? `${initialEngine} f 0 ` : null;
+  // Identity of the current view: engine + query. No cache/bust dimension —
+  // every search goes straight to the engine, always fresh.
+  const reqKey = `${engine} ${q}`;
+  // Manual refetch trigger (the reindex button) — not a cache; bumping it re-runs
+  // the fetch effect for the SAME view to pull freshly-reindexed data.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  // Key the server-rendered seed corresponds to: the landing (empty query) on
+  // the page's engine. When it matches `reqKey` on mount we use the seed instead
+  // of refetching — the first paint already has the results.
+  const seedKey = initialData ? `${initialEngine} ` : null;
   const [result, setResult] = useState<{
     key: string;
     data: FindResponse;
@@ -614,7 +515,6 @@ export function Finder({
     const ctrl = new AbortController();
     const params = new URLSearchParams({ engine });
     if (q) params.set("q", q);
-    if (cacheOn) params.set("cache", "on");
     // Thread the session so the search is recorded against this browser — the
     // X-BP-SEARCH-CLIENT key the API counts for correction auto-promotion.
     if (sessionId) params.set("sid", sessionId);
@@ -654,7 +554,7 @@ export function Finder({
               parsedQuery: null,
               recovery: null,
               ms: null,
-              cache: cacheOn,
+              cache: false,
               upstreamMs: null,
               searchEventId: null,
               correctedTo: null,
@@ -668,9 +568,9 @@ export function Finder({
     reqKey,
     engine,
     q,
-    cacheOn,
     seedKey,
     sessionId,
+    refreshNonce,
     liveEnabled,
     liveReady,
     liveSearch,
@@ -692,17 +592,15 @@ export function Finder({
 
   const hits = useMemo(() => data?.hits ?? [], [data]);
 
-  // ── optimistic-local-then-verify ──────────────────────────────────────────
-  // The browse seed (initialData) is a local corpus of up to 100 docs. While
-  // the debounced backend call for the CURRENT box text is still in flight, we
-  // filter that corpus locally so the list narrows on EVERY keystroke with zero
-  // latency. The authoritative result (full corpus + fuzzy + engine ranking)
-  // swaps in the instant it lands — optimistic, but verified. With no seed we
-  // fall back to the old stale-while-revalidate (keep `hits` until the fetch).
-  const corpus = useMemo(() => initialData?.hits ?? [], [initialData]);
+  // ── engine results, direct ────────────────────────────────────────────────
+  // Every keystroke queries Postgres/Indx directly (live socket when joined,
+  // else the same-origin HTTP route) — no client-side corpus approximation, no
+  // cache. The list shows what the engine actually returned. The previous result
+  // stays on screen (dimmed) while the next query is in flight, so typing never
+  // flashes empty between fresh engine answers.
   const trimmedInput = input.trim();
   // Cleaned literal query tokens (drop excludes/quotes, len ≥ 2) — the words the
-  // user actually typed; used for the exact-match partition + optimistic highlight.
+  // user actually typed; used for the exact-match partition + highlight.
   const queryTokens = useMemo(
     () =>
       trimmedInput
@@ -712,27 +610,16 @@ export function Finder({
         .filter((t) => t.length >= 2),
     [trimmedInput],
   );
-  const optimisticHits = useMemo(
-    () => localSearch(corpus, trimmedInput, engine),
-    [corpus, trimmedInput, engine],
-  );
-  // Backend data is authoritative for what's typed only when the committed query
-  // matches the box AND its fetch has landed (not loading).
-  const backendFresh = data != null && !loading && q.trim() === trimmedInput;
-  const optimisticActive = !backendFresh && corpus.length > 0;
-  // Verified results get an exact-match-first pass so a fuzzy/widened title
-  // match can't outrank a doc that literally contains the term (the optimistic
-  // local list is already substring-only, so it needs no partition).
-  const verifiedHits = useMemo(
+  // Engine results get an exact-match-first pass so a fuzzy/widened title match
+  // can't outrank a doc that literally contains the term.
+  const baseHits = useMemo(
     () => partitionExact(hits, queryTokens),
     [hits, queryTokens],
   );
-  const baseHits = optimisticActive ? optimisticHits : verifiedHits;
 
-  // Skeleton only when there is genuinely NOTHING to show — no backend result
-  // AND no optimistic local set. With the browse seed present we always have an
-  // instant local list, so the skeleton is effectively never hit in practice.
-  const showSkeleton = loading && !data && !optimisticActive;
+  // Skeleton only when there is genuinely nothing to show yet — no engine result
+  // in hand (first paint before the seed/first query lands).
+  const showSkeleton = loading && !data;
 
   // Vocabulary from the browse seed (all docs' titles/excerpts) — broadens the
   // "did you mean" candidate pool beyond the current query's results + popular.
@@ -762,13 +649,10 @@ export function Finder({
   );
 
   // Facet groups: prefer Indx's dataset-wide buckets; fall back to a client
-  // type-count when the engine returned none (Postgres path).
-  // Prefer the engine's dataset-wide facets, but only when the authoritative
-  // result is the one on screen — while showing optimistic local hits, count
-  // types from those hits so the rail matches the list the user sees.
-  const facetsFromIndx = Boolean(data?.facets) && !optimisticActive;
+  // type-count over the visible hits when the engine returned none (Postgres path).
+  const facetsFromIndx = Boolean(data?.facets);
   const facetGroups = useMemo(() => {
-    if (data?.facets && !optimisticActive) {
+    if (data?.facets) {
       return FACET_DIMENSIONS.map(({ key, label }) => ({
         key,
         label,
@@ -782,7 +666,7 @@ export function Finder({
       count: counts.get(t.type) ?? 0,
     })).filter((b) => b.count > 0);
     return buckets.length ? [{ key: "type", label: "Type", buckets }] : [];
-  }, [data, baseHits, optimisticActive]);
+  }, [data, baseHits]);
 
   const facetCount = Object.values(selectedFacets).reduce((n, s) => n + s.size, 0);
 
@@ -839,10 +723,9 @@ export function Finder({
     : "";
   useEffect(() => {
     if (!master) return;
-    // Publish on every change — `baseHits` is always populated (optimistic local
-    // while the backend verifies, authoritative once it lands), so the graph
-    // tracks the visible set in lockstep and never flashes to empty. The context
-    // dedupes identical publishes.
+    // Publish on every change — the previous engine result stays in `baseHits`
+    // while the next query is in flight, so the graph tracks the visible set in
+    // lockstep and never flashes to empty. The context dedupes identical publishes.
     setMatches(graphMatches);
     // matchKey captures the weighted set; graphMatches is read fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -873,12 +756,13 @@ export function Finder({
 
   const highlightTerms = useMemo(() => {
     const p = data?.parsedQuery;
-    // Once the backend result is authoritative, use its parsed terms; while
-    // showing optimistic local hits, use the LIVE typed tokens so the snippet
-    // and title highlight track the box (parsedQuery still reflects the old q).
-    const base = p && !optimisticActive ? [...p.terms, ...p.phrases] : queryTokens;
+    // Use the engine's parsed terms when the result for the current box has
+    // landed; while a query is still in flight, fall back to the live typed
+    // tokens so the highlight tracks the box (parsedQuery reflects the old q).
+    const fresh = data != null && !loading && q.trim() === trimmedInput;
+    const base = p && fresh ? [...p.terms, ...p.phrases] : queryTokens;
     return correctedTo ? [...base, correctedTo] : base;
-  }, [data, correctedTo, optimisticActive, queryTokens]);
+  }, [data, loading, q, trimmedInput, correctedTo, queryTokens]);
 
   const toggleFacet = (dim: string, value: string) => {
     const next = new Set(selectedFacets[dim] ?? []);
@@ -893,17 +777,6 @@ export function Finder({
     setParams(patch);
   };
 
-  const [resetting, setResetting] = useState(false);
-  const resetCache = async () => {
-    setResetting(true);
-    try {
-      await fetch("/api/cache/reset", { method: "POST" });
-      setBust((b) => b + 1); // force a cold refetch against the emptied cache
-    } finally {
-      setResetting(false);
-    }
-  };
-
   const [reindexMsg, setReindexMsg] = useState<string | null>(null);
   const reindexNow = async () => {
     setReindexMsg("queuing…");
@@ -914,7 +787,7 @@ export function Finder({
         setReindexMsg("rebuilding ~30s…");
         // The rebuild runs async on the API node; refetch once it should be live.
         setTimeout(() => {
-          setBust((b) => b + 1);
+          setRefreshNonce((n) => n + 1);
           setReindexMsg(null);
         }, 32000);
       } else {
@@ -1144,33 +1017,10 @@ export function Finder({
         {optionsOpen ? (
           <div className="flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-zinc-400">Cache</span>
-              <button
-                role="switch"
-                aria-checked={cacheOn}
-                onClick={() => setParams({ cache: cacheOn ? null : "on" })}
-                className={`rounded-full px-2.5 py-0.5 font-medium transition-colors ${
-                  cacheOn
-                    ? "bg-emerald-600 text-white"
-                    : "border border-zinc-300 text-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:hover:text-zinc-200"
-                }`}
-              >
-                {cacheOn ? "on" : "off"}
-              </button>
               <span className="text-zinc-400">
-                {cacheOn
-                  ? "Next Data Cache — warm hits skip the API round-trip"
-                  : "always fresh (no-store)"}
+                Every query hits {engine === "indx" ? "Indx" : "Postgres"}{" "}
+                directly — always fresh, no cache.
               </span>
-              {cacheOn ? (
-                <button
-                  onClick={resetCache}
-                  disabled={resetting}
-                  className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:hover:text-zinc-200"
-                >
-                  {resetting ? "resetting…" : "reset cache"}
-                </button>
-              ) : null}
               {engine === "indx" ? (
                 <button
                   onClick={reindexNow}
@@ -1324,8 +1174,8 @@ export function Finder({
         <section className="flex min-w-0 flex-col gap-2">
           {/* Fixed single-row header: never wraps, fixed min-height, so the
               sort tabs stay put and the row doesn't grow/shrink between the
-              optimistic ("verifying") and verified states. The left metadata
-              CLIPS rather than pushing the tabs to a second line. */}
+              loading and loaded states. The left metadata CLIPS rather than
+              pushing the tabs to a second line. */}
           <div className="flex min-h-8 items-center justify-between gap-3 text-sm text-zinc-400">
             {showSkeleton ? (
               <span className="min-w-0 truncate">Searching…</span>
@@ -1333,80 +1183,41 @@ export function Finder({
               <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
                 <span className="shrink-0">
                   {visibleHits.length}
-                  {!optimisticActive && data && data.total > hits.length
-                    ? ` of ${data.total}`
-                    : ""}{" "}
+                  {data && data.total > hits.length ? ` of ${data.total}` : ""}{" "}
                   {visibleHits.length === 1 ? "result" : "results"}
                 </span>
-                {optimisticActive ? (
-                  // Optimistic local hit shown instantly; the backend is
-                  // verifying the exact query in the background.
-                  <span className="flex items-center gap-x-2">
-                    <span
-                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-                      title="filtered locally from the loaded corpus — instant"
-                    >
-                      instant
-                    </span>
-                    {loading ? (
-                      <span className="animate-pulse text-zinc-400">
-                        · verifying…
-                      </span>
-                    ) : null}
+                {data?.engineUsed ? (
+                  <span className="font-mono">· {data.engineUsed}</span>
+                ) : null}
+                {/* engine compute · upstream fetch · client round-trip */}
+                {typeof data?.ms === "number" ? (
+                  <span className="font-mono" title="engine compute time">
+                    · {data.ms}ms
                   </span>
-                ) : (
-                  <>
-                    {data?.engineUsed ? (
-                      <span className="font-mono">· {data.engineUsed}</span>
-                    ) : null}
-                    {/* engine compute · upstream fetch (cache-hit proxy) · client round-trip */}
-                    {typeof data?.ms === "number" ? (
-                      <span className="font-mono" title="engine compute time">
-                        · {data.ms}ms
-                      </span>
-                    ) : null}
-                    {typeof data?.upstreamMs === "number" ? (
-                      <span
-                        className="font-mono"
-                        title="route handler → API (≈0ms = Data Cache hit)"
-                      >
-                        · api {data.upstreamMs}ms
-                      </span>
-                    ) : null}
-                    {typeof roundTripMs === "number" ? (
-                      <span className="font-mono" title="browser round-trip">
-                        · rt {roundTripMs}ms
-                      </span>
-                    ) : null}
-                    {prerendered ? (
-                      <span
-                        className="rounded bg-emerald-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                        title="server-rendered into the first byte (ISR Data Cache)"
-                      >
-                        prerendered
-                      </span>
-                    ) : data ? (
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[0.7rem] font-medium ${
-                          data.cache
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                            : "bg-zinc-200/70 text-zinc-500 dark:bg-zinc-800/70"
-                        }`}
-                      >
-                        {data.cache
-                          ? data.upstreamMs !== null && data.upstreamMs <= 8
-                            ? "cache HIT"
-                            : "cached"
-                          : "no-store"}
-                      </span>
-                    ) : null}
-                    {loading ? (
-                      <span className="animate-pulse text-zinc-400">
-                        · searching…
-                      </span>
-                    ) : null}
-                  </>
-                )}
+                ) : null}
+                {typeof data?.upstreamMs === "number" ? (
+                  <span className="font-mono" title="route handler → API">
+                    · api {data.upstreamMs}ms
+                  </span>
+                ) : null}
+                {typeof roundTripMs === "number" ? (
+                  <span className="font-mono" title="browser round-trip">
+                    · rt {roundTripMs}ms
+                  </span>
+                ) : null}
+                {prerendered ? (
+                  <span
+                    className="rounded bg-emerald-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                    title="server-rendered into the first byte"
+                  >
+                    prerendered
+                  </span>
+                ) : null}
+                {loading ? (
+                  <span className="animate-pulse text-zinc-400">
+                    · searching…
+                  </span>
+                ) : null}
               </span>
             )}
             {baseHits.length > 0 ? (
@@ -1447,11 +1258,8 @@ export function Finder({
             </ul>
           ) : visibleHits.length === 0 ? (
             <p className="py-8 text-zinc-500">
-              {optimisticActive && loading
-                ? // No LOCAL (substring) match yet — but the backend's fuzzy /
-                  // typo-tolerant pass may still find some, so don't claim "no
-                  // results" until it lands.
-                  "Searching…"
+              {loading
+                ? "Searching…"
                 : trimmedInput
                   ? "No documents match your search."
                   : "No documents found."}
@@ -1459,7 +1267,7 @@ export function Finder({
           ) : (
             <ul
               className={`flex flex-col divide-y divide-zinc-200 transition-opacity dark:divide-zinc-800 ${
-                loading && !optimisticActive ? "opacity-50" : "opacity-100"
+                loading ? "opacity-50" : "opacity-100"
               }`}
             >
               {visibleHits.map((hit, i) => (

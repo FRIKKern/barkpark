@@ -6,8 +6,8 @@ import { DATASET } from "@/lib/config";
 
 // Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
-// NOT force-dynamic: the handler is dynamic anyway (reads searchParams), but the
-// search caching lives in `runSearch`'s `unstable_cache`, not a route directive.
+// NOT force-dynamic: the handler is dynamic anyway (reads searchParams). Search
+// is always fresh — runSearch hits the engine directly, no cache.
 export const runtime = "nodejs";
 
 /* ── suggestions (popular / no-hit past queries) ───────────────────────── */
@@ -40,7 +40,6 @@ export async function GET(request: Request): Promise<NextResponse> {
   const q = (searchParams.get("q") ?? "").trim();
   const engine: SearchEngine =
     searchParams.get("engine") === "indx" ? "indx" : "postgres";
-  const cacheOn = searchParams.get("cache") === "on";
   // Browser session id (localStorage `bp-search-client`) — forwarded upstream as
   // X-BP-SEARCH-CLIENT so the recorded query event is attributed to a session.
   const sid = searchParams.get("sid");
@@ -49,12 +48,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     // Browse (no query) is a single-space search: both engines treat it as
     // "enumerate + facet" the dataset, so the landing gets facets either way.
     const payload = q
-      ? await runSearch({ q, engine, browse: false, cacheOn, sessionId: sid })
-      : await runSearch({ q: " ", engine, browse: true, cacheOn, sessionId: sid });
+      ? await runSearch({ q, engine, browse: false, sessionId: sid })
+      : await runSearch({ q: " ", engine, browse: true, sessionId: sid });
     return NextResponse.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(emptyResponse(engine, q, cacheOn, message), {
+    return NextResponse.json(emptyResponse(engine, q, message), {
       status: 200,
     });
   }

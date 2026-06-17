@@ -5,8 +5,8 @@ import { HoveredDocProvider } from "@/lib/hovered-doc-context";
 
 // Force-dynamic so the Finder's server-seeded browse renders straight into the
 // HTML — no `useSearchParams` CSR-bailout skeleton, so the master column keeps
-// the home's instant first paint. The seed itself is a ~1ms warm Data-Cache
-// read (`runSearch({ cacheOn: true })`), not a per-request origin round-trip.
+// the home's instant first paint. The seed is a direct (fresh) engine read on
+// the server; the client then drives all subsequent searches against the engine.
 export const dynamic = "force-dynamic";
 
 /**
@@ -43,7 +43,6 @@ export default async function FinderLayout({
     q: " ",
     engine: "indx",
     browse: true,
-    cacheOn: true,
   }).catch(() => null);
   // Don't surface a stale prerendered latency number — the readout fills in on
   // the first live interaction (mirrors the retired home page).
