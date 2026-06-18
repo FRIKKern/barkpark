@@ -313,6 +313,11 @@
     var glowTier = 0; // 0..3 (T0 best)
     var frameTimes = [];
     var lastFrame = 0;
+    // Idle "breathing": once settled, the loop stays awake but only REDRAWS at
+    // this rate (vs 60fps) and draw() applies a tiny render-only sway, so the
+    // graph feels alive at ~1/5 the idle cost. Off-screen / reduced-motion park.
+    var BREATH_FPS = 12;
+    var lastBreathDraw = 0;
     var demoteRun = 0,
       promoteRun = 0;
 
@@ -1208,10 +1213,24 @@
       var t = now;
       nowT = now;
 
-      // full-canvas clear in device space
+      // full-canvas clear in device space (plain transform so the bg always
+      // covers — the breath sway below must not leave an uncovered sliver).
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = bgGradient();
       ctx.fillRect(0, 0, W, H);
+
+      // Idle "breathing": a tiny render-only sway (~2px Lissajous over ~15-20s)
+      // so a settled graph feels alive without moving any node (positions and
+      // hit-testing are untouched — this is purely the draw transform). Disabled
+      // under reduced-motion. The throttle in frame() keeps the cost ~1/5 of a
+      // 60fps redraw, so this never reintroduces the perpetual-burn Windows cost.
+      var _bx = 0,
+        _by = 0;
+      if (!reduced) {
+        _bx = 2.2 * Math.sin(now / 2600);
+        _by = 1.6 * Math.cos(now / 3300);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, dpr * _bx, dpr * _by);
 
       // ── authored empty / error states share this bed ──
       if (errorState) {
@@ -1904,26 +1923,16 @@
         }
       }
 
-      draw(now);
-
-      // decide whether to keep running. Obsidian-calm: the scene SETTLES to
-      // rest and the loop PARKS — no perpetual redraw. We keep the loop alive
-      // only while something is actually changing: the sim is still cooling, the
-      // camera/pan is moving, a hover-focus crossfade is in flight, OR the fetch
-      // ring is breathing while we await data. coronaK lerps are kept alive too.
+      // ── settle / breathe / park decision ──────────────────────────────────
+      // Active motion (sim cooling, drag/pan/zoom, focus or hover crossfade,
+      // fetch ring) redraws every frame. Otherwise the SETTLED graph "breathes":
+      // the loop stays awake but draw() is throttled to BREATH_FPS and applies a
+      // tiny render-only sway, so it feels alive at ~1/5 the cost of the old
+      // 60fps idle burn. Off-screen OR reduced-motion → no breathing, full park.
       var stillFocus = isFocusLerping();
-      // Park once the sim drops below the tick-engage threshold (0.05 — the SAME
-      // gate the physics loop uses above: below it NO tick() runs, so node
-      // positions are FROZEN and the scene is static, nothing to redraw). The
-      // old test (alpha > 0 / alphaMin) never went false: the layout cools to a
-      // resting alpha≈0.03 (>0 and >alphaMin) to balance the alpha-independent
-      // center gravity, so the loop burned a full 60fps full-canvas redraw
-      // FOREVER at idle. Live crossfades (focus/hover/camera/pan/fetch-ring) all
-      // carry their own keep-alive flags below, so parking a still sim is safe.
       var alive = !reduced && (alpha >= 0.05 || alphaTarget >= 0.05);
-      // Only the fetch ring breathes now (nodes no longer pulse), so the
-      // perpetual keep-alive is limited to the awaiting-data state.
-      var hasBreathingNode = !reduced && !errorState && fetching && nodes.length === 0;
+      var hasBreathingNode =
+        !reduced && !errorState && fetching && nodes.length === 0;
       var interacting =
         dragging ||
         Math.abs(panVX) > 0.1 ||
@@ -1931,8 +1940,29 @@
         morph ||
         camAnimating ||
         Math.abs(cam.scale - camTargetScale) > 0.0005;
-      var keepGoing =
-        alive || interacting || stillFocus || hasBreathingNode || hoverCoronaK > 0.001 || selectPulse > 0;
+      var activeMotion =
+        alive ||
+        interacting ||
+        stillFocus ||
+        hasBreathingNode ||
+        hoverCoronaK > 0.001 ||
+        selectPulse > 0;
+      var breathing =
+        !reduced && visible && _autoFitDone && !errorState && nodes.length > 0;
+
+      if (activeMotion) {
+        draw(now);
+      } else if (breathing) {
+        // throttle the idle redraw — the sway is slow, so ~12fps reads smooth
+        if (now - lastBreathDraw >= 1000 / BREATH_FPS) {
+          lastBreathDraw = now;
+          draw(now);
+        }
+      } else {
+        draw(now); // one last frame as it comes to rest, then park below
+      }
+
+      var keepGoing = activeMotion || breathing;
       // Off-screen: park UNLESS mid-interaction/morph (those must complete) OR
       // the one-shot auto-fit hasn't run yet. The IntersectionObserver can report
       // not-visible on its FIRST async callback when the canvas is in-flow inside
