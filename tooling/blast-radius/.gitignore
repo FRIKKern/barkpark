@@ -1,0 +1,7 @@
+# Derived caches — regenerate with build-index.mjs / check.mjs, never commit.
+index.json
+last-impact.json
+# Ephemeral agent payloads — rebuilt every run.
+dossiers/
+# NOTE: verdict-cache.json is intentionally NOT ignored — it's the persistent,
+# shareable record of agent verdicts keyed by content-hash. Commit it.

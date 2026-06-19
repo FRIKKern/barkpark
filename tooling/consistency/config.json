@@ -1,0 +1,29 @@
+{
+  "_comment": "Consistency pass. Groups files (mostly by directory — peers that SHOULD look alike), derives each group's dominant pattern programmatically, and flags deviations. Inconsistency = distance from your own norm. Agents only judge whether a deviation is meaningful drift vs an intentional exception.",
+
+  "minGroupSize": 3,
+  "commonThreshold": 0.6,
+  "dupJaccard": 0.55,
+  "dupShingleLines": 5,
+  "maxDupGroup": 200,
+
+  "codeExt": ["ex", "exs", "go", "ts", "tsx", "js", "mjs", "heex", "eex"],
+
+  "layeringRules": [
+    {
+      "name": "web-bypasses-context",
+      "appliesTo": ["api/lib/barkpark_web/**/*.ex"],
+      "exclude": ["**/router.ex", "**/endpoint.ex"],
+      "forbid": "\\bRepo\\.",
+      "message": "Web layer should call domain contexts, not Repo directly (skips tenancy/validation)."
+    },
+    {
+      "name": "core-imports-web",
+      "appliesTo": ["api/lib/barkpark/**/*.ex"],
+      "exclude": ["**/web/**", "**/*_live.ex", "**/*_controller.ex"],
+      "forbid": "\\bBarkparkWeb\\.",
+      "allow": "BarkparkWeb\\.(Endpoint|Telemetry|Presence|Gettext)",
+      "message": "Core/domain modules should not depend on the web layer (inverts the dependency arrow)."
+    }
+  ]
+}
