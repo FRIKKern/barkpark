@@ -1,17 +1,19 @@
 <!-- doc-tier: human -->
-# tooling/ — Codebase Intelligence suite
+# tooling/ — Codebase Quality suite
 
-A living, prioritized map of every file in the repo. One discipline runs through
-all of it: **programmatic scripts do everything they can for free; agents are
-spent only on the judgment a machine can't produce, and only on what changed.**
+Scores **how good the codebase is** and **what it takes to improve it**. One
+discipline runs through all of it: **programmatic scripts do everything they can
+for free; agents are spent only on the judgment a machine can't produce, on what
+changed, and to verify a finding before it drives the plan.**
 
 ```
 research-coverage ─ every file evaluated? content-hash ledger; agents only on drift
-file-importance   ─ per-file importance score (blast-radius prior × agent criticality)
+file-importance   ─ per-file importance = blast-radius prior × agent criticality
 consistency       ─ relational: per-group norm, drift vs intentional, layering, dup
+ergonomics        ─ agent-cost: bloat (god-files) vs fragmentation → refactor_worth
 blast-radius      ─ what a change affects; cross-language seam guard (pre-push hook)
-        └────────────────────────┬───────────────────────────────────────────────┘
-combined          ─ importance × consistency → the prioritized worklist
+        ├───── combined  ─ importance × consistency → prioritized worklist
+        └───── quality   ─ 6-dimension scorecard (A–F) + ROI-ranked improvement plan
 ```
 
 | Dir | What it answers | Entry |
@@ -19,13 +21,15 @@ combined          ─ importance × consistency → the prioritized worklist
 | `research-coverage/` | "Is every file currently evaluated? What changed?" | `coverage.mjs scan` |
 | `file-importance/` | "How important is each file?" | `build-signals.mjs` → agents → `merge.mjs` |
 | `consistency/` | "Do we follow a style? Where do we break it?" | `consistency.mjs scan` |
+| `ergonomics/` | "Which files are too bloated to work with efficiently?" | `ergonomics.mjs` |
 | `blast-radius/` | "What does this change affect? Did it touch the wire contract?" | `check.mjs` (pre-push) |
-| `combined/` | "What's both important AND inconsistent?" (the worklist) | `combine.mjs` |
+| `combined/` | "What's both important AND inconsistent?" | `combine.mjs` |
+| `quality/` | "How good is the codebase? What do we fix first?" | `quality.mjs` |
 
-Orchestrated by the **`codebase-intelligence`** skill (`.claude/skills/`). Each pass
-is a plain Node script (no deps); all derived outputs (ledgers, indexes, charts,
-batches, results) are gitignored — regenerate, never commit. Agent fan-out uses
-the `Workflow` tool; read each pass's `README` / `config.json` for details.
+Orchestrated by the **`codebase-quality`** skill (`.claude/skills/`). Each pass is a
+plain Node script (no deps); all derived outputs (ledgers, indexes, charts, reports,
+batches, results) are gitignored — regenerate, never commit. Agent fan-out uses the
+`Workflow` tool; read each pass's `README` / `config.json` for details.
 
 ## Design invariants
 
