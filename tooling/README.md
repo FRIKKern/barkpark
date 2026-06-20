@@ -27,7 +27,10 @@ blast-radius      ─ what a change affects; cross-language seam guard (pre-push
 | `blast-radius/` | "What does this change affect? Did it touch the wire contract?" | `check.mjs` (pre-push) |
 | `combined/` | "What's both important AND inconsistent?" | `combine.mjs` |
 | `quality/` | "How good is the codebase? What do we fix first?" | `quality.mjs` |
-| `status/` | **the entry point** — full report, incremental, freshness-aware | `status.mjs` |
+| `usefulness/` | "How useful (value/leverage) is each file, and why?" | `usefulness.mjs` → agents → `merge` |
+| `intentions/` | "What objectives does each file serve?" (2nd edge type) | `review.mjs` → discovery → tag → `merge` |
+| `barkpark-sync/` | "Publish every file as an interconnected Barkpark paper" | `generate.mjs` → `push.mjs` → `graph-view.mjs` |
+| `status/` | **the entry point** — full quality report, incremental | `status.mjs` |
 
 `node tooling/status/status.mjs` is the one command: it runs the whole programmatic
 chain (~2s, free), regenerates the comprehensive 8-dimension report from cached
@@ -35,10 +38,16 @@ verdicts, and prints **FRESH** or the exact pending agent work. Re-runs are chea
 because every agent pass (research, consistency, issues) is content-hash cached —
 unchanged files/groups are never re-judged.
 
+Beyond the quality report, the suite has two more arcs (see the `codebase-quality`
+skill): **ENRICH** — `usefulness` + `intentions` add the per-file knowledge layer;
+**PUBLISH** — `barkpark-sync` ships every file as a Barkpark paper (source + all
+axes + git history) wired by typed references (`dependencies` + `intentions`) into
+an interconnected, filterable graph, in an isolated `codebase` dataset.
+
 Orchestrated by the **`codebase-quality`** skill (`.claude/skills/`). Each pass is a
 plain Node script (no deps); all derived outputs (ledgers, indexes, charts, reports,
-batches, results) are gitignored — regenerate, never commit. Agent fan-out uses the
-`Workflow` tool; read each pass's `README` / `config.json` for details.
+batches, results, nodes.json) are gitignored — regenerate, never commit. Agent
+fan-out uses the `Workflow` tool; read each pass's `README` / `config.json` for details.
 
 ## Design invariants
 
