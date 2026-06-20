@@ -132,6 +132,16 @@ const nodes = universe.map(p => {
   };
 });
 
+// ---- dependents (inverse of deps): the accurate file-level "depended on by" ----
+const dependentsMap = {};
+for (const n of nodes) for (const d of n.deps) (dependentsMap[d] ||= []).push(n.id);
+const idToPath = Object.fromEntries(nodes.map(n => [n.id, n.path]));
+for (const n of nodes) {
+  const deps = dependentsMap[n.id] || [];
+  n.fields.dependents = deps.map(id => idToPath[id]).filter(Boolean).sort();
+  n.fields.dependentCount = deps.length;
+}
+
 // ---- intention hub nodes (objectives that cluster cross-cutting files) ----
 const intentNodes = (intents.taxonomy || []).filter(t => (intents.hubs[t.id] || []).length).map(t => ({
   id: intId(t.id), path: intId(t.id), title: t.title, kind: "intention",

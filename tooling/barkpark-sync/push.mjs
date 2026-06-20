@@ -33,7 +33,7 @@ async function post(path, token, body) {
 }
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 const f = (n) => n.fields;
-const metricsLine = (n) => `importance ${f(n).importance} · usefulness ${f(n).usefulness ?? "?"} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · fanIn ${f(n).fanIn}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
+const metricsLine = (n) => `importance ${f(n).importance} · usefulness ${f(n).usefulness ?? "?"} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · depends-on ${n.deps.length} · depended-on-by ${f(n).dependentCount ?? 0}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
 
 // ---- phase 0: register the paper schema for this dataset ----
 // The content-edge extractor keys on list_schemas(dataset) to find reference
@@ -107,8 +107,10 @@ for (const n of (SKIP_CONTENT ? [] : nodes)) {
       { type: "paragraph", content: [{ type: "text", value: f(n).whyUseful || "(not yet scored)" }] },
       { type: "heading", level: 2, text: `Intentions it serves (${(f(n).intentions || []).length})` },
       { type: "code", language: "text", value: ints },
-      { type: "heading", level: 2, text: `Dependencies (${n.deps.length})` },
+      { type: "heading", level: 2, text: `Depends on (${n.deps.length})` },
       { type: "code", language: "text", value: depsList },
+      { type: "heading", level: 2, text: `Depended on by (${f(n).dependentCount ?? 0})` },
+      { type: "code", language: "text", value: (f(n).dependents || []).slice(0, 50).map(p => "← " + p).join("\n") + ((f(n).dependents || []).length > 50 ? `\n… (+${f(n).dependents.length - 50} more)` : "") || "(nothing in the graph depends on this)" },
       { type: "heading", level: 2, text: `Git history (${f(n).git?.commitCount ?? 0} commits · ${f(n).git?.authors?.length ?? 0} authors · ${f(n).git?.firstDate || "?"} → ${f(n).git?.lastDate || "?"})` },
       { type: "code", language: "text", value: (f(n).git?.commits || []).map(c => `${c.date}  ${c.hash}  ${(c.author || "").split(" ")[0]}  ${c.subject}`).join("\n") || "(no history)" },
       { type: "heading", level: 2, text: "Source" },
