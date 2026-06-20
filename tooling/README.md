@@ -27,6 +27,13 @@ blast-radius      ─ what a change affects; cross-language seam guard (pre-push
 | `blast-radius/` | "What does this change affect? Did it touch the wire contract?" | `check.mjs` (pre-push) |
 | `combined/` | "What's both important AND inconsistent?" | `combine.mjs` |
 | `quality/` | "How good is the codebase? What do we fix first?" | `quality.mjs` |
+| `status/` | **the entry point** — full report, incremental, freshness-aware | `status.mjs` |
+
+`node tooling/status/status.mjs` is the one command: it runs the whole programmatic
+chain (~2s, free), regenerates the comprehensive 8-dimension report from cached
+verdicts, and prints **FRESH** or the exact pending agent work. Re-runs are cheap
+because every agent pass (research, consistency, issues) is content-hash cached —
+unchanged files/groups are never re-judged.
 
 Orchestrated by the **`codebase-quality`** skill (`.claude/skills/`). Each pass is a
 plain Node script (no deps); all derived outputs (ledgers, indexes, charts, reports,

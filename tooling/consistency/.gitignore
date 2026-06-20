@@ -1,5 +1,7 @@
 consistency-report.json
 consistency-report.html
 batch-count.txt
+issues-stale.txt
+verdict-cache.json
 batches/
 results/

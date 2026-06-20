@@ -23,7 +23,7 @@ const risk = rd("tooling/risk/risk-report.json", { files: {} }).files;
 const layV = rd("tooling/consistency/results/_layering.json", []);
 const dupV = rd("tooling/consistency/results/_dup.json", []);
 const gV = {}; const RES = join(ROOT, "tooling/consistency/results");
-for (const f of (existsSync(RES) ? readdirSync(RES) : []).filter(f => /^group-/.test(f))) { try { for (const x of JSON.parse(readFileSync(join(RES, f), "utf8")).verdicts || []) gV[x.file] = x; } catch {} }
+for (const f of (existsSync(RES) ? readdirSync(RES) : []).filter(f => f.endsWith(".json") && !f.startsWith("_"))) { try { for (const x of JSON.parse(readFileSync(join(RES, f), "utf8")).verdicts || []) gV[x.file] = x; } catch {} }
 
 const importance = (p) => { const e = ledger.files[p]; if (!e) return 50; const sc = +e.score || 0; const pr = priors[p];
   return (e.tier === "agent" && Number.isFinite(pr)) ? Math.round(0.45 * pr + 0.55 * sc) : sc; };

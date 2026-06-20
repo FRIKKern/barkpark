@@ -12,6 +12,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +21,14 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 const cfg = JSON.parse(readFileSync(join(HERE, "config.json"), "utf8"));
 const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 });
 const cmd = process.argv[2] || "scan";
+
+// ---- verdict cache (incremental: re-judge only what changed) ----
+const VCACHE = join(HERE, "verdict-cache.json");
+const loadVC = () => existsSync(VCACHE) ? JSON.parse(readFileSync(VCACHE, "utf8")) : { groups: {}, issuesSig: null, layering: [], dup: [] };
+const saveVC = (c) => writeFileSync(VCACHE, JSON.stringify(c, null, 2));
+const hash = (s) => createHash("sha256").update(s).digest("hex").slice(0, 12);
+const fhash = (f) => { try { return createHash("sha256").update(readFileSync(join(ROOT, f))).digest("hex").slice(0, 12); } catch { return "0"; } };
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "root";
 
 const idxPath = join(ROOT, "tooling/blast-radius/index.json");
 const idx = existsSync(idxPath) ? JSON.parse(readFileSync(idxPath, "utf8")) : null;
@@ -96,7 +105,9 @@ function scan() {
       if (reasons.length) outliers.push({ file: f, reasons });
     }
     const conform = Math.round((1 - outliers.length / fs.length) * 100);
-    groups.push({ dir, stack: stackOf(fs[0]), n: fs.length, casing: cas.value, suffix: suf.value, commonSignature: common, conform, outliers });
+    // sig = content signature of the whole peer-group → agent verdict is reusable until a member changes
+    const sig = hash(fs.map(x => `${x}@${fhash(x)}`).sort().join("|"));
+    groups.push({ dir, stack: stackOf(fs[0]), n: fs.length, casing: cas.value, suffix: suf.value, commonSignature: common, conform, outliers, sig });
   }
   groups.sort((a, b) => a.conform - b.conform || b.outliers.length - a.outliers.length);
 
@@ -138,7 +149,10 @@ function scan() {
   // near-duplication within (stack, kind-by-suffix)
   const dup = nearDup();
 
-  const report = { at: new Date().toISOString(), groupsAnalyzed: groups.length,
+  // issuesSig = content signature of all layering + dup findings → reuse the 2-agent issue verdicts until one changes
+  const issuesSig = hash([...layering.map(l => `${l.file}@${fhash(l.file)}:${l.rule}`), ...dup.map(d => `${d.a}@${fhash(d.a)}~${d.b}@${fhash(d.b)}`)].sort().join("|"));
+
+  const report = { at: new Date().toISOString(), groupsAnalyzed: groups.length, issuesSig,
     groups, layering, deadGoPackages: dead, duplication: dup,
     summary: {
       lowConformGroups: groups.filter(g => g.conform < 80).length,
@@ -208,13 +222,45 @@ tr.bad td:nth-child(4){background:#fee2e2} tr.warn td:nth-child(4){background:#f
 }
 
 // ==================================================================== batches
+// Incremental: reuse cached verdicts for unchanged peer-groups; emit batch files
+// ONLY for groups whose content signature changed. Pre-populate results/ with the
+// cached verdicts so merge/combine/quality always see the full set.
 function batches(r) {
+  const vc = loadVC();
   const BDIR = join(HERE, "batches"); rmSync(BDIR, { recursive: true, force: true }); mkdirSync(BDIR, { recursive: true });
-  if (!existsSync(join(HERE, "results"))) mkdirSync(join(HERE, "results"));
-  const todo = r.groups.filter(g => g.outliers.length);
-  todo.forEach((g, i) => writeFileSync(join(BDIR, `group-${String(i).padStart(3,"0")}.json`), JSON.stringify(g, null, 2)));
-  writeFileSync(join(HERE, "batch-count.txt"), String(todo.length));
-  process.stderr.write(`[batches] ${todo.length} group(s) with outliers → ${BDIR.replace(ROOT+"/","")}/\n`);
+  const RDIR = join(HERE, "results"); rmSync(RDIR, { recursive: true, force: true }); mkdirSync(RDIR, { recursive: true });
+  let stale = 0, cached = 0;
+  for (const g of r.groups.filter(g => g.outliers.length)) {
+    const c = vc.groups[g.dir];
+    if (c && c.sig === g.sig) { writeFileSync(join(RDIR, `${slug(g.dir)}.json`), JSON.stringify(c.data, null, 2)); cached++; }
+    else { writeFileSync(join(BDIR, `${slug(g.dir)}.json`), JSON.stringify(g, null, 2)); stale++; }
+  }
+  const issuesStale = vc.issuesSig !== r.issuesSig;
+  if (!issuesStale) { // reuse the cached layering/dup verdicts — no 2-agent pass needed
+    writeFileSync(join(RDIR, "_layering.json"), JSON.stringify(vc.layering, null, 2));
+    writeFileSync(join(RDIR, "_dup.json"), JSON.stringify(vc.dup, null, 2));
+  }
+  writeFileSync(join(HERE, "batch-count.txt"), String(stale));
+  writeFileSync(join(HERE, "issues-stale.txt"), issuesStale ? "1" : "0");
+  process.stderr.write(`[batches] ${stale} group(s) need re-judging, ${cached} reused from cache · issues ${issuesStale ? "STALE (run 2 issue agents)" : "cached"}\n`);
+}
+
+// ===================================================================== record
+// Fold fresh agent results into the verdict cache, keyed by group content-sig.
+function record(r) {
+  const vc = loadVC();
+  const RDIR = join(HERE, "results");
+  const sigByDir = Object.fromEntries(r.groups.map(g => [g.dir, g.sig]));
+  let n = 0;
+  for (const f of (existsSync(RDIR) ? readdirSync(RDIR) : []).filter(f => f.endsWith(".json") && !f.startsWith("_"))) {
+    try { const v = JSON.parse(readFileSync(join(RDIR, f), "utf8")); if (v.dir && sigByDir[v.dir]) { vc.groups[v.dir] = { sig: sigByDir[v.dir], data: v }; n++; } } catch {}
+  }
+  const lay = join(RDIR, "_layering.json"), dup = join(RDIR, "_dup.json");
+  if (existsSync(lay)) vc.layering = JSON.parse(readFileSync(lay, "utf8"));
+  if (existsSync(dup)) vc.dup = JSON.parse(readFileSync(dup, "utf8"));
+  vc.issuesSig = r.issuesSig;
+  saveVC(vc);
+  process.stderr.write(`[record] folded ${n} group verdict(s) + issue verdicts into the cache\n`);
 }
 
 // ======================================================================= run
@@ -222,6 +268,7 @@ const r = scan();
 if (cmd === "merge") attachVerdicts(r);
 if (cmd === "report" || cmd === "scan" || cmd === "merge") writeHtml(r);
 if (cmd === "batches") batches(r);
+if (cmd === "record") record(r);
 
 const C = process.stderr.isTTY ? { y:"\x1b[33m", r:"\x1b[31m", g:"\x1b[32m", b:"\x1b[1m", x:"\x1b[0m" } : {y:"",r:"",g:"",b:"",x:""};
 const e = (s)=>process.stderr.write(s+"\n");

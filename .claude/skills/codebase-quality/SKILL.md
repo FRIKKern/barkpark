@@ -1,6 +1,6 @@
 ---
 name: codebase-quality
-description: Use when the user asks "how good is the codebase", "what's the code quality", "what should we improve / refactor", "where's our technical debt", "is this worth refactoring", "score the repo", "audit the codebase", or wants a quality assessment + a prioritized improvement plan. Produces a scored quality SCORECARD (6 dimensions, A-F grade) and an IMPROVEMENT PLAN ranked by ROI (impact ÷ effort). Programmatic scans do all the measuring for free; agents are spent only on judgment a parser can't make, and only on what changed. Lives in tooling/.
+description: Use when the user asks "how good is the codebase", "what's the code quality", "what should we improve / refactor", "where's our technical debt", "is this worth refactoring", "score the repo", "audit the codebase", or wants a quality assessment + a prioritized improvement plan. Produces a scored quality SCORECARD (8 dimensions, A-F grade) and an IMPROVEMENT PLAN ranked by ROI (impact ÷ effort). Programmatic scans do all the measuring for free; agents are spent only on judgment a parser can't make, and only on what changed. Lives in tooling/.
 ---
 
 # Codebase Quality
@@ -24,7 +24,7 @@ make it better**. Output = a scored scorecard + an ROI-ranked improvement plan.
 5. **Importance-weight everything.** A problem in a critical file outranks the
    same problem in a leaf: impact = importance × severity.
 
-## The 6 quality dimensions
+## The 8 quality dimensions
 
 | Dimension | Measures | Source |
 |---|---|---|
@@ -44,41 +44,45 @@ are **important × bloated × untested × defect-prone** at once.
 `quality.mjs` blends these into an A–F grade and an improvement plan where each
 finding carries `impact = importance × severity` and `effort` (refactor size).
 
-## Procedure
+## Procedure — the status-quo run
 
-**1. Coverage gate (free; usually the whole job).**
+**Step 1 — one command (free, ~2s).** It runs the whole programmatic chain
+(graph, signals, ergonomics, risk, consistency scan, coverage scan), regenerates
+the comprehensive report from whatever verdicts are cached, and prints either
+**FRESH** or the exact pending agent work. It is idempotent.
 ```
-node tooling/research-coverage/coverage.mjs scan
+node tooling/status/status.mjs
 ```
-If `stale==0 && new==0`: the ledger is current — skip straight to step 5. Else research the drift:
-`coverage.mjs prune && coverage.mjs batches` → dispatch `batch-count.txt` Sonnet agents (read each, write `results/batch-NNN.json` `[{path,role,description,score,what_breaks_if_wrong,confidence}]`) → `coverage.mjs record` → `coverage.mjs scan` (verify 100%). First run: `coverage.mjs seed` from a prior importance run, or treat all as new.
+- **FRESH** → done. Report the grade + 8 dimensions + top of the improvement plan;
+  open `tooling/quality/quality-report.html`. **Zero agent tokens.**
+- **PENDING** → do only the listed work below, then re-run `status.mjs` (→ FRESH).
 
-**2. Refresh the objective signals (free).**
-```
-node tooling/blast-radius/build-index.mjs --skip-elixir     # reverse-dep graph (fan-in, dead code)
-node tooling/file-importance/build-signals.mjs 10            # priors + churn
-node tooling/ergonomics/ergonomics.mjs                       # size-class + refactor_worth
-node tooling/risk/risk.mjs                                   # test-presence proxy + defect history
-```
+**Step 2 — only the stale agent work (the incremental part).**
+Each pass is content-hash cached, so you touch only what changed:
 
-**3. Consistency scan + judge (agents only on outliers/issues).**
-```
-node tooling/consistency/consistency.mjs scan
-node tooling/consistency/consistency.mjs batches            # one task per outlier GROUP
-```
-Dispatch one Sonnet agent per `consistency/batches/group-NNN.json` → write `consistency/results/group-NNN.json` `{dir, canonical_pattern, verdicts:[{file, verdict:"drift"|"intentional"|"refactor", recommendation}]}`. Then `consistency.mjs merge`.
+- **Coverage drift** (`N file(s) need research`):
+  `coverage.mjs prune && coverage.mjs batches` → dispatch `batch-count.txt` Sonnet
+  agents (read each `batches/batch-NNN.json`, write `results/batch-NNN.json`
+  `[{path,role,description,score,what_breaks_if_wrong,confidence}]`) →
+  `coverage.mjs record`. (First ever run: `coverage.mjs seed`, or treat all as new.)
 
-**4. Verify the architecture/dup issues (2 agents — critical, cheap).**
-Dispatch 2 agents that read `consistency-report.json` and write:
-- `consistency/results/_layering.json` `[{file, rule, verdict:"violation"|"acceptable", reason, fix}]` — judge each layering back-edge (real violation vs justified, e.g. the plugin route highway).
-- `consistency/results/_dup.json` `[{a, b, verdict:"extract"|"acceptable", reason}]` — extract-worthy vs benign config boilerplate.
+- **Consistency groups changed** (`M group(s) changed`): dispatch one Sonnet agent
+  per file in `consistency/batches/` (each reads `batches/<name>.json`, writes
+  `consistency/results/<name>.json` `{dir, canonical_pattern, verdicts:[{file,
+  verdict:"drift"|"intentional"|"refactor", recommendation}]}`) →
+  `consistency.mjs record`. Unchanged groups are reused from `verdict-cache.json` —
+  not re-judged.
 
-**5. Synthesize (free).**
-```
-node tooling/combined/combine.mjs        # importance × consistency worklist
-node tooling/quality/quality.mjs         # → quality-report.{html,json}: scorecard + improvement plan
-```
-Report the grade, the dimension scores, and the top of the improvement plan (ranked by impact, with effort). Open `quality-report.html`.
+- **Layering/dup findings changed** (`issues STALE`): dispatch 2 agents reading
+  `consistency-report.json` → `consistency/results/_layering.json` `[{file, rule,
+  verdict:"violation"|"acceptable", reason, fix}]` and `_dup.json` `[{a, b,
+  verdict:"extract"|"acceptable", reason}]` → `consistency.mjs record`.
+
+**Step 3 — re-run `status.mjs`.** It folds the new verdicts, regenerates the
+report, and should now print **FRESH**.
+
+The first ever run does the full fan-out (~hundreds of agents over every file);
+every run after that is incremental — usually a handful of agents, often none.
 
 ## Reading the output
 

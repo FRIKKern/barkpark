@@ -38,7 +38,7 @@ function importance(path, e) {
 const outlier = {}; for (const g of crep.groups) for (const o of g.outliers) outlier[o.file] = { reasons: o.reasons, conform: g.conform };
 const verdict = {}; // group drift/intentional/refactor
 const RES = join(ROOT, "tooling/consistency/results");
-for (const f of (existsSync(RES) ? readdirSync(RES) : []).filter(f => /^group-/.test(f))) {
+for (const f of (existsSync(RES) ? readdirSync(RES) : []).filter(f => f.endsWith(".json") && !f.startsWith("_"))) {
   try { for (const x of JSON.parse(readFileSync(join(RES, f), "utf8")).verdicts || []) verdict[x.file] = x; } catch {}
 }
 const layV = {}; for (const l of rd("tooling/consistency/results/_layering.json", [])) layV[l.file] = l;
