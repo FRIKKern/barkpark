@@ -30,7 +30,10 @@ function run(label, rel, args = []) {
 
 // ════════════════ ARC 1 — ASSESS (programmatic chain) ════════════════
 e(`${C.b}status-quo${C.x}  running the programmatic chain (free)…`);
-run("blast-index", "tooling/blast-radius/build-index.mjs", ["--skip-elixir"]);
+// Elixir edges come from `mix xref` (real module→module graph). It compiles (a few min)
+// the first time; gated on api/_build existing inside build-index.mjs. Pass --skip-elixir
+// to status.mjs to fall back to the regex resolver on machines without the Elixir toolchain.
+run("blast-index", "tooling/blast-radius/build-index.mjs", argv.includes("--skip-elixir") ? ["--skip-elixir"] : []);
 run("signals", "tooling/file-importance/build-signals.mjs", ["10"]);
 run("ergonomics", "tooling/ergonomics/ergonomics.mjs");
 run("risk", "tooling/risk/risk.mjs");

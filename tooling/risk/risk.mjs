@@ -1,13 +1,18 @@
 #!/usr/bin/env node
-// Risk axes — two cheap, programmatic signals that turn the worklist from
+// Risk axes — cheap, programmatic signals that turn the worklist from
 // "important & broken" into "important, broken, fragile, AND untested":
 //   defect-history — git bug-fix/revert mining → where bugs actually land
-//   test-presence  — proxy for test coverage (sibling test + module refs in tests)
+//   test-coverage  — REAL line/statement coverage where a fast suite exists
+//                    (go test -cover, mix test --cover); a presence PROXY elsewhere
 //   ownership      — bus-factor: top author's commit share + distinct author count
-// Proxy, not line coverage: real coverage (go test -cover / mix --cover / vitest)
-// can be ingested later; this needs nothing to run.
 //
-//   risk.mjs   → risk-report.json (per-file) + console summary   [free]
+// Coverage is MEASURED, not proxied, for Go and Elixir (v2 Phase 1). Each file's
+// testScore carries a `testCoverageSource` flag: "go" | "elixir" | "proxy".
+// Pass --no-coverage to skip the heavy suites and fall back to the proxy everywhere
+// (keeps the suite fast/portable on machines without the toolchains).
+//
+//   risk.mjs               → risk-report.json (per-file) + console summary
+//   risk.mjs --no-coverage → proxy-only (no go/mix suites)
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -16,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
+const NO_COVERAGE = process.argv.slice(2).includes("--no-coverage");
 const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
 const sig = JSON.parse(readFileSync(join(ROOT, "tooling/file-importance/file-signals.json"), "utf8")).signals;
 const churn = Object.fromEntries(sig.map(s => [s.path, s.churn]));
@@ -68,30 +74,84 @@ function modToken(f, txt) {
   return null;
 }
 
-// ---- per source (code, non-test) file ----
+// ---- source (code, non-test) file universe ----
 const code = sig.filter(s => s.kind === "code");
+
+// ---- REAL coverage (v2 Phase 1): measured for Go + Elixir, best-effort ----
+// realCov: path -> { pct, source }. Per-package (Go) / per-module (Elixir) coverage
+// is mapped down onto each source file. Any suite that fails/times out is skipped
+// silently — those files keep the presence proxy.
+const realCov = {};
+let goPct = null, exPct = null;
+function tryRun(cmd, a, opts) {
+  try { return execFileSync(cmd, a, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300000, ...opts }); }
+  catch (e) { return (e.stdout || "") + (e.stderr || ""); }  // non-zero exit (e.g. coverage threshold) still yields data
+}
+if (!NO_COVERAGE) {
+  // -- Go: `go test -cover ./...` → "ok PKG ... coverage: NN.N% of statements" per package
+  if (existsSync(join(ROOT, "go.mod"))) {
+    const goOut = tryRun("go", ["test", "-cover", "./..."], { cwd: ROOT });
+    const pkgToDir = {};   // import path -> rel dir
+    try {
+      const idx = JSON.parse(readFileSync(join(ROOT, "tooling/blast-radius/index.json"), "utf8"));
+      for (const [d, p] of Object.entries(idx.go?.dirToPkg || {})) pkgToDir[p] = d;
+    } catch {}
+    let sum = 0, nPkg = 0;
+    for (const m of goOut.matchAll(/^(?:ok|---)?\s*(github\.com\/\S+)\s.*coverage:\s*([\d.]+)% of statements/gm)) {
+      const dir = pkgToDir[m[1]]; const pct = +m[2];
+      sum += pct; nPkg++;
+      if (!dir) continue;
+      for (const f of code) if (f.path.startsWith(dir + "/") && dirname(f.path) === dir && f.path.endsWith(".go"))
+        realCov[f.path] = { pct, source: "go" };
+    }
+    if (nPkg) goPct = +(sum / nPkg).toFixed(1);
+  }
+  // -- Elixir: `mix test --cover` → "| NN.NN% | Module |" per module; map module→file
+  if (existsSync(join(ROOT, "api/mix.exs"))) {
+    const exOut = tryRun("mix", ["test", "--cover"], { cwd: join(ROOT, "api"), env: { ...process.env, MIX_ENV: "test" } });
+    const modToFile = {};
+    for (const s of code) if (/\.exs?$/.test(s.path)) { const m = read(s.path).match(/defmodule\s+([\w.]+)/); if (m) modToFile[m[1]] = s.path; }
+    for (const m of exOut.matchAll(/^\|\s*([\d.]+)%\s*\|\s*([\w.]+)\s*\|/gm)) {
+      const f = modToFile[m[2]]; if (f) realCov[f] = { pct: +m[1], source: "elixir" };
+    }
+    const tot = exOut.match(/^\|\s*([\d.]+)%\s*\|\s*Total\s*\|/m);
+    if (tot) exPct = +tot[1];
+  }
+}
+
+// ---- per source (code, non-test) file ----
 const out = {};
 for (const s of code) {
   const txt = read(s.path);
   const has = siblingTest(s.path);
   const mod = modToken(s.path, txt);
   const refs = mod ? Math.max(0, testCorpus.split(mod.toLowerCase()).length - 1) : 0;
-  const testScore = Math.min(100, (has ? 60 : 0) + Math.min(40, refs * 8));
+  const proxyScore = Math.min(100, (has ? 60 : 0) + Math.min(40, refs * 8));
+  // Prefer REAL coverage when measured; else fall back to the presence proxy.
+  const rc = realCov[s.path];
+  const testScore = rc ? Math.round(rc.pct) : proxyScore;
+  const testCoverageSource = rc ? rc.source : "proxy";
   const fixes = bugFix[s.path] || 0;
   const own = ownership(s.path);
   out[s.path] = { bugFixes: fixes, defectDensity: +(fixes / Math.max(1, churn[s.path] || 1)).toFixed(2),
-    hasTest: has, testRefs: refs, testScore,
+    hasTest: has, testRefs: refs, testScore, testCoverageSource,
+    realCoverage: rc ? rc.pct : null, proxyScore,
     primaryAuthorShare: own.primaryAuthorShare, authorCount: own.authorCount };
 }
 
-const report = { at: new Date().toISOString(), note: "test-presence is a PROXY, not line coverage", files: out };
+const report = { at: new Date().toISOString(),
+  note: "testScore is REAL coverage (go/elixir) where measured; presence PROXY elsewhere — see testCoverageSource",
+  coverageTotals: { go: goPct, elixir: exPct },
+  files: out };
 writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 
 const vals = Object.values(out);
 const untested = vals.filter(v => v.testScore < 40).length;
 const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= 0.4).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
 const e = (s) => process.stderr.write(s + "\n");
+const measured = vals.filter(v => v.testCoverageSource !== "proxy").length;
 e(`risk  ${vals.length} code files`);
+e(`  coverage: ${measured} files REAL-measured (go ${goPct ?? "—"}% · elixir ${exPct ?? "—"}% total) · ${vals.length - measured} on presence proxy`);
 e(`  test-presence: ${vals.filter(v => v.hasTest).length} have a sibling test · ${untested} score <40 (likely untested)`);
 e(`  defect-prone (density ≥0.4), top 8:`);
 for (const [f, v] of fragile.slice(0, 8)) e(`    ${v.bugFixes} fixes / ${churn[f]} churn = ${v.defectDensity}  ${f}`);

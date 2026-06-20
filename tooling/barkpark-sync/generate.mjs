@@ -20,7 +20,7 @@ const comb = Object.fromEntries(rd("tooling/combined/combined-report.json", { ro
 const risk = rd("tooling/risk/risk-report.json", { files: {} }).files;
 const erg = Object.fromEntries(rd("tooling/ergonomics/ergonomics-report.json", { files: [] }).files.map(f => [f.path, f]));
 const ledger = rd("tooling/research-coverage/research-ledger.json", { files: {} }).files;
-const idx = rd("tooling/blast-radius/index.json", { go: {}, js: {} });
+const idx = rd("tooling/blast-radius/index.json", { go: {}, js: {}, elixir: null });
 const useful = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;
 const intents = rd("tooling/intentions/intentions-report.json", { taxonomy: [], files: {}, hubs: {} });
 const intId = (id) => "intent-" + id;
@@ -51,10 +51,17 @@ const idOf = (p) => slug(p);
 const MAX_DEPS = 10; // keep the graph airy (avg degree ~7 is the Obsidian-like sweet spot)
 
 // ---- file-level dependency resolvers (per stack) ----
-// Elixir: module → file map, then alias/import/use refs
+// Elixir: prefer the REAL module→module graph from `mix xref` (blast-radius index,
+// keyed file→[files]); fall back to the alias/import/use regex scan when xref is
+// absent (no Elixir toolchain / --skip-elixir). The xref graph is ~2x denser and
+// makes reach/dependentCount exact for the biggest stack.
+const exForward = idx.elixir?.forward || null;
 const exModule = {};
 for (const f of universe) if (/\.exs?$/.test(f)) { const m = read(f).match(/defmodule\s+([\w.]+)/); if (m) exModule[m[1]] = f; }
 function elixirDeps(f, txt) {
+  if (exForward && exForward[f]) {
+    return new Set(exForward[f].filter(t => t !== f && inUniverse.has(t)));
+  }
   const out = new Set();
   for (const m of txt.matchAll(/\b(?:alias|import|use|require)\s+([A-Z][\w.]+)/g)) { const t = exModule[m[1]]; if (t && t !== f) out.add(t); }
   // alias Foo.{A, B}

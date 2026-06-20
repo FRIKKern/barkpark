@@ -103,16 +103,24 @@ function buildGo() {
 function buildElixir() {
   if (args.has("--skip-elixir")) { console.error("[elixir] skipped (--skip-elixir)"); return null; }
   if (!existsSync(join(ROOT, "api/_build"))) { console.error("[elixir] skipped (api/_build absent — run `mix compile` first)"); return null; }
+  // `mix xref graph --format dot` writes to api/xref_graph.dot by default; `--output -`
+  // streams the FULL module→module graph (compile + export + runtime edges) to stdout.
+  // The full graph is the real, dense dependency truth — far denser than the regex
+  // alias/import scan generate.mjs falls back to. This compiles (a few min); failure is
+  // non-fatal — generate.mjs then resolves Elixir edges itself.
   let dot;
-  try { dot = sh("mix", ["xref", "graph", "--format", "dot"], { cwd: join(ROOT, "api"), env: { ...process.env, MIX_ENV: "dev" } }); }
+  try { dot = sh("mix", ["xref", "graph", "--format", "dot", "--output", "-"], { cwd: join(ROOT, "api"), env: { ...process.env, MIX_ENV: "dev" } }); }
   catch (e) { console.error("[elixir] skipped:", e.message.split("\n")[0]); return null; }
 
-  // dot edges: "lib/a.ex" -> "lib/b.ex" [label="(compile)"]   (a references b)
+  // dot edges: "lib/a.ex" -> "lib/b.ex" [label="(compile)"]   (a references b).
+  // Paths are relative to api/, so prefix. Keep ALL edge types (compile/export/runtime).
   const forward = {};
   for (const m of dot.matchAll(/"([^"]+)"\s*->\s*"([^"]+)"/g)) {
     const a = "api/" + m[1], b = "api/" + m[2];
+    if (a === b) continue;
     (forward[a] ||= []).push(b);
   }
+  for (const k of Object.keys(forward)) forward[k] = [...new Set(forward[k])];
   return { forward, reverse: reverseOf(forward) };
 }
 
