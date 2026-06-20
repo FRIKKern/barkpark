@@ -120,7 +120,11 @@ const nodes = universe.map(p => {
       churn: s.churn ?? 0, fanIn: s.fanIn ?? 0, seam: !!s.seam,
       testScore: rk.testScore ?? null, hasTest: !!rk.hasTest, defectDensity: rk.defectDensity ?? 0,
       consistency: c.status || "clean", whatBreaks: l.whatBreaks || "",
-      usefulness: useful[p]?.usefulness ?? null, whyUseful: useful[p]?.why_useful || "",
+      // reach = pure programmatic normalized transitive-dependent count (formerly "usefulness").
+      // `why` is the agent prose kept as a DESCRIPTION, not a score.
+      reach: useful[p]?.reachScore ?? useful[p]?.usefulness ?? null, why: useful[p]?.why || useful[p]?.why_useful || "",
+      // ownership = bus-factor (from risk.mjs)
+      primaryAuthorShare: rk.primaryAuthorShare ?? null, authorCount: rk.authorCount ?? (gitMeta(p).authors.length || 0),
       intentions: intents.files[p] || [],
       git: gitMeta(p),
     },

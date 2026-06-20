@@ -54,7 +54,9 @@ run("generate", "tooling/barkpark-sync/generate.mjs");
 const nodes = (rd("tooling/barkpark-sync/nodes.json", { nodes: [] }).nodes || []).filter(n => n.kind !== "intention");
 const useFiles = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;
 const intRep = rd("tooling/intentions/intentions-report.json", { files: {}, taxonomy: [] });
-const usefulPending = nodes.filter(n => !(n.path in useFiles) || useFiles[n.path].usefulness == null).length;
+// reach is now PURE PROGRAMMATIC (computed by usefulness.mjs merge) — never an agent pass.
+// Count files still missing a computed reach only as a freshness signal, not agent work.
+const reachMissing = nodes.filter(n => !(n.path in useFiles) || useFiles[n.path].reach == null).length;
 const taxonomyN = (intRep.taxonomy || []).length;
 const intentPending = taxonomyN === 0 ? nodes.length : nodes.filter(n => !(n.path in intRep.files)).length;
 
@@ -74,7 +76,8 @@ if (PUBLISH && up && (publishNeeded || FORCE)) {
 }
 
 // ════════════════ REPORT BOARD ════════════════
-const enrichPending = usefulPending > 0 || intentPending > 0;
+// reach is computed, not agent work → only intentions gate ENRICH freshness.
+const enrichPending = intentPending > 0;
 e("");
 e(`${C.b}═══ STATUS QUO — three arcs ═══${C.x}`);
 e("");
@@ -87,12 +90,11 @@ if (covPending || staleGroups || issuesStale) {
   if (issuesStale) e(`     • layering/dup changed → 2 issue agents → consistency.mjs record`);
 } else e(`  ${C.g}✓ fresh${C.x}`);
 e("");
-e(`${C.b}ENRICH${C.x}   ${nodes.length} files · ${taxonomyN} intentions`);
+e(`${C.b}ENRICH${C.x}   ${nodes.length} files · reach computed (${reachMissing} missing) · ${taxonomyN} intentions`);
 if (enrichPending) {
   e(`  ${C.y}⟳ pending:${C.x}`);
-  if (usefulPending) e(`     • ${usefulPending} file(s) need usefulness → usefulness.mjs batches → dispatch → merge`);
   if (intentPending) e(`     • ${intentPending} file(s) need intention tags${taxonomyN ? "" : " (no taxonomy yet — run discovery)"} → intentions.mjs batches → dispatch → merge`);
-} else e(`  ${C.g}✓ fresh — every file has usefulness + intentions${C.x}`);
+} else e(`  ${C.g}✓ fresh — reach computed, every file has intentions${C.x}`);
 e("");
 e(`${C.b}PUBLISH${C.x}  Barkpark ${up ? C.g + "reachable" + C.x : C.r + "not reachable" + C.x} · nodes ${publishNeeded ? C.y + "changed" + C.x : C.g + "in sync" + C.x}`);
 if (published) e(`  ${C.g}✓ pushed → /d/codebase/papers/:slug · /v1/graph?dataset=codebase · codebase-graph.html${C.x}`);

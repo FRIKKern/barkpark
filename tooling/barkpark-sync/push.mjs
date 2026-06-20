@@ -33,7 +33,7 @@ async function post(path, token, body) {
 }
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 const f = (n) => n.fields;
-const metricsLine = (n) => `importance ${f(n).importance} · usefulness ${f(n).usefulness ?? "?"} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · depends-on ${n.deps.length} · depended-on-by ${f(n).dependentCount ?? 0}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
+const metricsLine = (n) => `importance ${f(n).importance} · reach ${f(n).reach ?? "?"} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · depends-on ${n.deps.length} · depended-on-by ${f(n).dependentCount ?? 0}${f(n).seam ? " · 🔗seam" : ""} · owners ${f(n).authorCount ?? "?"} (top ${f(n).primaryAuthorShare ?? "?"}%) · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
 
 // ---- phase 0: register the paper schema for this dataset ----
 // The content-edge extractor keys on list_schemas(dataset) to find reference
@@ -107,8 +107,8 @@ for (const n of (SKIP_CONTENT ? [] : nodes)) {
       { type: "heading", level: 1, text: n.path },
       { type: "paragraph", content: [{ type: "text", value: metricsLine(n) }] },
       { type: "paragraph", content: [{ type: "text", value: (f(n).role || "") + (f(n).description ? " — " + f(n).description : "") }] },
-      { type: "heading", level: 2, text: `Why it's useful (usefulness ${f(n).usefulness ?? "?"}/100)` },
-      { type: "paragraph", content: [{ type: "text", value: f(n).whyUseful || "(not yet scored)" }] },
+      { type: "heading", level: 2, text: `Reach ${f(n).reach ?? "?"}/100 (transitive dependents) · why reusable` },
+      { type: "paragraph", content: [{ type: "text", value: f(n).why || "(no description)" }] },
       { type: "heading", level: 2, text: `Intentions it serves (${(f(n).intentions || []).length})` },
       { type: "code", language: "text", value: ints },
       { type: "heading", level: 2, text: `Depends on (${n.deps.length})` },

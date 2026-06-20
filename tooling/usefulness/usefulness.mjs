@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-// Usefulness axis — distinct from importance. Importance = risk if wrong;
-// USEFULNESS = value/leverage delivered (how reusable + relied-upon a file is,
-// what capability it gives the system). Programmatic prior = reach (transitive
-// dependents) × leverage (entrypoint/seam/public) × reliability (tested). Agents
-// score usefulness + write a concrete "why it's useful" per file.
+// REACH axis (formerly "usefulness"). v2 Phase 0: reach is a PURE PROGRAMMATIC
+// value — the normalized (0-100) transitive-dependent count. No agent pass is
+// needed to produce the number; it is computed from the dependency graph.
 //
-//   usefulness.mjs batches  → per-file agent tasks (prior seeded)   [free]
-//   usefulness.mjs merge     → usefulness-report.json from results   [free]
+// The agent "why it's useful" prose is KEPT as a `why` DESCRIPTION (graded
+// "reusability") — it explains why a file is reusable; it is NOT a score.
+//
+//   usefulness.mjs batches  → per-file agent tasks (reach prior seeded)   [free]
+//   usefulness.mjs merge     → usefulness-report.json (reach + why)        [free]
+//
+// usefulness-report.json keeps its filename for back-compat; each entry now
+// carries: reach (raw transitive count), reachScore (0-100 surfaced value),
+// why (description text), plus legacy `usefulness`/`why_useful` mirrors.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmSync } from "node:fs";
@@ -56,14 +61,28 @@ if (cmd === "batches") {
 
 if (cmd === "merge") {
   const RDIR = join(HERE, "results");
+  // The agent prose stays only as a DESCRIPTION (the `why`); the score is computed.
   const out = {};
   for (const f of (existsSync(RDIR) ? readdirSync(RDIR) : []).filter(f => f.endsWith(".json"))) {
-    try { for (const r of JSON.parse(readFileSync(join(RDIR, f), "utf8"))) if (r?.path) out[r.path] = { usefulness: r.usefulness, why_useful: r.why_useful }; } catch {}
+    try { for (const r of JSON.parse(readFileSync(join(RDIR, f), "utf8"))) if (r?.path) out[r.path] = { why_useful: r.why_useful }; } catch {}
   }
-  // blend agent usefulness with the reach prior (anchor)
+  // reach = pure programmatic: normalize the transitive-dependent count to 0-100.
+  // Distribution is heavily skewed, so log-scale against the corpus max.
+  const reachByPath = {}; let maxReach = 0;
+  for (const n of nodes) { const r = reach(n.id); reachByPath[n.path] = r; if (r > maxReach) maxReach = r; }
+  const denom = Math.log2(1 + maxReach) || 1;
+  const reachScore = (r) => Math.round((Math.log2(1 + r) / denom) * 100);
   const report = { at: new Date().toISOString(), files: {} };
-  for (const n of nodes) { const a = out[n.path]; const p = prior(n); report.files[n.path] = { usefulness: a ? Math.round(0.4 * p.prior + 0.6 * (+a.usefulness || p.prior)) : p.prior, why_useful: a?.why_useful || "", reach: p.reach, prior: p.prior }; }
+  for (const n of nodes) {
+    const a = out[n.path]; const r = reachByPath[n.path]; const score = reachScore(r);
+    const why = a?.why_useful || "";
+    report.files[n.path] = {
+      reach: r, reachScore: score, why,
+      // legacy mirrors so older readers keep working; treat the score as reach.
+      usefulness: score, why_useful: why,
+    };
+  }
   writeFileSync(join(HERE, "usefulness-report.json"), JSON.stringify(report, null, 2));
-  const n = Object.values(report.files).filter(x => x.why_useful).length;
-  process.stderr.write(`[usefulness] merged ${n}/${nodes.length} with agent 'why useful' → usefulness-report.json\n`);
+  const n = Object.values(report.files).filter(x => x.why).length;
+  process.stderr.write(`[reach] computed reach for ${nodes.length} files (normalized 0-100) · ${n} carry a 'why' description → usefulness-report.json\n`);
 }
