@@ -47,7 +47,13 @@ blast-radius      ─ relationships: what a change affects; cross-language seam 
 chain (~2s, free), regenerates the comprehensive 8-dimension report from cached
 verdicts, and prints **FRESH** or the exact pending agent work. Re-runs are cheap
 because every agent pass (research, consistency, issues) is content-hash cached —
-unchanged files/groups are never re-judged.
+unchanged files/groups are never re-judged. Flags: `--no-coverage` (skip the heavy
+go/mix suites), `--skip-elixir` (regex resolver on hosts without the toolchain).
+
+The scoring is a **standing loop**, not a one-shot: `.github/workflows/codebase-intel.yml`
+re-fits `fit` on every release (tracking AUC over time in `tooling/fit/auc-history.jsonl`)
+and runs a weekly drift-guard that surfaces ledger staleness — both coverage-free,
+no DB needed.
 
 Beyond the quality report, the suite has two more arcs (see the `codebase-quality`
 skill): **ENRICH** — `usefulness` + `intentions` add the per-file knowledge layer;

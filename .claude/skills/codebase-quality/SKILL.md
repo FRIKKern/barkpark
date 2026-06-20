@@ -62,7 +62,17 @@ node tooling/status/status.mjs
 
 `status.mjs` already chains: `blast-radius/build-index`, `file-importance/build-signals`,
 `ergonomics/ergonomics`, `risk/risk`, `consistency scan+batches`, `combined/combine`,
-`quality/quality`, `status/report`.
+`quality/quality`, `status/report`. Pass `--no-coverage` to skip the heavy go/mix
+suites (proxy test everywhere; real defect-mining + reach still run) and
+`--skip-elixir` to use the regex resolver on hosts without the Elixir toolchain.
+
+**Standing loop (CI, cqv3-p1).** `.github/workflows/codebase-intel.yml` runs the
+calibration as a loop, not a one-shot: a **calibrate** job on every release re-runs
+`status.mjs --no-coverage` → `fit.mjs`, appends one line to `tooling/fit/auc-history.jsonl`
+(the one tracked, non-gitignored fit output) and uploads the calibrated config +
+report, so AUC is tracked as incident history grows; a weekly **drift-guard** job
+runs the cheap chain and surfaces ledger drift in the job summary (never blocks).
+Both run coverage-free, so no Postgres/test DB is needed.
 
 ---
 
@@ -185,11 +195,14 @@ also queryable via the Barkpark graph/search or the per-file papers.
 
 ## Honest limits (state these with the report)
 
-- Snapshot — the cache keeps it live, but a stale ledger weakens importance.
-- Single-vote agent judgments (spot-check; not multi-voted by default).
+- Snapshot — the cache keeps it live; the weekly **drift-guard** CI job
+  (`codebase-intel.yml`) now surfaces a stale ledger instead of letting it rot.
+- Single-vote agent judgments (spot-check; not multi-voted by default) — cqv3-p2.
 - Scoring weights + composite forms live in `tooling/fit/scoring-config.json` (read
-  by `tooling/lib/scoring.mjs`); when unfitted it falls back to defaults. Effort
-  estimates are calibrated heuristics — trust ranking/tiers over the exact integer.
+  by `tooling/lib/scoring.mjs`); when unfitted it falls back to defaults. The
+  **calibrate** CI job re-fits on every release and tracks AUC over time in
+  `tooling/fit/auc-history.jsonl` (cqv3-p1). Effort estimates are calibrated
+  heuristics — trust ranking/tiers over the exact integer.
 - **Tested is REAL where a suite runs** (Go `go test -cover`, Elixir `mix test
   --cover`, JS via vitest `coverage-final.json`); a presence PROXY elsewhere. The
   JS line-coverage ingest is free (reads existing `coverage-final.json`) and runs

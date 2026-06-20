@@ -36,7 +36,7 @@ e(`${C.b}status-quo${C.x}  running the programmatic chain (free)…`);
 run("blast-index", "tooling/blast-radius/build-index.mjs", argv.includes("--skip-elixir") ? ["--skip-elixir"] : []);
 run("signals", "tooling/file-importance/build-signals.mjs", ["10"]);
 run("ergonomics", "tooling/ergonomics/ergonomics.mjs");
-run("risk", "tooling/risk/risk.mjs");
+run("risk", "tooling/risk/risk.mjs", argv.includes("--no-coverage") ? ["--no-coverage"] : []);
 run("consistency", "tooling/consistency/consistency.mjs", ["scan"]);
 run("coverage", "tooling/research-coverage/coverage.mjs", ["scan"]);
 run("consistency-batches", "tooling/consistency/consistency.mjs", ["batches"]);

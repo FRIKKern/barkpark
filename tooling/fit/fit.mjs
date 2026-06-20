@@ -339,6 +339,21 @@ const config = {
 };
 writeFileSync(join(HERE, "scoring-config.json"), JSON.stringify(config, null, 2));
 
+// ════════════════ OUTPUT 1b — auc-history.jsonl (the standing-loop ledger) ═══
+// One append-only line per calibration run, so AUC is TRACKED OVER TIME as the
+// incident history grows (cqv3-p1). Unlike the other outputs this is NOT
+// gitignored — the whole point is that it survives across runs; the release-
+// cadence CI job (or a human) commits the new line. Keyed by HEAD so re-runs on
+// the same commit overwrite rather than duplicate.
+const head = (() => { try { return git(["rev-parse", "HEAD"]).trim(); } catch { return "unknown"; } })();
+const histPath = join(HERE, "auc-history.jsonl");
+const histLine = { at: config.generatedAt, head, files: N, positives, posRate: +posRate.toFixed(4), fullAuc: config.validity.fullAuc, cvAuc: cv.auc, confidence };
+const priorHist = existsSync(histPath)
+  ? readFileSync(histPath, "utf8").split("\n").filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).filter(r => r.head !== head)
+  : [];
+writeFileSync(histPath, [...priorHist, histLine].map(r => JSON.stringify(r)).join("\n") + "\n");
+process.stderr.write(`[fit] auc-history: ${priorHist.length + 1} run(s) tracked → fullAuc ${histLine.fullAuc}, cvAuc ${histLine.cvAuc ?? "—"} (${confidence})\n`);
+
 // ════════════════ OUTPUT 2 — fit-report.html ════════════════
 const esc = (s) => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const bar = (v, max = 1) => { const w = Math.round(Math.min(1, Math.abs(v) / max) * 100); const neg = v < 0; return `<span class="bar ${neg ? "neg" : "pos"}" style="width:${w}%"></span>`; };
