@@ -62,6 +62,56 @@ for (const n of codeNodes) for (const id of (n.fields?.intentions || [])) {
 const tax = rd("tooling/intentions/intentions-report.json", { taxonomy: [] }).taxonomy;
 const intentTitle = Object.fromEntries(tax.map((t) => [t.id, t.title]));
 
+// ──────────── triage scope for OPEN tasks (title → intention match) ────────────
+// A committed task scopes itself from the files it touched. An OPEN task has no
+// commits yet — so we ground its predicted scope in the same taxonomy by matching
+// its title's tokens against intention titles + ids (the slug carries the words).
+const STOP = new Set("the a an of to and or for in on with by into from this that fix feat add remove update refactor phase build review chore test docs".split(" "));
+const toks = (s) => [...new Set(String(s).toLowerCase().match(/[a-z0-9]+/g)?.filter((w) => w.length > 2 && !STOP.has(w)) || [])];
+const intentTokens = new Map(tax.map((t) => [t.id, new Set([...toks(t.title), ...toks(t.id)])]));
+function matchIntentions(title) {
+  const tt = toks(title); if (!tt.length) return [];
+  const scored = [];
+  for (const [id, set] of intentTokens) {
+    const hits = tt.filter((w) => set.has(w)).length;
+    if (hits) scored.push({ id, score: hits });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  // prefer PRECISE multi-token matches; a single common token (one hit) is weak
+  // signal — fall back to just the best one rather than dragging in 3 big
+  // intentions on a coincidental word. Keeps title-matched scope tight.
+  const strong = scored.filter((s) => s.score >= 2);
+  return (strong.length ? strong : scored.slice(0, 1)).slice(0, 2).map((s) => s.id);
+}
+
+// per-file leverage: the combined `priority` composite already = reach × severity ×
+// defect-amp × untested-boost (clean roots, fit-weighted). Σ over a file set is the
+// task's predicted blast-impact. defect-amp alone drives the calibration-on-tasks score.
+const filePriority = (p) => (comb[p]?.priority || 0);
+const fileDefectAmp = (p) => { const c = comb[p] || {}, rk = risk[p] || {}; const untested = 1 + (100 - (c.testScore ?? rk.testScore ?? 100)) / 100; return (c.reach || 0) * (1 + (rk.defectDensity || 0)) * untested; };
+
+// ──────────── churn provenance: who drives a hotspot ────────────
+// For a file, sum git churn (added+deleted lines) per author → the share owned by
+// the top author. A hotspot concentrated in one author is a bus-factor + review
+// blind-spot; spread churn is safer. Pure git mining, no agent.
+function churnProvenance(path) {
+  let out;
+  try { out = git(["log", "--no-merges", "--numstat", "--pretty=format:\x01%an", "--", path]); }
+  catch { return null; }
+  const byAuthor = {}; let total = 0, author = "";
+  for (const line of out.split("\n")) {
+    if (line.startsWith("\x01")) { author = line.slice(1); continue; }
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t/);
+    if (!m || !author) continue;
+    const churn = (m[1] === "-" ? 0 : +m[1]) + (m[2] === "-" ? 0 : +m[2]);
+    byAuthor[author] = (byAuthor[author] || 0) + churn; total += churn;
+  }
+  if (!total) return null;
+  const ranked = Object.entries(byAuthor).sort((a, b) => b[1] - a[1]);
+  const [topAuthor, topChurn] = ranked[0];
+  return { topAuthor, share: Math.round((topChurn / total) * 100), authors: ranked.length, totalChurn: total };
+}
+
 // impact/risk roots from the codebase intelligence
 const comb = Object.fromEntries(rd("tooling/combined/combined-report.json", { rows: [] }).rows.map((r) => [r.path, r]));
 const risk = rd("tooling/risk/risk-report.json", { files: {} }).files || {};
@@ -139,9 +189,14 @@ function build(tasks) {
     const intentSet = new Set();
     for (const p of actualGraph) for (const i of (fileIntents.get(p) || [])) intentSet.add(i);
     const intentions = [...intentSet].sort();
-    // predicted = union of every member file of those intentions
+    // predicted scope source: committed intentions (grounded) for tasks with
+    // file evidence; else match the TITLE against the taxonomy so OPEN, unstarted
+    // tasks can still be triaged. predictedVia records which path was taken.
+    let scopeIntents = intentions, predictedVia = intentions.length ? "commits" : "none";
+    if (!intentions.length) { const m = matchIntentions(t.title || id); if (m.length) { scopeIntents = m; predictedVia = "title"; } }
+    // predicted = union of every member file of the scope intentions
     const predSet = new Set();
-    for (const i of intentions) for (const p of (intentMembers.get(i) || [])) predSet.add(p);
+    for (const i of scopeIntents) for (const p of (intentMembers.get(i) || [])) predSet.add(p);
     const predictedFiles = [...predSet].sort();
 
     const actualGraphSet = new Set(actualGraph);
@@ -151,13 +206,24 @@ function build(tasks) {
 
     const { impact, risk: riskScore, fragileFiles, fragile } = scoreFiles(actualGraph);
 
+    // calibration-on-tasks: a forward-looking defect-risk for the task. Score the
+    // files it WILL touch (predicted scope for open tasks, the files it DID touch
+    // for committed ones) by the same defect-amp the file calibration uses. A
+    // HEURISTIC composite (too few closed tasks to train a model yet — sharpens as
+    // the (task-id) history grows); ranks open work, doesn't certify it.
+    const riskScopeFiles = actualGraph.length ? actualGraph : predictedFiles;
+    const predictedImpact = Math.round(predictedFiles.reduce((s, p) => s + filePriority(p), 0));
+    const defectRisk = Math.round(riskScopeFiles.reduce((s, p) => s + fileDefectAmp(p), 0));
+    const open = !/^(done|closed|cancelled)$/.test((t.lifecycle_status || t.content?.lifecycle_status || t.status || ""));
+
     out.push({
       id, title: t.title || id,
       status: t.lifecycle_status || t.content?.lifecycle_status || t.status || "",
       kind: (t.labels || []).find((l) => l.startsWith("kind:"))?.slice(5) || t.kind || "task",
-      commits, rolledUp,
-      actualFiles, nonGraphFiles, predictedFiles, intentions,
+      commits, rolledUp, open,
+      actualFiles, nonGraphFiles, predictedFiles, intentions, predictedVia,
       impact, risk: riskScore, fragile, fragileFiles,
+      predictedImpact, defectRisk,
       onTarget, scopedUntouched, scopeCreep,
     });
   }
@@ -252,15 +318,41 @@ async function publish(report) {
 }
 
 // ──────────── main ────────────
+const TRIAGE = argv.includes("triage");
+
 (async () => {
   const tasks = await fetchTasks();
-  const report = { at: new Date().toISOString(), host: HOST, dataset: DATASET, taskCount: tasks.length, tasks: build(tasks) };
+
+  // churn provenance for the top hotspot files — who drives the riskiest code.
+  const hotspots = Object.values(comb).filter((r) => (r.hotspot || 0) > 0).sort((a, b) => b.hotspot - a.hotspot).slice(0, 15);
+  const provenance = hotspots.map((r) => ({ path: r.path, hotspot: r.hotspot, ...(churnProvenance(r.path) || { topAuthor: null, share: 0, authors: 0, totalChurn: 0 }) }))
+    .filter((p) => p.topAuthor);
+
+  const report = { at: new Date().toISOString(), host: HOST, dataset: DATASET, taskCount: tasks.length, tasks: build(tasks), provenance };
   writeFileSync(join(HERE, "tasks-report.json"), JSON.stringify(report, null, 2));
+
+  // ── triage mode: rank OPEN tasks by predicted leverage × defect-risk ──
+  if (TRIAGE) {
+    const openScoped = report.tasks.filter((t) => t.open && t.predictedVia !== "none" && (t.predictedImpact > 0 || t.defectRisk > 0))
+      .sort((a, b) => (b.predictedImpact - a.predictedImpact) || (b.defectRisk - a.defectRisk));
+    const openUnscoped = report.tasks.filter((t) => t.open && (t.predictedVia === "none" || (t.predictedImpact === 0 && t.defectRisk === 0)));
+    e(`[tasks · triage] ${openScoped.length} open task(s) ranked by predicted impact × defect-risk\n`);
+    for (const t of openScoped.slice(0, 20)) {
+      e(`  ${String(t.predictedImpact).padStart(5)} impact · ${String(t.defectRisk).padStart(5)} defect-risk  ${t.id}  ${t.title}`);
+      e(`        scope via ${t.predictedVia}: ${t.intentions.concat(t.predictedVia === "title" ? ["(title-matched)"] : []).join(", ") || "—"} · ${t.predictedFiles.length} predicted file(s)`);
+    }
+    if (openUnscoped.length) e(`\n  ${openUnscoped.length} open task(s) unscored (no intention match — title carries no taxonomy tokens): ${openUnscoped.slice(0, 8).map((t) => t.id).join(", ")}${openUnscoped.length > 8 ? " …" : ""}`);
+    if (provenance.length) {
+      e(`\n[churn provenance] who drives the top hotspots:`);
+      for (const p of provenance.slice(0, 8)) e(`  ${p.path}  hotspot ${p.hotspot} · ${p.topAuthor} owns ${p.share}% of churn (${p.authors} author${p.authors > 1 ? "s" : ""})`);
+    }
+    return;
+  }
 
   // ── console summary ──
   const withFiles = report.tasks.filter((t) => t.actualFiles.length);
   e(`[tasks] ${report.tasks.length} tasks pulled · ${withFiles.length} have committed file evidence (task-id in a commit message)`);
-  e(`  → tasks-report.json`);
+  e(`  → tasks-report.json  ·  triage open work: node tooling/tasks/tasks.mjs triage`);
   e("");
   for (const t of withFiles.slice(0, 12)) {
     const graphN = t.onTarget.length + t.scopeCreep.length;

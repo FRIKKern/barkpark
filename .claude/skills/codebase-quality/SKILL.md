@@ -158,9 +158,21 @@ node-type. A task inherits the intentions of the files its commits changed (the
 `task → intention`. Cross-validates PREDICTED scope (`scope`) vs ACTUAL (git) →
 on-target / scoped-untouched / scope-creep (graph-node files only); rolls child
 commits up to the parent epic; computes impact (Σreach) + a fragile flag.
+
+Three forward-looking signals on top (cqv3-p4):
+- **Triage** (`tasks.mjs triage`) — ranks OPEN tasks by predicted impact (Σ of the
+  `priority` composite) × `defectRisk`. Committed tasks scope precisely from their
+  files; unstarted ones scope by matching the title against the intention taxonomy
+  (`predictedVia: commits|title|none`) so even fresh work can be ordered.
+- **Churn provenance** — `report.provenance`: for each top hotspot file, the author
+  who owns the most churn + their share (bus-factor / review blind-spot signal).
+- **Calibration-on-tasks** — per-task `defectRisk` (Σ defect-amp over the files it
+  will touch). A HEURISTIC composite, not a trained model — too few closed tasks to
+  fit yet; it sharpens as `(task-id)` history grows.
 ```
 node tooling/cochange/cochange.mjs        # co-change matrix + 3-way cross-validation
 node tooling/tasks/tasks.mjs              # task↔file↔intention + predicted-vs-actual scope
+node tooling/tasks/tasks.mjs triage       # rank OPEN work by predicted impact × defect-risk
 node tooling/tasks/tasks.mjs publish      # add task nodes to the codebase graph
 ```
 

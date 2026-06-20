@@ -39,7 +39,7 @@ blast-radius      ─ relationships: what a change affects; cross-language seam 
 | `fit/` | "What weights/forms do the composites use?" | `scoring-config.json` (read by `lib/scoring.mjs`) |
 | `barkpark-sync/` | "Publish every file as an interconnected Barkpark paper" | `generate.mjs` → `push.mjs` → `graph-view.mjs` |
 | `cochange/` | "Which files change together? Is a coupling real, aspirational, or accidental?" | `cochange.mjs` |
-| `tasks/` | "How does work relate to code? Did a task touch what it should?" | `tasks.mjs [publish]` |
+| `tasks/` | "How does work relate to code? Did a task touch what it should? What open work is highest-leverage?" | `tasks.mjs [triage\|publish]` |
 | `scope/` | "What's the file set for this task? — context pack, no crawl" | `scope.mjs <intention-id\|task>` |
 | `status/` | **the entry point** — full quality report, incremental | `status.mjs` |
 
