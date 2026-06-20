@@ -190,10 +190,14 @@ also queryable via the Barkpark graph/search or the per-file papers.
 - Scoring weights + composite forms live in `tooling/fit/scoring-config.json` (read
   by `tooling/lib/scoring.mjs`); when unfitted it falls back to defaults. Effort
   estimates are calibrated heuristics — trust ranking/tiers over the exact integer.
-- **Tested is a PROXY** (sibling-test + module references), not line coverage.
+- **Tested is REAL where a suite runs** (Go `go test -cover`, Elixir `mix test
+  --cover`, JS via vitest `coverage-final.json`); a presence PROXY elsewhere. The
+  JS line-coverage ingest is free (reads existing `coverage-final.json`) and runs
+  even under `--no-coverage`; CI emits it as the `js-coverage` artifact (cqv3-p3).
 - Defect-history is git-subject mining — only as good as commit hygiene.
-- The file-level **dependency graph is sparse** (~35-47% of files) — the resolver is
-  best-effort and **Elixir has no warm symbol graph** (no `mix xref`). Warming it
-  is the lever for denser edges.
+- The file-level **dependency graph is sparse for JS/Go** (best-effort resolver),
+  but **Elixir is now warm**: `build-index.mjs` auto-compiles when `api/_build` is
+  absent, so `mix xref` yields the dense module graph (~286 files) on a fresh clone
+  and in CI — no longer contingent on a manual `mix compile` (cqv3-p3).
 
 See `tooling/README.md` for the suite map.

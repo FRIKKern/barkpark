@@ -103,7 +103,17 @@ function buildGo() {
 // failure is non-fatal — check.mjs falls back to file-level + seam for Elixir.
 function buildElixir() {
   if (args.has("--skip-elixir")) { console.error("[elixir] skipped (--skip-elixir)"); return null; }
-  if (!existsSync(join(ROOT, "api/_build"))) { console.error("[elixir] skipped (api/_build absent — run `mix compile` first)"); return null; }
+  // Warm the symbol graph. `mix xref` needs compiled artifacts; without `_build`
+  // the old code SILENTLY skipped → the densest dependency layer (286 files)
+  // vanished on every fresh clone and in CI. Compile once so the dense graph is
+  // RELIABLE, not contingent on someone having run `mix compile` first.
+  // Opt out with --no-elixir-compile for offline / no-toolchain contexts.
+  if (!existsSync(join(ROOT, "api/_build"))) {
+    if (args.has("--no-elixir-compile")) { console.error("[elixir] skipped (api/_build absent, --no-elixir-compile)"); return null; }
+    console.error("[elixir] api/_build absent — warming via `mix compile` (one-time, ~min)…");
+    try { sh("mix", ["compile"], { cwd: join(ROOT, "api"), env: { ...process.env, MIX_ENV: "dev" }, stdio: ["ignore", "ignore", "inherit"] }); }
+    catch (e) { console.error("[elixir] compile failed — falling back to regex scan:", e.message.split("\n")[0]); return null; }
+  }
   // `mix xref graph --format dot` writes to api/xref_graph.dot by default; `--output -`
   // streams the FULL module→module graph (compile + export + runtime edges) to stdout.
   // The full graph is the real, dense dependency truth — far denser than the regex

@@ -77,6 +77,23 @@ jobs:
         continue-on-error: true
         run: bash scripts/check-no-node-imports.sh
 
+      # ADVISORY (cqv3-p3): emit REAL line coverage so the codebase-quality
+      # tooling (tooling/risk) ingests coverage-final.json instead of the
+      # presence proxy. The `json` reporter is configured in each package's
+      # vitest.config.ts; turbo's test task already declares coverage/** outputs.
+      # Never blocks — coverage is an observability signal, not a merge gate.
+      - name: "JS coverage (ADVISORY — feeds codebase-quality tooling)"
+        continue-on-error: true
+        run: pnpm test -- --coverage
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: js-coverage
+          path: js/packages/*/coverage/coverage-final.json
+          if-no-files-found: ignore
+
   changesets:
     name: Changeset present (PRs only)
     if: github.event_name == 'pull_request'

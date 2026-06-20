@@ -136,8 +136,12 @@ if (!NO_COVERAGE && !covCacheHit) {
     const tot = exOut.match(/^\|\s*([\d.]+)%\s*\|\s*Total\s*\|/m);
     if (tot) exPct = +tot[1];
   }
-  // -- JS/TS: ingest Istanbul coverage-final.json (vitest --coverage) where present.
-  //    --js-coverage runs vitest for the core SDK package (slow); default ingests existing.
+}
+// -- JS/TS: ingest Istanbul coverage-final.json (vitest --coverage) where present.
+//    Reading an existing coverage-final.json is FREE, so it runs even under
+//    --no-coverage (which only means "skip the heavy go/mix/vitest suites").
+//    --js-coverage additionally RUNS vitest for the core SDK package (slow).
+if (!covCacheHit) {
   const covFiles = [];
   const findCov = (dir, depth = 0) => { if (depth > 3) return; let es; try { es = readdirSync(join(ROOT, dir), { withFileTypes: true }); } catch { return; } for (const en of es) { if (en.name === "node_modules" || en.name === "dist" || en.name.startsWith(".")) continue; const rel = join(dir, en.name); if (en.isDirectory()) findCov(rel, depth + 1); else if (en.name === "coverage-final.json") covFiles.push(rel); } };
   for (const r of ["js", "web", "sdk", "packages"]) findCov(r);
