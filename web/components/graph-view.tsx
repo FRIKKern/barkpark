@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Script from "next/script";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
 import type { GraphMatch } from "@/lib/hovered-doc-context";
@@ -173,11 +173,37 @@ export function GraphView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // UPDATE — push new nodes/edges/root into the live controller (no remount, so
-  // node positions morph rather than re-seeding). No-op until init has run.
+  // A CONTENT signature of the graph topology. The server page re-renders on
+  // every search navigation (it doesn't read the query, but App Router re-runs it
+  // anyway), handing us fresh-but-identical `nodes`/`edges` arrays each time. The
+  // UPDATE effect below keys on this signature, NOT array identity — so a search
+  // that doesn't change the corpus never re-ingests + reheats the sim (which read
+  // as the whole layout re-animating between searches). Only a real topology
+  // change (navigating to a different corpus/root) fires update().
+  const topoSig = useMemo(
+    () =>
+      String(rootId) +
+      "|" +
+      nodes.map((n) => n.id).join(",") +
+      "|" +
+      edges.map((e) => e.from_id + ">" + e.to_id).join(","),
+    [nodes, edges, rootId],
+  );
+  // Seed the ref with the MOUNT signature so the first effect run is a no-op:
+  // init() already ingested this exact data, and re-calling update() would reheat.
+  const lastTopoSigRef = useRef<string>(topoSig);
+
+  // UPDATE — push genuinely-new nodes/edges/root into the live controller (no
+  // remount, so positions morph rather than re-seeding). Guarded by topoSig so
+  // identical-content re-renders are ignored. No-op until init has run.
   useEffect(() => {
+    if (lastTopoSigRef.current === topoSig) return;
+    lastTopoSigRef.current = topoSig;
     ctlRef.current?.update(nodes, edges, { rootId });
-  }, [nodes, edges, rootId]);
+    // nodes/edges/rootId are read inside but the guard is topoSig; they move in
+    // lockstep with it, so depending on topoSig alone is correct and intended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topoSig]);
 
   // MATCHES — the finder's visible set drives which nodes stay lit and how
   // strongly. Keep the ref current (for the init-race stamp) and push into the

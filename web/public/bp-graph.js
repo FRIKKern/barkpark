@@ -60,6 +60,23 @@
   // Hover focus: non-focus nodes fade to this; their links to LINK_A_DIM.
   var HOVER_DIM_ALPHA = 0.15; // dim hard so the focused ego-network pops
 
+  // ── z-depth ──────────────────────────────────────────────────────────────
+  // A SEPARATE channel from opacity: each node carries an animated `depth`
+  // (1 = forward/full-size, < 1 = receded/smaller) driven by its FOCUS DISTANCE
+  // — BFS hops from the hovered node, or match-weakness under a search. Because
+  // it keys off hover-distance (set identically by canvas hover AND the list→
+  // graph bridge), the recede reads the same whichever surface drives focus, and
+  // it never double-counts the search-dim the way an opacity-coupled scale did.
+  var DEPTH_FAR = 0.5; // floor: a fully-distant / unmatched dot draws at half size
+  var DEPTH_RING = 0.58; // per-ring recede factor past the 1-hop ego (smaller = steeper)
+  // Focus-distance → target scale. Ego (hovered + 1-hop) stays full; rings 2+
+  // recede geometrically toward the floor; unreachable (undefined) sits at floor.
+  function depthForDist(d) {
+    if (d === 0 || d === 1) return 1;
+    if (d === undefined) return DEPTH_FAR;
+    return DEPTH_FAR + (1 - DEPTH_FAR) * Math.pow(DEPTH_RING, d - 1);
+  }
+
   // Label color (muted grey) + zoom-fade thresholds.
   var LABEL_COLOR_DARK = "#8b92a3"; // muted grey
   var LABEL_COLOR_LIGHT = "#5a5f6e";
@@ -128,6 +145,29 @@
       a[1] + (b[1] - a[1]) * t,
       a[2] + (b[2] - a[2]) * t
     );
+  }
+  // Rank → highlight colour. Mirrors the finder list's `highlightColors` red→
+  // emerald sweep (lib/fuzzy.ts) so a node's colour matches the highlight tint of
+  // its result row: top of the list = vivid emerald, weakest visible = warm red.
+  // `mw` is the rank-derived match weight (≈0.2 tail → 1 top); normalize across
+  // that visible band to drive the full hue sweep. Opaque + lifted for a dark dot.
+  function rankColor(mw) {
+    var t = clamp((mw - 0.2) / 0.8, 0, 1); // 0 = weakest visible → 1 = top hit
+    var h = (t * 162) / 360; // 0 red → 162 emerald (same hue sweep as the list)
+    var s = (58 + t * 37) / 100; // 58% → 95% (vivid head)
+    var l = (58 - t * 4) / 100; // 58% → 54% (legible on the dark bed)
+    // HSL → hex so it composes with mixHex.
+    function h2(p, q, x) {
+      if (x < 0) x += 1;
+      if (x > 1) x -= 1;
+      if (x < 1 / 6) return p + (q - p) * 6 * x;
+      if (x < 1 / 2) return q;
+      if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+      return p;
+    }
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    var p = 2 * l - q;
+    return rgbToHex(h2(p, q, h + 1 / 3) * 255, h2(p, q, h) * 255, h2(p, q, h - 1 / 3) * 255);
   }
   // Perceptual-ish lighten/darken via HSL-L offset (good enough for rims).
   function shiftL(hex, dl) {
@@ -313,9 +353,12 @@
     var glowTier = 0; // 0..3 (T0 best)
     var frameTimes = [];
     var lastFrame = 0;
-    // Idle "breathing": once settled, the loop stays awake but only REDRAWS at
-    // this rate (vs 60fps) and draw() applies a tiny render-only sway, so the
-    // graph feels alive at ~1/5 the idle cost. Off-screen / reduced-motion park.
+    // Idle "breathing" — OFF by default for Obsidian-grade calm. When enabled,
+    // a settled graph keeps the loop awake at BREATH_FPS and draw() applies a
+    // tiny render-only sway. Default: a settled, un-hovered graph holds perfectly
+    // still and the rAF loop fully parks (re-woken on any interaction). Flip
+    // IDLE_BREATH to bring back the old gentle drift.
+    var IDLE_BREATH = false;
     var BREATH_FPS = 12;
     var lastBreathDraw = 0;
     var demoteRun = 0,
@@ -511,6 +554,8 @@
           alphaTarget: 1,
           scaleK: 0,
           scaleTarget: 1,
+          depth: 1,
+          depthTarget: 1,
           frosted: false,
           phaseSeed: Math.random() * Math.PI * 2,
           r: 8,
@@ -743,11 +788,11 @@
           node.x = cx + rad * Math.cos(ang);
           node.y = cy + rad * Math.sin(ang);
           node.alpha = 0;
-          node.scaleK = 0;
-          // Stronger depth stagger (55ms/ring, 320ms cap) turns the root→rim
-          // fill into a readable outward ripple — "impact propagating outward"
-          // — while staying under ~0.6s total. Pairs with the easeOutBack settle.
-          node._enterAt = perfNow() + Math.min(depthMap[node.id] * 55, 320);
+          node.scaleK = 1; // appear at full size — no scale pop (Obsidian-quiet)
+          // Very subtle entrance: a short UNIFORM opacity fade, no per-ring stagger
+          // ripple and no easeOutBack scale overshoot. Nodes simply fade in at rest
+          // size while the sim gently relaxes the seeded layout.
+          node._enterAt = perfNow();
         }
       });
 
@@ -756,17 +801,19 @@
 
       if (sparseMode) {
         layoutSparse();
-      } else if (reduced) {
+      } else if (reduced || !hadData) {
+        // Reduced-motion OR FIRST LOAD: settle the layout SYNCHRONOUSLY so the
+        // graph appears already in place — no live "entrance" drift while the sim
+        // relaxes. The whole settle happens off-screen before first paint, so
+        // nodes never slide into position (Obsidian-quiet).
         settleSync();
       } else {
-        // Pre-warm is now CAPPED by node count (clamp(round(4000/n),8,120)) so
-        // a large graph warms few steps off the good seed; tiny graphs still
-        // warm fully. This keeps the synchronous main-thread cost bounded.
-        var warm = hadData
-          ? clamp(Math.round(2000 / Math.max(1, n)), 6, 60)
-          : clamp(Math.round(4000 / Math.max(1, n)), 8, 120);
+        // In-session re-ingest (navigation): a brief, gentle live settle. Node
+        // positions are morph-eased from the prior layout by startMorph, so this
+        // stays soft rather than a swarm from full energy.
+        var warm = clamp(Math.round(2000 / Math.max(1, n)), 6, 60);
         for (var w2 = 0; w2 < warm; w2++) tick(16.67, true);
-        alpha = hadData ? 0.3 : 1.0;
+        alpha = 0.3;
         alphaTarget = 0.03;
         applyAngularFan();
       }
@@ -784,12 +831,12 @@
           if (saved.full != null) fullColor = !!saved.full;
           if (saved.flow != null) flowOn = saved.flow;
         } else {
-          // Frame the SEEDED positions now (so first paint isn't off-screen),
-          // then arm the one-shot auto-fit to reframe the SETTLED clump once the
-          // sim cools below the settle threshold. Sparse layouts are already
-          // exact, so they don't need the post-settle reframe.
+          // The layout is already fully settled (settleSync / layoutSparse ran
+          // synchronously above), so frame it ONCE, instantly, and mark auto-fit
+          // done — no eased post-settle reframe (that camera zoom was itself an
+          // entrance animation). First paint shows the final, static graph.
           fitInternal(false);
-          _autoFitDone = sparseMode || reduced ? true : false;
+          _autoFitDone = true;
           _userMovedCam = false;
         }
       }
@@ -1135,12 +1182,20 @@
       return Math.max(LINK_A_DIM, Math.pow(0.5, ring + 1));
     }
     function computeAlphaTargets() {
+      var matchOn = externalMatch != null;
       if (hoverId == null) {
         if (_hoverDistFor !== null) recomputeHoverDist();
         var ba = linkBaseAlpha();
         nodes.forEach(function (n) {
           n.alphaTarget = 1;
           n.frosted = false;
+          // No focus: depth keys off the search instead — weak/unmatched results
+          // recede, the strongest hits sit forward. No search → all flat (1).
+          n.depthTarget = !matchOn
+            ? 1
+            : n.searchDim
+            ? DEPTH_FAR
+            : DEPTH_FAR + (1 - DEPTH_FAR) * (n.matchW || 0);
         });
         edges.forEach(function (e) {
           e.alphaTarget = ba;
@@ -1154,11 +1209,16 @@
           // keyboard focus has parity with hover: always lit, never frosted
           n.alphaTarget = 1;
           n.frosted = false;
+          n.depthTarget = 1;
           return;
         }
         var d = hoverDist[n.id];
         n.alphaTarget = nodeHoverAlpha(d);
         n.frosted = !(d === 0 || d === 1); // hovered + 1-hop crisp; ring 2+ frosted
+        // Depth tracks the SAME hop distance as the opacity cascade — so size and
+        // dimming recede together, and a hover from the list reads identically to
+        // a hover on the canvas (both set hoverId → same hoverDist).
+        n.depthTarget = depthForDist(d);
       });
       edges.forEach(function (e) {
         var ds = hoverDist[e.srcId];
@@ -1182,7 +1242,11 @@
         var k = n.alphaTarget > n.alpha ? kin : kout;
         n.alpha += (n.alphaTarget - n.alpha) * k;
         n.scaleK += (n.scaleTarget - n.scaleK) * kin;
+        // Depth eases on the same crossfade as opacity so the recede is smooth
+        // (no per-ring snapping) and stays locked to the focus transition.
+        n.depth += (n.depthTarget - n.depth) * (n.depthTarget > n.depth ? kin : kout);
         if (Math.abs(n.alpha - n.alphaTarget) > 0.01) dirty++;
+        if (Math.abs(n.depth - n.depthTarget) > 0.01) dirty++;
       }
       for (var j = 0; j < edges.length; j++) {
         var e = edges[j];
@@ -1195,20 +1259,17 @@
       _lerpDirty = dirty;
     }
 
-    // Entrance has TWO decoupled channels so opacity LAGS spatial arrival
-    // (the deliberate luxe fade): scaleK on easeOutBack over ~280ms, alpha on
-    // a slightly-longer, slightly-delayed easeOutCubic so the orb fades in
-    // AFTER it has scaled into place. Returns {scale, alpha} progress, and
-    // clears _enterAt only once BOTH channels have completed.
+    // Very subtle entrance: a SINGLE short opacity fade, no scale channel. Scale
+    // is fixed at 1 (nodes never pop in), so the only motion is a gentle fade to
+    // full opacity. Set ENTER_MS to 0 for an instant (no-animation) appearance.
+    var ENTER_MS = 0;
     function entranceProgress(node, now) {
-      if (node._enterAt === 0) return { scale: 1, alpha: 1, done: true };
-      var ts = (now - node._enterAt) / 280; // scale window
-      var ta = (now - node._enterAt - 60) / 360; // alpha: +60ms delay, 360ms
-      var scaleP = ts < 0 ? 0 : ts >= 1 ? 1 : ts;
+      if (node._enterAt === 0 || ENTER_MS <= 0) return { scale: 1, alpha: 1, done: true };
+      var ta = (now - node._enterAt) / ENTER_MS;
       var alphaP = ta < 0 ? 0 : ta >= 1 ? 1 : ta;
-      var done = scaleP >= 1 && alphaP >= 1;
+      var done = alphaP >= 1;
       if (done) node._enterAt = 0;
-      return { scale: scaleP, alpha: alphaP, done: done };
+      return { scale: 1, alpha: alphaP, done: done };
     }
 
     function draw(now) {
@@ -1228,7 +1289,7 @@
       // 60fps redraw, so this never reintroduces the perpetual-burn Windows cost.
       var _bx = 0,
         _by = 0;
-      if (!reduced) {
+      if (IDLE_BREATH && !reduced) {
         _bx = 2.2 * Math.sin(now / 2600);
         _by = 1.6 * Math.cos(now / 3300);
       }
@@ -1253,11 +1314,11 @@
         stepMorph(now);
       }
 
-      // entrance ramp — scale (easeOutBack) leads, alpha (easeOutCubic) lags
+      // entrance ramp — a subtle opacity-only fade (scale stays 1, no pop)
       nodes.forEach(function (n) {
         if (n._enterAt) {
           var ep = entranceProgress(n, now);
-          n.scaleK = easeOutBack(ep.scale);
+          n.scaleK = 1;
           n.alpha = easeOutCubic(ep.alpha);
         }
       });
@@ -1489,6 +1550,14 @@
       var p = worldToScreen(node.x, node.y);
       var matchOn = externalMatch != null;
       var mw = node.matchW || 0;
+      // Effective opacity. Resolved up here because the phantom branch reads it.
+      // Search dims unmatched nodes (×0.18) — but a hover/focus OVERRUNS it: while
+      // any node is focused, the hovered node + its related (1-hop) network show at
+      // full opacity (the hover cascade in node.alpha already lights the ego-net
+      // and dims the rest), and the search-dim is suspended so the focused
+      // neighborhood is never double-dimmed. No active focus → search-dim applies.
+      var a = node.alpha;
+      if (node.searchDim && hoverId == null) a *= 0.18;
       var r = node.r * node.scaleK * cam.scale;
       // Score-scaled emphasis: under an active finder filter, the better a
       // result's rank the larger its dot — and we lift the on-screen cap for
@@ -1501,14 +1570,16 @@
       // Cap the on-screen radius so even zoomed all the way in a node never
       // becomes a big disc — Obsidian's dots stay tiny at every zoom.
       if (r > screenCap) r = screenCap;
+      // ── z-depth (FINAL multiplier): recede by focus distance. Applied after
+      // importance-growth + cap, so it's a clean "push into z" independent of how
+      // prominent the dot is — importance sets size, focus distance sets depth.
+      // node.depth is the animated focus-distance scale (1 forward → DEPTH_FAR
+      // back), driven identically by canvas hover and the list→graph bridge.
+      r *= node.depth;
       if (r < 0.4) return;
       var isRoot = node.id === rootId;
       var hovered = hoverId != null && node.id === hoverId;
       var neighbor = hoverId != null && adj[hoverId] && adj[hoverId][node.id];
-
-      // search dim (chrome search) folds into the same fade.
-      var a = node.alpha;
-      if (node.searchDim) a *= 0.18;
 
       // ── PHANTOM: dim hollow ring, no fill ──
       if (node.phantom) {
@@ -1556,11 +1627,14 @@
       } else {
         fill = nodeFill(node);
       }
-      // Score-scaled accent: the stronger a match, the more its fill pulls toward
-      // the accent — a warmth ramp, not a glow (Obsidian-pure). Root keeps its
-      // own accent; hovered/forced paths are left untouched.
-      if (matchOn && mw > 0 && !isRoot && !hovered && !forced) {
-        fill = mixHex(fill, ACCENT, 0.28 + 0.55 * mw);
+      // Rank-coloured matches: under a finder filter, a match takes the SAME
+      // red→emerald highlight colour as its result row (top of the list = vivid
+      // emerald, weakest visible = warm red), so the graph and list share one
+      // ranking encoding. Mixed in by weight so the strongest hits commit fully to
+      // their colour while tail hits stay a softer tint. Root keeps its own accent;
+      // hovered/neighbor/forced paths are left untouched.
+      if (matchOn && mw > 0 && !isRoot && !hovered && !neighbor && !forced) {
+        fill = mixHex(fill, rankColor(mw), 0.45 + 0.5 * mw);
       }
 
       ctx.save();
@@ -2008,8 +2082,10 @@
         hasBreathingNode ||
         hoverCoronaK > 0.001 ||
         selectPulse > 0;
+      // Idle breathing off (Obsidian-quiet): a settled, un-hovered graph parks
+      // the rAF loop entirely — no perpetual redraw. Only re-enabled by IDLE_BREATH.
       var breathing =
-        !reduced && visible && _autoFitDone && !errorState && nodes.length > 0;
+        IDLE_BREATH && !reduced && visible && _autoFitDone && !errorState && nodes.length > 0;
 
       if (activeMotion) {
         draw(now);
@@ -2055,6 +2131,7 @@
           // snap focus alphas (k=1)
           nodes.forEach(function (n) {
             n.alpha = n.alphaTarget;
+            n.depth = n.depthTarget;
           });
           edges.forEach(function (e) {
             e.alpha = Math.min(e.alphaTarget, Math.min(e.src.alpha, e.dst.alpha));
@@ -2213,9 +2290,17 @@
         var dx = ev.movementX != null ? ev.movementX * (W / rect.width) : 0;
         var dy = ev.movementY != null ? ev.movementY * (H / rect.height) : 0;
         if (dragNode) {
-          var w = clientToWorld(ev.clientX, ev.clientY);
-          dragNode.x = w[0];
-          dragNode.y = w[1];
+          // Only move the node once the pointer crosses the click→drag threshold,
+          // so a plain click never nudges it under the cursor. Matches onPointerUp's
+          // wasDrag test — below 4px it's a click (opens the node), not a drag.
+          var movedFar =
+            pointerStart &&
+            (Math.abs(ev.clientX - pointerStart.x) > 4 || Math.abs(ev.clientY - pointerStart.y) > 4);
+          if (movedFar) {
+            var w = clientToWorld(ev.clientX, ev.clientY);
+            dragNode.x = w[0];
+            dragNode.y = w[1];
+          }
         } else {
           cam.tx += dx;
           cam.ty += dy;
@@ -2233,8 +2318,10 @@
         canvas.style.cursor = hit && !hit.phantom ? "pointer" : spaceDown ? "grab" : "grab";
         if (hit && opts.onNodeHover) opts.onNodeHover(hit.raw);
         else if (opts.onNodeHover) opts.onNodeHover(null);
-        if (hit && !hit.phantom) reheat(0.25);
-        else wake();
+        // Obsidian-quiet: hover must NOT move nodes. Just wake the loop for the
+        // opacity/depth crossfade (kept alive by isFocusLerping); never reheat the
+        // physics sim — that drifted the whole layout under the cursor.
+        wake();
       }
     }
 
@@ -2260,7 +2347,10 @@
       panVX = panVY = 0;
       if (hit && !hit.phantom && hit.id !== rootId && !spaceDown && ev.button === 0) {
         dragNode = hit;
-        reheat(0.3);
+        // Wake for the press/drag, but do NOT reheat the sim — a click (or even a
+        // drag) must not re-energize the layout and set every node drifting. The
+        // dragged node follows the cursor directly in onPointerMove; the rest hold.
+        wake();
       } else {
         dragNode = null;
         canvas.style.cursor = "grabbing";
@@ -2956,8 +3046,9 @@
         }
         if (nextId === hoverId) return;
         hoverId = nextId;
-        if (nextId != null) reheat(0.25);
-        else wake();
+        // Match the canvas-hover path: wake for the crossfade, never reheat the
+        // sim — a list hover should focus the node, not stir the layout.
+        wake();
       },
       destroy: function () {
         destroyed = true;
