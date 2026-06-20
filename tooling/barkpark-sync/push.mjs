@@ -16,7 +16,12 @@ const argv = process.argv.slice(2);
 const valOf = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
 const HOST = valOf("--host", "http://localhost:4000");
 const LIMIT = +valOf("--limit", "0");
-const DATASET = valOf("--dataset", "production");
+// DEFAULT to the isolated `codebase` dataset — NEVER production. A bare
+// `push.mjs` (no --dataset) used to leak per-file code papers into production;
+// the separation is a hard requirement (graph-view.mjs + tasks.mjs already
+// default to codebase). Pass --dataset explicitly to target anything else.
+const DATASET = valOf("--dataset", "codebase");
+if (DATASET === "production") { console.error("[push] refusing to publish code papers into 'production' — pass a non-production --dataset (the isolated 'codebase' is the default)."); process.exit(2); }
 const DEV = "barkpark-dev-token", INGEST = "paperflow-dev-ingest-token";
 
 const all = JSON.parse(readFileSync(join(HERE, "nodes.json"), "utf8")).nodes;
