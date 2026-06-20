@@ -1,0 +1,6 @@
+batches/
+results/
+batch-count.txt
+taxonomy-input.txt
+taxonomy.json
+intentions-report.json

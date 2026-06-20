@@ -6,7 +6,7 @@
 // Sequence: createOrReplace all → publish all (refs resolve) → ingest blocks.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +20,8 @@ const DATASET = valOf("--dataset", "production");
 const DEV = "barkpark-dev-token", INGEST = "paperflow-dev-ingest-token";
 
 const all = JSON.parse(readFileSync(join(HERE, "nodes.json"), "utf8")).nodes;
+const taxPath = join(ROOT, "tooling/intentions/intentions-report.json");
+const TAX = existsSync(taxPath) ? Object.fromEntries(JSON.parse(readFileSync(taxPath, "utf8")).taxonomy.map(t => [t.id, t.title])) : {};
 const nodes = LIMIT ? all.slice(0, LIMIT) : all;
 const ids = new Set(nodes.map(n => n.id));
 const LANG = { ex: "elixir", exs: "elixir", go: "go", ts: "typescript", tsx: "tsx", js: "javascript", mjs: "javascript", jsx: "jsx", heex: "html", eex: "html", sh: "bash" };
@@ -56,14 +58,15 @@ for (const ck of chunk(nodes, 40)) {
   created += ck.length;
 }
 console.error(`  created ${created}`);
-// ---- phase 1b: set references now that all targets exist ----
-let linked = 0, withRefs = 0;
-for (const ck of chunk(nodes.filter(n => n.deps.some(d => ids.has(d))), 40)) {
-  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, n.deps.filter(d => ids.has(d)))) });
+// ---- phase 1b: set references (dependency edges + intention edges) ----
+const rel = (n) => [...(n.deps || []), ...(n.intentRefs || [])].filter(d => ids.has(d));
+let linked = 0;
+for (const ck of chunk(nodes.filter(n => rel(n).length), 40)) {
+  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, rel(n))) });
   if (!r.ok) { console.error(`  relink chunk failed ${r.status}: ${r.body.slice(0, 200)}`); process.exit(1); }
-  linked += ck.length; withRefs = linked;
+  linked += ck.length;
 }
-console.error(`  linked references on ${linked} nodes`);
+console.error(`  linked references on ${linked} nodes (deps + intentions)`);
 
 // ---- phase 2: publish (materializes references → edges) ----
 let pub = 0;
@@ -82,20 +85,35 @@ const SKIP_CONTENT = argv.includes("--no-content");
 let ing = 0, ingFail = 0;
 if (SKIP_CONTENT) console.error(`  [skip] content ingest (--no-content)`);
 for (const n of (SKIP_CONTENT ? [] : nodes)) {
-  const lang = LANG[f(n).ext] || "text";
-  const depsList = n.deps.length ? n.deps.map(d => "→ " + (all.find(x => x.id === d)?.path || d)).join("\n") : "(no resolved dependencies)";
-  const blocks = [
-    { type: "heading", level: 1, text: n.path },
-    { type: "paragraph", content: [{ type: "text", value: metricsLine(n) }] },
-    { type: "paragraph", content: [{ type: "text", value: (f(n).role || "") + (f(n).description ? " — " + f(n).description : "") }] },
-    { type: "heading", level: 2, text: `Why it's useful (usefulness ${f(n).usefulness ?? "?"}/100)` },
-    { type: "paragraph", content: [{ type: "text", value: f(n).whyUseful || "(not yet scored)" }] },
-    { type: "heading", level: 2, text: `Dependencies (${n.deps.length})` },
-    { type: "code", language: "text", value: depsList },
-    { type: "heading", level: 2, text: "Source" },
-    { type: "code", language: lang, value: n.content || "(empty)" },
-  ];
-  const r = await post(`/v1/plugins/bulldocs/papers`, INGEST, { slug: n.id, dataset: DATASET, style: "article", blocks, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}` });
+  let blocks;
+  if (n.kind === "intention" || f(n).kind === "intention") {
+    // intention HUB paper — the objective + every file advancing it
+    blocks = [
+      { type: "heading", level: 1, text: `🎯 ${f(n).title}` },
+      { type: "paragraph", content: [{ type: "text", value: `${f(n).scale === "epic" ? "Epic intention" : "Intention"} · ${f(n).members} files advance this.` }] },
+      { type: "paragraph", content: [{ type: "text", value: f(n).description || "" }] },
+      { type: "heading", level: 2, text: "Files advancing this intention" },
+      { type: "code", language: "text", value: n.content.split("Files advancing")[1]?.split(":").slice(1).join(":").trim() || "" },
+    ];
+  } else {
+    const lang = LANG[f(n).ext] || "text";
+    const depsList = n.deps.length ? n.deps.map(d => "→ " + (all.find(x => x.id === d)?.path || d)).join("\n") : "(no resolved dependencies)";
+    const ints = (f(n).intentions || []).map(id => "🎯 " + (TAX[id] || id)).join("\n") || "(none)";
+    blocks = [
+      { type: "heading", level: 1, text: n.path },
+      { type: "paragraph", content: [{ type: "text", value: metricsLine(n) }] },
+      { type: "paragraph", content: [{ type: "text", value: (f(n).role || "") + (f(n).description ? " — " + f(n).description : "") }] },
+      { type: "heading", level: 2, text: `Why it's useful (usefulness ${f(n).usefulness ?? "?"}/100)` },
+      { type: "paragraph", content: [{ type: "text", value: f(n).whyUseful || "(not yet scored)" }] },
+      { type: "heading", level: 2, text: `Intentions it serves (${(f(n).intentions || []).length})` },
+      { type: "code", language: "text", value: ints },
+      { type: "heading", level: 2, text: `Dependencies (${n.deps.length})` },
+      { type: "code", language: "text", value: depsList },
+      { type: "heading", level: 2, text: "Source" },
+      { type: "code", language: lang, value: n.content || "(empty)" },
+    ];
+  }
+  const r = await post(`/v1/plugins/bulldocs/papers`, INGEST, { slug: n.id, dataset: DATASET, style: "article", blocks, source_doc: n.path, event_type: (n.kind === "intention" ? "intention" : f(n).stack), goal_id: `imp:${f(n).importance ?? 0}` });
   if (r.ok) ing++; else { ingFail++; if (ingFail <= 3) console.error(`  ingest ${n.id} failed ${r.status}: ${r.body.slice(0, 160)}`); }
 }
 console.error(`  ingested blocks: ${ing} ok, ${ingFail} failed`);

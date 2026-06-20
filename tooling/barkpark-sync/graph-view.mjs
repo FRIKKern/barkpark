@@ -20,7 +20,7 @@ const graph = await (await fetch(`${HOST}/v1/graph?dataset=${DATASET}`, { header
 const meta = existsSync(join(HERE, "nodes.json")) ? Object.fromEntries(JSON.parse(readFileSync(join(HERE, "nodes.json"), "utf8")).nodes.map(n => [n.id, n.fields])) : {};
 
 // color by language; keep path as title
-for (const n of graph.nodes) { const f = meta[n.id]; n.type = (f?.stack) || "other"; n.title = n.title || n.id; }
+for (const n of graph.nodes) { const f = meta[n.id]; n.type = (f?.kind === "intention") ? "intention" : (f?.stack || "other"); n.title = n.title || n.id; }
 
 const bpgraph = readFileSync(join(ROOT, "api/priv/static/assets/bp-graph.js"), "utf8");
 const stacks = {}; for (const n of graph.nodes) stacks[n.type] = (stacks[n.type] || 0) + 1;

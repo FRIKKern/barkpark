@@ -22,6 +22,8 @@ const erg = Object.fromEntries(rd("tooling/ergonomics/ergonomics-report.json", {
 const ledger = rd("tooling/research-coverage/research-ledger.json", { files: {} }).files;
 const idx = rd("tooling/blast-radius/index.json", { go: {}, js: {} });
 const useful = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;
+const intents = rd("tooling/intentions/intentions-report.json", { taxonomy: [], files: {}, hubs: {} });
+const intId = (id) => "intent-" + id;
 
 // universe = code files (the graph nodes)
 const universe = Object.values(sig).filter(s => s.kind === "code").map(s => s.path);
@@ -102,21 +104,33 @@ const nodes = universe.map(p => {
       testScore: rk.testScore ?? null, hasTest: !!rk.hasTest, defectDensity: rk.defectDensity ?? 0,
       consistency: c.status || "clean", whatBreaks: l.whatBreaks || "",
       usefulness: useful[p]?.usefulness ?? null, whyUseful: useful[p]?.why_useful || "",
+      intentions: intents.files[p] || [],
     },
     content: body.length > CONTENT_CAP ? body.slice(0, CONTENT_CAP) + `\n\n… (${body.length - CONTENT_CAP} more chars truncated)` : body,
     truncated: body.length > CONTENT_CAP,
-    deps: depsFor(p).map(idOf),       // store as node ids (slugs), not paths
-    depPaths: depsFor(p),             // keep paths for human-readable display
+    deps: depsFor(p).map(idOf),       // dependency edges (file → file)
+    depPaths: depsFor(p),
+    intentRefs: (intents.files[p] || []).map(intId),  // intention edges (file → hub)
   };
 });
 
+// ---- intention hub nodes (objectives that cluster cross-cutting files) ----
+const intentNodes = (intents.taxonomy || []).filter(t => (intents.hubs[t.id] || []).length).map(t => ({
+  id: intId(t.id), path: intId(t.id), title: t.title, kind: "intention",
+  fields: { kind: "intention", scale: t.scale, title: t.title, description: t.description, members: (intents.hubs[t.id] || []).length },
+  content: `${t.title}\n\n${t.description}\n\nScale: ${t.scale}\n\nFiles advancing this intention (${(intents.hubs[t.id] || []).length}):\n` + (intents.hubs[t.id] || []).map(p => "  • " + p).join("\n"),
+  deps: [], depPaths: [], intentRefs: [],
+}));
+nodes.push(...intentNodes);
+
 const edges = nodes.reduce((a, n) => a + n.deps.length, 0);
+const intentEdges = nodes.reduce((a, n) => a + (n.intentRefs?.length || 0), 0);
 const avgDeg = (edges / nodes.length).toFixed(1);
 const orphans = nodes.filter(n => n.deps.length === 0 && !nodes.some(m => m.deps.includes(n.id))).length;
 writeFileSync(join(HERE, "nodes.json"), JSON.stringify({ generatedFrom: idx.head || "", nodes, stats: { nodes: nodes.length, edges, avgDegree: +avgDeg, orphans } }, null, 2));
 
 const e = (s) => process.stderr.write(s + "\n");
-e(`[generate] ${nodes.length} nodes · ${edges} edges · avg degree ${avgDeg} · ${orphans} orphans`);
+e(`[generate] ${nodes.length} nodes (${intentNodes.length} intention hubs) · ${edges} dep-edges · ${intentEdges} intention-edges · avg degree ${avgDeg} · ${orphans} orphans`);
 const byStack = {}; for (const n of nodes) byStack[n.fields.stack] = (byStack[n.fields.stack] || 0) + 1;
 e(`  by stack: ${Object.entries(byStack).map(([k, v]) => `${k} ${v}`).join(" · ")}`);
 e(`  sample edges:`); for (const n of nodes.filter(n => n.deps.length).slice(0, 4)) e(`    ${n.path} → ${n.deps.slice(0, 3).join(", ")}`);
