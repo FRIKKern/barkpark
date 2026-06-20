@@ -31,14 +31,14 @@ const E = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 const rows = comb.rows.map(r => {
   const e = erg[r.path] || {}, rk = risk[r.path] || {}, s = sig[r.path] || {}, l = ledger.files[r.path] || {};
   return {
-    priority: r.priority, importance: r.importance, path: r.path, stack: r.stack,
+    priority: r.priority, reach: r.reach, path: r.path, stack: r.stack,
     kind: s.kind || "", role: r.role || l.role || "", description: l.description || "",
     tokens: e.tokens ?? "", sizeClass: e.sizeClass || "", defs: e.defs ?? "", loc: s.loc ?? "",
     churn: s.churn ?? "", fanIn: s.fanIn ?? "", seam: s.seam ? "🔗" : "",
     testScore: rk.testScore ?? "", hasTest: rk.hasTest ? "✓" : (rk.testScore === 0 ? "✗" : ""),
     defect: rk.defectDensity ?? "", consistency: r.status, detail: r.detail || "",
   };
-}).sort((a, b) => b.priority - a.priority || b.importance - a.importance);
+}).sort((a, b) => b.priority - a.priority || b.reach - a.reach);
 
 // ---- aggregates ----
 const byStack = {}, byKind = {}, bySize = {};
@@ -52,7 +52,7 @@ const stC = (s) => ({ layering: "#fecaca", "layering?": "#fed7aa", drift: "#fed7
 const sizeC = (s) => ({ bloat: "#ddd6fe", large: "#e9d5ff", fragment: "#fee2e2", ideal: "#dcfce7" }[s] || "");
 
 const mrow = (r, i) => `<tr><td class=rk>${i + 1}</td><td class=n style="background:${r.priority > 0 ? "#fee2e2" : "#f8fafc"}">${r.priority || ""}</td>`
-  + `<td class=n style="background:hsl(${Math.round((r.importance || 0) / 100 * 120)},70%,90%)">${r.importance}</td>`
+  + `<td class=n style="background:hsl(${Math.round((r.reach || 0) / 100 * 120)},70%,90%)">${r.reach}</td>`
   + `<td class=path title="${E(r.description)}">${E(r.path)}</td><td>${E(r.stack)}</td>`
   + `<td class=n>${r.tokens}</td><td style="background:${sizeC(r.sizeClass)}">${E(r.sizeClass)}</td><td class=n>${r.churn}</td><td class=n>${r.fanIn}${r.seam}</td>`
   + `<td class=n style="color:${r.testScore !== "" && r.testScore < 40 ? "#dc2626" : "#16a34a"}">${r.testScore}${r.hasTest}</td>`
@@ -60,7 +60,7 @@ const mrow = (r, i) => `<tr><td class=rk>${i + 1}</td><td class=n style="backgro
   + `<td><span class=st style="background:${stC(r.consistency)}">${E(r.consistency)}</span></td>`
   + `<td class=role>${E(r.role)}</td></tr>`;
 
-const findRow = (f, i) => `<tr><td class=rk>${i + 1}</td><td class=n>${f.impact}</td><td class=n>${f.importance}</td><td><span class=st style="background:${stC(f.kind === "bloat" ? "" : f.kind)}">${f.kind}</span></td><td>${f.dim}</td><td>${eff[f.effort]}</td><td class=path>${E(f.file)}</td><td class=role>${E(f.action)}${f.defect >= 0.4 ? ` <b style=color:#b45309>⚠${f.defect}</b>` : ""}</td></tr>`;
+const findRow = (f, i) => `<tr><td class=rk>${i + 1}</td><td class=n>${f.impact}</td><td class=n>${f.reach}</td><td><span class=st style="background:${stC(f.kind === "bloat" ? "" : f.kind)}">${f.kind}</span></td><td>${f.dim}</td><td>${eff[f.effort]}</td><td class=path>${E(f.file)}</td><td class=role>${E(f.action)}${f.defect >= 0.4 ? ` <b style=color:#b45309>⚠${f.defect}</b>` : ""}</td></tr>`;
 
 // canonical patterns (the norms) from the verdict cache
 const norms = Object.entries(vc.groups || {}).map(([dir, g]) => ({ dir, pattern: g.data?.canonical_pattern, drift: (g.data?.verdicts || []).filter(v => v.verdict === "drift") }))
@@ -102,13 +102,13 @@ const html = `<!doctype html><meta charset=utf-8><title>Barkpark — Status Quo<
 <div class=sub>code size-class: ${pill(bySize)} <span class=meta>(ideal ${ergRep.thresholds?.idealCeil}tok ceiling · bloat &gt;${ergRep.thresholds?.bloat}tok)</span></div>
 </section>
 
-<section id=plan><h2>Improvement plan</h2><div class=sub>${q.totalFindings} findings · ~${q.effortUnits} effort units · impact = importance × severity × defect-amplifier</div>
-<table><thead><tr><th>#</th><th>Impact</th><th>Imp</th><th>Kind</th><th>Dimension</th><th>Effort</th><th>Target</th><th>Action</th></tr></thead>
+<section id=plan><h2>Improvement plan</h2><div class=sub>${q.totalFindings} findings · ~${q.effortUnits} effort units · impact = reach × severity × defect-amplifier</div>
+<table><thead><tr><th>#</th><th>Impact</th><th>Reach</th><th>Kind</th><th>Dimension</th><th>Effort</th><th>Target</th><th>Action</th></tr></thead>
 <tbody>${q.findings.map(findRow).join("")}</tbody></table></section>
 
 <section id=files><h2>Every file — total coverage</h2>
 <div class=sub>every file × every axis · sorted by priority. <input id=q placeholder="filter path / role / status…" oninput=flt()> <span id=cnt></span></div>
-<table id=ft><thead><tr><th>#</th><th onclick="sb(1,1)">Pri</th><th onclick="sb(2,1)">Imp</th><th onclick="sb(3,0)">Path</th><th>Stack</th><th onclick="sb(5,1)">Tok</th><th>Size</th><th onclick="sb(7,1)">Churn</th><th onclick="sb(8,1)">FanIn</th><th onclick="sb(9,1)">Test</th><th onclick="sb(10,1)">Defect</th><th>Consistency</th><th>Role</th></tr></thead>
+<table id=ft><thead><tr><th>#</th><th onclick="sb(1,1)">Pri</th><th onclick="sb(2,1)">Reach</th><th onclick="sb(3,0)">Path</th><th>Stack</th><th onclick="sb(5,1)">Tok</th><th>Size</th><th onclick="sb(7,1)">Churn</th><th onclick="sb(8,1)">FanIn</th><th onclick="sb(9,1)">Test</th><th onclick="sb(10,1)">Defect</th><th>Consistency</th><th>Role</th></tr></thead>
 <tbody>${rows.map(mrow).join("")}</tbody></table></section>
 
 <section id=norms><h2>Consistency — the canonical patterns (${norms.length} groups judged)</h2>
