@@ -31,7 +31,7 @@ async function post(path, token, body) {
 }
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 const f = (n) => n.fields;
-const metricsLine = (n) => `importance ${f(n).importance} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · fanIn ${f(n).fanIn}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
+const metricsLine = (n) => `importance ${f(n).importance} · usefulness ${f(n).usefulness ?? "?"} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · fanIn ${f(n).fanIn}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
 
 // ---- phase 0: register the paper schema for this dataset ----
 // The content-edge extractor keys on list_schemas(dataset) to find reference
@@ -88,6 +88,8 @@ for (const n of (SKIP_CONTENT ? [] : nodes)) {
     { type: "heading", level: 1, text: n.path },
     { type: "paragraph", content: [{ type: "text", value: metricsLine(n) }] },
     { type: "paragraph", content: [{ type: "text", value: (f(n).role || "") + (f(n).description ? " — " + f(n).description : "") }] },
+    { type: "heading", level: 2, text: `Why it's useful (usefulness ${f(n).usefulness ?? "?"}/100)` },
+    { type: "paragraph", content: [{ type: "text", value: f(n).whyUseful || "(not yet scored)" }] },
     { type: "heading", level: 2, text: `Dependencies (${n.deps.length})` },
     { type: "code", language: "text", value: depsList },
     { type: "heading", level: 2, text: "Source" },

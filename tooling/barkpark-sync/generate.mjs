@@ -21,6 +21,7 @@ const risk = rd("tooling/risk/risk-report.json", { files: {} }).files;
 const erg = Object.fromEntries(rd("tooling/ergonomics/ergonomics-report.json", { files: [] }).files.map(f => [f.path, f]));
 const ledger = rd("tooling/research-coverage/research-ledger.json", { files: {} }).files;
 const idx = rd("tooling/blast-radius/index.json", { go: {}, js: {} });
+const useful = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;
 
 // universe = code files (the graph nodes)
 const universe = Object.values(sig).filter(s => s.kind === "code").map(s => s.path);
@@ -100,6 +101,7 @@ const nodes = universe.map(p => {
       churn: s.churn ?? 0, fanIn: s.fanIn ?? 0, seam: !!s.seam,
       testScore: rk.testScore ?? null, hasTest: !!rk.hasTest, defectDensity: rk.defectDensity ?? 0,
       consistency: c.status || "clean", whatBreaks: l.whatBreaks || "",
+      usefulness: useful[p]?.usefulness ?? null, whyUseful: useful[p]?.why_useful || "",
     },
     content: body.length > CONTENT_CAP ? body.slice(0, CONTENT_CAP) + `\n\n… (${body.length - CONTENT_CAP} more chars truncated)` : body,
     truncated: body.length > CONTENT_CAP,
