@@ -109,6 +109,8 @@ for (const n of (SKIP_CONTENT ? [] : nodes)) {
       { type: "code", language: "text", value: ints },
       { type: "heading", level: 2, text: `Dependencies (${n.deps.length})` },
       { type: "code", language: "text", value: depsList },
+      { type: "heading", level: 2, text: `Git history (${f(n).git?.commitCount ?? 0} commits · ${f(n).git?.authors?.length ?? 0} authors · ${f(n).git?.firstDate || "?"} → ${f(n).git?.lastDate || "?"})` },
+      { type: "code", language: "text", value: (f(n).git?.commits || []).map(c => `${c.date}  ${c.hash}  ${(c.author || "").split(" ")[0]}  ${c.subject}`).join("\n") || "(no history)" },
       { type: "heading", level: 2, text: "Source" },
       { type: "code", language: lang, value: n.content || "(empty)" },
     ];

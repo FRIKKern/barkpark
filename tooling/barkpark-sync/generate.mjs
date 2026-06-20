@@ -25,6 +25,23 @@ const useful = rd("tooling/usefulness/usefulness-report.json", { files: {} }).fi
 const intents = rd("tooling/intentions/intentions-report.json", { taxonomy: [], files: {}, hubs: {} });
 const intId = (id) => "intent-" + id;
 
+// ---- per-file git history (one pass over the log) ----
+const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
+const history = {};
+{
+  let cur = null;
+  for (const line of git(["log", "--no-merges", "--date=short", "--pretty=format:\x01%h\x1f%ad\x1f%an\x1f%s", "--name-only"]).split("\n")) {
+    if (line.startsWith("\x01")) { const [hash, date, author, subject] = line.slice(1).split("\x1f"); cur = { hash, date, author, subject }; }
+    else if (line.trim() && cur) (history[line.trim()] ||= []).push(cur);
+  }
+}
+const HIST_CAP = 25;
+function gitMeta(p) {
+  const h = history[p] || [];
+  const authors = [...new Set(h.map(c => c.author))];
+  return { commits: h.slice(0, HIST_CAP), commitCount: h.length, firstDate: h.length ? h[h.length - 1].date : "", lastDate: h.length ? h[0].date : "", authors };
+}
+
 // universe = code files (the graph nodes)
 const universe = Object.values(sig).filter(s => s.kind === "code").map(s => s.path);
 const inUniverse = new Set(universe);
@@ -105,6 +122,7 @@ const nodes = universe.map(p => {
       consistency: c.status || "clean", whatBreaks: l.whatBreaks || "",
       usefulness: useful[p]?.usefulness ?? null, whyUseful: useful[p]?.why_useful || "",
       intentions: intents.files[p] || [],
+      git: gitMeta(p),
     },
     content: body.length > CONTENT_CAP ? body.slice(0, CONTENT_CAP) + `\n\n… (${body.length - CONTENT_CAP} more chars truncated)` : body,
     truncated: body.length > CONTENT_CAP,
