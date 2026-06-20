@@ -44,29 +44,33 @@ console.error(`[push] ${nodes.length} nodes → ${HOST} (dataset ${DATASET})`);
     { name: "title", type: "string" }, { name: "event_type", type: "string" },
     { name: "source_doc", type: "string" }, { name: "goal_id", type: "string" },
     { name: "related", type: "arrayOf", of: { type: "reference", refType: "paper" } },
+    // typed reference fields (Sanity-style) — each relationship is its own navigable reference set
+    { name: "dependencies", type: "arrayOf", of: { type: "reference", refType: "paper" } },
+    { name: "intentions", type: "arrayOf", of: { type: "reference", refType: "paper" } },
   ] };
   const r = await post(`/v1/schemas/${DATASET}`, DEV, schema);
   console.error(r.ok ? `  registered paper schema for ${DATASET}` : `  paper schema register: ${r.status} (may already exist) ${r.body.slice(0, 80)}`);
 }
 
 // ---- phase 1a: create ALL bare (so every reference target exists) ----
-const doc = (n, related) => ({ createOrReplace: { _type: "paper", _id: n.id, title: n.path, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}`, related } });
+const doc = (n, deps, ints) => ({ createOrReplace: { _type: "paper", _id: n.id, title: n.path, source_doc: n.path, event_type: (n.kind === "intention" ? "intention" : f(n).stack), goal_id: `imp:${f(n).importance ?? 0}`, related: [], dependencies: deps || [], intentions: ints || [] } });
 let created = 0;
 for (const ck of chunk(nodes, 40)) {
-  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, [])) });
+  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, [], [])) });
   if (!r.ok) { console.error(`  create chunk failed ${r.status}: ${r.body.slice(0, 200)}`); process.exit(1); }
   created += ck.length;
 }
 console.error(`  created ${created}`);
-// ---- phase 1b: set references (dependency edges + intention edges) ----
-const rel = (n) => [...(n.deps || []), ...(n.intentRefs || [])].filter(d => ids.has(d));
+// ---- phase 1b: set TYPED references — dependencies + intentions as separate fields ----
+const depRefs = (n) => (n.deps || []).filter(d => ids.has(d));
+const intRefs = (n) => (n.intentRefs || []).filter(d => ids.has(d));
 let linked = 0;
-for (const ck of chunk(nodes.filter(n => rel(n).length), 40)) {
-  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, rel(n))) });
+for (const ck of chunk(nodes.filter(n => depRefs(n).length || intRefs(n).length), 40)) {
+  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, depRefs(n), intRefs(n))) });
   if (!r.ok) { console.error(`  relink chunk failed ${r.status}: ${r.body.slice(0, 200)}`); process.exit(1); }
   linked += ck.length;
 }
-console.error(`  linked references on ${linked} nodes (deps + intentions)`);
+console.error(`  linked typed references on ${linked} nodes (dependencies + intentions fields)`);
 
 // ---- phase 2: publish (materializes references → edges) ----
 let pub = 0;
