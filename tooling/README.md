@@ -11,9 +11,10 @@ research-coverage ─ every file evaluated? content-hash ledger; agents only on 
 file-importance   ─ per-file importance = blast-radius prior × agent criticality
 consistency       ─ relational: per-group norm, drift vs intentional, layering, dup
 ergonomics        ─ agent-cost: bloat (god-files) vs fragmentation → refactor_worth
+risk              ─ test-presence proxy + defect-history (git bug-fix mining)
 blast-radius      ─ what a change affects; cross-language seam guard (pre-push hook)
         ├───── combined  ─ importance × consistency → prioritized worklist
-        └───── quality   ─ 6-dimension scorecard (A–F) + ROI-ranked improvement plan
+        └───── quality   ─ 8-dimension scorecard (A–F) + ROI-ranked improvement plan
 ```
 
 | Dir | What it answers | Entry |
@@ -22,6 +23,7 @@ blast-radius      ─ what a change affects; cross-language seam guard (pre-push
 | `file-importance/` | "How important is each file?" | `build-signals.mjs` → agents → `merge.mjs` |
 | `consistency/` | "Do we follow a style? Where do we break it?" | `consistency.mjs scan` |
 | `ergonomics/` | "Which files are too bloated to work with efficiently?" | `ergonomics.mjs` |
+| `risk/` | "Is important code tested? Where do bugs actually land?" | `risk.mjs` |
 | `blast-radius/` | "What does this change affect? Did it touch the wire contract?" | `check.mjs` (pre-push) |
 | `combined/` | "What's both important AND inconsistent?" | `combine.mjs` |
 | `quality/` | "How good is the codebase? What do we fix first?" | `quality.mjs` |

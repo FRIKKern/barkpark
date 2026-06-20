@@ -28,12 +28,18 @@ make it better**. Output = a scored scorecard + an ROI-ranked improvement plan.
 
 | Dimension | Measures | Source |
 |---|---|---|
-| Coverage | every file evaluated & current? | research-coverage ledger |
+| Evaluated | every file evaluated & current? | research-coverage ledger |
 | Consistency | drift vs the group's own pattern (vs intentional) | consistency + agent verdicts |
 | Architecture | layering back-edges (verified) · compile-DAG acyclic? | consistency + issue-judgment |
 | Modularity | context-bloat: god-files read on every change | ergonomics (size × churn × defs) |
+| Tested | do important files have test presence? (proxy) | risk (sibling test + module refs) |
+| Reliability | where do bugs actually land? | risk (git bug-fix/revert mining) |
 | Duplication | extract-worthy copy-paste (verified, not config) | consistency dup + agent verdicts |
 | Dead code | unreferenced packages | blast-radius index |
+
+Impact is amplified by defect-history: a finding on a file where bugs actually
+land outranks the same finding on a stable file. The sharpest worklist entries
+are **important × bloated × untested × defect-prone** at once.
 
 `quality.mjs` blends these into an A–F grade and an improvement plan where each
 finding carries `impact = importance × severity` and `effort` (refactor size).
@@ -52,6 +58,7 @@ If `stale==0 && new==0`: the ledger is current — skip straight to step 5. Else
 node tooling/blast-radius/build-index.mjs --skip-elixir     # reverse-dep graph (fan-in, dead code)
 node tooling/file-importance/build-signals.mjs 10            # priors + churn
 node tooling/ergonomics/ergonomics.mjs                       # size-class + refactor_worth
+node tooling/risk/risk.mjs                                   # test-presence proxy + defect history
 ```
 
 **3. Consistency scan + judge (agents only on outliers/issues).**
@@ -88,6 +95,9 @@ Report the grade, the dimension scores, and the top of the improvement plan (ran
 - Single-vote agent judgments (spot-check; not adversarially multi-voted by default).
 - Scoring weights and effort estimates are calibrated heuristics, not measurements —
   trust the ranking and tiers over the exact integer.
-- Test-coverage and defect-history are not yet axes (high-value next additions).
+- **Tested is a PROXY** (sibling-test existence + module references in the suite),
+  not line coverage. Real coverage (`go test -cover`, `mix test --cover`, vitest
+  JSON) can be ingested into `risk.mjs` later for ground truth.
+- Defect-history is git-subject mining — only as good as commit hygiene.
 
 See `tooling/README.md` for the suite map.
