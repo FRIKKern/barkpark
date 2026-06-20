@@ -34,13 +34,31 @@ const html = `<!DOCTYPE html><html lang=en><head><meta charset=utf-8>
 #cap{position:absolute;left:14px;top:12px;z-index:40;color:rgba(255,255,255,.55);font-size:12px;letter-spacing:.03em}
 #cap b{color:#9a8cff}</style></head><body>
 <div id=studio-graph></div>
-<div id=cap><b>BARKPARK</b> codebase graph &middot; dataset <b>${DATASET}</b> &middot; ${graph.nodes.length} files &middot; ${graph.edges.length} dependencies &middot; ${legend}</div>
+<div id=cap><b>BARKPARK</b> codebase graph &middot; dataset <b>${DATASET}</b> &middot; ${graph.nodes.length} nodes &middot; <span id=ecount>${graph.edges.length}</span> edges &middot; ${legend}</div>
+<div id=bar>
+  <button data-k="all" class=on>All edges</button>
+  <button data-k="dependencies">🔗 Dependencies (${graph.edges.filter(e => e.kind === "dependencies").length})</button>
+  <button data-k="intentions">🎯 Intentions (${graph.edges.filter(e => e.kind === "intentions").length})</button>
+</div>
+<style>#bar{position:absolute;left:14px;bottom:14px;z-index:40;display:flex;gap:8px}
+#bar button{background:#23232b;color:#cbd5e1;border:1px solid #3a3a44;border-radius:7px;padding:6px 11px;font-size:12px;cursor:pointer}
+#bar button.on{background:#9a8cff;color:#15151a;border-color:#9a8cff}</style>
 <script>${bpgraph}</script>
 <script>
 var DATA=${JSON.stringify({ nodes: graph.nodes, edges: graph.edges })};
 var c=document.getElementById("studio-graph");
-window.__r=window.BarkparkGraphRenderer(c,{nodes:DATA.nodes,edges:DATA.edges},
-  {theme:"dark",reducedMotion:false,flow:false,fullColor:true,onNodeClick:function(n){window.open("${HOST}/d/${DATASET}/papers/"+(n.doc_id||n.id),"_blank")},onNodeHover:function(){}});
+var OPTS={theme:"dark",reducedMotion:false,flow:false,fullColor:true,onNodeClick:function(n){window.open("${HOST}/d/${DATASET}/papers/"+(n.doc_id||n.id),"_blank")},onNodeHover:function(){}};
+function render(kind){
+  var edges = kind==="all" ? DATA.edges : DATA.edges.filter(function(e){return e.kind===kind});
+  c.innerHTML="";
+  window.__r=window.BarkparkGraphRenderer(c,{nodes:DATA.nodes,edges:edges},OPTS);
+  document.getElementById("ecount").textContent=edges.length;
+}
+render("all");
+document.querySelectorAll("#bar button").forEach(function(b){b.onclick=function(){
+  document.querySelectorAll("#bar button").forEach(function(x){x.classList.remove("on")});
+  b.classList.add("on"); render(b.dataset.k);
+};});
 </script></body></html>`;
 
 writeFileSync(join(HERE, "codebase-graph.html"), html);
