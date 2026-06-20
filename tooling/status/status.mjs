@@ -1,28 +1,34 @@
 #!/usr/bin/env node
-// Status Quo — the single entry point for the comprehensive quality report.
-// Runs the whole PROGRAMMATIC chain (free), reports freshness, and always
-// regenerates the full report from whatever verdicts currently exist (cached +
-// fresh). Idempotent: run it → it says FRESH or lists pending agent work; do the
-// agent work → run it again → FRESH. When the codebase hasn't moved, it spends
-// ZERO agent tokens and still emits the most up-to-date full assessment.
+// Status Quo — single entry point for ALL THREE arcs (ASSESS · ENRICH · PUBLISH).
+// Runs every PROGRAMMATIC step (free), reports the pending AGENT work per arc
+// (the orchestrator dispatches it — a node script can't), and with --publish
+// ships the codebase into Barkpark (gated on change). Idempotent; unchanged
+// work costs zero tokens.
+//
+//   node tooling/status/status.mjs            # assess + enrich status, report pending
+//   node tooling/status/status.mjs --publish  # also push into Barkpark if changed
+//   node tooling/status/status.mjs --publish --force   # republish regardless
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
+const argv = process.argv.slice(2);
+const PUBLISH = argv.includes("--publish"), FORCE = argv.includes("--force");
 const rd = (p, d) => existsSync(join(ROOT, p)) ? JSON.parse(readFileSync(join(ROOT, p), "utf8")) : d;
 const txt = (p, d) => existsSync(join(ROOT, p)) ? readFileSync(join(ROOT, p), "utf8").trim() : d;
 const C = process.stderr.isTTY ? { y: "\x1b[33m", r: "\x1b[31m", g: "\x1b[32m", b: "\x1b[1m", x: "\x1b[0m" } : { y: "", r: "", g: "", b: "", x: "" };
 const e = (s = "") => process.stderr.write(s + "\n");
-
 function run(label, rel, args = []) {
-  try { execFileSync("node", [join(ROOT, rel), ...args], { cwd: ROOT, stdio: ["ignore", "ignore", "ignore"], maxBuffer: 256 * 1024 * 1024 }); }
-  catch (err) { e(`  ${C.y}· ${label} skipped: ${String(err.message).split("\n")[0]}${C.x}`); }
+  try { execFileSync("node", [join(ROOT, rel), ...args], { cwd: ROOT, stdio: ["ignore", "ignore", "ignore"], maxBuffer: 256 * 1024 * 1024 }); return true; }
+  catch (err) { e(`  ${C.y}· ${label} skipped: ${String(err.message).split("\n")[0]}${C.x}`); return false; }
 }
 
+// ════════════════ ARC 1 — ASSESS (programmatic chain) ════════════════
 e(`${C.b}status-quo${C.x}  running the programmatic chain (free)…`);
 run("blast-index", "tooling/blast-radius/build-index.mjs", ["--skip-elixir"]);
 run("signals", "tooling/file-importance/build-signals.mjs", ["10"]);
@@ -30,35 +36,70 @@ run("ergonomics", "tooling/ergonomics/ergonomics.mjs");
 run("risk", "tooling/risk/risk.mjs");
 run("consistency", "tooling/consistency/consistency.mjs", ["scan"]);
 run("coverage", "tooling/research-coverage/coverage.mjs", ["scan"]);
-run("consistency-batches", "tooling/consistency/consistency.mjs", ["batches"]); // computes stale vs cached
-
-// ---- freshness ----
+run("consistency-batches", "tooling/consistency/consistency.mjs", ["batches"]);
 const cov = rd("tooling/research-coverage/coverage-report.json", { pct: 0, stale: 0, new: 0, lastFullResearch: null });
 const covPending = (cov.stale || 0) + (cov.new || 0);
 const staleGroups = +txt("tooling/consistency/batch-count.txt", "0");
 const issuesStale = txt("tooling/consistency/issues-stale.txt", "0") === "1";
-const pending = covPending > 0 || staleGroups > 0 || issuesStale;
-
-// ---- always regenerate the comprehensive report from current verdicts ----
 run("consistency-merge", "tooling/consistency/consistency.mjs", ["merge"]);
 run("combined", "tooling/combined/combine.mjs");
 run("quality", "tooling/quality/quality.mjs");
+run("report", "tooling/status/report.mjs");
 const q = rd("tooling/quality/quality-report.json", { grade: "?", overall: 0, dimensions: [], totalFindings: 0 });
 
-// ---- report ----
-e("");
-e(`${C.b}═══ STATUS QUO ═══${C.x}`);
-e(`  research coverage : ${cov.pct}%  (last full research ${cov.lastFullResearch || "—"})`);
-e(`  quality           : ${C.b}${q.grade} (${q.overall}/100)${C.x} · ${q.totalFindings} findings`);
-for (const d of q.dimensions) e(`      ${d.name.padEnd(12)} ${String(d.score).padStart(3)}`);
-e("");
-if (!pending) {
-  e(`  ${C.g}✓ FRESH — every axis current, report regenerated from cache. 0 agent tokens.${C.x}`);
-  e(`  → open tooling/quality/quality-report.html`);
-} else {
-  e(`  ${C.y}⟳ PENDING agent work to reach full freshness:${C.x}`);
-  if (covPending > 0) e(`     • ${covPending} file(s) need research  → coverage.mjs batches → dispatch → coverage.mjs record`);
-  if (staleGroups > 0) e(`     • ${staleGroups} consistency group(s) changed → dispatch consistency/batches/*.json → consistency.mjs record`);
-  if (issuesStale) e(`     • layering/dup findings changed → dispatch the 2 issue agents → consistency.mjs record`);
-  e(`  ${C.y}(the report above reflects current cached verdicts; re-run status after the agent work for full freshness)${C.x}`);
+// ════════════════ ARC 2 — ENRICH (programmatic merges + assemble) ════════════════
+run("usefulness-merge", "tooling/usefulness/usefulness.mjs", ["merge"]);
+run("intentions-merge", "tooling/intentions/intentions.mjs", ["merge"]);
+run("generate", "tooling/barkpark-sync/generate.mjs");
+const nodes = (rd("tooling/barkpark-sync/nodes.json", { nodes: [] }).nodes || []).filter(n => n.kind !== "intention");
+const useFiles = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;
+const intRep = rd("tooling/intentions/intentions-report.json", { files: {}, taxonomy: [] });
+const usefulPending = nodes.filter(n => !(n.path in useFiles) || useFiles[n.path].usefulness == null).length;
+const taxonomyN = (intRep.taxonomy || []).length;
+const intentPending = taxonomyN === 0 ? nodes.length : nodes.filter(n => !(n.path in intRep.files)).length;
+
+// ════════════════ ARC 3 — PUBLISH (gated on change; --publish to run) ════════════════
+const reachable = () => { try { return execFileSync("curl", ["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3", "http://localhost:4000/v1/capabilities"], { encoding: "utf8" }).trim().startsWith("2"); } catch { return false; } };
+const up = reachable();
+const nodesHash = existsSync(join(ROOT, "tooling/barkpark-sync/nodes.json")) ? createHash("sha256").update(readFileSync(join(ROOT, "tooling/barkpark-sync/nodes.json"))).digest("hex").slice(0, 16) : "";
+const lastHash = txt("tooling/barkpark-sync/.last-push-hash", "");
+const publishNeeded = nodesHash && nodesHash !== lastHash;
+let published = false;
+if (PUBLISH && up && (publishNeeded || FORCE)) {
+  e(`  ${C.b}publishing to Barkpark (codebase dataset)…${C.x}`);
+  run("push", "tooling/barkpark-sync/push.mjs", ["--dataset", "codebase"]);
+  run("graph-view", "tooling/barkpark-sync/graph-view.mjs", ["--dataset", "codebase"]);
+  writeFileSync(join(ROOT, "tooling/barkpark-sync/.last-push-hash"), nodesHash);
+  published = true;
 }
+
+// ════════════════ REPORT BOARD ════════════════
+const enrichPending = usefulPending > 0 || intentPending > 0;
+e("");
+e(`${C.b}═══ STATUS QUO — three arcs ═══${C.x}`);
+e("");
+e(`${C.b}ASSESS${C.x}   quality ${C.b}${q.grade} (${q.overall}/100)${C.x} · ${q.totalFindings} findings · coverage ${cov.pct}%`);
+for (const d of q.dimensions) e(`         ${d.name.padEnd(12)} ${String(d.score).padStart(3)}`);
+if (covPending || staleGroups || issuesStale) {
+  e(`  ${C.y}⟳ pending:${C.x}`);
+  if (covPending) e(`     • ${covPending} file(s) need research → coverage.mjs batches → dispatch → record`);
+  if (staleGroups) e(`     • ${staleGroups} consistency group(s) changed → dispatch consistency/batches/* → record`);
+  if (issuesStale) e(`     • layering/dup changed → 2 issue agents → consistency.mjs record`);
+} else e(`  ${C.g}✓ fresh${C.x}`);
+e("");
+e(`${C.b}ENRICH${C.x}   ${nodes.length} files · ${taxonomyN} intentions`);
+if (enrichPending) {
+  e(`  ${C.y}⟳ pending:${C.x}`);
+  if (usefulPending) e(`     • ${usefulPending} file(s) need usefulness → usefulness.mjs batches → dispatch → merge`);
+  if (intentPending) e(`     • ${intentPending} file(s) need intention tags${taxonomyN ? "" : " (no taxonomy yet — run discovery)"} → intentions.mjs batches → dispatch → merge`);
+} else e(`  ${C.g}✓ fresh — every file has usefulness + intentions${C.x}`);
+e("");
+e(`${C.b}PUBLISH${C.x}  Barkpark ${up ? C.g + "reachable" + C.x : C.r + "not reachable" + C.x} · nodes ${publishNeeded ? C.y + "changed" + C.x : C.g + "in sync" + C.x}`);
+if (published) e(`  ${C.g}✓ pushed → /d/codebase/papers/:slug · /v1/graph?dataset=codebase · codebase-graph.html${C.x}`);
+else if (!up) e(`  ${C.y}· start Barkpark (make dev) then re-run with --publish${C.x}`);
+else if (publishNeeded) e(`  ${C.y}⟳ ${PUBLISH ? "" : "data changed — "}run with --publish to ship into Barkpark${C.x}`);
+else e(`  ${C.g}✓ in sync${C.x}`);
+e("");
+const allFresh = !covPending && !staleGroups && !issuesStale && !enrichPending && (!up || !publishNeeded || published);
+e(allFresh ? `  ${C.g}${C.b}✓ FRESH across all arcs.${C.x}` : `  ${C.b}→ do the pending agent work, re-run status${C.x}`);
+e(`  → tooling/status/status-report.html (quality) · codebase-graph.html (graph)`);
