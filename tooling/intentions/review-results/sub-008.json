@@ -1,0 +1,46 @@
+{
+  "subsystem": ".",
+  "summary": "The root Go package is the terminal-native face of Barkpark: a single binary that routes between a manifest-driven CLI (`bp`) and an interactive Bubble Tea TUI. The TUI is a full content-editing environment — Miller-column navigation, field editing, draft/publish workflow, bulk operations, full-text search, diff view, revision history — all talking to the Phoenix API over SSE for live refresh.",
+  "intentions": [
+    {
+      "title": "Provide a terminal-native CMS editing environment with Studio parity",
+      "scale": "epic",
+      "evidence": "tui.go (Miller-column panes, field editor, inline create/delete/discard), bulk.go (space-mark + ctrl+p bulk publish mirroring Studio E3 parity comment), diff.go (draft↔published diff before publish/discard), history.go (revision viewer), styles.go (lipgloss visual language matching Studio conventions)"
+    },
+    {
+      "title": "Single binary with dual persona: interactive TUI and scriptable CLI",
+      "scale": "epic",
+      "evidence": "main.go routes os.Args: >1 arg → cli.Execute, no args → runTUI(); same binary, same config resolution path, same active-server pointer"
+    },
+    {
+      "title": "Live-refresh content via SSE without manual reload",
+      "scale": "small",
+      "evidence": "main.go: ds.OnChange callback pushes DataStoreRefreshMsg into the Bubble Tea program; ds.StartSSE wired immediately after program creation"
+    },
+    {
+      "title": "Shared server/workspace context between TUI and CLI (`bp use prod` moves both)",
+      "scale": "small",
+      "evidence": "main.go: cli.ResolvedAPIConfig() used for TUI — same resolution chain (flags > env > saved config) as the CLI; comment explicitly states `bp use prod` moves the TUI too"
+    },
+    {
+      "title": "Multi-tenant scope switching without restart",
+      "scale": "small",
+      "evidence": "selector.go: workspace/project/dataset picker modal that reloads schemas and rebuilds pane tree on apply; degrades gracefully to manual text entry on API failure"
+    },
+    {
+      "title": "Safe, confirmed destructive mutations (delete, discard draft)",
+      "scale": "small",
+      "evidence": "tui.go: two-press arm pattern for both delete (D×2) and discard-draft (R×2); target resolved at arm time; esc disarms silently"
+    },
+    {
+      "title": "First-run onboarding without external docs",
+      "scale": "small",
+      "evidence": "main.go: FirstRun() + isatty check routes into cli.RunFirstTimeSetup() before any network call; help.go provides in-TUI help overlay"
+    },
+    {
+      "title": "Graceful terminal-width degradation for constrained displays",
+      "scale": "small",
+      "evidence": "tui.go constants (minEditorWidth=40, minEditorUsable=24, minFrameWidth=16) with explicit tiered column-dropping logic; badge/meta fields dropped before title content"
+    }
+  ]
+}

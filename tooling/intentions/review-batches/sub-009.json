@@ -1,0 +1,120 @@
+{
+  "subsystem": "js/packages/core/src",
+  "count": 19,
+  "files": [
+    {
+      "path": "js/packages/core/src/index.ts",
+      "role": "JS SDK public API surface / barrel export",
+      "importance": 79,
+      "usefulness": 66
+    },
+    {
+      "path": "js/packages/core/src/types.ts",
+      "role": "JS SDK canonical type definitions",
+      "importance": 69,
+      "usefulness": 75
+    },
+    {
+      "path": "js/packages/core/src/client.ts",
+      "role": "JS SDK client factory and main method implementations",
+      "importance": 73,
+      "usefulness": 68
+    },
+    {
+      "path": "js/packages/core/src/transport.ts",
+      "role": "Core HTTP transport layer",
+      "importance": 69,
+      "usefulness": 70
+    },
+    {
+      "path": "js/packages/core/src/listen.ts",
+      "role": "SSE live-stream transport",
+      "importance": 65,
+      "usefulness": 68
+    },
+    {
+      "path": "js/packages/core/src/errors.ts",
+      "role": "JS SDK error class taxonomy",
+      "importance": 59,
+      "usefulness": 68
+    },
+    {
+      "path": "js/packages/core/src/retry.ts",
+      "role": "HTTP retry policy engine",
+      "importance": 60,
+      "usefulness": 66
+    },
+    {
+      "path": "js/packages/core/src/patch.ts",
+      "role": "Single-document patch builder",
+      "importance": 60,
+      "usefulness": 63
+    },
+    {
+      "path": "js/packages/core/src/doc.ts",
+      "role": "JS SDK single-document fetch operation",
+      "importance": 64,
+      "usefulness": 58
+    },
+    {
+      "path": "js/packages/core/src/docs.ts",
+      "role": "JS SDK fluent list-query operation",
+      "importance": 64,
+      "usefulness": 58
+    },
+    {
+      "path": "js/packages/core/src/transaction.ts",
+      "role": "Atomic multi-mutation transaction builder",
+      "importance": 61,
+      "usefulness": 61
+    },
+    {
+      "path": "js/packages/core/src/filter-builder.ts",
+      "role": "SDK query filter/builder and query-string encoder",
+      "importance": 55,
+      "usefulness": 63
+    },
+    {
+      "path": "js/packages/core/src/scope.ts",
+      "role": "URL scope prefix builder",
+      "importance": 56,
+      "usefulness": 62
+    },
+    {
+      "path": "js/packages/core/src/util/headers.ts",
+      "role": "HTTP header utilities",
+      "importance": 58,
+      "usefulness": 58
+    },
+    {
+      "path": "js/packages/core/src/handshake.ts",
+      "role": "SDK meta-endpoint cache",
+      "importance": 58,
+      "usefulness": 50
+    },
+    {
+      "path": "js/packages/core/src/publish.ts",
+      "role": "Draft publish/unpublish mutations",
+      "importance": 56,
+      "usefulness": 52
+    },
+    {
+      "path": "js/packages/core/src/tenancy.ts",
+      "role": "Workspace and project enumeration client",
+      "importance": 50,
+      "usefulness": 57
+    },
+    {
+      "path": "js/packages/core/src/fetchRaw.ts",
+      "role": "JS SDK escape-hatch raw HTTP fetch",
+      "importance": 54,
+      "usefulness": 48
+    },
+    {
+      "path": "js/packages/core/src/util/edge-detect.ts",
+      "role": "Edge runtime detector",
+      "importance": 44,
+      "usefulness": 50
+    }
+  ]
+}

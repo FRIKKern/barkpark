@@ -1,0 +1,54 @@
+{
+  "subsystem": "docs/snippets",
+  "count": 8,
+  "files": [
+    {
+      "path": "docs/snippets/04-mutate-optimistic.tsx",
+      "role": "JS SDK usage snippet — optimistic mutation React component",
+      "importance": 4,
+      "usefulness": 6
+    },
+    {
+      "path": "docs/snippets/06-server-component-fetch.tsx",
+      "role": "JS SDK usage snippet — Next.js Server Component fetch",
+      "importance": 4,
+      "usefulness": 6
+    },
+    {
+      "path": "docs/snippets/07-server-action-mutate.tsx",
+      "role": "JS SDK usage snippet — Next.js Server Action mutation",
+      "importance": 4,
+      "usefulness": 6
+    },
+    {
+      "path": "docs/snippets/08-revalidate-on-webhook.ts",
+      "role": "JS SDK usage snippet — webhook-triggered revalidation",
+      "importance": 4,
+      "usefulness": 6
+    },
+    {
+      "path": "docs/snippets/01-create-document.ts",
+      "role": "JS SDK usage snippet — create and publish",
+      "importance": 4,
+      "usefulness": 5
+    },
+    {
+      "path": "docs/snippets/02-query-with-filters.ts",
+      "role": "JS SDK usage snippet — filtered query",
+      "importance": 4,
+      "usefulness": 5
+    },
+    {
+      "path": "docs/snippets/03-listen-for-updates.ts",
+      "role": "JS SDK usage snippet — real-time subscription",
+      "importance": 4,
+      "usefulness": 5
+    },
+    {
+      "path": "docs/snippets/05-publish-unpublish.ts",
+      "role": "JS SDK usage snippet — publish/unpublish",
+      "importance": 4,
+      "usefulness": 5
+    }
+  ]
+}

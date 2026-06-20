@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/barkpark_web/controllers",
+  "summary": "The HTTP controller layer is the complete public API surface of Barkpark: it translates every inbound HTTP request into a Content/Tasks/Plugins domain call, enforces multi-tenant scoping and auth tiers on every read and write, and serialises results into stable JSON envelopes consumed by the CLI, SDK, Studio LiveView, and external integrators.",
+  "intentions": [
+    {
+      "title": "Expose a stable, versioned HTTP API contract that CLI, SDK, and plugins can rely on without breaking",
+      "scale": "epic",
+      "evidence": "capabilities_controller.ex serves a tier-projected manifest (GET /v1/capabilities) that the bp CLI self-discovers on every session; query_controller.ex, mutate_controller.ex, and fallback_controller.ex all emit consistent structured envelopes (transactionId, error.code, syncTags, etag) documented in docs/api-v1.md; legacy_controller.ex and legacy_redirect_controller.ex keep backward-compat paths alive while the canonical routes evolve"
+    },
+    {
+      "title": "Enforce strict multi-tenant isolation on every read, write, and real-time stream",
+      "scale": "epic",
+      "evidence": "Every controller imports ScopeHelpers.scope_opts/1 and threads workspace_id+project_id into every query and mutation. listen_controller.ex subscribes to workspace-scoped PubSub topics and has a forward_event?/3 gate that drops cross-tenant events. tasks_controller.ex deliberately avoids Content.get_document (which has a dataset-coalescence bug) and filters directly on workspace+project. query_controller.ex's anon_pinned? pins anonymous callers to the published perspective to prevent draft leakage."
+    },
+    {
+      "title": "Provide a durable, CAS-safe task substrate for multi-agent paperflow orchestration",
+      "scale": "epic",
+      "evidence": "tasks_controller.ex implements 11 endpoints covering the full paperflow claim/close lifecycle (queue-based claim, targeted claim_by_id, close with observed_epoch CAS, edge add/query, label mutation, paper-ref attachment). The prime endpoint aggregates in-progress + ready + recent_events + lifecycle counts in one call to minimise agent rehydration round-trips. Resource conflict detection (409 with holder details) prevents two agents claiming overlapping files."
+    },
+    {
+      "title": "Deliver real-time document change streams with resume support to SDKs and Studio",
+      "scale": "small",
+      "evidence": "listen_controller.ex opens an SSE stream, replays missed events via Last-Event-ID, sends 30-second keepalives, and formats each event with syncTags so JS SDK caches can selectively invalidate. The scoped PubSub topic subscription (documents:ws:<ws>:<dataset>) prevents all-tenant broadcast noise."
+    },
+    {
+      "title": "Gate content visibility by auth tier and publication state",
+      "scale": "small",
+      "evidence": "query_controller.ex blocks anonymous callers from fetching drafts (anon_pinned? → :published perspective always), enforces schema visibility (public vs private), and lets preview tokens force a perspective. The capabilities controller projects the manifest through a per-tier allow-list. bulldocs_ingest_controller.ex requires a separate ingest token distinct from the API token."
+    },
+    {
+      "title": "Support content-graph traversal and whole-corpus visualisation (Obsidian-style)",
+      "scale": "small",
+      "evidence": "tasks_controller.ex also hosts graph_show (BFS traversal from any doc, depth 1-5, direction, kind+source filters), graph_corpus (full dataset node+edge dump for the finder's landing graph), graph_orphans, and graph_dangling. The corpus endpoint includes phantom nodes (referenced but absent docs) to mirror Obsidian's showOrphans behaviour."
+    },
+    {
+      "title": "Support plugin extensibility without modifying core controllers",
+      "scale": "small",
+      "evidence": "bulldocs_ingest_controller.ex and bulldocs_intents_controller.ex are plugin-owned controllers registered via register_routes/1; plugins_controller.ex serves the plugin roster at GET /v1/plugins; plugin_settings_controller.ex provides admin-gated plugin config CRUD. The capabilities manifest (capabilities_controller.ex) is assembled by Plugins.Capabilities so plugins can inject their own endpoints."
+    },
+    {
+      "title": "Preserve backward compatibility across API and URL surface changes",
+      "scale": "small",
+      "evidence": "legacy_controller.ex preserves the original Go TUI endpoint shapes; legacy_redirect_controller.ex issues 301/302s from old URL patterns; studio_redirect_controller.ex funnels flat /studio URLs to the scoped /w/:ws/p/:proj/studio path. The /v1/paperflow/* alias of /v1/plugins/bulldocs/* is explicitly kept alive pending producer repointing."
+    }
+  ]
+}

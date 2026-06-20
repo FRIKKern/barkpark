@@ -1,0 +1,72 @@
+{
+  "subsystem": "js/packages",
+  "count": 11,
+  "files": [
+    {
+      "path": "js/packages/react/tsup.config.ts",
+      "role": "React SDK build config",
+      "importance": 25,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/groq/src/index.ts",
+      "role": "deferred GROQ package stub",
+      "importance": 21,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/nextjs-query/src/index.ts",
+      "role": "deferred nextjs-query package stub",
+      "importance": 21,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/tsup.config.ts",
+      "role": "CLI build config for create-barkpark-app",
+      "importance": 18,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/codegen/tsup.config.ts",
+      "role": "Codegen package build config",
+      "importance": 10,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/codegen/vitest.config.ts",
+      "role": "Codegen test runner config",
+      "importance": 6,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/groq/tsup.config.ts",
+      "role": "groq package build config",
+      "importance": 5,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/nextjs-query/tsup.config.ts",
+      "role": "nextjs-query package build config",
+      "importance": 5,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/react/vitest.config.ts",
+      "role": "react package test config",
+      "importance": 3,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/groq/vitest.config.ts",
+      "role": "groq package test config",
+      "importance": 3,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/nextjs-query/vitest.config.ts",
+      "role": "nextjs-query package test config",
+      "importance": 3,
+      "usefulness": 2
+    }
+  ]
+}

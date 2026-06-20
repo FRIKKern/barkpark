@@ -1,0 +1,30 @@
+{
+  "subsystem": "web",
+  "count": 4,
+  "files": [
+    {
+      "path": "web/public/bp-graph.js",
+      "role": "Studio graph renderer (self-contained canvas)",
+      "importance": 28,
+      "usefulness": 32
+    },
+    {
+      "path": "web/next.config.ts",
+      "role": "Next.js config + legacy redirects",
+      "importance": 26,
+      "usefulness": 8
+    },
+    {
+      "path": "web/postcss.config.mjs",
+      "role": "PostCSS config for Tailwind CSS",
+      "importance": 14,
+      "usefulness": 3
+    },
+    {
+      "path": "web/eslint.config.mjs",
+      "role": "ESLint configuration for Next.js web app",
+      "importance": 11,
+      "usefulness": 3
+    }
+  ]
+}

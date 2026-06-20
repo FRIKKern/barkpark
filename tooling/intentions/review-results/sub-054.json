@@ -1,0 +1,26 @@
+{
+  "subsystem": "js/packages/codegen/src",
+  "summary": "A minimal CLI + library package that builds schema-introspection URL paths and exposes typed config primitives, laying the groundwork for a typed-client code-generation workflow against Barkpark's /v1/schemas API.",
+  "intentions": [
+    {
+      "title": "Provide type-safe developer config for codegen",
+      "scale": "small",
+      "evidence": "types.ts defines BarkparkCodegenConfig (input/output/workspace/project) and the defineConfig() identity helper in index.ts exists solely to give IDE autocomplete and TypeScript checking in barkpark.config.ts files"
+    },
+    {
+      "title": "Abstract multi-tenancy routing (workspace/project scoping) from consumers",
+      "scale": "small",
+      "evidence": "schema-url.ts buildSchemaPath() centralises the /w/<workspace>/p/<project>/v1/schemas/<dataset> vs flat /v1/schemas/<dataset> path selection, preserving back-compat for existing single-tenant users while enabling scoped multi-tenant access"
+    },
+    {
+      "title": "Enable automated TypeScript type generation from live Barkpark schemas",
+      "scale": "epic",
+      "evidence": "cli.ts schema-path command prints the introspection URL for a dataset so external tooling (e.g. graphql-codegen or custom scripts) can fetch the schema JSON and emit typed clients; BarkparkSchemaJson type in types.ts models the /v1/schemas/:dataset response shape"
+    },
+    {
+      "title": "Reach peak DX — zero-config typed API client for JS consumers",
+      "scale": "epic",
+      "evidence": "defineConfig helper, the codegen package's position in the JS SDK monorepo alongside @barkpark/core and @barkpark/nextjs, and the README-level 'not-built boundary' note in js/CLAUDE.md all point to this as the scaffold for a future generate-once, type-safe query layer"
+    }
+  ]
+}

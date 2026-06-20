@@ -1,0 +1,2 @@
+{"at":"2026-06-20T10:33:48.902Z","head":"8865d36c30827a9280c7afc9bfedf4d12aed2aa4","files":1116,"positives":277,"posRate":0.2482,"fullAuc":0.8627,"cvAuc":0.7366,"confidence":"high"}
+{"at":"2026-06-20T10:49:15.968Z","head":"b1fc297d572a0060f5661cafb358d0722a578b22","files":1116,"positives":277,"posRate":0.2482,"fullAuc":0.8628,"cvAuc":0.7374,"confidence":"high"}

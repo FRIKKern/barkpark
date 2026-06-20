@@ -1,0 +1,51 @@
+{
+  "subsystem": "api/lib/barkpark_web/plugs",
+  "summary": "The plugs directory is the entire HTTP security and tenancy boundary layer for Barkpark's Phoenix API — every request passes through a composed pipeline of these plugs before reaching a controller, enforcing auth, multi-tenant isolation, rate limiting, CORS, and API contract hygiene.",
+  "intentions": [
+    {
+      "title": "Harden multi-tenant isolation at the routing layer",
+      "scale": "epic",
+      "evidence": "resolve_workspace.ex resolves workspace slug → struct and gates token membership before any controller runs; scope_helpers.ex is the single seam that translates conn/socket assigns into WHERE-clause opts so tenant scope is never hand-rolled at a call site; resolve_project.ex mirrors this for the project level. The cross-dataset read-leak fix is explicitly called out in resolve_workspace.ex moduledoc."
+    },
+    {
+      "title": "Enforce layered, fail-closed authentication across multiple token types",
+      "scale": "epic",
+      "evidence": "require_token.ex (Bearer), optional_token.ex (soft Bearer), optional_session_token.ex (browser session), require_bearer_or_session_token.ex (dual-mode for media upload), preview_token.ex (JWT for preview), require_ingest_token.ex (paperflow ingest), require_media_processing_callback_token.ex (media callback) — each surface gets exactly the auth posture it needs, all fail closed by default."
+    },
+    {
+      "title": "Enable controlled public / anonymous access without weakening member security",
+      "scale": "epic",
+      "evidence": "require_share_scope.ex gates anonymous reads by exact (workspace, project, dataset, surface) share match, is DEFAULT-OFF, read-vs-write aware, and explicitly guards against downgrading authenticated members to share-grade access (bug found live 2026-06-10). public_read.ex restricts a special 'public-read' token to published perspective + public-schema routes only. require_share_edit_token.ex covers the write-side share path."
+    },
+    {
+      "title": "Scope CORS per-dataset and per-tenant rather than globally",
+      "scale": "small",
+      "evidence": "dataset_cors.ex resolves the dataset from path_info at the endpoint layer (before routing), reflects only origins in the dataset's cors_origins allow-list unioned with @always_allowed_origins, never wildcards, and handles both flat and /w/:ws/p/:proj prefixed routes with correct project-scoped resolution."
+    },
+    {
+      "title": "Protect API availability with per-token token-bucket rate limiting",
+      "scale": "small",
+      "evidence": "rate_limit.ex separates read vs write buckets, supports per-dataset config overrides, falls back to client IP for unauthenticated callers, and emits Retry-After headers on 429."
+    },
+    {
+      "title": "Make mutating API calls safe to retry via idempotency dedup",
+      "scale": "small",
+      "evidence": "idempotency.ex caches the response for (key, token_id, method, path) tuples on POST/PUT/PATCH/DELETE, replays on hit with Idempotency-Replay header, and skips caching on 5xx so transient errors never poison the cache."
+    },
+    {
+      "title": "Provide a backwards-compatible flat-route surface while the codebase migrates to scoped URLs",
+      "scale": "small",
+      "evidence": "assign_default_scope.ex back-fills workspace/project assigns for legacy flat routes so ScopeHelpers works identically on both flat and /w/:ws/p/:proj routes; legacy_deprecation.ex adds deprecation headers to old route responses; resolve_workspace.ex's allow_anonymous_default option carries the flat Studio's anonymous-Default posture onto the scoped successor."
+    },
+    {
+      "title": "Gate write and admin operations to appropriately permissioned tokens",
+      "scale": "small",
+      "evidence": "require_write_permission.ex gates mutating routes, require_admin.ex gates admin-only routes, require_workspace_role.ex gates workspace-admin actions — three distinct permission tiers enforced as composable plugs."
+    },
+    {
+      "title": "Normalise API contract surface via content negotiation plugs",
+      "scale": "small",
+      "evidence": "accept_barkpark_vendor.ex normalises vendor MIME Accept headers so controllers can pattern-match a single content-type; error_envelope_negotiation.ex versions the error envelope shape based on client API version headers."
+    }
+  ]
+}

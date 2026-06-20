@@ -1,0 +1,48 @@
+{
+  "subsystem": "api/lib/barkpark_web/components",
+  "count": 7,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/components/studio_components.ex",
+      "role": "Shared Studio UI component library",
+      "importance": 52,
+      "usefulness": 64
+    },
+    {
+      "path": "api/lib/barkpark_web/components/field_inputs.ex",
+      "role": "Studio editor leaf-field input components",
+      "importance": 43,
+      "usefulness": 58
+    },
+    {
+      "path": "api/lib/barkpark_web/components/icons.ex",
+      "role": "Inline SVG icon library",
+      "importance": 28,
+      "usefulness": 47
+    },
+    {
+      "path": "api/lib/barkpark_web/components/confirm_modal.ex",
+      "role": "generic two-stage confirm modal LiveView component",
+      "importance": 31,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/barkpark_web/components/draft_diff.ex",
+      "role": "Studio UI component for draft-vs-published field diff",
+      "importance": 27,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/components/onix_preview.ex",
+      "role": "doc-type-agnostic content preview sidebar component",
+      "importance": 30,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/components/external_sync_pill.ex",
+      "role": "UI status pill for external sync integrations",
+      "importance": 24,
+      "usefulness": 14
+    }
+  ]
+}

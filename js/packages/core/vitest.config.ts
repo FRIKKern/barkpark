@@ -7,7 +7,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', '!tests/runtime.workerd.test.ts', '!tests/runtime.browser.test.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'lcov'],
+      reporter: ['text', 'lcov', 'json'],
       include: ['src/**'],
     },
   },

@@ -1,0 +1,42 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit/bokbasen",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/bokbasen/status.ex",
+      "role": "Bokbasen export status read/write facade",
+      "importance": 39,
+      "usefulness": 43
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/bokbasen/auth.ex",
+      "role": "OAuth2 token cache GenServer for Bokbasen integration",
+      "importance": 38,
+      "usefulness": 40
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/bokbasen/publish_worker.ex",
+      "role": "Oban async worker for Bokbasen ONIX publication",
+      "importance": 40,
+      "usefulness": 38
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/bokbasen/client.ex",
+      "role": "HTTP client for Bokbasen metadata import API",
+      "importance": 40,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/bokbasen/settings.ex",
+      "role": "Credential resolver for Bokbasen plugin settings",
+      "importance": 36,
+      "usefulness": 39
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/bokbasen/errors.ex",
+      "role": "Typed error structs with credential redaction for Bokbasen client",
+      "importance": 31,
+      "usefulness": 16
+    }
+  ]
+}

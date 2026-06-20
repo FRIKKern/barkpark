@@ -123,7 +123,8 @@ defmodule Barkpark.Content.EdgeExtractTest do
       edge = Enum.find(edges, &(&1.field == "author"))
       assert edge.from_id == "art-1"
       assert edge.to_id == "auth-1"
-      assert edge.kind == "references"
+      # kind IS the source field name now (graph-edge-seam), not generic "references".
+      assert edge.kind == "author"
       assert edge.refType == "author"
       refute edge.dangling
     end
@@ -262,7 +263,8 @@ defmodule Barkpark.Content.EdgeExtractTest do
       assert [{:ok, %Edge{} = stored}] = results
       assert stored.from_id == from_doc.id
       assert stored.to_id == to_doc.id
-      assert stored.kind == "references"
+      # kind IS the source field name now (graph-edge-seam).
+      assert stored.kind == "author"
 
       outbound = Content.list_outbound_edges(from_doc.id)
       assert Enum.any?(outbound, &(&1.id == stored.id and &1.to_id == to_doc.id))

@@ -1,0 +1,30 @@
+{
+  "subsystem": "js/docs",
+  "count": 4,
+  "files": [
+    {
+      "path": "js/docs/lib/source.ts",
+      "role": "docs MDX source loader",
+      "importance": 26,
+      "usefulness": 3
+    },
+    {
+      "path": "js/docs/mdx-components.tsx",
+      "role": "MDX component registry",
+      "importance": 18,
+      "usefulness": 3
+    },
+    {
+      "path": "js/docs/next.config.mjs",
+      "role": "Next.js config for JS SDK docs site",
+      "importance": 11,
+      "usefulness": 2
+    },
+    {
+      "path": "js/docs/source.config.ts",
+      "role": "Fumadocs content source config",
+      "importance": 10,
+      "usefulness": 2
+    }
+  ]
+}

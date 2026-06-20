@@ -1,0 +1,31 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter/app",
+  "summary": "Next.js App Router pages and API routes for the blog-starter scaffold template, demonstrating how to build a real content-driven site on top of the Barkpark JS SDK with draft-mode preview, webhook revalidation, and content relationships (posts, authors, tags).",
+  "intentions": [
+    {
+      "title": "Lower the time-to-first-working-site for new adopters",
+      "scale": "epic",
+      "evidence": "All 7 files together form a runnable blog; page.tsx + tags/page.tsx + authors/page.tsx give a complete content graph out of the box so a scaffolded project starts with real pages, not stubs"
+    },
+    {
+      "title": "Demonstrate draft-mode (preview) as a first-class SDK pattern",
+      "scale": "small",
+      "evidence": "draft-preview.tsx uses useOptimisticDocument from @barkpark/nextjs/actions; page.tsx branches on draftMode() to swap in the preview component; api/preview/route.ts and api/exit-preview/route.ts handle enter/exit lifecycle"
+    },
+    {
+      "title": "Show webhook-driven ISR cache invalidation as the canonical publish flow",
+      "scale": "small",
+      "evidence": "api/barkpark/webhook/route.ts wires createWebhookHandler + revalidateBarkpark, with inline comment instructing users to set BARKPARK_WEBHOOK_SECRET and point Studio at the route"
+    },
+    {
+      "title": "Prove the SDK's optimistic-edit API with a concrete UI example",
+      "scale": "small",
+      "evidence": "draft-preview.tsx exposes a commitOptimistic stub and an 'Optimistic edit title' button, explicitly inviting users to wire it to a real server action"
+    },
+    {
+      "title": "Teach relationship traversal (refs) using the SDK client helpers",
+      "scale": "small",
+      "evidence": "page.tsx resolves author and tags via getDocById using _ref fields; tags/page.tsx filters posts client-side by tag._id, showing both patterns (server join via ref and in-memory filter)"
+    }
+  ]
+}

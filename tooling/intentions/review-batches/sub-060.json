@@ -1,0 +1,18 @@
+{
+  "subsystem": "internal",
+  "count": 2,
+  "files": [
+    {
+      "path": "internal/apiclient/client.go",
+      "role": "Go HTTP API client shared by TUI and CLI",
+      "importance": 71,
+      "usefulness": 74
+    },
+    {
+      "path": "internal/apiclient/schema.go",
+      "role": "Go API client schema type definitions and field type enum",
+      "importance": 61,
+      "usefulness": 68
+    }
+  ]
+}

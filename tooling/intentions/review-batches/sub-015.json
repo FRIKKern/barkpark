@@ -1,0 +1,90 @@
+{
+  "subsystem": "internal/pdrender",
+  "count": 14,
+  "files": [
+    {
+      "path": "internal/pdrender/pdrender.go",
+      "role": "terminal portable-doc renderer core types and registry",
+      "importance": 63,
+      "usefulness": 40
+    },
+    {
+      "path": "internal/pdrender/blocks.go",
+      "role": "pdrender core block renderers (heading, paragraph, list, etc.)",
+      "importance": 49,
+      "usefulness": 52
+    },
+    {
+      "path": "internal/pdrender/code.go",
+      "role": "portable-doc code block renderer",
+      "importance": 49,
+      "usefulness": 44
+    },
+    {
+      "path": "internal/pdrender/attrs.go",
+      "role": "portable-doc JSON attribute helpers",
+      "importance": 48,
+      "usefulness": 37
+    },
+    {
+      "path": "internal/pdrender/inline.go",
+      "role": "pdrender inline node renderer",
+      "importance": 47,
+      "usefulness": 37
+    },
+    {
+      "path": "internal/pdrender/theme.go",
+      "role": "pdrender theme/palette definition",
+      "importance": 49,
+      "usefulness": 34
+    },
+    {
+      "path": "internal/pdrender/decode.go",
+      "role": "pdrender JSON document decoder",
+      "importance": 47,
+      "usefulness": 32
+    },
+    {
+      "path": "internal/pdrender/richblocks.go",
+      "role": "pdrender rich block renderers (table, figure, action, pullquote, ingress, eyebrow, byline)",
+      "importance": 45,
+      "usefulness": 30
+    },
+    {
+      "path": "internal/pdrender/sheet.go",
+      "role": "pdrender spreadsheet block renderer",
+      "importance": 42,
+      "usefulness": 23
+    },
+    {
+      "path": "internal/pdrender/fields.go",
+      "role": "pdrender field-* block renderers",
+      "importance": 40,
+      "usefulness": 24
+    },
+    {
+      "path": "internal/pdrender/v2fields.go",
+      "role": "pdrender schema-v2 field block renderers (composite, arrayOf, codelist, localizedText)",
+      "importance": 40,
+      "usefulness": 21
+    },
+    {
+      "path": "internal/pdrender/hardblocks.go",
+      "role": "pdrender hard-fallback block renderers (diagram, asciicast, image)",
+      "importance": 40,
+      "usefulness": 20
+    },
+    {
+      "path": "internal/pdrender/form.go",
+      "role": "pdrender form/questionnaire block renderer",
+      "importance": 38,
+      "usefulness": 16
+    },
+    {
+      "path": "internal/pdrender/cmd/demo/main.go",
+      "role": "pdrender standalone demo entrypoint",
+      "importance": 22,
+      "usefulness": 3
+    }
+  ]
+}

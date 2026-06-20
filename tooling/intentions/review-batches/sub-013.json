@@ -1,0 +1,96 @@
+{
+  "subsystem": "internal/cli/setup",
+  "count": 15,
+  "files": [
+    {
+      "path": "internal/cli/setup/connect.go",
+      "role": "bp setup connect executor",
+      "importance": 46,
+      "usefulness": 29
+    },
+    {
+      "path": "internal/cli/setup/setup.go",
+      "role": "bp setup package core types and Execute entry",
+      "importance": 49,
+      "usefulness": 23
+    },
+    {
+      "path": "internal/cli/setup/local.go",
+      "role": "bp setup local executor",
+      "importance": 43,
+      "usefulness": 27
+    },
+    {
+      "path": "internal/cli/setup/deploy.go",
+      "role": "bp setup deploy subcommand implementation",
+      "importance": 44,
+      "usefulness": 22
+    },
+    {
+      "path": "internal/cli/setup/wizard.go",
+      "role": "bp setup interactive TUI wizard",
+      "importance": 42,
+      "usefulness": 24
+    },
+    {
+      "path": "internal/cli/setup/assets/deploy.sh",
+      "role": "Server provisioning script",
+      "importance": 38,
+      "usefulness": 18
+    },
+    {
+      "path": "internal/cli/setup/steps.go",
+      "role": "setup step runner and plan renderer",
+      "importance": 37,
+      "usefulness": 18
+    },
+    {
+      "path": "internal/cli/setup/plan.go",
+      "role": "bp setup dry-run plan data structures",
+      "importance": 35,
+      "usefulness": 17
+    },
+    {
+      "path": "internal/cli/setup/assets/assets.go",
+      "role": "embedded deploy.sh asset for bp CLI",
+      "importance": 25,
+      "usefulness": 26
+    },
+    {
+      "path": "internal/cli/setup/provision.go",
+      "role": "cloud provisioning executor",
+      "importance": 33,
+      "usefulness": 14
+    },
+    {
+      "path": "internal/cli/setup/verify.go",
+      "role": "post-install server health gate",
+      "importance": 33,
+      "usefulness": 14
+    },
+    {
+      "path": "internal/cli/setup/token.go",
+      "role": "admin token generator for fresh installs",
+      "importance": 31,
+      "usefulness": 15
+    },
+    {
+      "path": "internal/cli/setup/plugins.go",
+      "role": "plugin discovery for bp setup wizard",
+      "importance": 27,
+      "usefulness": 15
+    },
+    {
+      "path": "internal/cli/setup/local_unix.go",
+      "role": "platform-specific background process helper (Unix)",
+      "importance": 27,
+      "usefulness": 9
+    },
+    {
+      "path": "internal/cli/setup/local_windows.go",
+      "role": "platform-specific background process helper (Windows)",
+      "importance": 24,
+      "usefulness": 8
+    }
+  ]
+}

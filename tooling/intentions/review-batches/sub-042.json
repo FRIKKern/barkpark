@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/content/validation",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark/content/validation/evaluator.ex",
+      "role": "cross-field validation rule evaluator",
+      "importance": 44,
+      "usefulness": 33
+    },
+    {
+      "path": "api/lib/barkpark/content/validation/path.ex",
+      "role": "JSON-Pointer path resolver with wildcard support",
+      "importance": 41,
+      "usefulness": 34
+    },
+    {
+      "path": "api/lib/barkpark/content/validation/ops.ex",
+      "role": "validation op evaluator",
+      "importance": 39,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark/content/validation/rule.ex",
+      "role": "compiled validation rule struct",
+      "importance": 37,
+      "usefulness": 29
+    },
+    {
+      "path": "api/lib/barkpark/content/validation/rules.ex",
+      "role": "Cross-field validation rule compiler and GenServer cache",
+      "importance": 38,
+      "usefulness": 27
+    }
+  ]
+}

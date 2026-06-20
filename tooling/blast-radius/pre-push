@@ -1,0 +1,8 @@
+#!/bin/sh
+# blast-radius pre-push monitor — light, warn-only. Reads the cached index,
+# never invokes a compiler. Source of truth lives in tooling/blast-radius/.
+# Install: tooling/blast-radius/install-hook.sh
+command -v node >/dev/null 2>&1 || exit 0
+ROOT=$(git rev-parse --show-toplevel)
+node "$ROOT/tooling/blast-radius/check.mjs" || true
+exit 0

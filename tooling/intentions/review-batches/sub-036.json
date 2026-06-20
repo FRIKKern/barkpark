@@ -1,0 +1,42 @@
+{
+  "subsystem": "api/lib/barkpark/validation/checkers",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark/validation/checkers/codelist_ref.ex",
+      "role": "ONIX codelist validation checker",
+      "importance": 46,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/validation/checkers/isbn13_checksum.ex",
+      "role": "ISBN-13 checksum validator",
+      "importance": 42,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark/validation/checkers/iso639_language.ex",
+      "role": "ISO-639 language code validator",
+      "importance": 42,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/barkpark/validation/checkers/gtin14_checksum.ex",
+      "role": "GTIN-14 checksum validator",
+      "importance": 40,
+      "usefulness": 15
+    },
+    {
+      "path": "api/lib/barkpark/validation/checkers/iso4217_currency.ex",
+      "role": "ISO-4217 currency code checker",
+      "importance": 39,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/barkpark/validation/checkers/nonempty.ex",
+      "role": "Non-empty value validator",
+      "importance": 40,
+      "usefulness": 11
+    }
+  ]
+}

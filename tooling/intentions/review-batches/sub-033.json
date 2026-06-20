@@ -1,0 +1,48 @@
+{
+  "subsystem": "js/docs/app",
+  "count": 7,
+  "files": [
+    {
+      "path": "js/docs/app/docs/[[...slug]]/page.tsx",
+      "role": "catch-all docs page renderer",
+      "importance": 23,
+      "usefulness": 8
+    },
+    {
+      "path": "js/docs/app/layout.tsx",
+      "role": "docs root HTML layout",
+      "importance": 22,
+      "usefulness": 3
+    },
+    {
+      "path": "js/docs/app/docs/layout.tsx",
+      "role": "docs section layout",
+      "importance": 19,
+      "usefulness": 3
+    },
+    {
+      "path": "js/docs/app/api/search/route.ts",
+      "role": "docs search API route",
+      "importance": 16,
+      "usefulness": 5
+    },
+    {
+      "path": "js/docs/app/layout.config.tsx",
+      "role": "shared docs nav config",
+      "importance": 11,
+      "usefulness": 4
+    },
+    {
+      "path": "js/docs/app/(home)/layout.tsx",
+      "role": "docs home page layout wrapper",
+      "importance": 10,
+      "usefulness": 2
+    },
+    {
+      "path": "js/docs/app/(home)/page.tsx",
+      "role": "docs landing page",
+      "importance": 8,
+      "usefulness": 2
+    }
+  ]
+}

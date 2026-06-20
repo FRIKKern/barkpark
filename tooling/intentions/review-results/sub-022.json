@@ -1,0 +1,36 @@
+{
+  "subsystem": "api",
+  "summary": "Foundation and operational scaffolding for the Phoenix/Elixir backend: project manifest, web module macro factory, production startup, health checks, and validation engine benchmarking. These files wire the runtime together and gate performance regressions in CI.",
+  "intentions": [
+    {
+      "title": "Establish a composable Phoenix web layer via macro injection",
+      "scale": "epic",
+      "evidence": "barkpark_web.ex defines router/controller/live_view/live_component/html factories via __using__ macros, injecting verified routes, Studio components, i18n, and LiveView layout into every surface from a single source of truth"
+    },
+    {
+      "title": "Support self-contained OTP releases for zero-friction server deploy",
+      "scale": "small",
+      "evidence": "mix.exs releases config sets include_erts: true so the packaged binary carries its own BEAM runtime; rel/env.sh.eex defaults PHX_SERVER=true so `bin/barkpark start` serves HTTP without extra env setup"
+    },
+    {
+      "title": "Keep prod healthy with a recovery-oriented post-deploy gate",
+      "scale": "small",
+      "evidence": "prod-postcheck.sh auto-starts the service if stopped, waits for BEAM bind, then probes /api/schemas (no-auth endpoint) — exits 1 with systemctl tail on failure; designed as a recovery guardrail, not passive monitor"
+    },
+    {
+      "title": "Guard validation engine throughput via CI benchmark regression alarm",
+      "scale": "small",
+      "evidence": "bench/validation_perf.exs runs 100-rule / 200-field / 30-contributor synthetic doc through Evaluator.run_rules/3, exits 1 if median exceeds 100ms; no-start mode avoids Postgres so CI stays fast"
+    },
+    {
+      "title": "Enforce pre-commit quality gates across compilation, deps, formatting, and tests",
+      "scale": "small",
+      "evidence": "mix.exs aliases define a `precommit` task that chains compile --warnings-as-errors, deps.unlock --unused, format, and test — single command surfaces all regressions before push"
+    },
+    {
+      "title": "Cross-platform image processing without breaking Windows dev setup",
+      "scale": "small",
+      "evidence": "mix.exs image_dep/0 conditionally omits the :image (libvips NIF) dep on Windows, with env-var overrides; media renditions fall back to ImageMagick CLI backend automatically"
+    }
+  ]
+}

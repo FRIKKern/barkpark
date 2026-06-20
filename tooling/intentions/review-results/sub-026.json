@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit/export",
+  "summary": "Builds and validates standards-compliant ONIX 3.0 XML messages from Barkpark book documents for submission to Bokbasen (the Norwegian book trade distributor). Each module owns one ONIX block composite, backed by a shared codelist resolver and an XSD validation gate.",
+  "intentions": [
+    {
+      "title": "Enable Norwegian book trade distribution via Bokbasen",
+      "scale": "epic",
+      "evidence": "collateral_detail.ex has explicit Norwegian-first locale logic (nob > eng fallback with Logger.warning); country_code/currency_code maps in codelists.ex are Nordic-first (NO, SE, DK, FI); status_pill.ex maps Bokbasen-specific export lifecycle states (staged, polling, accepted, rejected). The whole pipeline exists to ship product records to Bokbasen."
+    },
+    {
+      "title": "Enforce ONIX 3.0 spec compliance at the boundary, not at the caller",
+      "scale": "epic",
+      "evidence": "validator.ex runs xmllint against the vendored EDItEUR reference XSD (ONIX_BookProduct_3.0_reference.xsd) before any export ships. codelists.ex raises ArgumentError on unknown codes rather than silently passing them through — the fail-fast design is explicitly documented as preventing silent XSD failures downstream."
+    },
+    {
+      "title": "Map internal book.json document shape to ONIX composite blocks",
+      "scale": "small",
+      "evidence": "descriptive_detail.ex, collateral_detail.ex, product_supply.ex, publishing_detail.ex each own exactly one ONIX composite block and map fields from the Barkpark `book` document schema (e.g. productForm, titleDetails, contributors, themaSubjectCategory) to XmlBuilder element trees."
+    },
+    {
+      "title": "Silently suppress empty ONIX blocks to avoid XSD rejection",
+      "scale": "small",
+      "evidence": "Every block builder (descriptive_detail.ex, collateral_detail.ex) returns nil when no child produced output, documented as 'preferable to a wall of empty tags'. The Product orchestrator filters nils so the assembled ONIXMessage only contains populated composites."
+    },
+    {
+      "title": "Centralise Bokbasen export status presentation in a single pill mapping",
+      "scale": "small",
+      "evidence": "status_pill.ex was extracted from two earlier call sites (BookEditor LV and BokbasenLive) to a single module mapping 9 export states to 5 CSS pill buckets. Its moduledoc explicitly names the consolidation as Phase 8 WI5 and points at the two removed duplicates."
+    },
+    {
+      "title": "Support Thema subject classification for Nordic book metadata",
+      "scale": "small",
+      "evidence": "descriptive_detail.ex implements Thema (List 93) subject emission with the 'Boss Q3 convention': first Thema code gets a MainSubject flag, subsequent codes do not. codelists.ex carries a representative Thema subset skewed toward fiction/non-fiction/children categories common in Norwegian publishing."
+    }
+  ]
+}

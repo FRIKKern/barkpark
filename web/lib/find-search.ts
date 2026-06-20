@@ -33,7 +33,8 @@ export const FIND_TAG = "find";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const TOKEN = process.env.BARKPARK_READ_TOKEN;
 // DATASET is imported from lib/config (one source of truth, env-overridable).
-// Default tenancy — Indx only activates on the token-scoped route.
+// Default tenancy — a token unlocks the scoped route; the public flat route
+// already serves Indx (typo-tolerant) retrieval anonymously.
 const SCOPE = "/w/default/p/default";
 /** Cap the working set; the client facets + sorts + paginates over it. */
 const MAX_HITS = 100;
@@ -102,10 +103,11 @@ export async function runSearch({
   sessionId = null,
 }: RunSearchArgs): Promise<FindResponse> {
   const wantIndx = engine === "indx";
-  // Indx only activates on the token-scoped route; without a token, fall back
-  // to the public flat Postgres route and flag it.
-  const useIndx = wantIndx && Boolean(TOKEN);
-  const base = useIndx ? `${API_URL}${SCOPE}` : API_URL;
+  // Indx (typo-tolerant retrieval) runs on the public flat route anonymously, so
+  // honour the requested engine even without a token; a token additionally
+  // unlocks the tenancy-scoped route. Postgres always uses the flat route.
+  const useIndx = wantIndx;
+  const base = useIndx && TOKEN ? `${API_URL}${SCOPE}` : API_URL;
   const engineUsed: SearchEngine = useIndx ? "indx" : "postgres";
 
   // Browse sends a single space: the q-required guard passes but it parses to an

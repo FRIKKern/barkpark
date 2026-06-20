@@ -1,0 +1,42 @@
+{
+  "subsystem": "scripts",
+  "count": 6,
+  "files": [
+    {
+      "path": "scripts/docs-anchors-check.sh",
+      "role": "CI doc integrity gate",
+      "importance": 21,
+      "usefulness": 11
+    },
+    {
+      "path": "scripts/check-doc-budgets.sh",
+      "role": "CI doc byte-budget enforcer",
+      "importance": 22,
+      "usefulness": 9
+    },
+    {
+      "path": "scripts/install-cli.sh",
+      "role": "bp CLI curl-pipe installer",
+      "importance": 18,
+      "usefulness": 12
+    },
+    {
+      "path": "scripts/setup-windows.ps1",
+      "role": "Windows one-command dev setup script",
+      "importance": 16,
+      "usefulness": 9
+    },
+    {
+      "path": "scripts/install-cli.ps1",
+      "role": "Windows PowerShell CLI installer",
+      "importance": 13,
+      "usefulness": 8
+    },
+    {
+      "path": "scripts/media-smoke.sh",
+      "role": "media platform production smoke test",
+      "importance": 8,
+      "usefulness": 8
+    }
+  ]
+}

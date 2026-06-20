@@ -1,0 +1,234 @@
+{
+  "subsystem": "api/lib/barkpark_web/controllers",
+  "count": 38,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/controllers/tasks_controller.ex",
+      "role": "Task system HTTP API controller",
+      "importance": 69,
+      "usefulness": 44
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/listen_controller.ex",
+      "role": "SSE real-time document-change stream with tenant isolation",
+      "importance": 66,
+      "usefulness": 41
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/mutate_controller.ex",
+      "role": "Document mutation HTTP controller (transactional write entry point)",
+      "importance": 68,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/query_controller.ex",
+      "role": "HTTP document query API controller",
+      "importance": 66,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/fallback_controller.ex",
+      "role": "API error envelope router",
+      "importance": 61,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/capabilities_controller.ex",
+      "role": "GET /v1/capabilities endpoint — CLI/SDK contract surface",
+      "importance": 62,
+      "usefulness": 35
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/search_controller.ex",
+      "role": "Full-text search API controller",
+      "importance": 61,
+      "usefulness": 35
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+      "role": "Bulldocs/paperflow paper ingest API controller",
+      "importance": 58,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/v1/media_controller.ex",
+      "role": "Versioned media search and management API controller",
+      "importance": 62,
+      "usefulness": 25
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/media_controller.ex",
+      "role": "Media file upload, listing, serving, and rendition HTTP controller",
+      "importance": 59,
+      "usefulness": 27
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/federated_search_controller.ex",
+      "role": "Federated search controller",
+      "importance": 54,
+      "usefulness": 29
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/schema_controller.ex",
+      "role": "HTTP schema CRUD controller",
+      "importance": 57,
+      "usefulness": 25
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/workspace_controller.ex",
+      "role": "Workspace and project REST CRUD controller",
+      "importance": 56,
+      "usefulness": 25
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_controller.ex",
+      "role": "Browser session / login controller",
+      "importance": 55,
+      "usefulness": 25
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/history_controller.ex",
+      "role": "Document revision history HTTP controller",
+      "importance": 53,
+      "usefulness": 25
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/legacy_controller.ex",
+      "role": "Backward-compatible API controller for Go TUI original endpoints",
+      "importance": 56,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/v1/media_collections_controller.ex",
+      "role": "Media collections REST controller",
+      "importance": 54,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/share_controller.ex",
+      "role": "HTTP CRUD controller for persistent scoped-sharing registry",
+      "importance": 46,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/structure_controller.ex",
+      "role": "desk structure HTTP endpoint",
+      "importance": 44,
+      "usefulness": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
+      "role": "Admin-only plugin settings REST controller",
+      "importance": 49,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/export_controller.ex",
+      "role": "NDJSON document export controller",
+      "importance": 46,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/share_link_controller.ex",
+      "role": "Item share-link resolver and admin CRUD controller",
+      "importance": 49,
+      "usefulness": 23
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/webhook_controller.ex",
+      "role": "Webhook CRUD controller",
+      "importance": 53,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/studio_redirect_controller.ex",
+      "role": "Studio URL funnel — flat-to-scoped 302 redirector",
+      "importance": 47,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/meta_controller.ex",
+      "role": "SDK handshake / schema-drift detection endpoint",
+      "importance": 51,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
+      "role": "paperflow intent polling API controller",
+      "importance": 38,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/scoped_paper_controller.ex",
+      "role": "scoped workspace/project paper reader controller",
+      "importance": 40,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/analytics_controller.ex",
+      "role": "Dataset analytics REST endpoint",
+      "importance": 44,
+      "usefulness": 13
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/v1/media_processing_controller.ex",
+      "role": "Inbound webhook handler for external media processor callbacks",
+      "importance": 42,
+      "usefulness": 15
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/page_controller.ex",
+      "role": "Root redirect controller",
+      "importance": 41,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/legacy_redirect_controller.ex",
+      "role": "Back-compat 301/302 redirect controller",
+      "importance": 39,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/plugins_controller.ex",
+      "role": "GET /v1/plugins roster endpoint",
+      "importance": 35,
+      "usefulness": 15
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/error_json.ex",
+      "role": "JSON error renderer",
+      "importance": 32,
+      "usefulness": 12
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html.ex",
+      "role": "Session HTML view module",
+      "importance": 30,
+      "usefulness": 7
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/scoped_paper_html.ex",
+      "role": "HTML view module for scoped paper controller",
+      "importance": 27,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/error_html.ex",
+      "role": "HTML error renderer",
+      "importance": 25,
+      "usefulness": 7
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html/new.html.heex",
+      "role": "Studio login form template",
+      "importance": 22,
+      "usefulness": 3
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/scoped_paper_html/show.html.heex",
+      "role": "scoped paper reader HTML template",
+      "importance": 17,
+      "usefulness": 3
+    }
+  ]
+}

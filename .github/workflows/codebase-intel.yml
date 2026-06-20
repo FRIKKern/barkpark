@@ -1,0 +1,148 @@
+name: codebase-intel
+
+# The STANDING calibration loop (cqv3-p1). Two jobs:
+#
+#   calibrate    — on every release (+ manual): regenerate the programmatic
+#                  signal chain and RE-LEARN the scoring weights from the
+#                  codebase's own incident history. Appends one line to
+#                  tooling/fit/auc-history.jsonl and uploads the calibrated
+#                  config + report so AUC is tracked over time as history grows.
+#
+#   drift-guard  — weekly (+ manual): run the cheap programmatic chain and
+#                  report whether the research/consistency ledgers have drifted.
+#                  Pure observability — never blocks a merge.
+#
+# Both run --no-coverage: the loop learns from defect history × reach × churn ×
+# complexity (real, free), not line coverage, so no Postgres / test DB is needed.
+# Real coverage stays a local / js-tests.yml concern.
+
+on:
+  release:
+    types: [published]
+  schedule:
+    # Mondays 06:00 UTC — drift-guard only (the job filters on event_name).
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "which job to run on manual dispatch"
+        type: choice
+        options: [calibrate, drift-guard, both]
+        default: both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codebase-intel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    name: Calibrate scoring (release cadence)
+    # release, or manual asking for calibrate/both. NEVER on schedule.
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.job == 'calibrate' || github.event.inputs.job == 'both'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # fit.mjs labels defects + temporally cross-validates over FULL history
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.1"
+
+      # Warm the Elixir symbol graph: build-index.mjs auto-compiles when
+      # api/_build is absent, but it does NOT fetch deps — do that here first.
+      - name: Fetch Elixir deps (for mix xref warming)
+        working-directory: api
+        env:
+          MIX_ENV: dev
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Run signal chain + recalibrate
+        run: |
+          node tooling/status/status.mjs --no-coverage
+          node tooling/fit/fit.mjs
+
+      - name: Report AUC to summary
+        if: always()
+        run: |
+          node -e '
+            const c = require("./tooling/fit/scoring-config.json");
+            const v = c.validity || {};
+            const s = `## Calibration result\n\n` +
+              `| metric | value |\n|---|---|\n` +
+              `| confidence | ${c.confidence} |\n` +
+              `| full AUC | ${v.fullAuc} |\n` +
+              `| temporal-CV AUC | ${v.temporalCv && v.temporalCv.auc} |\n` +
+              `| corpus files | ${c.corpus && c.corpus.files} |\n` +
+              `| positive labels | ${c.corpus && c.corpus.positives} |\n` +
+              `| dropped (collinear) | ${(c.signals && c.signals.dropped || []).join(", ") || "—"} |\n`;
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, s);
+          '
+
+      - name: Upload calibration artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration
+          path: |
+            tooling/fit/scoring-config.json
+            tooling/fit/fit-report.html
+            tooling/fit/auc-history.jsonl
+          if-no-files-found: warn
+
+  drift-guard:
+    name: Drift guard (weekly)
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.job == 'drift-guard' || github.event.inputs.job == 'both'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # --skip-elixir keeps the guard fast (regex resolver); it is a drift
+      # signal, not the dense calibration run. Never blocks — observability only.
+      - name: Run drift check
+        continue-on-error: true
+        run: |
+          node tooling/status/status.mjs --no-coverage --skip-elixir 2>&1 | tee /tmp/status.txt
+          {
+            echo "## Codebase-intel drift guard"
+            echo ""
+            echo '```'
+            tail -30 /tmp/status.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,75 @@
+{
+  "_comment": "Blast-radius config. Programmatic core only. Edit `seam` and `dynamicEdges` by hand; agents will later append discovered blind-spot edges to `dynamicEdges`.",
+
+  "stacks": {
+    "go": {
+      "match": ["**/*.go"],
+      "exclude": ["_attic/**", "**/_build/**"]
+    },
+    "elixir": {
+      "match": ["api/**/*.ex", "api/**/*.exs"],
+      "exclude": ["api/_build/**", "api/deps/**", "_attic/**"]
+    },
+    "js": {
+      "match": ["js/**/*.{ts,tsx,js,jsx,mjs}", "web/**/*.{ts,tsx,js,jsx,mjs}", "sdk/**/*.{ts,tsx,js,jsx,mjs}", "packages/**/*.{ts,tsx,js,jsx,mjs}"],
+      "exclude": ["**/node_modules/**", "**/dist/**", "**/_attic/**", "**/*.test.ts", "**/*.spec.ts"]
+    }
+  },
+
+  "seam": {
+    "_comment": "The cross-language wire contract. A change to ANY of these can break consumers in OTHER languages that no single-language graph can see. Each consumer carries a machine-resolvable locator (files + anchor regex) so the dossier builder can slice the actual code on the far side of the seam.",
+    "surfaces": [
+      {
+        "id": "capabilities-manifest",
+        "globs": [
+          "api/lib/barkpark/plugins/capabilities.ex",
+          "api/lib/barkpark_web/controllers/capabilities_controller.ex",
+          "api/priv/plugins/*/plugin.json"
+        ],
+        "consumers": [
+          { "label": "go:internal/manifest — parses GET /v1/capabilities to build the bp CLI", "files": ["internal/manifest/manifest.go", "internal/manifest/tree.go", "internal/manifest/fetch.go"], "anchor": "struct|json:\"|Capabilit" },
+          { "label": "go:internal/cli — CLI surface is manifest-driven", "files": ["internal/cli/builtins.go", "internal/cli/cli.go", "internal/cli/usage.go", "internal/cli/run.go", "internal/cli/load.go", "internal/cli/config.go"], "anchor": "manifest\\.|Manifest" }
+        ],
+        "guards": [
+          ".demo-content/papers/capabilities-manifest.json (committed snapshot — regenerate & diff)",
+          "api/test/barkpark_web/contract/capabilities_manifest_test.exs (contract test)"
+        ]
+      },
+      {
+        "id": "http-api-v1",
+        "globs": [
+          "api/lib/barkpark_web/router.ex",
+          "api/lib/barkpark_web/controllers/**/*.ex"
+        ],
+        "consumers": [
+          { "label": "go:internal/apiclient — HTTP client against /v1", "files": ["internal/apiclient/client.go", "internal/apiclient/schema.go"], "anchor": "/v1|http|path" },
+          { "label": "js:@barkpark/core — SDK fetch layer", "files": ["js/packages/core/src/client.ts", "js/packages/core/src/fetchRaw.ts"], "anchor": "/v1|fetch|path" },
+          { "label": "js:@barkpark/codegen — generates types from /v1 shapes", "files": ["js/packages/codegen/src/schema-url.ts", "js/packages/codegen/src/types.ts"], "anchor": "/v1|schema|type" }
+        ],
+        "guards": ["docs/api-v1.md (contract doc — keep in sync)"]
+      },
+      {
+        "id": "schema-v2-fields",
+        "globs": ["api/lib/barkpark/validation/**/*.ex"],
+        "consumers": [
+          { "label": "js:@barkpark/codegen — field-type codegen", "files": ["js/packages/codegen/src/types.ts"], "anchor": "field|type" },
+          { "label": "go:internal/manifest — field-type rendering in TUI", "files": ["internal/manifest/tree.go"], "anchor": "[Ff]ield|[Tt]ype" }
+        ],
+        "guards": ["docs/contracts/schema-v2.md"]
+      },
+      {
+        "id": "webhooks-realtime",
+        "globs": ["api/lib/barkpark_web/**/webhook*.ex", "api/lib/barkpark/**/webhook*.ex"],
+        "consumers": [
+          { "label": "js:@barkpark/nextjs-query — cache revalidation", "files": ["js/packages/nextjs-query/src/**/*.ts"], "anchor": "revalidat|webhook|tag" }
+        ],
+        "guards": ["docs/contracts/webhook-realtime.md"]
+      }
+    ]
+  },
+
+  "dynamicEdges": {
+    "_comment": "Edges no static graph can see — string-keyed dispatch, behaviours, config wiring. Promoted from agent findings so the hook catches them for free on the next run. Each: when `from` glob changes, the listed `affects` are at risk.",
+    "edges": []
+  }
+}

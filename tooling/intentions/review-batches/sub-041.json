@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/config",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/config/config.exs",
+      "role": "base Elixir application configuration",
+      "importance": 48,
+      "usefulness": 14
+    },
+    {
+      "path": "api/config/runtime.exs",
+      "role": "runtime environment configuration",
+      "importance": 48,
+      "usefulness": 14
+    },
+    {
+      "path": "api/config/prod.exs",
+      "role": "production Elixir config override",
+      "importance": 23,
+      "usefulness": 2
+    },
+    {
+      "path": "api/config/dev.exs",
+      "role": "development environment config",
+      "importance": 20,
+      "usefulness": 3
+    },
+    {
+      "path": "api/config/test.exs",
+      "role": "test environment config",
+      "importance": 18,
+      "usefulness": 5
+    }
+  ]
+}

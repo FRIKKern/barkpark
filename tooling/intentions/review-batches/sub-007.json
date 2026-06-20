@@ -1,0 +1,120 @@
+{
+  "subsystem": "api/lib/barkpark/content",
+  "count": 19,
+  "files": [
+    {
+      "path": "api/lib/barkpark/content/document.ex",
+      "role": "Document Ecto schema",
+      "importance": 57,
+      "usefulness": 70
+    },
+    {
+      "path": "api/lib/barkpark/content/schema_definition.ex",
+      "role": "Ecto schema for schema_definitions table",
+      "importance": 54,
+      "usefulness": 73
+    },
+    {
+      "path": "api/lib/barkpark/content/scope.ex",
+      "role": "Multi-tenant query scoping boundary",
+      "importance": 57,
+      "usefulness": 65
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists.ex",
+      "role": "Pluggable codelist registry (DB-backed)",
+      "importance": 45,
+      "usefulness": 64
+    },
+    {
+      "path": "api/lib/barkpark/content/envelope.ex",
+      "role": "v1 document envelope serializer",
+      "importance": 39,
+      "usefulness": 69
+    },
+    {
+      "path": "api/lib/barkpark/content/validation.ex",
+      "role": "Document content validator (flat v1 + recursive v2)",
+      "importance": 46,
+      "usefulness": 61
+    },
+    {
+      "path": "api/lib/barkpark/content/errors.ex",
+      "role": "API error envelope mapper",
+      "importance": 48,
+      "usefulness": 55
+    },
+    {
+      "path": "api/lib/barkpark/content/edge.ex",
+      "role": "content graph edge Ecto schema",
+      "importance": 35,
+      "usefulness": 61
+    },
+    {
+      "path": "api/lib/barkpark/content/graph.ex",
+      "role": "content graph BFS traversal engine",
+      "importance": 42,
+      "usefulness": 52
+    },
+    {
+      "path": "api/lib/barkpark/content/localized_text.ex",
+      "role": "localized text fallback resolver",
+      "importance": 25,
+      "usefulness": 51
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists/codelist.ex",
+      "role": "Ecto schema for codelist registry entries",
+      "importance": 29,
+      "usefulness": 46
+    },
+    {
+      "path": "api/lib/barkpark/content/expand.ex",
+      "role": "reference field expansion for query results",
+      "importance": 41,
+      "usefulness": 33
+    },
+    {
+      "path": "api/lib/barkpark/content/revision.ex",
+      "role": "Revision Ecto schema",
+      "importance": 37,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists/value.ex",
+      "role": "Ecto schema for codelist values",
+      "importance": 29,
+      "usefulness": 40
+    },
+    {
+      "path": "api/lib/barkpark/content/mutation_event.ex",
+      "role": "Ecto schema for mutation_events table",
+      "importance": 34,
+      "usefulness": 34
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists/translation.ex",
+      "role": "Ecto schema for codelist value translations",
+      "importance": 25,
+      "usefulness": 43
+    },
+    {
+      "path": "api/lib/barkpark/content/search_intelligence.ex",
+      "role": "search analytics adapter for document search",
+      "importance": 32,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/content/error_codes.ex",
+      "role": "validation error code registry",
+      "importance": 35,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/barkpark/content/cross_validator.ex",
+      "role": "schema cross-validation rule evaluator",
+      "importance": 27,
+      "usefulness": 19
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "subsystem": "tooling/blast-radius",
+  "summary": "A pre-push change-impact analyzer for the polyglot monorepo (JS/TS, Go, Elixir). It builds a cached reverse-dependency graph offline, then runs a millisecond-fast pre-push hook that identifies which packages/files are reachable from each changed file and flags cross-language seam touchpoints that no single-language graph can see.",
+  "intentions": [
+    {
+      "title": "Prevent silent cross-language breakage at push time",
+      "scale": "epic",
+      "evidence": "check.mjs seam-detection logic and --strict exit-1 behaviour; config.json seam.surfaces with consumers+guards; dossier.mjs builds self-contained agent payloads from diff hunks + consumer code slices specifically for cross-language edges"
+    },
+    {
+      "title": "Keep the pre-push hook sub-second by separating the slow graph build from the fast lookup",
+      "scale": "small",
+      "evidence": "build-index.mjs is explicitly 'the SLOW, out-of-band half' (run in CI or by hand); check.mjs is 'the FAST half — never invokes a compiler, only reads the cached index.json'; the split is the architectural centrepiece of the design"
+    },
+    {
+      "title": "Make blast-radius results consumable by AI agents without further exploration",
+      "scale": "small",
+      "evidence": "dossier.mjs assembles 'SELF-CONTAINED payload: symbol delta, consumer code slice, guard contents' so 'an agent can judge the edge with NO exploration tool calls'; verdictSchema field tells the agent exactly what JSON to emit"
+    },
+    {
+      "title": "Avoid redundant AI token spend via a content-hash verdict cache",
+      "scale": "small",
+      "evidence": "dossier.mjs content-hash cache keyed on (edgeId, sha256(payload)); unchanged edges are marked skip=true and excluded from token budget; cache stats subcommand for visibility"
+    },
+    {
+      "title": "Support all three language stacks (JS, Go, Elixir) with appropriate fidelity per stack",
+      "scale": "small",
+      "evidence": "build-index.mjs has distinct builders: JS uses package.json workspace graph (no tsc), Go uses go list -deps -json, Elixir uses mix xref (best-effort, non-fatal). check.mjs handles missing index gracefully per stack with degradation notes"
+    },
+    {
+      "title": "Surface dynamic/runtime edges that static analysis cannot discover",
+      "scale": "small",
+      "evidence": "config.json dynamicEdges.edges list; check.mjs populates impact.dynamicEdges; dossier.mjs builds dynamic dossiers; verdictSchema includes new_dynamic_edges field so agents can promote discovered blind spots back into config"
+    }
+  ]
+}

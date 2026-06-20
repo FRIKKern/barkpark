@@ -1,0 +1,36 @@
+{
+  "subsystem": "js/packages/nextjs",
+  "summary": "Next.js App Router SDK that integrates Barkpark content fetching with Next 15's RSC/client boundary, draft-mode preview, and tag-based cache invalidation. It exports separate server, client, webhook, draft-mode, revalidate, and preload subpaths to keep the react-server module graph clean.",
+  "intentions": [
+    {
+      "title": "Preserve Next 15 RSC boundary: no client APIs in the server graph",
+      "scale": "epic",
+      "evidence": "server/core.ts explicitly never re-exports BarkparkLive/BarkparkLiveProvider; tsup.config.ts only prepends 'use client' to client.{mjs,cjs} and actions.{mjs,cjs}, not server; server/index.ts imports 'server-only'"
+    },
+    {
+      "title": "Tag-based cache invalidation that round-trips with webhook-driven revalidation",
+      "scale": "epic",
+      "evidence": "server/core.ts builds scoped tag prefixes (bp:ws:<ws>:p:<project>:ds:<dataset>) for force-cache fetches, auto-tags by type and doc id, and explicitly avoids next.tags on no-store (ADR-004) so tags match what the webhook bridge fires"
+    },
+    {
+      "title": "Draft-mode preview with server-token auth and auto-reissue",
+      "scale": "small",
+      "evidence": "barkparkFetchInner branches on draftMode().isEnabled: adds perspective=drafts, Authorization Bearer, cache:'no-store', and retries once via cfg.reissuePreviewToken on 401"
+    },
+    {
+      "title": "Multi-workspace/project scoping for multi-tenant deployments",
+      "scale": "small",
+      "evidence": "resolveScopePrefix and resolveTagPrefix in server/core.ts layer server-config workspace/project over the client config, emitting /w/<ws>/p/<project> URL prefixes and matching bp:ws:...:p:... cache tag prefixes"
+    },
+    {
+      "title": "Structured error taxonomy surfaced to Next.js consumers",
+      "scale": "small",
+      "evidence": "decodeAndThrow in server/core.ts maps HTTP status codes to typed BarkparkNotFoundError, BarkparkAuthError, BarkparkRateLimitError, BarkparkNetworkError, BarkparkAPIError from @barkpark/core"
+    },
+    {
+      "title": "Correct dual-format (CJS+ESM) build with directive injection",
+      "scale": "small",
+      "evidence": "tsup.config.ts outputs both .cjs and .mjs for all entry points, then post-processes client/actions chunks to prepend 'use client' which esbuild strips, restoring the directive Next 15 requires"
+    }
+  ]
+}

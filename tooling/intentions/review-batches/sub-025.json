@@ -1,0 +1,60 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/indx",
+  "count": 9,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/indx/client.ex",
+      "role": "Indx search engine HTTP client",
+      "importance": 47,
+      "usefulness": 53
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/indexer.ex",
+      "role": "Indx blue/green corpus rebuilder",
+      "importance": 44,
+      "usefulness": 46
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/settings.ex",
+      "role": "Indx plugin settings resolver",
+      "importance": 43,
+      "usefulness": 44
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/auth.ex",
+      "role": "Indx JWT token cache GenServer",
+      "importance": 36,
+      "usefulness": 40
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/retriever.ex",
+      "role": "Indx search retriever implementation",
+      "importance": 43,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/indexer_worker.ex",
+      "role": "Oban search index rebuild/upsert/delete worker",
+      "importance": 47,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/lifecycle.ex",
+      "role": "Indx search index lifecycle hook dispatcher",
+      "importance": 41,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/recovery.ex",
+      "role": "Indx boot-time live-pointer recovery GenServer",
+      "importance": 39,
+      "usefulness": 12
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/errors.ex",
+      "role": "Indx plugin typed error structs with secret redaction",
+      "importance": 30,
+      "usefulness": 16
+    }
+  ]
+}

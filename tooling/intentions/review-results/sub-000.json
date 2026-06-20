@@ -1,0 +1,51 @@
+{
+  "subsystem": "api/lib/barkpark",
+  "summary": "The core Elixir business-logic layer of the Barkpark CMS: document/schema CRUD with draft-publish lifecycle, multi-tenant isolation, plugin extensibility, webhooks, tasks, sheets, auth, and sharing. It is the single source of truth all other surfaces (Studio, API controllers, CLI, plugins) delegate to.",
+  "intentions": [
+    {
+      "title": "Provide a clean, extensible plugin highway that keeps the core always bootable",
+      "scale": "epic",
+      "evidence": "plugin.ex defines a strict behaviour contract (schemas+logic only, never UI) with compile-time-only discovery and a fresh-install invariant enforced by a boot test. schema_bootstrap.ex auto-registers plugin schemas on every boot. The forbidden-surfaces list in plugin.ex and tenancy scoping in content.ex prevent plugins from bypassing the host lifecycle."
+    },
+    {
+      "title": "Enforce hard multi-tenant isolation at the data layer",
+      "scale": "epic",
+      "evidence": "tenancy.ex, webhooks.ex, sharing.ex, and content.ex all scope every query to (workspace_id, project_id, dataset_id). Webhooks scope is enforced in WHERE clauses so cross-tenant id-guessing returns :not_found. sharing.ex is default-OFF and default-DENY — active only when an exact (ws/project/dataset) triple is configured."
+    },
+    {
+      "title": "Implement a Sanity-compatible draft/publish document lifecycle",
+      "scale": "epic",
+      "evidence": "content.ex leads with a detailed @moduledoc on the drafts. prefix convention, three perspectives (:published, :drafts, :raw), and the publish/unpublish/discard_draft operations. tasks.ex adds a separate lifecycle_status axis on task documents to avoid polluting the Sanity status axis."
+    },
+    {
+      "title": "Ship a task substrate that lets agent orchestrators claim and close work atomically",
+      "scale": "epic",
+      "evidence": "tasks.ex stores tasks as documents with a content.lifecycle_status field and CAS claim epochs; tasks/ttl_sweeper.ex reaps stale agent claims; tasks/compactor.ex compacts the storage; tasks/edge.ex tracks dependency DAG edges. The whole system is what bp task claim/close/ready/next rides on."
+    },
+    {
+      "title": "Deliver reliable webhook fan-out with HMAC signing, retry, and idempotency",
+      "scale": "small",
+      "evidence": "webhooks/dispatcher.ex signs payloads and retries delivery; webhooks/webhook.ex rotates secrets; webhooks/delivery.ex records each attempt. idempotency.ex deduplicates mutation writes by key so retried clients don't double-apply."
+    },
+    {
+      "title": "Expose fine-grained, revocable API token auth with time-bounded sharing grants",
+      "scale": "small",
+      "evidence": "auth.ex verifies tokens with revocation + expiry enforced in SQL (never post-filter, to prevent existence leaks). preview_token.ex issues short-lived HS256 JWTs for preview routes. auth.ex models share-edit tokens with a 7-day default TTL and hard 1-year cap, restricted to (docs, media) surfaces only."
+    },
+    {
+      "title": "Embed a collaborative spreadsheet engine inside the CMS document model",
+      "scale": "small",
+      "evidence": "sheets.ex, sheets/engine.ex (formula subset with cycle detection), sheets/session.ex (per-sheet GenServer with debounced persist and op batching up to 1000/call), sheets/structure.ex (ref-shift on row/col inserts). Sheets live as type:sheet documents, plugged into the same draft-publish and PubSub pipeline."
+    },
+    {
+      "title": "Support content-graph edges between documents as a first-class primitive",
+      "scale": "small",
+      "evidence": "content.ex imports Content.Edge; tasks/edge.ex is the Ecto schema for task dependency edges. The graph-edge goal dogfoods Barkpark's own content graph, treating edges as the dual of the Indx retriever seam."
+    },
+    {
+      "title": "Keep the system observable and operationally safe in production",
+      "scale": "small",
+      "evidence": "application.ex wires the OTP supervision tree; telemetry/handlers.ex attaches Oban and plugin telemetry; rate_limiter.ex provides ETS token-bucket rate limiting; vault.ex + encrypted_map.ex encrypt sensitive fields at rest; release.ex runs migrations without the app running; workers/smoke.ex provides an Oban smoke-test worker."
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/website-starter",
+  "count": 10,
+  "files": [
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/lib/barkpark.ts",
+      "role": "website-starter server fetch helper",
+      "importance": 19,
+      "usefulness": 22
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/barkpark.config.ts.tmpl",
+      "role": "website-starter scaffolder config template",
+      "importance": 18,
+      "usefulness": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/package.json.tmpl",
+      "role": "package.json template for website-starter scaffolded app",
+      "importance": 18,
+      "usefulness": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/seeds/seed.ts",
+      "role": "website starter seed script",
+      "importance": 11,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/next.config.mjs",
+      "role": "scaffold template Next.js config",
+      "importance": 5,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/author.ts",
+      "role": "scaffold template author schema definition",
+      "importance": 4,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/page.ts",
+      "role": "scaffold template marketing page schema definition",
+      "importance": 4,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/post.ts",
+      "role": "starter-template schema fixture",
+      "importance": 4,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/postcss.config.js",
+      "role": "scaffold template PostCSS config",
+      "importance": 3,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/tailwind.config.ts",
+      "role": "starter-template Tailwind config",
+      "importance": 3,
+      "usefulness": 2
+    }
+  ]
+}

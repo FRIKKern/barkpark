@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark_web/studio",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "role": "Studio pane-tree builder",
+      "importance": 45,
+      "usefulness": 45
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/presence_state.ex",
+      "role": "Studio collaborative presence helpers",
+      "importance": 33,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/workspace_switcher.ex",
+      "role": "Studio workspace/project/dataset scope switcher component",
+      "importance": 39,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/nav.ex",
+      "role": "Studio navigation tab definitions",
+      "importance": 30,
+      "usefulness": 10
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/dataset_switcher.ex",
+      "role": "Studio dataset selector component",
+      "importance": 29,
+      "usefulness": 8
+    }
+  ]
+}

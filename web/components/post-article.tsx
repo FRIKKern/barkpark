@@ -1,6 +1,34 @@
 import Link from "next/link";
 import type { PostDocument } from "@/lib/posts";
 
+/**
+ * Normalize a post body into paragraph strings. The demo `docs` dataset ships
+ * `body` as a plain string (split on blank lines); richer datasets (e.g.
+ * `production`) ship a structured `{ blocks, html }` PortableDoc — there we pull
+ * the text out of each block. Anything unrecognized yields `[]` (→ "no body").
+ */
+function bodyParagraphs(body: unknown): string[] {
+  if (typeof body === "string") {
+    return body.split(/\n{2,}/).filter((p) => p.trim().length > 0);
+  }
+  if (body && typeof body === "object" && Array.isArray((body as { blocks?: unknown }).blocks)) {
+    const blocks = (body as { blocks: unknown[] }).blocks;
+    return blocks
+      .map((b) => {
+        const block = b as { text?: unknown; content?: unknown };
+        if (typeof block.text === "string") return block.text;
+        if (Array.isArray(block.content)) {
+          return block.content
+            .map((c) => (c && typeof (c as { value?: unknown }).value === "string" ? (c as { value: string }).value : ""))
+            .join("");
+        }
+        return "";
+      })
+      .filter((p) => p.trim().length > 0);
+  }
+  return [];
+}
+
 interface PostArticleProps {
   post: PostDocument | null;
   error: string | null;
@@ -86,9 +114,9 @@ export function PostArticle({
             </p>
           ) : null}
 
-          {post.body ? (
+          {bodyParagraphs(post.body).length > 0 ? (
             <div className="flex flex-col gap-4 text-base leading-7 text-zinc-700 dark:text-zinc-300">
-              {post.body.split(/\n{2,}/).map((para, i) => (
+              {bodyParagraphs(post.body).map((para, i) => (
                 <p key={i} className="whitespace-pre-wrap">
                   {para}
                 </p>

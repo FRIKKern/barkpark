@@ -1,0 +1,60 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit/export",
+  "count": 9,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/codelists.ex",
+      "role": "ONIX 3.0 static codelist resolver",
+      "importance": 38,
+      "usefulness": 49
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/descriptive_detail.ex",
+      "role": "ONIX 3.0 DescriptiveDetail block builder",
+      "importance": 42,
+      "usefulness": 42
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/collateral_detail.ex",
+      "role": "ONIX 3.0 CollateralDetail block builder",
+      "importance": 40,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/product_supply.ex",
+      "role": "ONIX 3.0 ProductSupply block builder",
+      "importance": 37,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/validator.ex",
+      "role": "ONIX 3.0 XSD validation gate via xmllint",
+      "importance": 33,
+      "usefulness": 40
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/message.ex",
+      "role": "ONIX 3.0 ONIXMessage root wrapper",
+      "importance": 39,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/publishing_detail.ex",
+      "role": "ONIX 3.0 PublishingDetail block builder",
+      "importance": 31,
+      "usefulness": 34
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/header.ex",
+      "role": "ONIX 3.0 Header element builder",
+      "importance": 35,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/status_pill.ex",
+      "role": "Bokbasen export status color/label mapping",
+      "importance": 28,
+      "usefulness": 21
+    }
+  ]
+}

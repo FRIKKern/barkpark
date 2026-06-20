@@ -1,0 +1,14 @@
+{
+  "_comment": "Research-coverage config. We walk the FILESYSTEM (not just git) so untracked files count too. 'Coverage' = every non-excluded file has a current-hash research entry in the ledger. Excludes are declared so coverage is honest: we cover everything except these vendored/derived paths.",
+
+  "_enumeration": "Files = git-tracked ∪ git-untracked-not-ignored. This honors .gitignore (skips build caches, uploads, node_modules, _build) yet still covers untracked SOURCE (e.g. tooling/). Then drop binary assets + declared sensitive/derived prefixes.",
+  "root": ".",
+  "excludePathPrefixes": ["secrets/", ".demo-content/", "_attic/", ".beads/"],
+  "excludeGlobs": [
+    "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.ico",
+    "**/*.woff", "**/*.woff2", "**/*.ttf", "**/*.eot", "**/*.beam",
+    "**/*.lock", "**/package-lock.json", "**/pnpm-lock.yaml", "**/go.sum"
+  ],
+
+  "batchSize": 10
+}

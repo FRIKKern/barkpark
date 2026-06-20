@@ -1,0 +1,41 @@
+{
+  "subsystem": "web/app/api",
+  "summary": "Next.js API route layer that acts as a secure server-side proxy between the browser and the Barkpark Phoenix API — handling search queries, cache invalidation via webhooks, search index rebuilds, and search feedback recording — all while keeping auth tokens off the client.",
+  "intentions": [
+    {
+      "title": "Keep API credentials off the client",
+      "scale": "epic",
+      "evidence": "All four routes run 'nodejs' runtime and explicitly read BARKPARK_READ_TOKEN server-side. Comments in find/route.ts and find-event/route.ts explicitly note the token is 'never bundled to the browser'. Proxying same-origin is the stated reason for the route's existence."
+    },
+    {
+      "title": "Deliver always-fresh search results without caching",
+      "scale": "small",
+      "evidence": "find/route.ts comment says 'Search is always fresh — runSearch hits the engine directly, no cache' and deliberately omits force-dynamic since the handler is already dynamic via searchParams."
+    },
+    {
+      "title": "Keep Next.js ISR cache in sync with content mutations",
+      "scale": "epic",
+      "evidence": "barkpark/webhook/route.ts verifies HMAC signatures + timestamps, deduplicates retries via an LRU set, and calls revalidateTag for all affected cache tags (doc tags, _all tags, FIND_TAG) on every Barkpark mutation event."
+    },
+    {
+      "title": "Harden webhook delivery against replay and forgery attacks",
+      "scale": "small",
+      "evidence": "webhook/route.ts uses timingSafeEqual for HMAC comparison, enforces a 5-minute timestamp tolerance, supports both a current and previous secret for key rotation, and rejects malformed/stale signatures with explicit 401 responses."
+    },
+    {
+      "title": "Support dual search engines (Postgres + Indx) with on-demand reindex",
+      "scale": "small",
+      "evidence": "find/route.ts passes engine param ('postgres' | 'indx') through to runSearch. admin/reindex/route.ts triggers a blue/green Indx rebuild via the Phoenix endpoint, covering all finder doc types including sheets, then immediately purges FIND_TAG."
+    },
+    {
+      "title": "Collect search feedback signals for relevance improvement",
+      "scale": "small",
+      "evidence": "find-event/route.ts records 'correction' (Did-you-mean accepts) and 'click' (result interactions with position) events upstream, attributed by session id. Explicitly fire-and-forget — always returns 200 so a dropped signal never blocks UX."
+    },
+    {
+      "title": "Graceful degradation on upstream failures",
+      "scale": "small",
+      "evidence": "find/route.ts returns emptyResponse (not an error status) on runSearch failure. suggestions() catches and returns empty arrays. find-event/route.ts swallows upstream errors. admin/reindex/route.ts maps transient errors to 503 vs definitive errors to their real status."
+    }
+  ]
+}

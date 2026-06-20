@@ -1,0 +1,41 @@
+{
+  "subsystem": "api/lib/barkpark_web/components",
+  "summary": "A shared Phoenix component library that provides the full UI vocabulary for the Barkpark Studio LiveView — layout primitives, field editors, modals, and status indicators — extracted from inline StudioLive markup to be reusable across the host and plugins.",
+  "intentions": [
+    {
+      "title": "Centralise Studio UI into a composable component library",
+      "scale": "epic",
+      "evidence": "studio_components.ex documents explicit byte-identity contracts when extracting inline markup from studio_live.ex (pane_layout, pane_column, document_header, editor_field, studio_topbar, studio_shell). field_inputs.ex is a verbatim extraction of render_input/2 clauses. Both modules exist solely to break monolith StudioLive into reusable pieces."
+    },
+    {
+      "title": "Support plugin extensibility of Studio navigation without breaking the host",
+      "scale": "epic",
+      "evidence": "studio_tabs/1 in studio_components.ex feeds baseline host tabs through Registry.collect_top_menu_entries/1 so plugins can reorder/add/drop tabs via the resolver chain. plugin_tab_active?/2 handles both regex and prefix `:active_when` rules set by plugins, with try/rescue fallback to baseline when the registry fails."
+    },
+    {
+      "title": "Bridge Web Components into the LiveView form pipeline",
+      "scale": "epic",
+      "evidence": "field_inputs.ex wraps bp-rich-text-editor, bp-media-picker, and bp-reference-picker in phx-update='ignore' divs with BarkparkFieldBridge hooks and hidden inputs. This lets client-owned Web Components sync values into the LiveView form without server round-trips per keystroke."
+    },
+    {
+      "title": "Expose draft-vs-published content diff in the editor",
+      "scale": "small",
+      "evidence": "draft_diff.ex computes field-level :unchanged/:added/:removed/:changed status by comparing draft content map against published twin, rendering a table keyed by schema fields. Scoped to top-level fields only, with explicit design note that nested composites are a v2 follow-up."
+    },
+    {
+      "title": "Surface external sync integration state inline in documents",
+      "scale": "small",
+      "evidence": "external_sync_pill.ex is a stateless renderer that shows system:state badges (bokbasen, etc.) driven by ExternalSync.topic PubSub broadcasts. Parent LV subscribes, re-assigns :state; the pill owns no process and slots into toolbar without new CSS."
+    },
+    {
+      "title": "Enable scoped-surface (multi-tenant workspace/project URL) sharing across pickers",
+      "scale": "small",
+      "evidence": "field_inputs.ex threads scope_prefix and api_token_raw down to bp-media-picker and bp-reference-picker so their fetch calls hit the /w/:ws/p/:proj scoped API mirror instead of the flat surface. shares_modal and item_share_popover in studio_components.ex add network-share and per-item shareable-link management UI."
+    },
+    {
+      "title": "Provide safe bulk-publish multi-select in the document list",
+      "scale": "small",
+      "evidence": "pane_doc_item/1 in studio_components.ex has a selectable/checked variant that renders a checkbox with phx-click='toggle-doc-checkbox', adding is-bulk-checked CSS and the toggle event when opt-in. bp-doc-checkbox CSS hook is annotated as Task barkpark-3yq."
+    }
+  ]
+}

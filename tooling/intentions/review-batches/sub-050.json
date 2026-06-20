@@ -1,0 +1,30 @@
+{
+  "subsystem": "api/lib/barkpark/edge_projector",
+  "count": 4,
+  "files": [
+    {
+      "path": "api/lib/barkpark/edge_projector/projector.ex",
+      "role": "content edge materialisation engine",
+      "importance": 44,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark/edge_projector/projector_worker.ex",
+      "role": "Oban worker driving debounced edge projection",
+      "importance": 40,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/edge_projector/lifecycle.ex",
+      "role": "content graph projection event router",
+      "importance": 40,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/edge_projector/settings.ex",
+      "role": "edge projector settings resolver",
+      "importance": 27,
+      "usefulness": 19
+    }
+  ]
+}

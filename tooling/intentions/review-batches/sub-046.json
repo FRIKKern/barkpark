@@ -1,0 +1,36 @@
+{
+  "subsystem": "js/packages/core",
+  "count": 5,
+  "files": [
+    {
+      "path": "js/packages/core/tsup.config.ts",
+      "role": "core SDK build config",
+      "importance": 35,
+      "usefulness": 10
+    },
+    {
+      "path": "js/packages/core/vitest.config.ts",
+      "role": "Node.js unit test config",
+      "importance": 21,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/core/vitest.browser.config.ts",
+      "role": "browser test config",
+      "importance": 20,
+      "usefulness": 7
+    },
+    {
+      "path": "js/packages/core/vitest.workerd.config.ts",
+      "role": "Cloudflare Workers test config",
+      "importance": 20,
+      "usefulness": 7
+    },
+    {
+      "path": "js/packages/core/scripts/live-regression.mjs",
+      "role": "live regression test script",
+      "importance": 19,
+      "usefulness": 8
+    }
+  ]
+}

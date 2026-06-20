@@ -36,8 +36,15 @@ defmodule Barkpark.Content.Edge do
   ## Kinds
 
   Core + plugin-projected kinds the graph understands. The column is `:string`
-  so a new kind lands without a migration; the changeset's
-  `validate_inclusion` is the application boundary.
+  so a new kind lands without a migration. Reference-field edges now carry the
+  SOURCE FIELD NAME as their kind (graph-edge-seam): a `dependencies` reference
+  → kind `"dependencies"`, `intentions` → `"intentions"`, `related` →
+  `"related"`. Because a schema may declare ANY reference field name, the
+  changeset no longer validates `kind` against a closed allowlist — that would
+  force a code edit for every new reference field. The boundary is now
+  structural: `kind` must be a non-empty string. `@kinds` below stays as the
+  documented set of well-known core/plugin kinds (for reference / tests), not as
+  a gate.
   """
 
   use Ecto.Schema
@@ -72,7 +79,8 @@ defmodule Barkpark.Content.Edge do
 
   @doc """
   Changeset for inserting / upserting an edge. Validates
-  `from_id`/`to_id`/`kind` presence and that `kind` is one of the known values;
+  `from_id`/`to_id`/`kind` presence (kind must be a non-empty string — reference
+  edges carry the source field name, so there is no closed kind allowlist);
   rejects self-edges. The FK + uniqueness constraints in the migration are
   surfaced as changeset errors for friendlier callers. `weight` and
   `plugin_source` are optional mutable metadata.
@@ -81,7 +89,7 @@ defmodule Barkpark.Content.Edge do
     edge
     |> cast(attrs, [:from_id, :to_id, :kind, :weight, :plugin_source])
     |> validate_required([:from_id, :to_id, :kind])
-    |> validate_inclusion(:kind, @kinds, message: "must be one of #{inspect(@kinds)}")
+    |> validate_format(:kind, ~r/\S/, message: "must be a non-empty string")
     |> validate_not_self_edge()
     |> foreign_key_constraint(:from_id)
     |> foreign_key_constraint(:to_id)

@@ -1,0 +1,66 @@
+{
+  "subsystem": "api",
+  "count": 10,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web.ex",
+      "role": "Phoenix web module macro factory",
+      "importance": 40,
+      "usefulness": 61
+    },
+    {
+      "path": "api/mix.exs",
+      "role": "Elixir project manifest and build entrypoint",
+      "importance": 55,
+      "usefulness": 14
+    },
+    {
+      "path": "api/start.sh",
+      "role": "Production Phoenix server entrypoint script",
+      "importance": 37,
+      "usefulness": 10
+    },
+    {
+      "path": "api/rel/env.sh.eex",
+      "role": "OTP release runtime environment template",
+      "importance": 34,
+      "usefulness": 9
+    },
+    {
+      "path": "api/entrypoint.sh",
+      "role": "Docker/release container entrypoint script",
+      "importance": 30,
+      "usefulness": 4
+    },
+    {
+      "path": "api/bench/validation_perf.exs",
+      "role": "Validation engine performance benchmark",
+      "importance": 13,
+      "usefulness": 13
+    },
+    {
+      "path": "api/scripts/prod-postcheck.sh",
+      "role": "post-deploy health check script",
+      "importance": 14,
+      "usefulness": 6
+    },
+    {
+      "path": "api/bench/support/synthetic_doc.ex",
+      "role": "deterministic benchmark document generator",
+      "importance": 11,
+      "usefulness": 6
+    },
+    {
+      "path": "api/.formatter.exs",
+      "role": "Elixir code formatter config",
+      "importance": 3,
+      "usefulness": 2
+    },
+    {
+      "path": "api/lib/barkpark.ex",
+      "role": "top-level application module stub",
+      "importance": 3,
+      "usefulness": 1
+    }
+  ]
+}

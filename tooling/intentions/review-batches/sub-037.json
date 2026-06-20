@@ -1,0 +1,42 @@
+{
+  "subsystem": "api/lib/barkpark_web/components/fields",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/components/fields/composite_field.ex",
+      "role": "recursive composite field form component",
+      "importance": 43,
+      "usefulness": 56
+    },
+    {
+      "path": "api/lib/barkpark_web/components/fields/visibility.ex",
+      "role": "Schema-driven field visibility predicate evaluator",
+      "importance": 38,
+      "usefulness": 54
+    },
+    {
+      "path": "api/lib/barkpark_web/components/fields/array_field.ex",
+      "role": "LiveView HEEx component for arrayOf fields",
+      "importance": 37,
+      "usefulness": 54
+    },
+    {
+      "path": "api/lib/barkpark_web/components/fields/codelist_field.ex",
+      "role": "Studio form component for codelist fields",
+      "importance": 37,
+      "usefulness": 52
+    },
+    {
+      "path": "api/lib/barkpark_web/components/fields/localized_text_field.ex",
+      "role": "Studio form component for localized text fields",
+      "importance": 37,
+      "usefulness": 51
+    },
+    {
+      "path": "api/lib/barkpark_web/components/fields/tree_codelist_field.ex",
+      "role": "hierarchical codelist picker LiveComponent",
+      "importance": 36,
+      "usefulness": 48
+    }
+  ]
+}

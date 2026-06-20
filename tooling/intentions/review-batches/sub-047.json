@@ -1,0 +1,36 @@
+{
+  "subsystem": "js/packages/nextjs",
+  "count": 5,
+  "files": [
+    {
+      "path": "js/packages/nextjs/tsup.config.ts",
+      "role": "Next.js SDK build config with use-client directive injection",
+      "importance": 31,
+      "usefulness": 14
+    },
+    {
+      "path": "js/packages/nextjs/vitest.client.config.ts",
+      "role": "vitest client-side test config",
+      "importance": 15,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/nextjs/vitest.server.config.ts",
+      "role": "vitest server-side test config",
+      "importance": 15,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/nextjs/tests/setup.server.ts",
+      "role": "server test setup — mock server-only module",
+      "importance": 14,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/nextjs/vitest.workspace.ts",
+      "role": "vitest workspace root config",
+      "importance": 15,
+      "usefulness": 3
+    }
+  ]
+}

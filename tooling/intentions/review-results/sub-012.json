@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/mix/tasks",
+  "summary": "A suite of Mix operator tasks that automate plugin scaffolding, data lifecycle operations (ONIX import/export, Bokbasen publish/replay, FRT seed/export), token rotation, search quality evaluation, and backfill utilities — the CLI surface for running Barkpark outside the HTTP request cycle.",
+  "intentions": [
+    {
+      "title": "Reduce plugin authorship friction to near-zero",
+      "scale": "epic",
+      "evidence": "barkpark.plugin.new.ex generates a fully wired plugin skeleton (manifest, entry module, test, schemas dir) that immediately passes Registry discovery and mix test — mirrors the OnixEdit reference layout, no manual registry edit needed. barkpark.gen.plugin.ex is a deprecated shim pointing to the new task."
+    },
+    {
+      "title": "Make ONIX/Bokbasen publishing operationally recoverable",
+      "scale": "small",
+      "evidence": "bokbasen.replay.ex lets operators re-enqueue a failed Bokbasen publish or dry-run the ONIX 3.0 XML render + XSD gate without touching the live API. bokbasen.list.ex and bokbasen.status.ex expose submission state and per-book detail. onix.import.ex bulk-ingests ONIX XML feeds as draft book documents."
+    },
+    {
+      "title": "Keep public-read credentials rotated automatically",
+      "scale": "small",
+      "evidence": "barkpark.rotate_public_read.ex generates a fresh token weekly (invoked by a systemd timer), writes it 0600 to disk, POSTs it to the Vercel deploy hook, and purges tokens older than 8 days — full credential lifecycle with no manual step."
+    },
+    {
+      "title": "Gate search quality regressions in CI",
+      "scale": "small",
+      "evidence": "search.eval.ex runs golden JSONL queries, reports MRR/NDCG@10/zero-hit-rate, and exits non-zero on failure or baseline regression — designed to run in CI as a quality gate."
+    },
+    {
+      "title": "Serve Barkpark as a CMS backend for non-web clients (game engine)",
+      "scale": "small",
+      "evidence": "frt.export.ex reads published FRT documents and emits a deterministic, byte-stable SHA-256-pinned JSON artifact keyed by type for a Godot game loader. frt.seed.ex writes the dataset. The determinism contract (canonical_iodata, sorted keys, hash over types only) is explicit so CI can assert content stability."
+    },
+    {
+      "title": "Maintain ONIX codelist data integrity over time",
+      "scale": "small",
+      "evidence": "barkpark.codelists.seed.ex populates the EDItEUR codelist registry on first boot; codelists.staleness.ex reports stale entries and triggers revalidation — keeping the ONIX export correct as the codelist standard evolves."
+    },
+    {
+      "title": "Bridge TypeScript SDK and Elixir plugin types automatically",
+      "scale": "small",
+      "evidence": "barkpark.plugin.gen_types.ex regenerates TypeScript types from plugin definitions, keeping the JS SDK in sync with server-side schema changes without manual type authoring."
+    },
+    {
+      "title": "Support backfill and data-migration of CMS documents from the command line",
+      "scale": "small",
+      "evidence": "barkpark.media.backfill.ex backfills mediaAsset documents — a pattern for operating on existing CMS data outside the web lifecycle, enabling schema/model migrations without downtime."
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/src",
+  "count": 8,
+  "files": [
+    {
+      "path": "js/packages/create-barkpark-app/src/index.ts",
+      "role": "CLI entrypoint for project scaffolding",
+      "importance": 27,
+      "usefulness": 12
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/scaffold.ts",
+      "role": "Template file copier for scaffolder",
+      "importance": 19,
+      "usefulness": 9
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/prompts.ts",
+      "role": "CLI scaffolder interactive prompts",
+      "importance": 17,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/constants.ts",
+      "role": "scaffolder constants (version, templates, demo URL)",
+      "importance": 18,
+      "usefulness": 6
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/pm.ts",
+      "role": "Package manager detector",
+      "importance": 13,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/hosted.ts",
+      "role": "Hosted demo setup helper",
+      "importance": 14,
+      "usefulness": 6
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/install.ts",
+      "role": "Dependency installer helper",
+      "importance": 12,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/post-install.ts",
+      "role": "Post-install instructions printer",
+      "importance": 7,
+      "usefulness": 3
+    }
+  ]
+}

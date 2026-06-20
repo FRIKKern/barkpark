@@ -1,0 +1,46 @@
+{
+  "subsystem": "internal/pdrender",
+  "summary": "pdrender is a terminal renderer for Bulldocs portable-doc block trees, producing width-aware ANSI-styled output via lipgloss — the terminal counterpart to the Phoenix HTML renderer. It maps every block type (heading, paragraph, code, table, figure, field-*, sheet, form, diagram, etc.) to terminal-safe output with graceful degradation for blocks that have no honest terminal representation.",
+  "intentions": [
+    {
+      "title": "Render Bulldocs content natively in the Go TUI without a browser",
+      "scale": "epic",
+      "evidence": "pdrender.go package comment calls it 'the terminal counterpart to render.ex'; DefaultRegistry wires all block types; RenderDoc produces a single ANSI string the TUI paper-viewer embeds directly"
+    },
+    {
+      "title": "Mirror render.ex's block model exactly so document fidelity is consistent across surfaces",
+      "scale": "epic",
+      "evidence": "Every renderer cites its render.ex counterpart (compose_block, heading_style/2, compose_inline/2); field names, recursion shape, and inline node coercion all mirror the Elixir side"
+    },
+    {
+      "title": "Honest graceful degradation for terminal-impossible blocks",
+      "scale": "small",
+      "evidence": "hardblocks.go: diagram/asciicast/image each render a clearly-labeled placeholder box instead of faking a capability; comment explains why (sixel smear, no Mermaid lib, .cast is a stream)"
+    },
+    {
+      "title": "Keep pdrender extractable as a standalone module (clean import seam)",
+      "scale": "small",
+      "evidence": "pdrender.go IMPORT DISCIPLINE comment: only lipgloss + x/ansi + stdlib; Theme and Block are owned types injected by the caller; no apiclient or main-package dependency"
+    },
+    {
+      "title": "Width-aware, ANSI-correct text layout without a constraint solver",
+      "scale": "small",
+      "evidence": "RenderCtx.Width passed immutably down the tree; WithWidth/Deeper derive narrowed contexts; wrapLines uses ansi.Wrap for cell-accurate wrapping; MinWidth floor drops chrome at narrow widths"
+    },
+    {
+      "title": "Support adaptive color profiles and OSC 8 hyperlinks per terminal capability",
+      "scale": "small",
+      "evidence": "Profile enum (NoColor→TrueColor) in pdrender.go; supportsHyperlinks gates OSC 8 on ≥ANSI256; asciicastRenderer and inline link renderer both follow this gate"
+    },
+    {
+      "title": "Expose resolver seams for field-reference and codelist lookups without coupling to the API client",
+      "scale": "small",
+      "evidence": "RenderCtx.RefResolver and CodelistResolver are caller-supplied func fields; nil fallback renders raw id/code; mirrors render.ex's injected :ref_resolver / :codelist_resolver opts"
+    },
+    {
+      "title": "Support the full schema-v2 and sheet block vocabulary for ONIX/Bulldocs content in the TUI",
+      "scale": "small",
+      "evidence": "DefaultRegistry registers composite/arrayOf/codelist/localizedText (v2fields.go) and PdSheet/sheet (sheet.go); form/questionnaire alias registered for paperflow questionnaire blocks"
+    }
+  ]
+}

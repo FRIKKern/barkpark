@@ -1,0 +1,41 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter",
+  "summary": "A complete, runnable Next.js App Router blog template scaffolded by create-barkpark-app, demonstrating how to build a content-driven site on Barkpark's API with server-side fetching, pagination, draft preview, and seed data.",
+  "intentions": [
+    {
+      "title": "Prove the SDK end-to-end in a realistic app",
+      "scale": "epic",
+      "evidence": "lib/barkpark.ts uses @barkpark/core + @barkpark/nextjs/server to fetch typed documents via the REST API; app/page.tsx calls getDocs with pagination; this exercises the full stack from schema to render"
+    },
+    {
+      "title": "Reduce time-to-first-blog to near zero via scaffolding + seed",
+      "scale": "epic",
+      "evidence": "seeds/seed.ts inserts 2 authors, 3 tags, 7 posts (6 published, 1 draft) via the mutate API; package.json.tmpl exposes a 'pnpm seed' command; barkpark.config.ts.tmpl wires env vars automatically"
+    },
+    {
+      "title": "Demonstrate workspace/project URL scoping",
+      "scale": "small",
+      "evidence": "lib/barkpark.ts computes SCOPE via scopePrefix(); seeds/seed.ts builds SCOPE from BARKPARK_WORKSPACE + BARKPARK_PROJECT env vars, showing /w/<ws>/p/<project> vs flat /v1 routing"
+    },
+    {
+      "title": "Model the draft/published perspective pattern",
+      "scale": "small",
+      "evidence": "lib/barkpark.ts passes perspective=drafts + Authorization header + revalidate:0 for draft fetches; seed.ts deliberately leaves post-upcoming unpublished to create a draft preview demo scenario; queries.ts documents the GROQ-ready postBySlug filter"
+    },
+    {
+      "title": "Establish Next.js cache-tag discipline as the reference pattern",
+      "scale": "small",
+      "evidence": "fetchJson in lib/barkpark.ts sets next:{tags,revalidate:60} using bp:ds:<dataset>:type:<type> and bp:ds:<dataset>:doc:<id> tag shapes, aligning with the @barkpark/nextjs revalidate webhook contract"
+    },
+    {
+      "title": "Show content schema definition as code (schema-as-config)",
+      "scale": "small",
+      "evidence": "schemas/post.ts, author.ts, tag.ts define documents with richText, slug, reference, array-of-reference fields as plain TS objects — the same shape the codegen pipeline consumes"
+    },
+    {
+      "title": "Prepare for typed-query migration (ADR-003 forward-compat)",
+      "scale": "small",
+      "evidence": "lib/queries.ts exports GROQ strings annotated as 'ready for the codegen + typed-query migration (ADR-003, Phase 8)' — informational today, wired tomorrow without file-level changes"
+    }
+  ]
+}
