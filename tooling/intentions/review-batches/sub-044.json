@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark_web/layouts",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/layouts/root.html.heex",
+      "role": "Studio HTML shell / global layout entrypoint",
+      "importance": 63,
+      "usefulness": 33
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/studio.html.heex",
+      "role": "Studio shell layout template",
+      "importance": 46,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/app.html.heex",
+      "role": "app shell layout template",
+      "importance": 38,
+      "usefulness": 4
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+      "role": "Bulldocs paper reader HTML layout",
+      "importance": 31,
+      "usefulness": 11
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/sheets.html.heex",
+      "role": "Sheets public reader HTML layout",
+      "importance": 23,
+      "usefulness": 11
+    }
+  ]
+}

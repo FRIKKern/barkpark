@@ -1,0 +1,46 @@
+{
+  "subsystem": "web/components",
+  "summary": "The Next.js web demo's React component layer — a document discovery UI built around a live full-text search finder, an Obsidian-style knowledge graph, and a PortableDoc block renderer. Together they make Barkpark's own content corpus browsable and searchable in a master/detail split layout with bidirectional graph↔list highlighting.",
+  "intentions": [
+    {
+      "title": "Dogfood Barkpark as a living documentation platform",
+      "scale": "epic",
+      "evidence": "finder.tsx header reads 'Barkpark, documented in Barkpark' and 'Every page here is a Paper'; graph-landing.tsx labels the right pane 'Barkpark documentation graph'; the entire demo indexes Barkpark's own docs into its production dataset"
+    },
+    {
+      "title": "Showcase dual-engine search (Indx BM25 vs Postgres full-text) with transparent quality signals",
+      "scale": "epic",
+      "evidence": "finder.tsx exposes an engine toggle (Indx/Postgres), a StrengthMeter (title/body/partial/fuzzy), exact-match-first partitioning, contextual match snippets, round-trip timing breakdowns, and a coverage boundary divider for Indx truncation — all designed to let users compare engines live"
+    },
+    {
+      "title": "Unify graph and list as a single cross-highlighting surface",
+      "scale": "epic",
+      "evidence": "graph-landing.tsx and graph-view.tsx receive `matches` (weighted search results) and `hoveredId`; finder.tsx's ResultRow publishes hover to setHoveredId and reads graphHovered to show a violet ring; GraphView.setHovered() cascades hover into the canvas — bidirectional sync between graph nodes and finder rows"
+    },
+    {
+      "title": "Render arbitrary PortableDoc block content in-browser without a dedicated backend renderer",
+      "scale": "small",
+      "evidence": "portable-doc.tsx handles heading/paragraph/list/callout/code/table/figure/sheet/asciicast/diagram block types via a pure React recursive renderer, enabling Papers to display in the Next.js web surface"
+    },
+    {
+      "title": "Keyboard-first navigation across Search → Facets → List → Document panes",
+      "scale": "small",
+      "evidence": "finder.tsx implements roving DOM focus with arrow-key routing across [data-nav-result] and [data-nav-facet] elements; document-nav.tsx + finder-nav-context handle ←/→ handoff between the finder list and the document detail pane"
+    },
+    {
+      "title": "Search quality feedback loop via click and correction event recording",
+      "scale": "small",
+      "evidence": "finder.tsx posts find-events (kind: 'click' with position and queryEventId, kind: 'correction' with from/to) to /api/find-event fire-and-forget; session id is persisted in localStorage via getSearchSessionId; accepted corrections accumulate toward synonym auto-promotion on the API side"
+    },
+    {
+      "title": "Live content subscription — server components refresh automatically on publish",
+      "scale": "small",
+      "evidence": "live-bridge.tsx mounts BarkparkLive from @barkpark/nextjs, debouncing SSE change events from /v1/data/listen into router.refresh() so content changes in the CMS appear without a page reload"
+    },
+    {
+      "title": "Performance-conscious search UX: adaptive debounce, DOM render cap, prefetch suppression",
+      "scale": "small",
+      "evidence": "finder.tsx uses a 90ms debounce on live-socket vs 250ms on HTTP fallback; caps DOM-rendered rows at 25 (RESULT_RENDER_CAP) to avoid keystroke-driven reconcile storms; sets prefetch={false} on result Link rows to prevent per-keystroke RSC payload avalanche"
+    }
+  ]
+}

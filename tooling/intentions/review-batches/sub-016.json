@@ -1,0 +1,90 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter",
+  "count": 14,
+  "files": [
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/lib/barkpark.ts",
+      "role": "blog-starter server fetch helper",
+      "importance": 20,
+      "usefulness": 28
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/barkpark.config.ts.tmpl",
+      "role": "blog-starter scaffolder config template",
+      "importance": 18,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/package.json.tmpl",
+      "role": "package.json template for blog-starter scaffolded app",
+      "importance": 18,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/seeds/seed.ts",
+      "role": "blog starter seed script",
+      "importance": 11,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/lib/queries.ts",
+      "role": "template GROQ query constants",
+      "importance": 4,
+      "usefulness": 11
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/components/Pagination.tsx",
+      "role": "blog starter pagination component",
+      "importance": 4,
+      "usefulness": 10
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/page.tsx",
+      "role": "blog starter home/post-listing page",
+      "importance": 5,
+      "usefulness": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/layout.tsx",
+      "role": "blog starter root layout",
+      "importance": 5,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/schemas/author.ts",
+      "role": "template author schema definition",
+      "importance": 3,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/schemas/post.ts",
+      "role": "template post schema definition",
+      "importance": 3,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/next.config.mjs",
+      "role": "template Next.js config",
+      "importance": 3,
+      "usefulness": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/postcss.config.js",
+      "role": "template PostCSS config",
+      "importance": 3,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/schemas/tag.ts",
+      "role": "template tag schema definition",
+      "importance": 3,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/tailwind.config.ts",
+      "role": "template Tailwind CSS config",
+      "importance": 3,
+      "usefulness": 2
+    }
+  ]
+}

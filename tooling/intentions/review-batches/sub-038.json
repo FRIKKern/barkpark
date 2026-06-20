@@ -1,0 +1,42 @@
+{
+  "subsystem": "internal/manifest",
+  "count": 6,
+  "files": [
+    {
+      "path": "internal/manifest/context.go",
+      "role": "CLI context resolution (flags > env > active > defaults)",
+      "importance": 49,
+      "usefulness": 47
+    },
+    {
+      "path": "internal/manifest/manifest.go",
+      "role": "capabilities manifest types + strict parser",
+      "importance": 52,
+      "usefulness": 40
+    },
+    {
+      "path": "internal/manifest/url.go",
+      "role": "CLI URL builder from capabilities manifest",
+      "importance": 55,
+      "usefulness": 33
+    },
+    {
+      "path": "internal/manifest/fetch.go",
+      "role": "capabilities manifest fetcher with ETag caching",
+      "importance": 42,
+      "usefulness": 43
+    },
+    {
+      "path": "internal/manifest/cache.go",
+      "role": "ETag-based on-disk manifest cache",
+      "importance": 35,
+      "usefulness": 43
+    },
+    {
+      "path": "internal/manifest/tree.go",
+      "role": "manifest noun-verb command tree builder",
+      "importance": 40,
+      "usefulness": 32
+    }
+  ]
+}

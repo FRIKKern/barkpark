@@ -1,0 +1,66 @@
+{
+  "subsystem": "api/lib/barkpark_web/live/studio",
+  "count": 10,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/live/studio/plugins/adapter.ex",
+      "role": "Studio v2 plugin field adapter",
+      "importance": 42,
+      "usefulness": 54
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live.ex",
+      "role": "Main Studio LiveView (multi-pane CMS UI)",
+      "importance": 54,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/plugins/field_components.ex",
+      "role": "Studio plugin field component adapter",
+      "importance": 28,
+      "usefulness": 40
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/sheet_grid.ex",
+      "role": "LiveComponent spreadsheet grid editor",
+      "importance": 41,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/paper_field_block.ex",
+      "role": "composite field block LiveComponent for paper editor",
+      "importance": 42,
+      "usefulness": 23
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/settings_live.ex",
+      "role": "plugin settings editor LiveView",
+      "importance": 40,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/api_tester_live.ex",
+      "role": "Studio API playground LiveView",
+      "importance": 35,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/graph_view.ex",
+      "role": "Studio graph pane LiveComponent",
+      "importance": 33,
+      "usefulness": 15
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/media_live.ex",
+      "role": "Studio Media tab LiveView",
+      "importance": 33,
+      "usefulness": 10
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/plugins/registry_query.ex",
+      "role": "Codelist registry wrapper for Studio plugin adapter",
+      "importance": 30,
+      "usefulness": 11
+    }
+  ]
+}

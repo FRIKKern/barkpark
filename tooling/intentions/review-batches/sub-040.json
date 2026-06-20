@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/assets/paper-editor/src",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/assets/paper-editor/src/convert.js",
+      "role": "portable-doc ↔ TipTap JSON converter",
+      "importance": 30,
+      "usefulness": 39
+    },
+    {
+      "path": "api/assets/paper-editor/src/index.js",
+      "role": "TipTap Web Component editor entrypoint",
+      "importance": 34,
+      "usefulness": 27
+    },
+    {
+      "path": "api/assets/paper-editor/src/slash-menu.js",
+      "role": "Slash-command insert menu for paper editor",
+      "importance": 27,
+      "usefulness": 26
+    },
+    {
+      "path": "api/assets/paper-editor/src/format-bubble.js",
+      "role": "floating text-format toolbar for paper editor",
+      "importance": 17,
+      "usefulness": 24
+    },
+    {
+      "path": "api/assets/paper-editor/src/__smoke.mjs",
+      "role": "smoke test for portable-doc ↔ TipTap round-trip converters",
+      "importance": 7,
+      "usefulness": 9
+    }
+  ]
+}

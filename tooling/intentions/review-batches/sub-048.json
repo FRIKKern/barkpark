@@ -1,0 +1,36 @@
+{
+  "subsystem": "js/packages/react/src",
+  "count": 5,
+  "files": [
+    {
+      "path": "js/packages/react/src/PortableText.tsx",
+      "role": "React PortableText renderer",
+      "importance": 32,
+      "usefulness": 56
+    },
+    {
+      "path": "js/packages/react/src/Reference.tsx",
+      "role": "React reference resolver component",
+      "importance": 28,
+      "usefulness": 55
+    },
+    {
+      "path": "js/packages/react/src/Image.tsx",
+      "role": "React image renderer component",
+      "importance": 28,
+      "usefulness": 53
+    },
+    {
+      "path": "js/packages/react/src/index.ts",
+      "role": "React package public API barrel",
+      "importance": 36,
+      "usefulness": 42
+    },
+    {
+      "path": "js/packages/react/src/server.ts",
+      "role": "RSC-safe React package server entry",
+      "importance": 17,
+      "usefulness": 20
+    }
+  ]
+}

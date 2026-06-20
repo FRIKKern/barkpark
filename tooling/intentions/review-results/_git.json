@@ -1,0 +1,114 @@
+{
+  "intentions": [
+    {
+      "title": "Build a fully-scoped multi-tenant Studio with canonical URLs, workspace/project/dataset switching, and tenant-boundary safety",
+      "scale": "epic",
+      "evidence": "studio (88 commits): scoped Studio mount, P1–P5 cutover, StudioChrome contract, scope menu, canonical URL /w/:ws/p/:proj/d/:dataset/studio, tenant-boundary fixes, top bar restructure"
+    },
+    {
+      "title": "Ship an Obsidian-style interactive content graph — Canvas2D renderer with force sim, BFS blast-rings, hover cascades, and graph↔finder bidirectional highlight",
+      "scale": "epic",
+      "evidence": "graph (19 commits): Northern Night Canvas2D renderer, Obsidian restyle, hop-cascade, /v1/graph corpus endpoint, force integrator bounds, idle breathing, graph↔finder highlight, graph landing"
+    },
+    {
+      "title": "Build a rich semantic search layer spanning Postgres full-text and Indx (typo-tolerant, faceted, ranked, per-keystroke WebSocket)",
+      "scale": "epic",
+      "evidence": "search (16), indx (15), web (56): Indx v5, typo-tolerant title tier, per-keystroke WS search, Postgres parity facets, N+1 batch hydration, click-feedback autocorrection, fuzzy/exact ranking, qualitative match meter"
+    },
+    {
+      "title": "Deliver a manifest-driven Go CLI (bp) — multi-server, atomic task queue, plugin verbs, self-update, Windows release",
+      "scale": "epic",
+      "evidence": "cli (22 commits): M0–M4, /v1/capabilities manifest, bp setup/use/servers/migrate/share/task, Windows release, release binaries + installer, bp task next/prime/close"
+    },
+    {
+      "title": "Build a feature-complete terminal TUI — Miller-column nav, field editing, publish/draft lifecycle, reference picker, paper viewer, Studio parity",
+      "scale": "epic",
+      "evidence": "tui (45 commits): pdrender M0–M2, Miller-column nav, publish/unpublish/discard, reference picker, slug generate, revision history, diff view, bulk mark/act, image fields, object arrays, required markers, schema validation"
+    },
+    {
+      "title": "Implement a task system as first-class Barkpark documents — dep graph, atomic claim/close, lease sweep, compactor, Studio integration, bp CLI surface",
+      "scale": "epic",
+      "evidence": "tasks (20 commits), w7-01 through w7-11: task-document schema, edge table, CAS claim, TtlSweeper, Compactor, /v1/tasks HTTP controller, resource claims, bp task verbs, Tasks plugin owns routes (C4-3), Studio task surfaces"
+    },
+    {
+      "title": "Establish a content graph edge layer — EdgeProjector, plugin extract_edges seam, BFS engine, /v1/graph API, orphan/dangling endpoints",
+      "scale": "epic",
+      "evidence": "graph phases 2–5: content_edges schema, EdgeProjector worker, plugin seam, BFS engine, reverse_referencers, Studio graph pane, tenancy fail-closed, arrayOf-aware guard"
+    },
+    {
+      "title": "Ship a Sheets plugin — collaborative spreadsheet with SheetSession, formula engine, presence cursors, soft locks, per-user undo, xlsx round-trip",
+      "scale": "epic",
+      "evidence": "sheets (8 commits): M0–M5, SheetSession supervision, cell-op wire endpoint, formula engine, presence cursors/selections, soft locks, per-user undo, live public reader, xlsx deps"
+    },
+    {
+      "title": "Build a first-class content-sharing layer — scoped tokens, LAN tunnel, per-item share links, revocable edit access, bp share CLI",
+      "scale": "epic",
+      "evidence": "sharing (18 commits): P1a–P7a, Barkpark.Sharing registry, default-deny, scoped paper reader, docs surface, scoped media, persistent share registry, bp share CLI, edit access tokens, Studio Share popover, PublicShareGuard hardening"
+    },
+    {
+      "title": "Introduce a plugin highway — typed route buckets, plugin-contributed Oban crons, Tasks + Bulldocs as native plugins, fresh-install invariant",
+      "scale": "epic",
+      "evidence": "plugins (22), plugin (9): :token_root + :ingest + :public_root + :token highway buckets, Bulldocs plugin, Tasks plugin owns schema + routes, frt/OnixEdit plugins, plugin extract_edges seam, plugin-dynamic CLI verbs"
+    },
+    {
+      "title": "Ingest the codebase graph into Barkpark and surface tooling intelligence — quality scorecard, blast-radius analysis, incremental status-quo reports",
+      "scale": "epic",
+      "evidence": "tooling (5), barkpark-sync (4): barkpark-sync ingest, graph visualizer, codebase-quality scorecard, codebase-intelligence suite, incremental verdict caching, Tested + Reliability axes, intentions/goal layer"
+    },
+    {
+      "title": "Run a premium first-run setup — bp setup wizard, local self-sufficiency, version pinning, sha256 verify, Windows support, seed profiles",
+      "scale": "epic",
+      "evidence": "premium-setup commits A1–D2: bp setup interactive bootstrapper, C1–C4, profile flag, first-run detection, bp upgrade/uninstall builtins, go:embed deploy.sh, QUICKSTART + HANDBOOK docs"
+    },
+    {
+      "title": "Mirror and read Barkpark's own docs as Papers inside Barkpark — dogfooding the product as its own documentation CMS",
+      "scale": "epic",
+      "evidence": "docs dataset demo, web (56): 51 GitHub docs mirrored as Papers, 68 Papers seeded, docs-dataset finder, Obsidian graph landing over the docs dataset, demo/docs-graph branch"
+    },
+    {
+      "title": "Reach multi-server, multi-workspace tenancy safety — scope threading, cascade deletes, cross-tenant read-leak remediation, dataset-id backfills",
+      "scale": "epic",
+      "evidence": "tenancy (5), migration (5), [beads] reconcile commits: scope threading in Content.get_document/expand, workspace-delete cleanup, cascade deletes, paper_events dataset_id re-stamp, search dedup post-flip"
+    },
+    {
+      "title": "Establish a structured doc spine with byte-budgeted cards, CI enforcement, doc-tier routing, and attic quarantine",
+      "scale": "epic",
+      "evidence": "docs-refactor waves 0–5, docs (6): 7-card hard cap, byte budgets CI-enforced, fact-rescue, anchors check, doc-tier agent/human/cold, attic freeze"
+    },
+    {
+      "title": "Achieve real Core Web Vitals — instant first paint, Data Cache, keep-alive pools, CWV monitoring, LCP optimization",
+      "scale": "small",
+      "evidence": "perf(web): CWV monitoring, single-shot home LCP, instant first paint, real Data Cache, fra1 region, keep-alive connection pool; perf(indx): batch hit hydration"
+    },
+    {
+      "title": "Make the Next.js web finder the primary product showcase — spacious hero, master/detail, Popular shortcuts, UX polish passes",
+      "scale": "small",
+      "evidence": "web (56): finder as frontpage, 1080px rail, master/detail, cache-mode toggle, /bench sweep, UTC hydration fix, stable results header, Popular shortcuts, Options disclosure, thin scrollbars"
+    },
+    {
+      "title": "Publish a JS SDK monorepo with changeset-gated releases, live-update SSE proxy, and starter templates",
+      "scale": "small",
+      "evidence": "js (4), ci(js): @barkpark/nextjs live updates, SSE proxy, blog/website starters fixed, changeset job CI gate, TS authoring SDK (bp CLI M3)"
+    },
+    {
+      "title": "Wire ONIX/Bokbasen export as a plugin — deterministic JSON bridge, schema field types, named SVG icons, game-CMS plugin (frt)",
+      "scale": "small",
+      "evidence": "onix (10), bokbasen (7), onixedit (13), frt (6), g2–g4: mix frt.export Godot bridge, named icons, OnixEdit plugin, schema v2 field types"
+    },
+    {
+      "title": "Give Studio a rich richText toolbar, real article rendering, slug Generate, discard-draft, schema-level list_preview badges",
+      "scale": "small",
+      "evidence": "studio commits: richText toolbar (bold/italic/links), article h1/h2 render, slug Generate, discard-draft, list_preview badges, Sanity-style reference search, scope menu dropdown"
+    },
+    {
+      "title": "Surface content usefulness metrics and intention/goal edges as a second edge type in the graph",
+      "scale": "small",
+      "evidence": "feat(intentions): goal/intention layer — second edge type; feat(usefulness): per-file usefulness metric + why-useful surfaced on papers"
+    },
+    {
+      "title": "Harden CI — Elixir test gate unblocked, Go sum tracked, JS changeset gate, format advisory, no-cancel-on-main",
+      "scale": "small",
+      "evidence": "ci (9): mix-test blocking, go.sum tracked, elixir paid-runner fix, cancel-in-progress disabled on main, JS monorepo gate"
+    }
+  ]
+}

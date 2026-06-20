@@ -1,0 +1,36 @@
+{
+  "subsystem": "docs/snippets",
+  "summary": "Executable, annotated TypeScript/TSX usage snippets covering the full JS SDK surface — CRUD, real-time subscriptions, optimistic mutations, Next.js server components, server actions, and webhook-driven cache revalidation. They serve as both developer documentation and implicit integration contract tests.",
+  "intentions": [
+    {
+      "title": "Lower the JS SDK adoption barrier with copy-paste-ready patterns",
+      "scale": "epic",
+      "evidence": "All 8 snippets are self-contained, runnable modules with explicit expected-output comments. 01-create-document.ts, 02-query-with-filters.ts, 03-listen-for-updates.ts, and 05-publish-unpublish.ts cover the core CRUD+realtime loop a new integrator needs first."
+    },
+    {
+      "title": "Document the Next.js App Router integration contract end-to-end",
+      "scale": "epic",
+      "evidence": "06-server-component-fetch.tsx (createBarkparkServer + force-cache + next.tags), 07-server-action-mutate.tsx (defineActions in 'use server'), 04-mutate-optimistic.tsx (useOptimisticDocument in 'use client'), and 08-revalidate-on-webhook.ts together trace the full App Router lifecycle."
+    },
+    {
+      "title": "Specify the cache-tag invalidation scheme as executable documentation",
+      "scale": "small",
+      "evidence": "06-server-component-fetch.tsx calls out 'bp:ds:production:_all' and 'bp:ds:production:type:post' tags explicitly; 07-server-action-mutate.tsx fans out doc:<id> + type:<type>; 08-revalidate-on-webhook.ts shows revalidateBarkpark() consuming webhook payloads — together they pin the tag naming contract."
+    },
+    {
+      "title": "Demonstrate conflict-aware optimistic UI for collaborative editing",
+      "scale": "small",
+      "evidence": "04-mutate-optimistic.tsx exposes useOptimisticDocument with a BarkparkConflictError banner, covering the optimistic-update → committed-state replace → conflict-resolution flow."
+    },
+    {
+      "title": "Show zero-downtime webhook secret rotation",
+      "scale": "small",
+      "evidence": "08-revalidate-on-webhook.ts wires previousSecret alongside secret in createWebhookHandler, explicitly documenting the dual-secret rotation window."
+    },
+    {
+      "title": "Establish real-time SSE subscription as a first-class SDK primitive",
+      "scale": "small",
+      "evidence": "03-listen-for-updates.ts uses client.listen() as an async iterator with welcome/mutation event discrimination and clean unsubscribe, making the streaming contract explicit."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/barkpark_web",
+  "summary": "The web layer wires every HTTP, WebSocket, and LiveView surface of Barkpark: it defines all pipelines, routes, auth hooks, and real-time channels that expose the core CMS — data CRUD, Studio UI, search, media, schemas, plugins — to browsers, the CLI, and the JS SDK.",
+  "intentions": [
+    {
+      "title": "Enforce hard multi-tenant isolation at every entry point",
+      "scale": "epic",
+      "evidence": "router.ex defines :scoped_api/:scoped_browser/:scoped_mutate pipelines with ResolveWorkspace/ResolveProject plugs; live_scope.ex re-authorizes on every live_patch so cross-tenant navigation is caught in-socket, not just at dead-render; search_channel.ex replicates the same membership gate on WebSocket join"
+    },
+    {
+      "title": "Support fine-grained sharing of read and write surfaces without membership",
+      "scale": "epic",
+      "evidence": "router.ex defines :shared_docs_api, :shared_media_api, :shared_paper_browser, :shared_studio_browser pipelines wrapping RequireShareScope; P4/P5/P7 comments describe docs-read, media-edit-token, and per-item share-link surfaces; ShareController/ShareLinkController routes handle mint/list/revoke; live_scope.ex attaches a :live_scope_readonly gate for share_read grade"
+    },
+    {
+      "title": "Allow plugins to contribute routes at compile time without modifying the host router",
+      "scale": "epic",
+      "evidence": "router/plugins.ex macro reads Registry.collect_routes/1 at compile time and emits Phoenix AST for 8 auth buckets (:admin,:ops,:public,:api,:token,:token_root,:ingest,:public_root); router.ex has 10+ plugin_routes() callsites covering both flat and /w/:ws/p/:proj scoped prefixes; the fresh-install invariant (empty plugins → no routes emitted) is explicitly preserved"
+    },
+    {
+      "title": "Preserve backward compatibility for legacy clients while routing new clients to canonical URLs",
+      "scale": "small",
+      "evidence": "router.ex keeps /api/documents/:type (legacy TUI), /v1/paperflow/* (back-compat Bulldocs ingest alias), /studio/:dataset (flat→scoped 302), /studio/onixedit/book/:doc_id (LegacyRedirectController), /w/:ws/p/:proj/studio/:dataset (pre-/d/ canonical 302); LegacyDeprecation plug adds deprecation headers"
+    },
+    {
+      "title": "Deliver per-keystroke search over a persistent WebSocket to eliminate per-request TLS overhead",
+      "scale": "small",
+      "evidence": "search_channel.ex uses a single Phoenix Channel per tenant scope; seq field lets the client discard stale replies; response shape is identical to SearchController.search/2 so clients render identically over HTTP or socket"
+    },
+    {
+      "title": "Provide a versioned API error contract that supports both legacy flat strings and structured violation envelopes",
+      "scale": "small",
+      "evidence": "error_envelope.ex serializes to v1 (flat string list) or v2 (JSON Pointer keyed violation maps with severity/code/rule) negotiated via Accept-Version header; handles legacy field maps, WI1 violation structs, and plain string lists uniformly"
+    },
+    {
+      "title": "Gate LiveView surfaces with role-differentiated auth hooks that fail closed",
+      "scale": "small",
+      "evidence": "live_auth.ex defines :admin, :ops, :fetch_api_token on_mount hooks; :admin requires 'admin' permission, :ops accepts 'ops' or 'admin'; failures redirect to /studio or /login with flash; dev environment auto-injects dev token for frictionless local workflow"
+    },
+    {
+      "title": "Scope the Studio URL to workspace/project/dataset to make tenant context visible and bookmarkable",
+      "scale": "small",
+      "evidence": "router.ex canonical Studio is /w/:ws/p/:proj/d/:dataset/studio; live_scope.ex on_mount resolves from URL params (not session) and re-resolves on every handle_params patch; old /studio/:dataset flat form 302s to the canonical; StudioRedirectController handles legacy_scoped and studio redirects"
+    }
+  ]
+}

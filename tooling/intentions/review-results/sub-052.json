@@ -1,0 +1,41 @@
+{
+  "subsystem": "api/lib/barkpark_web/live",
+  "summary": "Four LiveView modules that surface Barkpark's content and plugin infrastructure as real-time browser UIs: a streaming paper reader (Bulldocs), a public read-only sheet viewer, and two admin LiveViews for managing and debugging plugins without SSH access.",
+  "intentions": [
+    {
+      "title": "Zero-reload live content reading",
+      "scale": "epic",
+      "evidence": "BulldocsLive implements a two-path renderer (block-streamed Wave 4 + HTML-only Wave 3 fallback) with PubSub subscriptions, rev-gap recovery via full refetch, and a DOM sentinel that proves no page reload occurred across delta updates. SheetsReaderLive subscribes to Session delta topic and forwards ops into SheetGrid in read_only mode, showing live edits as they happen."
+    },
+    {
+      "title": "Plugin system operability without SSH",
+      "scale": "epic",
+      "evidence": "PluginsLive exposes per-plugin callback coverage, bootstrap/seed run status, and idempotent in-process Reload without restarting Phoenix. PluginSettingsLive provides a secure settings form (encrypted at rest, audit-logged) with Reveal/Clear/Test-connection actions, replacing manual `mix run` or SSH sessions for credential management."
+    },
+    {
+      "title": "Paperflow orchestrator bridge via Barkpark events",
+      "scale": "epic",
+      "evidence": "BulldocsLive's action buttons (Create plan, Grill, Build, Submit, Simplify) record user intent as `paper_events` rows (routing Option B) scoped to the paper's workspace/project, letting the paperflow orchestrator pick up user decisions without a daemon or CLAUDE_TARGET nonce."
+    },
+    {
+      "title": "Goal-path lifecycle visibility inside published papers",
+      "scale": "small",
+      "evidence": "BulldocsLive mounts a sticky goal-path rail rendering a Mermaid gitGraph of `kind:event` Barkpark tasks for the paper's goal_id, with shift-click diff modal (TextDiff line diff of two event payloads) — surfacing the paperflow Goal history inside the reading surface."
+    },
+    {
+      "title": "Multi-tenant isolation for paper reads and events",
+      "scale": "small",
+      "evidence": "BulldocsLive resolves reader_scope from URL params (/w/:ws/p/:proj/papers/:slug vs flat /papers/:slug), subscribes to workspace-keyed PubSub topics, and stamps all recorded events with the paper's own workspace_id/project_id — preventing cross-tenant PubSub leakage and event pollution."
+    },
+    {
+      "title": "Plugin secrets security model",
+      "scale": "small",
+      "evidence": "PluginSettingsLive never serialises stored secrets into the DOM; password fields render empty with a masked badge; Reveal is a separate explicit action; blank password submission preserves existing encrypted value; every read/write/reveal/delete is audit-logged in plugin_settings_audits."
+    },
+    {
+      "title": "Published-only public content surfaces",
+      "scale": "small",
+      "evidence": "Both BulldocsLive (via get_public_paper) and SheetsReaderLive (via get_public_document + NotFound exception for draft-only slugs) enforce that public reader routes only resolve against published documents in the seeded Default workspace."
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "subsystem": "api/lib/mix/tasks",
+  "count": 15,
+  "files": [
+    {
+      "path": "api/lib/mix/tasks/barkpark.plugin.new.ex",
+      "role": "plugin scaffold generator Mix task",
+      "importance": 23,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.rotate_public_read.ex",
+      "role": "Mix task for weekly public-read token rotation",
+      "importance": 21,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/bokbasen.replay.ex",
+      "role": "Bokbasen publish replay operator tool",
+      "importance": 21,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/onix.import.ex",
+      "role": "ONIX XML bulk import CLI",
+      "importance": 22,
+      "usefulness": 8
+    },
+    {
+      "path": "api/lib/mix/tasks/frt.export.ex",
+      "role": "Mix task: FRT dataset export to game-ready JSON",
+      "importance": 16,
+      "usefulness": 11
+    },
+    {
+      "path": "api/lib/mix/tasks/onix.export_proof.ex",
+      "role": "ONIX proof artifact regeneration task",
+      "importance": 18,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/search.eval.ex",
+      "role": "Mix task — golden search evaluation harness",
+      "importance": 13,
+      "usefulness": 13
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.codelists.seed.ex",
+      "role": "Mix task — seed ONIX EDItEUR codelist registry",
+      "importance": 16,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/bokbasen.list.ex",
+      "role": "Mix task: list Bokbasen submissions by state",
+      "importance": 18,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/mix/tasks/bokbasen.status.ex",
+      "role": "Mix task: Bokbasen publish status summary or per-book detail",
+      "importance": 18,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.plugin.gen_types.ex",
+      "role": "Mix task to regenerate plugin TypeScript types",
+      "importance": 14,
+      "usefulness": 8
+    },
+    {
+      "path": "api/lib/mix/tasks/codelists.staleness.ex",
+      "role": "Mix task for ONIX codelist staleness reporting and revalidation",
+      "importance": 15,
+      "usefulness": 6
+    },
+    {
+      "path": "api/lib/mix/tasks/frt.seed.ex",
+      "role": "Mix task: FRT dataset seeder",
+      "importance": 13,
+      "usefulness": 6
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.media.backfill.ex",
+      "role": "Mix task — backfill mediaAsset documents",
+      "importance": 12,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.gen.plugin.ex",
+      "role": "deprecated plugin scaffold shim",
+      "importance": 10,
+      "usefulness": 6
+    }
+  ]
+}

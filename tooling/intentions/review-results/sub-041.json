@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/config",
+  "summary": "Elixir/Phoenix application configuration layer that wires environment-specific defaults, runtime secrets, and feature toggles for every Barkpark subsystem — from Postgres and Oban job queues to plugins, rate limits, CORS, media CDN, LAN sharing, and the paperflow ingest seam.",
+  "intentions": [
+    {
+      "title": "Prevent production misconfiguration from silently breaking LiveView",
+      "scale": "epic",
+      "evidence": "runtime.exs hard-raises on missing/IP-valued PHX_HOST with a named incident reference (studio-nav-bug-2026-04-19.md), validates PHX_SCHEME vs IP pattern, and builds an explicit check_origin allowlist covering the Vercel apex + preview URLs — all to stop websocket 403s that make Studio click-dead."
+    },
+    {
+      "title": "Keep secrets out of source control while staying operable in dev",
+      "scale": "epic",
+      "evidence": "SECRET_KEY_BASE, BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET, DATABASE_URL all hard-raise in prod when absent; dev.exs supplies documented constant fallbacks so the app boots with zero env setup locally. BARKPARK_CLOAK_KEY is explicitly separated from SECRET_KEY_BASE so rotating one doesn't invalidate the other."
+    },
+    {
+      "title": "Plugin kill switch and explicit whitelist via env",
+      "scale": "small",
+      "evidence": "runtime.exs parses BARKPARK_PLUGINS: unset = discover-all, empty string = register nothing, CSV = explicit allowlist. EnvConfig.parse/1 encodes the three-state distinction so a misconfigured env never silently loads zero plugins (that would look like a fresh install)."
+    },
+    {
+      "title": "Scoped LAN/tunnel sharing controlled without code changes",
+      "scale": "small",
+      "evidence": "BARKPARK_SHARES parses scope syntax; any non-empty result or BARKPARK_SHARE_LAN=1 flips the Endpoint bind from 127.0.0.1 to 0.0.0.0. BARKPARK_SHARE_HOST decouples 'which hostname share links advertise' from what the server binds, enabling Cloudflare tunnel sharing without firewall changes."
+    },
+    {
+      "title": "Safe defaults so the paperflow ingest seam is closed until explicitly opened",
+      "scale": "small",
+      "evidence": "config.exs sets :paperflow_ingest_token to nil; runtime.exs only populates it when PAPERFLOW_INGEST_TOKEN is present. The plug treats nil as 'no token configured → 401', so a fresh prod deploy can't accidentally accept ingest traffic."
+    },
+    {
+      "title": "Background-job isolation to prevent subsystems starving each other",
+      "scale": "small",
+      "evidence": "config.exs declares seven named Oban queues (default, bokbasen, plugins, tasks_ttl, tasks_compact, indx, edge_projector) with deliberate concurrency caps. Comments explain that tasks_ttl=1 prevents double-sweep and that indx/edge_projector must be static (not plugin-contributed) or their jobs sit available forever."
+    },
+    {
+      "title": "Pluggable search retriever seam configured at startup",
+      "scale": "small",
+      "evidence": "config.exs maps engine name 'indx' to Barkpark.Plugins.Indx.Retriever; an unknown engine falls back to Postgres so a misconfig never takes a surface dark. runtime.exs maps INDX_* env vars into the app env so Indx.Settings can resolve credentials in the same priority order as Bokbasen."
+    },
+    {
+      "title": "Media pipeline fully env-driven (CDN, signing, webhooks, processing callbacks)",
+      "scale": "small",
+      "evidence": "runtime.exs has four independent media config blocks: signing secret (derived from SECRET_KEY_BASE as fallback), CDN base URL + invalidation adapter, processing callback token, and webhook endpoint list with per-event filtering — each independently optional, each no-op when unset."
+    }
+  ]
+}

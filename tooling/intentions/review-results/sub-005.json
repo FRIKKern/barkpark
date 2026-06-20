@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/barkpark/search",
+  "summary": "A self-improving, multi-engine search subsystem that executes queries across document and media surfaces, learns from user behavior to auto-promote synonyms and suggest improvements, and aggregates raw events into periodic crystals for analytics.",
+  "intentions": [
+    {
+      "title": "Deliver resilient, zero-dead-end search via automatic recovery",
+      "scale": "epic",
+      "evidence": "query_pipeline.ex implements drop_tokens + typo_widen recovery strategies; both zero-hit and thin-result paths trigger widening; a misconfigured engine falls back to Postgres silently (retriever.ex, retrievers.ex)"
+    },
+    {
+      "title": "Decouple search engines behind a stable seam so plugins can swap retrievers",
+      "scale": "epic",
+      "evidence": "retriever.ex defines a @callback contract; retrievers.ex resolves engine name to module; query_pipeline.ex has D3-b tenant-scope gate that falls back to Postgres when workspace_id is absent to prevent cross-tenant bypass"
+    },
+    {
+      "title": "Turn search behavior into actionable intelligence without blocking the request path",
+      "scale": "epic",
+      "evidence": "intelligence.ex records events, interactions, and corrections; crystallizer.ex aggregates raw events into day/week/month Crystal rows and detects merge patterns (zero_to_hit, facet_add, query_replace); workers/crystallize.ex and workers/prune.ex run these as background Oban jobs"
+    },
+    {
+      "title": "Auto-promote synonyms from observed user corrections",
+      "scale": "small",
+      "evidence": "intelligence.ex record_correction/4 counts distinct sessions signaling the same from→to pair and calls Synonyms.promote/3 when ≥2 sessions agree; query_pipeline.ex expand_synonyms/3 injects these at query time and returns corrected_to for UI display"
+    },
+    {
+      "title": "Surface actionable search quality hints to operators",
+      "scale": "small",
+      "evidence": "intelligence.ex improvement_hints/3 emits structured hints for high zero-hit-rate queries, low CTR despite volume, and common zero→hit recovery patterns; insights/1 assembles these alongside synonym candidates, zero_hit_rate, and recovery_rate"
+    },
+    {
+      "title": "Normalize and sanitize all query input before any retrieval or analytics",
+      "scale": "small",
+      "evidence": "sanitizer.ex is used in query_pipeline.ex, intelligence.ex (qualify_query), crystallizer.ex, and synonyms.ex; query_parser.ex tokenizes into terms + phrases; rejected queries are recorded with reject_reason for quality tracking"
+    },
+    {
+      "title": "Highlight matched terms in results uniformly across engines",
+      "scale": "small",
+      "evidence": "highlighter.ex wraps every retriever via query_pipeline.ex highlight_hits/5, covering both documents and media surfaces"
+    },
+    {
+      "title": "Provide per-surface search tuning without code changes",
+      "scale": "small",
+      "evidence": "surface_configs.ex caches config rows keyed by surface+scope; config drives zero_hit_strategy, low_hit_threshold, and highlight behavior in query_pipeline.ex"
+    }
+  ]
+}

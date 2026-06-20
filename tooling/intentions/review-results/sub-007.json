@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/barkpark/content",
+  "summary": "The core content domain layer: Ecto schemas and business logic for documents, schema definitions, validation, serialization, multi-tenant scoping, content-graph traversal, and reference expansion. Everything the API layer needs to read, write, validate, and relate content lives here.",
+  "intentions": [
+    {
+      "title": "Harden multi-tenant isolation at the query layer",
+      "scale": "epic",
+      "evidence": "scope.ex implements a fail-closed nil-workspace guard (`where: false`) and an explicit opt-in for cross-tenant reads (`scope_to_workspace_global/1`). The same scope helpers are threaded through graph.ex (hydrate_nodes, fetch_doc, reverse_referencers) and expand.ex so a UUID from another tenant hydrates to nothing rather than leaking."
+    },
+    {
+      "title": "Support a schema v2 field type system alongside the legacy v1 flat model",
+      "scale": "epic",
+      "evidence": "schema_definition.ex parses composite, arrayOf, codelist, and localizedText field types into a %Parsed{} tree. validation.ex dispatches on flat?/1 — legacy schemas take the verbatim v1 path, v2 schemas take the recursive walk_field path. The flat? invariant is explicitly locked so existing seed schemas never accidentally upgrade."
+    },
+    {
+      "title": "Expose a traversable content graph for the Studio and the /v1/graph API",
+      "scale": "epic",
+      "evidence": "graph.ex implements a BFS engine over the materialised content_edges table with three trip-wires (node budget 1000, fan-out 200, depth 1–5). It handles a separate live-extract drafts path, phantom/dangling node reporting, orphan detection, and a reverse_referencers query used by the Studio unpublish guard."
+    },
+    {
+      "title": "Provide a stable, Sanity-compatible v1 document envelope for all API consumers",
+      "scale": "small",
+      "evidence": "envelope.ex renders the canonical flat map with _id, _type, _rev, _draft, _publishedId, _createdAt, _updatedAt reserved keys, protecting them from user-content collisions. expand.ex uses Envelope.render/1 when resolving inline reference fields."
+    },
+    {
+      "title": "Expand reference fields inline at query time without leaking draft content",
+      "scale": "small",
+      "evidence": "expand.ex resolves reference-typed fields by fetching the referenced document and rendering its envelope. A published_only flag on the read-share path prevents draft fallback so anonymous query expansion can never expose unpublished content."
+    },
+    {
+      "title": "Evolve the tenancy model from a string dataset discriminator to a first-class dataset entity (Wave 2)",
+      "scale": "epic",
+      "evidence": "document.ex and schema_definition.ex both carry a dual presence: the legacy `dataset` string field and the new `dataset_id` FK (`:dataset_entity` association). Uniqueness constraints are flipped to (doc_id, type, dataset_id) and (name, dataset_id). Comments throughout label this 'W2 additive seam'."
+    },
+    {
+      "title": "Validate document content recursively against schema-declared field rules",
+      "scale": "small",
+      "evidence": "validation.ex walks composite and arrayOf fields recursively, produces JSON-Pointer-style paths in error messages (/contributors/2/role), and explicitly defers codelist membership and fallbackChain enforcement to later phases, keeping the validator in scope."
+    },
+    {
+      "title": "Surface an expectation layer (layout + prefill) for the Studio editor without blocking saves",
+      "scale": "small",
+      "evidence": "schema_definition.ex provides default_layout/1 and default_prefill/1, deriving a soft field-order layout with per-field cardinality (max/enforce) and a prefill scaffold from initial_values. resolve_expectation/1 merges stored vs derived. The layer is explicitly marked SOFT — never a constraint on document validity."
+    }
+  ]
+}

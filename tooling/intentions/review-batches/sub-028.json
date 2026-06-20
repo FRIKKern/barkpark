@@ -1,0 +1,60 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/website-starter/app",
+  "count": 9,
+  "files": [
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/contact/actions.ts",
+      "role": "template contact form Server Action",
+      "importance": 4,
+      "usefulness": 13
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/api/barkpark/webhook/route.ts",
+      "role": "template webhook revalidation route",
+      "importance": 5,
+      "usefulness": 9
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/hosted-demo-banner.tsx",
+      "role": "demo environment banner component",
+      "importance": 3,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/layout.tsx",
+      "role": "scaffold template root layout",
+      "importance": 5,
+      "usefulness": 5
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/contact/page.tsx",
+      "role": "scaffold template contact page",
+      "importance": 5,
+      "usefulness": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/page.tsx",
+      "role": "scaffold template home page",
+      "importance": 5,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/posts/[slug]/page.tsx",
+      "role": "scaffold template post detail page",
+      "importance": 4,
+      "usefulness": 3
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/about/page.tsx",
+      "role": "template About page component",
+      "importance": 3,
+      "usefulness": 2
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/app/pricing/page.tsx",
+      "role": "scaffold template pricing page",
+      "importance": 3,
+      "usefulness": 2
+    }
+  ]
+}

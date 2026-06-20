@@ -1,0 +1,60 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/sheets",
+  "count": 9,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/sheets/xlsx_import.ex",
+      "role": "xlsx binary to sheet content importer",
+      "importance": 38,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/fmt.ex",
+      "role": "xlsx number-format classification and round-trip mapping",
+      "importance": 29,
+      "usefulness": 39
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/xlsx_export.ex",
+      "role": "Sheet content to xlsx binary exporter",
+      "importance": 33,
+      "usefulness": 30
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/csv.ex",
+      "role": "CSV/TSV import-export converter for Sheets plugin",
+      "importance": 31,
+      "usefulness": 31
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/web/export_controller.ex",
+      "role": "Sheets plugin multi-format export HTTP controller",
+      "importance": 36,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/web/import_controller.ex",
+      "role": "HTTP import endpoint for spreadsheet files",
+      "importance": 37,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
+      "role": "HTTP endpoint for cell and structural sheet ops",
+      "importance": 40,
+      "usefulness": 19
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/html.ex",
+      "role": "Sheet-to-standalone-HTML exporter",
+      "importance": 23,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/markdown.ex",
+      "role": "Sheet-to-Markdown-table exporter",
+      "importance": 22,
+      "usefulness": 19
+    }
+  ]
+}

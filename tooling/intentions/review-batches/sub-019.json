@@ -1,0 +1,84 @@
+{
+  "subsystem": "web/app",
+  "count": 13,
+  "files": [
+    {
+      "path": "web/app/(finder)/layout.tsx",
+      "role": "Finder split-view layout shell",
+      "importance": 34,
+      "usefulness": 20
+    },
+    {
+      "path": "web/app/v1/data/listen/[dataset]/route.ts",
+      "role": "SSE proxy for live-listen stream",
+      "importance": 31,
+      "usefulness": 20
+    },
+    {
+      "path": "web/app/(finder)/d/[type]/[slug]/page.tsx",
+      "role": "unified document detail page for the finder",
+      "importance": 25,
+      "usefulness": 20
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/layout.tsx",
+      "role": "Scoped workspace/project layout",
+      "importance": 29,
+      "usefulness": 11
+    },
+    {
+      "path": "web/app/layout.tsx",
+      "role": "Next.js root layout for web demo",
+      "importance": 23,
+      "usefulness": 12
+    },
+    {
+      "path": "web/app/(finder)/page.tsx",
+      "role": "finder landing page with corpus graph",
+      "importance": 21,
+      "usefulness": 14
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/page.tsx",
+      "role": "Scoped workspace/project post listing page",
+      "importance": 21,
+      "usefulness": 8
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/posts/[slug]/page.tsx",
+      "role": "Scoped post detail page",
+      "importance": 21,
+      "usefulness": 8
+    },
+    {
+      "path": "web/app/w/[workspace]/page.tsx",
+      "role": "workspace landing redirect resolver",
+      "importance": 16,
+      "usefulness": 9
+    },
+    {
+      "path": "web/app/papers/page.tsx",
+      "role": "Papers (Bulldocs PortableDoc) listing page",
+      "importance": 17,
+      "usefulness": 5
+    },
+    {
+      "path": "web/app/find/page.tsx",
+      "role": "permanent redirect from /find to /",
+      "importance": 7,
+      "usefulness": 4
+    },
+    {
+      "path": "web/app/not-found.tsx",
+      "role": "404 not-found page",
+      "importance": 6,
+      "usefulness": 3
+    },
+    {
+      "path": "web/app/bench/page.tsx",
+      "role": "benchmark page route",
+      "importance": 5,
+      "usefulness": 3
+    }
+  ]
+}

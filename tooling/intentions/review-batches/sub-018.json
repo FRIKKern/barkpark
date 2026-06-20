@@ -1,0 +1,84 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit",
+  "count": 13,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export.ex",
+      "role": "ONIX 3.0 XML export entry point",
+      "importance": 39,
+      "usefulness": 48
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/codelists/staleness_checker.ex",
+      "role": "ONIX codelist staleness analyzer",
+      "importance": 35,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/lifecycle.ex",
+      "role": "OnixEdit Bokbasen auto-publish lifecycle hook",
+      "importance": 37,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/importer.ex",
+      "role": "ONIX 3.0 XML to book content map importer",
+      "importance": 35,
+      "usefulness": 23
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/web/bokbasen_live.ex",
+      "role": "Bokbasen submission admin LiveView",
+      "importance": 34,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/web/export_controller.ex",
+      "role": "HTTP endpoint for streaming ONIX 3.0 XML per book",
+      "importance": 42,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/actions.ex",
+      "role": "OnixEdit Studio action handlers",
+      "importance": 38,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas/contributor.ex",
+      "role": "OnixEdit Contributor sub-schema module",
+      "importance": 27,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas/text_content.ex",
+      "role": "OnixEdit TextContent sub-schema module",
+      "importance": 26,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/web/staleness_live.ex",
+      "role": "OnixEdit codelist staleness admin LiveView",
+      "importance": 29,
+      "usefulness": 12
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas.ex",
+      "role": "OnixEdit sub-schema index/namespace module",
+      "importance": 26,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas/thema_subject_category.ex",
+      "role": "Thema subject category field definition",
+      "importance": 26,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/ping_live.ex",
+      "role": "plugin route highway smoke-test LiveView",
+      "importance": 15,
+      "usefulness": 3
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "subsystem": "js/packages/core/src",
+  "summary": "The runtime-agnostic JS SDK core that gives any JS/TS consumer a typed, resilient HTTP client over the Barkpark Phoenix API — covering read, write, live-stream, and tenancy surfaces with zero Node.js dependencies so it runs in browsers, Next.js edge, and Cloudflare Workers alike.",
+  "intentions": [
+    {
+      "title": "Provide a first-class JS/TS client API for Barkpark",
+      "scale": "epic",
+      "evidence": "client.ts exposes createClient() + the full BarkparkClient interface (doc, docs, patch, transaction, publish, unpublish, listen, fetchRaw, tenancy); types.ts gives every consumer typed envelopes, builder interfaces, and config options; index.ts re-exports everything as the package's public surface."
+    },
+    {
+      "title": "Enforce API contract correctness at call-time, not at runtime surprises",
+      "scale": "small",
+      "evidence": "client.ts validateConfig() throws BarkparkValidationError on malformed projectUrl, dataset, workspace/project slugs, apiVersion, perspective × useCdn conflicts; warns loudly when drafts/raw perspective is used without a token to prevent silent published-reads."
+    },
+    {
+      "title": "Deliver resilient reads with automatic exponential-backoff retry",
+      "scale": "small",
+      "evidence": "retry.ts defines DEFAULT_READ_POLICY (3 attempts, 300ms base, jitter), DEFAULT_WRITE_POLICY (1 attempt, safe default), and IDEMPOTENT_WRITE_POLICY (3 attempts + Idempotency-Key rotation); transport.ts wires the policy per request kind and injects uuidv7 Idempotency-Key headers on retry for opted-in writes."
+    },
+    {
+      "title": "Surface typed, actionable errors instead of raw HTTP status codes",
+      "scale": "small",
+      "evidence": "transport.ts decodeErrorAndThrow() maps every Phoenix error code and HTTP status to a specific class (BarkparkAuthError, BarkparkConflictError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkNotFoundError, BarkparkValidationError, BarkparkTimeoutError, BarkparkNetworkError); errors.ts defines the taxonomy referenced in ADR-009."
+    },
+    {
+      "title": "Enable real-time document subscriptions via SSE without EventSource limitations",
+      "scale": "epic",
+      "evidence": "listen.ts implements createListenHandle using fetch()+ReadableStream (not EventSource) so Authorization headers can be sent; supports Last-Event-ID resume on reconnect, exponential backoff up to 5 reconnects, graceful unsubscribe via AbortController, and synchronous edge-runtime detection to fail fast in Workerd."
+    },
+    {
+      "title": "Stay runtime-agnostic to target browser, Node.js, and edge simultaneously",
+      "scale": "epic",
+      "evidence": "transport.ts and listen.ts accept config.fetch override so MSW/tracing can intercept; edge-detect.ts detects Workerd/Cloudflare and throws BarkparkEdgeRuntimeError on listen() since streaming fetch is unavailable there; no node: imports in core (enforced by CI per js/CLAUDE.md)."
+    },
+    {
+      "title": "Support multi-tenant workspace/project scoping with back-compat flat routes",
+      "scale": "small",
+      "evidence": "scope.ts builds the /w/:workspace/p/:project prefix only when both fields are present, falling back to flat /v1 paths; tenancy.ts provides listWorkspaces, listProjects, createWorkspace, createProject over top-level /api/workspaces endpoints; client.ts validates both workspace and project slugs independently."
+    },
+    {
+      "title": "Provide observability hooks for tracing and monitoring integrations",
+      "scale": "small",
+      "evidence": "types.ts defines BarkparkHooks (onBeforeRequest, onResponse) with RequestContext and ResponseContext carrying attempt, durationMs, requestId, etag, syncTags, schemaHash; transport.ts runs both hooks on every attempt and fires onResponse on both success and error paths; requestTagPrefix injects X-Barkpark-Request-Tag per ADR-010."
+    },
+    {
+      "title": "Detect and surface API version + schema drift before silent data corruption",
+      "scale": "small",
+      "evidence": "handshake.ts caches /v1/meta (minApiVersion, maxApiVersion, currentDatasetSchemaHash); transport.ts maps schema_mismatch/apiversion_mismatch codes to BarkparkSchemaMismatchError with client/server version and hash fields; types.ts MetaResponse carries currentDatasetSchemaHash for drift comparison."
+    }
+  ]
+}

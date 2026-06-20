@@ -1,0 +1,30 @@
+{
+  "subsystem": "api/lib/barkpark_web/live",
+  "count": 4,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/live/bulldocs_live.ex",
+      "role": "LiveView paper reader with block streaming",
+      "importance": 42,
+      "usefulness": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/live/admin/plugin_settings_live.ex",
+      "role": "admin LiveView for per-plugin encrypted settings management",
+      "importance": 38,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark_web/live/admin/plugins_live.ex",
+      "role": "admin plugin debug LiveView",
+      "importance": 32,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark_web/live/sheets_reader_live.ex",
+      "role": "LiveView for public read-only sheet reader",
+      "importance": 27,
+      "usefulness": 19
+    }
+  ]
+}

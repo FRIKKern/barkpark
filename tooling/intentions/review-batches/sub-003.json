@@ -1,0 +1,138 @@
+{
+  "subsystem": "api/lib/barkpark/plugins",
+  "count": 22,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/registry.ex",
+      "role": "Plugin registry and resolver chain",
+      "importance": 57,
+      "usefulness": 70
+    },
+    {
+      "path": "api/lib/barkpark/plugins/capabilities.ex",
+      "role": "CLI/API capabilities manifest assembler and auth-tier visibility filter",
+      "importance": 70,
+      "usefulness": 52
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings.ex",
+      "role": "encrypted plugin settings CRUD",
+      "importance": 42,
+      "usefulness": 56
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media/assets.ex",
+      "role": "mediaAsset document lifecycle manager",
+      "importance": 40,
+      "usefulness": 52
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tasks.ex",
+      "role": "Tasks plugin wiring layer",
+      "importance": 50,
+      "usefulness": 34
+    },
+    {
+      "path": "api/lib/barkpark/plugins/bootstrap.ex",
+      "role": "boot-time plugin schema installer",
+      "importance": 48,
+      "usefulness": 35
+    },
+    {
+      "path": "api/lib/barkpark/plugins/hooks.ex",
+      "role": "plugin lifecycle-hook dispatcher",
+      "importance": 44,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings_record.ex",
+      "role": "plugin settings Ecto schema with encrypted storage",
+      "importance": 38,
+      "usefulness": 41
+    },
+    {
+      "path": "api/lib/barkpark/plugins/bulldocs.ex",
+      "role": "Bulldocs plugin — paper schema + route registration + graph edge extraction",
+      "importance": 47,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets.ex",
+      "role": "Sheets plugin entrypoint and structural validator",
+      "importance": 40,
+      "usefulness": 31
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit.ex",
+      "role": "ONIX 3.0 book metadata plugin entrypoint",
+      "importance": 38,
+      "usefulness": 30
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media.ex",
+      "role": "media library plugin entry point",
+      "importance": 43,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/plugins/bulldocs/events.ex",
+      "role": "paper_events context / query module",
+      "importance": 34,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark/plugins/manifest.ex",
+      "role": "plugin manifest compile-time + runtime validator",
+      "importance": 41,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings_audit.ex",
+      "role": "plugin settings audit log Ecto schema",
+      "importance": 26,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/bulldocs/event.ex",
+      "role": "paper_events Ecto schema",
+      "importance": 31,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/frt.ex",
+      "role": "FRT game-design plugin — 25 schema registrations + Studio desk",
+      "importance": 33,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark/plugins/run_status.ex",
+      "role": "in-memory plugin run-status GenServer",
+      "importance": 30,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/plugins/env_config.ex",
+      "role": "BARKPARK_PLUGINS env var parser for plugin registry",
+      "importance": 37,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media/codelists.ex",
+      "role": "Media plugin codelist seeder",
+      "importance": 31,
+      "usefulness": 19
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings/masking.ex",
+      "role": "plugin settings secret masker",
+      "importance": 27,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media/api_tests.ex",
+      "role": "declarative smoke-test specs for Media plugin",
+      "importance": 24,
+      "usefulness": 10
+    }
+  ]
+}

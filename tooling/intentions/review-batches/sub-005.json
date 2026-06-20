@@ -1,0 +1,126 @@
+{
+  "subsystem": "api/lib/barkpark/search",
+  "count": 20,
+  "files": [
+    {
+      "path": "api/lib/barkpark/search/sanitizer.ex",
+      "role": "search query sanitization and normalization gate",
+      "importance": 42,
+      "usefulness": 61
+    },
+    {
+      "path": "api/lib/barkpark/search/documents_retriever.ex",
+      "role": "Postgres-backed document search retriever",
+      "importance": 51,
+      "usefulness": 49
+    },
+    {
+      "path": "api/lib/barkpark/search/query_pipeline.ex",
+      "role": "Unified search pipeline orchestrator",
+      "importance": 54,
+      "usefulness": 46
+    },
+    {
+      "path": "api/lib/barkpark/search/intelligence.ex",
+      "role": "Search analytics and suggestion engine",
+      "importance": 44,
+      "usefulness": 55
+    },
+    {
+      "path": "api/lib/barkpark/search/synonyms.ex",
+      "role": "search synonym CRUD and query expansion",
+      "importance": 38,
+      "usefulness": 56
+    },
+    {
+      "path": "api/lib/barkpark/search/surface_configs.ex",
+      "role": "search tuning config cache",
+      "importance": 38,
+      "usefulness": 45
+    },
+    {
+      "path": "api/lib/barkpark/search/event.ex",
+      "role": "Ecto schema for search analytics events",
+      "importance": 29,
+      "usefulness": 51
+    },
+    {
+      "path": "api/lib/barkpark/search/retrievers.ex",
+      "role": "search engine retriever registry",
+      "importance": 39,
+      "usefulness": 39
+    },
+    {
+      "path": "api/lib/barkpark/search/crystallizer.ex",
+      "role": "search analytics aggregation engine",
+      "importance": 41,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark/search/query_parser.ex",
+      "role": "search query tokenizer",
+      "importance": 31,
+      "usefulness": 46
+    },
+    {
+      "path": "api/lib/barkpark/search/crystal.ex",
+      "role": "Ecto schema for search aggregate rows",
+      "importance": 33,
+      "usefulness": 43
+    },
+    {
+      "path": "api/lib/barkpark/search/retriever.ex",
+      "role": "search engine behaviour / seam contract",
+      "importance": 46,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark/search/merge_pattern.ex",
+      "role": "search intel merge pattern Ecto schema",
+      "importance": 25,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark/search/media_retriever.ex",
+      "role": "media search query builder",
+      "importance": 34,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/search/synonym.ex",
+      "role": "Ecto schema for search synonyms",
+      "importance": 27,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark/search/surface_config.ex",
+      "role": "Ecto schema for search surface configuration",
+      "importance": 30,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark/search/highlighter.ex",
+      "role": "search result text highlighter",
+      "importance": 26,
+      "usefulness": 31
+    },
+    {
+      "path": "api/lib/barkpark/search/workers/crystallize.ex",
+      "role": "Oban background job for search crystallization",
+      "importance": 27,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark/search/workers/prune.ex",
+      "role": "Oban background job for search index pruning",
+      "importance": 24,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/barkpark/search/golden_eval.ex",
+      "role": "search quality golden-query evaluation harness",
+      "importance": 20,
+      "usefulness": 14
+    }
+  ]
+}

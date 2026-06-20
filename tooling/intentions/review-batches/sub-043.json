@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/tenancy",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark/tenancy/auth.ex",
+      "role": "token-based workspace authorization primitives",
+      "importance": 53,
+      "usefulness": 62
+    },
+    {
+      "path": "api/lib/barkpark/tenancy/workspace.ex",
+      "role": "Workspace Ecto schema and changeset",
+      "importance": 42,
+      "usefulness": 47
+    },
+    {
+      "path": "api/lib/barkpark/tenancy/project.ex",
+      "role": "Ecto schema for Project tenancy entity",
+      "importance": 38,
+      "usefulness": 42
+    },
+    {
+      "path": "api/lib/barkpark/tenancy/membership.ex",
+      "role": "Ecto schema for workspace membership",
+      "importance": 35,
+      "usefulness": 43
+    },
+    {
+      "path": "api/lib/barkpark/tenancy/dataset.ex",
+      "role": "Ecto schema for Dataset entity",
+      "importance": 33,
+      "usefulness": 42
+    }
+  ]
+}

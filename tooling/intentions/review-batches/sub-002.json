@@ -1,0 +1,150 @@
+{
+  "subsystem": "api/lib/barkpark_web/plugs",
+  "count": 24,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/plugs/scope_helpers.ex",
+      "role": "tenancy scope extractor for HTTP and LiveView surfaces",
+      "importance": 56,
+      "usefulness": 54
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/dataset_cors.ex",
+      "role": "per-dataset CORS enforcement plug",
+      "importance": 52,
+      "usefulness": 34
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_share_scope.ex",
+      "role": "public-share grant plug (default-off)",
+      "importance": 51,
+      "usefulness": 29
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_token.ex",
+      "role": "API Bearer token auth plug",
+      "importance": 53,
+      "usefulness": 27
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/resolve_workspace.ex",
+      "role": "tenant boundary enforcement plug",
+      "importance": 55,
+      "usefulness": 23
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/rate_limit.ex",
+      "role": "per-token token-bucket rate limiting plug",
+      "importance": 42,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/idempotency.ex",
+      "role": "Idempotency-Key dedup plug for mutating API requests",
+      "importance": 40,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/preview_token.ex",
+      "role": "preview JWT verification plug",
+      "importance": 42,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/public_read.ex",
+      "role": "Public-read token enforcement plug",
+      "importance": 44,
+      "usefulness": 22
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_write_permission.ex",
+      "role": "Write permission gate plug",
+      "importance": 48,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_bearer_or_session_token.ex",
+      "role": "dual-mode auth plug for media upload routes",
+      "importance": 46,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/public_share_guard.ex",
+      "role": "Tunnel host-gate security plug for public sharing mode",
+      "importance": 42,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/optional_session_token.ex",
+      "role": "Soft-auth plug for browser scoped routes",
+      "importance": 42,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_admin.ex",
+      "role": "Admin permission gate plug",
+      "importance": 46,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/optional_token.ex",
+      "role": "Soft auth plug for optional Bearer token verification",
+      "importance": 35,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_share_edit_token.ex",
+      "role": "scoped share-write auth plug",
+      "importance": 37,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/accept_barkpark_vendor.ex",
+      "role": "vendor MIME type Accept header normalizer plug",
+      "importance": 40,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_workspace_role.ex",
+      "role": "workspace admin role gate",
+      "importance": 40,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/assign_default_scope.ex",
+      "role": "Back-compat plug assigning default workspace/project for flat routes",
+      "importance": 37,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/resolve_project.ex",
+      "role": "project resolution plug",
+      "importance": 38,
+      "usefulness": 15
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/error_envelope_negotiation.ex",
+      "role": "Error envelope version negotiation plug",
+      "importance": 33,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_ingest_token.ex",
+      "role": "paperflow ingest auth plug",
+      "importance": 31,
+      "usefulness": 11
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/require_media_processing_callback_token.ex",
+      "role": "media callback auth plug",
+      "importance": 29,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/barkpark_web/plugs/legacy_deprecation.ex",
+      "role": "HTTP plug adding deprecation headers to legacy routes",
+      "importance": 16,
+      "usefulness": 5
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "subsystem": "web/components",
+  "count": 14,
+  "files": [
+    {
+      "path": "web/components/finder.tsx",
+      "role": "Next.js full-text search + faceted finder UI",
+      "importance": 38,
+      "usefulness": 26
+    },
+    {
+      "path": "web/components/graph-view.tsx",
+      "role": "Next.js graph canvas React component",
+      "importance": 29,
+      "usefulness": 23
+    },
+    {
+      "path": "web/components/portable-doc.tsx",
+      "role": "portable-doc block renderer",
+      "importance": 27,
+      "usefulness": 24
+    },
+    {
+      "path": "web/components/document-detail.tsx",
+      "role": "document detail pane server component",
+      "importance": 25,
+      "usefulness": 21
+    },
+    {
+      "path": "web/components/live-bridge.tsx",
+      "role": "Live content subscription bridge",
+      "importance": 23,
+      "usefulness": 17
+    },
+    {
+      "path": "web/components/document-nav.tsx",
+      "role": "keyboard navigation layer for document pane",
+      "importance": 20,
+      "usefulness": 18
+    },
+    {
+      "path": "web/components/sheet-grid.tsx",
+      "role": "spreadsheet grid renderer component",
+      "importance": 20,
+      "usefulness": 18
+    },
+    {
+      "path": "web/components/graph-landing.tsx",
+      "role": "Obsidian-style graph landing component",
+      "importance": 23,
+      "usefulness": 14
+    },
+    {
+      "path": "web/components/post-article.tsx",
+      "role": "shared post detail view component",
+      "importance": 21,
+      "usefulness": 15
+    },
+    {
+      "path": "web/components/workspace-project-switcher.tsx",
+      "role": "workspace/project scope switcher UI",
+      "importance": 22,
+      "usefulness": 14
+    },
+    {
+      "path": "web/components/detail-chrome.tsx",
+      "role": "detail pane sticky header",
+      "importance": 17,
+      "usefulness": 17
+    },
+    {
+      "path": "web/components/posts-list.tsx",
+      "role": "posts list UI component",
+      "importance": 19,
+      "usefulness": 12
+    },
+    {
+      "path": "web/components/meta-card.tsx",
+      "role": "document metadata display component",
+      "importance": 14,
+      "usefulness": 11
+    },
+    {
+      "path": "web/components/bench.tsx",
+      "role": "Search engine benchmarking UI component",
+      "importance": 12,
+      "usefulness": 11
+    }
+  ]
+}

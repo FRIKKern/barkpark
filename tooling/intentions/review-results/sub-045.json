@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/barkpark_web/studio",
+  "summary": "Pure UI-layer helpers for the multi-pane LiveView Studio: pane-tree construction from schema structure, multi-tenant scope switching, collaborative presence, and navigation. These modules are extracted from StudioLive to keep it thin and testable.",
+  "intentions": [
+    {
+      "title": "Render a multi-pane Miller-column content browser from schema structure",
+      "scale": "epic",
+      "evidence": "pane_builder.ex walk_path/7 recursively walks the Structure tree against the nav URL path, emitting a list of pane maps (root list → sub-list → doc list → editor) that StudioLive renders as Miller columns — mirrors the Go TUI's rebuildPanes() loop."
+    },
+    {
+      "title": "Harden multi-tenant isolation in the Studio UI",
+      "scale": "epic",
+      "evidence": "pane_builder.ex threads :scope (workspace_id/project_id) into every Content read so the desk shows only the active tenant's documents; presence_state.ex keys PubSub topics per workspace_id to prevent cross-tenant avatar bleed; dataset is stamped on each presence meta to stop same-doc_id co-presence across datasets."
+    },
+    {
+      "title": "Support specialist editor views (paper, graph, sheet, media) inside the standard pane frame",
+      "scale": "small",
+      "evidence": "pane_builder.ex dispatches on type_name and a reserved 'graph' URL segment to return view: :paper | :graph | :sheet | :media_explorer editor maps, letting StudioLive render the right LiveComponent without branching in the router."
+    },
+    {
+      "title": "Expose blast-radius / content-graph exploration from any document",
+      "scale": "small",
+      "evidence": "pane_builder.ex has a dedicated walk_path clause for the 'graph' URL literal that resolves a type-agnostic doc and calls Content.Graph.traverse/2 with direction: :both, depth: 2, returning nodes/edges/root so GraphView can render the dependency ring."
+    },
+    {
+      "title": "Enable workspace/project/dataset scope switching without page reloads",
+      "scale": "small",
+      "evidence": "workspace_switcher.ex renders a three-column Miller popover (workspace → project → dataset) where column clicks preview children without navigating and only a dataset pick fires scope-open (push_navigate to the canonical /w/:ws/p/:proj/d/:ds/studio URL)."
+    },
+    {
+      "title": "Surface collaborative presence (co-editors) scoped to the right tenant and document",
+      "scale": "small",
+      "evidence": "presence_state.ex provides topic/1 (workspace-keyed PubSub topic), on_doc/3 (filter by doc_id + dataset), pick_color/1 (deterministic avatar color from user_id), and list/1 (flatten Phoenix.Presence metas) — all pure helpers consumed by StudioLive's track/subscribe calls."
+    },
+    {
+      "title": "Provide schema-driven list previews (badge/meta) in document list panes",
+      "scale": "small",
+      "evidence": "pane_builder.ex doc_items/2 reads list_preview from the schema (badge + meta specs, field name or {field, prefix} map) and annotates each row map — generic across all schema types with graceful nil-fallback."
+    },
+    {
+      "title": "Keep StudioLive thin by extracting pure data modules",
+      "scale": "small",
+      "evidence": "pane_builder.ex and presence_state.ex module docs explicitly state they carry no socket/PubSub/Presence calls and were extracted from StudioLive in Task #11 WI3 for testability."
+    }
+  ]
+}

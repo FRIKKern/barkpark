@@ -1,0 +1,126 @@
+{
+  "subsystem": "web/lib",
+  "count": 20,
+  "files": [
+    {
+      "path": "web/lib/barkpark-client.ts",
+      "role": "Server-side Barkpark client factory",
+      "importance": 39,
+      "usefulness": 32
+    },
+    {
+      "path": "web/lib/find.ts",
+      "role": "finder shared types and pure helpers",
+      "importance": 33,
+      "usefulness": 38
+    },
+    {
+      "path": "web/lib/bp-fetch.ts",
+      "role": "server-side HTTP fetch client with keep-alive and retry",
+      "importance": 36,
+      "usefulness": 33
+    },
+    {
+      "path": "web/lib/find-search.ts",
+      "role": "server-side search API client",
+      "importance": 37,
+      "usefulness": 32
+    },
+    {
+      "path": "web/lib/config.ts",
+      "role": "dataset name constant",
+      "importance": 24,
+      "usefulness": 37
+    },
+    {
+      "path": "web/lib/find-shape.ts",
+      "role": "search response normalizer / shape mapper",
+      "importance": 31,
+      "usefulness": 29
+    },
+    {
+      "path": "web/lib/graph.ts",
+      "role": "content graph data fetcher and shape transformer",
+      "importance": 23,
+      "usefulness": 36
+    },
+    {
+      "path": "web/lib/papers.ts",
+      "role": "PortableDoc paper document types and helpers",
+      "importance": 21,
+      "usefulness": 36
+    },
+    {
+      "path": "web/lib/sheets.ts",
+      "role": "sheet document model and densification helpers",
+      "importance": 22,
+      "usefulness": 33
+    },
+    {
+      "path": "web/lib/hovered-doc-context.tsx",
+      "role": "Graph–finder hover and match context provider",
+      "importance": 25,
+      "usefulness": 29
+    },
+    {
+      "path": "web/lib/get-post.ts",
+      "role": "ISR-cached post fetch helper",
+      "importance": 29,
+      "usefulness": 24
+    },
+    {
+      "path": "web/lib/bp-tags.ts",
+      "role": "Next.js cache tag helpers mirroring webhook contract",
+      "importance": 21,
+      "usefulness": 29
+    },
+    {
+      "path": "web/lib/get-document.ts",
+      "role": "generic document fetch utility",
+      "importance": 24,
+      "usefulness": 26
+    },
+    {
+      "path": "web/lib/posts.ts",
+      "role": "demo post fetch helpers",
+      "importance": 18,
+      "usefulness": 32
+    },
+    {
+      "path": "web/lib/get-paper.ts",
+      "role": "ISR-cached paper fetch helper",
+      "importance": 26,
+      "usefulness": 23
+    },
+    {
+      "path": "web/lib/use-live-search.ts",
+      "role": "WebSocket live search React hook",
+      "importance": 27,
+      "usefulness": 20
+    },
+    {
+      "path": "web/lib/stem.ts",
+      "role": "conservative morphological token stemmer",
+      "importance": 16,
+      "usefulness": 27
+    },
+    {
+      "path": "web/lib/finder-nav-context.tsx",
+      "role": "keyboard navigation context for finder layout",
+      "importance": 17,
+      "usefulness": 17
+    },
+    {
+      "path": "web/lib/search-session.ts",
+      "role": "persistent browser search session ID generator",
+      "importance": 14,
+      "usefulness": 14
+    },
+    {
+      "path": "web/lib/did-you-mean.ts",
+      "role": "client-side spelling suggestion utility",
+      "importance": 13,
+      "usefulness": 14
+    }
+  ]
+}

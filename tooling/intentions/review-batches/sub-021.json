@@ -1,0 +1,72 @@
+{
+  "subsystem": "tooling",
+  "count": 11,
+  "files": [
+    {
+      "path": "tooling/consistency/consistency.mjs",
+      "role": "consistency scanner and batch manager",
+      "importance": 28,
+      "usefulness": 27
+    },
+    {
+      "path": "tooling/combined/combine.mjs",
+      "role": "importance x consistency join script",
+      "importance": 27,
+      "usefulness": 21
+    },
+    {
+      "path": "tooling/ergonomics/ergonomics.mjs",
+      "role": "god-file and bloat detector",
+      "importance": 22,
+      "usefulness": 20
+    },
+    {
+      "path": "tooling/quality/quality.mjs",
+      "role": "codebase quality synthesizer",
+      "importance": 29,
+      "usefulness": 9
+    },
+    {
+      "path": "tooling/file-importance/build-signals.mjs",
+      "role": "file importance signal builder and batch partitioner",
+      "importance": 24,
+      "usefulness": 11
+    },
+    {
+      "path": "tooling/research-coverage/coverage.mjs",
+      "role": "research-coverage ledger engine",
+      "importance": 24,
+      "usefulness": 10
+    },
+    {
+      "path": "tooling/status/status.mjs",
+      "role": "status-quo entry point / orchestrator",
+      "importance": 22,
+      "usefulness": 12
+    },
+    {
+      "path": "tooling/ergonomics/measure.mjs",
+      "role": "ergonomics analysis script",
+      "importance": 18,
+      "usefulness": 11
+    },
+    {
+      "path": "tooling/risk/risk.mjs",
+      "role": "risk axis analyzer",
+      "importance": 21,
+      "usefulness": 8
+    },
+    {
+      "path": "tooling/file-importance/merge.mjs",
+      "role": "importance-score merge pipeline",
+      "importance": 20,
+      "usefulness": 8
+    },
+    {
+      "path": "tooling/twoslash-mocks/next-stubs.d.ts",
+      "role": "TypeScript ambient stubs for Next.js internals used in docs twoslash fences",
+      "importance": 6,
+      "usefulness": 5
+    }
+  ]
+}

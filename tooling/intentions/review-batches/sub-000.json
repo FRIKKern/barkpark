@@ -1,0 +1,324 @@
+{
+  "subsystem": "api/lib/barkpark",
+  "count": 53,
+  "files": [
+    {
+      "path": "api/lib/barkpark/content.ex",
+      "role": "core document and schema CRUD context",
+      "importance": 67,
+      "usefulness": 78
+    },
+    {
+      "path": "api/lib/barkpark/plugin.ex",
+      "role": "plugin behaviour contract and use macro",
+      "importance": 60,
+      "usefulness": 76
+    },
+    {
+      "path": "api/lib/barkpark/repo.ex",
+      "role": "Ecto repository definition",
+      "importance": 55,
+      "usefulness": 71
+    },
+    {
+      "path": "api/lib/barkpark/auth.ex",
+      "role": "API token auth context",
+      "importance": 59,
+      "usefulness": 64
+    },
+    {
+      "path": "api/lib/barkpark/webhooks.ex",
+      "role": "Webhook context — CRUD, scoped queries, delivery slot claiming, secret rotation",
+      "importance": 60,
+      "usefulness": 62
+    },
+    {
+      "path": "api/lib/barkpark/tenancy.ex",
+      "role": "Workspace/Project/Dataset tenancy context",
+      "importance": 56,
+      "usefulness": 64
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/webhook.ex",
+      "role": "Webhook Ecto schema and secret rotation logic",
+      "importance": 59,
+      "usefulness": 52
+    },
+    {
+      "path": "api/lib/barkpark/auth/api_token.ex",
+      "role": "API token Ecto schema",
+      "importance": 52,
+      "usefulness": 57
+    },
+    {
+      "path": "api/lib/barkpark/validation/registry.ex",
+      "role": "ETS-backed validation checker registry GenServer",
+      "importance": 62,
+      "usefulness": 46
+    },
+    {
+      "path": "api/lib/barkpark/media.ex",
+      "role": "media upload and file management context",
+      "importance": 49,
+      "usefulness": 57
+    },
+    {
+      "path": "api/lib/barkpark/sharing.ex",
+      "role": "scoped-sharing access control registry",
+      "importance": 47,
+      "usefulness": 58
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/dispatcher.ex",
+      "role": "Webhook delivery with HMAC signing and retry",
+      "importance": 47,
+      "usefulness": 56
+    },
+    {
+      "path": "api/lib/barkpark/sheets.ex",
+      "role": "core sheets A1 address and snapshot utilities",
+      "importance": 41,
+      "usefulness": 58
+    },
+    {
+      "path": "api/lib/barkpark/tasks.ex",
+      "role": "Task document schema and lifecycle engine",
+      "importance": 54,
+      "usefulness": 45
+    },
+    {
+      "path": "api/lib/barkpark/validation/checker.ex",
+      "role": "Validation checker behaviour definition",
+      "importance": 55,
+      "usefulness": 42
+    },
+    {
+      "path": "api/lib/barkpark/sheets/session.ex",
+      "role": "collaborative sheet session GenServer",
+      "importance": 46,
+      "usefulness": 48
+    },
+    {
+      "path": "api/lib/barkpark/sheets/engine.ex",
+      "role": "spreadsheet formula engine",
+      "importance": 42,
+      "usefulness": 47
+    },
+    {
+      "path": "api/lib/barkpark/application.ex",
+      "role": "OTP application entrypoint and supervision tree",
+      "importance": 74,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark/structure.ex",
+      "role": "Studio navigation structure builder",
+      "importance": 45,
+      "usefulness": 39
+    },
+    {
+      "path": "api/lib/barkpark/schema_bootstrap.ex",
+      "role": "boot-time plugin schema registration orchestrator",
+      "importance": 49,
+      "usefulness": 29
+    },
+    {
+      "path": "api/lib/barkpark/sheets/structure.ex",
+      "role": "sheet row/column structural rewrite engine",
+      "importance": 37,
+      "usefulness": 40
+    },
+    {
+      "path": "api/lib/barkpark/external_sync.ex",
+      "role": "external sync registry and PubSub hub",
+      "importance": 40,
+      "usefulness": 36
+    },
+    {
+      "path": "api/lib/barkpark/preview_token.ex",
+      "role": "short-lived HS256 preview JWT manager",
+      "importance": 46,
+      "usefulness": 27
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/delivery.ex",
+      "role": "Ecto schema for webhook delivery records",
+      "importance": 30,
+      "usefulness": 41
+    },
+    {
+      "path": "api/lib/barkpark/sharing/stored_share.ex",
+      "role": "Ecto schema for persisted share grants",
+      "importance": 23,
+      "usefulness": 47
+    },
+    {
+      "path": "api/lib/barkpark/validation/cross_codelist.ex",
+      "role": "Cross-field codelist consistency helper",
+      "importance": 50,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/idempotency.ex",
+      "role": "idempotency-key dedup store",
+      "importance": 37,
+      "usefulness": 27
+    },
+    {
+      "path": "api/lib/barkpark/codelists/editeur.ex",
+      "role": "EDItEUR ONIX codelist XML parser/seeder",
+      "importance": 36,
+      "usefulness": 27
+    },
+    {
+      "path": "api/lib/barkpark/tasks/edge.ex",
+      "role": "Ecto schema for task dependency edges",
+      "importance": 38,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/api_tester/endpoints.ex",
+      "role": "Studio API docs and playground spec registry",
+      "importance": 34,
+      "usefulness": 27
+    },
+    {
+      "path": "api/lib/barkpark/tasks/ttl_sweeper.ex",
+      "role": "crashed-agent claim reaper (Oban worker)",
+      "importance": 45,
+      "usefulness": 16
+    },
+    {
+      "path": "api/lib/barkpark/rate_limiter.ex",
+      "role": "ETS token-bucket rate limiter",
+      "importance": 38,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark/sharing/share_link.ex",
+      "role": "Ecto schema for share links",
+      "importance": 33,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark/release.ex",
+      "role": "Production release task runner (migrations + seeds)",
+      "importance": 45,
+      "usefulness": 11
+    },
+    {
+      "path": "api/lib/barkpark/sharing/links.ex",
+      "role": "item share link context (create/resolve/revoke)",
+      "importance": 37,
+      "usefulness": 18
+    },
+    {
+      "path": "api/lib/barkpark/tasks/compactor.ex",
+      "role": "Oban worker for task document storage compaction",
+      "importance": 36,
+      "usefulness": 14
+    },
+    {
+      "path": "api/lib/barkpark/papers/text_diff.ex",
+      "role": "Line-level LCS diff utility for paperflow goal-path rail",
+      "importance": 24,
+      "usefulness": 24
+    },
+    {
+      "path": "api/lib/barkpark/api_test_runner/asserts.ex",
+      "role": "built-in assertion evaluators for API test runner",
+      "importance": 26,
+      "usefulness": 21
+    },
+    {
+      "path": "api/lib/barkpark/api_test_runner.ex",
+      "role": "Plugin API test spec executor",
+      "importance": 24,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/seeds/clean.ex",
+      "role": "clean-install seed profile",
+      "importance": 31,
+      "usefulness": 13
+    },
+    {
+      "path": "api/lib/barkpark/api_tester/runner.ex",
+      "role": "API tester HTTP request executor",
+      "importance": 29,
+      "usefulness": 13
+    },
+    {
+      "path": "api/lib/barkpark/seeds.ex",
+      "role": "database seed dispatcher",
+      "importance": 29,
+      "usefulness": 11
+    },
+    {
+      "path": "api/lib/barkpark/vault.ex",
+      "role": "Cloak encryption vault",
+      "importance": 35,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/barkpark/encrypted_map.ex",
+      "role": "encrypted map Ecto type",
+      "importance": 31,
+      "usefulness": 8
+    },
+    {
+      "path": "api/lib/barkpark/auth/public_read.ex",
+      "role": "public-read token rotation helper",
+      "importance": 30,
+      "usefulness": 9
+    },
+    {
+      "path": "api/lib/barkpark/seeds/shared.ex",
+      "role": "seed tenancy bootstrap helper",
+      "importance": 16,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark/release/secrets.ex",
+      "role": "first-run crypto secret generator for local installs",
+      "importance": 25,
+      "usefulness": 10
+    },
+    {
+      "path": "api/lib/barkpark/workers/search_analytics_prune.ex",
+      "role": "Oban worker shim for search analytics pruning",
+      "importance": 26,
+      "usefulness": 8
+    },
+    {
+      "path": "api/lib/barkpark/workers/search_analytics_crystallize.ex",
+      "role": "Oban worker shim for search analytics crystallization",
+      "importance": 27,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/barkpark/seeds/demo.ex",
+      "role": "Demo seed data module",
+      "importance": 18,
+      "usefulness": 13
+    },
+    {
+      "path": "api/lib/barkpark/telemetry/handlers.ex",
+      "role": "telemetry event attachment for Oban and plugin observability",
+      "importance": 26,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/barkpark/text_diff.ex",
+      "role": "rail diff wrapper for goal-path modal",
+      "importance": 18,
+      "usefulness": 10
+    },
+    {
+      "path": "api/lib/barkpark/workers/smoke.ex",
+      "role": "Oban smoke-test worker",
+      "importance": 17,
+      "usefulness": 6
+    }
+  ]
+}

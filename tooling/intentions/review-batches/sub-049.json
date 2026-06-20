@@ -1,0 +1,36 @@
+{
+  "subsystem": "sdk/src",
+  "count": 5,
+  "files": [
+    {
+      "path": "sdk/src/blocks.ts",
+      "role": "PortableDoc block type definitions and constructors",
+      "importance": 31,
+      "usefulness": 34
+    },
+    {
+      "path": "sdk/src/client.ts",
+      "role": "Bulldocs HTTP ingest client",
+      "importance": 29,
+      "usefulness": 32
+    },
+    {
+      "path": "sdk/src/ops.ts",
+      "role": "PortableDoc patch-op type definitions and constructors",
+      "importance": 28,
+      "usefulness": 32
+    },
+    {
+      "path": "sdk/src/paper.ts",
+      "role": "Paper builder",
+      "importance": 25,
+      "usefulness": 23
+    },
+    {
+      "path": "sdk/src/index.ts",
+      "role": "Bulldocs SDK barrel entrypoint",
+      "importance": 26,
+      "usefulness": 18
+    }
+  ]
+}

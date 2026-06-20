@@ -1,0 +1,21 @@
+{
+  "subsystem": ".claude",
+  "summary": "Project-local Claude Code configuration: a pre-tool-use hook that gates force-push operations with an opt-in escape hatch, and a workflow script that runs an adversarial View↔Edit parity audit across all PortableDoc block types.",
+  "intentions": [
+    {
+      "title": "Guard against unsafe git operations while preserving rebase workflows",
+      "scale": "small",
+      "evidence": "on-pre-tool-use.sh blocks bare --force push unconditionally but allows --force-with-lease when DOEY_ALLOW_FORCE_PUSH=1 is set; falls through to upstream doey hook for all other rules"
+    },
+    {
+      "title": "Enforce View↔Edit visual parity for PortableDoc rendering",
+      "scale": "epic",
+      "evidence": "view-edit-parity.workflow.js enumerates all block types from render.ex, extracts inline styles and editor CSS from root.html.heex, diffs every block×variant pair, adversarially verifies findings with two independent agent voters, and writes a parity matrix report"
+    },
+    {
+      "title": "Systematise quality audits via reproducible multi-agent workflows",
+      "scale": "small",
+      "evidence": "The workflow uses paperflow agent types (paperflow-researcher, paperflow-doc-writer), structured JSON schemas per phase, parallel fan-out, and a 2-voter adversarial gate — establishing a repeatable audit pattern rather than a one-off script"
+    }
+  ]
+}

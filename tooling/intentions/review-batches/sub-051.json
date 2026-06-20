@@ -1,0 +1,30 @@
+{
+  "subsystem": "api/lib/barkpark/portable_doc",
+  "count": 4,
+  "files": [
+    {
+      "path": "api/lib/barkpark/portable_doc/patch.ex",
+      "role": "PortableDoc block tree patch engine",
+      "importance": 49,
+      "usefulness": 70
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/render.ex",
+      "role": "Pd-tree to HTML renderer",
+      "importance": 50,
+      "usefulness": 61
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/projection.ex",
+      "role": "PortableDoc bound/free block projection engine",
+      "importance": 48,
+      "usefulness": 37
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/synthesis.ex",
+      "role": "legacy document block list synthesizer",
+      "importance": 39,
+      "usefulness": 29
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "subsystem": "js/packages/nextjs/src",
+  "count": 15,
+  "files": [
+    {
+      "path": "js/packages/nextjs/src/server/core.ts",
+      "role": "Next.js server fetch core — URL builder + cache tag resolver",
+      "importance": 53,
+      "usefulness": 42
+    },
+    {
+      "path": "js/packages/nextjs/src/revalidate/index.ts",
+      "role": "Next.js cache revalidation handler",
+      "importance": 54,
+      "usefulness": 38
+    },
+    {
+      "path": "js/packages/nextjs/src/webhook/index.ts",
+      "role": "Next.js webhook handler factory",
+      "importance": 55,
+      "usefulness": 33
+    },
+    {
+      "path": "js/packages/nextjs/src/actions/defineActions.ts",
+      "role": "Next.js Server Actions factory",
+      "importance": 44,
+      "usefulness": 39
+    },
+    {
+      "path": "js/packages/nextjs/src/draft-mode/index.ts",
+      "role": "Next.js draft-mode route factory",
+      "importance": 53,
+      "usefulness": 30
+    },
+    {
+      "path": "js/packages/nextjs/src/client/live.tsx",
+      "role": "Next.js SSE live-reload component",
+      "importance": 42,
+      "usefulness": 38
+    },
+    {
+      "path": "js/packages/nextjs/src/server/types.ts",
+      "role": "Next.js server config and fetch option types",
+      "importance": 33,
+      "usefulness": 40
+    },
+    {
+      "path": "js/packages/nextjs/src/index.ts",
+      "role": "Next.js package root export stub",
+      "importance": 36,
+      "usefulness": 35
+    },
+    {
+      "path": "js/packages/nextjs/src/preload/index.ts",
+      "role": "Next.js App Router preload utility",
+      "importance": 45,
+      "usefulness": 26
+    },
+    {
+      "path": "js/packages/nextjs/src/server/index.ts",
+      "role": "Next.js server subpath export",
+      "importance": 51,
+      "usefulness": 18
+    },
+    {
+      "path": "js/packages/nextjs/src/actions/useOptimisticDocument.ts",
+      "role": "React hook for optimistic document mutations",
+      "importance": 28,
+      "usefulness": 28
+    },
+    {
+      "path": "js/packages/nextjs/src/client/index.ts",
+      "role": "Next.js client-side subpath entrypoint",
+      "importance": 42,
+      "usefulness": 9
+    },
+    {
+      "path": "js/packages/nextjs/src/webhook/types.ts",
+      "role": "webhook config and handler types",
+      "importance": 25,
+      "usefulness": 25
+    },
+    {
+      "path": "js/packages/nextjs/src/actions/index.ts",
+      "role": "Next.js actions package public entrypoint",
+      "importance": 39,
+      "usefulness": 8
+    },
+    {
+      "path": "js/packages/nextjs/src/draft-mode/types.ts",
+      "role": "draft-mode config and handler types",
+      "importance": 25,
+      "usefulness": 21
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "subsystem": "js/packages/core",
+  "summary": "Build and test infrastructure for the @barkpark/core JS SDK — packages the client for CJS/ESM/TypeScript consumers and validates it across Node, browser, and Cloudflare Workers runtimes, plus a live regression harness against prod.",
+  "intentions": [
+    {
+      "title": "Ship a universal JS SDK that runs anywhere",
+      "scale": "epic",
+      "evidence": "tsup.config.ts emits both CJS (.cjs) and ESM (.mjs) with tree-shaking + dts; separate vitest configs for node, browser (Playwright/Chromium), and Cloudflare Workers (workerd) prove the same package works across all three runtimes"
+    },
+    {
+      "title": "Prevent API contract regressions from shipping to consumers",
+      "scale": "small",
+      "evidence": "scripts/live-regression.mjs imports the built dist and fires real requests at prod (89.167.28.206) to prove defects #16 (docs.find() envelope) and #18 (single-doc fetch) stay fixed; fails with non-zero exit on shape mismatch"
+    },
+    {
+      "title": "Maintain tight TypeScript DX for SDK consumers",
+      "scale": "small",
+      "evidence": "tsup.config.ts sets dts:true and sourcemap:true, targeting es2022 with code-splitting — consumers get full types, source maps, and shake-friendly imports out of the box"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit",
+  "summary": "The OnixEdit plugin integrates Barkpark with the Norwegian book trade standard ONIX 3.0 and the Bokbasen distribution channel. It provides bidirectional ONIX 3.0 XML conversion (import + XSD-validated export), automated publish-on-save to Bokbasen via lifecycle hooks, a Studio admin surface, and codelist drift detection.",
+  "intentions": [
+    {
+      "title": "Emit standards-compliant ONIX 3.0 XML for trade distribution",
+      "scale": "epic",
+      "evidence": "export.ex builds full EDItEUR-conformant ONIXMessage trees (DescriptiveDetail, CollateralDetail, PublishingDetail, ProductSupply); export_controller.ex streams XSD-gated XML at GET /v1/plugins/onixedit/export/:dataset/:id.onix; to_iodata/1 refuses to emit invalid XML"
+    },
+    {
+      "title": "Automate Bokbasen submission on normal publish (zero extra clicks)",
+      "scale": "epic",
+      "evidence": "lifecycle.ex registers an after_publish hook that enqueues Bokbasen.PublishWorker whenever a book document is published; recursion guard on ctx.source == :worker prevents infinite re-enqueue loops"
+    },
+    {
+      "title": "Support round-trip ONIX import so external catalogs can be ingested",
+      "scale": "small",
+      "evidence": "importer.ex parses ONIX 3.0 XML back to book content maps that byte-stably re-export through the same exporter; designed as the explicit inverse of export.ex"
+    },
+    {
+      "title": "Surface Bokbasen dry-run preview and manual retry in Studio",
+      "scale": "small",
+      "evidence": "actions.ex exposes publish_to_bokbasen/3 in :dryrun and :real modes; bokbasen_live.ex provides an admin LiveView for submission state; export_onix_path/2 renders a kind:link download action in the Studio schema registry"
+    },
+    {
+      "title": "Detect and surface ONIX codelist version drift before submissions fail downstream",
+      "scale": "small",
+      "evidence": "staleness_checker.ex classifies every pinned codelist ref as :current/:stale/:deprecated/:acknowledged against the current registry issue; staleness_live.ex surfaces this in a Studio admin panel; revalidate/2 computes the diff needed to bring a doc current"
+    },
+    {
+      "title": "Enforce multi-tenant isolation on ONIX export",
+      "scale": "small",
+      "evidence": "export_controller.ex loads documents via Content.get_document with scope_opts(conn) so a cross-workspace book never resolves; lifecycle.ex captures workspace_id/project_id into Oban job args so the worker re-reads the correct tenant's book"
+    }
+  ]
+}

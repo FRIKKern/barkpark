@@ -1,0 +1,46 @@
+{
+  "subsystem": "internal/cli",
+  "summary": "The manifest-driven `bp` CLI dispatcher: a zero-hardcoded-command binary that builds its entire noun/verb command tree at runtime from the server's /v1/capabilities manifest, then routes each invocation to the appropriate HTTP endpoint. It shares the same binary as the TUI, routing based on whether positional args are present.",
+  "intentions": [
+    {
+      "title": "Zero-code plugin extensibility via manifest-driven dispatch",
+      "scale": "epic",
+      "evidence": "cli.go comment explicitly states 'Nothing in this package hardcodes a noun, verb, or route. The command tree is a pure function of the capabilities manifest.' run.go builds URLs via manifest.BuildURL. A new server-side plugin adds CLI commands with zero client code changes."
+    },
+    {
+      "title": "Deterministic credential and server resolution with layered precedence",
+      "scale": "epic",
+      "evidence": "cli.go resolveContext() implements flags > env(actually-set) > active(persisted config) > baked defaults. config.go Config struct + ToActiveContext() + SaveConfig() back the persistence layer. envContext() deliberately avoids baking a non-empty floor so saved config can win."
+    },
+    {
+      "title": "Multi-server management for local and cloud environments",
+      "scale": "small",
+      "evidence": "config.go KnownServers history, ServerEntry, RememberServer(), FindServer(), SetActiveServer(), ServerKind() local/cloud classifier. servers_cmd.go `bp use <name|url>` and `bp servers` let users switch active targets without re-typing URLs or tokens."
+    },
+    {
+      "title": "Scripting-friendly output and stable exit codes",
+      "scale": "small",
+      "evidence": "cli.go documents exit codes 0-8 (exitOK through exitServer) mapped from HTTP status. output.go renders table/JSON/YAML/minimal modes. run.go renderMinimal() prints only rev+ids for write receipts — designed for shell pipelines."
+    },
+    {
+      "title": "Production write-guard to prevent accidental mutations",
+      "scale": "small",
+      "evidence": "run.go confirmProdWrite() prompts [y/N] on stderr for any write targeting a prod-looking server (heuristic: name=prod/production or URL contains api.barkpark.cloud). Bypassed only with --yes global flag."
+    },
+    {
+      "title": "Unified TUI + CLI binary with shared server context",
+      "scale": "epic",
+      "evidence": "cli.go package doc: 'The SAME binary serves the interactive TUI (invoked with no args) and this CLI.' ResolvedAPIConfig() and ServerSource() exist specifically to let the TUI inherit exactly the same active-server resolution the CLI uses, so `bp use <name>` affects both surfaces."
+    },
+    {
+      "title": "Safe credential handling and ingest-secret separation",
+      "scale": "small",
+      "evidence": "run.go authHeaders() maps auth_tier (none/read/write/admin/scoped_admin/ingest) to the right credential. ingestSecret() resolves BARKPARK_INGEST_TOKEN separately from the bearer API token. redactHeaders() masks tokens in --dry-run output."
+    },
+    {
+      "title": "Offline and pre-deploy CLI operation via manifest override",
+      "scale": "small",
+      "evidence": "load.go precedence: --manifest flag > $BARKPARK_MANIFEST env > ETag-cached network fetch. Allows running the CLI against a local fixture file before /v1/capabilities is deployed on the target server."
+    }
+  ]
+}

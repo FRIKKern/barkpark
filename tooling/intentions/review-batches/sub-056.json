@@ -1,0 +1,30 @@
+{
+  "subsystem": "tooling/blast-radius",
+  "count": 4,
+  "files": [
+    {
+      "path": "tooling/blast-radius/check.mjs",
+      "role": "pre-push blast-radius checker",
+      "importance": 24,
+      "usefulness": 27
+    },
+    {
+      "path": "tooling/blast-radius/dossier.mjs",
+      "role": "agent-ready dossier builder with verdict cache",
+      "importance": 21,
+      "usefulness": 24
+    },
+    {
+      "path": "tooling/blast-radius/build-index.mjs",
+      "role": "reverse-dependency graph builder",
+      "importance": 21,
+      "usefulness": 23
+    },
+    {
+      "path": "tooling/blast-radius/install-hook.sh",
+      "role": "git hook installer",
+      "importance": 11,
+      "usefulness": 8
+    }
+  ]
+}

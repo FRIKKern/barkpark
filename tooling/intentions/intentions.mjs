@@ -19,7 +19,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 const cmd = process.argv[2] || "digest";
 const BATCH = 10;
 
-const nodes = JSON.parse(readFileSync(join(ROOT, "tooling/barkpark-sync/nodes.json"), "utf8")).nodes;
+const nodes = JSON.parse(readFileSync(join(ROOT, "tooling/barkpark-sync/nodes.json"), "utf8")).nodes.filter(n => n.kind !== "intention");
 const rows = nodes.map(n => ({ path: n.path, stack: n.fields.stack, role: n.fields.role, why: (n.fields.whyUseful || n.fields.description || "").slice(0, 160), importance: n.fields.importance, usefulness: n.fields.usefulness }));
 
 if (cmd === "digest") {

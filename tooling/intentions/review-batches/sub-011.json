@@ -1,0 +1,102 @@
+{
+  "subsystem": "internal/cli",
+  "count": 16,
+  "files": [
+    {
+      "path": "internal/cli/run.go",
+      "role": "CLI command execution core",
+      "importance": 62,
+      "usefulness": 44
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "role": "bp CLI entry point and manifest-driven dispatcher",
+      "importance": 66,
+      "usefulness": 39
+    },
+    {
+      "path": "internal/cli/config.go",
+      "role": "CLI config persistence and context resolution",
+      "importance": 55,
+      "usefulness": 35
+    },
+    {
+      "path": "internal/cli/errors.go",
+      "role": "CLI API error decoding and exit-code mapping",
+      "importance": 49,
+      "usefulness": 21
+    },
+    {
+      "path": "internal/cli/setup_cmd.go",
+      "role": "setup command adapter/bridge",
+      "importance": 44,
+      "usefulness": 26
+    },
+    {
+      "path": "internal/cli/load.go",
+      "role": "CLI capabilities manifest loader with file/env/network precedence",
+      "importance": 50,
+      "usefulness": 15
+    },
+    {
+      "path": "internal/cli/output.go",
+      "role": "CLI output renderer (table/JSON/YAML/minimal)",
+      "importance": 42,
+      "usefulness": 21
+    },
+    {
+      "path": "internal/cli/globals.go",
+      "role": "CLI global flags parser",
+      "importance": 44,
+      "usefulness": 17
+    },
+    {
+      "path": "internal/cli/builtins.go",
+      "role": "CLI built-in commands (version, capabilities)",
+      "importance": 42,
+      "usefulness": 18
+    },
+    {
+      "path": "internal/cli/table.go",
+      "role": "CLI table renderer for API payloads",
+      "importance": 33,
+      "usefulness": 20
+    },
+    {
+      "path": "internal/cli/usage.go",
+      "role": "CLI usage/help text renderer",
+      "importance": 35,
+      "usefulness": 17
+    },
+    {
+      "path": "internal/cli/paper_cmd.go",
+      "role": "bp paper view CLI command",
+      "importance": 34,
+      "usefulness": 17
+    },
+    {
+      "path": "internal/cli/migrate_cmd.go",
+      "role": "bp migrate command implementation",
+      "importance": 35,
+      "usefulness": 14
+    },
+    {
+      "path": "internal/cli/servers_cmd.go",
+      "role": "bp use command — named-server switching",
+      "importance": 31,
+      "usefulness": 14
+    },
+    {
+      "path": "internal/cli/upgrade.go",
+      "role": "bp self-upgrade command",
+      "importance": 29,
+      "usefulness": 14
+    },
+    {
+      "path": "internal/cli/uninstall_cmd.go",
+      "role": "bp uninstall command implementation",
+      "importance": 28,
+      "usefulness": 10
+    }
+  ]
+}

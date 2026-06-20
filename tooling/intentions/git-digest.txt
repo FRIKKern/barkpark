@@ -1,0 +1,406 @@
+# Git history — 1021 commits
+
+## commit scopes (frequency):
+studio (88) · web (56) · tui (45) · api (36) · api-tester (27) · cli (22) · plugins (22) · tasks (20) · graph (19) · sharing (18) · search (16) · indx (15) · beads (15) · onixedit (13) · ops (10) · onix (10) · ci (9) · plugin (9) · sheets (8) · content (8) · media (7) · bokbasen (7) · docs (6) · g3 (6) · tooling (5) · readme (5) · test (5) · render (5) · tenancy (5) · migration (5) · g4 (5) · g2 (5) · release (5) · barkpark-sync (4) · bulldocs (4) · js (4) · setup (4) · core (4) · auth (4) · paper-editor (4)
+
+## commit subjects (most recent 400):
+feat(intentions): goal/intention layer — a second edge type
+feat(usefulness): per-file usefulness metric + why-useful, surfaced on papers
+feat(barkpark-sync): graph visualizer + register paper schema per dataset
+feat(barkpark-sync): ingest content to any dataset now that papers are dataset-aware
+feat(bulldocs): dataset-aware paper reader + ingest
+fix(barkpark-sync): skip production-locked content ingest for non-prod datasets
+fix(barkpark-sync): store dependency edges as node ids (not paths)
+feat(tooling): barkpark-sync — ingest codebase graph into Barkpark
+feat(tooling): incremental status-quo report + verdict caching
+feat(tooling): add Tested + Reliability axes to codebase-quality
+feat(tooling): codebase-quality — scorecard + improvement plan
+feat(tooling): codebase-intelligence suite + skill
+feat(graph): subtle idle "breathing" instead of a hard park
+fix(web/finder): disable native autocomplete on the search box
+feat(web/finder): keyboard nav across Search · Facets · List · Document + bidirectional graph hover
+fix(graph,web): stop Next-app search freeze + perpetual graph redraw
+fix(search): WS channel must browse on the ' ' sentinel, not trim it to empty
+refactor(search): query Postgres/Indx directly — drop client cache + optimistic local
+fix(search): scope_opts/1 must handle the channel socket, not just LiveView's
+feat(search): per-keystroke live search over a direct WebSocket (dark)
+perf(web): keep-alive connection pool to the Barkpark API
+perf(indx): batch hit hydration — kill the N+1 Postgres read per search
+feat(indx): v5 upgrade — team-scoped routes, static-token auth, float weights, high-res
+feat(web): conservative morphological matching — operators ≈ operator's
+feat(indx): typo-tolerant title tier — fuzzy recall wins the ranking too
+fix(indx): widen the re-rank candidate pool so title matches actually surface
+feat(web): qualitative match-strength meter per result
+polish(web): Popular shortcuts replace the engine tagline by default
+polish(web): trim the hero lead + drop the Browse Papers link
+fix(web): fold parsed-query chips + fuzzy indicator into the engine row
+fix(web): case-fold query tokens in the exact-match partition
+fix(web): exact term matches beat fuzzy/widened matches in results
+fix(web): stable results header — no layout shift while searching
+feat(web): optimistic local cache ranks per the selected engine
+feat(web): contextual match snippets — highlight the body text that triggered the hit
+refine(indx): finer title tiers — prefix-title beats title-contains
+fix(web): finder input no longer eats keystrokes + optimistic-local search
+feat(indx): title-affinity re-rank — Postgres-parity weighting + fuzzy recall
+content(docs): link the orphaned error-envelope-migration paper to api-v1 + http-api cheatsheet — it semantically belongs to the API reference, and the cross-link folds it into the connected graph (orphans 10->9)
+feat(web): score-weighted finder↔graph — read the results in the graph
+fix(web): media nodes were a 404 dead-end — add mediaAsset/mediaCollection to the detail route's KNOWN_TYPES so clicking a media node in the landing graph opens a MetaCard summary instead of a 404 (document-detail already falls back to MetaCard for non-article types)
+feat(web): make the finder drive the landing graph — one instrument
+fix(web): let the graph pane fill the full right edge of the viewport
+revert(web): restore the wider finder rail (md480/lg640/xl860/2xl1080)
+feat(web): cross-surface graph↔finder highlight — hovering a landing graph node lights up its finder result (violet accent tied to the graph's accent node, matched doc_id==slug). HoveredDocProvider wraps the (finder) layout; GraphLanding wires onNodeHover; ResultRow consumes it. Additive + safe (no-op default outside the provider; no remount change).
+polish(web): reframe the finder hero for the docs showcase — 'Barkpark, documented in Barkpark' (its own docs + a 1:1 GitHub-docs mirror as live Papers, searched two ways, explorable as an Obsidian-style graph) instead of generic CMS marketing
+polish(web): give the graph the stage — cap the finder rail (md440/lg480/xl540/2xl600) instead of escalating to 1080px, so the Obsidian graph landing dominates (~65% on wide screens) and the doc-reading pane is wider too
+fix(graph): raise corpus list_documents limit 100->1000 so the whole-dataset graph isn't truncated at the default page size (we have 118 papers; only 100 showed)
+feat(docs): mirror 51 Barkpark GitHub docs 1:1 into Papers (docs dataset) — web PortableDoc format, doc-link cross-refs as related edges, table heads normalized
+fix(graph): bound the force integrator + reject diverged cameras — cap per-step velocity and sanitize non-finite/runaway node positions (a near-zero inter-node distance could spike 1/dist repulsion to ~1e45, framing empty space → blank canvas); never save/restore a non-finite camera so a pre-existing persisted blowup self-heals to a fresh auto-fit
+fix(papers): convert PortableDoc blocks to the web renderer format — inlines are {type:text,value,marks} (not Elixir-internal {kind:PdText,children}), ingress/heading/paragraph/list/callout block types; re-ingested all 68 into the docs dataset
+fix(graph): never park the draw loop before the first auto-fit — the IntersectionObserver can report not-visible on its first callback for an in-flow canvas inside overflow/scroll ancestors (React pane), parking the sim before it settles+frames and leaving a blank canvas that never re-wakes. Hold alive until initial fit; off-screen parking resumes after.
+fix(web): never serve a cached-empty landing graph — retry live when the cache holds an empty/failed corpus, so a transient upstream hiccup can't pin the graph empty for the revalidate window
+feat(web): Obsidian-style interactive graph landing + docs-dataset finder
+chore(demo): docs-dataset seed content — 68 Papers (PortableDoc blocks + related) + 20 type-samples
+feat(graph): hover hop-cascade renderer + /v1/graph corpus endpoint + paper related field
+polish(graph): Obsidian text-fade labels (option A, fit-relative) — wide/default view = clean dots+threads, no labels; labels fade in only on zoom-in (>2.4x fit) or hover (node + 1-hop neighbors). Active node marked by accent color, not a label.
+polish(graph): much closer to Obsidian — tiny dots (3.5-6 + 10px screen-clamp + fit cap 2.0), label fade-on-zoom, subtle accent active node (not a ball), faithful Obsidian palette (#a6adc0 nodes, faint links, #9a8cff accent, #16161a bg), harder hover dim
+feat(graph): restyle to faithful Obsidian — monochrome small dots + thin faint links + airy force layout (repulsion 2.7x) + zoom-faded labels + hover focus/dim; strip the busy Northern Night effects (orbs, sun, blast-rings, glow, vignette, glyphs); -626 LOC
+polish(graph): restrained gem-sun (1.55x->1.2x, dimmer core) + calmer label LOD + premium edge gradient/flow + deeper bg/vignette + breathing pulse; fix root threading through studio_live setup_graph_view so root-sun centers on the navigated doc
+fix(graph): thread root through graph_payload so the renderer centers the sun on the real blast-radius root, not an arbitrary node
+chore(graph): drop the now-dead cytoscape.min.js script load (Canvas2D renderer is self-contained)
+feat(graph): Northern Night — premium Obsidian-grade Canvas2D renderer (glowing glass orbs, BFS blast-rings, focus+context, hand-rolled force sim) replacing Cytoscape; + standalone visual harness
+fix(graph): give Studio graph pane a real height (was 0px -> blank) + readable node labels (text-outline)
+fix(graph): remediate capstone findings — /v1/graph core-mounted (fresh-install), Studio graph pane reachable, tenancy fail-closed (add_edge + projector delete + read hydration)
+feat(graph): Phase 5 — Studio Cytoscape blast-radius pane + bp-graph.js hook + arrayOf-aware pre-unpublish guard
+feat(graph): Phase 4 — Content.Graph BFS engine + reverse_referencers + /v1/graph/:id|orphans|dangling
+feat(graph): Phase 3 — EdgeProjector worker + plugin extract_edges seam + tasks/bulldocs extractors + fresh-install fire_after enqueue
+feat(graph): Phase 2 — content_edges + Edge schema + core extract_edges/2 + edge CRUD
+fix(web): resilient API fetch — admin reindex button no longer breaks on restart
+fix(search): include sheet in default reindex types
+fix(search): keep Indx @body_max at 4000 — 8000 regressed title-match ranking
+feat(search): tune Indx defaults — field coverage + long-doc indexing
+feat(search): excellent Postgres defaults out of the box
+fix(search): weight title above body in search_vector (Postgres relevance)
+fix(web): move Popular search suggestions below the search bar
+feat(search): click-feedback auto-correction loop (learns hadless→headless)
+feat(web): "Did you mean …?" spelling suggestion for both engines
+refactor(web): tuck advanced finder controls into an Options disclosure
+style(web): thin, theme-matched scrollbars
+feat(web): spacious frontpage finder — 1080px rail in a 2200px container
+fix(web): UTC date formatting — kill React #418 hydration mismatch
+feat(web): master/detail finder — open documents in-place with dedicated URLs
+feat(web): webhook reader revalidation — instant-fresh on publish
+perf(web): real-user CWV monitoring + single-shot home LCP
+perf(web): instant first paint + real Data Cache + fra1 region
+feat(web): reindex button (#2b) + reader ISR (#4)
+feat(search): token-gated reindex endpoint (#2b)
+feat(web): reset-cache control (#2a)
+feat(web): cache-mode toggle + latency readout + /bench engine sweep
+fix(indx): drop _id from searchable fields (kills fuzzy short-id noise)
+fix(web): engine-aware facet-source label (Postgres vs Indx)
+feat(search): types allowlist param so engine results + facets are consistent
+fix(search): group Postgres JSON facets by SELECT alias (selected_as)
+feat(search): Postgres parity — native facets + body-text search
+feat(indx): index a bounded plain-text body so papers are findable by content
+feat(web): finder Showcase Pack — Indx facets, confidence boundary, sort, facet filter
+feat(indx): surface native facets + coverage boundary from search (Showcase A+D)
+feat(web): make the finder the frontpage — it showcases the CMS best
+fix(indx): don't ship the content JSONB to the index (timeout fix)
+fix(indx): drop unloaded associations before JSON-encoding the corpus
+fix(indx): map INDX_* OS env into app config so Auth gets creds
+fix(indx): supervise Indx.Auth + Indx.Recovery (seam has no plugin worker hook)
+fix(indx): declare the missing :indx Oban queue so reindex jobs run
+fix(web): anchor .vercelignore root paths so web/app/api survives the build
+feat(web): advanced finder — search across all document types, Postgres + Indx
+feat(media): ImageMagick rendition backend for Windows (#120)
+feat(web): read Papers (Portable Docs) — listing + block reader
+docs(web): README — @barkpark/nextjs live updates are wired (gated), not deferred
+fix(web): gate live updates behind NEXT_PUBLIC_BARKPARK_LIVE flag
+feat(web): wire @barkpark/nextjs live updates via same-origin SSE proxy
+feat(web): visual design pass — Geist type, editorial listing, loading skeletons
+feat(web): render full post content, per-post metadata, real 404s
+fix(web): add flat /posts/[slug] route, real metadata, pin turbopack root
+docs(readme): premium Setup section at the top (#119)
+feat(windows): one-command native setup + bp Windows release (#118)
+feat(desk): TUI renders the server's canonical desk — Studio parity at the nav layer
+docs(sheets): fold Sheets into the doc spine (R2 docs half)
+fix(sheets): R1 review — session hardening, presence overlay perf, parity contract
+fix(test): deterministic rate-limit burst — the 201-request flake
+feat(sheets): M4 — presence cursors/selections, soft locks, per-user undo, live public reader
+feat(sheets): M0a embed hydration + structural ops + Studio grid editor (M2)
+feat(studio): Classic richText gets a real toolbar — bold, italic, links
+feat(tui): schema field groups render as section headers
+fix(studio): declared number fields get the numeric input treatment
+feat(sheets): M1 — SheetSession supervision, cell-op wire endpoint, export flush
+feat(tui): object arrays render as aligned mini-tables
+fix(content): Studio's checkbox booleans persist as REAL booleans
+feat(sheets): M3 formula engine + M5 conversions, adversarially hardened
+polish(tui): broken-ref warnings, per-field unsaved dots, relative datetime hints
+feat(cli): --set k:=json sends typed values (httpie convention)
+docs: trim the TUI cheatsheet back under its 2400B cap
+polish(tui): human API errors, filterable long-select picker, hex validation
+docs: ledger the Studio boolean-coercion bug found by the switch round-trip
+polish(studio+tui): boolean switch, honest array hint, asset-sever warning
+feat(tui): type-to-filter in the reference picker (Sanity's search-driven refs)
+feat(tui): required markers + schema-pattern validation (Sanity parity)
+feat(tui): typed save for numbers + booleans; datetime/number commit validation
+feat(studio+tui): slug Generate — Sanity's signature affordance, both surfaces
+feat(tui): multiline text/richText + string-array editing with a typed save
+feat(sheets): M0 — data model, sheet embed block, write-through snapshots, static render
+docs(tui): human-tier TUI cheatsheet — keys, draft lifecycle, bulk flow
+feat(sheets): pre-flight — xlsx deps, Sheets plugin skeleton, PdSheet TUI node
+feat(tui): ? opens the full key reference overlay
+feat(tui): space marks doc-list rows; ctrl+p / U act on the marked set
+feat(tui): n creates a workspace/project inside the scope selector
+feat(tui): H opens revision history with one-keypress diff-vs-current
+feat(tui): d opens a draft-vs-published field diff (Studio parity)
+feat(tui): image fields are value-aware and URL-editable (Studio parity)
+fix(studio): image field is two clean states — no inline library grid
+fix(media): scoped delivery accepts the browser session — thumbnails render
+feat(studio): canonical URL becomes /w/:ws/p/:proj/d/:dataset/studio
+style(studio): center the bar tabs at the bar's true horizontal middle
+feat(studio): scope menu — workspace, project + dataset in ONE dropdown
+style(studio): Sanity-inspired top bar — workspace as title, ghost path, icon rail
+fix(studio): restructure the top bar — scope pill, single right group, presence in-bar
+docs(tasks): trim under the byte cap — the gate failure my pipe masked
+docs(tasks): close row gains the [reason] positional — typed verbatim
+fix(studio): API tester runs the FLAT api again — the scoped runner broke Run-all
+fix(studio): consistent top bar everywhere — the StudioChrome contract
+feat(tasks): per-row reference pickers in arrays + worklog compaction
+fix(studio): regroup seed_new_doc_content — clause-split broke the CI compile gate
+feat(tasks): born-valid Studio task creates + close --reason landing slot
+feat(studio): P5 — stragglers: scoped deep links, dead producers deleted, blob backfill, canonical short links
+feat(sharing): P4 — sharing composes on canonical URLs
+chore: untrack api/.claude/ (local Claude Code session state)
+feat(studio)!: P3 — the cutover: flat Studio 302s to the scoped canonical
+fix(studio): drop dead default args — CI compile gate was red
+fix(studio): dev browser reaches scoped Studio without /login
+feat(studio): P2 — every switch and link is URL-real on the scoped surface
+feat(studio): P1 — the scoped Studio mount (/w/:ws/p/:proj/studio/:dataset)
+fix(studio): P0 tenant-boundary fixes — ws-keyed presence, scoped renditions, scoped uploads
+docs(plugins): plugin-route recompile guidance was insufficient — name the real remedy
+polish(tui): editor help bar advertises U unpublish and R discard
+ci(js): changeset job blocks PRs; js/CLAUDE.md hard rules match enforcement
+ci(js): quote the colon-bearing step name — the first run died at YAML parse
+ci(js): the monorepo finally has a test gate — and it found three things
+fix(tasks): lease sweep drops the dead worker's resource fences
+docs: README + bp cheatsheet catch up with prime and resource claims
+feat(tui): R×2 discards the draft — the draft lifecycle triad completes
+feat(tui): U unpublishes — ctrl+p's missing peer; ledger the audited long-tail
+fix(tui): non-scalar fields are read-only AND visible; exact scroll-follow
+feat(tasks): resource claims — the Beads file-claim successor
+feat(tasks): bp task prime — one-call agent rehydration
+fix(tui): SSE refresh no longer steals focus from the open editor
+docs(tasks): honest workspace-cleanup phrasing — delete verb is deferred
+fix(docs+cli): README teaches the real project-create form; create receipts print the slug
+fix(setup): connect refuses a supplied token that resolves to tier none; SDK warns on tokenless drafts
+fix(api): anonymous reads pinned to published; task validation 422s instead of 500
+fix(cli): perspective flag on doc ls/query; list envelopes render as rows
+polish(tui): task editors advertise c/x; ledger records the deferred TUI gaps
+fix(sharing): a read share must never downgrade an authenticated member
+feat(tui): duplicate document (y) — parity gap 7; fix Get's envelope decode
+docs(tui): card notes the reference picker + slash search
+feat(tui): reference picker + search — parity gaps 5+6
+feat(studio): discard-draft action — Studio's one parity gap
+feat(tui): delete (D, two-press) + task quick actions (c claim, x close) — parity gaps 3+4
+feat(tui): publish (ctrl+p) and create document (n) — parity gaps 1+2
+feat(setup): preflight running-server check before destructive DB steps
+docs(tasks): TASK-SYSTEM reflects the task-dossier schema
+feat(studio): Sanity-style reference search + fix Beta-editor v2 block crash
+feat(config): BARKPARK_EXTRA_ORIGINS — per-box websocket origin allowlist
+ci: mix-test is BLOCKING — the remediation it waited on is complete
+refactor(tasks): kill the legacy parent key — parent_id is THE parent reference
+fix(ci): both elixir CI test failures root-caused + format gate advisory
+feat(tasks): task-dossier schema — rich fields, references, tabs, soft validations
+fix(ci): elixir workflow requested a paid runner label nobody has
+docs: tasks cheatsheet back under its byte cap
+docs: copy-edit sweep — de-jargon the newcomer-facing docs
+fix(ci): never cancel in-progress runs on main — the suite was starved dark
+docs: api-v1.md compressed to its 14KB budget + gated, auth.md gated
+fix(js): blog/website starter templates were broken against the real wire
+fix: doc.query filter actually filters + typed-verbatim audit fixes
+fix(docs): demo links use the TLS domain — IP Studio is click-dead by design
+fix: fresh-eyes sweep — 8 findings (dead-end hints, empty panes, orphans, doc errors)
+fix(tasks): broadcast every task op over PubSub — SSE + Studio live-update
+fix(tui): status gap-fill from _draft + no empty [] badge in detail header
+docs: freshen README test count
+fix(registry): capture plugin baseline eagerly at boot — kills the suite's last intermittent
+feat(cli): bp task next — atomic queue claim + informative minimal receipts
+fix: bp task claim/close actually work + mixed-envelope _id honored
+docs(tasks): split the 409 troubleshooting row + complete the controller moduledoc
+fix(tui): normalize the v1 envelope into Doc — ID/UpdatedAt/Values
+feat(tui): list_preview badge parity — task rows show lifecycle + priority
+docs(ops): migration runbook validated live — migrate-first order, un-DRAFT
+feat(studio): schema-level list_preview — at-a-glance badges on list rows
+fix: de-flake CompactorTest + 8 doc/wizard truth-check corrections
+feat(tasks): bare-id resolution on task endpoints + tripwire allowlists
+feat(cli): bp workspace create — one-command sandbox workspaces
+docs: AI-first README + task-system guide
+feat(setup): clean profile pre-checks tasks alongside bulldocs
+feat(tasks): tasks are first-class in Studio
+fix(ci): track go.sum — it was gitignored, so CI checkouts had no dependency checksums and cli-release failed on 'missing go.sum entry'
+fix(seeds): welcome paper renders in article style
+premium-setup fix(integration): studio editor test no longer leans on committed demo-seed post layout
+premium-setup D1+D2: QUICKSTART, cheatsheets, README + HANDBOOK install docs
+premium-setup fix(C): first-run guard fires before manifest fetch, not only on fetch failure
+premium-setup C4: bp uninstall builtin — config always, --local tears down the dev stack
+premium-setup C3: go:embed deploy.sh + seed env in the ssh prefix + .env plugin persistence
+premium-setup C2: local self-sufficiency — clone to ~/.barkpark/src, dep preflight, background phx + poll
+premium-setup C1: profile flag + stageProfile + first-run detection + done screen
+premium-setup A4: desk safety-net tests for the paper+media-only world
+premium-setup A3: union media into any non-empty BARKPARK_PLUGINS whitelist
+premium-setup A2: clean seed profile — admin-token bootstrap + welcome paper
+premium-setup B4: bp upgrade builtin — redirect latest, sha256 verify, atomic self-replace
+premium-setup A1: extract seeds.exs into Barkpark.Seeds with profile dispatch
+premium-setup B3: installer hardening — sha256 verify, version pin, POSIX sh, wizard copy
+premium-setup B2: cli-release workflow (cli-v* tags -> GitHub release)
+premium-setup B1: version plumbing — ldflags-injected version/commit/date + cli-checksums
+chore: untrack working-artifact dirs swept in by docs-refactor (104MB) + gitignore them
+docs-refactor: trim npm-rollback-playbook under its 8800B budget ceiling
+docs-refactor wave 5: CI doc gates (budgets + anchors) + review rules
+docs-refactor wave 4: attic + relocations + inbound-reference sweep
+docs-refactor wave 3: router CLAUDE.md, 7 cards, entry points, long-tail compressions
+docs-refactor wave 2: plugin contract moduledoc + studio_live section index
+docs-refactor wave 1: fact-rescue — contracts/, decisions/, runbook absorptions
+docs-refactor wave 0: freeze — attic manifest + before-inventory
+fix(tests): de-flake suite after sharing merge — 3 failures, 1 warning
+fix(sharing): harden PublicShareGuard — two holes found by adversarial review
+feat(sharing): safe external sharing via tunnel (BARKPARK_SHARE_HOST + guard)
+fix(sharing): item-share links advertise a shareable host, not localhost
+fix(sharing): item-share popover — create failed + button clipped (P7a-ui)
+feat(sharing): Studio per-item Share popover for papers (P7a-ui)
+feat(sharing): item (per-document) share links — backend (P7a)
+feat(sharing): edit access via scoped revocable tokens (P5)
+feat(sharing): contextual Share buttons on paper + media surfaces (P6b)
+feat(sharing): Studio "Network shares" panel (P6a)
+feat(sharing): `bp share` CLI + admin /v1/shares CRUD (P4b)
+feat(sharing): persistent share registry (P4a)
+feat(sharing): scoped media surface (P3)
+feat(sharing): docs surface — read-only, published-only (P2)
+feat(sharing): LAN transport + boot banner (P1c) — completes P1
+feat(sharing): gated scoped paper reader (P1b)
+feat(sharing): Barkpark.Sharing registry — default-deny core (P1a)
+fix(tui): show typed text live while editing a field
+feat(tui): right arrow enters the highlighted item (Miller-column nav)
+fix(tui): paper column is width-driven (max-width container), not height-driven
+feat(tui): A4-portrait max width for papers, centered in the pane
+fix(tui): align editor field boxes — indent every box row, not just the top
+fix(tui): responsive narrow-width collapse — body width == terminal width
+docs: apply the 6 audit decisions (plugins, ops-on-task, ADRs, highway)
+fix(plugins): add nouns to plugin_types.d.ts (Phase D regression)
+docs: add Tasks node to README architecture diagram; fix dead portable-doc link
+docs(tasks): drop dead "goal-path rail" jargon from tasks.ex comments
+docs: major audit — align 28 living docs with current code
+feat(cli): task CLI verbs become plugin-native; drop stale rail (Phase D)
+feat(plugins): Tasks plugin owns its /v1/tasks routes (C4-3b)
+feat(plugins): Barkpark.Plugins.Tasks owns the task schema + cron (C4-3a)
+fix(tasks): correct stale fencing test missed by C3b
+feat(router): add :token_root highway bucket — /v1-rooted plugin routes (C4-2)
+feat(plugins): plugins can contribute Oban cron entries (C4-1)
+docs: align task docs with the single-task model (C3c)
+refactor(tasks)!: everything is a task — remove goal/phase/event types (C3b)
+refactor(tasks)!: remove the W7 task rail surface (C3a)
+feat(tasks): a task carries its rail — children in show (C2)
+feat(tasks): task is the universal node — parent filter = the rail (C1)
+feat(router): add :token plugin-route highway bucket (Phase B)
+feat(tasks): task→paper references via content.papers[] (Phase A)
+feat(content): get_public_document/3 — type-generic public reader keystone (Phase 1)
+fix(tui): every pane height-bounded with internal cursor-follow scroll
+feat(cli): bp paper view — one-shot portable-doc render + field/theme fixes
+feat(tui): pdrender M2 — full block coverage + TUI paper-viewer pane
+fix(deploy): post-merge restarts API before (non-fatal) TUI build
+feat(tui): pdrender M1 — rich blocks (code/table/figure/action/field-*)
+feat(tui): pdrender M0 — Bulldocs portable-doc → terminal renderer
+fix(tui): align editor field boxes — slug box full width, [gen] on the label line
+fix(tui): Query reads .result.documents — TUI lists were always empty
+feat(tui): TUI shares the bp config (active server) + drafts perspective default
+fix(cli): bp setup --token persists — thread global g.token into plan.Token
+feat(cli): server kinds (local/cloud) + bp migrate cross-server data copy
+feat(cli): incredibly simple multi-server switching — bp use / bp servers / -s <name>
+fix(cli): bp whoami is local-first — shows target offline, never hard-fails
+feat(cli): bp setup connect defaults to active saved server + docs
+feat(cli): bp setup connect remembers + lists previously-connected servers
+docs(setup): document bp setup in README + HANDBOOK
+feat(cli): bp setup — AI/automation-first (structured JSON, no-TTY, never-hang)
+feat(cli): bp setup — interactive bootstrapper (connect/local/deploy/provision) + config persistence
+docs(readme): premium rewrite — bp CLI front-and-center
+fix(cli): correct 8 broken commands — core-verb registry drift + CLI defects
+feat(cli): M4 GA tooling — release binaries, installer, handbook
+feat(cli): M3 SDK — thin TS authoring SDK for Bulldocs papers
+feat(cli): M3 — plugin verbs lit + ifRev guard + scoped-prefix fix
+feat(cli): M2 — runnable bp CLI (manifest-driven) + atomic batch ops endpoint
+feat(cli): M1 — live /v1/capabilities, cli_commands/0, Go manifest layer
+feat(cli): M0 close — extract internal/apiclient, sever Bubble Tea coupling
+feat(cli): M0 contract summit — frozen manifest schema, fixtures, error/exit table, decisions, callback spec
+docs(bulldocs): mark BULLDOCS-MIGRATION shipped + verified (§4, §5.1–§5.4 done; §5.5 externally gated)
+refactor(bulldocs): §5.4 rename paper-surface modules into Bulldocs namespace (PaperLive/ingest/intents/Papers.Events + reader layout); paper artifact + paperflow token/alias unchanged
+refactor(bulldocs): rename plugin bulldoc → bulldocs (brand Bulldocs); paper artifact + /v1/paperflow alias unchanged
+docs(bulldoc): document :ingest + :public_root highway buckets + Bulldoc pointer (§5.3)
+chore(bulldoc): drop redundant inline paper seed — plugin Bootstrap owns it (§5.2)
+Add Bulldoc migration handoff/PRD
+Document the Bulldoc plugin + core/plugin split in api/CLAUDE.md
+Mount the Bulldoc paper reader + ingest API via the plugin highway
+Add the Bulldoc plugin, owning the `paper` document type
+Add :ingest and :public_root buckets to the plugin route highway
+fix(tenancy+fresh-install): Tasks.ready fails CLOSED on nil workspace_id; frt moduledoc drops FQ OnixEdit name (boot invariant #5)
+feat(search): engine-neutral retriever seam onto scoped search base — D2 {docs,count,meta} + Indx scope-safe (D3 a+b)
+feat(indx): plugin + retriever-seam behaviour grafted onto main base
+feat(paper): asciicast block grafted onto main base
+feat(frt): mix frt.export — deterministic JSON bridge to the Godot game
+feat(frt): add named SVG icons across schemas + desk
+feat(frt): author-first CMS plugin mirroring the Frickin Real Time game
+feat(paper): View↔Edit parity — per-block-type Edit CSS rules
+fix(paper): zero heading margins — block container owns rhythm
+fix(render): make article-mode inline styles respect dark mode
+fix(render): tolerate scalar inline nodes in compose_inline
+fix(render): parity gaps — callout 500, table empty cells, inline marks, semantic lists
+fix(render): real <p> for paragraph/ingress/byline in article mode + revert heading margins
+fix(studio): render paper view in :article style — real h1/h2, not bold spans
+fix(render): match View pane heading typography to the Edit pane
+feat(studio): live edit-mode block updates via push_event → WC setter
+fix(papers/intents): mark_processed returns 404 JSON for bad ids
+docs: audit-driven accuracy cleanup — fix code-verified doc errors; quarantine spent docs to _attic/
+fix(barkpark R2): assign per-block ids at paper ingest + index-based stream fallback in paper_live — id-less paper blocks now all render (was: only last block) — e2e residual R2
+docs: AI-CLI task-workflow guide — tested end-to-end (bd lifecycle + dep-aware ready + rail + PortableDoc papers) with honest limitations
+fix(barkpark): prefix-agnostic parent↔doc_id matching (rail goal-path + epic close-eligible no longer empty/vacuous) + allow goal/phase close for bd epic close — e2e-test gaps #6 #7
+docs(barkpark): correct compactor moduledoc (content.history is forward-looking/unwired; mutation_events is canonical) + align starter-template Postgres version to SETUP floor
+docs(barkpark): README Makefile local/prod split + api/README pointer (was stock boilerplate) + api/CLAUDE.md tenancy-aware 'adding a doc type' recipe
+fix(docs): rail restore-event bug (task.restored→task.compaction_restored) + barkpark doc accuracy (Elixir/Go versions, deploy DOMAIN, api/CLAUDE.md seed-count/key-files/pubsub, dead .doey xref)
+docs: tested Barkpark setup guides — standalone + paperflow-integration (W7 cutover)
+feat(tt5-a): GET /v1/tasks ?label= generic filter + POST /v1/tasks/:doc_id/labels add/remove mutation (task.relabeled event) — bd-shim file-claim support
+feat(w7-11a): /v1/rail/{goal-path,event/:id,diff} controllers + Barkpark.TextDiff (Elixir port of lib/text-diff.js) — W7c step 3 / Gate-C surface
+feat(w7-08c-a): GET /v1/tasks list-all + dependency_count/dependent_count/comment_count on ready/show/list responses — W7b step 2.5 / Gate-B finishing
+feat(w7-08a): close w7-07 gaps — GET /v1/tasks/:doc_id, targeted POST /v1/tasks/:doc_id/claim (Tasks.claim_by_id/3), GET /v1/tasks/epic/close-eligible aggregator — W7b step 2 / Gate-B half
+feat(w7-07a): /v1/tasks HTTP controller (ready/claim/close/edges) — barkpark-side surface for the bd-shim — W7b step 1 / Gate-B foundation
+feat(w7-06): Tasks.Compactor Oban worker — analyze → summary in content → reversible snapshot in revisions, advisory-locked per-task; Compactor.restore/2 reversibility — W7a step 6 (W7a complete)
+feat(w7-05): Tasks.TtlSweeper Oban worker — reap crashed-agent claims (epoch bump + lifecycle→open + task.lease_expired event), advisory-locked per-task — W7a step 5
+feat(w7-04): full claim primitives — CAS rev + fencing epoch + advisory-lock close/unblock + durable-then-ack mutation_events — W7a step 4
+feat(w7-03): Tasks.ready/1 + Tasks.claim/2 skeleton (FOR UPDATE SKIP LOCKED, dep-aware, phase+tenancy-scoped) — W7a step 3 / Gate-A foundation
+feat(w7-02): task_edges table + typed dep graph (blocks/discovered-from) + CRUD + cascade-safe — W7a step 2
+feat(w7-01): task-document schema (goal/phase/task/event) on documents + content field contract + validation + registered schemas
+[beads] final reconcile — sknf re-closed; review-finding-3 + review-finding-4 EMPTY
+[beads] sync — sknf merged; 8qvt merging (last meta-review item)
+fix: thread scope into 5 missed 3-arg Content.get_document sites (studio/document_edit/components/asset_response) — doc_id collisions now legal post-keystone (8qvt)
+[beads] sync — rs2j merged; sknf merging
+fix: gate 5znv dataset_id memo to explicit :memoize opt (request controllers only) — stop staleness in LiveView/Oban long-lived processes (sknf)
+[beads] sync — obhg+0f7g merged; rs2j+8nb9 closed; sknf in flight
+fix(tenancy): route all workspace-delete callers through Tenancy.delete_workspace/1 (was Repo.delete bypassing cleanup) — closes the obhg safety hole (rs2j)
+[beads] sync — 8nb9 merged; obhg+0f7g merging
+fix(tenancy): Tenancy.delete_workspace fires blob/CDN/plugin cleanup before SQL delete + extend cascade to webhooks/search/events/paper_events (obhg P0 + 0f7g P1)
+[beads] sync — 4lsn merged + meta-review filed; 8nb9 merging; obhg+0f7g in flight
+fix: thread scope_opts through Expand.expand → resolve_ref → get_document — close P0 cross-tenant read leak via ?expand= (8nb9)
+[beads] final reconcile — review-finding-3 emptied
+[beads] sync — knjh merged; 4lsn merging (THE LAST ONE)
+fix(migration): cascade-delete content (documents/revisions/media/schemas) on workspace/project/dataset delete — was SET NULL → orphan-resurfaces-under-Default leak (4lsn)
+[beads] sync — vwu5/84bn merged + chain-verified; hs8q moot; 4lsn/knjh in flight
+fix(tenancy): list_projects orders the default-slug project first — web/studio/mount agree on default-project resolution (knjh)
+[beads] sync — vwu5 merged; 84bn merging
+fix(migration): re-stamp paper_events.dataset_id from each event's own project (was blanket Default → project/dataset mismatch) (84bn)
+[beads] sync — 6z0e merged; 84bn/vwu5 in flight
+fix(migration): restore dedup for NULL-dataset_id search rows post-flip (backfill scope→dataset_id OR partial unique index) (vwu5)
+[beads] final reconcile — close all merged review-finding-3 tasks
+fix(studio): re-derive current_project via initial_project after create (was transaction-partial struct → one-render divergence) (6z0e)
+[beads] reconcile scmi/wnij; 6z0e claimed
+[beads] reconcile o7fu/m2ie
+[beads] sync — m2ie merged; o7fu merging
+fix(studio): validate dataset URL leaf against the resolved project in handle_params — redirect to default when not owned (defense-in-depth) (o7fu)
+fix(tui): SSE-fallback poll hashes the sorted doc id:rev set, not the raw export body — stop spurious refreshes / missed changes (m2ie)
+[beads] reconcile (re-close reverted) + scmi by-design; o7fu/m2ie claimed

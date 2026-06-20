@@ -1,0 +1,56 @@
+{
+  "subsystem": "api/lib/barkpark_web/live/studio",
+  "summary": "The Studio subsystem is the browser-based CMS editing surface — a multi-pane Phoenix LiveView that lets users create, edit, publish, and delete content documents across workspaces, projects, and datasets in real time. It is the primary human interface for content authorship in Barkpark.",
+  "intentions": [
+    {
+      "title": "Provide a multi-pane, real-time content editing environment",
+      "scale": "epic",
+      "evidence": "studio_live.ex: Structure→Type→Documents→Editor drill-down pane navigation, PubSub subscriptions (doc_updated, document_changed), presence tracking, and autosave/publish/discard-draft flows all serve live collaborative editing"
+    },
+    {
+      "title": "Surface plugin-declared v2 field types in the editor without breaking legacy v1 fields",
+      "scale": "epic",
+      "evidence": "plugins/adapter.ex: v2?/1 gate + dispatch to FieldComponents for composite/arrayOf/codelist/localizedText; explicitly preserves v1 fall-through for legacy seed schemas (post, page, author, etc.)"
+    },
+    {
+      "title": "Show content-graph blast-radius and reference topology for any document",
+      "scale": "small",
+      "evidence": "graph_view.ex: Canvas2D force-sim renderer driven by server-derived node/edge topology; root-pinned BFS blast-ring layout encodes impact rank; unpublish guard in studio_live.ex probes reverse_referencers to block dangling-ref unpublish"
+    },
+    {
+      "title": "Enable in-Studio editing of paper (block-document) content without leaving the CMS UI",
+      "scale": "small",
+      "evidence": "paper_field_block.ex: per-composite-block LiveComponent that routes patch-block ops through the canonical paper_op/2 pipeline; studio_live.ex editor_view :paper mode subscribes to per-doc paper topic and applies deltas in place"
+    },
+    {
+      "title": "Support collaborative real-time spreadsheet editing via a sheet grid pane",
+      "scale": "small",
+      "evidence": "sheet_grid.ex: SheetGrid LiveComponent receives {:sheets_op, …} deltas forwarded from studio_live.ex; presence tracked per-sheet for cursor/selection display (Sheets M2/M4)"
+    },
+    {
+      "title": "Hard multi-tenant isolation: scope every read, write, subscription, and presence to the active workspace/project/dataset",
+      "scale": "epic",
+      "evidence": "studio_live.ex: dataset URL-leaf validated against project membership; workspace switch gate (can_reach_workspace?, project-less workspace refused); PubSub topics are workspace-scoped; scope_opts threaded into every Content/Media call; upload stamped with workspace/project to avoid NULL-scope invisible rows"
+    },
+    {
+      "title": "Allow in-Studio creation and switching of workspaces, projects, and datasets",
+      "scale": "small",
+      "evidence": "studio_live.ex toggle-create/create-workspace/create-project/switch-workspace/switch-project/switch-dataset handlers; Tenancy.create_workspace_with_owner/2 + create_project_with_dataset/2; rescope_dataset_for_project cascades URL on every switch"
+    },
+    {
+      "title": "Surface draft-vs-published diff and document history for editorial review",
+      "scale": "small",
+      "evidence": "studio_live.ex toggle-diff handler + published_doc assign (diff_visible flag); show-history handler calls Content.list_revisions and restore-revision; discard-draft flow with modal confirmation"
+    },
+    {
+      "title": "Plugin-owned content preview pane alongside the editor form",
+      "scale": "small",
+      "evidence": "studio_live.ex content_preview_rendered assign set by Plugins.Registry.collect_content_renderer/3; toggle-content-preview event; fresh-install invariant: pane absent when no plugin contributes a renderer"
+    },
+    {
+      "title": "Admin-controlled network sharing and per-document share links (Google-Docs-style)",
+      "scale": "small",
+      "evidence": "studio_live.ex shares_admin? gate; shares-* handlers calling Barkpark.Sharing.*; item_share_open popover minting /s/<token> direct-doc links; admin re-checked in every handler as security boundary, not just UX gate"
+    }
+  ]
+}

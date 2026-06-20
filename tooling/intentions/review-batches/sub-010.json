@@ -1,0 +1,102 @@
+{
+  "subsystem": "api/lib/barkpark_web",
+  "count": 16,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/router.ex",
+      "role": "Phoenix HTTP route table + pipeline definitions",
+      "importance": 83,
+      "usefulness": 35
+    },
+    {
+      "path": "api/lib/barkpark_web/endpoint.ex",
+      "role": "Phoenix HTTP entrypoint / plug pipeline",
+      "importance": 71,
+      "usefulness": 26
+    },
+    {
+      "path": "api/lib/barkpark_web/router/plugins.ex",
+      "role": "compile-time plugin route injection macro",
+      "importance": 55,
+      "usefulness": 32
+    },
+    {
+      "path": "api/lib/barkpark_web/live_auth.ex",
+      "role": "LiveView auth on_mount hooks",
+      "importance": 54,
+      "usefulness": 28
+    },
+    {
+      "path": "api/lib/barkpark_web/live_scope.ex",
+      "role": "LiveView mount hook for scoped-URL tenant resolution and re-auth",
+      "importance": 52,
+      "usefulness": 29
+    },
+    {
+      "path": "api/lib/barkpark_web/error_envelope.ex",
+      "role": "API error envelope serializer (v1/v2)",
+      "importance": 44,
+      "usefulness": 31
+    },
+    {
+      "path": "api/lib/barkpark_web/studio_chrome.ex",
+      "role": "Shared Studio top-bar LiveView hook",
+      "importance": 44,
+      "usefulness": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/search_channel.ex",
+      "role": "WebSocket channel for per-keystroke live search",
+      "importance": 44,
+      "usefulness": 23
+    },
+    {
+      "path": "api/lib/barkpark_web/plugin_scope_session.ex",
+      "role": "HTTP-to-LiveView scope bridge for plugin scoped LiveViews",
+      "importance": 46,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark_web/search_intel.ex",
+      "role": "search request metadata extractor",
+      "importance": 30,
+      "usefulness": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/v1/media_search_params.ex",
+      "role": "media search query param parser",
+      "importance": 31,
+      "usefulness": 29
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/user_socket.ex",
+      "role": "Phoenix WebSocket auth gate for SearchChannel",
+      "importance": 35,
+      "usefulness": 17
+    },
+    {
+      "path": "api/lib/barkpark_web/presence.ex",
+      "role": "Phoenix Presence module definition",
+      "importance": 26,
+      "usefulness": 20
+    },
+    {
+      "path": "api/lib/barkpark_web/telemetry.ex",
+      "role": "telemetry supervisor and metrics definitions",
+      "importance": 27,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts.ex",
+      "role": "layout template embedder",
+      "importance": 26,
+      "usefulness": 5
+    },
+    {
+      "path": "api/lib/barkpark_web/gettext.ex",
+      "role": "i18n backend module",
+      "importance": 13,
+      "usefulness": 2
+    }
+  ]
+}

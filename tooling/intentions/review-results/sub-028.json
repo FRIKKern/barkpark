@@ -1,0 +1,31 @@
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/website-starter/app",
+  "summary": "Next.js 15 App Router pages and routes that form the website-starter scaffold template — a ready-to-run marketing site (home, posts, about, pricing, contact) wired to Barkpark as its CMS, demonstrating real-time revalidation via webhook and form-to-CMS write via Server Actions.",
+  "intentions": [
+    {
+      "title": "Lower adoption friction with a zero-to-running starter",
+      "scale": "epic",
+      "evidence": "layout.tsx, page.tsx, posts/[slug]/page.tsx, about/page.tsx, pricing/page.tsx together form a complete multi-page site a new user gets via `create-barkpark-app` — no boilerplate to write, just fill in content"
+    },
+    {
+      "title": "Demonstrate the full Barkpark read path in a real app",
+      "scale": "small",
+      "evidence": "page.tsx calls getDoc + getDocs; posts/[slug]/page.tsx calls getDocBySlug and renders via PortableText — covers single-doc, list, and slug-based fetch patterns"
+    },
+    {
+      "title": "Show CMS-driven write (form → Barkpark document) via Server Actions",
+      "scale": "small",
+      "evidence": "contact/actions.ts uses defineActions + createDoc to persist a contact submission as a `contact` document — demonstrates the write path without a custom API route"
+    },
+    {
+      "title": "Wire content freshness via Studio → Next.js webhook revalidation",
+      "scale": "small",
+      "evidence": "api/barkpark/webhook/route.ts uses createWebhookHandler + revalidateBarkpark so published edits in Studio invalidate the Next.js cache automatically"
+    },
+    {
+      "title": "Support a hosted demo environment without code branching",
+      "scale": "small",
+      "evidence": "hosted-demo-banner.tsx detects barkpark.dev API URL and injects a banner warning that data resets daily — keeps demo UX honest without separate build targets"
+    }
+  ]
+}

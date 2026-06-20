@@ -1,0 +1,18 @@
+{
+  "subsystem": ".claude",
+  "count": 2,
+  "files": [
+    {
+      "path": ".claude/hooks/on-pre-tool-use.sh",
+      "role": "Claude Code pre-tool-use hook override for force-push opt-in",
+      "importance": 6,
+      "usefulness": 3
+    },
+    {
+      "path": ".claude/workflows/view-edit-parity.workflow.js",
+      "role": "Claude Code workflow script for View↔Edit parity audit",
+      "importance": 3,
+      "usefulness": 5
+    }
+  ]
+}

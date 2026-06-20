@@ -1,0 +1,46 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/indx",
+  "summary": "The Indx plugin integrates Barkpark with a dedicated single-tenant Indx search engine, providing full-text BM25F search with faceting as an alternative retriever to Postgres. It manages the full index lifecycle: blue/green corpus rebuilds, incremental per-document upsert/delete, JWT auth caching, boot-time live-pointer recovery, and a re-ranking layer that restores Postgres title-affinity semantics on top of Indx's fuzzy recall.",
+  "intentions": [
+    {
+      "title": "Provide dedicated full-text search with BM25F ranking and faceting beyond what Postgres offers",
+      "scale": "epic",
+      "evidence": "retriever.ex implements the Barkpark.Search.Retriever behaviour and routes engine=indx surfaces to Indx; client.ex exposes search_full/3 with enableFacets; indexer.ex configures per-field BM25 knobs (b=0.75, k1=1.2) and weight tiers (title high > author/category/body medium > slug low)"
+    },
+    {
+      "title": "Zero-downtime index rebuilds via blue/green dataset versioning",
+      "scale": "epic",
+      "evidence": "indexer.ex maintains a <prefix>_<scope>_v<n> naming scheme, loads into a fresh dataset, verifies record count, then atomically swaps the :persistent_term live pointer; the NEVER-re-load-a-live-dataset rule is enforced throughout client.ex and indexer.ex moduledocs to avoid the engine hang-and-wedge failure mode found in the 2026-06-01 spike"
+    },
+    {
+      "title": "Enable incremental per-document index mutations without full rebuilds",
+      "scale": "small",
+      "evidence": "indexer.ex upsert_record/3 and delete_record/3 operate on the live dataset for single-doc adds/removes; lifecycle.ex hooks route after_save/publish to upsert (flag ON) or rebuild (flag OFF), and after_delete/unpublish always to delete; indexer_worker.ex debounces these via Oban"
+    },
+    {
+      "title": "Restore title-affinity ranking parity with Postgres on top of Indx's flat BM25F order",
+      "scale": "small",
+      "evidence": "retriever.ex rerank_by_title/2 buckets hits into 5 tiers (exact title → prefix → whole-title → partial → body/fuzzy) and stable-sorts over the full candidate pool of 200, specifically to fix the documented regression where a body-heavy doc outranked the doc titled for the query"
+    },
+    {
+      "title": "Keep Postgres as the authoritative source of truth while using Indx only as a relevance oracle",
+      "scale": "small",
+      "evidence": "retriever.ex hydrate_documents/3 re-reads the display slice from Postgres via Content.get_documents_by_ids after ranking; tenant scope opts (workspace_id, project_id) are forwarded to prevent cross-tenant data leaks; the Indx index carries only _id/_type for mapping back"
+    },
+    {
+      "title": "Survive restarts without losing the live dataset pointer",
+      "scale": "small",
+      "evidence": "recovery.ex GenServer rediscovers the live <prefix>_<scope>_v<n> dataset from client.get_user_datasets/1 at boot and calls indexer.restore_pointer/2 to re-seat the :persistent_term pointer; restore_pointer is a noop when a rebuild already ran first"
+    },
+    {
+      "title": "Maintain a stable deterministic document key mapping for reliable deletes across rebuilds",
+      "scale": "small",
+      "evidence": "indexer.ex key_for_id/1 derives a 63-bit positive SHA-256 hash from the string _id; render_corpus uses deterministic linear probing for collision resolution; swap/2 records the resulting key→_id map on the live pointer so delete_record can resolve probe-displaced keys exactly"
+    },
+    {
+      "title": "Surface facet counts and coverage boundaries to the search API",
+      "scale": "small",
+      "evidence": "client.ex search_full/3 sends enableFacets:true and returns facets + truncationIndex; retriever.ex normalize_facets reshapes Indx bucket format to label/count pairs and passes them as engine_meta to the pipeline; type/status/author/category are configured as facetable in indexer.ex field_proxies"
+    }
+  ]
+}

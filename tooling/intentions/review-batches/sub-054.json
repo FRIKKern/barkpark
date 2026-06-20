@@ -1,0 +1,30 @@
+{
+  "subsystem": "js/packages/codegen/src",
+  "count": 4,
+  "files": [
+    {
+      "path": "js/packages/codegen/src/schema-url.ts",
+      "role": "Schema introspection URL builder",
+      "importance": 18,
+      "usefulness": 29
+    },
+    {
+      "path": "js/packages/codegen/src/types.ts",
+      "role": "TypeScript config and schema types for codegen CLI",
+      "importance": 24,
+      "usefulness": 23
+    },
+    {
+      "path": "js/packages/codegen/src/cli.ts",
+      "role": "codegen CLI entrypoint",
+      "importance": 29,
+      "usefulness": 14
+    },
+    {
+      "path": "js/packages/codegen/src/index.ts",
+      "role": "codegen package public entrypoint",
+      "importance": 29,
+      "usefulness": 14
+    }
+  ]
+}

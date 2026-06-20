@@ -1,0 +1,120 @@
+{
+  "subsystem": ".",
+  "count": 19,
+  "files": [
+    {
+      "path": "tui.go",
+      "role": "Go TUI main model and renderer",
+      "importance": 44,
+      "usefulness": 32
+    },
+    {
+      "path": "main.go",
+      "role": "Go binary entrypoint (TUI + CLI router)",
+      "importance": 56,
+      "usefulness": 18
+    },
+    {
+      "path": "deploy.sh",
+      "role": "server provisioning and deploy script",
+      "importance": 45,
+      "usefulness": 12
+    },
+    {
+      "path": "structure.go",
+      "role": "Go TUI structure builder API",
+      "importance": 29,
+      "usefulness": 28
+    },
+    {
+      "path": "schema.go",
+      "role": "Go TUI schema type aliases",
+      "importance": 30,
+      "usefulness": 22
+    },
+    {
+      "path": "selector.go",
+      "role": "TUI scope selector modal (workspace/project/dataset picker)",
+      "importance": 28,
+      "usefulness": 20
+    },
+    {
+      "path": "objtable.go",
+      "role": "TUI object-array table renderer",
+      "importance": 18,
+      "usefulness": 24
+    },
+    {
+      "path": "styles.go",
+      "role": "TUI lipgloss style definitions",
+      "importance": 22,
+      "usefulness": 20
+    },
+    {
+      "path": "bulk.go",
+      "role": "TUI bulk publish/unpublish implementation",
+      "importance": 20,
+      "usefulness": 20
+    },
+    {
+      "path": "search.go",
+      "role": "TUI full-text search UI",
+      "importance": 20,
+      "usefulness": 20
+    },
+    {
+      "path": "store.go",
+      "role": "TUI type aliases and presentation helpers for apiclient",
+      "importance": 24,
+      "usefulness": 14
+    },
+    {
+      "path": "refpicker.go",
+      "role": "TUI reference-field picker modal",
+      "importance": 23,
+      "usefulness": 14
+    },
+    {
+      "path": "diff.go",
+      "role": "TUI draft-vs-published diff modal",
+      "importance": 14,
+      "usefulness": 21
+    },
+    {
+      "path": "paper.go",
+      "role": "TUI paper viewer layout helper",
+      "importance": 22,
+      "usefulness": 11
+    },
+    {
+      "path": "history.go",
+      "role": "TUI document history view component",
+      "importance": 16,
+      "usefulness": 16
+    },
+    {
+      "path": "help.go",
+      "role": "TUI help overlay UI component",
+      "importance": 13,
+      "usefulness": 14
+    },
+    {
+      "path": "run.sh",
+      "role": "local dev launcher script",
+      "importance": 21,
+      "usefulness": 5
+    },
+    {
+      "path": "dev.sh",
+      "role": "local dev environment launcher",
+      "importance": 14,
+      "usefulness": 8
+    },
+    {
+      "path": "watch.sh",
+      "role": "Go TUI hot-reload dev script",
+      "importance": 5,
+      "usefulness": 5
+    }
+  ]
+}

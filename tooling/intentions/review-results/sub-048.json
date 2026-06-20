@@ -1,0 +1,36 @@
+{
+  "subsystem": "js/packages/react/src",
+  "summary": "React renderer package (@barkpark/react) providing framework-agnostic UI primitives — PortableText, BarkparkImage, BarkparkReference — that let consumers display Barkpark CMS content without reimplementing block rendering, image URL resolution, or async reference resolution.",
+  "intentions": [
+    {
+      "title": "Eliminate boilerplate for rendering Barkpark content in React apps",
+      "scale": "epic",
+      "evidence": "PortableText.tsx implements full block/span/mark/list rendering with component override hooks; consumers pass a value and optional component map and get correct HTML. Without this, every app would re-implement the same block-walking logic."
+    },
+    {
+      "title": "Make image asset rendering portable across frameworks (plain img vs next/image)",
+      "scale": "small",
+      "evidence": "BarkparkImage accepts an `as` prop so consumers can swap in next/image or any component; it forwards lqip as blurDataURL only for non-string components, and falls back to building /images/<id> URLs from baseUrl when the asset lacks an inline url."
+    },
+    {
+      "title": "Safe async reference resolution with cycle detection and depth capping",
+      "scale": "small",
+      "evidence": "BarkparkReference uses React's use() + Suspense, tracks visited ids via context to break cycles, caps recursion at maxDepth (default 5), and ensures nested instances cannot widen the root's cap — preventing infinite reference chains in documents."
+    },
+    {
+      "title": "RSC / App Router compatibility without splitting the package",
+      "scale": "small",
+      "evidence": "server.ts re-exports only context-free renderers (PortableText, BarkparkImage) and omits BarkparkReference (which calls createContext), so a Server Component can import from this entry without crashing the RSC import graph. index.ts carries 'use client' for the full client build."
+    },
+    {
+      "title": "Scope-aware API paths aligned with the multi-tenant core client",
+      "scale": "small",
+      "evidence": "BarkparkReference.buildDocPath calls scopePrefix from @barkpark/core when a client config (workspace/project/dataset) is present, producing /w/:ws/p/:proj/v1/... paths — falling back to flat /v1/... only for unscoped configs — keeping reference resolution consistent with the client's multi-tenant routing."
+    },
+    {
+      "title": "Extensible rendering surface via component override slots",
+      "scale": "epic",
+      "evidence": "PortableTextComponents exposes override slots for every node type (block, mark, list, listItem, types) plus unknown-* fallbacks; BarkparkImage's `as` prop and BarkparkReference's `fetcher`/`children` render-prop follow the same pattern — the package is an integration point, not a closed renderer."
+    }
+  ]
+}

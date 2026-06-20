@@ -1,0 +1,46 @@
+{
+  "subsystem": "internal/cli/setup",
+  "summary": "The bp setup subsystem is the zero-to-running onboarding engine for the bp CLI: it turns a declarative SetupPlan into a working Barkpark installation via four modes (connect an existing server, bring up a local dev server, deploy over SSH, provision a cloud host), each with a dry-run/confirm gate and an interactive Bubble Tea wizard.",
+  "intentions": [
+    {
+      "title": "Zero-friction first-run onboarding for every deployment topology",
+      "scale": "epic",
+      "evidence": "Four targets (connect/local/deploy/provision) in setup.go + wizard.go cover all operator contexts from 'I already have a server' to 'provision a fresh cloud host'; the wizard walks through target → inputs → profile → plugins → confirm without requiring any prior knowledge"
+    },
+    {
+      "title": "Dry-run-first safety model for destructive operations",
+      "scale": "epic",
+      "evidence": "Every executor (local.go, deploy.go) checks opts.DryRun before any mutation, prints the exact commands it WOULD run, and refuses to proceed without opts.Confirm; BuildPlan/Plan.RenderHuman keep JSON and human paths byte-identical so operators see the real intent before committing"
+    },
+    {
+      "title": "Persist and manage multi-server connection history",
+      "scale": "small",
+      "evidence": "connect.go probes /v1/capabilities to resolve the auth tier, then hands a SavedConfig (with Tier + LastConnected) to the injected ConfigStore; wizard.go's stageServerPick offers a remembered-server pick-list with relative timestamps and active-server star marker"
+    },
+    {
+      "title": "Self-sufficient curl-install path (no checkout required)",
+      "scale": "small",
+      "evidence": "local.go's resolveLocalContext walks up from cwd for api/mix.exs; when not found it targets ~/.barkpark/src and prepends a shallow-clone step; deploy.go embeds deploy.sh via go:embed assets so a curl-installed bp binary carries the installer without needing the repo on disk"
+    },
+    {
+      "title": "Dependency preflight with actionable per-OS install hints",
+      "scale": "small",
+      "evidence": "local.go's localPreflight checks git/docker/mix/postgres/vips, distinguishes required vs warn-only, and emits the exact brew/apt command — explicitly never running package managers itself to avoid sudo/PATH side-effects"
+    },
+    {
+      "title": "Seed content profiles for controlled first-run database state",
+      "scale": "small",
+      "evidence": "setup.go defines ProfileClean/ProfileDemo; clean pre-generates an admin token at execute time (never at plan time), threads it through BARKPARK_SEED_ADMIN_TOKEN redacted in display, and verifies the tier post-connect; wizard.go's stageProfile pre-selects plugins to match the chosen profile"
+    },
+    {
+      "title": "Declarative plugin selection with kill-switch semantics",
+      "scale": "small",
+      "evidence": "wizard.go's selectedPlugins() maps all-checked→nil (register everything), strict subset→that slice, none-checked→empty slice (explicit kill switch); PluginsEnvValue/PluginsSummary propagate this into BARKPARK_PLUGINS env for local, deploy, and provision paths"
+    },
+    {
+      "title": "Config-store injection seam to avoid import cycles",
+      "scale": "small",
+      "evidence": "setup.go's ConfigStore interface is the only persistence surface; setup never imports cli — the cli built-in adapts cli.LoadConfig/SaveConfig onto it, and tests pass an in-memory store; same pattern for WizardFunc and KnownServers"
+    }
+  ]
+}
