@@ -131,6 +131,29 @@ it). The `dependencies` field on each doc is the inverse-correct dependents sour
 
 ---
 
+## ARC 4 — RELATE (relationship layers + tasks)
+
+Two more relationship layers beyond dependencies, plus a third node type — all
+free git-mining + joins of the existing reports.
+
+**Co-change** — `tooling/cochange/cochange.mjs`: one git pass → the temporal-
+coupling matrix (files that commit together). Then cross-validates the THREE edge
+types — dependency × intention × co-change: agree → **real** relationship ·
+intention-only → **aspirational** (intended, not enacted) · co-change-only →
+**accidental** coupling (a smell). Per-file `accidentalCoupling` flag.
+
+**Tasks** — `tooling/tasks/tasks.mjs`: blends Barkpark tasks in as a THIRD graph
+node-type. A task inherits the intentions of the files its commits changed (the
+`(task-id)` commit-message convention is the join key) → links `task → file` and
+`task → intention`. Cross-validates PREDICTED scope (`scope`) vs ACTUAL (git) →
+on-target / scoped-untouched / scope-creep (graph-node files only); rolls child
+commits up to the parent epic; computes impact (Σreach) + a fragile flag.
+```
+node tooling/cochange/cochange.mjs        # co-change matrix + 3-way cross-validation
+node tooling/tasks/tasks.mjs              # task↔file↔intention + predicted-vs-actual scope
+node tooling/tasks/tasks.mjs publish      # add task nodes to the codebase graph
+```
+
 ## Reading the output
 
 - **Scorecard** = where the codebase stands; a low dimension is the headline.
@@ -140,8 +163,10 @@ it). The `dependencies` field on each doc is the inverse-correct dependents sour
   intentions + dependencies (both directions) + git history. This is the
   metadata-first context pack that lets an agent understand a file without
   re-deriving anything (see agent-efficiency note below).
-- **Graph** = two relationship layers — dependency (code structure) and intention
-  (shared goals, linking files that don't import each other).
+- **Graph** = three relationship layers — dependency (code structure), intention
+  (shared goals, linking files that don't import each other), and co-change
+  (temporal coupling) — cross-validated; plus **tasks** as a third node type
+  (work → files/intentions), so the graph shows goals, code, *and* the work moving them.
 
 ## Delivery — `scope` (exploration → lookup)
 
