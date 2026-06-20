@@ -24,7 +24,14 @@ you need.
    one pass. Composites (hotspot, priority, refactor-worth, critical-untested) read
    clean roots from `scoring-config.json` — no root reaches a composite twice.
 4. **VERIFY before you trust.** Findings (layering, dup, drift) are adversarially
-   judged before they drive the plan.
+   judged before they drive the plan. The composite-driving judgment — file
+   **criticality** — can be **multi-voted**: dispatch the batch K times into
+   `results/vote-1/ … vote-K/`; `file-importance/merge` consensus's the votes
+   (median + agreement, `tooling/lib/consensus.mjs`) and flags a `contested`
+   judgment the panel disagreed on instead of silently averaging it (cqv3-p2). Flat
+   `results/` = one vote, exactly as before. The same lib exposes
+   `categoricalConsensus` for the consistency-drift verdicts (the wiring point when
+   those judgments need hardening too).
 5. **Reach-weight everything.** `reach` (normalized transitive dependents) is the
    single value root — a problem in a high-reach file outranks the same in a leaf.
    The old `usefulness` "value axis" is gone; its agent prose survives as a `why`
@@ -59,6 +66,12 @@ node tooling/status/status.mjs
     verdict:"drift"|"intentional"|"refactor", recommendation}]}`) → `consistency.mjs record`.
   - *issues stale* → 2 agents judge layering (`violation`|`acceptable`) + dup
     (`extract`|`acceptable`) → `_layering.json`/`_dup.json` → `consistency.mjs record`.
+  - *multi-vote (optional, cqv3-p2)* → to harden the file-criticality judgment,
+    dispatch the SAME `file-importance` batch K times (K=3 typical) writing to
+    `results/vote-1/ … vote-K/` instead of flat `results/`. `file-importance/merge`
+    consensus's the numeric votes (median + agreement) via
+    `tooling/lib/consensus.mjs` and marks `contested` rows (tier `contested`) for
+    review. Spend the extra votes only on the judgments that actually move a composite.
 
 `status.mjs` already chains: `blast-radius/build-index`, `file-importance/build-signals`,
 `ergonomics/ergonomics`, `risk/risk`, `consistency scan+batches`, `combined/combine`,
@@ -209,7 +222,9 @@ also queryable via the Barkpark graph/search or the per-file papers.
 
 - Snapshot — the cache keeps it live; the weekly **drift-guard** CI job
   (`codebase-intel.yml`) now surfaces a stale ledger instead of letting it rot.
-- Single-vote agent judgments (spot-check; not multi-voted by default) — cqv3-p2.
+- Agent judgments are single-vote BY DEFAULT but can be **multi-voted** on demand
+  (`results/vote-*/` → consensus + `contested` flag, `tooling/lib/consensus.mjs`,
+  cqv3-p2). Spend the votes only on judgments that move a composite.
 - Scoring weights + composite forms live in `tooling/fit/scoring-config.json` (read
   by `tooling/lib/scoring.mjs`); when unfitted it falls back to defaults. The
   **calibrate** CI job re-fits on every release and tracks AUC over time in

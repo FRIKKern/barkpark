@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { collectVotes, numericConsensus } from "../lib/consensus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -15,24 +16,27 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 const sig = JSON.parse(readFileSync(join(HERE, "file-signals.json"), "utf8")).signals;
 const RDIR = join(HERE, "results");
 
-// ---- ingest agent results (defensive: log malformed, never crash) ----
-const agentByPath = {};
-const seenBatches = new Set(); const badBatches = [];
-for (const f of (existsSync(RDIR) ? readdirSync(RDIR) : []).filter(f => f.endsWith(".json"))) {
-  seenBatches.add(f);
-  try {
-    const raw = JSON.parse(readFileSync(join(RDIR, f), "utf8"));
-    const arr = Array.isArray(raw) ? raw : raw.files || raw.results || [];
-    for (const r of arr) if (r && r.path) agentByPath[r.path] = r;
-  } catch (e) { badBatches.push(`${f}: ${e.message.split("\n")[0]}`); }
-}
+// ---- ingest agent results — MULTI-VOTE (cqv3-p2) ----
+// collectVotes returns path -> [vote, …]: flat results/ = 1 vote; results/vote-*/
+// subdirs = N independent votes. criticality is consensus'd; a panel that
+// disagrees is flagged `contested`, not silently averaged into a confident score.
+const votesByPath = collectVotes(RDIR, "path");
+const seenBatches = new Set((existsSync(RDIR) ? readdirSync(RDIR) : []).filter(f => f.endsWith(".json")));
+const badBatches = [];
+// representative metadata (role/description/whatBreaks): take the highest-confidence
+// vote, falling back to the first — prose doesn't vote, but the most-confident
+// agent's wording is the best single label.
+const confRank = { high: 3, medium: 2, low: 1, "": 0 };
+const repOf = (votes) => [...votes].sort((a, b) => (confRank[b?.confidence] ?? 0) - (confRank[a?.confidence] ?? 0))[0] || {};
 
 // ---- blend ----
 const clamp = (n) => Math.max(1, Math.min(100, Math.round(n)));
 const rows = sig.map((s) => {
-  const a = agentByPath[s.path];
+  const votes = votesByPath[s.path] || [];
+  const a = repOf(votes);
   const scored = (s.kind === "code" || s.kind === "test");
-  const crit = a && Number.isFinite(+a.criticality) ? +a.criticality : null;
+  const con = numericConsensus(votes.map((v) => v?.criticality));
+  const crit = con.value;
   const finalScore = (scored && crit != null) ? clamp(0.45 * s.prior + 0.55 * crit) : s.prior;
   return {
     score: finalScore, path: s.path, stack: s.stack, kind: s.kind,
@@ -42,13 +46,14 @@ const rows = sig.map((s) => {
     whatBreaks: a?.what_breaks_if_wrong || a?.whatBreaks || "",
     confidence: a?.confidence ?? "",
     prior: s.prior, agentCrit: crit ?? "",
-    tier: (scored ? (crit != null ? "agent" : "MISSING") : "auto"),
+    votes: con.votes, agreement: con.agreement ?? "", contested: con.contested,
+    tier: (scored ? (crit != null ? (con.contested ? "contested" : "agent") : "MISSING") : "auto"),
   };
 }).sort((x, y) => y.score - x.score);
 
 // ---- CSV ----
 const esc = (v) => `"${String(v).replace(/"/g, '""').replace(/\n/g, " ")}"`;
-const cols = ["score","path","stack","kind","fanIn","churn","loc","seam","entrypoint","tier","prior","agentCrit","confidence","role","description","whatBreaks"];
+const cols = ["score","path","stack","kind","fanIn","churn","loc","seam","entrypoint","tier","prior","agentCrit","votes","agreement","contested","confidence","role","description","whatBreaks"];
 writeFileSync(join(HERE, "importance-chart.csv"),
   [cols.join(","), ...rows.map(r => cols.map(c => esc(r[c])).join(","))].join("\n"));
 
@@ -106,8 +111,16 @@ ${rows.map(tr).join("\n")}
 </script>`;
 writeFileSync(join(HERE, "importance-chart.html"), html);
 
+const multiVoted = rows.filter(r => r.votes > 1);
+const contested = rows.filter(r => r.contested);
 console.error(`[merge] ${rows.length} files → importance-chart.{csv,html}`);
-console.error(`  agent-scored: ${rows.filter(r=>r.tier==="agent").length} · auto: ${rows.filter(r=>r.tier==="auto").length} · MISSING: ${missing.length}`);
+console.error(`  agent-scored: ${rows.filter(r=>r.tier==="agent"||r.tier==="contested").length} · auto: ${rows.filter(r=>r.tier==="auto").length} · MISSING: ${missing.length}`);
+if (multiVoted.length) {
+  console.error(`  multi-vote: ${multiVoted.length} file(s) panel-judged · ${contested.length} CONTESTED (panel disagreed — review before trusting)`);
+  for (const r of contested.slice(0, 8)) console.error(`    ⚖ ${r.path}  crit ${r.agentCrit} · ${r.votes} votes · agreement ${r.agreement}`);
+} else {
+  console.error(`  single-vote (no results/vote-*/ subdirs) — dispatch N passes for multi-vote consensus (cqv3-p2)`);
+}
 console.error(`  result batches ingested: ${seenBatches.size}/109${badBatches.length?` · ${badBatches.length} malformed`:""}`);
 if (badBatches.length) badBatches.forEach(b => console.error(`    ✗ ${b}`));
 if (missing.length) console.error(`  re-run batches containing: ${missing.slice(0,8).map(m=>m.path).join(", ")}${missing.length>8?` …(+${missing.length-8})`:""}`);
