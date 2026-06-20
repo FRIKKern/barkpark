@@ -67,6 +67,30 @@ body {
   background: color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 
+/* Search highlight — the per-word match colour is computed in JS as a
+   continuous red→green gradient and handed in via the --hl (light) / --hl-d
+   (dark) custom properties on each <mark>. We swap them by scheme here, matching
+   the same prefers-color-scheme strategy the rest of the theme uses. The
+   foreground stays inherited; the translucent background never touches it. */
+mark.bp-hl {
+  background-color: var(--hl);
+}
+
+@media (prefers-color-scheme: dark) {
+  mark.bp-hl {
+    background-color: var(--hl-d);
+  }
+}
+
+/* Inferred letters inside a CORRECTED word — the letters we filled in or changed
+   to understand a misspelling ("wrapp·e·r"). Italic is the shape cue (works
+   without colour/contrast); opacity stays high enough to clear WCAG text
+   contrast (0.45 was too faint for the very glyphs a low-vision reader needs). */
+.bp-hl-inferred {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 /* Disclosure chevron — rotate when the parent <details> is open. Plain CSS on
    the `rotate` property (Tailwind's transition-transform doesn't animate it),
    so it works regardless of the group-open variant and animates smoothly. */

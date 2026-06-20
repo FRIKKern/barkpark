@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ReactNode,
+  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   FocusEvent as ReactFocusEvent,
 } from "react";
@@ -25,13 +26,8 @@ import { useFinderNav } from "@/lib/finder-nav-context";
 import { useLiveSearch } from "@/lib/use-live-search";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
-import {
-  stemToken,
-  queryStems,
-  textStems,
-  termMatches,
-  wordMatchesQuery,
-} from "@/lib/stem";
+import { stemToken, queryStems } from "@/lib/stem";
+import { highlightSegments, words, termHitsWords } from "@/lib/fuzzy";
 
 /** Fire-and-forget feedback POST — never throws, never blocks the caller. */
 function recordFindEvent(body: {
@@ -71,12 +67,11 @@ function partitionExact(hits: FindHit[], tokens: string[]): FindHit[] {
   const exact: FindHit[] = [];
   const fuzzy: FindHit[] = [];
   for (const h of hits) {
-    const hayText = `${h.title} ${h.body ?? h.excerpt ?? ""} ${h.slug ?? ""}`;
-    const hayLower = hayText.toLowerCase();
-    const hayStems = textStems(hayText);
-    // A doc "contains" the query when every token appears — by substring (incl.
-    // camelCase like "WebSocket") OR by stem ("operators" ⇢ "operator's").
-    (tokens.every((t) => termMatches(t, hayLower, hayStems)) ? exact : fuzzy).push(h);
+    const hayWords = words(`${h.title} ${h.body ?? h.excerpt ?? ""} ${h.slug ?? ""}`);
+    // A doc "contains" the query when every token hits — by substring (incl.
+    // camelCase like "WebSocket"), inflection ("publishing" ⇢ "publish"), or
+    // stem; same test the highlighter and strength meter use.
+    (tokens.every((t) => termHitsWords(t, hayWords)) ? exact : fuzzy).push(h);
   }
   // Only reorder on a genuine mix — otherwise keep the engine's order intact.
   return exact.length > 0 && fuzzy.length > 0 ? [...exact, ...fuzzy] : hits;
@@ -154,18 +149,14 @@ type MatchStrength = "title" | "body" | "partial" | "fuzzy";
 function matchStrength(hit: FindHit, terms: string[]): MatchStrength {
   const t = terms.filter(Boolean);
   if (t.length === 0) return "title";
-  const titleText = hit.title;
   const restText = `${hit.body ?? hit.excerpt ?? ""} ${hit.slug ?? ""}`;
-  // Stem-aware membership (so "operator's" counts for "operators"), with the
-  // substring fallback baked into termMatches.
-  const titleLower = titleText.toLowerCase();
-  const restLower = restText.toLowerCase();
-  const titleStemSet = textStems(titleText);
-  const restStemSet = textStems(restText);
-  const inTitle = (x: string) => termMatches(x, titleLower, titleStemSet);
-  const inAny = (x: string) =>
-    termMatches(x, titleLower, titleStemSet) ||
-    termMatches(x, restLower, restStemSet);
+  // Use the SAME hit test as the highlighter (exact / inflection / verbatim), so
+  // "publishing" counts as a title hit when the title says "publish" — otherwise
+  // the meter says "fuzzy" while the word is clearly lit up.
+  const titleWords = words(hit.title);
+  const restWords = words(restText);
+  const inTitle = (x: string) => termHitsWords(x, titleWords);
+  const inAny = (x: string) => inTitle(x) || termHitsWords(x, restWords);
   if (t.every(inTitle)) return "title";
   if (t.every(inAny)) return "body";
   if (t.some(inAny)) return "partial";
@@ -231,28 +222,79 @@ function shortDate(value: string | null): string | null {
   }).format(d);
 }
 
-/** Safe client-side highlight — splits text into words and marks each WORD
- * whose stem matches a query term (so "operator's" lights up for "operators")
- * or that contains a term as a substring (prefix/partial). Never injects HTML. */
+/** Safe client-side highlight — delegates to {@link highlightSegments}, which
+ * tints each WORD by how honestly it answers the query on a green→red gradient,
+ * and returns three non-colliding channels per match: a background hue
+ * (quality), an underline STYLE (solid/dashed/dotted — a colour-blind-safe echo
+ * of quality), and, for a corrected misspelling, the inferred/changed letters
+ * flagged so we can ghost them ("wrapp·e·r"). Never injects HTML; only ever
+ * wraps whole word-runs (light/dark backgrounds swapped in globals.css). */
 function highlight(text: string, terms: string[]): ReactNode {
-  const clean = terms.filter(Boolean);
-  if (!clean.length) return text;
-  const stems = queryStems(clean);
-  const lowerTerms = clean.map((t) => t.toLowerCase());
-  // Capturing split keeps the delimiters, so words and the gaps between them
-  // both survive — we only ever wrap whole word-runs, never break a word.
-  const parts = text.split(/([A-Za-z0-9_'’]+)/);
-  return parts.map((part, i) =>
-    /[A-Za-z0-9_'’]/.test(part) && wordMatchesQuery(part, lowerTerms, stems) ? (
+  if (!terms.some(Boolean)) return text;
+  return highlightSegments(text, terms).map((seg, i) => {
+    if (!seg.match) return <span key={i}>{seg.text}</span>;
+    const body = (seg.runs ?? [{ text: seg.text, inferred: false }]).map((run, j) =>
+      run.inferred ? (
+        <span key={j} className="bp-hl-inferred">
+          {run.text}
+        </span>
+      ) : (
+        <span key={j}>{run.text}</span>
+      ),
+    );
+    return (
       <mark
         key={i}
-        className="rounded bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-400/30"
+        title={`${seg.label} · ${Math.round((seg.score ?? 0) * 100)}%`}
+        aria-label={`${seg.text} (${seg.label?.toLowerCase()})`}
+        className="bp-hl rounded px-0.5 text-inherit"
+        style={
+          {
+            "--hl": seg.light,
+            "--hl-d": seg.dark,
+            textDecorationLine: "underline",
+            textDecorationStyle: seg.underline,
+            textDecorationThickness: "2px",
+            textUnderlineOffset: "2px",
+          } as CSSProperties
+        }
       >
-        {part}
+        {body}
       </mark>
-    ) : (
-      <span key={i}>{part}</span>
-    ),
+    );
+  });
+}
+
+/** Key for the highlight encoding — the red→green quality gradient plus its
+ * colour-blind-safe echo (underline style: solid = typed verbatim, dashed/dotted
+ * = understood after correcting a typo). Shown once above the results. */
+function HighlightLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.7rem] text-zinc-500 dark:text-zinc-400">
+      <span className="flex items-center gap-2">
+        <span className="uppercase tracking-widest">match</span>
+        <span>fuzzy</span>
+        <span
+          aria-hidden
+          className="h-2 w-24 rounded-full"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, hsl(0 55% 60%), hsl(24 70% 56%), hsl(48 82% 50%), hsl(72 86% 46%), hsl(100 88% 42%), hsl(130 90% 38%), hsl(162 95% 34%))",
+          }}
+        />
+        <span>exact</span>
+      </span>
+      <span className="flex items-center gap-3">
+        <span className="underline decoration-solid decoration-2 underline-offset-2">verbatim</span>
+        <span className="underline decoration-dashed decoration-2 underline-offset-2">corrected</span>
+        <span>
+          <span className="underline decoration-solid decoration-2 underline-offset-2">wrapp</span>
+          <span className="italic opacity-45 underline decoration-solid decoration-2 underline-offset-2">e</span>
+          <span className="underline decoration-solid decoration-2 underline-offset-2">r</span>
+          <span className="ml-1">= inferred letter</span>
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -264,7 +306,7 @@ function TypeChip({ type }: { type: string }) {
   );
 }
 
-function ResultRow({
+const ResultRow = memo(function ResultRow({
   hit,
   terms,
   master = false,
@@ -292,6 +334,15 @@ function ResultRow({
   position?: number;
 }) {
   const date = shortDate(hit.date);
+  // Memoise the highlight render path — highlightSegments runs a per-token
+  // Damerau + per-corrected-word LCS DP, and this row re-renders on every
+  // keystroke; terms is already a stable useMemo from the parent.
+  const titleNodes = useMemo(() => highlight(hit.title, terms), [hit.title, terms]);
+  const snippet = useMemo(() => matchSnippet(hit, terms), [hit, terms]);
+  const snippetNodes = useMemo(
+    () => (snippet ? highlight(snippet, terms) : null),
+    [snippet, terms],
+  );
   // Cross-surface highlight: lit when the landing graph hovers this doc's node
   // (matched by doc_id == slug). A no-op outside the provider (default null).
   const { hoveredId, setHoveredId } = useHoveredDoc();
@@ -323,7 +374,7 @@ function ResultRow({
   const inner = (
     <>
       <span className="flex items-center gap-2 text-lg font-medium tracking-tight">
-        <span>{highlight(hit.title, terms)}</span>
+        <span>{titleNodes}</span>
         {hit.href ? (
           <span
             aria-hidden
@@ -340,16 +391,11 @@ function ResultRow({
           </span>
         ) : null}
       </span>
-      {(() => {
-        // Contextual snippet (the matched body text, highlighted) when there's a
-        // query; the plain opening excerpt otherwise.
-        const snippet = matchSnippet(hit, terms);
-        return snippet ? (
-          <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
-            {highlight(snippet, terms)}
-          </span>
-        ) : null;
-      })()}
+      {snippetNodes ? (
+        <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
+          {snippetNodes}
+        </span>
+      ) : null}
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
         <TypeChip type={hit.type} />
         {date ? <span>{date}</span> : null}
@@ -413,7 +459,7 @@ function ResultRow({
       {inner}
     </Link>
   );
-}
+});
 
 /* ── main ──────────────────────────────────────────────────────────────── */
 
@@ -976,15 +1022,6 @@ export function Finder({
   // than <details>, so the interactive Popular chips can share its header row
   // without a click also toggling the panel.
   const [optionsOpen, setOptionsOpen] = useState(false);
-  // The parsed-query chips ("Understood as: …") share the status row and replace
-  // the idle Popular shortcuts when a query parses — no extra line, no shift.
-  const parsed = data?.parsedQuery ?? null;
-  const hasParsedChips =
-    !!parsed &&
-    (parsed.terms.length > 0 ||
-      parsed.phrases.length > 0 ||
-      parsed.excludes.length > 0 ||
-      parsed.prefixes.length > 0);
 
   return (
     <main
@@ -1104,42 +1141,8 @@ export function Finder({
             collapsed by default so the primary surface stays clean. */}
         <div className="flex min-h-7 items-center justify-between gap-3 text-sm text-zinc-500 dark:text-zinc-400">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            {hasParsedChips && parsed ? (
-              <>
-                <span className="text-zinc-400">Understood as:</span>
-                {parsed.terms.map((t) => (
-                  <span
-                    key={`t-${t}`}
-                    className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
-                  >
-                    {t}
-                  </span>
-                ))}
-                {parsed.phrases.map((t) => (
-                  <span
-                    key={`p-${t}`}
-                    className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
-                  >
-                    &quot;{t}&quot;
-                  </span>
-                ))}
-                {parsed.prefixes.map((t) => (
-                  <span
-                    key={`x-${t}`}
-                    className="rounded bg-zinc-200/70 px-2 py-0.5 font-mono text-xs dark:bg-zinc-800/70"
-                  >
-                    {t}*
-                  </span>
-                ))}
-                {parsed.excludes.map((t) => (
-                  <span
-                    key={`e-${t}`}
-                    className="rounded bg-red-100 px-2 py-0.5 font-mono text-xs text-red-700 line-through dark:bg-red-950/40 dark:text-red-300"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </>
+            {highlightTerms.length > 0 ? (
+              <HighlightLegend />
             ) : popular.length > 0 ? (
               // Default (idle) state: Popular shortcuts live HERE instead of the
               // old engine tagline.
