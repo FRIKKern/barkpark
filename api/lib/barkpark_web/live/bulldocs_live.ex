@@ -47,7 +47,11 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.PortableDoc.Render
 
   @impl true
-  def mount(%{"slug" => slug}, _session, socket) do
+  def mount(%{"slug" => slug} = params, _session, socket) do
+    # Optional dataset path param (present only on /d/:dataset/papers/:slug).
+    # Absent on the flat /papers/:slug + scoped /w/:ws/p/:proj/papers/:slug
+    # surfaces → default dataset (back-compat: identical behaviour as today).
+    dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
     # Two front doors, one LiveView (P4 of Scoped-by-URL):
     #   * flat /papers/:slug — PUBLIC surface, resolves ONLY within the seeded
     #     Default workspace (barkpark-w9dg; the locked paperflow contract).
@@ -56,8 +60,15 @@ defmodule BarkparkWeb.BulldocsLive do
     #     item token — RequireShareScope/ResolveWorkspace already gated);
     #     fetch within THAT tenant, live updates ride the same ws-keyed topic.
     reader_scope = reader_scope(socket)
-    socket = assign(socket, :reader_scope, reader_scope)
-    paper = fetch_paper(slug, reader_scope)
+    # Persist the resolved dataset so the rev-gap refetch + goal/scope helpers
+    # re-resolve the paper in the SAME dataset they mounted (default for the
+    # flat + scoped surfaces).
+    socket =
+      socket
+      |> assign(:reader_scope, reader_scope)
+      |> assign(:dataset, dataset)
+
+    paper = fetch_paper(slug, reader_scope, dataset)
 
     if connected?(socket) do
       # Workspace-scope the subscription (barkpark-n56v, P0). The topic now
@@ -75,7 +86,8 @@ defmodule BarkparkWeb.BulldocsLive do
         Barkpark.PubSub,
         Content.paper_topic(
           slug,
-          (paper && paper.workspace_id) || reader_scope[:workspace_id]
+          (paper && paper.workspace_id) || reader_scope[:workspace_id],
+          dataset
         )
       )
     end
@@ -287,7 +299,8 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-action", %{"action" => key}, socket) do
     slug = socket.assigns.slug
     label = action_label(socket.assigns.paper_actions, key)
-    {goal_id, scope} = paper_goal_and_scope(slug, socket.assigns[:reader_scope])
+    {goal_id, scope} =
+      paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
     # W1.5-C: stamp the intent row with the paper's OWN workspace/project so the
     # event follows the paper/goal scope (Default fallback when unscoped).
@@ -321,7 +334,8 @@ defmodule BarkparkWeb.BulldocsLive do
   # commit) — the intended Option-B demonstration.
   def handle_event("simplify-request", _params, socket) do
     slug = socket.assigns.slug
-    {goal_id, scope} = paper_goal_and_scope(slug, socket.assigns[:reader_scope])
+    {goal_id, scope} =
+      paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
     # No goal_id → nothing to simplify against; skip gracefully (never crash).
     if is_nil(goal_id) do
@@ -369,7 +383,8 @@ defmodule BarkparkWeb.BulldocsLive do
   defp record_simplify_decision(socket, event_type, verb) do
     slug = socket.assigns.slug
     branch = socket.assigns.pending_simplify
-    {goal_id, scope} = paper_goal_and_scope(slug, socket.assigns[:reader_scope])
+    {goal_id, scope} =
+      paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
     if is_nil(branch) or is_nil(goal_id) do
       socket
@@ -425,12 +440,12 @@ defmodule BarkparkWeb.BulldocsLive do
   # Shared by the U5 action + U4 Simplify handlers — both need the live goal_id
   # AND (W1.5-C) the paper's workspace/project so the recorded event follows the
   # paper/goal scope. Returns `{goal_id | nil, scope_opts}`.
-  defp paper_goal_and_scope(slug, reader_scope) do
-    # Resolve the live paper within the SAME tenant the reader mounted
+  defp paper_goal_and_scope(slug, reader_scope, dataset) do
+    # Resolve the live paper within the SAME tenant + dataset the reader mounted
     # (Default for the flat surface, the URL scope for /w/... — P4). The
     # resolved paper's OWN workspace/project still stamps the recorded
     # event via paper_scope_opts/1.
-    case fetch_paper(slug, reader_scope) do
+    case fetch_paper(slug, reader_scope, dataset) do
       %{content: content} = paper when is_map(content) ->
         {Map.get(content, "goal_id"), paper_scope_opts(paper)}
 
@@ -610,7 +625,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp refetch(socket) do
     # Same tenant scoping as mount (Default flat / URL scope on /w/..., P4).
-    case fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope]) do
+    case fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset]) do
       nil ->
         socket
 
@@ -807,6 +822,11 @@ defmodule BarkparkWeb.BulldocsLive do
     end
   end
 
-  defp fetch_paper(slug, nil), do: Content.get_public_paper(slug)
-  defp fetch_paper(slug, scope), do: Content.get_paper(slug, "production", scope)
+  # Public (unscoped) reader — flat /papers/:slug and dataset-scoped
+  # /d/:dataset/papers/:slug both arrive here (reader_scope == nil). The
+  # dataset comes from the path param, defaulting to the production dataset.
+  defp fetch_paper(slug, nil, dataset), do: Content.get_public_paper(slug, dataset)
+  # Tenant-scoped reader (/w/:ws/p/:proj/papers/:slug) — dataset stays
+  # "production" exactly as before (no dataset segment on that route).
+  defp fetch_paper(slug, scope, _dataset), do: Content.get_paper(slug, "production", scope)
 end

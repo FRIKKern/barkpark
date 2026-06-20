@@ -190,7 +190,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
             if_rev -> [if_rev: if_rev]
           end
 
-        case Content.apply_paper_block_ops(slug, ops, Content.paper_default_dataset(), op_opts) do
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_paper_block_ops(slug, ops, dataset, op_opts) do
           {:ok, result} ->
             # MINIMAL receipt — slug + op-count + new rev + affected block ids.
             # fragment_html is deliberately SUPPRESSED on the batch path.
@@ -254,7 +256,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
         |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
 
       true ->
-        case Content.apply_paper_block_op(slug, op) do
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_paper_block_op(slug, op, dataset) do
           {:ok, result} ->
             conn
             |> put_status(:ok)
@@ -319,6 +323,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     attrs
     |> maybe_put("workspace_id", ws_id)
     |> maybe_put("project_id", project_id)
+    # Dataset-aware ingest: an OPTIONAL "dataset" body param routes the upserted
+    # paper doc + its blocks into that dataset. Absent → upsert_paper applies its
+    # own default-dataset fallback (back-compat: existing producers unchanged).
+    |> maybe_put("dataset", blank_to_nil(params["dataset"]))
   end
 
   # Resolve {workspace_id, project_id}. Precedence: explicit ids in the body win;
