@@ -44,7 +44,7 @@ blast-radius      ─ relationships: what a change affects; cross-language seam 
 | `status/` | **the entry point** — full quality report, incremental | `status.mjs` |
 
 `node tooling/status/status.mjs` is the one command: it runs the whole programmatic
-chain (~2s, free), regenerates the comprehensive 8-dimension report from cached
+chain (~2s, free), regenerates the comprehensive 9-dimension report from cached
 verdicts, and prints **FRESH** or the exact pending agent work. Re-runs are cheap
 because every agent pass (research, consistency, issues) is content-hash cached —
 unchanged files/groups are never re-judged. Flags: `--no-coverage` (skip the heavy
@@ -55,11 +55,13 @@ re-fits `fit` on every release (tracking AUC over time in `tooling/fit/auc-histo
 and runs a weekly drift-guard that surfaces ledger staleness — both coverage-free,
 no DB needed.
 
-Beyond the quality report, the suite has two more arcs (see the `codebase-quality`
-skill): **ENRICH** — `usefulness` + `intentions` add the per-file knowledge layer;
-**PUBLISH** — `barkpark-sync` ships every file as a Barkpark paper (source + all
-axes + git history) wired by typed references (`dependencies` + `intentions`) into
-an interconnected, filterable graph, in an isolated `codebase` dataset.
+Beyond the quality report, the suite has three more arcs (see the `codebase-quality`
+skill): **ENRICH** — `usefulness` (reach) + `intentions` add the per-file knowledge
+layer; **PUBLISH** — `barkpark-sync` ships every file as a Barkpark paper (source +
+all axes + git history) wired by typed references (`dependencies` + `intentions`)
+into an interconnected, filterable graph, in an isolated `codebase` dataset;
+**RELATE** — `cochange` + `tasks` layer co-change coupling and Barkpark tasks (with
+triage of open work) onto that graph.
 
 Orchestrated by the **`codebase-quality`** skill (`.claude/skills/`). Each pass is a
 plain Node script (no deps); all derived outputs (ledgers, indexes, charts, reports,

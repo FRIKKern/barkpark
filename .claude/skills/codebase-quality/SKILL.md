@@ -1,15 +1,16 @@
 ---
 name: codebase-quality
-description: Use when the user asks "how good is the codebase", "what's the code quality", "what should we improve / refactor", "where's our technical debt", "score the repo", "audit the codebase", "build the codebase knowledge graph", "what is each file for / how important / how useful", "what intentions / goals does the code serve", or "publish the codebase into Barkpark". Three arcs: ASSESS (8-dimension quality scorecard + ROI improvement plan), ENRICH (per-file importance, usefulness+why, intentions, git history), PUBLISH (one Barkpark paper per file, typed references, interconnected graph). Programmatic scans measure for free; agents are spent only on judgment a parser can't make, and only on what changed. Lives in tooling/.
+description: Use when the user asks "how good is the codebase", "what's the code quality", "what should we improve / refactor", "where's our technical debt", "score the repo", "audit the codebase", "build the codebase knowledge graph", "what is each file for / how important / how useful", "what intentions / goals does the code serve", "what open work is highest-leverage", or "publish the codebase into Barkpark". Four arcs: ASSESS (9-dimension quality scorecard + ROI improvement plan), ENRICH (per-file importance, reach+why, intentions, ownership, git history), PUBLISH (one Barkpark paper per file, typed references, interconnected graph), RELATE (co-change + tasks as a third graph layer, plus triage of open work by predicted impact). Programmatic scans measure for free; agents are spent only on judgment a parser can't make, and only on what changed. Lives in tooling/.
 ---
 
 # Codebase Quality & Knowledge Graph
 
-Three arcs over one codebase: **ASSESS** how good it is (scorecard + plan),
-**ENRICH** every file with metadata a parser can't produce (importance,
-usefulness, intentions, git history), and **PUBLISH** it all into Barkpark as an
-interconnected graph of papers. Each arc reuses the same outputs; run only what
-you need.
+Four arcs over one codebase: **ASSESS** how good it is (scorecard + plan),
+**ENRICH** every file with metadata a parser can't produce (importance, reach,
+intentions, ownership, git history), **PUBLISH** it all into Barkpark as an
+interconnected graph of papers, and **RELATE** — co-change + Barkpark tasks
+layered onto that graph (triage, churn provenance). Each arc reuses the same
+outputs; run only what you need.
 
 ## The doctrine (the whole point)
 
@@ -73,11 +74,15 @@ node tooling/status/status.mjs
     `tooling/lib/consensus.mjs` and marks `contested` rows (tier `contested`) for
     review. Spend the extra votes only on the judgments that actually move a composite.
 
-`status.mjs` already chains: `blast-radius/build-index`, `file-importance/build-signals`,
-`ergonomics/ergonomics`, `risk/risk`, `consistency scan+batches`, `combined/combine`,
-`quality/quality`, `status/report`. Pass `--no-coverage` to skip the heavy go/mix
-suites (proxy test everywhere; real defect-mining + reach still run) and
-`--skip-elixir` to use the regex resolver on hosts without the Elixir toolchain.
+`status.mjs` is the single all-arcs entry — it chains the whole programmatic
+pipeline: ARC 1 (`blast-radius/build-index`, `file-importance/build-signals`,
+`ergonomics`, `risk`, `consistency scan+batches+merge`, `research-coverage scan`,
+`combined`, `quality`, `report`), the ARC 2 enrich merges (`usefulness merge`,
+`intentions merge`), ARC 4 (`cochange`), and ARC 3 `generate` — with `push` +
+`graph-view` run only on `--publish` (and only when Barkpark is reachable). Pass
+`--no-coverage` to skip the heavy go/mix suites (proxy test everywhere; real
+defect-mining + reach still run) and `--skip-elixir` to use the regex resolver on
+hosts without the Elixir toolchain.
 
 **Standing loop (CI, cqv3-p1).** `.github/workflows/codebase-intel.yml` runs the
 calibration as a loop, not a one-shot: a **calibrate** job on every release re-runs
@@ -142,7 +147,9 @@ node tooling/barkpark-sync/generate.mjs              # → nodes.json: every fil
 #   history, dependency edges + intention edges + the intention HUB nodes
 node tooling/barkpark-sync/push.mjs --dataset codebase
 #   registers the paper schema (incl. typed `dependencies`+`intentions` ref fields),
-#   creates+publishes papers, sets TYPED references, ingests content blocks
+#   creates+publishes papers, sets TYPED references, ingests content blocks.
+#   SAFETY: push.mjs defaults to `codebase` and REFUSES `--dataset production`
+#   (exit 2) — code papers must never leak into production (cqv3 hardening).
 node tooling/barkpark-sync/graph-view.mjs --dataset codebase   # interactive graph HTML
 ```
 View: papers at `http://localhost:4000/d/codebase/papers/<slug>` (source +
@@ -194,10 +201,10 @@ node tooling/tasks/tasks.mjs publish      # add task nodes to the codebase graph
 - **Scorecard** = where the codebase stands; a low dimension is the headline.
 - **Improvement plan** = what to fix, top-down by impact (reach × severity ×
   defect-amplifier); a file under multiple kinds is the highest-leverage target.
-- **Per-file paper** = a complete briefing: source + importance + usefulness/why +
+- **Per-file paper** = a complete briefing: source + importance + reach/why +
   intentions + dependencies (both directions) + git history. This is the
   metadata-first context pack that lets an agent understand a file without
-  re-deriving anything (see agent-efficiency note below).
+  re-deriving anything (see **Delivery — `scope`** below for how to consume it).
 - **Graph** = three relationship layers — dependency (code structure), intention
   (shared goals, linking files that don't import each other), and co-change
   (temporal coupling) — cross-validated; plus **tasks** as a third node type
