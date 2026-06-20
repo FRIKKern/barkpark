@@ -33,8 +33,21 @@ const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.
 const f = (n) => n.fields;
 const metricsLine = (n) => `importance ${f(n).importance} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · fanIn ${f(n).fanIn}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
 
-// ---- phase 1a: create ALL bare (so every reference target exists) ----
+// ---- phase 0: register the paper schema for this dataset ----
+// The content-edge extractor keys on list_schemas(dataset) to find reference
+// fields; without a `paper` schema in this dataset, the graph has 0 edges.
 console.error(`[push] ${nodes.length} nodes → ${HOST} (dataset ${DATASET})`);
+{
+  const schema = { name: "paper", title: "Papers", fields: [
+    { name: "title", type: "string" }, { name: "event_type", type: "string" },
+    { name: "source_doc", type: "string" }, { name: "goal_id", type: "string" },
+    { name: "related", type: "arrayOf", of: { type: "reference", refType: "paper" } },
+  ] };
+  const r = await post(`/v1/schemas/${DATASET}`, DEV, schema);
+  console.error(r.ok ? `  registered paper schema for ${DATASET}` : `  paper schema register: ${r.status} (may already exist) ${r.body.slice(0, 80)}`);
+}
+
+// ---- phase 1a: create ALL bare (so every reference target exists) ----
 const doc = (n, related) => ({ createOrReplace: { _type: "paper", _id: n.id, title: n.path, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}`, related } });
 let created = 0;
 for (const ck of chunk(nodes, 40)) {
