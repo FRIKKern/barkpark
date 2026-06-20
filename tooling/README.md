@@ -1,79 +1,200 @@
 <!-- doc-tier: human -->
-# tooling/ — Codebase Quality suite
+# tooling/ — Codebase Intelligence
 
-Scores **how good the codebase is** and **what it takes to improve it**. One
-discipline runs through all of it: **programmatic scripts do everything they can
-for free; agents are spent only on the judgment a machine can't produce, on what
-changed, and to verify a finding before it drives the plan.**
+> One question, answered four ways: **how good is this codebase, what do we fix
+> first, how does every file relate to every other, and which open work matters
+> most?** Built for a polyglot monorepo — Go, Elixir, TypeScript — where no single
+> language server sees the whole picture.
 
-**v2 model:** eight canonical roots — **reach · churn · complexity · defects ·
-tests · conventions · ownership · relationships** — each measured exactly ONCE,
-composed only ACROSS roots (`SIGNALS.md`). `reach` (not "usefulness") is the single
-value root. Composites read clean roots from `fit/scoring-config.json`.
+One discipline runs through all of it:
+
+> **Parsers do everything they can for free. Agents are spent only on the judgment
+> a machine can't produce, only on what changed, and only after the finding is
+> verified.** A clean re-run costs zero tokens. A one-file change re-evaluates one
+> file.
+
+The result is a scorecard you can trust, an improvement plan ranked by leverage,
+and a live Barkpark graph where files, the goals they serve, and the tasks moving
+them all hang together.
+
+---
+
+## The model — eight roots, each measured once
+
+Every score traces back to exactly **eight canonical signals**, each owned by one
+pass and never double-counted. Composites are built only by combining roots
+*across* passes — so no signal silently votes twice (`SIGNALS.md`).
+
+| Root | Means | Owner |
+|---|---|---|
+| **reach** | normalized transitive-dependent count — the single *value* axis | `usefulness` |
+| **churn** | how often a file changes (git) | `file-importance` |
+| **complexity** | size / bloat / fragmentation | `ergonomics` |
+| **defects** | bug-fix + revert density (git-subject mining) | `risk` |
+| **tests** | real line coverage where a suite runs, presence proxy elsewhere | `risk` |
+| **conventions** | per-group norm; drift vs intentional; layering; duplication | `consistency` |
+| **ownership** | bus-factor — primary-author share + author count | `risk` |
+| **relationships** | what a change reaches; the cross-language wire seams | `blast-radius` |
+
+Four **composites** recombine clean roots, with weights *learned from the
+codebase's own incident history* (see The standing loop):
 
 ```
-research-coverage ─ every file evaluated? content-hash ledger; agents only on drift
-file-importance   ─ churn root + importance prior (blast-radius × agent criticality)
-usefulness        ─ reach root: normalized transitive-dependent count (pure programmatic) + why
-consistency       ─ conventions root: per-group norm, drift vs intentional, layering, dup
-ergonomics        ─ complexity root: bloat (god-files) vs fragmentation → refactor-worth
-risk              ─ tests + defects + ownership roots (git mining: bug-fixes, bus-factor)
-blast-radius      ─ relationships: what a change affects; cross-language seam guard (pre-push hook)
-        ├───── combined  ─ reach × consistency → prioritized worklist
-        ├───── quality   ─ scorecard (A–F) + 4 composite worklists (priority · hotspot · crit-untested · refactor-worth)
-        └───── scope     ─ DELIVERY: task/intention → scoped context pack (exploration → lookup)
+Priority          = reach × severity × defect-amp × untested-boost   → fix-first list
+Hotspot           = churn × complexity                                → refactor targets
+Critical-untested = reach × ¬coverage                                 → test-first list
+Refactor-worth    = bloat × churn × separability                      → safe-to-split list
 ```
+
+---
+
+## The pipeline
+
+```
+        ROOTS (programmatic, free)                      COMPOSED
+  ┌─────────────────────────────────────┐      ┌───────────────────────────┐
+  research-coverage  every file evaluated? ──┐
+  blast-radius       reach + wire seams ──────┤
+  file-importance    churn + importance ──────┼──▶ combined   reach × consistency
+  usefulness         reach (+ why prose) ─────┤    quality    9-dim scorecard (A–F)
+  ergonomics         bloat vs fragmentation ──┤               + 4 composite worklists
+  risk               tests · defects · owner ─┤    fit        LEARNS the weights
+  consistency        norm · drift · dup ──────┘               (logistic, AUC-scored)
+  ├── cochange        files that change together → real / aspirational / accidental
+  ├── intentions      the goals each file serves  → a second edge type
+  ├── tasks           Barkpark work as a 3rd node → triage open work by impact
+  └── scope           task/intention → context pack (exploration → lookup)
+```
+
+Every box is a dependency-free Node script. Agents enter only where a parser
+can't judge — file criticality, whether a style deviation is real drift or an
+intentional exception — and only for files/groups whose content hash changed.
+
+---
+
+## Four arcs
+
+| Arc | Question | What you get |
+|---|---|---|
+| **ASSESS** | How good is it? What first? | 9-dimension scorecard (A–F) + the four ranked worklists |
+| **ENRICH** | What is each file *for*? | per-file importance, reach + why, intentions, ownership, git history |
+| **PUBLISH** | Show me the whole web | one Barkpark paper per file, typed references, an interconnected graph |
+| **RELATE** | How does it all connect? | co-change coupling + Barkpark tasks as a third node layer, with triage |
+
+The nine scorecard dimensions: **Evaluated · Consistency · Architecture · Hotspots
+· Modularity · Tested · Reliability · Duplication · Dead-code** — each keyed to one
+root, each carrying a one-line note and a weight.
+
+---
+
+## One command
+
+```bash
+node tooling/status/status.mjs
+```
+
+The single all-arcs entry point. It runs the whole programmatic chain (~2s, free),
+regenerates the comprehensive report from cached verdicts, and prints **FRESH** or
+the exact pending agent work — never a vague "run some agents." Re-runs are cheap:
+every agent pass (research, consistency, issues) is content-hash cached, so
+unchanged files are never re-judged.
+
+| Flag | Effect |
+|---|---|
+| *(none)* | full chain; publishes to Barkpark only with `--publish` |
+| `--no-coverage` | skip the heavy `go test` / `mix test` suites (real defect-mining + reach still run) |
+| `--skip-elixir` | use the regex resolver on hosts without the Elixir toolchain |
+| `--publish` | also ship the graph into the isolated `codebase` dataset |
+
+Open `tooling/quality/quality-report.html` for the rendered scorecard, or
+`tooling/status/status-report.html` for the full 9-dimension board.
+
+---
+
+## The standing loop (CI)
+
+Scoring is a **loop, not a one-shot**. `.github/workflows/codebase-intel.yml`:
+
+- **calibrate** — on every release: re-runs the chain and re-fits the scoring
+  weights against the codebase's own defect history, then appends one line to
+  `tooling/fit/auc-history.jsonl` so **AUC is tracked over time** as incident
+  history grows. (Current hold-out AUC ≈ **0.86**.)
+- **drift-guard** — weekly: runs the cheap chain and surfaces a stale research /
+  consistency ledger in the job summary. Never blocks.
+
+Both run coverage-free — no Postgres or test DB needed.
+
+## Verification — multi-vote
+
+The judgments that move a composite (file criticality) can be **multi-voted**:
+dispatch the batch K times into `results/vote-1/ … vote-K/`. The merge consensus's
+the votes (median + agreement, `lib/consensus.mjs`) and flags a **contested**
+judgment the panel disagreed on — surfaced for review, never silently averaged.
+Flat `results/` = one vote, exactly as before.
+
+---
+
+## Directory map
 
 | Dir | What it answers | Entry |
 |---|---|---|
-| `research-coverage/` | "Is every file currently evaluated? What changed?" | `coverage.mjs scan` |
-| `file-importance/` | "How important is each file?" | `build-signals.mjs` → agents → `merge.mjs` |
-| `consistency/` | "Do we follow a style? Where do we break it?" | `consistency.mjs scan` |
-| `ergonomics/` | "Which files are too bloated to work with efficiently?" | `ergonomics.mjs` |
-| `risk/` | "Is important code tested? Where do bugs actually land?" | `risk.mjs` |
-| `blast-radius/` | "What does this change affect? Did it touch the wire contract?" | `check.mjs` (pre-push) |
-| `combined/` | "What's both important AND inconsistent?" | `combine.mjs` |
-| `quality/` | "How good is the codebase? What do we fix first?" | `quality.mjs` |
-| `usefulness/` | "How much does each file get depended on (reach), and why reusable?" | `usefulness.mjs merge` (reach is programmatic; `why` is description-only) |
-| `intentions/` | "What objectives does each file serve?" (2nd edge type) | `review.mjs` → discovery → tag → `merge` |
-| `fit/` | "What weights/forms do the composites use?" | `scoring-config.json` (read by `lib/scoring.mjs`) |
-| `barkpark-sync/` | "Publish every file as an interconnected Barkpark paper" | `generate.mjs` → `push.mjs` → `graph-view.mjs` |
-| `cochange/` | "Which files change together? Is a coupling real, aspirational, or accidental?" | `cochange.mjs` |
-| `tasks/` | "How does work relate to code? Did a task touch what it should? What open work is highest-leverage?" | `tasks.mjs [triage\|publish]` |
-| `scope/` | "What's the file set for this task? — context pack, no crawl" | `scope.mjs <intention-id\|task>` |
-| `status/` | **the entry point** — full quality report, incremental | `status.mjs` |
+| `research-coverage/` | Is every file currently evaluated? What changed? | `coverage.mjs scan` |
+| `blast-radius/` | What does this change affect? Did it touch the wire contract? | `check.mjs` (pre-push) |
+| `file-importance/` | How important is each file? | `build-signals.mjs` → agents → `merge.mjs` |
+| `usefulness/` | How depended-on is each file (reach), and why reusable? | `usefulness.mjs merge` |
+| `ergonomics/` | Which files are too bloated to work in efficiently? | `ergonomics.mjs` |
+| `risk/` | Is important code tested? Where do bugs actually land? | `risk.mjs` |
+| `consistency/` | Do we follow a style? Where do we break it? | `consistency.mjs scan` |
+| `intentions/` | What objectives does each file serve? (2nd edge type) | `review.mjs` → tag → `merge` |
+| `cochange/` | Which files change together — real, aspirational, or accidental? | `cochange.mjs` |
+| `combined/` | What's both important *and* inconsistent? | `combine.mjs` |
+| `fit/` | What weights/forms do the composites use? | `fit.mjs` → `scoring-config.json` |
+| `quality/` | How good is the codebase? What do we fix first? | `quality.mjs` |
+| `tasks/` | How does work relate to code? What open work is highest-leverage? | `tasks.mjs [triage\|publish]` |
+| `scope/` | What's the file set for this task — context pack, no crawl? | `scope.mjs <intention\|task>` |
+| `barkpark-sync/` | Publish every file as an interconnected Barkpark paper | `generate.mjs` → `push.mjs` → `graph-view.mjs` |
+| `status/` | **the entry point** — full report, incremental | `status.mjs` |
+| `lib/` | shared engines — `scoring.mjs` (composites), `consensus.mjs` (multi-vote) | — |
 
-`node tooling/status/status.mjs` is the one command: it runs the whole programmatic
-chain (~2s, free), regenerates the comprehensive 9-dimension report from cached
-verdicts, and prints **FRESH** or the exact pending agent work. Re-runs are cheap
-because every agent pass (research, consistency, issues) is content-hash cached —
-unchanged files/groups are never re-judged. Flags: `--no-coverage` (skip the heavy
-go/mix suites), `--skip-elixir` (regex resolver on hosts without the toolchain).
+---
 
-The scoring is a **standing loop**, not a one-shot: `.github/workflows/codebase-intel.yml`
-re-fits `fit` on every release (tracking AUC over time in `tooling/fit/auc-history.jsonl`)
-and runs a weekly drift-guard that surfaces ledger staleness — both coverage-free,
-no DB needed.
+## What's real vs. what's a proxy
 
-Beyond the quality report, the suite has three more arcs (see the `codebase-quality`
-skill): **ENRICH** — `usefulness` (reach) + `intentions` add the per-file knowledge
-layer; **PUBLISH** — `barkpark-sync` ships every file as a Barkpark paper (source +
-all axes + git history) wired by typed references (`dependencies` + `intentions`)
-into an interconnected, filterable graph, in an isolated `codebase` dataset;
-**RELATE** — `cochange` + `tasks` layer co-change coupling and Barkpark tasks (with
-triage of open work) onto that graph.
+Be honest about the edges, because the system is:
 
-Orchestrated by the **`codebase-quality`** skill (`.claude/skills/`). Each pass is a
-plain Node script (no deps); all derived outputs (ledgers, indexes, charts, reports,
-batches, results, nodes.json) are gitignored — regenerate, never commit. Agent
-fan-out uses the `Workflow` tool; read each pass's `README` / `config.json` for details.
+- **Coverage is REAL** where a suite runs — Go (`go test -cover`), Elixir (`mix
+  test --cover`), and JS (vitest `coverage-final.json`, ingested free even under
+  `--no-coverage`). It falls back to a sibling-test *presence proxy* elsewhere.
+- **The Elixir dependency graph is warm.** `build-index.mjs` auto-compiles when
+  `api/_build` is absent, so `mix xref` yields the dense module graph (~286 files)
+  on a fresh clone and in CI — not contingent on a manual `mix compile`. JS/Go
+  edges remain best-effort.
+- **Defect history is git-subject mining** — only as good as commit hygiene.
+- **Task triage is a heuristic** until more work carries the `(task-id)` commit
+  convention; it sharpens as that history grows.
+
+## Safety
+
+Code papers live **only** in the isolated `codebase` dataset. `push.mjs` defaults
+to `codebase` and **refuses `--dataset production`** (exit 2) — production is never
+polluted with per-file papers.
+
+---
 
 ## Design invariants
 
 - **Programmatic first.** Dependency graphs, hashing, churn, naming, layering,
-  duplication — all computed exactly and freely. An LLM is never asked to do what
-  a parser does perfectly.
+  duplication — computed exactly and freely. An LLM is never asked to do what a
+  parser does perfectly.
 - **Agents on drift only.** Content hashes gate every agent call; a clean re-run
-  costs zero tokens. A one-file change re-researches one file.
-- **Blend, don't replace.** Final scores anchor an objective prior with agent
-  judgment, so the result is correct, calibrated, and auditable.
+  costs zero tokens; a one-file change re-researches one file.
+- **One root, one owner.** Each signal is measured once; composites combine roots
+  only across passes, so nothing double-counts.
+- **Blend, don't assert.** Final scores anchor an objective prior with agent
+  judgment and *calibrated* weights — correct, auditable, and learned from history.
+
+Orchestrated by the **`codebase-quality`** skill (`.claude/skills/`). All derived
+outputs (ledgers, indexes, charts, reports, batches, results, `nodes.json`) are
+gitignored — regenerate, never commit; the one exception is the tracked AUC ledger.
+Agent fan-out uses the `Workflow` tool. See each pass's `README` / `config.json`,
+and `SIGNALS.md` for the canonical root definitions.
