@@ -111,32 +111,52 @@ function scoreFiles(files) {
 }
 
 function build(tasks) {
+  // task tree (parent_id) → a parent task ROLLS UP its descendants' file evidence
+  // (an epic carries 0 commits of its own; its phases carry them).
+  const parentOf = {};
+  for (const t of tasks) { const pid = t.parent_id ?? t.content?.parent_id; if (pid) parentOf[t._id] = String(pid).replace(/^drafts\./, ""); }
+  const childrenOf = {};
+  for (const [c, p] of Object.entries(parentOf)) (childrenOf[p] ||= []).push(c);
+  const descendants = (id) => { const o = [], stack = [...(childrenOf[id] || [])]; while (stack.length) { const x = stack.pop(); o.push(x); for (const c of (childrenOf[x] || [])) stack.push(c); } return o; };
+  const rawById = {}; for (const t of tasks) rawById[t._id] = actualFilesFor(t._id);
+
   const out = [];
   for (const t of tasks) {
     const id = t._id;
-    const { files: actualFiles, commits } = actualFilesFor(id);
-    // a task inherits the intentions of the files it changed
+    const ids = [id, ...descendants(id)];
+    const fileSet = new Set(); let commits = 0;
+    for (const x of ids) { const r = rawById[x] || (rawById[x] = actualFilesFor(x)); for (const f of r.files) fileSet.add(f); commits += r.commits; }
+    const actualFiles = [...fileSet].sort();
+    const rolledUp = ids.length > 1;
+
+    // ONLY graph-node files can be cross-validated; docs/.gitignore/SKILL.md aren't
+    // nodes (carry no intentions) → can never be "predicted", so they're reported
+    // separately, not counted as scope-creep.
+    const actualGraph = actualFiles.filter((p) => inGraph.has(p));
+    const nonGraphFiles = actualFiles.filter((p) => !inGraph.has(p));
+
+    // a task inherits the intentions of the (graph) files it changed
     const intentSet = new Set();
-    for (const p of actualFiles) for (const i of (fileIntents.get(p) || [])) intentSet.add(i);
+    for (const p of actualGraph) for (const i of (fileIntents.get(p) || [])) intentSet.add(i);
     const intentions = [...intentSet].sort();
     // predicted = union of every member file of those intentions
     const predSet = new Set();
     for (const i of intentions) for (const p of (intentMembers.get(i) || [])) predSet.add(p);
     const predictedFiles = [...predSet].sort();
 
-    const actualSet = new Set(actualFiles);
-    const onTarget = actualFiles.filter((p) => predSet.has(p));      // predicted ∩ actual
-    const scopedUntouched = predictedFiles.filter((p) => !actualSet.has(p)); // predicted − actual
-    const scopeCreep = actualFiles.filter((p) => !predSet.has(p));   // actual − predicted
+    const actualGraphSet = new Set(actualGraph);
+    const onTarget = actualGraph.filter((p) => predSet.has(p));            // predicted ∩ actual (graph)
+    const scopedUntouched = predictedFiles.filter((p) => !actualGraphSet.has(p)); // predicted − actual
+    const scopeCreep = actualGraph.filter((p) => !predSet.has(p));         // SOURCE outside scope (real creep)
 
-    const { impact, risk: riskScore, fragileFiles, fragile } = scoreFiles(actualFiles);
+    const { impact, risk: riskScore, fragileFiles, fragile } = scoreFiles(actualGraph);
 
     out.push({
       id, title: t.title || id,
-      status: t.lifecycle_status || t.status || "",
+      status: t.lifecycle_status || t.content?.lifecycle_status || t.status || "",
       kind: (t.labels || []).find((l) => l.startsWith("kind:"))?.slice(5) || t.kind || "task",
-      commits,
-      actualFiles, predictedFiles, intentions,
+      commits, rolledUp,
+      actualFiles, nonGraphFiles, predictedFiles, intentions,
       impact, risk: riskScore, fragile, fragileFiles,
       onTarget, scopedUntouched, scopeCreep,
     });
@@ -243,9 +263,10 @@ async function publish(report) {
   e(`  → tasks-report.json`);
   e("");
   for (const t of withFiles.slice(0, 12)) {
-    e(`  ${t.id}  ${t.title}`);
-    e(`     ${t.commits} commit(s) · ${t.actualFiles.length} files changed · intentions: ${t.intentions.join(", ") || "(none)"}`);
-    e(`     impact ${t.impact} · risk ${t.risk}${t.fragile ? " · ⚠️ fragile" : ""} · on-target ${t.onTarget.length}/${t.actualFiles.length} · scope-creep ${t.scopeCreep.length} · scoped-untouched ${t.scopedUntouched.length}`);
+    const graphN = t.onTarget.length + t.scopeCreep.length;
+    e(`  ${t.id}  ${t.title}${t.rolledUp ? " (rolled up from children)" : ""}`);
+    e(`     ${t.commits} commit(s) · ${graphN} source + ${t.nonGraphFiles.length} non-graph files · intentions: ${t.intentions.join(", ") || "(none)"}`);
+    e(`     impact ${t.impact} · risk ${t.risk}${t.fragile ? " · ⚠️ fragile" : ""} · on-target ${t.onTarget.length}/${graphN} · scope-creep ${t.scopeCreep.length} · scoped-untouched ${t.scopedUntouched.length}`);
     if (t.scopeCreep.length) e(`     creep: ${t.scopeCreep.slice(0, 4).join(", ")}${t.scopeCreep.length > 4 ? " …" : ""}`);
   }
   if (!withFiles.length) e(`  ⚠️ no task carried its id in a commit message — the commit-id→file join is empty. Tasks need "(<task-id>)" in the subject.`);
