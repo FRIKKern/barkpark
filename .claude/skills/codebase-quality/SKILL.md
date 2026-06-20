@@ -18,12 +18,17 @@ you need.
    to do what a parser does perfectly.
 2. **Agents only on judgment, only on drift.** Content hashes gate every agent
    call; a clean re-run costs zero tokens; one changed file re-evaluates one file.
-3. **Anchor judgment with objective priors.** Importance, usefulness = blend(a
-   reach/fan-in prior, agent judgment) — correct, calibrated, auditable.
+3. **Measure each root signal ONCE; compose only ACROSS roots (v2).** The eight
+   canonical roots (reach · churn · complexity · defects · tests · conventions ·
+   ownership · relationships — see `tooling/SIGNALS.md`) are each owned by exactly
+   one pass. Composites (hotspot, priority, refactor-worth, critical-untested) read
+   clean roots from `scoring-config.json` — no root reaches a composite twice.
 4. **VERIFY before you trust.** Findings (layering, dup, drift) are adversarially
    judged before they drive the plan.
-5. **Importance-weight everything.** A problem/score in a critical file outranks
-   the same in a leaf.
+5. **Reach-weight everything.** `reach` (normalized transitive dependents) is the
+   single value root — a problem in a high-reach file outranks the same in a leaf.
+   The old `usefulness` "value axis" is gone; its agent prose survives as a `why`
+   description, not a score.
 
 `tooling/` has one Node script (no deps) per pass; all derived outputs (ledgers,
 indexes, reports, batches, results, nodes.json) are gitignored — regenerate,
@@ -39,9 +44,12 @@ from cached verdicts, and prints **FRESH** or the exact pending agent work:
 ```
 node tooling/status/status.mjs
 ```
-- **FRESH** → report the grade, the 8 dimensions (Evaluated, Consistency,
-  Architecture, Modularity, Tested, Reliability, Duplication, Dead-code), and the
-  top of the improvement plan. Open `tooling/status/status-report.html`.
+- **FRESH** → report the grade, the dimensions (Evaluated, Consistency,
+  Architecture, **Hotspots** churn×complexity, Modularity, Tested, Reliability,
+  Duplication, Dead-code), and the four composite worklists — **Priority** (reach ×
+  severity × defect × untested), **Hotspot map** (churn × complexity),
+  **Critical-untested** (reach × ¬coverage), **Refactor-worth** (bloat × churn ×
+  separability). Open `tooling/quality/quality-report.html`.
 - **PENDING** → do only the listed agent work, then re-run `status.mjs`:
   - *coverage drift* → `research-coverage/coverage.mjs prune && … batches` → dispatch
     `batch-count.txt` Sonnet agents (read each file, write `results/batch-NNN.json`
@@ -68,13 +76,18 @@ content-hash friendly; re-run only when files changed.
 what_breaks_if_wrong}`) → `file-importance/merge.mjs`. (The coverage ledger also
 carries importance, so this is optional once `status.mjs` has run.)
 
-**Usefulness (+ why)** — value/leverage, distinct from importance (reach ×
-reusability × reliability):
+**Reach (+ why)** — the single value root (v2). `reach` is now PURE programmatic:
+a normalized (0–100) transitive-dependent count computed by the merge — no agent
+produces the number. The agent `why_useful` prose is kept as a `why` *description*
+(graded reusability), never a score:
 ```
 node tooling/usefulness/usefulness.mjs batches      # prior from transitive-dependent reach
-# dispatch ~66 Sonnet agents → results/batch-NNN.json [{path,usefulness,why_useful}]
-node tooling/usefulness/usefulness.mjs merge         # blends prior + agent → usefulness-report.json
+# (optional) dispatch agents → results/batch-NNN.json [{path,why_useful}]  — DESCRIPTION only
+node tooling/usefulness/usefulness.mjs merge         # computes reach + folds why → usefulness-report.json
 ```
+
+**Ownership** — bus-factor, programmatic + free (one `git log` pass in `risk.mjs`):
+`primaryAuthorShare` (top author's % of commits) + `authorCount`. No agent step.
 
 **Intentions** — the objectives each file advances (a second edge type linking
 cross-cutting files). Derive the taxonomy from THREE grounded sources, then tag:
@@ -121,7 +134,7 @@ it). The `dependencies` field on each doc is the inverse-correct dependents sour
 ## Reading the output
 
 - **Scorecard** = where the codebase stands; a low dimension is the headline.
-- **Improvement plan** = what to fix, top-down by impact (importance × severity ×
+- **Improvement plan** = what to fix, top-down by impact (reach × severity ×
   defect-amplifier); a file under multiple kinds is the highest-leverage target.
 - **Per-file paper** = a complete briefing: source + importance + usefulness/why +
   intentions + dependencies (both directions) + git history. This is the
@@ -130,19 +143,28 @@ it). The `dependencies` field on each doc is the inverse-correct dependents sour
 - **Graph** = two relationship layers — dependency (code structure) and intention
   (shared goals, linking files that don't import each other).
 
-## Agent-efficiency use
+## Delivery — `scope` (exploration → lookup)
 
-Exploration → lookup. A task maps to intention(s) → the exact files advancing it,
-ranked by importance, each with a one-line summary + deps + blast-radius. Agents
-read metadata first and open source only where they'll edit. Query via the
-Barkpark graph/search or the JSON reports.
+The `scope` capability turns a task or intention into a **scoped context pack** so
+an agent reads metadata instead of crawling the tree:
+```
+node tooling/scope/scope.mjs <intention-id>          # e.g. layered-auth
+node tooling/scope/scope.mjs "harden auth scoping"   # free-text task → best intention(s)
+node tooling/scope/scope.mjs --list                  # every intention + member count
+node tooling/scope/scope.mjs <task> --json --top 40  # machine-readable, capped
+```
+The pack lists the files advancing the matched intention(s), ranked by **reach**,
+each with its one-line role/why + reach + blast-radius + deps **both directions**.
+Reads `tooling/barkpark-sync/nodes.json`. See the `scope` skill. The same data is
+also queryable via the Barkpark graph/search or the per-file papers.
 
 ## Honest limits (state these with the report)
 
 - Snapshot — the cache keeps it live, but a stale ledger weakens importance.
 - Single-vote agent judgments (spot-check; not multi-voted by default).
-- Scoring weights + effort estimates are calibrated heuristics — trust ranking/tiers
-  over the exact integer.
+- Scoring weights + composite forms live in `tooling/fit/scoring-config.json` (read
+  by `tooling/lib/scoring.mjs`); when unfitted it falls back to defaults. Effort
+  estimates are calibrated heuristics — trust ranking/tiers over the exact integer.
 - **Tested is a PROXY** (sibling-test + module references), not line coverage.
 - Defect-history is git-subject mining — only as good as commit hygiene.
 - The file-level **dependency graph is sparse** (~35-47% of files) — the resolver is

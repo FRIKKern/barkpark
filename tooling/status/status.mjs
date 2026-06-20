@@ -48,7 +48,7 @@ run("consistency-merge", "tooling/consistency/consistency.mjs", ["merge"]);
 run("combined", "tooling/combined/combine.mjs");
 run("quality", "tooling/quality/quality.mjs");
 run("report", "tooling/status/report.mjs");
-const q = rd("tooling/quality/quality-report.json", { grade: "?", overall: 0, dimensions: [], totalFindings: 0 });
+const q = rd("tooling/quality/quality-report.json", { grade: "?", overall: 0, dimensions: [], totalFindings: 0, composites: { config: {}, worklists: {} } });
 
 // ════════════════ ARC 2 — ENRICH (programmatic merges + assemble) ════════════════
 run("usefulness-merge", "tooling/usefulness/usefulness.mjs", ["merge"]);
@@ -86,10 +86,19 @@ if (PUBLISH && up && (publishNeeded || FORCE)) {
 // reach is computed, not agent work → only intentions gate ENRICH freshness.
 const enrichPending = intentPending > 0;
 e("");
-e(`${C.b}═══ STATUS QUO — three arcs ═══${C.x}`);
+e(`${C.b}═══ STATUS QUO — three arcs (v2: reach·churn·complexity·defects·tests·conventions·ownership·relationships) ═══${C.x}`);
 e("");
-e(`${C.b}ASSESS${C.x}   quality ${C.b}${q.grade} (${q.overall}/100)${C.x} · ${q.totalFindings} findings · coverage ${cov.pct}%`);
-for (const d of q.dimensions) e(`         ${d.name.padEnd(12)} ${String(d.score).padStart(3)}`);
+const cfgSrc = q.composites?.config?.source || "defaults";
+e(`${C.b}ASSESS${C.x}   quality ${C.b}${q.grade} (${q.overall}/100)${C.x} · ${q.totalFindings} findings · coverage ${cov.pct}% · composites: ${cfgSrc}`);
+for (const d of q.dimensions) e(`         ${d.name.padEnd(12)} ${String(d.score).padStart(3)}${d.root ? `  ${C.y}[${d.root}]${C.x}` : ""}`);
+const wl = q.composites?.worklists || {};
+const wlTop = (k) => (wl[k] || []).slice(0, 4).map((x) => x.path.split("/").pop() + " " + x.score).join(" · ") || "—";
+if (q.dimensions.length) {
+  e(`  ${C.b}worklists:${C.x}`);
+  e(`     ⭑ priority (reach×sev×defect×untested): ${wlTop("priority")}`);
+  e(`     🔥 hotspot map (churn×complexity):       ${wlTop("hotspot")}`);
+  e(`     ⚠ critical-untested (reach×¬coverage):  ${wlTop("criticalUntested")}`);
+}
 if (covPending || staleGroups || issuesStale) {
   e(`  ${C.y}⟳ pending:${C.x}`);
   if (covPending) e(`     • ${covPending} file(s) need research → coverage.mjs batches → dispatch → record`);
@@ -97,7 +106,7 @@ if (covPending || staleGroups || issuesStale) {
   if (issuesStale) e(`     • layering/dup changed → 2 issue agents → consistency.mjs record`);
 } else e(`  ${C.g}✓ fresh${C.x}`);
 e("");
-e(`${C.b}ENRICH${C.x}   ${nodes.length} files · reach computed (${reachMissing} missing) · ${taxonomyN} intentions`);
+e(`${C.b}ENRICH${C.x}   ${nodes.length} files · reach + ownership computed (reach ${reachMissing} missing) · ${taxonomyN} intentions`);
 if (enrichPending) {
   e(`  ${C.y}⟳ pending:${C.x}`);
   if (intentPending) e(`     • ${intentPending} file(s) need intention tags${taxonomyN ? "" : " (no taxonomy yet — run discovery)"} → intentions.mjs batches → dispatch → merge`);
@@ -111,4 +120,5 @@ else e(`  ${C.g}✓ in sync${C.x}`);
 e("");
 const allFresh = !covPending && !staleGroups && !issuesStale && !enrichPending && (!up || !publishNeeded || published);
 e(allFresh ? `  ${C.g}${C.b}✓ FRESH across all arcs.${C.x}` : `  ${C.b}→ do the pending agent work, re-run status${C.x}`);
-e(`  → tooling/status/status-report.html (quality) · codebase-graph.html (graph)`);
+e(`  → tooling/quality/quality-report.html (quality) · codebase-graph.html (graph)`);
+e(`  → DELIVERY: node tooling/scope/scope.mjs <intention|task>  (scoped context pack — exploration→lookup; --list)`);

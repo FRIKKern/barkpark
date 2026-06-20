@@ -6,15 +6,22 @@ discipline runs through all of it: **programmatic scripts do everything they can
 for free; agents are spent only on the judgment a machine can't produce, on what
 changed, and to verify a finding before it drives the plan.**
 
+**v2 model:** eight canonical roots — **reach · churn · complexity · defects ·
+tests · conventions · ownership · relationships** — each measured exactly ONCE,
+composed only ACROSS roots (`SIGNALS.md`). `reach` (not "usefulness") is the single
+value root. Composites read clean roots from `fit/scoring-config.json`.
+
 ```
 research-coverage ─ every file evaluated? content-hash ledger; agents only on drift
-file-importance   ─ per-file importance = blast-radius prior × agent criticality
-consistency       ─ relational: per-group norm, drift vs intentional, layering, dup
-ergonomics        ─ agent-cost: bloat (god-files) vs fragmentation → refactor_worth
-risk              ─ test-presence proxy + defect-history (git bug-fix mining)
-blast-radius      ─ what a change affects; cross-language seam guard (pre-push hook)
-        ├───── combined  ─ importance × consistency → prioritized worklist
-        └───── quality   ─ 8-dimension scorecard (A–F) + ROI-ranked improvement plan
+file-importance   ─ churn root + importance prior (blast-radius × agent criticality)
+usefulness        ─ reach root: normalized transitive-dependent count (pure programmatic) + why
+consistency       ─ conventions root: per-group norm, drift vs intentional, layering, dup
+ergonomics        ─ complexity root: bloat (god-files) vs fragmentation → refactor-worth
+risk              ─ tests + defects + ownership roots (git mining: bug-fixes, bus-factor)
+blast-radius      ─ relationships: what a change affects; cross-language seam guard (pre-push hook)
+        ├───── combined  ─ reach × consistency → prioritized worklist
+        ├───── quality   ─ scorecard (A–F) + 4 composite worklists (priority · hotspot · crit-untested · refactor-worth)
+        └───── scope     ─ DELIVERY: task/intention → scoped context pack (exploration → lookup)
 ```
 
 | Dir | What it answers | Entry |
@@ -27,9 +34,11 @@ blast-radius      ─ what a change affects; cross-language seam guard (pre-push
 | `blast-radius/` | "What does this change affect? Did it touch the wire contract?" | `check.mjs` (pre-push) |
 | `combined/` | "What's both important AND inconsistent?" | `combine.mjs` |
 | `quality/` | "How good is the codebase? What do we fix first?" | `quality.mjs` |
-| `usefulness/` | "How useful (value/leverage) is each file, and why?" | `usefulness.mjs` → agents → `merge` |
+| `usefulness/` | "How much does each file get depended on (reach), and why reusable?" | `usefulness.mjs merge` (reach is programmatic; `why` is description-only) |
 | `intentions/` | "What objectives does each file serve?" (2nd edge type) | `review.mjs` → discovery → tag → `merge` |
+| `fit/` | "What weights/forms do the composites use?" | `scoring-config.json` (read by `lib/scoring.mjs`) |
 | `barkpark-sync/` | "Publish every file as an interconnected Barkpark paper" | `generate.mjs` → `push.mjs` → `graph-view.mjs` |
+| `scope/` | "What's the file set for this task? — context pack, no crawl" | `scope.mjs <intention-id\|task>` |
 | `status/` | **the entry point** — full quality report, incremental | `status.mjs` |
 
 `node tooling/status/status.mjs` is the one command: it runs the whole programmatic

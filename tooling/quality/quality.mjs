@@ -144,7 +144,8 @@ td.path{font-family:ui-monospace,monospace;font-size:12px}td.act,td.meta{font-si
 <div class=sub>value axis is reach (transitive dependents) — the single value root, no importance/reusability double-count · fix top-down for best ROI</div>
 <table><thead><tr><th>#</th><th>Impact</th><th>Reach</th><th>Kind</th><th>Dimension</th><th>Effort</th><th>Target</th><th>Action</th></tr></thead>
 <tbody>${deduped.slice(0, 40).map(frow).join("")}</tbody></table>
-${wlTable("🔥 Hotspots — churn × complexity", "the refactor-target gold standard: high-churn × high-complexity files", worklists.hotspot)}
+${wlTable("⭑ Priority worklist — reach × severity × defect × untested", "fix top-down: highest-leverage code carrying the most risk", worklists.priority)}
+${wlTable("🔥 Hotspot map — churn × complexity", "the refactor-target gold standard: high-churn × high-complexity files", worklists.hotspot)}
 ${wlTable("⚠ Critical-untested — reach × ¬coverage", "the danger worklist: high-reach files with little/no coverage", worklists.criticalUntested)}
 ${wlTable("Refactor-worth — bloat × churn × separability", "agent-ergonomics axis: big monolithic files read on every change", worklists.refactorWorth)}`;
 writeFileSync(join(HERE, "quality-report.html"), html);
@@ -154,6 +155,7 @@ e(`\n  CODEBASE QUALITY (v2): ${grade} (${overall}/100) — composites: ${cfg.so
 for (const d of dims) e(`    ${d.name.padEnd(13)} ${String(d.score).padStart(3)}  [${d.root}]  ${d.note}`);
 e(`\n  IMPROVEMENT PLAN — top findings by impact (${out.totalFindings} total, ~${effortDays} effort units):`);
 for (const f of deduped.slice(0, 10)) e(`    impact ${String(f.impact).padStart(3)} [${f.kind}/${effLabel[f.effort]}] ${f.file}`);
-e(`\n  🔥 HOTSPOTS (churn × complexity): ${worklists.hotspot.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);
+e(`\n  ⭑ PRIORITY (reach × severity × defect × untested): ${worklists.priority.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);
+e(`  🔥 HOTSPOT MAP (churn × complexity): ${worklists.hotspot.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);
 e(`  ⚠ CRITICAL-UNTESTED (reach × ¬coverage): ${worklists.criticalUntested.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);
 e(`  → quality-report.{html,json}`);
