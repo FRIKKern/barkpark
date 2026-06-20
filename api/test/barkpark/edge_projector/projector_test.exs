@@ -99,10 +99,12 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
 
       {:ok, %{edges: edges}} = Projector.project(@dataset, [src], dataset: @dataset)
 
+      # kind IS the source field name now (graph-edge-seam) — the article's
+      # `author` reference projects an "author"-kind edge, not generic "references".
       kinds = edges |> Enum.map(& &1[:kind]) |> Enum.sort()
-      assert kinds == ["references"]
+      assert kinds == ["author"]
 
-      ref = Enum.find(edges, &(&1[:kind] == "references"))
+      ref = Enum.find(edges, &(&1[:kind] == "author"))
       assert ref[:from_id] == "art-1"
       assert ref[:to_id] == "auth-1"
     end
@@ -116,7 +118,7 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
       {:ok, %{edges: edges}} = Projector.project(@dataset, [src], dataset: @dataset)
 
       kinds = edges |> Enum.map(& &1[:kind]) |> Enum.sort()
-      assert "references" in kinds
+      assert "author" in kinds
       assert "related-to" in kinds
     end
 
@@ -127,7 +129,7 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
       # Project the SAME doc twice in one corpus — the union must dedup.
       {:ok, %{edges: edges}} = Projector.project(@dataset, [src, src], dataset: @dataset)
 
-      refs = Enum.filter(edges, &(&1[:kind] == "references"))
+      refs = Enum.filter(edges, &(&1[:kind] == "author"))
       assert length(refs) == 1
     end
   end
@@ -142,7 +144,7 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
 
       from_pk = doc_pk("art-4")
       stored = Content.list_outbound_edges(from_pk)
-      assert Enum.any?(stored, &(&1.kind == "references"))
+      assert Enum.any?(stored, &(&1.kind == "author"))
     end
   end
 
@@ -173,9 +175,11 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
       from_pk = doc_pk("art-6")
       to_pk = doc_pk("auth-1")
 
-      # Seed an edge with an OLD weight via the raw CRUD.
+      # Seed an edge with an OLD weight via the raw CRUD. kind "author" matches
+      # what the extract produces (the article's author reference field) so the
+      # on_conflict replace hits the SAME (from,to,kind) row rather than pruning.
       {:ok, _} =
-        Content.add_edge("art-6", "auth-1", "references", %{
+        Content.add_edge("art-6", "auth-1", "author", %{
           "dataset" => @dataset,
           "weight" => 1.0,
           "plugin_source" => "old"
@@ -185,7 +189,7 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
       # on_conflict replace must overwrite plugin_source/weight (to nil).
       {:ok, _} = Projector.upsert_record(src, dataset: @dataset)
 
-      edge = Repo.get_by!(Edge, from_id: from_pk, to_id: to_pk, kind: "references")
+      edge = Repo.get_by!(Edge, from_id: from_pk, to_id: to_pk, kind: "author")
       refute edge.plugin_source == "old"
     end
 
@@ -230,7 +234,7 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
                })
 
       from_pk = doc_pk("art-8")
-      assert Enum.any?(Content.list_outbound_edges(from_pk), &(&1.kind == "references"))
+      assert Enum.any?(Content.list_outbound_edges(from_pk), &(&1.kind == "author"))
     end
 
     test "rebuild op with no types cancels (no_types)" do

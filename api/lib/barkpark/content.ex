@@ -1549,9 +1549,11 @@ defmodule Barkpark.Content do
   invariant). Resolves EACH target → O(edges) DB round-trips; the Phase-3
   projector runs it off the request path.
 
-  Returns `[%{from_id, to_id, kind, field, refType, dangling}]`. `kind` is
-  always `"references"` here; plugin-projected kinds (Phase 3) arrive via the
-  registry collector, not this function.
+  Returns `[%{from_id, to_id, kind, field, refType, dangling}]`. `kind` is the
+  source reference field's NAME (e.g. `"dependencies"`, `"intentions"`,
+  `"related"`) so distinct reference fields become distinct edge kinds in
+  /v1/graph; plugin-projected kinds (Phase 3) arrive via the registry
+  collector, not this function.
   """
   @spec extract_edges(map() | Document.t(), keyword()) :: [
           %{
@@ -1592,7 +1594,14 @@ defmodule Barkpark.Content do
           %{
             from_id: from_id,
             to_id: to_id,
-            kind: "references",
+            # kind IS the source reference field's name (graph-edge-seam): a
+            # `dependencies` ref → kind "dependencies", `intentions` → "intentions",
+            # `related` → "related". This makes distinct reference fields distinct
+            # edge kinds in /v1/graph (bp-graph.js colours by kind) WITHOUT a
+            # via_field column or API change — the kind column already surfaces.
+            # Was the generic "references" for every field. Plugin-projected kinds
+            # (Phase 3) arrive via the registry collector, not this function.
+            kind: field_name,
             field: field_name,
             refType: ref_type,
             dangling: dangling
