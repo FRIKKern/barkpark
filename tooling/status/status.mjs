@@ -53,6 +53,10 @@ const q = rd("tooling/quality/quality-report.json", { grade: "?", overall: 0, di
 // ════════════════ ARC 2 — ENRICH (programmatic merges + assemble) ════════════════
 run("usefulness-merge", "tooling/usefulness/usefulness.mjs", ["merge"]);
 run("intentions-merge", "tooling/intentions/intentions.mjs", ["merge"]);
+// co-change + 3-edge relationship cross-validation. Reads nodes.json (deps) +
+// intentions-report (intent) + git history (co-change); generate re-runs after so
+// the graph can carry the co-change edge kind. Best-effort: a skip never breaks the board.
+run("cochange", "tooling/cochange/cochange.mjs");
 run("generate", "tooling/barkpark-sync/generate.mjs");
 const nodes = (rd("tooling/barkpark-sync/nodes.json", { nodes: [] }).nodes || []).filter(n => n.kind !== "intention");
 const useFiles = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;

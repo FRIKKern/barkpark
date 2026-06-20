@@ -24,6 +24,9 @@ const idx = rd("tooling/blast-radius/index.json", { go: {}, js: {}, elixir: null
 const useful = rd("tooling/usefulness/usefulness-report.json", { files: {} }).files;
 const intents = rd("tooling/intentions/intentions-report.json", { taxonomy: [], files: {}, hubs: {} });
 const intId = (id) => "intent-" + id;
+// co-change (3rd relationship edge kind) — additive, gated on the report existing.
+// partners: path → [{path,support,confidence}]; files: path → { accidentalCoupling, ... }
+const cochange = rd("tooling/cochange/cochange-report.json", { partners: {}, files: {} });
 
 // ---- per-file git history (one pass over the log) ----
 const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
@@ -133,6 +136,9 @@ const nodes = universe.map(p => {
       // ownership = bus-factor (from risk.mjs)
       primaryAuthorShare: rk.primaryAuthorShare ?? null, authorCount: rk.authorCount ?? (gitMeta(p).authors.length || 0),
       intentions: intents.files[p] || [],
+      // co-change: temporal-coupling partners + the accidental-coupling smell flag
+      accidentalCoupling: !!cochange.files?.[p]?.accidentalCoupling,
+      cochangePartners: (cochange.partners?.[p] || []).map(q => q.path),
       git: gitMeta(p),
     },
     content: body.length > CONTENT_CAP ? body.slice(0, CONTENT_CAP) + `\n\n… (${body.length - CONTENT_CAP} more chars truncated)` : body,
@@ -140,6 +146,9 @@ const nodes = universe.map(p => {
     deps: depsFor(p).map(idOf),       // dependency edges (file → file)
     depPaths: depsFor(p),
     intentRefs: (intents.files[p] || []).map(intId),  // intention edges (file → hub)
+    // co-change edges (file ↔ file) — 3rd relationship kind, only to files in-universe
+    cochangePaths: (cochange.partners?.[p] || []).map(q => q.path).filter(t => inUniverse.has(t)),
+    cochangeRefs: (cochange.partners?.[p] || []).map(q => q.path).filter(t => inUniverse.has(t)).map(idOf),
   };
 });
 
@@ -164,12 +173,13 @@ nodes.push(...intentNodes);
 
 const edges = nodes.reduce((a, n) => a + n.deps.length, 0);
 const intentEdges = nodes.reduce((a, n) => a + (n.intentRefs?.length || 0), 0);
+const cochangeEdges = nodes.reduce((a, n) => a + (n.cochangeRefs?.length || 0), 0);
 const avgDeg = (edges / nodes.length).toFixed(1);
 const orphans = nodes.filter(n => n.deps.length === 0 && !nodes.some(m => m.deps.includes(n.id))).length;
 writeFileSync(join(HERE, "nodes.json"), JSON.stringify({ generatedFrom: idx.head || "", nodes, stats: { nodes: nodes.length, edges, avgDegree: +avgDeg, orphans } }, null, 2));
 
 const e = (s) => process.stderr.write(s + "\n");
-e(`[generate] ${nodes.length} nodes (${intentNodes.length} intention hubs) · ${edges} dep-edges · ${intentEdges} intention-edges · avg degree ${avgDeg} · ${orphans} orphans`);
+e(`[generate] ${nodes.length} nodes (${intentNodes.length} intention hubs) · ${edges} dep-edges · ${intentEdges} intention-edges · ${cochangeEdges} cochange-edges · avg degree ${avgDeg} · ${orphans} orphans`);
 const byStack = {}; for (const n of nodes) byStack[n.fields.stack] = (byStack[n.fields.stack] || 0) + 1;
 e(`  by stack: ${Object.entries(byStack).map(([k, v]) => `${k} ${v}`).join(" · ")}`);
 e(`  sample edges:`); for (const n of nodes.filter(n => n.deps.length).slice(0, 4)) e(`    ${n.path} → ${n.deps.slice(0, 3).join(", ")}`);
