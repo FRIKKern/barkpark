@@ -63,8 +63,14 @@ for (const ck of chunk(nodes, 40)) {
 console.error(`  published ${pub}`);
 
 // ---- phase 3: ingest content blocks (per doc) ----
+// NOTE: Barkpark's bulldocs paper ingest is HARDWIRED to the `production` dataset
+// (Content.paper_default_dataset/0) and ignores a dataset param — so for any
+// non-production dataset, --no-content skips this to avoid polluting production.
+// Content-in-a-separate-dataset needs a dataset-aware ingest + reader in Barkpark.
+const SKIP_CONTENT = argv.includes("--no-content") || (DATASET !== "production");
 let ing = 0, ingFail = 0;
-for (const n of nodes) {
+if (SKIP_CONTENT) console.error(`  [skip] content ingest (dataset=${DATASET}; bulldocs papers are production-only)`);
+for (const n of (SKIP_CONTENT ? [] : nodes)) {
   const lang = LANG[f(n).ext] || "text";
   const depsList = n.deps.length ? n.deps.map(d => "→ " + (all.find(x => x.id === d)?.path || d)).join("\n") : "(no resolved dependencies)";
   const blocks = [
@@ -76,7 +82,7 @@ for (const n of nodes) {
     { type: "heading", level: 2, text: "Source" },
     { type: "code", language: lang, value: n.content || "(empty)" },
   ];
-  const r = await post(`/v1/plugins/bulldocs/papers`, INGEST, { slug: n.id, style: "article", blocks, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}` });
+  const r = await post(`/v1/plugins/bulldocs/papers`, INGEST, { slug: n.id, dataset: DATASET, style: "article", blocks, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}` });
   if (r.ok) ing++; else { ingFail++; if (ingFail <= 3) console.error(`  ingest ${n.id} failed ${r.status}: ${r.body.slice(0, 160)}`); }
 }
 console.error(`  ingested blocks: ${ing} ok, ${ingFail} failed`);
