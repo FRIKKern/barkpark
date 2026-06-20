@@ -33,16 +33,24 @@ const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.
 const f = (n) => n.fields;
 const metricsLine = (n) => `importance ${f(n).importance} · priority ${f(n).priority} · ${f(n).sizeClass} ${f(n).tokens}tok/${f(n).loc}loc · churn ${f(n).churn} · fanIn ${f(n).fanIn}${f(n).seam ? " · 🔗seam" : ""} · test ${f(n).testScore ?? "?"} · defect ${f(n).defectDensity} · consistency ${f(n).consistency}`;
 
-// ---- phase 1: create (refs only to ids we will create) ----
+// ---- phase 1a: create ALL bare (so every reference target exists) ----
 console.error(`[push] ${nodes.length} nodes → ${HOST} (dataset ${DATASET})`);
+const doc = (n, related) => ({ createOrReplace: { _type: "paper", _id: n.id, title: n.path, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}`, related } });
 let created = 0;
 for (const ck of chunk(nodes, 40)) {
-  const mutations = ck.map(n => ({ createOrReplace: { _type: "paper", _id: n.id, title: n.path, source_doc: n.path, event_type: f(n).stack, goal_id: `imp:${f(n).importance}`, related: n.deps.filter(d => ids.has(d)) } }));
-  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations });
+  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, [])) });
   if (!r.ok) { console.error(`  create chunk failed ${r.status}: ${r.body.slice(0, 200)}`); process.exit(1); }
   created += ck.length;
 }
 console.error(`  created ${created}`);
+// ---- phase 1b: set references now that all targets exist ----
+let linked = 0, withRefs = 0;
+for (const ck of chunk(nodes.filter(n => n.deps.some(d => ids.has(d))), 40)) {
+  const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: ck.map(n => doc(n, n.deps.filter(d => ids.has(d)))) });
+  if (!r.ok) { console.error(`  relink chunk failed ${r.status}: ${r.body.slice(0, 200)}`); process.exit(1); }
+  linked += ck.length; withRefs = linked;
+}
+console.error(`  linked references on ${linked} nodes`);
 
 // ---- phase 2: publish (materializes references → edges) ----
 let pub = 0;

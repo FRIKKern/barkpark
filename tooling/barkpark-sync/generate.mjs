@@ -103,7 +103,8 @@ const nodes = universe.map(p => {
     },
     content: body.length > CONTENT_CAP ? body.slice(0, CONTENT_CAP) + `\n\n… (${body.length - CONTENT_CAP} more chars truncated)` : body,
     truncated: body.length > CONTENT_CAP,
-    deps: depsFor(p),
+    deps: depsFor(p).map(idOf),       // store as node ids (slugs), not paths
+    depPaths: depsFor(p),             // keep paths for human-readable display
   };
 });
 
