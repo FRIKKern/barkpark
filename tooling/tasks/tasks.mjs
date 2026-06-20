@@ -1,0 +1,254 @@
+#!/usr/bin/env node
+// tasks — blend Barkpark TASKS into the codebase-intelligence graph as a THIRD
+// node layer, so files, intentions, AND tasks live in one web.
+//
+// THE INSIGHT: a task advances an INTENTION by changing FILES. Two independent
+// sources of "which files a task touches" let us cross-validate scope:
+//   ACTUAL    — commit messages carry the task id, e.g. "(cqv2-p1)".
+//               git log --all --grep="(<id>)" --name-only → files it changed.
+//   PREDICTED — the task's intention(s) → scope's file set (the files it SHOULD
+//               touch). A task INHERITS the intentions of the files it changed,
+//               so the prediction is grounded in real history, not a guess.
+//
+// Cross-validation per task (mirrors cochange's three-layer cross-validator):
+//   predicted ∩ actual → on-target      (the task hit its scope)
+//   predicted − actual → scoped-untouched (in-scope files it left alone)
+//   actual − predicted → scope-creep      (surprise files outside the scope)
+//
+//   node tooling/tasks/tasks.mjs            → tasks-report.json + console summary
+//   node tooling/tasks/tasks.mjs publish    → also publish task nodes into the
+//                                             `codebase` Barkpark dataset
+//   node tooling/tasks/tasks.mjs --host URL --dataset codebase
+//
+// Dependency-free. Derived outputs gitignored. Reads committed git history + the
+// other passes' reports + Barkpark over HTTP; never touches api/ source.
+
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
+const rd = (p, d) => existsSync(join(ROOT, p)) ? JSON.parse(readFileSync(join(ROOT, p), "utf8")) : d;
+const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
+const e = (s = "") => process.stderr.write(s + "\n");
+
+const argv = process.argv.slice(2);
+const valOf = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
+const PUBLISH = argv.includes("publish");
+const HOST = valOf("--host", "http://localhost:4000");
+const DATASET = valOf("--dataset", "codebase");
+const SRC_DATASET = valOf("--src-dataset", "production"); // where the tasks live
+const LIMIT = +valOf("--limit", "200");
+const DEV = "barkpark-dev-token", INGEST = "paperflow-dev-ingest-token";
+
+// ──────────── load the codebase graph + the quality reports ────────────
+const graph = rd("tooling/barkpark-sync/nodes.json", { nodes: [] });
+const codeNodes = graph.nodes.filter((n) => n.kind !== "intention");
+const inGraph = new Set(codeNodes.map((n) => n.path));
+const idOf = (p) => p.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const nodeByPath = new Map(codeNodes.map((n) => [n.path, n]));
+
+// file → intention hub ids (bare slugs) it advances, from the generated graph
+const fileIntents = new Map(codeNodes.map((n) => [n.path, (n.fields?.intentions || [])]));
+// intention hub id (bare) → member file paths — the "predicted scope" of an intention
+const intentMembers = new Map();
+for (const n of codeNodes) for (const id of (n.fields?.intentions || [])) {
+  if (!intentMembers.has(id)) intentMembers.set(id, new Set());
+  intentMembers.get(id).add(n.path);
+}
+// intention hub id (bare) → title, from the taxonomy
+const tax = rd("tooling/intentions/intentions-report.json", { taxonomy: [] }).taxonomy;
+const intentTitle = Object.fromEntries(tax.map((t) => [t.id, t.title]));
+
+// impact/risk roots from the codebase intelligence
+const comb = Object.fromEntries(rd("tooling/combined/combined-report.json", { rows: [] }).rows.map((r) => [r.path, r]));
+const risk = rd("tooling/risk/risk-report.json", { files: {} }).files || {};
+
+// tracked source files (so actualFiles ignores deleted paths / docs the suite excludes)
+const tracked = new Set(git(["ls-files"]).split("\n").filter(Boolean));
+
+// ──────────── pull the tasks from Barkpark ────────────
+async function fetchTasks() {
+  const url = `${HOST}/v1/data/query/${SRC_DATASET}/task?perspective=raw&limit=${LIMIT}`;
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + DEV } });
+  if (!r.ok) { e(`[tasks] task query failed ${r.status} — is Barkpark up at ${HOST}?`); process.exit(2); }
+  const j = await r.json();
+  const arr = j.result?.documents || j.documents || (Array.isArray(j.result) ? j.result : Array.isArray(j) ? j : []);
+  // real tasks only: kind:task / kind:phase / kind:epic — skip events and anything draft-shaped.
+  return arr.filter((t) => t && t._id && (t.kind === "task" || (t.labels || []).some((l) => /^kind:(task|phase|epic|goal)$/.test(l)) || t.kind === undefined && t.title));
+}
+
+// ──────────── per-task ACTUAL files via commit-id join ────────────
+function actualFilesFor(id) {
+  // git log --all --grep="(<id>)" --name-only — the parenthesised task-id convention.
+  let out;
+  try { out = git(["log", "--all", `--grep=(${id})`, "--name-only", "--pretty=format:\x01"]); }
+  catch { return { files: [], commits: 0 }; }
+  const files = new Set();
+  let commits = 0;
+  for (const line of out.split("\n")) {
+    if (line.startsWith("\x01")) { commits++; continue; }
+    const p = line.trim();
+    if (p && tracked.has(p)) files.add(p);
+  }
+  return { files: [...files].sort(), commits };
+}
+
+// ──────────── impact + risk from the codebase intelligence ────────────
+function scoreFiles(files) {
+  let reach = 0, hotspot = 0;
+  const fragile = [];
+  for (const p of files) {
+    const c = comb[p] || {}, rk = risk[p] || {};
+    reach += c.reach || 0;
+    hotspot += c.hotspot || 0;
+    // fragile = touched a critical-untested file, or a defect-dense file with no test
+    if ((c.criticalUntested || 0) > 0 || ((rk.defectDensity || 0) > 0 && !rk.hasTest)) fragile.push(p);
+  }
+  return { impact: reach, risk: hotspot, fragileFiles: fragile, fragile: fragile.length > 0 };
+}
+
+function build(tasks) {
+  const out = [];
+  for (const t of tasks) {
+    const id = t._id;
+    const { files: actualFiles, commits } = actualFilesFor(id);
+    // a task inherits the intentions of the files it changed
+    const intentSet = new Set();
+    for (const p of actualFiles) for (const i of (fileIntents.get(p) || [])) intentSet.add(i);
+    const intentions = [...intentSet].sort();
+    // predicted = union of every member file of those intentions
+    const predSet = new Set();
+    for (const i of intentions) for (const p of (intentMembers.get(i) || [])) predSet.add(p);
+    const predictedFiles = [...predSet].sort();
+
+    const actualSet = new Set(actualFiles);
+    const onTarget = actualFiles.filter((p) => predSet.has(p));      // predicted ∩ actual
+    const scopedUntouched = predictedFiles.filter((p) => !actualSet.has(p)); // predicted − actual
+    const scopeCreep = actualFiles.filter((p) => !predSet.has(p));   // actual − predicted
+
+    const { impact, risk: riskScore, fragileFiles, fragile } = scoreFiles(actualFiles);
+
+    out.push({
+      id, title: t.title || id,
+      status: t.lifecycle_status || t.status || "",
+      kind: (t.labels || []).find((l) => l.startsWith("kind:"))?.slice(5) || t.kind || "task",
+      commits,
+      actualFiles, predictedFiles, intentions,
+      impact, risk: riskScore, fragile, fragileFiles,
+      onTarget, scopedUntouched, scopeCreep,
+    });
+  }
+  // tasks with real file evidence first, then by impact
+  out.sort((a, b) => (b.actualFiles.length - a.actualFiles.length) || (b.impact - a.impact) || a.id.localeCompare(b.id));
+  return out;
+}
+
+// ──────────── publish task nodes into the codebase dataset ────────────
+async function post(path, token, body) {
+  const r = await fetch(HOST + path, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return { ok: r.ok, status: r.status, body: await r.text() };
+}
+
+async function publish(report) {
+  const tasks = report.tasks.filter((t) => t.actualFiles.length); // only tasks with real file evidence become nodes
+  e(`[tasks] publishing ${tasks.length} task node(s) → ${HOST} (dataset ${DATASET})`);
+
+  // schema already carries dependencies + intentions reference fields (push.mjs
+  // registered it); re-register is idempotent and harmless.
+  {
+    const schema = { name: "paper", title: "Papers", fields: [
+      { name: "title", type: "string" }, { name: "event_type", type: "string" },
+      { name: "source_doc", type: "string" }, { name: "goal_id", type: "string" },
+      { name: "related", type: "arrayOf", of: { type: "reference", refType: "paper" } },
+      { name: "dependencies", type: "arrayOf", of: { type: "reference", refType: "paper" } },
+      { name: "intentions", type: "arrayOf", of: { type: "reference", refType: "paper" } },
+    ] };
+    const r = await post(`/v1/schemas/${DATASET}`, DEV, schema);
+    e(r.ok ? `  paper schema ok for ${DATASET}` : `  paper schema: ${r.status} (likely exists)`);
+  }
+
+  const slugOf = (t) => `task-${t.id}`;
+  // edges only point at papers that EXIST in the codebase dataset (in-graph files +
+  // intention hubs). .md / .gitignore / SKILL.md are tracked but not graph nodes.
+  const fileRef = (p) => inGraph.has(p) ? idOf(p) : null;
+  const intentRef = (i) => `intent-${i}`;
+  const depRefsOf = (t) => [...new Set(t.actualFiles.map(fileRef).filter(Boolean))];
+  const intentRefsOf = (t) => t.intentions.map(intentRef);
+
+  const doc = (t, deps, ints) => ({ createOrReplace: { _type: "paper", _id: slugOf(t), title: t.title,
+    source_doc: t.id, event_type: "task", goal_id: t.status || "", dependencies: deps || [], intentions: ints || [] } });
+
+  // phase 1a — create bare so every target resolves
+  for (const t of tasks) { const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: [doc(t, [], [])] }); if (!r.ok) { e(`  create ${t.id} failed ${r.status}: ${r.body.slice(0, 160)}`); } }
+  e(`  created ${tasks.length}`);
+
+  // phase 2 — publish FIRST (before references) so the materialiser sees live targets
+  for (const t of tasks) await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: [{ publish: { id: slugOf(t), type: "paper" } }] });
+  e(`  published ${tasks.length}`);
+
+  // phase 3 — set typed references, then re-publish to materialise the edges
+  let linked = 0;
+  for (const t of tasks) {
+    const deps = depRefsOf(t), ints = intentRefsOf(t);
+    const r = await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: [doc(t, deps, ints)] });
+    if (r.ok) { await post(`/v1/data/mutate/${DATASET}`, DEV, { mutations: [{ publish: { id: slugOf(t), type: "paper" } }] }); linked++; }
+    else e(`  link ${t.id} failed ${r.status}: ${r.body.slice(0, 160)}`);
+  }
+  e(`  linked typed references (dependencies + intentions) on ${linked} task node(s)`);
+
+  // phase 4 — ingest the body content (dataset-aware Bulldocs ingest)
+  let ing = 0, ingFail = 0;
+  for (const t of tasks) {
+    const intLines = t.intentions.map((i) => `🎯 ${intentTitle[i] || i}`).join("\n") || "(none inferred)";
+    const blocks = [
+      { type: "heading", level: 1, text: `📋 ${t.title}` },
+      { type: "paragraph", content: [{ type: "text", value: `Task ${t.id} · ${t.kind} · status ${t.status || "?"} · ${t.commits} commit(s) carry the task id · impact ${t.impact} · risk ${t.risk}${t.fragile ? " · ⚠️ touched fragile files" : ""}` }] },
+      { type: "heading", level: 2, text: `Intentions advanced (${t.intentions.length})` },
+      { type: "code", language: "text", value: intLines },
+      { type: "heading", level: 2, text: `Files it actually changed (${t.actualFiles.length})` },
+      { type: "code", language: "text", value: t.actualFiles.map((p) => (inGraph.has(p) ? "→ " : "· ") + p).join("\n") || "(no committed files carry this task id)" },
+      { type: "heading", level: 2, text: `Scope cross-validation (predicted ${t.predictedFiles.length})` },
+      { type: "code", language: "text", value:
+        `on-target  (predicted ∩ actual): ${t.onTarget.length}\n` +
+        t.onTarget.map((p) => "  ✓ " + p).join("\n") +
+        `\n\nscope-creep (actual − predicted): ${t.scopeCreep.length}\n` +
+        t.scopeCreep.map((p) => "  ! " + p).join("\n") +
+        `\n\nscoped-untouched (predicted − actual): ${t.scopedUntouched.length}\n` +
+        t.scopedUntouched.slice(0, 30).map((p) => "  ◦ " + p).join("\n") +
+        (t.scopedUntouched.length > 30 ? `\n  … (+${t.scopedUntouched.length - 30} more)` : "") },
+      ...(t.fragile ? [
+        { type: "heading", level: 2, text: `⚠️ Fragile files touched (${t.fragileFiles.length})` },
+        { type: "code", language: "text", value: t.fragileFiles.map((p) => "  ⚠ " + p).join("\n") },
+      ] : []),
+    ];
+    const r = await post(`/v1/plugins/bulldocs/papers`, INGEST, { slug: slugOf(t), dataset: DATASET, style: "article", blocks, source_doc: t.id, event_type: "task", goal_id: t.status || "" });
+    if (r.ok) ing++; else { ingFail++; if (ingFail <= 3) e(`  ingest ${t.id} failed ${r.status}: ${r.body.slice(0, 160)}`); }
+  }
+  e(`  ingested blocks: ${ing} ok, ${ingFail} failed`);
+  e(`[tasks] done. View a task node: ${HOST}/papers/task-${tasks[0]?.id}  ·  graph: ${HOST}/v1/graph?dataset=${DATASET}`);
+}
+
+// ──────────── main ────────────
+(async () => {
+  const tasks = await fetchTasks();
+  const report = { at: new Date().toISOString(), host: HOST, dataset: DATASET, taskCount: tasks.length, tasks: build(tasks) };
+  writeFileSync(join(HERE, "tasks-report.json"), JSON.stringify(report, null, 2));
+
+  // ── console summary ──
+  const withFiles = report.tasks.filter((t) => t.actualFiles.length);
+  e(`[tasks] ${report.tasks.length} tasks pulled · ${withFiles.length} have committed file evidence (task-id in a commit message)`);
+  e(`  → tasks-report.json`);
+  e("");
+  for (const t of withFiles.slice(0, 12)) {
+    e(`  ${t.id}  ${t.title}`);
+    e(`     ${t.commits} commit(s) · ${t.actualFiles.length} files changed · intentions: ${t.intentions.join(", ") || "(none)"}`);
+    e(`     impact ${t.impact} · risk ${t.risk}${t.fragile ? " · ⚠️ fragile" : ""} · on-target ${t.onTarget.length}/${t.actualFiles.length} · scope-creep ${t.scopeCreep.length} · scoped-untouched ${t.scopedUntouched.length}`);
+    if (t.scopeCreep.length) e(`     creep: ${t.scopeCreep.slice(0, 4).join(", ")}${t.scopeCreep.length > 4 ? " …" : ""}`);
+  }
+  if (!withFiles.length) e(`  ⚠️ no task carried its id in a commit message — the commit-id→file join is empty. Tasks need "(<task-id>)" in the subject.`);
+
+  if (PUBLISH) { e(""); await publish(report); }
+})();

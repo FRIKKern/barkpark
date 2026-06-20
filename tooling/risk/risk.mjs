@@ -18,9 +18,19 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
+// Coverage cache: the suites (go/mix --cover) are slow; only re-run them when
+// code/tests change. Signature = git blobs of all source/test files + dirty.
+function covSig() {
+  try {
+    const lines = execFileSync("git", ["ls-files", "-s"], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).split("\n").filter((l) => /\.(go|exs?|tsx?|jsx?|mjs)$/.test(l)).sort();
+    const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" }).split("\n").filter((l) => /\.(go|exs?|tsx?|jsx?|mjs)$/.test(l)).sort().join("|");
+    return createHash("sha256").update(lines.join("\n") + "##" + dirty).digest("hex").slice(0, 16);
+  } catch { return ""; }
+}
 const NO_COVERAGE = process.argv.slice(2).includes("--no-coverage");
 const JS_COVERAGE = process.argv.slice(2).includes("--js-coverage");  // opt-in: run vitest (slow); default ingests existing
 const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
@@ -88,7 +98,15 @@ function tryRun(cmd, a, opts) {
   try { return execFileSync(cmd, a, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300000, ...opts }); }
   catch (e) { return (e.stdout || "") + (e.stderr || ""); }  // non-zero exit (e.g. coverage threshold) still yields data
 }
-if (!NO_COVERAGE) {
+const COVSIG = covSig();
+const priorRpt = existsSync(join(HERE, "risk-report.json")) ? JSON.parse(readFileSync(join(HERE, "risk-report.json"), "utf8")) : {};
+const covCacheHit = !NO_COVERAGE && COVSIG && priorRpt.coverageSig === COVSIG && priorRpt.realCov && Object.keys(priorRpt.realCov).length;
+if (covCacheHit) {
+  Object.assign(realCov, priorRpt.realCov);
+  ({ go: goPct = null, elixir: exPct = null, js: jsPct = null } = priorRpt.coverageTotals || {});
+  process.stderr.write("[coverage] reused cache — no code/test change (skipped go/mix suites)\n");
+}
+if (!NO_COVERAGE && !covCacheHit) {
   // -- Go: `go test -cover ./...` → "ok PKG ... coverage: NN.N% of statements" per package
   if (existsSync(join(ROOT, "go.mod"))) {
     const goOut = tryRun("go", ["test", "-cover", "./..."], { cwd: ROOT });
@@ -163,6 +181,7 @@ for (const s of code) {
 const report = { at: new Date().toISOString(),
   note: "testScore is REAL coverage (go/elixir) where measured; presence PROXY elsewhere — see testCoverageSource",
   coverageTotals: { go: goPct, elixir: exPct, js: jsPct },
+  coverageSig: COVSIG, realCov,
   files: out };
 writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 
