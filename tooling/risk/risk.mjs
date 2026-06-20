@@ -15,13 +15,14 @@
 //   risk.mjs --no-coverage → proxy-only (no go/mix suites)
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
 const NO_COVERAGE = process.argv.slice(2).includes("--no-coverage");
+const JS_COVERAGE = process.argv.slice(2).includes("--js-coverage");  // opt-in: run vitest (slow); default ingests existing
 const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
 const sig = JSON.parse(readFileSync(join(ROOT, "tooling/file-importance/file-signals.json"), "utf8")).signals;
 const churn = Object.fromEntries(sig.map(s => [s.path, s.churn]));
@@ -82,7 +83,7 @@ const code = sig.filter(s => s.kind === "code");
 // is mapped down onto each source file. Any suite that fails/times out is skipped
 // silently — those files keep the presence proxy.
 const realCov = {};
-let goPct = null, exPct = null;
+let goPct = null, exPct = null, jsPct = null;
 function tryRun(cmd, a, opts) {
   try { return execFileSync(cmd, a, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300000, ...opts }); }
   catch (e) { return (e.stdout || "") + (e.stderr || ""); }  // non-zero exit (e.g. coverage threshold) still yields data
@@ -117,6 +118,26 @@ if (!NO_COVERAGE) {
     const tot = exOut.match(/^\|\s*([\d.]+)%\s*\|\s*Total\s*\|/m);
     if (tot) exPct = +tot[1];
   }
+  // -- JS/TS: ingest Istanbul coverage-final.json (vitest --coverage) where present.
+  //    --js-coverage runs vitest for the core SDK package (slow); default ingests existing.
+  const covFiles = [];
+  const findCov = (dir, depth = 0) => { if (depth > 3) return; let es; try { es = readdirSync(join(ROOT, dir), { withFileTypes: true }); } catch { return; } for (const en of es) { if (en.name === "node_modules" || en.name === "dist" || en.name.startsWith(".")) continue; const rel = join(dir, en.name); if (en.isDirectory()) findCov(rel, depth + 1); else if (en.name === "coverage-final.json") covFiles.push(rel); } };
+  for (const r of ["js", "web", "sdk", "packages"]) findCov(r);
+  if (!covFiles.length && JS_COVERAGE) { tryRun("pnpm", ["exec", "vitest", "run", "--coverage"], { cwd: join(ROOT, "js/packages/core"), timeout: 120000 }); findCov("js/packages/core"); }
+  let jsSum = 0, jsN = 0;
+  for (const cf of covFiles) {
+    try {
+      const cov = JSON.parse(readFileSync(join(ROOT, cf), "utf8"));
+      for (const [abs, data] of Object.entries(cov)) {
+        const rel = String(abs).replace(ROOT + "/", "").replace(/^\.\//, "");
+        const sv = Object.values(data.s || {}); if (!sv.length) continue;
+        if (!code.some(f => f.path === rel)) continue;
+        const pct = Math.round((sv.filter(c => c > 0).length / sv.length) * 100);
+        realCov[rel] = { pct, source: "js" }; jsSum += pct; jsN++;
+      }
+    } catch {}
+  }
+  if (jsN) jsPct = +(jsSum / jsN).toFixed(1);
 }
 
 // ---- per source (code, non-test) file ----
@@ -141,7 +162,7 @@ for (const s of code) {
 
 const report = { at: new Date().toISOString(),
   note: "testScore is REAL coverage (go/elixir) where measured; presence PROXY elsewhere — see testCoverageSource",
-  coverageTotals: { go: goPct, elixir: exPct },
+  coverageTotals: { go: goPct, elixir: exPct, js: jsPct },
   files: out };
 writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 

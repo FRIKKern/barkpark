@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -124,16 +125,38 @@ function buildElixir() {
   return { forward, reverse: reverseOf(forward) };
 }
 
+// ---- Elixir cache: a content signature over api/ .ex/.exs (committed blobs +
+// uncommitted edits). mix xref compiles (~min), so we only re-run it when the
+// signature changes — restoring status.mjs's fast path when Elixir is unchanged.
+function elixirSig() {
+  try {
+    const lines = sh("git", ["ls-files", "-s", "api"]).split("\n").filter((l) => /\.exs?$/.test(l)).sort();
+    const dirty = sh("git", ["status", "--porcelain", "api"]).split("\n").filter((l) => /\.exs?$/.test(l)).sort().join("|");
+    return createHash("sha256").update(lines.join("\n") + "##" + dirty).digest("hex").slice(0, 16);
+  } catch { return ""; }
+}
+
 // ------------------------------------------------------------------- main ---
+const out = join(HERE, "index.json");
+const prior = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : {};
+const esig = elixirSig();
+let elixir, savedSig;
+if (!args.has("--skip-elixir") && esig && prior.elixirSig === esig && prior.elixir) {
+  elixir = prior.elixir; savedSig = esig;
+  console.error("[elixir] reused cache — no .ex changes (skipped mix xref)");
+} else {
+  elixir = buildElixir();
+  savedSig = args.has("--skip-elixir") ? prior.elixirSig : esig;  // keep prior sig when skipping
+}
+
 const index = {
   builtAtNote: "regenerate with: node tooling/blast-radius/build-index.mjs",
   head: sh("git", ["rev-parse", "HEAD"]).trim(),
   js: buildJs(),
   go: buildGo(),
-  elixir: buildElixir(),
+  elixir,
+  elixirSig: savedSig,
 };
-
-const out = join(HERE, "index.json");
 writeFileSync(out, JSON.stringify(index, null, 2));
 
 const n = (x) => (x ? Object.keys(x.reverse).length : 0);
