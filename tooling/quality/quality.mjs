@@ -21,6 +21,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, gatherRoots, composites, percentile } from "../lib/scoring.mjs";
 import { FRAGILE_DENSITY } from "../lib/thresholds.mjs";
+import { evalFormula } from "../lib/formula.mjs";
+// effort estimate (1–5) for splitting a bloated file, as a bound piecewise
+// FUNCTION (cody rung ④) — tunable through a paper, safely evaluated.
+const EFFORT_FN = "tokens > 30000 ? 5 : tokens > 15000 ? 4 : 3";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -54,7 +58,7 @@ const findings = [];
 for (const l of layV) if (l.verdict === "violation") findings.push({ kind: "layering", file: l.file, dim: "Architecture", sev: 1.0, effort: 2, action: l.fix || "Move data access into a domain context", why: l.reason });
 for (const [f, v] of Object.entries(gV)) if (v.verdict === "drift") findings.push({ kind: "drift", file: f, dim: "Consistency", sev: 0.9, effort: 1, action: v.recommendation, why: "diverges from the group's own pattern" });
 for (const v of dupV) if (v.verdict === "extract") findings.push({ kind: "duplication", file: v.a, dim: "Duplication", sev: 0.55, effort: 2, action: `Extract shared logic (≈ ${v.b})`, why: v.reason });
-for (const r of erg.splitCandidates) if (r.refactorWorth > 5000) findings.push({ kind: "bloat", file: r.path, dim: "Modularity", sev: Math.min(1, r.refactorWorth / 40000), effort: r.tokens > 30000 ? 5 : r.tokens > 15000 ? 4 : 3, action: `Split god-module (${r.defs} defs, ${r.tokens.toLocaleString()} tok) read every change (churn ${r.churn})`, why: "context-bloat paid on every read" });
+for (const r of erg.splitCandidates) if (r.refactorWorth > 5000) findings.push({ kind: "bloat", file: r.path, dim: "Modularity", sev: Math.min(1, r.refactorWorth / 40000), effort: evalFormula(EFFORT_FN, { tokens: r.tokens }), action: `Split god-module (${r.defs} defs, ${r.tokens.toLocaleString()} tok) read every change (churn ${r.churn})`, why: "context-bloat paid on every read" });
 // HOTSPOT findings — churn × complexity above the fitted percentile (the refactor gold standard)
 for (const [f, c] of allComp) if (c.hotspot >= hotspotCut && c.hotspot >= 60 && (roots[f]?._raw.churn ?? 0) >= 8) findings.push({ kind: "hotspot", file: f, dim: "Hotspot", sev: Math.min(1, c.hotspot / 100), effort: roots[f]._raw.tokens > 20000 ? 4 : 3, action: `Refactor hotspot — churn ${roots[f]._raw.churn} × ${roots[f]._raw.tokens.toLocaleString()} tok (hotspot ${c.hotspot})`, why: "high-churn high-complexity: the field's gold-standard refactor target" });
 // CRITICAL-UNTESTED findings — reach × ¬coverage in the danger top-K

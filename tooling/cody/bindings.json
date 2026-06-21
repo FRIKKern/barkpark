@@ -35,5 +35,9 @@
 
   { "name": "defect_formula", "vtype": "expr", "vars": ["fixes", "churn"],
     "doc": "how defect-density is computed from a file's bug-fixes and churn (rung ③ — a bound FORMULA, safely evaluated)",
-    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "DEFECT_FORMULA = \"([^\"]*)\"" } ] }
+    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "DEFECT_FORMULA = \"([^\"]*)\"" } ] },
+
+  { "name": "effort_formula", "vtype": "expr", "vars": ["tokens"],
+    "doc": "piecewise effort estimate (1–5) for splitting a bloated file (rung ④ — a bound FUNCTION-CELL with branching)",
+    "locations": [ { "file": "tooling/quality/quality.mjs", "pattern": "EFFORT_FN = \"([^\"]*)\"" } ] }
 ]
