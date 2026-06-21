@@ -242,6 +242,89 @@ dedicated build-spec (`gap: true` — cqv6 specced, never built). Current state:
 **34 under-documented, top gap is the tenancy seam (membership/project/workspace/
 dataset, reach ~292, named by zero docs).**
 
+## P5 — remake (the never-worse remake gate)
+
+P1 asks *"is each claim true?"*, P2 *"is each fact stated once?"*, P3 *"does the
+map still work?"*, P4 *"is doc effort proportioned to reach?"*. **P5 is the
+capstone that USES all four:** it gates a proposed doc **restructure** (merge /
+split / promote / rewrite) and lets it land ONLY if it loses no verifiable fact
+and no outbound link. Destructive remakes go to **human review, never silent
+auto-apply**.
+
+`remake.mjs` exports `gateRemake({ beforePath, beforeText, afterText, meta })` →
+`{ verdict, reason, lostClaims, lostLinks, lostAnchors, classification }`.
+
+### The gate (Figure 4 of the plan)
+
+```
+proposed remake (beforeText → afterText)
+  → CLAIM DIFF:  extractClaims(before) ⊆ extractClaims(after)?   (P1's extractor,
+       keyed by P2's factKey)   any factKey missing → REJECT (failure log)
+  → LINK CHECK:  every outbound link/URL/doc-path in before still in after?
+       any link broken → REJECT
+  → STRUCTURE:   every H2/H3 that P3's routing/pointers target still present
+       (or redirected via meta)?   a dropped routing anchor → REJECT
+  → SIZE/TYPE:   merges docs / alters a canonical H2 / touches a verbatim-exempt
+       or requiresOwnerSignoff region?
+         yes → HUMAN (queue for review; never auto-apply)
+         no (prose/reorder only, all three checks green) → AUTO
+```
+
+### The three survival checks
+
+1. **Claim survival** — `extractClaims` (P1) on before & after, each claim hashed
+   to its normalized `factKey` (P2's `factKeyForClaim`) so a fact stated two ways
+   still matches. `lostClaims` = before-factKeys absent from after. Non-empty →
+   `reject`.
+2. **Link survival** — outbound links mined from before: markdown `[text](url)`,
+   bare `http(s)://…`, and backtick doc-paths (`docs/…`, `api/…`). Mined
+   **fence-aware** (line-by-line, skipping ` ``` ` delimiters) so an odd fence
+   backtick never drifts the whole-doc pairing. `lostLinks` = before-links absent
+   from after. Non-empty → `reject`.
+3. **Structure survival** — the set of H2/H3 heading slugs P3 treats as
+   routing/pointer targets (the routing table's `§/#` anchors that point INTO
+   this doc, plus same-doc `#anchor` links) must survive, or be intentionally
+   redirected via `meta.redirects: { oldSlug: newSlug }`. A dropped routing
+   anchor with no redirect → `reject`.
+
+### Propose-only / human-review stance
+
+The gate **EVALUATES** a remake — it **never writes a doc**. Applying an accepted
+remake is a separate, explicitly-invoked step that is out of scope for P5
+(propose + gate only, exactly like P2). A remake that merges docs, alters the
+canonical H2 structure, or touches a verbatim-exempt / `requiresOwnerSignoff`
+region routes to **`human`** — the never-auto guarantee. Rejects append one line
+to `remake-failures.log` (gitignored, like paperflow's `simplify-failures.log`);
+they never pollute git or a rail.
+
+```bash
+node tooling/doc-truth/remake.mjs           # human-review queue + recent rejects
+node tooling/doc-truth/remake.mjs --json     # { humanQueue, recentRejects, failureLog }
+node tooling/map/query.mjs remake --json     # via the front door
+node tooling/doc-truth/acceptance-p5.mjs     # gates: POSITIVE + NEGATIVE-1 + NEGATIVE-2
+```
+
+### The P5 acceptance test
+
+The acceptance target is the barkpark root `CLAUDE.md` Golden Rules ↔ Past
+Mistakes overlap. Those sections are **verbatim-exempt** — so the gate must route
+that remake to **human** review and **never write the file**.
+
+- **POSITIVE (must pass)** — builds the real GR↔PM collapse candidate via P2's
+  proposal (keep GR canonical; replace PM's *overlapping* facts with a typed
+  pointer to GR while keeping every non-overlapping PM fact). Asserts verdict is
+  **not reject** (claims + links + anchors all survive — **41 → 41 facts, lost:
+  0**) AND verdict is **human** (verbatim-exempt → must require sign-off).
+- **NEGATIVE-1 (must pass)** — same candidate but drops the `systemctl restart`
+  fact from both GR and PM. Asserts `reject` with `cmd:systemctl restart` in
+  `lostClaims`.
+- **NEGATIVE-2 (must pass)** — a candidate that drops the
+  `docs/ops/studio-nav-bug-2026-04-19.md` outbound link. Asserts `reject` with it
+  in `lostLinks`.
+
+Current state: **POSITIVE human (41→41, lost 0) · NEGATIVE-1 reject · NEGATIVE-2
+reject · no file written.**
+
 ## Meta-lesson
 
 The verifier is a **lead generator, not an authority.** It earns trust through
