@@ -12,16 +12,19 @@ A PR targeting `main` must clear:
    architectural fit. Catches most defects but not all (see lessons-learned
    below).
 2. **`format` CI job** — `.github/workflows/elixir.yml`, runs
-   `mix format --check-formatted`. **Blocking.** Its own dedicated, fast job
-   (~30s, no DB, no full compile) so an unformatted PR short-circuits before
-   the heavier jobs. Split out of `mix-test` because that job is advisory.
+   `mix format --check-formatted`. Currently **advisory** (`continue-on-error:
+   true`; the job is named "Format … advisory"). Its own dedicated, fast job
+   (~30s, no DB, no full compile) so drift is visible in <60s. It was split out
+   of `mix-test` to *become* a blocking gate once format drift is cleared, but
+   today a red `format` check does not block merge.
 3. **`mix-prod-compile` CI job** — same workflow, depends on `mix-test`.
    Cleans `api/_build/prod`, force-recompiles deps, then runs
    `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the gate.**
 4. **`validation-perf` CI job** — same workflow, independent of `mix-test`.
    Runs the synthetic 200-field / 100-rule bench, takes the median of 5 timed
-   runs, fails if the median exceeds 100ms. **Blocking** — a perf regression
-   blocks merge even while the test suite is advisory.
+   runs, fails if the median exceeds 100ms. Treated as a hard gate — a red
+   perf bench should stop a merge even while the test suite is advisory (but
+   see the branch-protection note below: nothing mechanically enforces it).
 5. **`plugin-node` CI job** — `.github/workflows/plugin-node.yml`. Discovers
    plugins under `api/priv/plugins/` whose `plugin.json` declares a top-level
    `"node"` object and runs `npm ci` + lint + typecheck per plugin. Emits a
@@ -34,9 +37,14 @@ The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 is remediated. It cannot block merge in its current state; once the fix
 groups land, drop `continue-on-error` to make it blocking again.
 
-The branch protection on `main` requires the `format` and `mix-prod-compile`
-gates (plus `validation-perf`) to be green. `mix-test` is advisory.
-`plugin-node` is required only when the PR touches `api/priv/plugins/**`.
+`main` has **no branch protection or rulesets** configured (verified
+2026-06-21 via the GitHub branches/rulesets APIs), so none of these gates
+mechanically blocks a merge — PR #123 merged with the advisory `format` check
+red. They are the team's merge discipline, enforced by review rather than by
+GitHub. The checks that *should* be green before merge are `mix-prod-compile`
+and `validation-perf`; `mix-test` and `format` are advisory; `plugin-node`
+matters only when the PR touches `api/priv/plugins/**`. If these are meant to
+be enforced, add a branch-protection rule requiring those status checks.
 
 ## Local pre-merge check
 
