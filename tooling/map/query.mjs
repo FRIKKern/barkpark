@@ -5,6 +5,7 @@
 //
 //   query verify            → is the map current? (the freshness GATE)
 //   query verify --docs [g] → are the DOCS truthful? (the doc-truth verifier)
+//   query waterfall         → is any fact RESTATED across docs? (collapse leads)
 //   query impact <file|sym> → what breaks if I change X? (blast radius + risk)
 //   query scope <feature>   → what files do I touch for feature Y? (context pack)
 //   query                   → usage that frames the three
@@ -40,6 +41,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 const MANIFEST_MJS = join(HERE, "manifest.mjs");
 const WHAT_BREAKS_MJS = join(HERE, "what-breaks.mjs");
 const VERIFY_DOCS_MJS = join(ROOT, "tooling/doc-truth/verify-docs.mjs");
+const WATERFALL_MJS = join(ROOT, "tooling/doc-truth/waterfall.mjs");
 const SCOPE_MJS = join(ROOT, "tooling/scope/scope.mjs");
 const NODES = join(ROOT, "tooling/barkpark-sync/nodes.json");
 
@@ -142,6 +144,18 @@ function cmdVerify(rest) {
   return delegate(MANIFEST_MJS, ["verify", ...rest]);
 }
 
+// ── verb: waterfall ──────────────────────────────────────────────────────────
+// "Each fact once." The P2 restatement detector: finds sections that restate the
+// same VERIFIABLE-CLAIM anchors (not prose) and proposes — never applies —
+// collapsing the duplicates to one canonical home plus typed pointers. Pure
+// pass-through to the doc-truth waterfall tool (facade, not reimplementation).
+//   query waterfall                       → clusters + collapse proposals
+//   query waterfall --topic <fk-substr>   → a fact's canonical doc+section + all
+//                                           docs carrying pointers (the DAG query)
+function cmdWaterfall(rest) {
+  return delegate(WATERFALL_MJS, rest);
+}
+
 // ── verb: impact ─────────────────────────────────────────────────────────────
 // Blast-radius / risk for a file or symbol. GATE FIRST: if the map is stale we
 // print the ⚠ banner before the result so the agent is never silently misled.
@@ -218,6 +232,16 @@ function usage() {
                                e.g. query verify --docs docs/ops/
                                     query verify --docs js/CLAUDE.md --json
 
+    waterfall                  Is any fact RESTATED across docs?  Finds sections
+                               that share a set of verifiable-claim anchors (the
+                               same paths/commands/symbols, NOT prose) and
+                               PROPOSES — never applies — collapsing them to one
+                               canonical home + typed pointers. Conservative:
+                               propose-only, lose-no-fact enforced.
+                               Flags: --json  --topic <factKey-substr>
+                               e.g. query waterfall
+                                    query waterfall --topic systemctl --json
+
     impact <file|symbol>       What breaks if I change X?  Blast-radius closure,
                                symbol-precise + cross-language reach, and a
                                LOW/MEDIUM/HIGH/CRITICAL risk verdict.
@@ -253,6 +277,9 @@ function main() {
   switch (verb) {
     case "verify":
       process.exit(cmdVerify(rest));
+      break;
+    case "waterfall":
+      process.exit(cmdWaterfall(rest));
       break;
     case "impact":
       if (!rest.some((a) => !a.startsWith("--") || a === "--symbol")) {
