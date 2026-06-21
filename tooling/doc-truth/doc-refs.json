@@ -1,0 +1,397 @@
+{
+  "generatedAt": "2026-06-21T20:33:05.211Z",
+  "refs": {
+    "CLAUDE.md": [
+      "api",
+      "api/CLAUDE.md",
+      "api/start.sh",
+      "docs/INDEX.md",
+      "docs/api-v1.md",
+      "docs/auth.md",
+      "docs/cards/cli.md",
+      "docs/cards/js-sdk.md",
+      "docs/cards/onix-bokbasen.md",
+      "docs/cards/plugins.md",
+      "docs/cards/search-media.md",
+      "docs/cards/studio.md",
+      "docs/cards/tui.md",
+      "docs/contracts/schema-v2.md",
+      "docs/contracts/webhook-realtime.md",
+      "docs/decisions/deferred.md",
+      "docs/ops/PROD_OPS.md",
+      "docs/ops/adding-a-domain.md",
+      "docs/ops/merge-gates.md",
+      "docs/ops/npm-rollback-playbook.md",
+      "docs/ops/studio-nav-bug-2026-04-19.md",
+      "docs/setup/SETUP.md",
+      "docs/setup/TASK-SYSTEM.md",
+      "internal/cli",
+      "js",
+      "scripts/check-doc-budgets.sh",
+      "scripts/docs-anchors-check.sh",
+      "web"
+    ],
+    "api/CLAUDE.md": [
+      "docs/auth.md",
+      "docs/cards",
+      "docs/decisions/deferred.md"
+    ],
+    "js/CLAUDE.md": [
+      ".github/workflows/js-tests.yml",
+      "docs/cards/js-sdk.md",
+      "docs/decisions",
+      "docs/decisions/deferred.md"
+    ],
+    "web/AGENTS.md": [
+      "docs/cards/js-sdk.md",
+      "web",
+      "web/README.md"
+    ],
+    ".claude/skills/codebase-quality/SKILL.md": [
+      ".github/workflows/codebase-intel.yml",
+      "api",
+      "api/_build",
+      "tooling",
+      "tooling/README.md",
+      "tooling/SIGNALS.md",
+      "tooling/barkpark-sync/nodes.json",
+      "tooling/cochange/cochange.mjs",
+      "tooling/fit/auc-history.jsonl",
+      "tooling/fit/scoring-config.json",
+      "tooling/intentions/intentions.mjs",
+      "tooling/lib/consensus.mjs",
+      "tooling/lib/scoring.mjs",
+      "tooling/quality/quality-report.html",
+      "tooling/tasks/tasks.mjs"
+    ],
+    ".claude/skills/scope/SKILL.md": [
+      "tooling/SIGNALS.md",
+      "tooling/barkpark-sync/nodes.json"
+    ],
+    "README.md": [
+      "api/lib/barkpark/plugin.ex",
+      "docs/INDEX.md",
+      "docs/api-v1.md",
+      "docs/auth.md",
+      "docs/cards/plugins.md",
+      "docs/cheatsheets",
+      "docs/cheatsheets/tasks.md",
+      "docs/cli/HANDBOOK.md",
+      "docs/decisions/deferred.md",
+      "docs/ops/PROD_OPS.md",
+      "docs/setup/TASK-SYSTEM.md"
+    ],
+    "api/docs/adr/ADR-0003-canonical-sync-tag-convention.md": [
+      "docs/decisions/0003-sync-tags.md"
+    ],
+    "api/priv/codelists/README.md": [
+      "api/priv/onix/onix-3.0"
+    ],
+    "api/priv/codelists/thema-1.6/README.md": [
+      "api/priv/codelists/README.md"
+    ],
+    "api/priv/onix/onix-3.0/README.md": [
+      "api/priv/onix/onix-3.0"
+    ],
+    "api/priv/plugins/media/README.md": [
+      "docs/contracts/schema-v2.md"
+    ],
+    "deploy/systemd/README.md": [
+      "api/start.sh",
+      "docs/ops/PROD_OPS.md"
+    ],
+    "docs-site/README.md": [
+      "js/docs"
+    ],
+    "docs-site/ops/adding-a-domain.md": [
+      "docs/ops/adding-a-domain.md",
+      "docs/ops/studio-nav-bug-2026-04-19.md"
+    ],
+    "docs/adr/0002-npm-dist-tag-publish.md": [
+      "docs/decisions/0002-npm-dist-tag.md"
+    ],
+    "docs/api-v1.md": [
+      "docs/auth.md"
+    ],
+    "docs/auth.md": [
+      "docs/api-v1.md"
+    ],
+    "docs/cards/cli.md": [
+      "internal/cli",
+      "internal/pdrender"
+    ],
+    "docs/cards/js-sdk.md": [
+      "js",
+      "js/packages/create-barkpark-app/templates/blog-starter",
+      "web"
+    ],
+    "docs/cards/onix-bokbasen.md": [
+      "api/lib/barkpark/plugins/onixedit/export"
+    ],
+    "docs/cards/search-media.md": [
+      "api/lib/barkpark/plugins/media.ex",
+      "api/lib/barkpark/search"
+    ],
+    "docs/cards/tui.md": [
+      "internal/pdrender"
+    ],
+    "docs/cheatsheets/bp.md": [
+      "docs/cli/error-exit-table.md"
+    ],
+    "docs/cheatsheets/papers.md": [
+      "api/CLAUDE.md"
+    ],
+    "docs/cli/HANDBOOK.md": [
+      "docs/cli/error-exit-table.md",
+      "docs/cli/m0-decisions.md",
+      "docs/cli/manifest.schema.json",
+      "docs/setup/QUICKSTART.md",
+      "internal/cli",
+      "internal/cli/errors.go",
+      "internal/manifest"
+    ],
+    "docs/cli/m0-decisions.md": [
+      "api/lib/barkpark/plugins/capabilities.ex",
+      "api/lib/barkpark_web/controllers/capabilities_controller.ex",
+      "docs/cli/manifest.schema.json",
+      "internal/cli/builtins.go"
+    ],
+    "docs/contracts/bokbasen.md": [
+      "api",
+      "api/config/config.exs",
+      "api/config/runtime.exs",
+      "api/lib/barkpark/plugins/onixedit/bokbasen",
+      "api/lib/barkpark/plugins/onixedit/export/validator.ex",
+      "api/test/fixtures/bokbasen",
+      "docs/contracts/onix-field-map.md",
+      "docs/ops/bokbasen-go-live.md",
+      "docs/spec/bokbasen-api-contract.md"
+    ],
+    "docs/contracts/onix-field-map.md": [
+      "api/lib/barkpark/plugins/onixedit/export.ex",
+      "api/lib/barkpark/plugins/onixedit/export/codelists.ex",
+      "api/lib/barkpark/plugins/onixedit/export/collateral_detail.ex",
+      "api/lib/barkpark/plugins/onixedit/export/descriptive_detail.ex",
+      "api/lib/barkpark/plugins/onixedit/export/header.ex",
+      "api/lib/barkpark/plugins/onixedit/export/message.ex",
+      "api/lib/barkpark/plugins/onixedit/export/product_supply.ex",
+      "api/lib/barkpark/plugins/onixedit/export/validator.ex",
+      "api/priv/onix/onix-3.0/ONIX_BookProduct_3.0_reference.xsd",
+      "api/test/fixtures/onix/full-book.json",
+      "docs/cards/plugins.md",
+      "docs/contracts/bokbasen.md"
+    ],
+    "docs/contracts/schema-v2.md": [
+      "api/lib/barkpark/content/codelists.ex",
+      "api/lib/barkpark/content/localized_text.ex",
+      "api/lib/barkpark/content/schema_definition.ex",
+      "api/lib/barkpark/content/validation.ex",
+      "api/lib/barkpark/content/validation/rules.ex",
+      "api/lib/barkpark_web/components/fields",
+      "api/priv/repo/seeds.exs",
+      "docs/decisions/deferred.md"
+    ],
+    "docs/contracts/webhook-realtime.md": [
+      "api/lib/barkpark/webhooks/dispatcher.ex",
+      "docs/ops/realtime-webhook-setup.md",
+      "js/packages/nextjs/src/webhook/index.ts"
+    ],
+    "docs/decisions/0001-sdk-envelope.md": [
+      "api/lib/barkpark_web/controllers/query_controller.ex",
+      "js/packages/core/src/client.ts",
+      "js/packages/core/tests"
+    ],
+    "docs/decisions/0002-npm-dist-tag.md": [
+      ".github/workflows/release.yml",
+      ".github/workflows/retag.yml",
+      "js/.changeset/pre.json"
+    ],
+    "docs/decisions/0003-sync-tags.md": [
+      "api/lib/barkpark/webhooks/dispatcher.ex",
+      "api/test/barkpark/webhooks/dispatcher_test.exs",
+      "js/packages/nextjs/src/actions/defineActions.ts",
+      "js/packages/nextjs/src/revalidate/index.ts",
+      "js/packages/nextjs/src/server/core.ts",
+      "js/packages/nextjs/tests/revalidate.test.ts",
+      "js/packages/nextjs/tests/server.test.ts"
+    ],
+    "docs/decisions/deferred.md": [
+      "api/lib/barkpark/search/intelligence.ex",
+      "api/lib/barkpark_web/router.ex",
+      "internal/manifest/url.go",
+      "js/docs"
+    ],
+    "docs/media/DISCOVERY.md": [
+      "api/lib/barkpark/media/search.ex",
+      "api/priv/static/assets/bp-asset-explorer.js",
+      "docs/search/INTELLIGENCE.md",
+      "scripts/media-smoke.sh"
+    ],
+    "docs/ops/PROD_OPS.md": [
+      "api/_build/prod",
+      "api/scripts/prod-postcheck.sh",
+      "api/start.sh",
+      "docs/ops/npm-rollback-playbook.md"
+    ],
+    "docs/ops/adding-a-domain.md": [
+      "api/config/prod.exs",
+      "web/README.md"
+    ],
+    "docs/ops/bokbasen-go-live.md": [
+      "docs/contracts/bokbasen.md"
+    ],
+    "docs/ops/merge-gates.md": [
+      ".github/workflows/doc-gates.yml",
+      ".github/workflows/elixir.yml",
+      ".github/workflows/plugin-node.yml",
+      "api/_build/prod",
+      "api/priv/plugins",
+      "scripts/check-doc-budgets.sh",
+      "scripts/docs-anchors-check.sh"
+    ],
+    "docs/ops/npm-rollback-playbook.md": [
+      ".github/workflows/retag.yml",
+      "docs/adr/0002-npm-dist-tag-publish.md"
+    ],
+    "docs/ops/realtime-webhook-setup.md": [
+      "docs/contracts/webhook-realtime.md"
+    ],
+    "docs/ops/studio-nav-bug-2026-04-19.md": [
+      "_attic/docs-2026-06/docs/ops/caddy-api-tls.md",
+      "api/config/prod.exs",
+      "api/config/runtime.exs",
+      "api/lib/barkpark_web/live/studio/studio_live.ex",
+      "deploy.sh",
+      "docs/ops/adding-a-domain.md"
+    ],
+    "docs/ops/vercel-dns-connect.md": [
+      "docs/ops/adding-a-domain.md",
+      "web"
+    ],
+    "docs/plugins/codelists-byo.md": [
+      "api/priv/codelists/README.md",
+      "api/priv/codelists/onix-issue-73.xml",
+      "api/test/fixtures/codelists/synthetic.xml"
+    ],
+    "docs/search/INTELLIGENCE.md": [
+      "api/config/config.exs",
+      "api/lib/barkpark/search/intelligence.ex",
+      "api/lib/barkpark/search/query_pipeline.ex",
+      "api/lib/barkpark/search/workers/crystallize.ex",
+      "api/lib/barkpark_web/search_intel.ex",
+      "docs/api-v1.md"
+    ],
+    "docs/search/ROADMAP.md": [
+      "api/lib/barkpark/search/query_pipeline.ex",
+      "api/lib/barkpark_web/controllers/federated_search_controller.ex",
+      "api/lib/mix/tasks/search.eval.ex",
+      "api/priv/static/assets/bp-search-intel.js"
+    ],
+    "docs/setup/QUICKSTART.md": [
+      "api"
+    ],
+    "docs/setup/SETUP.md": [
+      "api",
+      "web"
+    ],
+    "docs/setup/TASK-SYSTEM.md": [
+      "api/start.sh"
+    ],
+    "docs/setup/paperflow-cutover.md": [
+      "docs/setup/SETUP.md"
+    ],
+    "docs/snippets/README.md": [
+      "js/tsconfig.base.json"
+    ],
+    "docs/spec/bokbasen-api-contract.md": [
+      "api/mix.exs",
+      "api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs",
+      "api/test/fixtures/bokbasen",
+      "api/test/test_helper.exs"
+    ],
+    "docs/studio/user-guide.md": [
+      "api/test/barkpark_web/components/fields",
+      "docs/cards/plugins.md",
+      "docs/contracts/schema-v2.md",
+      "docs/ops/bokbasen-go-live.md"
+    ],
+    "docs/studio/web-components.md": [
+      "api/lib/barkpark_web/components/field_inputs.ex",
+      "api/lib/barkpark_web/layouts/root.html.heex",
+      "api/lib/barkpark_web/live/studio/studio_live.ex",
+      "api/priv/static/assets",
+      "api/priv/static/assets/bp-rich-text-editor.js"
+    ],
+    "js/CONTRIBUTING.md": [
+      "api/docs/adr",
+      "docs/adr"
+    ],
+    "js/README.md": [
+      "api/docs/adr",
+      "docs/adr",
+      "docs/decisions",
+      "docs/decisions/deferred.md"
+    ],
+    "js/SECURITY.md": [
+      "api/docs/adr"
+    ],
+    "js/packages/codegen/README.md": [
+      "docs/adr",
+      "js/packages/codegen/src/index.ts"
+    ],
+    "js/packages/core/README.md": [
+      "docs/decisions/0001-sdk-envelope.md"
+    ],
+    "js/packages/create-barkpark-app/templates/blog-starter/README.md": [
+      "docs/auth.md",
+      "docs/contracts/webhook-realtime.md"
+    ],
+    "js/packages/create-barkpark-app/templates/website-starter/README.md": [
+      "docs/auth.md",
+      "docs/contracts/webhook-realtime.md"
+    ],
+    "js/packages/groq/README.md": [
+      "docs/decisions/deferred.md"
+    ],
+    "js/packages/nextjs/README.md": [
+      "api/docs/adr/ADR-0003-canonical-sync-tag-convention.md",
+      "docs/decisions/0003-sync-tags.md"
+    ],
+    "sdk/README.md": [
+      "docs/cli/error-exit-table.md",
+      "js/packages/core"
+    ],
+    "tooling/README.md": [
+      ".github/workflows/codebase-intel.yml",
+      "api/_build",
+      "tooling/fit/auc-history.jsonl",
+      "tooling/quality/quality-report.html",
+      "tooling/status/status-report.html"
+    ],
+    "tooling/SIGNALS.md": [
+      "tooling/barkpark-sync",
+      "tooling/barkpark-sync/generate.mjs",
+      "tooling/blast-radius",
+      "tooling/consistency",
+      "tooling/ergonomics",
+      "tooling/file-importance",
+      "tooling/fit",
+      "tooling/intentions",
+      "tooling/risk/risk.mjs",
+      "tooling/usefulness/usefulness.mjs"
+    ],
+    "tooling/blast-radius/README.md": [
+      "tooling/blast-radius/check.mjs"
+    ],
+    "tooling/twoslash-mocks/README.md": [
+      ".github/workflows/twoslash.yml",
+      "js/docs"
+    ],
+    "web/README.md": [
+      "api/lib/barkpark_web/plugs/dataset_cors.ex",
+      "docs/cards/js-sdk.md",
+      "docs/ops/vercel-dns-connect.md",
+      "web"
+    ]
+  }
+}
