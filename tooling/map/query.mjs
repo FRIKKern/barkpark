@@ -8,6 +8,7 @@
 //   query waterfall         → is any fact RESTATED across docs? (collapse leads)
 //   query highways          → does the routing table still resolve? (topic→owner)
 //   query priority          → which code is UNDER-documented by reach? (work queue)
+//   query remake            → gate a doc restructure: lose no fact/link → human/reject
 //   query impact <file|sym> → what breaks if I change X? (blast radius + risk)
 //   query scope <feature>   → what files do I touch for feature Y? (context pack)
 //   query                   → usage that frames the three
@@ -46,6 +47,7 @@ const VERIFY_DOCS_MJS = join(ROOT, "tooling/doc-truth/verify-docs.mjs");
 const WATERFALL_MJS = join(ROOT, "tooling/doc-truth/waterfall.mjs");
 const HIGHWAYS_MJS = join(ROOT, "tooling/doc-truth/highways.mjs");
 const PRIORITY_MJS = join(ROOT, "tooling/doc-truth/priority.mjs");
+const REMAKE_MJS = join(ROOT, "tooling/doc-truth/remake.mjs");
 const SCOPE_MJS = join(ROOT, "tooling/scope/scope.mjs");
 const NODES = join(ROOT, "tooling/barkpark-sync/nodes.json");
 
@@ -182,6 +184,20 @@ function cmdPriority(rest) {
   return delegate(PRIORITY_MJS, rest);
 }
 
+// ── verb: remake ─────────────────────────────────────────────────────────────
+// "Can this doc restructure land safely?" The P5 never-worse remake gate: it
+// evaluates a proposed merge/split/promote/rewrite and lets it land ONLY if it
+// loses no verifiable fact (P1's extractor) and no outbound link, with every
+// routing/pointer anchor (P3) surviving. Destructive or canonical-touching
+// remakes route to HUMAN review — never silent auto-apply. The gate NEVER writes
+// a doc. The CLI shows the human-review queue + recent rejects from the failure
+// log. Pure pass-through to the doc-truth remake tool (facade).
+//   query remake            → human-review queue + recent rejects
+//   query remake --json     → { humanQueue, recentRejects, failureLog }
+function cmdRemake(rest) {
+  return delegate(REMAKE_MJS, rest);
+}
+
 // ── verb: impact ─────────────────────────────────────────────────────────────
 // Blast-radius / risk for a file or symbol. GATE FIRST: if the map is stale we
 // print the ⚠ banner before the result so the agent is never silently misled.
@@ -282,6 +298,18 @@ function usage() {
                                Flags: --json
                                e.g. query priority --json
 
+    remake                     Can a doc RESTRUCTURE land safely?  The never-worse
+                               gate evaluates a proposed merge/split/promote/rewrite
+                               and lets it land ONLY if it loses no verifiable fact
+                               (P1's extractor) and no outbound link, with every
+                               routing/pointer anchor (P3) surviving. Destructive or
+                               canonical-touching remakes route to HUMAN review —
+                               never silent auto-apply. Propose-only: the gate never
+                               writes a doc. The CLI shows the human-review queue +
+                               recent rejects.
+                               Flags: --json
+                               e.g. query remake --json
+
     impact <file|symbol>       What breaks if I change X?  Blast-radius closure,
                                symbol-precise + cross-language reach, and a
                                LOW/MEDIUM/HIGH/CRITICAL risk verdict.
@@ -326,6 +354,9 @@ function main() {
       break;
     case "priority":
       process.exit(cmdPriority(rest));
+      break;
+    case "remake":
+      process.exit(cmdRemake(rest));
       break;
     case "impact":
       if (!rest.some((a) => !a.startsWith("--") || a === "--symbol")) {

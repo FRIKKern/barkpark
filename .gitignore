@@ -43,6 +43,11 @@ packages/**/dist/
 .artifacts/visual/**/node_modules/
 *.log
 
+# doc-truth P5 remake gate — transient reject log (kept out of git, like
+# paperflow's simplify-failures.log). Already covered by *.log above; named
+# explicitly so its purpose is documented and an editor never re-adds it.
+tooling/doc-truth/remake-failures.log
+
 # IDE
 .idea/
 .vscode/
