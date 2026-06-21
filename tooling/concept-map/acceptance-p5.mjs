@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+// acceptance-p5.mjs — cqv8 Phase 5 acceptance gate. MUST PASS.
+//
+// Asserts the boundary gate + gated recolocation honour the spec's enforcement
+// and never-worse contracts — computed LIVE off the real symbol graph every run,
+// never against frozen literals. Exits non-zero on any failed assertion.
+//
+//   node tooling/concept-map/acceptance-p5.mjs
+//
+// ── WHAT IT GUARANTEES (spec §5 check 1/3, §8, Figure 7) ─────────────────────
+//   1. SIDEWAYS GATE — a SYNTHETIC sideways edge between two LIVE non-kernel
+//      features → verdict 'violation', with the offending edge NAMED and typed
+//      'sideways'. The two endpoints are picked from P1's live bands, never
+//      hardcoded, so the test tracks whatever the graph currently bands.
+//   2. WRONG-DIRECTION GATE — a synthetic kernel→feature edge → verdict
+//      'violation', typed 'wrong-direction'. The kernel concept is read from the
+//      live KERNEL band.
+//   3. CLEAN PASS — a legitimate feature→kernel inward edge → verdict 'ok'. The
+//      gate must not cry wolf on the allowed direction.
+//   4. RECOLOCATION ACCOUNTS FOR 100% — proposeRecolocation('sheets') returns a
+//      plan accounting for EVERY file sheets owns (lose-none): count before ===
+//      count after, 0 lost, every input maps to a unique output. neverWorse:true.
+//   5. PROPOSE-ONLY — the recolocation is marked proposeOnly:true AND moves
+//      nothing: the working tree is unchanged across the call (git status
+//      --porcelain identical before/after).
+//
+// Dependency-free. ESM, node: builtins only.
+
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { runConcepts } from "./concepts.mjs";
+import { gateBoundary, proposeRecolocation } from "./boundary.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
+  .toString()
+  .trim();
+
+const failures = [];
+const checks = [];
+
+function ok(label, cond, detail) {
+  checks.push({ label, ok: !!cond, detail });
+  if (!cond) failures.push(`${label}: ${detail}`);
+  return !!cond;
+}
+
+function gitStatusBlob() {
+  return execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: ROOT,
+    maxBuffer: 16 * 1024 * 1024,
+  }).toString();
+}
+
+// ── live substrate ────────────────────────────────────────────────────────────
+const p1 = runConcepts();
+const kernel = p1.bands.kernel;
+// live non-kernel features (CLEAN-FEATURE preferred, else any non-kernel/non-noise).
+const features = p1.concepts
+  .filter((c) => c.band === "CLEAN-FEATURE")
+  .map((c) => c.concept);
+const anyFeatures = p1.concepts
+  .filter((c) => c.band !== "KERNEL" && c.band !== "noise")
+  .map((c) => c.concept);
+const featurePool = features.length >= 2 ? features : anyFeatures;
+
+// pick two DISTINCT live features for the synthetic sideways edge.
+const featA = featurePool[0];
+const featB = featurePool.find((f) => f !== featA);
+const kernelConcept = kernel[0];
+
+// snapshot the working tree before any gate/recolocation call (propose-only proof).
+const beforeStatus = gitStatusBlob();
+
+// ── 1. SIDEWAYS GATE ──────────────────────────────────────────────────────────
+const sideways = gateBoundary({ edges: [{ from: featA, to: featB }] }, { p1 });
+const sv = sideways.violations[0];
+ok(
+  "synthetic sideways edge → verdict 'violation'",
+  sideways.verdict === "violation" && sideways.violations.length >= 1,
+  `verdict=${sideways.verdict} violations=${sideways.violations.length} (edge ${featA} → ${featB})`
+);
+ok(
+  "sideways violation is typed and NAMES the offending edge",
+  sv && sv.type === "sideways" && sv.edge === `${featA} → ${featB}` && sv.from === featA && sv.to === featB,
+  sv ? `type=${sv.type} edge="${sv.edge}"` : "no violation returned"
+);
+
+// ── 2. WRONG-DIRECTION GATE ─────────────────────────────────────────────────
+const wrong = gateBoundary({ edges: [{ from: kernelConcept, to: featA }] }, { p1 });
+const wv = wrong.violations[0];
+ok(
+  "synthetic kernel→feature edge → verdict 'violation' (wrong-direction)",
+  wrong.verdict === "violation" && wv && wv.type === "wrong-direction" && wv.edge === `${kernelConcept} → ${featA}`,
+  wv ? `type=${wv.type} edge="${wv.edge}"` : `verdict=${wrong.verdict}, no violation`
+);
+
+// ── 3. CLEAN PASS — the allowed inward direction ─────────────────────────────
+const inward = gateBoundary({ edges: [{ from: featA, to: kernelConcept }] }, { p1 });
+ok(
+  "legitimate feature→kernel inward edge → verdict 'ok'",
+  inward.verdict === "ok" && inward.violations.length === 0,
+  `verdict=${inward.verdict} violations=${inward.violations.length} (edge ${featA} → ${kernelConcept})`
+);
+
+// ── 4. RECOLOCATION ACCOUNTS FOR 100% OF sheets' FILES ───────────────────────
+const reco = proposeRecolocation("sheets", { p1 });
+ok(
+  "proposeRecolocation('sheets') is never-worse (lose-none)",
+  reco.neverWorse === true && reco.counts.lost === 0,
+  `neverWorse=${reco.neverWorse} lost=${reco.counts.lost} lostFiles=[${(reco.lostFiles || []).join(", ")}]`
+);
+ok(
+  "recolocation count is preserved: before === after",
+  reco.counts.filesBefore === reco.counts.filesAfter &&
+    reco.counts.filesBefore > 0 &&
+    reco.counts.accountedFor === reco.counts.filesBefore,
+  `before=${reco.counts.filesBefore} after=${reco.counts.filesAfter} accounted=${reco.counts.accountedFor}`
+);
+ok(
+  "every member file maps to exactly one UNIQUE home path (100% accounted)",
+  reco.plan.length === reco.counts.filesBefore &&
+    new Set(reco.plan.map((p) => p.to)).size === reco.plan.length &&
+    new Set(reco.plan.map((p) => p.from)).size === reco.plan.length,
+  `plan=${reco.plan.length} uniqueTo=${new Set(reco.plan.map((p) => p.to)).size} ` +
+    `uniqueFrom=${new Set(reco.plan.map((p) => p.from)).size}`
+);
+ok(
+  "recolocation collapses scatter to ONE home tree",
+  reco.scatter.after === 1 && reco.scatter.before >= 1 && reco.plan.every((p) => p.to.startsWith(reco.homeDir + "/")),
+  `scatter ${reco.scatter.before} → ${reco.scatter.after}; home=${reco.homeDir}`
+);
+
+// ── 5. PROPOSE-ONLY — nothing moved ──────────────────────────────────────────
+ok("recolocation is marked propose-only", reco.proposeOnly === true, `proposeOnly=${reco.proposeOnly}`);
+const afterStatus = gitStatusBlob();
+ok(
+  "working tree UNCHANGED across gate + recolocation (nothing moved)",
+  afterStatus === beforeStatus,
+  afterStatus === beforeStatus ? "git status identical" : "WORKING TREE MUTATED — propose-only violated"
+);
+
+// ── report ───────────────────────────────────────────────────────────────────
+function run() {
+  const out = (s) => process.stdout.write(s);
+  out(
+    `\ncqv8 P5 acceptance — ${p1.graph.nodes} nodes · ${p1.graph.edges} edges · ` +
+      `kernel [${kernel.join(", ")}]\n`
+  );
+  out(`synthetic edges (live concepts):\n`);
+  out(`  · sideways:        ${featA} → ${featB}  (two live features)\n`);
+  out(`  · wrong-direction: ${kernelConcept} → ${featA}  (kernel → feature)\n`);
+  out(`  · inward (ok):     ${featA} → ${kernelConcept}  (feature → kernel)\n`);
+  out(`recolocation('sheets'): ${reco.counts.filesBefore} files → home ${reco.homeDir}\n`);
+  out(`${"─".repeat(64)}\n`);
+  for (const c of checks) {
+    out(`  ${c.ok ? "✓" : "✗"} ${c.label}\n      ${c.detail}\n`);
+  }
+  out(`${"─".repeat(64)}\n`);
+  if (failures.length === 0) {
+    out(`PASS — ${checks.length}/${checks.length} checks green\n\n`);
+    process.exit(0);
+  } else {
+    out(`FAIL — ${failures.length} of ${checks.length} checks failed:\n`);
+    for (const f of failures) out(`  ✗ ${f}\n`);
+    out(`\n`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  run();
+}
