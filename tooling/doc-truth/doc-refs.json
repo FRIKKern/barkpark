@@ -1,6 +1,27 @@
 {
-  "generatedAt": "2026-06-21T21:30:59.518Z",
+  "generatedAt": "2026-06-21T21:40:40.569Z",
   "refs": {
+    ".claude/skills/codebase-quality/SKILL.md": [
+      ".github/workflows/codebase-intel.yml",
+      "api",
+      "api/_build",
+      "tooling",
+      "tooling/README.md",
+      "tooling/SIGNALS.md",
+      "tooling/barkpark-sync/nodes.json",
+      "tooling/cochange/cochange.mjs",
+      "tooling/fit/auc-history.jsonl",
+      "tooling/fit/scoring-config.json",
+      "tooling/intentions/intentions.mjs",
+      "tooling/lib/consensus.mjs",
+      "tooling/lib/scoring.mjs",
+      "tooling/quality/quality-report.html",
+      "tooling/tasks/tasks.mjs"
+    ],
+    ".claude/skills/scope/SKILL.md": [
+      "tooling/SIGNALS.md",
+      "tooling/barkpark-sync/nodes.json"
+    ],
     "CLAUDE.md": [
       "api",
       "api/CLAUDE.md",
@@ -32,43 +53,6 @@
       "scripts/docs-anchors-check.sh",
       "web"
     ],
-    "api/CLAUDE.md": [
-      "docs/auth.md",
-      "docs/cards",
-      "docs/decisions/deferred.md"
-    ],
-    "js/CLAUDE.md": [
-      ".github/workflows/js-tests.yml",
-      "docs/cards/js-sdk.md",
-      "docs/decisions",
-      "docs/decisions/deferred.md"
-    ],
-    "web/AGENTS.md": [
-      "docs/cards/js-sdk.md",
-      "web",
-      "web/README.md"
-    ],
-    ".claude/skills/codebase-quality/SKILL.md": [
-      ".github/workflows/codebase-intel.yml",
-      "api",
-      "api/_build",
-      "tooling",
-      "tooling/README.md",
-      "tooling/SIGNALS.md",
-      "tooling/barkpark-sync/nodes.json",
-      "tooling/cochange/cochange.mjs",
-      "tooling/fit/auc-history.jsonl",
-      "tooling/fit/scoring-config.json",
-      "tooling/intentions/intentions.mjs",
-      "tooling/lib/consensus.mjs",
-      "tooling/lib/scoring.mjs",
-      "tooling/quality/quality-report.html",
-      "tooling/tasks/tasks.mjs"
-    ],
-    ".claude/skills/scope/SKILL.md": [
-      "tooling/SIGNALS.md",
-      "tooling/barkpark-sync/nodes.json"
-    ],
     "README.md": [
       "api/lib/barkpark/plugin.ex",
       "docs/INDEX.md",
@@ -81,6 +65,11 @@
       "docs/decisions/deferred.md",
       "docs/ops/PROD_OPS.md",
       "docs/setup/TASK-SYSTEM.md"
+    ],
+    "api/CLAUDE.md": [
+      "docs/auth.md",
+      "docs/cards",
+      "docs/decisions/deferred.md"
     ],
     "api/docs/adr/ADR-0003-canonical-sync-tag-convention.md": [
       "docs/decisions/0003-sync-tags.md"
@@ -190,6 +179,20 @@
       "api/lib/barkpark/content/validation/rules.ex",
       "api/lib/barkpark_web/components/fields",
       "api/priv/repo/seeds.exs",
+      "docs/decisions/deferred.md"
+    ],
+    "docs/contracts/tenancy.md": [
+      "api/CLAUDE.md",
+      "api/lib/barkpark/content/scope.ex",
+      "api/lib/barkpark/tenancy",
+      "api/lib/barkpark/tenancy.ex",
+      "api/lib/barkpark/tenancy/auth.ex",
+      "api/lib/barkpark/tenancy/dataset.ex",
+      "api/lib/barkpark/tenancy/membership.ex",
+      "api/lib/barkpark/tenancy/project.ex",
+      "api/lib/barkpark/tenancy/workspace.ex",
+      "docs/api-v1.md",
+      "docs/auth.md",
       "docs/decisions/deferred.md"
     ],
     "docs/contracts/webhook-realtime.md": [
@@ -323,6 +326,12 @@
       "api/priv/static/assets",
       "api/priv/static/assets/bp-rich-text-editor.js"
     ],
+    "js/CLAUDE.md": [
+      ".github/workflows/js-tests.yml",
+      "docs/cards/js-sdk.md",
+      "docs/decisions",
+      "docs/decisions/deferred.md"
+    ],
     "js/CONTRIBUTING.md": [
       "api/docs/adr",
       "docs/adr"
@@ -384,29 +393,30 @@
     "tooling/blast-radius/README.md": [
       "tooling/blast-radius/check.mjs"
     ],
+    "tooling/doc-truth/README.md": [
+      ".github/workflows/js-tests.yml",
+      "api",
+      "api/lib/barkpark/content.ex",
+      "api/lib/barkpark_web/router.ex",
+      "api/mix.exs",
+      "docs/ops/studio-nav-bug-2026-04-19.md",
+      "docs/setup/SETUP.md",
+      "scripts/check-doc-budgets.sh"
+    ],
     "tooling/twoslash-mocks/README.md": [
       ".github/workflows/twoslash.yml",
       "js/docs"
+    ],
+    "web/AGENTS.md": [
+      "docs/cards/js-sdk.md",
+      "web",
+      "web/README.md"
     ],
     "web/README.md": [
       "api/lib/barkpark_web/plugs/dataset_cors.ex",
       "docs/cards/js-sdk.md",
       "docs/ops/vercel-dns-connect.md",
       "web"
-    ],
-    "docs/contracts/tenancy.md": [
-      "api/CLAUDE.md",
-      "api/lib/barkpark/content/scope.ex",
-      "api/lib/barkpark/tenancy",
-      "api/lib/barkpark/tenancy.ex",
-      "api/lib/barkpark/tenancy/auth.ex",
-      "api/lib/barkpark/tenancy/dataset.ex",
-      "api/lib/barkpark/tenancy/membership.ex",
-      "api/lib/barkpark/tenancy/project.ex",
-      "api/lib/barkpark/tenancy/workspace.ex",
-      "docs/api-v1.md",
-      "docs/auth.md",
-      "docs/decisions/deferred.md"
     ]
   }
 }
