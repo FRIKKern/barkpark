@@ -645,11 +645,38 @@ function slim(v) {
 
 // ── corpus resolution ────────────────────────────────────────────────────────
 
-function defaultCorpus() {
+export function defaultCorpus() {
   const c = JSON.parse(readFileSync(CORPUS_FIXTURE, "utf8"));
   const all = [...(c.ctx || []), ...(c.batches || []).flat()];
   const present = [], skipped = [];
   for (const d of all) {
+    if (existsSync(join(ROOT, d))) present.push(d);
+    else skipped.push(d);
+  }
+  return { present, skipped };
+}
+
+// The LIVE corpus: every tracked .md in the repo, minus vendored/cold/WIP trees.
+// This is what the standing tools (highways, waterfall, verify CLI, --emit-refs)
+// index by default, so a newly-added doc is visible the moment it's tracked —
+// no fixture round-trip. The frozen 92-doc fixture (defaultCorpus) stays ONLY
+// for P1's recall acceptance, which is scored against the audited set.
+// Graceful fallback to defaultCorpus() when git is absent / not a checkout.
+const LIVE_EXCLUDE = ["node_modules/", "_attic/", "obsidian_example/"];
+export function liveCorpus() {
+  let lines;
+  try {
+    lines = execFileSync("git", ["ls-files", "*.md"], { cwd: ROOT })
+      .toString()
+      .split("\n");
+  } catch {
+    return defaultCorpus();
+  }
+  const present = [], skipped = [];
+  for (const raw of lines) {
+    const d = raw.trim();
+    if (!d) continue;
+    if (LIVE_EXCLUDE.some((p) => d.startsWith(p) || d.includes("/" + p))) continue;
     if (existsSync(join(ROOT, d))) present.push(d);
     else skipped.push(d);
   }
@@ -767,7 +794,9 @@ function main() {
   if (globs.length) {
     ({ present: docs, skipped } = resolveArgs(globs));
   } else {
-    ({ present: docs, skipped } = defaultCorpus());
+    // Standing default is the LIVE tracked tree (verify + --emit-refs).
+    // Explicit globs still override. The frozen fixture stays for P1 recall only.
+    ({ present: docs, skipped } = liveCorpus());
   }
 
   if (emitRefs) {

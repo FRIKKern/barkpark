@@ -39,7 +39,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractClaims, sectionsOf, slugify } from "./verify-docs.mjs";
+import { extractClaims, sectionsOf, slugify, liveCorpus } from "./verify-docs.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -449,16 +449,16 @@ function topicQuery(dag, substr) {
 }
 
 // ── corpus resolution (mirror verify-docs) ───────────────────────────────────
+// The STANDING default for waterfall (and highways, which imports this) is now
+// the LIVE tracked doc tree — restatement detection covers every live doc, not
+// just the frozen 92-doc fixture. liveCorpus() falls back to the fixture when
+// git is absent. Returns a flat present[] array (waterfall's expected shape).
 function defaultCorpus() {
   const present = [];
   const seen = new Set();
   const add = (d) => { if (!seen.has(d) && existsSync(join(ROOT, d))) { seen.add(d); present.push(d); } };
-  // the P1 92-doc corpus fixture …
-  try {
-    const c = JSON.parse(readFileSync(CORPUS_FIXTURE, "utf8"));
-    for (const d of [...(c.ctx || []), ...(c.batches || []).flat()]) add(d);
-  } catch { /* fixture optional */ }
-  // … plus the root CLAUDE.md (the acceptance target)
+  for (const d of liveCorpus().present) add(d);
+  // … plus the root CLAUDE.md (the acceptance target), in case it's untracked.
   add(ROOT_CLAUDE);
   return present;
 }
