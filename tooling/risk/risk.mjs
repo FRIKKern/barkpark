@@ -48,8 +48,13 @@ const BUG_WORDS = ["fix(es|ed)?", "bug", "hotfix", "revert", "regression", "brok
 const BUG = new RegExp("\\b(" + BUG_WORDS.join("|") + ")\\b", "i");
 // how defect-density is derived from a file's bug-fixes and churn. A bound
 // FORMULA (cody rung ③) — tunable through a paper, evaluated by lib/formula's
-// safe evaluator (no eval). "fixes / max(1, churn)" reproduces the prior literal.
-const DEFECT_FORMULA = "fixes / max(1, churn)";
+// safe evaluator (no eval). Laplace-smoothed: the prior literal `fixes /
+// max(1, churn)` gave a lone fix in a 1-commit file a perfect 1.0, flagging
+// trivial files (repo.ex, release.ex) as maximally defect-prone — 53% of the
+// "fragile" set was such low-evidence noise. The `+ 3` requires real evidence
+// before density climbs; it dropped the fragile set 72 → 24, all genuine
+// multi-fix files. Threshold re-tuned in lockstep (thresholds.mjs FRAGILE_DENSITY).
+const DEFECT_FORMULA = "fixes / (churn + 3)";
 const bugFix = {};
 {
   let isBug = false;

@@ -7,10 +7,13 @@
 
 // FRAGILE_DENSITY — bug-fix density at/above which a file is flagged
 // "defect-prone". Drives risk.mjs's summary AND quality.mjs's Reliability
-// dimension. Was a 0.4 literal in risk.mjs + quality.mjs (×2). Tuned to 0.5:
-// the top quartile (p75) of files carrying any defect history (0.4 flagged 13%
-// of the codebase — too broad; 0.5 isolates the genuinely defect-dense set).
-export const FRAGILE_DENSITY = 0.5;
+// dimension. Was a 0.4 literal duplicated in risk.mjs + quality.mjs (×2).
+// COUPLED to the defect-density formula (risk.mjs DEFECT_FORMULA): when that
+// formula gained Laplace smoothing — fixes / (churn + 3) — the density scale
+// shifted down, so this threshold was re-tuned 0.5 → 0.4 to keep ~the top
+// decile of files-with-fixes (24 files), excluding the low-evidence noise the
+// old formula over-flagged.
+export const FRAGILE_DENSITY = 0.4;
 
 // COLLINEARITY_CUT — |r| above which two signals are treated as collinear (the
 // weaker is dropped). Was a 0.7 literal duplicated in fit.mjs as logic (×2) AND
