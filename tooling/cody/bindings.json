@@ -31,5 +31,9 @@
 
   { "name": "bug_fix_words", "vtype": "list", "elem": "string", "min": 1,
     "doc": "commit-subject terms that mark a bug-fix (drives defect-density → Reliability). A bound LIST tunable through a paper.",
-    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "BUG_WORDS = (\\[[^\\]]*\\])" } ] }
+    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "BUG_WORDS = (\\[[^\\]]*\\])" } ] },
+
+  { "name": "defect_formula", "vtype": "expr", "vars": ["fixes", "churn"],
+    "doc": "how defect-density is computed from a file's bug-fixes and churn (rung ③ — a bound FORMULA, safely evaluated)",
+    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "DEFECT_FORMULA = \"([^\"]*)\"" } ] }
 ]

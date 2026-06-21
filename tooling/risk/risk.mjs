@@ -20,6 +20,7 @@ import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { FRAGILE_DENSITY } from "../lib/thresholds.mjs";
+import { evalFormula } from "../lib/formula.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -45,6 +46,10 @@ const churn = Object.fromEntries(sig.map(s => [s.path, s.churn]));
 // a Barkpark paper. Adding a word widens what counts as a bug-fix → defectDensity.
 const BUG_WORDS = ["fix(es|ed)?", "bug", "hotfix", "revert", "regression", "broken", "crash", "patch(ed)?", "incorrect", "wrong", "fault", "defect", "oops", "reverts?"];
 const BUG = new RegExp("\\b(" + BUG_WORDS.join("|") + ")\\b", "i");
+// how defect-density is derived from a file's bug-fixes and churn. A bound
+// FORMULA (cody rung ③) — tunable through a paper, evaluated by lib/formula's
+// safe evaluator (no eval). "fixes / max(1, churn)" reproduces the prior literal.
+const DEFECT_FORMULA = "fixes / max(1, churn)";
 const bugFix = {};
 {
   let isBug = false;
@@ -182,7 +187,7 @@ for (const s of code) {
   const testCoverageSource = rc ? rc.source : "proxy";
   const fixes = bugFix[s.path] || 0;
   const own = ownership(s.path);
-  out[s.path] = { bugFixes: fixes, defectDensity: +(fixes / Math.max(1, churn[s.path] || 1)).toFixed(2),
+  out[s.path] = { bugFixes: fixes, defectDensity: +(evalFormula(DEFECT_FORMULA, { fixes, churn: churn[s.path] || 1 })).toFixed(2),
     hasTest: has, testRefs: refs, testScore, testCoverageSource,
     realCoverage: rc ? rc.pct : null, proxyScore,
     primaryAuthorShare: own.primaryAuthorShare, authorCount: own.authorCount };

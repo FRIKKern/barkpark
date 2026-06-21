@@ -14,6 +14,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { evalFormula, formulaVars } from "../lib/formula.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,6 +50,7 @@ function rawAt(loc) {
 function canon(b, raw) {
   if (raw == null) return null;
   if (b.vtype === "list") { try { return JSON.stringify(JSON.parse(raw)); } catch { return raw; } }
+  if (b.vtype === "expr") return raw.replace(/\s+/g, " ").trim();   // whitespace-insensitive
   return raw;
 }
 const fmtList = (arr) => "[" + arr.map(x => JSON.stringify(x)).join(", ") + "]";  // code-literal form
@@ -66,6 +68,13 @@ function validate(b, raw) {
     if (b.elem === "string" && !a.every(x => typeof x === "string")) return { ok: false, why: "all items must be strings" };
     if (b.min != null && a.length < b.min) return { ok: false, why: `fewer than ${b.min} item(s)` };
     return { ok: true, value: JSON.stringify(a) };   // canonical
+  }
+  if (b.vtype === "expr") {                           // a FORMULA — logic, validated by trying to evaluate it
+    const allowed = b.vars || [];
+    const bad = formulaVars(s).filter(v => !allowed.includes(v));
+    if (bad.length) return { ok: false, why: `unknown variable(s): ${bad.join(", ")} (allowed: ${allowed.join(", ")})` };
+    try { evalFormula(s, Object.fromEntries(allowed.map(v => [v, 2]))); } catch (e) { return { ok: false, why: e.message }; }
+    return { ok: true, value: s.replace(/\s+/g, " ").trim() };
   }
   if (b.vtype === "int"   && !/^-?\d+$/.test(s))     return { ok: false, why: `not an int: "${s}"` };
   if (b.vtype === "float" && !/^-?\d*\.?\d+$/.test(s)) return { ok: false, why: `not a number: "${s}"` };
