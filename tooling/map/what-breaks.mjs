@@ -171,29 +171,56 @@ function loadSymbols() {
 }
 
 // Reverse-closure over the symbol graph, seeded by every symbol defined in
-// <file>. Returns the dependent symbol ids (excluding the seeds), grouped.
-function blastSymbols(file, sym) {
-  // seeds: all node ids whose `file` is the target file
-  const seeds = sym.nodes.filter((n) => n.file === file).map((n) => n.id);
-  if (!seeds.length) return { defined: [], dependents: [], note: "no symbols indexed for this file" };
+// <file> — or, when symbolSeed is given, by just that one symbol's node(s).
+// BFS the reverse adjacency to the FULL transitive set (worklist + seen-set to
+// fixpoint), tracking the max hop-depth. Returns the dependent symbol ids
+// (excluding the seeds), grouped, plus { depth: maxDepth }.
+function blastSymbols(file, sym, symbolSeed) {
+  const byId = new Map(sym.nodes.map((n) => [n.id, n]));
+
+  // seeds: a specific symbol if asked, else every symbol defined in <file>.
+  let seeds;
+  if (symbolSeed) {
+    const matched = matchSymbolNodes(sym.nodes, file, symbolSeed);
+    seeds = matched.map((n) => n.id);
+    if (!seeds.length) {
+      return { defined: [], dependents: [], files: [], depth: 0,
+        note: `no symbol matched "${symbolSeed}"${file ? ` in ${file}` : ""}` };
+    }
+  } else {
+    seeds = sym.nodes.filter((n) => n.file === file).map((n) => n.id);
+    if (!seeds.length) return { defined: [], dependents: [], files: [], depth: 0, note: "no symbols indexed for this file" };
+  }
 
   // unified reverse map across all languages (symId -> [callerIds]); the
   // per-language maps already partition cleanly by the "<lang>:" id prefix.
   const reverse = {};
   for (const langRev of Object.values(sym.reverse || {})) Object.assign(reverse, langRev);
 
+  // BFS (not DFS) so the first time we reach a node records its true min-depth.
   const seen = new Set();
-  const stack = [...seeds];
+  const depthOf = new Map();
   const seedSet = new Set(seeds);
-  while (stack.length) {
-    const cur = stack.pop();
-    for (const dep of reverse[cur] || []) {
-      if (!seen.has(dep)) { seen.add(dep); stack.push(dep); }
+  let frontier = [...seeds];
+  let depth = 0;
+  let maxDepth = 0;
+  while (frontier.length) {
+    depth++;
+    const next = [];
+    for (const cur of frontier) {
+      for (const dep of reverse[cur] || []) {
+        if (!seen.has(dep)) {
+          seen.add(dep);
+          depthOf.set(dep, depth);
+          next.push(dep);
+        }
+      }
     }
+    if (next.length) maxDepth = depth;
+    frontier = next;
   }
   for (const s of seedSet) seen.delete(s);
 
-  const byId = new Map(sym.nodes.map((n) => [n.id, n]));
   const definedNodes = seeds.map((id) => byId.get(id)).filter(Boolean);
   const dependentNodes = [...seen].map((id) => byId.get(id)).filter(Boolean);
   // rank dependents: distinct file count matters, but list symbols directly.
@@ -201,9 +228,124 @@ function blastSymbols(file, sym) {
     a.file.localeCompare(b.file) || a.symbol.localeCompare(b.symbol));
   return {
     defined: definedNodes.map((n) => ({ id: n.id, symbol: n.symbol, kind: n.kind, exported: n.exported })),
-    dependents: dependentNodes.map((n) => ({ id: n.id, file: n.file, symbol: n.symbol, kind: n.kind })),
+    dependents: dependentNodes.map((n) => ({ id: n.id, file: n.file, symbol: n.symbol, kind: n.kind, depth: depthOf.get(n.id) || null })),
     files: [...new Set(dependentNodes.map((n) => n.file))].sort(),
-    note: "symbol-level reverse closure over tooling/symbol-graph/symbols.json",
+    depth: maxDepth,
+    note: symbolSeed
+      ? `symbol-seeded transitive reverse closure over tooling/symbol-graph/symbols.json`
+      : "transitive symbol-level reverse closure over tooling/symbol-graph/symbols.json",
+  };
+}
+
+// Resolve a --symbol query ("Module" or "Module.fun" or bare "fun") to the
+// matching node(s). When `file` is given we restrict to that file first; the
+// query may name the module, a "Module.fun" pair, or just the function/symbol.
+function matchSymbolNodes(nodes, file, query) {
+  const scope = file ? nodes.filter((n) => n.file === file) : nodes;
+  const pool = scope.length ? scope : nodes; // if file had nothing, search wide
+  // 1) exact module / symbol name match
+  let hits = pool.filter((n) => n.symbol === query);
+  if (hits.length) return hits;
+  // 2) "Module.fun" — split last dot, match the function within that module file
+  if (query.includes(".")) {
+    const fun = query.slice(query.lastIndexOf(".") + 1);
+    const mod = query.slice(0, query.lastIndexOf("."));
+    hits = pool.filter((n) => n.symbol === fun &&
+      (n.id.includes(`#${mod}.`) || n.file.length)); // function node lives in mod's file
+    if (hits.length) return hits;
+    // module-name match (the dotted query *is* the module)
+    hits = nodes.filter((n) => n.symbol === query);
+    if (hits.length) return hits;
+  }
+  // 3) bare function name anywhere in scope
+  hits = pool.filter((n) => n.symbol === query);
+  return hits;
+}
+
+// ---- surface reach -------------------------------------------------------
+// Classify which reached symbols are the USER-FACING SURFACE — the blast that
+// actually changes observable behaviour:
+//   • Elixir modules ending Controller / Live / Channel, or under barkpark_web/router
+//   • Go funcs in package main / under a cmd/ directory
+//   • TS exports from a package root (src/index.ts) or a Next.js app/ route|page|layout
+function isSurface(n) {
+  if (n.lang === "elixir") {
+    if (n.kind === "module" && /(Controller|Live|Channel)$/.test(n.symbol)) return true;
+    if (/(^|\/)barkpark_web\/router(\.|\/|$)/.test(n.file)) return true;
+    return false;
+  }
+  if (n.lang === "go") {
+    if (/(^|\/)cmd\//.test(n.file)) return true;
+    if (/(^|\/)main\.go$/.test(n.file)) return true; // package main entrypoint
+    return false;
+  }
+  if (n.lang === "ts") {
+    if (/(^|\/)src\/index\.ts$/.test(n.file)) return true;            // package root
+    if (/(^|\/)app\/.*\/(page|route|layout)\.tsx?$/.test(n.file)) return true; // Next.js route
+    if (/(^|\/)app\/(page|route|layout)\.tsx?$/.test(n.file)) return true;
+    return false;
+  }
+  return false;
+}
+
+function surfaceReach(dependentNodes) {
+  const surface = dependentNodes.filter(isSurface);
+  // dedupe to one row per (file#symbol); rank Elixir Controllers/Lives first
+  const rank = (n) => (/Controller$/.test(n.symbol) ? 0 : /Live$/.test(n.symbol) ? 1 : /Channel$/.test(n.symbol) ? 2 : 3);
+  surface.sort((a, b) => rank(a) - rank(b) || a.file.localeCompare(b.file) || a.symbol.localeCompare(b.symbol));
+  return {
+    count: surface.length,
+    points: surface.map((n) => ({ file: n.file, symbol: n.symbol, kind: n.kind, lang: n.lang, depth: n.depth || null })),
+  };
+}
+
+// ---- cross-language seam crossing ----------------------------------------
+// A wire-contract SEAM is the boundary where a change ripples ACROSS languages.
+// Seed is a seam when: nodes.json fields.seam is truthy, OR the path is a
+// barkpark_web/controllers/* handler / api .../v1 route, OR a /v1 route string.
+function isSeamSeed(file, selfFields) {
+  if (selfFields && selfFields.seam) return true;
+  if (/barkpark_web\/controllers\//.test(file)) return true;
+  if (/\/v1(\/|\.|$)/.test(file)) return true;
+  if (/barkpark_web\/router/.test(file)) return true;
+  return false;
+}
+
+// The OTHER-language contract consumers that a seam change ripples into. These
+// are the cross-language bindings generated from / coupled to the HTTP/v1
+// contract: the Go apiclient, the TS @barkpark/core bindings, and the doc.
+function crossLanguageSeam(blastFilesSet, dependentNodes, map) {
+  const langs = new Set();
+  const consumers = [];
+  const add = (lang, path, why) => { langs.add(lang); consumers.push({ lang, path, why }); };
+
+  // 1) Direct: any reached symbol/file in another language.
+  const langByFile = new Map();
+  for (const n of dependentNodes) langByFile.set(n.file, n.lang);
+  for (const [f, l] of langByFile) {
+    if (l === "go") add("go", f, "reached via symbol closure");
+    else if (l === "ts") add("ts", f, "reached via symbol closure");
+  }
+
+  // 2) Contract-coupled bindings — present regardless of whether the symbol
+  //    graph linked them (the wire contract couples them by convention).
+  const known = [
+    { lang: "go", path: "internal/apiclient/client.go", why: "Go API client bound to the v1 contract" },
+    { lang: "go", path: "internal/apiclient/schema.go", why: "Go API client schema bound to the v1 contract" },
+    { lang: "ts", path: "js/packages/core/src/index.ts", why: "@barkpark/core TS bindings to the v1 contract" },
+    { lang: "docs", path: "docs/api-v1.md", why: "v1 API contract documentation" },
+  ];
+  for (const k of known) {
+    if (existsSync(join(ROOT, k.path))) { langs.add(k.lang); consumers.push({ ...k, contract: true }); }
+  }
+
+  // collapse dup paths, keep first reason
+  const byPath = new Map();
+  for (const c of consumers) if (!byPath.has(c.path)) byPath.set(c.path, c);
+  return {
+    crosses: langs.size > 0,
+    languages: [...langs].filter((l) => l !== "elixir"),
+    consumers: [...byPath.values()],
   };
 }
 
@@ -230,7 +372,25 @@ function enrich(paths, { byPath, risk }) {
 const HIGH_REACH = 60; // matches the "high-reach" band used across tooling
 const FRAGILE = 0.2; // defectDensity above this = defect-prone
 
-function verdict(rows) {
+// verdict — refined risk formula.
+//
+//   score = min(closure,60)·1            raw blast size (capped)
+//         + seamTouch·8                  dependents that themselves sit on a seam
+//         + highReach·4                  each high-reach dependent amplifies
+//         + defectProne·3                fragile dependents add risk
+//         + untestedShare·40             an untested blast radius is unverifiable
+//         + surfaceReach·6               NEW: each user-facing surface point reached
+//         + (crossesSeam ? 25 : 0)       NEW: a contract change that crosses a
+//                                              language seam ripples beyond Elixir
+//
+// Rationale for the two new terms: a change reaching many surface points
+// (Controllers / Lives / Channels / routes / cmd entrypoints) changes OBSERVABLE
+// behaviour, and a seam crossing means the blast escapes one language's test
+// net into hand-written cross-language bindings (Go apiclient, TS @barkpark/core)
+// — both are strictly higher risk than the same closure size buried internally.
+// The original closure × untested factors are preserved verbatim.
+function verdict(rows, extra = {}) {
+  const { surfaceCount = 0, crossesSeam = false } = extra;
   const n = rows.length;
   const highReach = rows.filter((r) => r.reach !== null && r.reach >= HIGH_REACH).length;
   const seamTouch = rows.filter((r) => r.seam).length;
@@ -238,18 +398,19 @@ function verdict(rows) {
   const untested = rows.filter((r) => !r.hasTest).length;
   const untestedShare = n ? untested / n : 0;
 
-  // Score: closure size × seam exposure × untested share, with high-reach and
-  // defect-proneness as multipliers. Tuned to land on intuitive bands.
   let score = 0;
   score += Math.min(n, 60) * 1.0; // raw blast size (capped contribution)
   score += seamTouch * 8; // crossing a seam is expensive
   score += highReach * 4; // each high-reach dependent amplifies
   score += defectProne * 3; // fragile dependents add risk
   score += untestedShare * 40; // an untested blast radius is unverifiable
+  score += surfaceCount * 6; // each user-facing surface point reached
+  score += crossesSeam ? 25 : 0; // a cross-language contract crossing
 
   let level;
-  if (n === 0) level = "NONE";
-  else if (score >= 140 || (seamTouch > 0 && n >= 30 && untestedShare > 0.6)) level = "CRITICAL";
+  if (n === 0 && surfaceCount === 0) level = "NONE";
+  else if (score >= 140 || (seamTouch > 0 && n >= 30 && untestedShare > 0.6) || (crossesSeam && surfaceCount >= 10))
+    level = "CRITICAL";
   else if (score >= 70) level = "HIGH";
   else if (score >= 25) level = "MEDIUM";
   else level = "LOW";
@@ -263,6 +424,8 @@ function verdict(rows) {
     defectProne,
     untested,
     untestedShare: Math.round(untestedShare * 100) / 100,
+    surfaceReach: surfaceCount,
+    crossesSeam: !!crossesSeam,
   };
 }
 
@@ -271,36 +434,74 @@ const args = process.argv.slice(2);
 const wantJson = args.includes("--json");
 const noSymbols = args.includes("--no-symbols");
 const wantSymbols = args.includes("--symbols");
-const file = args.find((a) => !a.startsWith("--"));
 
-if (!file) {
-  console.error("usage: what-breaks.mjs <file> [--json] [--symbols|--no-symbols]");
+// --symbol <Module|Module.fun> seeds the closure from a specific symbol instead
+// of the whole file. Accept "--symbol X" and "--symbol=X".
+let symbolSeed = null;
+const symFlagIdx = args.findIndex((a) => a === "--symbol" || a.startsWith("--symbol="));
+if (symFlagIdx !== -1) {
+  const a = args[symFlagIdx];
+  symbolSeed = a.includes("=") ? a.slice(a.indexOf("=") + 1) : args[symFlagIdx + 1];
+}
+
+// Positional file arg: first bareword that isn't the --symbol value.
+const symValue = symFlagIdx !== -1 && !args[symFlagIdx].includes("=") ? args[symFlagIdx + 1] : null;
+let file = args.find((a, i) => !a.startsWith("--") && a !== symValue) || null;
+
+if (!file && !symbolSeed) {
+  console.error("usage: what-breaks.mjs <file> [--symbol <Module|Module.fun>] [--json] [--symbols|--no-symbols]");
   process.exit(2);
 }
 
+// When seeding from a symbol and no file is given, derive the file from the
+// symbol's node so file-level overlays still work.
 const map = loadMap();
+const symEarly = (wantSymbols || !noSymbols || symbolSeed) ? loadSymbols() : null;
+if (symbolSeed && !file && symEarly) {
+  const m = matchSymbolNodes(symEarly.nodes, null, symbolSeed);
+  if (m.length) file = m[0].file;
+}
+if (!file) {
+  console.error(`could not resolve a file for --symbol "${symbolSeed}" (symbols.json absent or symbol unknown).`);
+  process.exit(2);
+}
+
 const blast = blastFiles(file, map);
 const rows = enrich(blast.files, map);
 rows.sort((a, b) => (b.reach || 0) - (a.reach || 0) || a.path.localeCompare(b.path));
-const v = verdict(rows);
 
 // Currency check — is the map we just queried built against today's tree?
 const currency = safeVerify();
 
 // Symbol-level overlay (additive). Auto-use when symbols.json exists unless the
-// caller opts out with --no-symbols; --symbols forces it on (and errors loudly
-// if the artifact is missing).
+// caller opts out with --no-symbols; --symbols (or --symbol) forces it on and
+// errors loudly if the artifact is missing.
 let symbolBlast = null;
-const sym = (wantSymbols || !noSymbols) ? loadSymbols() : null;
+let surface = { count: 0, points: [] };
+let seam = { crosses: false, languages: [], consumers: [] };
+const sym = symEarly;
 if (sym) {
-  symbolBlast = blastSymbols(file, sym);
-} else if (wantSymbols) {
-  console.error(`--symbols requested but ${SYMBOLS} not found.\n  build it first: node tooling/symbol-graph/build-symbols.mjs`);
-  process.exit(2);
+  symbolBlast = blastSymbols(file, sym, symbolSeed);
+  // resolve dependent node objects (with their depth) for surface/seam classification
+  const byId = new Map(sym.nodes.map((n) => [n.id, n]));
+  const depNodes = symbolBlast.dependents.map((d) => {
+    const node = byId.get(d.id);
+    return node ? { ...node, depth: d.depth } : d;
+  });
+  surface = surfaceReach(depNodes);
+  if (isSeamSeed(file, (map.byPath.get(file) || {}).fields)) {
+    seam = crossLanguageSeam(blast.files, depNodes, map);
+  }
+} else if (wantSymbols || symbolSeed) {
+  console.error(`symbol query requested but ${SYMBOLS} not found.\n  build it first: node tooling/symbol-graph/build-symbols.mjs --skip-go --skip-ts`);
+  console.error(`  falling back to file-level mode.`);
 }
+
+const v = verdict(rows, { surfaceCount: surface.count, crossesSeam: seam.crosses });
 
 const result = {
   target: file,
+  symbolSeed: symbolSeed || null,
   lang: blast.lang,
   unit: blast.unit || null,
   note: blast.note,
@@ -318,9 +519,12 @@ const result = {
     definedCount: symbolBlast.defined.length,
     dependentCount: symbolBlast.dependents.length,
     dependentFiles: symbolBlast.files || [],
+    maxDepth: symbolBlast.depth || 0,
     defined: symbolBlast.defined,
     dependents: symbolBlast.dependents.slice(0, 50),
     note: symbolBlast.note,
+    surface: { count: surface.count, points: surface.points.slice(0, 25) },
+    seam,
   } } : {}),
 };
 
@@ -382,6 +586,10 @@ function printReport(res) {
   console.log(`├ high-reach:     ${v.highReach}  (reach ≥ ${HIGH_REACH})`);
   console.log(`├ touch a seam:   ${v.seamTouch}`);
   console.log(`├ defect-prone:   ${v.defectProne}  (defectDensity ≥ ${FRAGILE})`);
+  if (typeof v.surfaceReach === "number" && (v.surfaceReach > 0 || v.crossesSeam)) {
+    console.log(`├ surface reach:  ${v.surfaceReach} user-facing point(s)`);
+    console.log(`├ cross-lang seam:${v.crossesSeam ? " YES — contract change ripples across languages" : " no"}`);
+  }
   console.log(`└ untested:       ${v.untested}/${v.closureSize}  (${Math.round(v.untestedShare * 100)}% of the blast radius)`);
 
   if (res.topAffected.length) {
@@ -402,20 +610,47 @@ function printReport(res) {
     console.log(`\nNo recorded dependents — safe to change in isolation (per the current map).`);
   }
 
-  // Symbol-level overlay — which SPECIFIC functions/modules depend on this file.
+  // Symbol-level overlay — which SPECIFIC functions/modules depend on this
+  // file/symbol, transitively, plus surface reach and cross-language seam.
   if (res.symbols) {
     const s = res.symbols;
     console.log(`\n${"─".repeat(64)}`);
-    console.log(`SYMBOL-LEVEL BLAST  ·  ${s.definedCount} symbols defined here, ${s.dependentCount} dependents across ${s.dependentFiles.length} files`);
+    const seedLabel = res.symbolSeed ? `symbol ${res.symbolSeed}` : `${s.definedCount} symbols defined here`;
+    console.log(`SYMBOL-LEVEL BLAST  ·  seed: ${seedLabel}`);
+    console.log(`  transitive closure: ${s.dependentCount} dependent symbols across ${s.dependentFiles.length} files, max depth ${s.maxDepth}`);
+
+    // Surface reach.
+    if (s.surface) {
+      console.log(`  reaches ${s.surface.count} surface point(s) (user-facing: Controllers · Lives · Channels · routes · cmd entrypoints)`);
+      const shown = s.surface.points.slice(0, 12);
+      for (const p of shown) {
+        console.log(`    ▸ ${p.symbol}  [${p.lang}/${p.kind}]  ${p.file}${p.depth ? `  (depth ${p.depth})` : ""}`);
+      }
+      if (s.surface.count > shown.length) {
+        console.log(`    … and ${s.surface.count - shown.length} more surface point(s)`);
+      }
+    }
+
+    // Cross-language seam crossing.
+    if (s.seam && s.seam.crosses) {
+      const langs = s.seam.languages.length ? s.seam.languages.join(", ") : "(none)";
+      console.log(`\n  ⚠ CROSS-LANGUAGE SEAM — this is a wire contract; a change ripples beyond Elixir into: ${langs}`);
+      for (const c of s.seam.consumers) {
+        console.log(`    → [${c.lang}] ${c.path}${c.contract ? "  (contract-coupled)" : ""}  — ${c.why}`);
+      }
+    }
+
+    // Raw dependent listing (still useful for symbol-precise work).
     if (s.dependentCount) {
-      const shown = s.dependents.slice(0, 25);
+      console.log(`\n  dependent symbols:`);
+      const shown = s.dependents.slice(0, 20);
       for (const d of shown) {
-        console.log(`  ${d.file}#${d.symbol}  [${d.kind}]`);
+        console.log(`    ${d.file}#${d.symbol}  [${d.kind}]${d.depth ? `  d${d.depth}` : ""}`);
       }
       if (s.dependentCount > shown.length) {
-        console.log(`  … and ${s.dependentCount - shown.length} more dependent symbols (use --json for all)`);
+        console.log(`    … and ${s.dependentCount - shown.length} more dependent symbols (use --json for all)`);
       }
-    } else {
+    } else if (!s.surface || !s.surface.count) {
       console.log(`  ${s.note}`);
     }
   }
