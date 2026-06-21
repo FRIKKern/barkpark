@@ -1,0 +1,27 @@
+[
+  { "name": "fragile_density", "vtype": "float", "min": 0, "max": 1,
+    "doc": "bug-fix density at/above which a file is flagged defect-prone (drives the Reliability scorecard dimension)",
+    "locations": [
+      { "file": "tooling/lib/thresholds.mjs", "pattern": "FRAGILE_DENSITY = ([0-9.]+)" }
+    ] },
+
+  { "name": "consensus_band", "vtype": "int", "min": 1,
+    "doc": "criticality spread that flags a multi-vote judgment 'contested'",
+    "locations": [ { "file": "tooling/lib/consensus.mjs", "pattern": "band = (\\d+)" } ] },
+
+  { "name": "content_cap", "vtype": "int", "min": 1000,
+    "doc": "max chars of file content stored on a Barkpark paper",
+    "locations": [ { "file": "tooling/barkpark-sync/generate.mjs", "pattern": "CONTENT_CAP = (\\d+)" } ] },
+
+  { "name": "collinearity_cut", "vtype": "float", "min": 0, "max": 1,
+    "doc": "|r| above which two signals are collinear (the weaker is dropped)",
+    "locations": [ { "file": "tooling/fit/fit.mjs", "pattern": "a < b && Math\\.abs\\(r\\) > ([0-9.]+)" } ] },
+
+  { "name": "hotspot_percentile", "vtype": "int", "min": 50, "max": 99,
+    "doc": "percentile cut for the hotspot refactor line (churn × complexity)",
+    "locations": [ { "file": "tooling/fit/fit.mjs", "pattern": "hotspotPercentile: (\\d+)" } ] },
+
+  { "name": "priority_percentile", "vtype": "int", "min": 50, "max": 99,
+    "doc": "percentile cut for the priority worklist",
+    "locations": [ { "file": "tooling/fit/fit.mjs", "pattern": "priorityPercentile: (\\d+)" } ] }
+]
