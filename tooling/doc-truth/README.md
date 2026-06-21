@@ -97,6 +97,86 @@ Two metrics:
   finding for `.github/workflows/js-tests.yml`. Prints `GATE: PASS|FAIL` and
   exits non-zero on failure.
 
+## P2 — the waterfall (each fact once)
+
+P1 asks *"is each claim TRUE?"*. **P2 asks the orthogonal question: "is the same
+fact RESTATED in more than one place?"** — and, when it is, **proposes (never
+applies)** collapsing the duplicates to one canonical home plus typed pointers.
+
+```bash
+node tooling/doc-truth/waterfall.mjs [--json]
+node tooling/doc-truth/waterfall.mjs --topic <factKey-substr> [--json]
+# via the front door:
+node tooling/map/query.mjs waterfall
+node tooling/map/query.mjs waterfall --topic systemctl --json
+```
+
+### Hash on verifiable claims, NOT prose
+
+Two sections restate the same fact when they share a significant set of
+**verifiable-claim anchors** — the paths / commands / symbols P1 already
+extracts — even if the prose differs entirely. The waterfall **reuses P1's
+extractor** (`extractClaims` / `sectionsOf`, now exported from `verify-docs.mjs`
+— one set of regexes, no duplication) and content-hashes each claim into a
+normalized `factKey`:
+
+| Claim | factKey |
+|---|---|
+| path | `path:<repo-rel, 2-seg prefix>` (so `_build/prod` ≡ `_build/prod/lib/barkpark`) |
+| command | `cmd:<tool + salient arg>` (`cmd:systemctl restart`) |
+| symbol | `sym:<module>#<func>` |
+| route | `route:<path>` |
+| lineref | `lref:<basename>` |
+
+It adds one small class P1's five types skip — **invariant anchors** (`force_ssl`,
+`<head>`/`<script>`, `_build/prod`, env vars, `phx-*`) — mined only from backtick
+spans, never free prose. A **prose-scan** then augments each section's factKey
+set with any corpus-vocabulary anchor whose literal string appears in the
+section body, so a fact stated in a backtick in one section (`` `systemctl
+restart` ``) matches the same fact stated in prose in another ("Forgot systemctl
+restart"). The prose-scan only ever re-finds strings that are verifiable claims
+*somewhere* — it never does fuzzy text similarity.
+
+### Canonical-fact DAG
+
+`factKey → { canonical: {doc, section, line, tier}, pointers: [...] }`. Canonical
+pick: highest **doc-tier** (`agent` > `human` > `cold`, read from the
+`<!-- doc-tier: … -->` marker on line 1), tie-broken by first occurrence. This
+DAG is what `--topic` queries — the substrate a routing table builds on.
+
+### Restatement detector + conservative thresholds
+
+Every section **pair** (cross-doc AND within a doc) is compared on factKey-set
+overlap. A pair clusters when it shares **≥ 3 distinctive anchors** (Jaccard ≥
+0.10). Generic top-dir prefixes (`path:api`, `path:priv`) are **excluded from the
+evidence count** — two unrelated sections both touching `api/` is not
+restatement. Tuned so the acceptance target (Golden Rules ↔ Past Mistakes, 6
+distinctive shared anchors) is caught with headroom while co-mentions stay out.
+
+### Propose-only + lose-no-fact
+
+The detector **never edits a doc.** It emits collapse proposals as data: promote
+the higher-tier section to canonical, replace the other's overlapping facts with
+a typed pointer (`> See [Golden Rules](#golden-rules) — canonical for: …`).
+**Verbatim-exempt** sections (CLAUDE.md Golden Rules / Past Mistakes) are still
+proposed, tagged `requiresOwnerSignoff: true`. Every proposal enforces the
+**lose-no-fact** guarantee: it enumerates every factKey present in either section
+and asserts each survives in `canonical ∪ retained-non-shared ∪ pointer`. A
+proposal that would drop a fact is invalid — dropped, with the reason logged.
+
+### The P2 acceptance test
+
+```bash
+node tooling/doc-truth/acceptance-p2.mjs
+```
+
+- **Detection (must pass)** — runs the detector over the root `CLAUDE.md` and
+  asserts the Golden Rules ↔ Past Mistakes restatement cluster is found with ≥ 4
+  distinctive shared anchors; prints the shared factKeys. Non-zero if absent.
+- **Lose-no-fact (must pass)** — asserts the proposed collapse preserves 100% of
+  verifiable claims (`before ⊆ after`); prints the count and any lost facts
+  (must be 0), corpus-wide.
+
 ## Meta-lesson
 
 The verifier is a **lead generator, not an authority.** It earns trust through

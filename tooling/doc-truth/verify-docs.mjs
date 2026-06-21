@@ -174,6 +174,64 @@ function extractSpans(text) {
   return spans;
 }
 
+// Split a markdown doc into sections on `##`/`###` (and `#`) headings. Returns
+// [{ heading, level, startLine, endLine, slug }] in document order. The slice
+// before the first heading is emitted as a synthetic "(preamble)" section so no
+// content is dropped. Exported for the P2 waterfall detector.
+export function sectionsOf(text) {
+  const lines = text.split("\n");
+  const heads = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = line.match(/^(#{1,6})\s+(.*\S)\s*$/);
+    if (m) heads.push({ idx: i, level: m[1].length, heading: m[2].trim() });
+  }
+  const out = [];
+  // preamble before the first heading
+  const firstIdx = heads.length ? heads[0].idx : lines.length;
+  if (firstIdx > 0) {
+    out.push({ heading: "(preamble)", level: 0, startLine: 1, endLine: firstIdx, slug: "" });
+  }
+  for (let h = 0; h < heads.length; h++) {
+    const start = heads[h].idx;
+    const end = h + 1 < heads.length ? heads[h + 1].idx : lines.length;
+    out.push({
+      heading: heads[h].heading,
+      level: heads[h].level,
+      startLine: start + 1, // 1-based, the heading line
+      endLine: end, // exclusive of next heading (1-based count of lines)
+      slug: slugify(heads[h].heading),
+    });
+  }
+  return out;
+}
+
+// GitHub-style heading slug: lowercase, strip non-word (keep spaces/hyphens),
+// collapse whitespace to single hyphens. Matches the `#section-anchor` form.
+export function slugify(heading) {
+  return heading
+    .toLowerCase()
+    .replace(/[`*_~]/g, "")
+    .replace(/[^a-z0-9 \-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+// Extract every typed claim from a doc's text, tagged with the line it appears
+// on. This is the P1 extractor, lifted to a clean export so the P2 waterfall
+// detector reuses the exact same span-parsing + classification regexes instead
+// of duplicating them. `doc` is the repo-relative path used to stamp claims.
+export function extractClaims(doc, text) {
+  const out = [];
+  for (const span of extractSpans(text)) {
+    for (const claim of claimsFromSpan(doc, span)) out.push(claim);
+  }
+  return out;
+}
+
 // Classify a span's text into zero or more typed claims. A span can yield more
 // than one claim (e.g. a lineref also looks like a path).
 function claimsFromSpan(doc, span) {
@@ -557,15 +615,12 @@ function reverify(claim) {
 function verifyDoc(relDoc) {
   const abs = join(ROOT, relDoc);
   const text = readFileSync(abs, "utf8");
-  const spans = extractSpans(text);
 
   const verified = [];
-  for (const span of spans) {
-    for (const claim of claimsFromSpan(relDoc, span)) {
-      let v = verifyClaim(claim);
-      if (v.status === "false" || v.status === "stale") v = reverify(v);
-      verified.push(v);
-    }
+  for (const claim of extractClaims(relDoc, text)) {
+    let v = verifyClaim(claim);
+    if (v.status === "false" || v.status === "stale") v = reverify(v);
+    verified.push(v);
   }
 
   const statuses = { confirmed: 0, false: 0, stale: 0, unverifiable: 0 };
