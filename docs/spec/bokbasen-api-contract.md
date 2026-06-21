@@ -479,7 +479,7 @@ Bokbasen ceiling or Boss sign-off.
 
 **Pinned: `Req` ~> 0.5 (latest stable: 0.5.17).**[^req-hex]
 
-Already a direct dep in `api/mix.exs:55`:
+Already a direct dep in `api/mix.exs`:
 
 ```elixir
 {:req, "~> 0.5"},
@@ -531,15 +531,15 @@ introduced in Phase 6. WI2 / WI3 will use it as-is; if a newer
 
 **Pinned: `Bypass` ~> 2.1 (latest stable: 2.1.0).**[^bypass-hex]
 
-`Bypass` is **not yet** in `api/mix.exs`. WI3 (or WI3a, at WI3's
-discretion) will add the dep:
+`Bypass` is now a test dep in `api/mix.exs` (added since this contract
+was drafted — it landed with WI3):
 
 ```elixir
-# api/mix.exs — proposed addition for WI3 (not WI1):
-# {:bypass, "~> 2.1", only: :test},
+# api/mix.exs:
+{:bypass, "~> 2.1", only: :test},
 ```
 
-WI1 does not add this dep — that is WI3's job.
+WI1 did not add this dep — that was WI3's job.
 
 ### 8.2 Why Bypass
 
