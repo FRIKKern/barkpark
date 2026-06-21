@@ -12,12 +12,12 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 | `lib/barkpark/plugins/` | Registry, resolver chain, Bootstrap, `tasks.ex`, `bulldocs.ex`, `sheets.ex` (§§ below), `onixedit/` |
 | `lib/barkpark/plugins/onixedit/export/*.ex` | ONIX 3.0 export submodules (header, message, codelists, validator, detail composites) |
 | `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
-| `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:ws/p/:proj` mirror (~:672) |
+| `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:workspace_slug/p/:project_slug` mirror |
 | `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
 | `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **NOTE: under `studio/`, NOT `live/studio/`** |
 | `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
 | `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |
-| `priv/repo/seeds.exs` | 8 core schemas + ~27 docs + dev token; plugin schemas via `Bootstrap.register_all_schemas/0` |
+| `priv/repo/seeds.exs` → `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`lib/barkpark/seeds/demo.ex`) seeds 8 core schemas + ~27 docs + dev token; shared tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
 
 ## Bulldocs (the Papers surface)
 
@@ -35,7 +35,7 @@ The built-in "Papers"/"paperflow" feature is now the **Bulldocs plugin**. Bulldo
 
 - **Core:** `Barkpark.Sheets` (A1 + snapshot synthesis, 200k-position cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
 - **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD/1,048,576 grid bounds, merge area ≤10k) → mutate 409 `halted`; `:ingest` API `POST /v1/plugins/sheets/import` (xlsx/csv/tsv; 413 `upload_too_large` >15MB / `sheet_too_large` >50k cells, 422 `invalid_xlsx`) · `GET …/:slug/export.{xlsx,csv,tsv,md,html}` (flush-first; 503 `flush_failed` + retry-after) · `POST …/:slug/ops` (422 `batch_too_large`, 503 `session_unavailable` + retry-after); `:public_root` live reader `/sheets/:slug` (published-only).
-- **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content.ex ~:1431/:1552).
+- **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content.ex — `tap_sheet_writethrough` / `hydrate_sheet_embed_snapshots`).
 
 Session deltas: `{:sheets_op, %{rev, tab, changed}}` on `doc_topic <> ":sheets:op"`; SSE doc events fire only on the debounced persist.
 
@@ -67,7 +67,7 @@ Sanity's `drafts.` prefix convention (api-v1.md §6) — `Content.publish_docume
 
 ## PubSub topics
 
-After every mutation `Content` broadcasts (content.ex ~:2153/:2172):
+After every mutation `Content` broadcasts (content.ex — `tap_broadcast` / `broadcast_document_mutation`):
 
 - `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
 - `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only when the doc carries a `workspace_id`)
