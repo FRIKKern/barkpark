@@ -90,6 +90,8 @@ function buildElixir(files) {
   const moduleFile = {};        // "Barkpark.Content" -> "api/lib/.../content.ex"
   const moduleSymbols = {};     // module -> Map(funcName -> {file, exported})
   const fileModule = {};        // file -> module (primary)
+  const fileSymbols = {};       // file -> Map(funcName -> {file, exported}) — ALL defs in the file,
+                                // so bare-local calls resolve even in multi-module files (nested defmodule)
   const aliasExpansions = {};   // file -> Map(localAlias -> fullModule)
 
   for (const f of files) {
@@ -113,6 +115,7 @@ function buildElixir(files) {
       if (fn && curMod) {
         const name = fn[2];
         const exported = fn[1] === "def";
+        (fileSymbols[f] ||= new Map()).set(name, { file: f, exported });   // file-level (multi-module safe)
         const m = moduleSymbols[curMod];
         if (!m.has(name)) {
           m.set(name, { file: f, exported });
@@ -189,8 +192,11 @@ function buildElixir(files) {
       edges.push({ from: fromId, to: toId, type: "calls", confidence: "static" });
     }
 
-    // Bare local calls  fun(  resolved within the SAME module → HEURISTIC.
-    const ownSyms = moduleSymbols[fromMod] || new Map();
+    // Bare local calls  fun(  resolved within the SAME FILE → HEURISTIC.
+    // (file-level, not module-level: a file may hold several modules — nested
+    //  structs etc. — and module tracking has no end-stack, so a def after a
+    //  nested defmodule would otherwise be unreachable and look "dead".)
+    const ownSyms = fileSymbols[f] || new Map();
     for (const m of txt.matchAll(/(?:^|[^.\w])([a-z_][\w?!]*)\s*\(/g)) {
       const fn = m[1];
       if (!ownSyms.has(fn)) continue;
