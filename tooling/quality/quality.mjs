@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, gatherRoots, composites, percentile } from "../lib/scoring.mjs";
+import { FRAGILE_DENSITY } from "../lib/thresholds.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -81,7 +82,7 @@ const hotspotN = hotspots.length;
 // test-presence + defect-history across HIGH-REACH code files (value = reach, the single axis)
 const impCode = Object.entries(risk).filter(([f]) => reachOf(f) >= 40);
 const testedFrac = impCode.length ? impCode.filter(([, v]) => v.testScore >= 50).length / impCode.length : 1;
-const fragileN = impCode.filter(([, v]) => v.defectDensity >= 0.4).length;
+const fragileN = impCode.filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).length;
 const critN = critArr.slice(0, dangerTopK).filter(x => x.v >= 50).length;
 
 const dims = [
@@ -91,7 +92,7 @@ const dims = [
   { name: "Hotspots", root: "churn × complexity", score: clamp(100 - hotspotN * 4), note: `${hotspotN} files churn×complexity ≥70 · ${deduped.filter(f=>f.kind==="hotspot").length} above the ${cfg.thresholds.hotspotPercentile}th-pct refactor line`, weight: 0.16 },
   { name: "Modularity", root: "complexity", score: clamp(100 - bloatBig * 7 - Math.min(20, (erg.summary?.bloat || 0))), note: `${erg.summary?.bloat || 0} bloated files · ${bloatBig} high-reach god-modules`, weight: 0.12 },
   { name: "Tested", root: "tests", score: clamp(testedFrac * 100), note: `${Math.round(testedFrac*100)}% of high-reach code has coverage · ${critN} critical-untested (reach × ¬coverage)`, weight: 0.15 },
-  { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥0.4)`, weight: 0.10 },
+  { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥${FRAGILE_DENSITY})`, weight: 0.10 },
   { name: "Duplication", root: "relationships", score: clamp(100 - dupN * 6), note: `${dupN} extract-worthy (of ${crep.duplication?.length || 0} dup pairs)`, weight: 0.06 },
   { name: "Dead code", root: "reach", score: clamp(100 - (crep.deadGoPackages?.length || 0) * 8), note: `${crep.deadGoPackages?.length || 0} dead Go packages`, weight: 0.07 },
 ];
@@ -120,7 +121,7 @@ const E = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
 const bar = (s) => { const c = s >= 85 ? "#16a34a" : s >= 70 ? "#65a30d" : s >= 55 ? "#ca8a04" : "#dc2626"; return `<div class=track><div class=fill style="width:${s}%;background:${c}"></div></div>`; };
 const effLabel = ["", "low", "med", "high", "high+", "xhigh"];
 const frow = (f, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${f.impact}</td><td class=n>${f.reach}</td><td><span class="k ${f.kind}">${f.kind}</span></td>`
-  + `<td>${f.dim}</td><td class=eff>${effLabel[f.effort]}</td><td class=path>${E(f.file)}</td><td class=act>${E(f.action)}${f.defect >= 0.4 ? ` <b style="color:#b45309">⚠ defect ${f.defect}</b>` : ""}</td></tr>`;
+  + `<td>${f.dim}</td><td class=eff>${effLabel[f.effort]}</td><td class=path>${E(f.file)}</td><td class=act>${E(f.action)}${f.defect >= FRAGILE_DENSITY ? ` <b style="color:#b45309">⚠ defect ${f.defect}</b>` : ""}</td></tr>`;
 const wlRow = (x, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${x.score}</td><td class=path>${E(x.path)}</td><td class=meta>churn ${x.raw.churn} · ${x.raw.tokens.toLocaleString()}tok · reach ${x.raw.reach} · test ${x.raw.testScore}</td></tr>`;
 const wlTable = (title, sub, rows) => `<h2>${title}</h2><div class=sub>${sub}</div><table><thead><tr><th>#</th><th>Score</th><th>Path</th><th>Roots</th></tr></thead><tbody>${rows.map(wlRow).join("") || "<tr><td colspan=4 class=sub>none</td></tr>"}</tbody></table>`;
 

@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { FRAGILE_DENSITY } from "../lib/thresholds.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -191,13 +192,13 @@ writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 
 const vals = Object.values(out);
 const untested = vals.filter(v => v.testScore < 40).length;
-const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= 0.4).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
+const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
 const e = (s) => process.stderr.write(s + "\n");
 const measured = vals.filter(v => v.testCoverageSource !== "proxy").length;
 e(`risk  ${vals.length} code files`);
 e(`  coverage: ${measured} files REAL-measured (go ${goPct ?? "—"}% · elixir ${exPct ?? "—"}% total) · ${vals.length - measured} on presence proxy`);
 e(`  test-presence: ${vals.filter(v => v.hasTest).length} have a sibling test · ${untested} score <40 (likely untested)`);
-e(`  defect-prone (density ≥0.4), top 8:`);
+e(`  defect-prone (density ≥${FRAGILE_DENSITY}), top 8:`);
 for (const [f, v] of fragile.slice(0, 8)) e(`    ${v.bugFixes} fixes / ${churn[f]} churn = ${v.defectDensity}  ${f}`);
 const soloOwned = vals.filter(v => v.authorCount === 1).length;
 e(`  ownership: ${soloOwned} file(s) single-author (bus-factor 1)`);
