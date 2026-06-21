@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { FRAGILE_DENSITY } from "../lib/thresholds.mjs";
+import { FRAGILE_DENSITY, UNTESTED_SCORE } from "../lib/thresholds.mjs";
 import { evalFormula } from "../lib/formula.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -206,7 +206,7 @@ const report = { at: new Date().toISOString(),
 writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 
 const vals = Object.values(out);
-const untested = vals.filter(v => v.testScore < 40).length;
+const untested = vals.filter(v => v.testScore < UNTESTED_SCORE).length;
 const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
 const e = (s) => process.stderr.write(s + "\n");
 const measured = vals.filter(v => v.testCoverageSource !== "proxy").length;

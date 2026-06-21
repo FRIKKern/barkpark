@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { UNTESTED_SCORE } from "../lib/thresholds.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -55,7 +56,7 @@ const mrow = (r, i) => `<tr><td class=rk>${i + 1}</td><td class=n style="backgro
   + `<td class=n style="background:hsl(${Math.round((r.reach || 0) / 100 * 120)},70%,90%)">${r.reach}</td>`
   + `<td class=path title="${E(r.description)}">${E(r.path)}</td><td>${E(r.stack)}</td>`
   + `<td class=n>${r.tokens}</td><td style="background:${sizeC(r.sizeClass)}">${E(r.sizeClass)}</td><td class=n>${r.churn}</td><td class=n>${r.fanIn}${r.seam}</td>`
-  + `<td class=n style="color:${r.testScore !== "" && r.testScore < 40 ? "#dc2626" : "#16a34a"}">${r.testScore}${r.hasTest}</td>`
+  + `<td class=n style="color:${r.testScore !== "" && r.testScore < UNTESTED_SCORE ? "#dc2626" : "#16a34a"}">${r.testScore}${r.hasTest}</td>`
   + `<td class=n style="color:${r.defect >= 0.4 ? "#b45309" : "#94a3b8"}">${r.defect}</td>`
   + `<td><span class=st style="background:${stC(r.consistency)}">${E(r.consistency)}</span></td>`
   + `<td class=role>${E(r.role)}</td></tr>`;

@@ -25,6 +25,10 @@
     "doc": "percentile cut for the priority worklist",
     "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "PRIORITY_PERCENTILE = (\\d+)" } ] },
 
+  { "name": "untested_score", "vtype": "int", "min": 0, "max": 100,
+    "doc": "testScore below this marks a file 'likely untested' (the untested count + the report's red colour)",
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "UNTESTED_SCORE = (\\d+)" } ] },
+
   { "name": "js_scan_roots", "vtype": "list", "elem": "string", "min": 1,
     "doc": "directories scanned to build the JS/TS workspace dependency graph (rung ② — a bound LIST)",
     "locations": [ { "file": "tooling/blast-radius/build-index.mjs", "pattern": "scanRoots = (\\[[^\\]]*\\])" } ] },

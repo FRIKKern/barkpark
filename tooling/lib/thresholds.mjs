@@ -26,3 +26,8 @@ export const COLLINEARITY_CUT = 0.7;
 export const HOTSPOT_PERCENTILE = 90;   // hotspot refactor line (churn × complexity)
 export const PRIORITY_PERCENTILE = 90;  // priority worklist
 export const DANGER_TOPK = 40;          // default top-K for the danger/critical worklist
+
+// UNTESTED_SCORE — testScore below this marks a file "likely untested". Was a
+// bare 40 in risk.mjs (the untested count) AND status/report.mjs (the red
+// colour-coding) — change one, the count and the report disagree. One source.
+export const UNTESTED_SCORE = 40;
