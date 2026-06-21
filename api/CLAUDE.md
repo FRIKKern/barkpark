@@ -17,7 +17,7 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 | `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **NOTE: under `studio/`, NOT `live/studio/`** |
 | `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
 | `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |
-| `priv/repo/seeds.exs` → `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`lib/barkpark/seeds/demo.ex`) seeds 8 core schemas + ~27 docs + dev token; shared tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
+| `priv/repo/seeds.exs` → `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`seeds/demo.ex`) seeds 8 schemas + ~27 docs + dev token; tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
 
 ## Bulldocs (the Papers surface)
 
@@ -27,14 +27,14 @@ The built-in "Papers"/"paperflow" feature is now the **Bulldocs plugin**. Bulldo
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
 - **Plugin module:** `register_schemas/1` (the `paper` schema) + `register_routes/1` — reader on the `:public_root` bucket, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Any plugin needing a public reader page or token-gated ingest API reuses these buckets.
 
-**Alias-drop gate:** `/v1/paperflow/*` remains an alias of `/v1/plugins/bulldocs/*` until paperflow's `event-on-save.sh` producers repoint — externally gated; do NOT drop unilaterally. `:paperflow_ingest_token` config / `PAPERFLOW_INGEST_TOKEN` env are unchanged. Tracked in `docs/decisions/deferred.md`.
+**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` until paperflow's `event-on-save.sh` producers repoint — externally gated; do NOT drop unilaterally. `:paperflow_ingest_token` / `PAPERFLOW_INGEST_TOKEN` unchanged. Tracked in `docs/decisions/deferred.md`.
 
 ## Sheets
 
 `type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — the Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant).
 
 - **Core:** `Barkpark.Sheets` (A1 + snapshot synthesis, 200k-position cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
-- **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD/1,048,576 grid bounds, merge area ≤10k) → mutate 409 `halted`; `:ingest` API `POST /v1/plugins/sheets/import` (xlsx/csv/tsv; 413 `upload_too_large` >15MB / `sheet_too_large` >50k cells, 422 `invalid_xlsx`) · `GET …/:slug/export.{xlsx,csv,tsv,md,html}` (flush-first; 503 `flush_failed` + retry-after) · `POST …/:slug/ops` (422 `batch_too_large`, 503 `session_unavailable` + retry-after); `:public_root` live reader `/sheets/:slug` (published-only).
+- **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD grid bounds, merge ≤10k) → 409 `halted`; `:ingest` API: import (xlsx/csv/tsv; size/cell caps) · export `.{xlsx,csv,tsv,md,html}` (flush-first) · `/ops` (batch caps); `:public_root` reader `/sheets/:slug` (published-only). Error envelopes (413/422/503) in `plugins/sheets.ex`.
 - **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content.ex — `tap_sheet_writethrough` / `hydrate_sheet_embed_snapshots`).
 
 Session deltas: `{:sheets_op, %{rev, tab, changed}}` on `doc_topic <> ":sheets:op"`; SSE doc events fire only on the debounced persist.
