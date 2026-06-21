@@ -20,6 +20,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { DANGER_TOPK, HOTSPOT_PERCENTILE, PRIORITY_PERCENTILE } from "./thresholds.mjs";
 
 const rd = (root, p, d) => existsSync(join(root, p)) ? JSON.parse(readFileSync(join(root, p), "utf8")) : d;
 
@@ -31,7 +32,7 @@ export const DEFAULT_COMPOSITES = {
   refactorWorth:    { form: "bloat × churn × separability",      roots: ["tokens", "churn", "defs"],         weights: { tokens: 0.4, churn: 0.4, defs: 0.2 } },
   criticalUntested: { form: "reach × ¬coverage",                 roots: ["reach", "testScore"],              weights: { reach: 0.6, testScore: 0.4 } },
 };
-const DEFAULT_THRESHOLDS = { dangerTopK: 40, hotspotPercentile: 90, priorityPercentile: 90 };
+const DEFAULT_THRESHOLDS = { dangerTopK: DANGER_TOPK, hotspotPercentile: HOTSPOT_PERCENTILE, priorityPercentile: PRIORITY_PERCENTILE };
 
 // ── config loader ───────────────────────────────────────────────────────────
 // Returns { composites, thresholds, source, confidence }. When the config is

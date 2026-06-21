@@ -15,13 +15,13 @@
 
   { "name": "collinearity_cut", "vtype": "float", "min": 0, "max": 1,
     "doc": "|r| above which two signals are collinear (the weaker is dropped)",
-    "locations": [ { "file": "tooling/fit/fit.mjs", "pattern": "a < b && Math\\.abs\\(r\\) > ([0-9.]+)" } ] },
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "COLLINEARITY_CUT = ([0-9.]+)" } ] },
 
   { "name": "hotspot_percentile", "vtype": "int", "min": 50, "max": 99,
     "doc": "percentile cut for the hotspot refactor line (churn × complexity)",
-    "locations": [ { "file": "tooling/fit/fit.mjs", "pattern": "hotspotPercentile: (\\d+)" } ] },
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "HOTSPOT_PERCENTILE = (\\d+)" } ] },
 
   { "name": "priority_percentile", "vtype": "int", "min": 50, "max": 99,
     "doc": "percentile cut for the priority worklist",
-    "locations": [ { "file": "tooling/fit/fit.mjs", "pattern": "priorityPercentile: (\\d+)" } ] }
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "PRIORITY_PERCENTILE = (\\d+)" } ] }
 ]

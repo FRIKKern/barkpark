@@ -37,6 +37,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { COLLINEARITY_CUT, HOTSPOT_PERCENTILE, PRIORITY_PERCENTILE } from "../lib/thresholds.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -193,7 +194,7 @@ for (const a of SIGNALS) {
   for (const b of SIGNALS) {
     const r = a === b ? 1 : +spearman(col(a), col(b)).toFixed(4);
     corrMatrix[a][b] = r;
-    if (a < b && Math.abs(r) > 0.7) collinear.push({ a, b, r });
+    if (a < b && Math.abs(r) > COLLINEARITY_CUT) collinear.push({ a, b, r });
   }
 }
 collinear.sort((x, y) => Math.abs(y.r) - Math.abs(x.r));
@@ -316,7 +317,7 @@ const learnedWeights = {};
 if (model) kept.forEach((n, i) => { learnedWeights[n] = +model.w[i].toFixed(4); });
 
 // thresholds: default percentile cut points for the danger/refactor worklists.
-const thresholds = { dangerTopK: cv.k || Math.max(5, Math.round(N * 0.05)), hotspotPercentile: 90, priorityPercentile: 90 };
+const thresholds = { dangerTopK: cv.k || Math.max(5, Math.round(N * 0.05)), hotspotPercentile: HOTSPOT_PERCENTILE, priorityPercentile: PRIORITY_PERCENTILE };
 
 // ════════════════ OUTPUT 1 — scoring-config.json ════════════════
 const config = {
@@ -328,7 +329,7 @@ const config = {
   sparse: SPARSE,
   signals: { all: SIGNALS, kept, dropped: [...dropped] },
   featureImportance: importance,
-  collinearity: { threshold: 0.7, pairs: collinear, droppedForRedundancy: [...dropped] },
+  collinearity: { threshold: COLLINEARITY_CUT, pairs: collinear, droppedForRedundancy: [...dropped] },
   learnedWeights: SPARSE ? null : learnedWeights,
   standardization: SPARSE ? null : Object.fromEntries(kept.map(n => [n, { mean: +stats[n].m.toFixed(4), sd: +stats[n].sd.toFixed(4) }])),
   validity: { fullAuc: fullAuc == null ? null : +fullAuc.toFixed(4), temporalCv: cv },
@@ -362,7 +363,7 @@ const weightRows = SPARSE ? `<tr><td colspan="2">low confidence — priors used,
   kept.map(n => `<tr><td>${esc(n)}</td><td class="num">${(learnedWeights[n] ?? 0).toFixed(3)}</td></tr>`).join("\n");
 const collRows = collinear.length ? collinear.map(c => `<tr><td>${esc(c.a)} ↔ ${esc(c.b)}</td><td class="num">${c.r.toFixed(3)}</td><td>${dropped.has(c.a) ? esc(c.a) : esc(c.b)} dropped</td></tr>`).join("\n") : `<tr><td colspan="3">none above |r|&gt;0.7</td></tr>`;
 const matHead = `<tr><th></th>${SIGNALS.map(s => `<th>${esc(s.slice(0, 4))}</th>`).join("")}</tr>`;
-const matBody = SIGNALS.map(a => `<tr><th>${esc(a)}</th>${SIGNALS.map(b => { const r = corrMatrix[a][b]; const hot = Math.abs(r) > 0.7 && a !== b; return `<td class="num ${hot ? "hot" : ""}">${r.toFixed(2)}</td>`; }).join("")}</tr>`).join("\n");
+const matBody = SIGNALS.map(a => `<tr><th>${esc(a)}</th>${SIGNALS.map(b => { const r = corrMatrix[a][b]; const hot = Math.abs(r) > COLLINEARITY_CUT && a !== b; return `<td class="num ${hot ? "hot" : ""}">${r.toFixed(2)}</td>`; }).join("")}</tr>`).join("\n");
 
 const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
