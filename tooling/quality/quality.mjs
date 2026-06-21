@@ -20,6 +20,11 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, gatherRoots, composites, percentile } from "../lib/scoring.mjs";
+import { FRAGILE_DENSITY } from "../lib/thresholds.mjs";
+import { evalFormula } from "../lib/formula.mjs";
+// effort estimate (1–5) for splitting a bloated file, as a bound piecewise
+// FUNCTION (cody rung ④) — tunable through a paper, safely evaluated.
+const EFFORT_FN = "tokens > 30000 ? 5 : tokens > 15000 ? 4 : 3";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -53,7 +58,7 @@ const findings = [];
 for (const l of layV) if (l.verdict === "violation") findings.push({ kind: "layering", file: l.file, dim: "Architecture", sev: 1.0, effort: 2, action: l.fix || "Move data access into a domain context", why: l.reason });
 for (const [f, v] of Object.entries(gV)) if (v.verdict === "drift") findings.push({ kind: "drift", file: f, dim: "Consistency", sev: 0.9, effort: 1, action: v.recommendation, why: "diverges from the group's own pattern" });
 for (const v of dupV) if (v.verdict === "extract") findings.push({ kind: "duplication", file: v.a, dim: "Duplication", sev: 0.55, effort: 2, action: `Extract shared logic (≈ ${v.b})`, why: v.reason });
-for (const r of erg.splitCandidates) if (r.refactorWorth > 5000) findings.push({ kind: "bloat", file: r.path, dim: "Modularity", sev: Math.min(1, r.refactorWorth / 40000), effort: r.tokens > 30000 ? 5 : r.tokens > 15000 ? 4 : 3, action: `Split god-module (${r.defs} defs, ${r.tokens.toLocaleString()} tok) read every change (churn ${r.churn})`, why: "context-bloat paid on every read" });
+for (const r of erg.splitCandidates) if (r.refactorWorth > 5000) findings.push({ kind: "bloat", file: r.path, dim: "Modularity", sev: Math.min(1, r.refactorWorth / 40000), effort: evalFormula(EFFORT_FN, { tokens: r.tokens }), action: `Split god-module (${r.defs} defs, ${r.tokens.toLocaleString()} tok) read every change (churn ${r.churn})`, why: "context-bloat paid on every read" });
 // HOTSPOT findings — churn × complexity above the fitted percentile (the refactor gold standard)
 for (const [f, c] of allComp) if (c.hotspot >= hotspotCut && c.hotspot >= 60 && (roots[f]?._raw.churn ?? 0) >= 8) findings.push({ kind: "hotspot", file: f, dim: "Hotspot", sev: Math.min(1, c.hotspot / 100), effort: roots[f]._raw.tokens > 20000 ? 4 : 3, action: `Refactor hotspot — churn ${roots[f]._raw.churn} × ${roots[f]._raw.tokens.toLocaleString()} tok (hotspot ${c.hotspot})`, why: "high-churn high-complexity: the field's gold-standard refactor target" });
 // CRITICAL-UNTESTED findings — reach × ¬coverage in the danger top-K
@@ -81,7 +86,7 @@ const hotspotN = hotspots.length;
 // test-presence + defect-history across HIGH-REACH code files (value = reach, the single axis)
 const impCode = Object.entries(risk).filter(([f]) => reachOf(f) >= 40);
 const testedFrac = impCode.length ? impCode.filter(([, v]) => v.testScore >= 50).length / impCode.length : 1;
-const fragileN = impCode.filter(([, v]) => v.defectDensity >= 0.4).length;
+const fragileN = impCode.filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).length;
 const critN = critArr.slice(0, dangerTopK).filter(x => x.v >= 50).length;
 
 const dims = [
@@ -91,7 +96,7 @@ const dims = [
   { name: "Hotspots", root: "churn × complexity", score: clamp(100 - hotspotN * 4), note: `${hotspotN} files churn×complexity ≥70 · ${deduped.filter(f=>f.kind==="hotspot").length} above the ${cfg.thresholds.hotspotPercentile}th-pct refactor line`, weight: 0.16 },
   { name: "Modularity", root: "complexity", score: clamp(100 - bloatBig * 7 - Math.min(20, (erg.summary?.bloat || 0))), note: `${erg.summary?.bloat || 0} bloated files · ${bloatBig} high-reach god-modules`, weight: 0.12 },
   { name: "Tested", root: "tests", score: clamp(testedFrac * 100), note: `${Math.round(testedFrac*100)}% of high-reach code has coverage · ${critN} critical-untested (reach × ¬coverage)`, weight: 0.15 },
-  { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥0.4)`, weight: 0.10 },
+  { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥${FRAGILE_DENSITY})`, weight: 0.10 },
   { name: "Duplication", root: "relationships", score: clamp(100 - dupN * 6), note: `${dupN} extract-worthy (of ${crep.duplication?.length || 0} dup pairs)`, weight: 0.06 },
   { name: "Dead code", root: "reach", score: clamp(100 - (crep.deadGoPackages?.length || 0) * 8), note: `${crep.deadGoPackages?.length || 0} dead Go packages`, weight: 0.07 },
 ];
@@ -120,7 +125,7 @@ const E = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
 const bar = (s) => { const c = s >= 85 ? "#16a34a" : s >= 70 ? "#65a30d" : s >= 55 ? "#ca8a04" : "#dc2626"; return `<div class=track><div class=fill style="width:${s}%;background:${c}"></div></div>`; };
 const effLabel = ["", "low", "med", "high", "high+", "xhigh"];
 const frow = (f, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${f.impact}</td><td class=n>${f.reach}</td><td><span class="k ${f.kind}">${f.kind}</span></td>`
-  + `<td>${f.dim}</td><td class=eff>${effLabel[f.effort]}</td><td class=path>${E(f.file)}</td><td class=act>${E(f.action)}${f.defect >= 0.4 ? ` <b style="color:#b45309">⚠ defect ${f.defect}</b>` : ""}</td></tr>`;
+  + `<td>${f.dim}</td><td class=eff>${effLabel[f.effort]}</td><td class=path>${E(f.file)}</td><td class=act>${E(f.action)}${f.defect >= FRAGILE_DENSITY ? ` <b style="color:#b45309">⚠ defect ${f.defect}</b>` : ""}</td></tr>`;
 const wlRow = (x, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${x.score}</td><td class=path>${E(x.path)}</td><td class=meta>churn ${x.raw.churn} · ${x.raw.tokens.toLocaleString()}tok · reach ${x.raw.reach} · test ${x.raw.testScore}</td></tr>`;
 const wlTable = (title, sub, rows) => `<h2>${title}</h2><div class=sub>${sub}</div><table><thead><tr><th>#</th><th>Score</th><th>Path</th><th>Roots</th></tr></thead><tbody>${rows.map(wlRow).join("") || "<tr><td colspan=4 class=sub>none</td></tr>"}</tbody></table>`;
 

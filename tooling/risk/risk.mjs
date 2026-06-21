@@ -19,6 +19,8 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { FRAGILE_DENSITY, UNTESTED_SCORE } from "../lib/thresholds.mjs";
+import { evalFormula } from "../lib/formula.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -38,7 +40,21 @@ const sig = JSON.parse(readFileSync(join(ROOT, "tooling/file-importance/file-sig
 const churn = Object.fromEntries(sig.map(s => [s.path, s.churn]));
 
 // ---- defect history: commits whose subject signals a fix/revert ----
-const BUG = /\b(fix(es|ed)?|bug|hotfix|revert|regression|broken|crash|patch(ed)?|incorrect|wrong|fault|defect|oops|reverts?)\b/i;
+// The defect vocabulary, as an auditable list (was a dense inline regex). Each
+// entry is an alternation term — plain word or a small regex for inflections.
+// Bindable via tooling/cody (bug_fix_words) so it can be reviewed/tuned through
+// a Barkpark paper. Adding a word widens what counts as a bug-fix → defectDensity.
+const BUG_WORDS = ["fix(es|ed)?", "bug", "hotfix", "revert", "regression", "broken", "crash", "patch(ed)?", "incorrect", "wrong", "fault", "defect", "oops", "reverts?"];
+const BUG = new RegExp("\\b(" + BUG_WORDS.join("|") + ")\\b", "i");
+// how defect-density is derived from a file's bug-fixes and churn. A bound
+// FORMULA (cody rung ③) — tunable through a paper, evaluated by lib/formula's
+// safe evaluator (no eval). Laplace-smoothed: the prior literal `fixes /
+// max(1, churn)` gave a lone fix in a 1-commit file a perfect 1.0, flagging
+// trivial files (repo.ex, release.ex) as maximally defect-prone — 53% of the
+// "fragile" set was such low-evidence noise. The `+ 3` requires real evidence
+// before density climbs; it dropped the fragile set 72 → 24, all genuine
+// multi-fix files. Threshold re-tuned in lockstep (thresholds.mjs FRAGILE_DENSITY).
+const DEFECT_FORMULA = "fixes / (churn + 3)";
 const bugFix = {};
 {
   let isBug = false;
@@ -176,7 +192,7 @@ for (const s of code) {
   const testCoverageSource = rc ? rc.source : "proxy";
   const fixes = bugFix[s.path] || 0;
   const own = ownership(s.path);
-  out[s.path] = { bugFixes: fixes, defectDensity: +(fixes / Math.max(1, churn[s.path] || 1)).toFixed(2),
+  out[s.path] = { bugFixes: fixes, defectDensity: +(evalFormula(DEFECT_FORMULA, { fixes, churn: churn[s.path] || 1 })).toFixed(2),
     hasTest: has, testRefs: refs, testScore, testCoverageSource,
     realCoverage: rc ? rc.pct : null, proxyScore,
     primaryAuthorShare: own.primaryAuthorShare, authorCount: own.authorCount };
@@ -190,14 +206,14 @@ const report = { at: new Date().toISOString(),
 writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 
 const vals = Object.values(out);
-const untested = vals.filter(v => v.testScore < 40).length;
-const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= 0.4).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
+const untested = vals.filter(v => v.testScore < UNTESTED_SCORE).length;
+const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
 const e = (s) => process.stderr.write(s + "\n");
 const measured = vals.filter(v => v.testCoverageSource !== "proxy").length;
 e(`risk  ${vals.length} code files`);
 e(`  coverage: ${measured} files REAL-measured (go ${goPct ?? "—"}% · elixir ${exPct ?? "—"}% total) · ${vals.length - measured} on presence proxy`);
 e(`  test-presence: ${vals.filter(v => v.hasTest).length} have a sibling test · ${untested} score <40 (likely untested)`);
-e(`  defect-prone (density ≥0.4), top 8:`);
+e(`  defect-prone (density ≥${FRAGILE_DENSITY}), top 8:`);
 for (const [f, v] of fragile.slice(0, 8)) e(`    ${v.bugFixes} fixes / ${churn[f]} churn = ${v.defectDensity}  ${f}`);
 const soloOwned = vals.filter(v => v.authorCount === 1).length;
 e(`  ownership: ${soloOwned} file(s) single-author (bus-factor 1)`);

@@ -1,0 +1,47 @@
+[
+  { "name": "fragile_density", "vtype": "float", "min": 0, "max": 1,
+    "doc": "bug-fix density at/above which a file is flagged defect-prone (drives the Reliability scorecard dimension)",
+    "locations": [
+      { "file": "tooling/lib/thresholds.mjs", "pattern": "FRAGILE_DENSITY = ([0-9.]+)" }
+    ] },
+
+  { "name": "consensus_band", "vtype": "int", "min": 1,
+    "doc": "criticality spread that flags a multi-vote judgment 'contested'",
+    "locations": [ { "file": "tooling/lib/consensus.mjs", "pattern": "band = (\\d+)" } ] },
+
+  { "name": "content_cap", "vtype": "int", "min": 1000,
+    "doc": "max chars of file content stored on a Barkpark paper",
+    "locations": [ { "file": "tooling/barkpark-sync/generate.mjs", "pattern": "CONTENT_CAP = (\\d+)" } ] },
+
+  { "name": "collinearity_cut", "vtype": "float", "min": 0, "max": 1,
+    "doc": "|r| above which two signals are collinear (the weaker is dropped)",
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "COLLINEARITY_CUT = ([0-9.]+)" } ] },
+
+  { "name": "hotspot_percentile", "vtype": "int", "min": 50, "max": 99,
+    "doc": "percentile cut for the hotspot refactor line (churn × complexity)",
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "HOTSPOT_PERCENTILE = (\\d+)" } ] },
+
+  { "name": "priority_percentile", "vtype": "int", "min": 50, "max": 99,
+    "doc": "percentile cut for the priority worklist",
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "PRIORITY_PERCENTILE = (\\d+)" } ] },
+
+  { "name": "untested_score", "vtype": "int", "min": 0, "max": 100,
+    "doc": "testScore below this marks a file 'likely untested' (the untested count + the report's red colour)",
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "UNTESTED_SCORE = (\\d+)" } ] },
+
+  { "name": "js_scan_roots", "vtype": "list", "elem": "string", "min": 1,
+    "doc": "directories scanned to build the JS/TS workspace dependency graph (rung ② — a bound LIST)",
+    "locations": [ { "file": "tooling/blast-radius/build-index.mjs", "pattern": "scanRoots = (\\[[^\\]]*\\])" } ] },
+
+  { "name": "bug_fix_words", "vtype": "list", "elem": "string", "min": 1,
+    "doc": "commit-subject terms that mark a bug-fix (drives defect-density → Reliability). A bound LIST tunable through a paper.",
+    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "BUG_WORDS = (\\[[^\\]]*\\])" } ] },
+
+  { "name": "defect_formula", "vtype": "expr", "vars": ["fixes", "churn"],
+    "doc": "how defect-density is computed from a file's bug-fixes and churn (rung ③ — a bound FORMULA, safely evaluated)",
+    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "DEFECT_FORMULA = \"([^\"]*)\"" } ] },
+
+  { "name": "effort_formula", "vtype": "expr", "vars": ["tokens"],
+    "doc": "piecewise effort estimate (1–5) for splitting a bloated file (rung ④ — a bound FUNCTION-CELL with branching)",
+    "locations": [ { "file": "tooling/quality/quality.mjs", "pattern": "EFFORT_FN = \"([^\"]*)\"" } ] }
+]
