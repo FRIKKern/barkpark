@@ -6,6 +6,8 @@
 //   query verify            → is the map current? (the freshness GATE)
 //   query verify --docs [g] → are the DOCS truthful? (the doc-truth verifier)
 //   query waterfall         → is any fact RESTATED across docs? (collapse leads)
+//   query highways          → does the routing table still resolve? (topic→owner)
+//   query priority          → which code is UNDER-documented by reach? (work queue)
 //   query impact <file|sym> → what breaks if I change X? (blast radius + risk)
 //   query scope <feature>   → what files do I touch for feature Y? (context pack)
 //   query                   → usage that frames the three
@@ -42,6 +44,8 @@ const MANIFEST_MJS = join(HERE, "manifest.mjs");
 const WHAT_BREAKS_MJS = join(HERE, "what-breaks.mjs");
 const VERIFY_DOCS_MJS = join(ROOT, "tooling/doc-truth/verify-docs.mjs");
 const WATERFALL_MJS = join(ROOT, "tooling/doc-truth/waterfall.mjs");
+const HIGHWAYS_MJS = join(ROOT, "tooling/doc-truth/highways.mjs");
+const PRIORITY_MJS = join(ROOT, "tooling/doc-truth/priority.mjs");
 const SCOPE_MJS = join(ROOT, "tooling/scope/scope.mjs");
 const NODES = join(ROOT, "tooling/barkpark-sync/nodes.json");
 
@@ -156,6 +160,28 @@ function cmdWaterfall(rest) {
   return delegate(WATERFALL_MJS, rest);
 }
 
+// ── verb: highways ─────────────────────────────────────────────────────────────
+// "Does the map still work?" The P3 routing check: every entry in the root
+// CLAUDE.md routing table must reach exactly one canonical owner doc in ≤2 hops,
+// each canonical-for topic must have one owner, and byte budgets / 7-card cap
+// must hold. Pure pass-through to the doc-truth highways tool (facade).
+//   query highways            → routing resolution + orphans + dup owners + budget
+//   query highways --json     → { routes, orphans, duplicateOwners, budget }
+function cmdHighways(rest) {
+  return delegate(HIGHWAYS_MJS, rest);
+}
+
+// ── verb: priority ─────────────────────────────────────────────────────────────
+// "Is documentation proportioned to reach?" The P4 coverage scorer: joins doc
+// coverage against blast-radius reach + churn and ranks the gaps — high-reach code
+// no doc names (write-new / extend-canonical), and trivia that's over-documented.
+// Pure pass-through to the doc-truth priority tool (facade).
+//   query priority            → ranked under/over-documented work queue
+//   query priority --json     → { queue, overDocumented, buildSpec }
+function cmdPriority(rest) {
+  return delegate(PRIORITY_MJS, rest);
+}
+
 // ── verb: impact ─────────────────────────────────────────────────────────────
 // Blast-radius / risk for a file or symbol. GATE FIRST: if the map is stale we
 // print the ⚠ banner before the result so the agent is never silently misled.
@@ -242,6 +268,20 @@ function usage() {
                                e.g. query waterfall
                                     query waterfall --topic systemctl --json
 
+    highways                   Does the routing table still resolve?  Every entry
+                               in the root CLAUDE.md routing table must reach one
+                               canonical owner doc in ≤2 hops; flags orphans,
+                               duplicate owners, and budget / 7-card-cap breaches.
+                               Flags: --json
+                               e.g. query highways --json
+
+    priority                   Which code is UNDER-documented by reach?  Joins doc
+                               coverage against blast-radius reach + churn and ranks
+                               the gaps (write-new / extend-canonical) plus the
+                               over-documented trivia.
+                               Flags: --json
+                               e.g. query priority --json
+
     impact <file|symbol>       What breaks if I change X?  Blast-radius closure,
                                symbol-precise + cross-language reach, and a
                                LOW/MEDIUM/HIGH/CRITICAL risk verdict.
@@ -280,6 +320,12 @@ function main() {
       break;
     case "waterfall":
       process.exit(cmdWaterfall(rest));
+      break;
+    case "highways":
+      process.exit(cmdHighways(rest));
+      break;
+    case "priority":
+      process.exit(cmdPriority(rest));
       break;
     case "impact":
       if (!rest.some((a) => !a.startsWith("--") || a === "--symbol")) {

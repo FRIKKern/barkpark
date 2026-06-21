@@ -177,6 +177,71 @@ node tooling/doc-truth/acceptance-p2.mjs
   verifiable claims (`before ⊆ after`); prints the count and any lost facts
   (must be 0), corpus-wide.
 
+## P3 — highways (`highways.mjs` + `acceptance-p3.mjs`)
+
+P1 asks *"is each claim true?"*, P2 asks *"is each fact stated once?"*, P3 asks
+*"does the map still work?"* — does every entry in the root `CLAUDE.md` routing
+table reach exactly one canonical owner doc in a short hop, and do the byte
+budgets / 7-card cap still hold.
+
+`highways.mjs` parses the `| Group | Task pattern | Load |` table, builds a
+`canonical-for → owner` index from every doc's line-1 marker, and resolves each
+Load target to its canonical owner in **≤2 hops**. A hop is one canonical-record
+redirection: hop 0 is a direct non-pointer owner; a pointer doc (`canonical-for`
+ending `-redirect`/`-pointer`, or a body `Canonical record:`/`Canonical
+guidance …:` line) is followed up to twice. Pointer-of-a-pointer, a missing
+link, or a final doc with no `canonical-for` is a routing failure. It also flags
+duplicate owners (one topic on 2+ docs), orphan topics (referenced, no owner),
+and shells out to `scripts/check-doc-budgets.sh` to surface over-budget docs and
+the card count.
+
+```
+node tooling/doc-truth/highways.mjs            # readable report
+node tooling/doc-truth/highways.mjs --json     # {routes, orphans, duplicateOwners, budget}
+node tooling/map/query.mjs highways --json     # via the front door
+node tooling/doc-truth/acceptance-p3.mjs       # gates: RESOLUTION + UNIQUENESS (budget informational)
+```
+
+The acceptance gate passes when every routing row resolves to one owner in ≤2
+hops and no `canonical-for` topic has more than one owner. Budget violations are
+reported but do not fail the gate (the repo's own `check-doc-budgets.sh` owns
+that gate). Current state: **19/19 rows resolved, 0 duplicate owners, budget
+clean (7/7 cards)**.
+
+## P4 — priority (`priority.mjs` + `acceptance-p4.mjs`)
+
+`priority.mjs` joins doc **coverage** against code **reach / importance / churn**
+and emits a ranked work queue: high-reach code that's under-documented, and
+trivia that's over-documented.
+
+- **Coverage** inverts `doc-refs.json` (`file → [covering docs]`). Verdicts count
+  **exact, file-level** references only — a card naming a *directory* is not
+  documentation of a specific file.
+- **Reach** is the authoritative blast-radius signal from `tooling/map/what-breaks.mjs
+  --json` (`closureSize + 2×surfaceReach`); `file-signals.json` is a secondary
+  importance signal. Files outside the symbol graph report `reach: null`
+  (unknown, never guessed).
+- **Churn** joins `cochange-report.json` (`cochangePartners`) and
+  `file-signals.json` (`churn`).
+- **Candidate set:** the 335 elixir files present as nodes in `symbols.json` — the
+  set with a file-exact reverse closure.
+
+```
+node tooling/doc-truth/priority.mjs           # ranked report
+node tooling/doc-truth/priority.mjs --json     # { queue, overDocumented, buildSpec }
+node tooling/map/query.mjs priority --json     # via the front door
+node tooling/doc-truth/acceptance-p4.mjs       # asserts top flag is real top-decile reach + build-spec named
+```
+
+Verdicts: `under-documented` (reach ≥ p90 AND zero exact coverage),
+`over-documented` (≥1 exact doc but zero dependents and reach ≤ p10), else
+`proportioned`. The queue actions are `write-new` (no doc names it) or
+`extend-canonical <doc>` (a doc already covers it loosely). `buildSpec` names the
+canonical "how to build here" doc (`docs/setup/SETUP.md`) and flags the missing
+dedicated build-spec (`gap: true` — cqv6 specced, never built). Current state:
+**34 under-documented, top gap is the tenancy seam (membership/project/workspace/
+dataset, reach ~292, named by zero docs).**
+
 ## Meta-lesson
 
 The verifier is a **lead generator, not an authority.** It earns trust through
