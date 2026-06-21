@@ -39,7 +39,12 @@ const sig = JSON.parse(readFileSync(join(ROOT, "tooling/file-importance/file-sig
 const churn = Object.fromEntries(sig.map(s => [s.path, s.churn]));
 
 // ---- defect history: commits whose subject signals a fix/revert ----
-const BUG = /\b(fix(es|ed)?|bug|hotfix|revert|regression|broken|crash|patch(ed)?|incorrect|wrong|fault|defect|oops|reverts?)\b/i;
+// The defect vocabulary, as an auditable list (was a dense inline regex). Each
+// entry is an alternation term — plain word or a small regex for inflections.
+// Bindable via tooling/cody (bug_fix_words) so it can be reviewed/tuned through
+// a Barkpark paper. Adding a word widens what counts as a bug-fix → defectDensity.
+const BUG_WORDS = ["fix(es|ed)?", "bug", "hotfix", "revert", "regression", "broken", "crash", "patch(ed)?", "incorrect", "wrong", "fault", "defect", "oops", "reverts?"];
+const BUG = new RegExp("\\b(" + BUG_WORDS.join("|") + ")\\b", "i");
 const bugFix = {};
 {
   let isBug = false;
