@@ -4,6 +4,7 @@
 // never trust a stale map.
 //
 //   query verify            → is the map current? (the freshness GATE)
+//   query verify --docs [g] → are the DOCS truthful? (the doc-truth verifier)
 //   query impact <file|sym> → what breaks if I change X? (blast radius + risk)
 //   query scope <feature>   → what files do I touch for feature Y? (context pack)
 //   query                   → usage that frames the three
@@ -38,6 +39,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 
 const MANIFEST_MJS = join(HERE, "manifest.mjs");
 const WHAT_BREAKS_MJS = join(HERE, "what-breaks.mjs");
+const VERIFY_DOCS_MJS = join(ROOT, "tooling/doc-truth/verify-docs.mjs");
 const SCOPE_MJS = join(ROOT, "tooling/scope/scope.mjs");
 const NODES = join(ROOT, "tooling/barkpark-sync/nodes.json");
 
@@ -126,9 +128,17 @@ function delegate(script, argv) {
 }
 
 // ── verb: verify ─────────────────────────────────────────────────────────────
-// Pure pass-through to the gate. Exit 0 current / non-zero stale — this verb IS
-// the gate, so callers (and CI) can branch on its status.
+// Two gates under one verb:
+//   query verify            → MAP currency gate (manifest.mjs). Exit 0 current /
+//                             non-zero stale — this IS the gate CI branches on.
+//   query verify --docs [g] → DOC-TRUTH verifier (doc-truth/verify-docs.mjs).
+//                             Parses docs into typed claims, checks them against
+//                             ground truth behind a re-verify gate. Pass-through.
 function cmdVerify(rest) {
+  if (rest.includes("--docs")) {
+    const passthrough = rest.filter((a) => a !== "--docs");
+    return delegate(VERIFY_DOCS_MJS, passthrough);
+  }
   return delegate(MANIFEST_MJS, ["verify", ...rest]);
 }
 
@@ -199,6 +209,15 @@ function usage() {
                                Exit 0 = current, non-zero = stale. This is the
                                gate every other answer is checked against.
 
+    verify --docs [glob...]    Are the DOCS truthful?  The doc-truth verifier
+                               parses docs into typed claims (path · symbol ·
+                               route · lineref · command) and checks each
+                               against ground truth behind a RE-VERIFY GATE.
+                               Defaults to the 92-doc audit corpus; pass globs
+                               to scope. Flags: --json
+                               e.g. query verify --docs docs/ops/
+                                    query verify --docs js/CLAUDE.md --json
+
     impact <file|symbol>       What breaks if I change X?  Blast-radius closure,
                                symbol-precise + cross-language reach, and a
                                LOW/MEDIUM/HIGH/CRITICAL risk verdict.
@@ -212,6 +231,8 @@ function usage() {
 
   EXAMPLES
     node tooling/map/query.mjs verify
+    node tooling/map/query.mjs verify --docs
+    node tooling/map/query.mjs verify --docs docs/ops/ --json
     node tooling/map/query.mjs impact api/lib/barkpark/content.ex
     node tooling/map/query.mjs impact api/lib/barkpark/content.ex --symbol Content
     node tooling/map/query.mjs scope --list
