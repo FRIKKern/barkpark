@@ -1,0 +1,2 @@
+# Derived cache — regenerate with build-symbols.mjs, never commit.
+symbols.json

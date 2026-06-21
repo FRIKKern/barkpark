@@ -35,6 +35,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 const INDEX = join(ROOT, "tooling/blast-radius/index.json");
 const NODES = join(ROOT, "tooling/barkpark-sync/nodes.json");
 const RISK = join(ROOT, "tooling/risk/risk-report.json");
+const SYMBOLS = join(ROOT, "tooling/symbol-graph/symbols.json");
 
 const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
 
@@ -159,6 +160,53 @@ function filesForUnits(units, dirMap, nodes, langTag) {
   return out;
 }
 
+// ---- symbol-level blast --------------------------------------------------
+// Optional, additive. If tooling/symbol-graph/symbols.json exists, descend one
+// level below files: which SPECIFIC functions/modules transitively depend on
+// the symbols DEFINED in <file>. Pure read of the prebuilt symbol graph; the
+// reverse adjacency is precomputed per-language so each step is O(1).
+function loadSymbols() {
+  if (!existsSync(SYMBOLS)) return null;
+  try { return readJson(SYMBOLS); } catch { return null; }
+}
+
+// Reverse-closure over the symbol graph, seeded by every symbol defined in
+// <file>. Returns the dependent symbol ids (excluding the seeds), grouped.
+function blastSymbols(file, sym) {
+  // seeds: all node ids whose `file` is the target file
+  const seeds = sym.nodes.filter((n) => n.file === file).map((n) => n.id);
+  if (!seeds.length) return { defined: [], dependents: [], note: "no symbols indexed for this file" };
+
+  // unified reverse map across all languages (symId -> [callerIds]); the
+  // per-language maps already partition cleanly by the "<lang>:" id prefix.
+  const reverse = {};
+  for (const langRev of Object.values(sym.reverse || {})) Object.assign(reverse, langRev);
+
+  const seen = new Set();
+  const stack = [...seeds];
+  const seedSet = new Set(seeds);
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const dep of reverse[cur] || []) {
+      if (!seen.has(dep)) { seen.add(dep); stack.push(dep); }
+    }
+  }
+  for (const s of seedSet) seen.delete(s);
+
+  const byId = new Map(sym.nodes.map((n) => [n.id, n]));
+  const definedNodes = seeds.map((id) => byId.get(id)).filter(Boolean);
+  const dependentNodes = [...seen].map((id) => byId.get(id)).filter(Boolean);
+  // rank dependents: distinct file count matters, but list symbols directly.
+  dependentNodes.sort((a, b) =>
+    a.file.localeCompare(b.file) || a.symbol.localeCompare(b.symbol));
+  return {
+    defined: definedNodes.map((n) => ({ id: n.id, symbol: n.symbol, kind: n.kind, exported: n.exported })),
+    dependents: dependentNodes.map((n) => ({ id: n.id, file: n.file, symbol: n.symbol, kind: n.kind })),
+    files: [...new Set(dependentNodes.map((n) => n.file))].sort(),
+    note: "symbol-level reverse closure over tooling/symbol-graph/symbols.json",
+  };
+}
+
 // ---- overlay -------------------------------------------------------------
 function enrich(paths, { byPath, risk }) {
   const rows = [];
@@ -221,10 +269,12 @@ function verdict(rows) {
 // ---- run -----------------------------------------------------------------
 const args = process.argv.slice(2);
 const wantJson = args.includes("--json");
+const noSymbols = args.includes("--no-symbols");
+const wantSymbols = args.includes("--symbols");
 const file = args.find((a) => !a.startsWith("--"));
 
 if (!file) {
-  console.error("usage: what-breaks.mjs <file> [--json]");
+  console.error("usage: what-breaks.mjs <file> [--json] [--symbols|--no-symbols]");
   process.exit(2);
 }
 
@@ -236,6 +286,18 @@ const v = verdict(rows);
 
 // Currency check — is the map we just queried built against today's tree?
 const currency = safeVerify();
+
+// Symbol-level overlay (additive). Auto-use when symbols.json exists unless the
+// caller opts out with --no-symbols; --symbols forces it on (and errors loudly
+// if the artifact is missing).
+let symbolBlast = null;
+const sym = (wantSymbols || !noSymbols) ? loadSymbols() : null;
+if (sym) {
+  symbolBlast = blastSymbols(file, sym);
+} else if (wantSymbols) {
+  console.error(`--symbols requested but ${SYMBOLS} not found.\n  build it first: node tooling/symbol-graph/build-symbols.mjs`);
+  process.exit(2);
+}
 
 const result = {
   target: file,
@@ -252,6 +314,14 @@ const result = {
   self: selfRow(file, map),
   topAffected: rows.slice(0, 25),
   closure: rows.map((r) => r.path),
+  ...(symbolBlast ? { symbols: {
+    definedCount: symbolBlast.defined.length,
+    dependentCount: symbolBlast.dependents.length,
+    dependentFiles: symbolBlast.files || [],
+    defined: symbolBlast.defined,
+    dependents: symbolBlast.dependents.slice(0, 50),
+    note: symbolBlast.note,
+  } } : {}),
 };
 
 if (wantJson) {
@@ -330,6 +400,24 @@ function printReport(res) {
     }
   } else {
     console.log(`\nNo recorded dependents — safe to change in isolation (per the current map).`);
+  }
+
+  // Symbol-level overlay — which SPECIFIC functions/modules depend on this file.
+  if (res.symbols) {
+    const s = res.symbols;
+    console.log(`\n${"─".repeat(64)}`);
+    console.log(`SYMBOL-LEVEL BLAST  ·  ${s.definedCount} symbols defined here, ${s.dependentCount} dependents across ${s.dependentFiles.length} files`);
+    if (s.dependentCount) {
+      const shown = s.dependents.slice(0, 25);
+      for (const d of shown) {
+        console.log(`  ${d.file}#${d.symbol}  [${d.kind}]`);
+      }
+      if (s.dependentCount > shown.length) {
+        console.log(`  … and ${s.dependentCount - shown.length} more dependent symbols (use --json for all)`);
+      }
+    } else {
+      console.log(`  ${s.note}`);
+    }
   }
   console.log(bar);
 }
