@@ -23,5 +23,13 @@
 
   { "name": "priority_percentile", "vtype": "int", "min": 50, "max": 99,
     "doc": "percentile cut for the priority worklist",
-    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "PRIORITY_PERCENTILE = (\\d+)" } ] }
+    "locations": [ { "file": "tooling/lib/thresholds.mjs", "pattern": "PRIORITY_PERCENTILE = (\\d+)" } ] },
+
+  { "name": "js_scan_roots", "vtype": "list", "elem": "string", "min": 1,
+    "doc": "directories scanned to build the JS/TS workspace dependency graph (rung ② — a bound LIST)",
+    "locations": [ { "file": "tooling/blast-radius/build-index.mjs", "pattern": "scanRoots = (\\[[^\\]]*\\])" } ] },
+
+  { "name": "bug_fix_words", "vtype": "list", "elem": "string", "min": 1,
+    "doc": "commit-subject terms that mark a bug-fix (drives defect-density → Reliability). A bound LIST tunable through a paper.",
+    "locations": [ { "file": "tooling/risk/risk.mjs", "pattern": "BUG_WORDS = (\\[[^\\]]*\\])" } ] }
 ]

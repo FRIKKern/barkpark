@@ -38,12 +38,21 @@ const query = async () => {
 };
 const mutate = (m) => post(`/v1/data/mutate/${DATASET}`, { mutations: m });
 
-// ── read the literal at one location via its anchor ──
-function readLoc(loc) {
+// ── read the raw captured literal at one location (used for the in-place rewrite) ──
+function rawAt(loc) {
   const m = readFileSync(join(ROOT, loc.file), "utf8").match(new RegExp(loc.pattern));
   return m ? m[1] : null;
 }
-const codeValues = (b) => locs(b).map(readLoc);
+// canonical form for compare/display. A `list` normalises to compact JSON so a
+// code literal `["a", "b"]` and a paper value `["a","b"]` compare equal; scalars
+// are their own canonical form.
+function canon(b, raw) {
+  if (raw == null) return null;
+  if (b.vtype === "list") { try { return JSON.stringify(JSON.parse(raw)); } catch { return raw; } }
+  return raw;
+}
+const fmtList = (arr) => "[" + arr.map(x => JSON.stringify(x)).join(", ") + "]";  // code-literal form
+const codeValues = (b) => locs(b).map(loc => canon(b, rawAt(loc)));
 const codeValue  = (b) => codeValues(b)[0];                       // canonical = first
 const driftset   = (b) => [...new Set(codeValues(b).filter(v => v != null))];
 const hasDrift   = (b) => driftset(b).length > 1;                 // copies disagree
@@ -51,6 +60,13 @@ const hasDrift   = (b) => driftset(b).length > 1;                 // copies disa
 // ── validate a candidate against the binding's type + constraints ──
 function validate(b, raw) {
   const s = String(raw).trim();
+  if (b.vtype === "list") {
+    let a; try { a = JSON.parse(s); } catch { return { ok: false, why: "not valid JSON" }; }
+    if (!Array.isArray(a)) return { ok: false, why: "not a list" };
+    if (b.elem === "string" && !a.every(x => typeof x === "string")) return { ok: false, why: "all items must be strings" };
+    if (b.min != null && a.length < b.min) return { ok: false, why: `fewer than ${b.min} item(s)` };
+    return { ok: true, value: JSON.stringify(a) };   // canonical
+  }
   if (b.vtype === "int"   && !/^-?\d+$/.test(s))     return { ok: false, why: `not an int: "${s}"` };
   if (b.vtype === "float" && !/^-?\d*\.?\d+$/.test(s)) return { ok: false, why: `not a number: "${s}"` };
   const n = Number(s);
@@ -60,17 +76,18 @@ function validate(b, raw) {
 }
 
 // ── rewrite the literal at EVERY bound location (the "compile" step) ──
-function writeCode(b, newVal) {
+function writeCode(b, newVal) {                          // newVal is canonical (paper value)
   const changed = [];
+  const lit = b.vtype === "list" ? fmtList(JSON.parse(newVal)) : newVal;   // code-literal form
   for (const loc of locs(b)) {
     const path = join(ROOT, loc.file);
     const txt = readFileSync(path, "utf8");
     const m = txt.match(new RegExp(loc.pattern));
     if (!m) throw new Error(`anchor not found in ${loc.file}`);
-    if (m[1] === newVal) continue;                       // already correct
-    writeFileSync(path, txt.replace(m[0], m[0].replace(m[1], newVal)));
-    if (readLoc(loc) !== newVal) throw new Error(`verify failed in ${loc.file}`);
-    changed.push({ file: loc.file, from: m[1], to: newVal });
+    if (canon(b, m[1]) === newVal) continue;             // already in sync (content-wise)
+    writeFileSync(path, txt.replace(m[0], m[0].replace(m[1], lit)));
+    if (canon(b, rawAt(loc)) !== newVal) throw new Error(`verify failed in ${loc.file}`);
+    changed.push({ file: loc.file, from: m[1], to: lit });
   }
   return changed;                                        // [] if nothing changed
 }
