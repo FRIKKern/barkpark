@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-21T20:33:05.211Z",
+  "generatedAt": "2026-06-21T21:30:59.518Z",
   "refs": {
     "CLAUDE.md": [
       "api",
@@ -16,6 +16,7 @@
       "docs/cards/studio.md",
       "docs/cards/tui.md",
       "docs/contracts/schema-v2.md",
+      "docs/contracts/tenancy.md",
       "docs/contracts/webhook-realtime.md",
       "docs/decisions/deferred.md",
       "docs/ops/PROD_OPS.md",
@@ -392,6 +393,20 @@
       "docs/cards/js-sdk.md",
       "docs/ops/vercel-dns-connect.md",
       "web"
+    ],
+    "docs/contracts/tenancy.md": [
+      "api/CLAUDE.md",
+      "api/lib/barkpark/content/scope.ex",
+      "api/lib/barkpark/tenancy",
+      "api/lib/barkpark/tenancy.ex",
+      "api/lib/barkpark/tenancy/auth.ex",
+      "api/lib/barkpark/tenancy/dataset.ex",
+      "api/lib/barkpark/tenancy/membership.ex",
+      "api/lib/barkpark/tenancy/project.ex",
+      "api/lib/barkpark/tenancy/workspace.ex",
+      "docs/api-v1.md",
+      "docs/auth.md",
+      "docs/decisions/deferred.md"
     ]
   }
 }

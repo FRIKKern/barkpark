@@ -27,6 +27,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | Ops | CI / merge gates | `docs/ops/merge-gates.md` |
 | API/SDK | HTTP API contract | `docs/api-v1.md` |
 | API/SDK | auth / tokens | `docs/auth.md` |
+| API/SDK | tenancy / workspace / project / dataset scoping | `docs/contracts/tenancy.md` |
 | API/SDK | webhooks / cache revalidation | `docs/contracts/webhook-realtime.md` |
 | API/SDK | consume from JS / Next.js | `docs/cards/js-sdk.md` |
 | Plugins/ONIX | build or modify a plugin | `docs/cards/plugins.md` |
