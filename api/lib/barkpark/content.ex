@@ -33,6 +33,7 @@ defmodule Barkpark.Content do
     Labels,
     MutationEvent,
     Revision,
+    Revisions,
     Schema,
     SchemaDefinition,
     Search,
@@ -2887,76 +2888,18 @@ defmodule Barkpark.Content do
   @doc "Stream all documents for a dataset as envelope maps. Optionally filter by type."
   def export_stream(dataset, opts \\ []), do: Export.export_stream(dataset, opts)
 
-  # ── Revision queries ──────────────────────────────────────────────────────
+  # ── Revisions (extracted → Content.Revisions) ─────────────────────────────
 
   @doc "List revisions for a document, newest first."
-  def list_revisions(doc_id, type, dataset, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
+  def list_revisions(doc_id, type, dataset, opts \\ []),
+    do: Revisions.list_revisions(doc_id, type, dataset, opts)
 
-    Revision
-    |> where([r], r.doc_id == ^published_id(doc_id) and r.type == ^type)
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> order_by([r], desc: r.inserted_at)
-    |> limit(^limit)
-    |> Repo.all()
-  end
+  @doc "Get a single revision by ID, scoped to a dataset and (optionally) workspace/project."
+  def get_revision(id, dataset, opts \\ []), do: Revisions.get_revision(id, dataset, opts)
 
-  @doc """
-  Get a single revision by ID, scoped to a dataset and (optionally)
-  workspace/project.
-
-  Dataset scoping closes an intra-workspace IDOR: without it a member can read
-  ANY revision in their workspace by UUID regardless of the dataset named in the
-  URL. Workspace/project scoping additionally prevents cross-workspace reads of
-  a guessed/leaked id. `scope_to_dataset` is NULL-tolerant (matches rows whose
-  `dataset_id` is NULL but whose `dataset` STRING equals the requested one).
-  """
-  def get_revision(id, dataset, opts \\ []) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    Revision
-    |> where([r], r.id == ^id)
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      rev -> {:ok, rev}
-    end
-  end
-
-  @doc """
-  Restore a document to a specific revision.
-
-  `opts` is forwarded to `upsert_document/4` so callers can supply
-  lifecycle-hook context (`:source`, `:user_id`).
-  """
-  def restore_revision(revision_id, type, dataset, opts \\ []) do
-    with {:ok, rev} <- get_revision(revision_id, dataset, opts),
-         :ok <- assert_revision_dataset(rev, dataset) do
-      attrs = %{
-        "doc_id" => draft_id(rev.doc_id),
-        "title" => rev.title,
-        "status" => rev.status,
-        "content" => rev.content
-      }
-
-      upsert_document(type, attrs, dataset, opts)
-    end
-  end
-
-  # Defence-in-depth on top of get_revision's dataset scoping: refuse to restore
-  # a revision whose own `dataset` does not match the requested one, so a rev
-  # from dataset A can never be re-upserted into dataset B within a workspace.
-  defp assert_revision_dataset(%Revision{dataset: rev_dataset}, dataset)
-       when rev_dataset == dataset,
-       do: :ok
-
-  defp assert_revision_dataset(_rev, _dataset), do: {:error, :not_found}
+  @doc "Restore a document to a specific revision."
+  def restore_revision(revision_id, type, dataset, opts \\ []),
+    do: Revisions.restore_revision(revision_id, type, dataset, opts)
 
   # ── Papers — context functions ─────────────────────────────────────────────
   #
