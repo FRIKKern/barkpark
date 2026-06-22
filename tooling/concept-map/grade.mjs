@@ -86,6 +86,13 @@ const TEST_DIR = join(ROOT, "api/test");
 export const GRATUITOUS_EXTERNAL_PCT = 20; // external% below this → colocate the core
 export const TEST_HOME_TARGET = 1; // target distinct test dirs per feature
 export const MIN_SIDEWAYS = 1; // a sideways cluster counts from this many edges
+// REAL_SIDEWAYS_CLUSTER — a single feature→feature cluster this thick (after the
+// web-layer exclusion below) is a REAL coupling knot even for a clean-by-coupling
+// concept: it pushes the verdict to `tangled`. Below it, a clean-band concept's
+// domain sideways is a MINOR note → `improvable`. 10 matches the spec's "thick
+// boundary violation" line (media→search's domain knot, tasks→onixedit). The
+// must-stay-improvable exemplars top out at 3 (onixedit→settings), well clear.
+export const REAL_SIDEWAYS_CLUSTER = 10;
 
 // ── load + concept assignment (mirrors concepts.mjs structural detection) ────
 function loadGraph() {
@@ -208,24 +215,56 @@ function testScatter(concept, allTestFiles) {
   return { testFileCount: matches.length, testDirs: [...dirs].sort() };
 }
 
+// ── web-layer predicate (Fix 1) ──────────────────────────────────────────────
+// A feature→feature edge whose SOURCE file is a web-layer file is ORCHESTRATION,
+// not a boundary violation: controllers and LiveViews legitimately compose
+// multiple features. Such an edge is excluded from the sideways (domain-coupling)
+// counter. The predicate matches anything under api/lib/barkpark_web/, plus the
+// Phoenix web role suffixes (*_controller.ex / *_live.ex / *_html.ex) wherever
+// they live. Evidence: ~22 of media's 42 media→search edges originate in
+// media_controller.ex / web params — the real domain knot is the ~20 from
+// media/search.ex + media/search_intelligence.ex.
+function isWebLayerFile(file) {
+  return (
+    /^api\/lib\/barkpark_web\//.test(file) ||
+    /(_controller|_live|_html)\.ex$/.test(file)
+  );
+}
+
 // ── gap 3: sideways edges ────────────────────────────────────────────────────
 // Feature→feature: an edge FROM this concept TO a DIFFERENT concept, where the
 // target is itself a non-kernel feature. Kernel targets are allowed (depend
-// inward); sideways targets are the violations. Returned as a counted, named
-// "cut" list — exactly what boundary-lint would flag.
-function sidewaysEdges(concept, graph, conceptOf, kernelSet) {
-  const counts = new Map();
+// inward); sideways targets are the violations. We count DOMAIN→DOMAIN edges only
+// — edges whose source is a web-layer file (see isWebLayerFile) are orchestration
+// and skipped. `rawCrossConcept` keeps the pre-exclusion tally per target so the
+// Fix-1 effect is observable; `clusters` is the domain-only "cut" list.
+function sidewaysEdges(concept, graph, conceptOf, kernelSet, fileOf) {
+  const domain = new Map();
+  const raw = new Map();
   for (const e of graph.edges) {
     if (conceptOf.get(e.from) !== concept) continue;
     const ct = conceptOf.get(e.to);
     if (!ct || ct === concept) continue;
     if (kernelSet.has(ct)) continue; // inward dep on the kernel is allowed
-    counts.set(ct, (counts.get(ct) || 0) + 1);
+    raw.set(ct, (raw.get(ct) || 0) + 1);
+    if (isWebLayerFile(fileOf.get(e.from))) continue; // Fix 1: web edge = orchestration
+    domain.set(ct, (domain.get(ct) || 0) + 1);
   }
-  return [...counts.entries()]
+  const clusters = [...domain.entries()]
     .filter(([, n]) => n >= MIN_SIDEWAYS)
     .map(([to, edges]) => ({ to, edges }))
     .sort((a, b) => b.edges - a.edges || a.to.localeCompare(b.to));
+  const rawCrossConcept = [...raw.values()].reduce((s, n) => s + n, 0);
+  const domainCrossConcept = clusters.reduce((s, c) => s + c.edges, 0);
+  // expose the raw target tally so acceptance can assert a specific web-inflated
+  // edge was dropped (e.g. media→search raw vs domain).
+  const rawClusters = [...raw.entries()]
+    .map(([to, edges]) => ({ to, edges }))
+    .sort((a, b) => b.edges - a.edges || a.to.localeCompare(b.to));
+  clusters.rawCrossConcept = rawCrossConcept;
+  clusters.domainCrossConcept = domainCrossConcept;
+  clusters.rawClusters = rawClusters;
+  return clusters;
 }
 
 // ── gap 4: manifest-absence ──────────────────────────────────────────────────
@@ -250,24 +289,50 @@ function manifestPresence(concept) {
 }
 
 // ── the verdict ──────────────────────────────────────────────────────────────
-// kernel concepts are not feature-graded. Otherwise we read the three feature
-// gaps. A "real" coupling problem is sideways edges OR test-scatter.
+// Five-word vocabulary, ordered by severity: kernel · clean · clean-lib ·
+// improvable · tangled. kernel concepts are not feature-graded.
 //
-// The gratuitous-core flag means a concept's core half is reused almost entirely
-// from inside its own feature. For a registered plugin that is a colocate signal.
-// But for a CLEAN-NONPLUGIN concept — clean by the coupling math, just lacking the
-// plugin registration surface — internal-only reuse is the EXPECTED shape of a
-// pristine domain library, not architectural debt. So when a CLEAN-NONPLUGIN
-// concept trips ONLY the gratuitous-core gap (no sideways edges, no test-scatter),
-// we excuse it and grade `clean-lib` instead of `tangled`. The instant it ALSO
-// trips a real coupling problem, it is tangled like anything else.
+// The discriminator is the BAND (clean-by-coupling vs not) crossed with whether a
+// REAL coupling problem is present:
+//
+//   • A clean-by-coupling band (CLEAN-FEATURE / CLEAN-NONPLUGIN) earns the benefit
+//     of the doubt. The band itself certifies low afferent coupling + high
+//     cohesion. Within it:
+//       – a REAL coupling knot (a domain sideways cluster ≥ REAL_SIDEWAYS_CLUSTER)
+//         → tangled.
+//       – no coupling/layout problem at all, or ONLY the gratuitous-core flag
+//         (internal-only reuse — the EXPECTED shape of a cohesive domain lib, not
+//         debt) → clean (registered) / clean-lib (unregistered domain lib).
+//       – a SMALL but real fixable note — a domain sideways cluster below the
+//         threshold (web-origin edges already excluded by Fix 1) and/or
+//         test-scatter (an on-disk layout flaw) → improvable.
+//   • A non-clean band (mixed / UNSTABLE-EDGE) carries efferent sprawl or a low
+//     cohesion the band already flagged: any tripped gap → tangled.
+//
+// `improvable` is the honest middle: clean-by-coupling, but with a named, small
+// thing to fix. The gratuitous-core colocate suggestion still rides along when
+// present (it is useful), but on its own it never demotes a clean band below
+// clean / clean-lib — only sideways / scatter does, and only short of a real knot.
 function verdictFor(band, gaps) {
   if (band === "KERNEL") return "kernel";
-  const sideways = gaps.sideways.length > 0;
+
+  const cleanBand = band === "CLEAN-FEATURE" || band === "CLEAN-NONPLUGIN";
+  const maxSideways = gaps.sideways.reduce((m, s) => Math.max(m, s.edges), 0);
+  const realKnot = maxSideways >= REAL_SIDEWAYS_CLUSTER;
+  const anySideways = gaps.sideways.length > 0;
   const scatter = gaps.testScatter.testDirs.length > TEST_HOME_TARGET;
-  const realProblem = sideways || scatter;
-  if (band === "CLEAN-NONPLUGIN" && !realProblem) return "clean-lib";
-  const featureFlaw = gaps.gratuitousCore.gratuitous || realProblem;
+  // gratuitous-core is excused inside a clean band; the actionable-but-minor
+  // notes are domain sideways (below the knot threshold) and test-scatter.
+  const minorNote = anySideways || scatter;
+
+  if (cleanBand) {
+    if (realKnot) return "tangled"; // a thick domain edge is real debt
+    if (!minorNote) return band === "CLEAN-NONPLUGIN" ? "clean-lib" : "clean";
+    return "improvable"; // clean-by-coupling + only minor fixable notes
+  }
+  // non-clean band: efferent sprawl / low cohesion already flagged by the band;
+  // any problem makes it tangled, otherwise it is clean by coupling after all.
+  const featureFlaw = gaps.gratuitousCore.gratuitous || anySideways || scatter;
   return featureFlaw ? "tangled" : "clean";
 }
 
@@ -276,7 +341,7 @@ export function runGrade() {
   const graph = loadGraph();
   const p1 = runConcepts();
   const kernelSet = new Set(p1.bands.kernel);
-  const { conceptOf } = assignConcepts(graph);
+  const { conceptOf, fileOf } = assignConcepts(graph);
   const allTestFiles = existsSync(TEST_DIR) ? listTestFiles(TEST_DIR) : [];
 
   const rows = [];
@@ -285,12 +350,18 @@ export function runGrade() {
 
     const gratuitousCore = coreHalfReuse(c.concept, graph, conceptOf);
     const scatter = testScatter(c.concept, allTestFiles);
-    const sideways = sidewaysEdges(c.concept, graph, conceptOf, kernelSet);
+    const sideways = sidewaysEdges(c.concept, graph, conceptOf, kernelSet, fileOf);
     const manifest = manifestPresence(c.concept);
     const gaps = {
       gratuitousCore,
       testScatter: scatter,
       sideways,
+      // Fix-1 observability: the cross-concept edge tally BEFORE the web-layer
+      // exclusion (rawCrossConcept) vs AFTER (domainCrossConcept). When a concept
+      // has web-orchestration edges, domain < raw.
+      sidewaysRawCrossConcept: sideways.rawCrossConcept,
+      sidewaysDomainCrossConcept: sideways.domainCrossConcept,
+      sidewaysRawClusters: sideways.rawClusters,
       manifestAbsent: !manifest.present,
       manifestPath: manifest.path,
       frameworkScatter: c.dirSpread,
@@ -299,11 +370,12 @@ export function runGrade() {
     const verdict = verdictFor(c.band, gaps);
 
     // named remediation edges: colocate (core into the feature) + cut (sideways).
-    // Only TANGLED concepts carry remediation — a clean-lib concept's gratuitous
-    // core is the expected shape of an unregistered domain library, not debt, so
-    // it earns no colocate edge.
+    // IMPROVABLE and TANGLED concepts carry remediation — both have a concrete,
+    // named thing to fix. A clean / clean-lib concept's gratuitous core (if any)
+    // is the expected shape of a pristine domain library and earns no edge.
+    const remediable = verdict === "tangled" || verdict === "improvable";
     const colocate =
-      gratuitousCore.gratuitous && verdict === "tangled"
+      gratuitousCore.gratuitous && remediable
         ? [
             {
               what: c.concept + " core-half → feature folder",
@@ -313,10 +385,9 @@ export function runGrade() {
             },
           ]
         : [];
-    const cut =
-      verdict === "tangled"
-        ? sideways.map((s) => ({ edge: c.concept + " → " + s.to, edges: s.edges }))
-        : [];
+    const cut = remediable
+      ? sideways.map((s) => ({ edge: c.concept + " → " + s.to, edges: s.edges }))
+      : [];
 
     rows.push({
       concept: c.concept,
@@ -330,9 +401,10 @@ export function runGrade() {
     });
   }
 
-  // order: tangled first (most actionable), then the two clean verdicts, then
-  // kernel; within a verdict the worst sideways/scatter offenders lead.
-  const VERDICT_ORDER = { tangled: 0, "clean-lib": 1, clean: 2, kernel: 3 };
+  // order: tangled first (most actionable), then improvable, then the two clean
+  // verdicts, then kernel; within a verdict the worst sideways/scatter offenders
+  // lead.
+  const VERDICT_ORDER = { tangled: 0, improvable: 1, "clean-lib": 2, clean: 3, kernel: 4 };
   rows.sort(
     (a, b) =>
       VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
@@ -350,12 +422,14 @@ export function runGrade() {
       gratuitousExternalPct: GRATUITOUS_EXTERNAL_PCT,
       testHomeTarget: TEST_HOME_TARGET,
       minSideways: MIN_SIDEWAYS,
+      realSidewaysCluster: REAL_SIDEWAYS_CLUSTER,
     },
     counts: {
       total: rows.length,
       kernel: rows.filter((r) => r.verdict === "kernel").length,
       clean: rows.filter((r) => r.verdict === "clean").length,
       cleanLib: rows.filter((r) => r.verdict === "clean-lib").length,
+      improvable: rows.filter((r) => r.verdict === "improvable").length,
       tangled: tangled.length,
     },
     concepts: rows,
@@ -363,7 +437,13 @@ export function runGrade() {
 }
 
 // ── human output ─────────────────────────────────────────────────────────────
-const VERDICT_GLYPH = { kernel: "▓", clean: "░", "clean-lib": "▒", tangled: "✗" };
+const VERDICT_GLYPH = {
+  kernel: "▓",
+  clean: "░",
+  "clean-lib": "▒",
+  improvable: "▚",
+  tangled: "✗",
+};
 
 function pad(s, n) {
   s = String(s);
@@ -381,8 +461,9 @@ function printHuman(res) {
   out(`cqv8 P3 — grade pass (five measured gaps)\n`);
   out(
     `${res.graph.nodes} nodes · ${res.graph.edges} edges · ` +
-      `${res.counts.tangled} tangled · ${res.counts.cleanLib} clean-lib · ` +
-      `${res.counts.clean} clean · ${res.counts.kernel} kernel\n`
+      `${res.counts.tangled} tangled · ${res.counts.improvable} improvable · ` +
+      `${res.counts.cleanLib} clean-lib · ${res.counts.clean} clean · ` +
+      `${res.counts.kernel} kernel\n`
   );
   out(`${bar}\n\n`);
 
