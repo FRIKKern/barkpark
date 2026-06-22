@@ -1,9 +1,9 @@
-defmodule Barkpark.Media.Checkout do
+defmodule Barkpark.Media.Storage.Checkout do
   @moduledoc "Editorial checkout lock on `mediaAsset` documents."
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
 
   @asset_type "mediaAsset"
 

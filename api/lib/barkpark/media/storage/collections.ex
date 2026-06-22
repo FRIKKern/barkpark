@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Collections do
+defmodule Barkpark.Media.Storage.Collections do
   @moduledoc """
   Folder and virtual media collections — membership queries and member CRUD.
   """
@@ -8,7 +8,7 @@ defmodule Barkpark.Media.Collections do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Media
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
   @collection_type "mediaCollection"

@@ -1,6 +1,6 @@
-defmodule Barkpark.Media.MediaFileTest do
+defmodule Barkpark.Media.Storage.MediaFileTest do
   @moduledoc """
-  Unit + integration tests for Barkpark.Media.MediaFile.changeset/2.
+  Unit + integration tests for Barkpark.Media.Storage.MediaFile.changeset/2.
 
   Changeset tests that don't touch the DB run with async: true (they are
   pure Ecto.Changeset traversals).  The unique-constraint test requires
@@ -15,7 +15,7 @@ defmodule Barkpark.Media.MediaFileTest do
 
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 

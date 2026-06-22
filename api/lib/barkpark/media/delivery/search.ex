@@ -14,7 +14,7 @@ defmodule Barkpark.Media.Delivery.Search do
   import Ecto.Query
   import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
   alias Barkpark.Media.Delivery.Retriever, as: MediaRetriever
   alias Barkpark.Search.{QueryParser, QueryPipeline, SurfaceConfigs}

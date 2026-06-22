@@ -22,7 +22,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Content, Media, Repo, Sharing, Tenancy}
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Sharing.Links
 
   @dataset "production"

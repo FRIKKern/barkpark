@@ -14,7 +14,7 @@ defmodule BarkparkWeb.StudioScopeP0Test do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Media
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
   alias BarkparkWeb.Studio.PresenceState
 

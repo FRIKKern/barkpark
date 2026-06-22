@@ -3,7 +3,7 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
 
   alias Barkpark.Auth
   alias Barkpark.Media
-  alias Barkpark.Media.SignedUrl
+  alias Barkpark.Media.Storage.SignedUrl
   alias Barkpark.Plugins.Media.Assets
 
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="

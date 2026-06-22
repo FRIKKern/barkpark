@@ -17,7 +17,7 @@ defmodule BarkparkWeb.SharedMediaTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Media, Sharing}
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
   import Barkpark.TenancyFixtures

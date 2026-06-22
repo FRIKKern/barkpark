@@ -27,7 +27,7 @@ defmodule Barkpark.MediaTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Media
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
   @upload_dir Application.compile_env!(:barkpark, :media_upload_dir)

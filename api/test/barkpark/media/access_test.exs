@@ -1,6 +1,6 @@
-defmodule Barkpark.Media.AccessTest do
+defmodule Barkpark.Media.Storage.AccessTest do
   @moduledoc """
-  Unit tests for Barkpark.Media.Access — pure logic, no DB calls.
+  Unit tests for Barkpark.Media.Storage.Access — pure logic, no DB calls.
 
   Every test builds minimal structs (Plug.Conn, Document, MediaFile) inline so
   the suite is async-safe and runs without a sandbox.
@@ -10,8 +10,8 @@ defmodule Barkpark.Media.AccessTest do
 
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Access
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.Access
+  alias Barkpark.Media.Storage.MediaFile
 
   # ---------------------------------------------------------------------------
   # Helpers
@@ -259,6 +259,7 @@ defmodule Barkpark.Media.AccessTest do
     test "token-visibility doc with anon user returns no delivery-gated perms" do
       token_doc = doc(%{"bp_visibility" => "token"})
       perms = Access.permissions(anon_conn(), file(), token_doc)
+
       # Without auth or signed URL, delivery_ok? is false → view/preview/use_original filtered out
       refute "view" in perms
       refute "use_original" in perms

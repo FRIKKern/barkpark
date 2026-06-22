@@ -10,7 +10,7 @@ defmodule Barkpark.Plugins.Media.Assets do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
   @asset_type "mediaAsset"
@@ -107,7 +107,7 @@ defmodule Barkpark.Plugins.Media.Assets do
   NULL-tolerant workspace envelope for an asset-doc read, binding against the
   FIRST named binding (`[d]`) so it composes with any `Document` query.
 
-  Public so the relation graph (`Barkpark.Media.Relations`) reuses the EXACT
+  Public so the relation graph (`Barkpark.Media.Storage.Relations`) reuses the EXACT
   same envelope on its back-link query instead of hand-rolling (and silently
   diverging from) the scope clause that closes the cross-tenant leak.
 
@@ -146,7 +146,7 @@ defmodule Barkpark.Plugins.Media.Assets do
   @doc """
   NULL-tolerant dataset envelope for an asset-doc read, binding against the
   FIRST named binding (`[d]`). Public for the same reason as
-  `scope_asset_workspace/3` — `Barkpark.Media.Relations` reuses it verbatim.
+  `scope_asset_workspace/3` — `Barkpark.Media.Storage.Relations` reuses it verbatim.
 
   Resolves the dataset STRING → dataset_id within the read's project scope
   (opts :project_id, else the seeded Default project) and filters by

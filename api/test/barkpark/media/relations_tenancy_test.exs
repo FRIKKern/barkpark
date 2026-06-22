@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.RelationsTenancyTest do
+defmodule Barkpark.Media.Storage.RelationsTenancyTest do
   @moduledoc """
   P0 cross-workspace relations leak (barkpark-m21z).
 
@@ -33,7 +33,7 @@ defmodule Barkpark.Media.RelationsTenancyTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Relations
+  alias Barkpark.Media.Storage.Relations
   alias Barkpark.Tenancy
 
   @asset_type "mediaAsset"

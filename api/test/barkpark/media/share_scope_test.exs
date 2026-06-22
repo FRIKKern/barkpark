@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.ShareScopeTest do
+defmodule Barkpark.Media.Storage.ShareScopeTest do
   @moduledoc """
   P0 cross-workspace share-link WRITE leak (barkpark-ukzs).
 
@@ -41,7 +41,7 @@ defmodule Barkpark.Media.ShareScopeTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Share
+  alias Barkpark.Media.Storage.Share
 
   @collection_type "mediaCollection"
   # Deliberately the SAME dataset STRING across workspaces — isolation must

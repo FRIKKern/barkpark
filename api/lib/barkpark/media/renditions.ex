@@ -9,7 +9,7 @@ defmodule Barkpark.Media.Renditions do
 
   alias Barkpark.Media
   alias Barkpark.Media.ImageBackend
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
 
   @presets %{
     "thumb" => %{max_width: 320, max_height: 320, format: "jpg", quality: 80},

@@ -6,10 +6,10 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
 
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Access
+  alias Barkpark.Media.Storage.Access
   alias Barkpark.Media.Delivery.Cdn
   alias Barkpark.Media.Delivery.Urls
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Plugins.Registry
 

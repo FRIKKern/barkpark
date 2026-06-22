@@ -1,11 +1,12 @@
-defmodule Barkpark.Media.Access do
+defmodule Barkpark.Media.Storage.Access do
   @moduledoc """
   Per-asset delivery and edit permissions (WoodWing-style governance plane).
   """
 
   alias Barkpark.Auth
   alias Barkpark.Content.Document
-  alias Barkpark.Media.{MediaFile, SignedUrl}
+  alias Barkpark.Media.Storage.SignedUrl
+  alias Barkpark.Media.Storage.MediaFile
 
   @type level :: :view | :preview | :original | :edit_metadata
 

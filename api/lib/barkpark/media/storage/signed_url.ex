@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.SignedUrl do
+defmodule Barkpark.Media.Storage.SignedUrl do
   @moduledoc """
   HMAC signatures for public media embed URLs (WoodWing `appendRequestSecret` style).
 
