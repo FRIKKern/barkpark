@@ -5,7 +5,7 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B− · 71 / 100
+## Codebase grade — B− · 72 / 100
 
 Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live from the dependency graph (`node tooling/quality/quality.mjs`):
 
@@ -13,9 +13,9 @@ Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite 
 |---|--:|---|--:|---|--:|
 | Architecture | 100 | Consistency | 78 | Tested | 55 |
 | Duplication | 100 | Reliability | 65 | Hotspots | 48 |
-| Dead-code | 100 | Evaluated | 100 | **Modularity** | **31** |
+| Dead-code | 100 | Evaluated | 100 | **Modularity** | **38** |
 
-Weighted **71 / 100 (B−)**. The lowest three — **Modularity · Hotspots · Tested** — are Cody's live worklist; every fix is graded, gated, and re-scored against the dependency graph, so the number only moves on real, verified improvement (Modularity climbed **17→31** — C+→B− — as the `content`, `studio_components`, and `render` god-modules were decomposed under threshold).
+Weighted **72 / 100 (B−)**. The lowest three — **Modularity · Hotspots · Tested** — are Cody's live worklist; every fix is graded, gated, and re-scored against the dependency graph, so the number only moves on real, verified improvement (Modularity climbed **17→38** — C+ 68 → B− 72 — as the `content`, `studio_components`, `render`, and `registry` god-modules were decomposed behind facades).
 
 ## Get started
 
