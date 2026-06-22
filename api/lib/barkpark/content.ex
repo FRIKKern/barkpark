@@ -30,6 +30,7 @@ defmodule Barkpark.Content do
     Edge,
     Envelope,
     Export,
+    Labels,
     MutationEvent,
     Revision,
     SchemaDefinition,
@@ -319,130 +320,28 @@ defmodule Barkpark.Content do
     |> Map.new(fn d -> {d.doc_id, d} end)
   end
 
+  # ── Reference / codelist labels (extracted → Content.Labels) ───────────────
+  #
+  # Public `reference_title/4` and `codelist_label/3` keep their facade entry
+  # points (explicit wrappers because `reference_title/4` carries a default
+  # `opts \\ []`). The private render-opts builders delegate too, so the paper /
+  # write paths inside this module call `Labels.render_opts(...)` etc.
+
   @doc """
   Resolve a referenced document's display title from a stored reference value.
 
-  `value` is a plain doc-id string (the v1 reference-field persistence model);
-  `ref_type` is the optional target schema (`""` when a paper field-reference
-  block has no refType set). Returns the title of the matching document, or the
-  original `value` as a fallback when no document is found / `value` is blank.
-
-  Cheap by design — a single keyed read on `(doc_id, dataset)`, narrowed
-  by `type` when `ref_type` is non-empty. The published id is preferred (a
-  reference value stores the published id); both the published row and its
-  `drafts.` twin satisfy the `doc_id IN (...)` clause, so an unpublished target
-  still resolves. Used by the View-mode renderer to show the title instead of
-  the raw id.
-
-  NEVER raises on a non-unique `doc_id`. When `ref_type` is empty there is no
-  type narrowing, so the same `doc_id` can match several rows (e.g. `p1` exists
-  as both a `book` and a `post`). We therefore use `Repo.all` + an explicit
-  in-Elixir pick (published row before its `drafts.` twin) instead of
-  `Repo.one`, which would raise `Ecto.MultipleResultsError` if the `limit(1)`
-  guard were ever dropped.
+  Delegates to `Barkpark.Content.Labels.reference_title/4`.
   """
   @spec reference_title(String.t() | nil, String.t() | nil, String.t(), keyword()) :: String.t()
-  def reference_title(value, ref_type, dataset, opts \\ [])
-
-  def reference_title(value, _ref_type, _dataset, _opts) when value in [nil, ""],
-    do: value || ""
-
-  def reference_title(value, ref_type, dataset, opts) when is_binary(value) do
-    pub_id = published_id(value)
-    draft = draft_id(pub_id)
-
-    query =
-      Document
-      |> scope_to_dataset(dataset, opts)
-      |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
-      # Scope the reference resolution to the caller's tenant when supplied so a
-      # reference value never resolves a same-id doc in another workspace
-      # (barkpark-af50). Render-pipeline callers that pass no scope keep the
-      # explicit-global behaviour via scope_to_workspace_or_global/3.
-      |> scope_to_workspace_or_global(
-        Keyword.get(opts, :workspace_id),
-        Keyword.get(opts, :project_id)
-      )
-      |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
-
-    query =
-      if is_binary(ref_type) and ref_type != "" do
-        where(query, [d], d.type == ^ref_type)
-      else
-        query
-      end
-
-    # Repo.all + List.first: the published row (CASE = 0) sorts ahead of its
-    # `drafts.` twin (CASE = 1), so the first row is the published-preferred
-    # pick. Multiple-type matches (empty ref_type) never raise.
-    case query |> Repo.all() |> List.first() do
-      %Document{title: title} when is_binary(title) and title != "" -> title
-      _ -> value
-    end
-  end
+  def reference_title(value, ref_type, dataset, opts \\ []),
+    do: Labels.reference_title(value, ref_type, dataset, opts)
 
   @doc """
   Resolve a codelist CODE to its human LABEL for View-mode rendering.
 
-  Looks the code up in the registered codelist `(plugin, codelist_id)` via
-  `Barkpark.Content.Codelists.lookup/4` and returns its preferred-language
-  label. Falls back to the raw `code` when the codelist is unregistered, the
-  code is unknown, or `code`/`codelist_id` is blank. Dataset-independent —
-  the codelist registry is keyed by `(plugin, list_id)`, not by dataset.
+  Delegates to `Barkpark.Content.Labels.codelist_label/3`.
   """
-  @spec codelist_label(String.t() | nil, String.t() | nil, String.t() | nil) :: String.t()
-  def codelist_label(plugin, codelist_id, code)
-
-  def codelist_label(_plugin, _codelist_id, code) when code in [nil, ""], do: code || ""
-
-  def codelist_label(plugin, codelist_id, code)
-      when is_binary(plugin) and is_binary(codelist_id) and codelist_id != "" and is_binary(code) do
-    case Barkpark.Content.Codelists.lookup(plugin, codelist_id, code) do
-      %{label: label} when is_binary(label) and label != "" -> label
-      _ -> code
-    end
-  end
-
-  def codelist_label(_plugin, _codelist_id, code) when is_binary(code), do: code
-
-  # Render options carrying the resolvers bound to a dataset. Passed to
-  # `Render.render_block/2` / `render_blocks/2` so the View-mode
-  # `field-reference` row shows the referenced doc's TITLE instead of the raw
-  # id, and the `codelist` row shows the selected code's LABEL instead of the
-  # raw code; everything else in `Render` stays pure.
-  defp render_opts(dataset) do
-    %{
-      ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset) end,
-      codelist_resolver: fn plugin, codelist_id, code ->
-        codelist_label(plugin, codelist_id, code)
-      end
-    }
-  end
-
-  # The same resolvers as `render_opts/1`, plus the per-doc render `:style`
-  # when the paper is marked `"article"`. Threaded into `Render.render_blocks/2`
-  # so an article paper's body_html cache (and delta fragments) come out in the
-  # article palette. A nil / non-"article" style adds nothing → email default,
-  # byte-unchanged from `render_opts/1`.
-  defp paper_render_opts(dataset, "article"), do: Map.put(render_opts(dataset), :style, :article)
-  defp paper_render_opts(dataset, _style), do: render_opts(dataset)
-
-  # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs
-  # wins (so an ingest/POST can set it), else the existing doc's stored style is
-  # preserved (a partial update never silently demotes an article paper), else
-  # nil (the email default). Only "article" is meaningful; anything else is
-  # normalized away so we never persist a stray marker.
-  defp paper_style(attrs, existing) do
-    explicit = attrs["style"]
-    existing_style = existing && get_in(existing.content || %{}, ["style"])
-
-    cond do
-      explicit == "article" -> "article"
-      is_binary(explicit) -> nil
-      existing_style == "article" -> "article"
-      true -> nil
-    end
-  end
+  defdelegate codelist_label(plugin, codelist_id, code), to: Labels
 
   @doc """
   Fetch a document with draft-first preference. Returns the draft if it
@@ -616,7 +515,7 @@ defmodule Barkpark.Content do
         |> Map.drop(["title", "status"])
         |> Map.merge(build_content(unbound_params, schema))
         |> Map.put("blocks", new_blocks)
-        |> Projection.project(new_blocks, render_opts(dataset))
+        |> Projection.project(new_blocks, Labels.render_opts(dataset))
 
       _ ->
         # Merge over the existing content instead of replacing it: a key
@@ -936,7 +835,7 @@ defmodule Barkpark.Content do
     content =
       provided
       |> Map.put("blocks", blocks)
-      |> Projection.project(blocks, render_opts(dataset))
+      |> Projection.project(blocks, Labels.render_opts(dataset))
 
     Map.put(attrs, "content", content)
   end
@@ -2057,7 +1956,7 @@ defmodule Barkpark.Content do
       # the full block list) and the projected content[fieldName] /
       # content["body"] keys, whose html also embeds the rendered grid.
       # Projection remains the SOLE writer of the projected keys.
-      render_opts = paper_render_opts(doc.dataset, Map.get(content, "style"))
+      render_opts = Labels.paper_render_opts(doc.dataset, Map.get(content, "style"))
 
       content =
         case content do
@@ -2316,7 +2215,7 @@ defmodule Barkpark.Content do
 
     case content && Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        Map.put(attrs, "content", Projection.project(content, blocks, render_opts(dataset)))
+        Map.put(attrs, "content", Projection.project(content, blocks, Labels.render_opts(dataset)))
 
       _ ->
         attrs
@@ -3788,8 +3687,8 @@ defmodule Barkpark.Content do
     # attrs; otherwise it sticks at whatever the existing doc already carries
     # (so a partial update never silently demotes an article paper). Threaded
     # into render_opts so the body_html cache is rendered in the article palette.
-    style = paper_style(attrs, existing)
-    render_opts = paper_render_opts(dataset, style)
+    style = Labels.paper_style(attrs, existing)
+    render_opts = Labels.paper_render_opts(dataset, style)
 
     body_html =
       cond do
@@ -3933,7 +3832,7 @@ defmodule Barkpark.Content do
       # Carry the doc's stored article marker into the render so both the
       # body_html cache and the delta fragment match the article palette.
       style = get_in(doc.content || %{}, ["style"])
-      render_opts = paper_render_opts(dataset, style)
+      render_opts = Labels.paper_render_opts(dataset, style)
       body_html = Render.render_blocks(new_blocks, render_opts)
 
       fragment_html =
@@ -4041,7 +3940,7 @@ defmodule Barkpark.Content do
         true ->
           rev = paper_next_rev(doc)
           style = get_in(doc.content || %{}, ["style"])
-          render_opts = paper_render_opts(dataset, style)
+          render_opts = Labels.paper_render_opts(dataset, style)
           body_html = Render.render_blocks(new_blocks, render_opts)
 
           content =
@@ -4189,7 +4088,7 @@ defmodule Barkpark.Content do
         # Project-on-write — the SOLE writer of content[fieldName]/content["body"]
         # for this document, identical to the paper path. Bound title → "title",
         # free body blocks → content["body"].
-        |> Projection.project(new_blocks, render_opts(dataset))
+        |> Projection.project(new_blocks, Labels.render_opts(dataset))
 
       # Derive the row title from the bound title field if present (matches the
       # Classic-save title precedence), else keep the document's current title.
@@ -4431,7 +4330,7 @@ defmodule Barkpark.Content do
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
   defp maybe_project(content, blocks, dataset) when is_list(blocks) do
-    Projection.project(content, blocks, render_opts(dataset))
+    Projection.project(content, blocks, Labels.render_opts(dataset))
   end
 
   defp maybe_project(content, _blocks, _dataset), do: content
