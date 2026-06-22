@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.SearchScopeTest do
+defmodule Barkpark.Search.MediaSearchScopeTest do
   @moduledoc """
   Regression tests for two media-search bugs:
 
@@ -14,7 +14,7 @@ defmodule Barkpark.Media.SearchScopeTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Search
+  alias Barkpark.Search.MediaSearch, as: Search
 
   @dataset "test"
   @asset_type "mediaAsset"

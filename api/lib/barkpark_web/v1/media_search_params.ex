@@ -4,7 +4,7 @@ defmodule BarkparkWeb.V1.MediaSearchParams do
   @default_limit 50
   @max_limit 500
 
-  @doc "Parse query params into search options for `Barkpark.Media.Search`."
+  @doc "Parse query params into search options for `Barkpark.Search.MediaSearch`."
   @spec parse(map()) :: keyword()
   def parse(params) when is_map(params) do
     [
@@ -31,7 +31,7 @@ defmodule BarkparkWeb.V1.MediaSearchParams do
   defp parse_facets(facets) when is_binary(facets) do
     facets
     |> String.split(",", trim: true)
-    |> Enum.filter(&(&1 in Barkpark.Media.Search.facet_fields()))
+    |> Enum.filter(&(&1 in Barkpark.Search.MediaSearch.facet_fields()))
   end
 
   defp parse_facet_selections(params) do
