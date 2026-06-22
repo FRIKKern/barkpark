@@ -1,110 +1,50 @@
 defmodule Barkpark.Media.Delivery do
   @moduledoc """
-  Delivery URL builders and HTTP cache headers for media binaries.
+  media-delivery layer — the CDN / serving edge.
+
+  Turns an asset + a request into a served, cached response. This context
+  module re-exports the layer's four sub-modules so callers depend on the
+  layer, not its internals:
+
+    * `Barkpark.Media.Delivery.Urls`          — delivery URL builders + cache headers
+    * `Barkpark.Media.Delivery.Cdn`           — CDN URL prefixing + invalidation
+    * `Barkpark.Media.Delivery.AssetResponse` — unified asset JSON response shape
+    * `Barkpark.Media.Delivery.Events`        — media-lifecycle outbound webhooks
+
+  This is the TOP media layer: it depends downward on `media-storage` and
+  `media-processing` plus the content/tenancy kernel; nothing in those lower
+  layers may call up into it.
   """
 
-  alias Barkpark.Content.Document
-  alias Barkpark.Media.{Access, Cdn, MediaFile, Renditions, SignedUrl}
+  alias Barkpark.Media.Delivery.{AssetResponse, Cdn, Events, Urls}
 
-  @immutable_cache "public, max-age=31536000, immutable"
+  # ── delivery URLs + cache headers (Urls) ──────────────────────────────────
+  # Functions carrying default args (\\) are exposed as explicit thin wrappers
+  # rather than bare defdelegate so every external arity stays callable.
 
-  @doc "Original binary URL (WoodWing `originalUrl`)."
-  @spec original_url(%MediaFile{}, keyword()) :: String.t()
-  def original_url(%MediaFile{} = file, opts \\ []) do
-    maybe_sign("/media/files/#{file.path}", file, opts)
-  end
+  def original_url(file, opts \\ []), do: Urls.original_url(file, opts)
+  def thumbnail_url(file, opts \\ []), do: Urls.thumbnail_url(file, opts)
+  def preview_url(file, opts \\ []), do: Urls.preview_url(file, opts)
+  def rendition_urls(file, opts \\ []), do: Urls.rendition_urls(file, opts)
 
-  @doc "Thumbnail URL — rendition for images, original otherwise."
-  @spec thumbnail_url(%MediaFile{}, keyword()) :: String.t()
-  def thumbnail_url(%MediaFile{} = file, opts \\ []) do
-    if image?(file) do
-      maybe_sign(Renditions.url(file, "thumb"), file, opts)
-    else
-      original_url(file, opts)
-    end
-  end
+  defdelegate put_file_cache_headers(conn, full_path), to: Urls
+  defdelegate etag_for(full_path), to: Urls
 
-  @doc "Preview URL — rendition for images, original otherwise."
-  @spec preview_url(%MediaFile{}, keyword()) :: String.t()
-  def preview_url(%MediaFile{} = file, opts \\ []) do
-    if image?(file) do
-      maybe_sign(Renditions.url(file, "preview"), file, opts)
-    else
-      original_url(file, opts)
-    end
-  end
+  # ── CDN prefixing + invalidation (Cdn) ────────────────────────────────────
 
-  @doc "Map of preset → public URL for image assets."
-  @spec rendition_urls(%MediaFile{}, keyword()) :: map()
-  def rendition_urls(%MediaFile{} = file, opts \\ []) do
-    if image?(file) do
-      Map.new(Renditions.presets(), fn preset ->
-        {preset, maybe_sign(Renditions.url(file, preset), file, opts)}
-      end)
-    else
-      %{}
-    end
-  end
+  defdelegate public_url(path), to: Cdn
+  defdelegate invalidation_paths(file), to: Cdn
+  defdelegate url_map(file), to: Cdn
+  defdelegate publish(file, doc), to: Cdn
+  defdelegate invalidate(file), to: Cdn
+  defdelegate invalidate_paths(paths), to: Cdn
 
-  @doc "Apply long-lived cache + ETag headers for immutable media bytes."
-  @spec put_file_cache_headers(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
-  def put_file_cache_headers(conn, full_path) do
-    etag = etag_for(full_path)
+  # ── unified asset response shape (AssetResponse) ──────────────────────────
 
-    conn =
-      conn
-      |> Plug.Conn.put_resp_header("cache-control", @immutable_cache)
-      |> Plug.Conn.put_resp_header("etag", etag)
+  def render(file, asset_doc \\ nil, opts \\ []), do: AssetResponse.render(file, asset_doc, opts)
 
-    case Plug.Conn.get_req_header(conn, "if-none-match") do
-      [^etag | _] -> Plug.Conn.send_resp(conn, 304, "")
-      _ -> conn
-    end
-  end
+  # ── media-lifecycle webhooks (Events) ─────────────────────────────────────
 
-  @doc "Strong ETag from size + mtime."
-  @spec etag_for(String.t()) :: String.t()
-  def etag_for(full_path) do
-    case File.stat(full_path) do
-      {:ok, %File.Stat{mtime: mtime, size: size}} ->
-        mtime_unix = :calendar.datetime_to_gregorian_seconds(mtime) |> Integer.to_string(36)
-        "\"#{size}-#{mtime_unix}\""
-
-      _ ->
-        "\"unknown\""
-    end
-  end
-
-  defp maybe_sign(nil, _file, _opts), do: nil
-
-  defp maybe_sign(path, file, opts) when is_binary(path) do
-    # Scoped emission (P4 of Scoped-by-URL): URLs key off the REQUEST's
-    # scope, never the asset row — a scoped API response emits
-    # /w/<ws>/p/<proj>/media/... so the link resolves in the workspace the
-    # caller is reading, while flat responses stay byte-identical
-    # (prefix "") for every persisted-URL consumer. Prefix applied BEFORE
-    # signing so a signed URL verifies against the path actually requested
-    # on the scoped serve route.
-    path = Keyword.get(opts, :scope_prefix, "") <> path
-
-    signed =
-      if Keyword.get(opts, :sign_urls, false) and token_visibility?(Keyword.get(opts, :asset_doc)) do
-        SignedUrl.sign(path, file.id)
-      else
-        path
-      end
-
-    Cdn.public_url(signed)
-  end
-
-  defp token_visibility?(%Document{content: content}) when is_map(content) do
-    Access.visibility(%Document{content: content}) == "token"
-  end
-
-  defp token_visibility?(_), do: false
-
-  defp image?(%MediaFile{mime_type: mime}) when is_binary(mime),
-    do: String.starts_with?(mime, "image/")
-
-  defp image?(_), do: false
+  def dispatch(dataset, event, file, doc \\ nil), do: Events.dispatch(dataset, event, file, doc)
+  defdelegate build_payload(event, dataset, file, doc), to: Events
 end

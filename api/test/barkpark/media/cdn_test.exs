@@ -1,11 +1,11 @@
-defmodule Barkpark.Media.CdnTest do
+defmodule Barkpark.Media.Delivery.CdnTest do
   # async: false — this module toggles the global :media_cdn Application env, and
   # Cdn reads config straight from Application.get_env (no test-scoped injection
   # path), so concurrent tests reading :media_cdn would race. Correctness over a
   # tiny parallelism gain.
   use ExUnit.Case, async: false
 
-  alias Barkpark.Media.Cdn
+  alias Barkpark.Media.Delivery.Cdn
   alias Barkpark.Media.MediaFile
 
   setup do

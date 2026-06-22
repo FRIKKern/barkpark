@@ -11,7 +11,8 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations}
+  alias Barkpark.Media.{Access, Checkout, Relations}
+  alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 

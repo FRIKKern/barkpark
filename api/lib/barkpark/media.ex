@@ -4,7 +4,8 @@ defmodule Barkpark.Media do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Media.{Cdn, Events, MediaFile}
+  alias Barkpark.Media.Delivery.{Cdn, Events}
+  alias Barkpark.Media.MediaFile
   alias Barkpark.Plugins.Media.Assets
 
   @upload_dir Application.compile_env!(:barkpark, :media_upload_dir)
