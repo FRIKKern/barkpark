@@ -25,15 +25,14 @@ defmodule Barkpark.Content do
 
   alias Barkpark.Content.{
     Analytics,
+    Broadcast,
     Document,
     DraftId,
     Edge,
     Envelope,
     Export,
     Labels,
-    MutationEvent,
     Query,
-    Revision,
     Revisions,
     Schema,
     SchemaDefinition,
@@ -478,7 +477,7 @@ defmodule Barkpark.Content do
               existing
               |> Document.changeset(attrs)
               |> Repo.update()
-              |> tap_broadcast(dataset, type, "update", existing.rev)
+              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
 
             _ ->
               attrs = scaffold_or_initial_values(attrs, type, dataset)
@@ -486,7 +485,7 @@ defmodule Barkpark.Content do
               %Document{}
               |> Document.changeset(attrs)
               |> Repo.insert()
-              |> tap_broadcast(dataset, type, "create", nil)
+              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
           end
 
         result
@@ -708,7 +707,7 @@ defmodule Barkpark.Content do
                 {:ok, published} ->
                   # Delete the draft
                   Repo.delete(draft)
-                  tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
+                  Broadcast.tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
 
                 error ->
                   error
@@ -776,7 +775,7 @@ defmodule Barkpark.Content do
               case draft_result do
                 {:ok, draft} ->
                   Repo.delete(pub)
-                  tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
+                  Broadcast.tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
 
                 error ->
                   error
@@ -799,7 +798,7 @@ defmodule Barkpark.Content do
         prev_rev = draft.rev
 
         Repo.delete(draft)
-        |> tap_broadcast(dataset, type, "discardDraft", prev_rev)
+        |> Broadcast.tap_broadcast(dataset, type, "discardDraft", prev_rev)
 
       error ->
         error
@@ -847,7 +846,7 @@ defmodule Barkpark.Content do
             [{first_result, prev_rev} | _] =
               Enum.map(docs, fn doc -> {Repo.delete(doc), doc.rev} end)
 
-            result = tap_broadcast(first_result, dataset, type, "delete", prev_rev)
+            result = Broadcast.tap_broadcast(first_result, dataset, type, "delete", prev_rev)
             fire_after(result, :after_delete, payload)
         end
     end
@@ -888,16 +887,16 @@ defmodule Barkpark.Content do
 
       case result do
         {:ok, _} ->
-          flush_deferred_broadcasts()
+          Broadcast.flush_deferred_broadcasts()
           result
 
         _ ->
-          clear_deferred_broadcasts()
+          Broadcast.clear_deferred_broadcasts()
           result
       end
     rescue
       e ->
-        clear_deferred_broadcasts()
+        Broadcast.clear_deferred_broadcasts()
         reraise(e, __STACKTRACE__)
     end
   end
@@ -1145,7 +1144,7 @@ defmodule Barkpark.Content do
         doc
         |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
         |> Repo.update()
-        |> tap_broadcast(dataset, type, "update", prev_rev)
+        |> Broadcast.tap_broadcast(dataset, type, "update", prev_rev)
       end
 
       :ok
@@ -1754,7 +1753,7 @@ defmodule Barkpark.Content do
       doc
       |> Document.changeset(%{"content" => content, "rev" => generate_rev()})
       |> Repo.update()
-      |> tap_broadcast(doc.dataset, doc.type, "update", doc.rev)
+      |> Broadcast.tap_broadcast(doc.dataset, doc.type, "update", doc.rev)
     end
 
     :ok
@@ -1969,13 +1968,13 @@ defmodule Barkpark.Content do
               existing
               |> Document.changeset(attrs)
               |> Repo.update()
-              |> tap_broadcast(dataset, type, "update", existing.rev)
+              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
 
             _ ->
               %Document{}
               |> Document.changeset(attrs)
               |> Repo.insert()
-              |> tap_broadcast(dataset, type, "create", nil)
+              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
           end
 
         result
@@ -2407,8 +2406,8 @@ defmodule Barkpark.Content do
     * `documents:ws:<workspace_id>:<dataset>`    — `{:document_changed, msg}`
       (only when the doc carries a workspace_id)
 
-  This module stays the single owner of the topic shapes — callers never
-  build topic strings themselves.
+  Extracted to `Content.Broadcast`, which is the single owner of the topic
+  shapes — callers never build topic strings themselves.
 
   ## Options
     * `:event_id` — the caller's `mutation_events` row id. REQUIRED for the
@@ -2427,233 +2426,8 @@ defmodule Barkpark.Content do
   """
   @spec broadcast_document_mutation(Document.t(), String.t(), keyword()) :: :ok
   def broadcast_document_mutation(%Document{} = doc, mutation, opts \\ [])
-      when is_binary(mutation) do
-    event_id = Keyword.get(opts, :event_id)
-    previous_rev = Keyword.get(opts, :previous_rev)
-    dataset = doc.dataset
-
-    msg = %{
-      event_id: event_id,
-      type: doc.type,
-      mutation: mutation,
-      action: :mutate,
-      doc_id: doc.doc_id,
-      rev: doc.rev,
-      previous_rev: previous_rev,
-      workspace_id: doc.workspace_id,
-      project_id: doc.project_id,
-      document: Envelope.render(doc),
-      doc: %{
-        doc_id: doc.doc_id,
-        title: doc.title,
-        status: doc.status,
-        content: doc.content,
-        updated_at: doc.updated_at
-      },
-      sender: self()
-    }
-
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      "documents:#{dataset}",
-      {:document_changed, msg}
-    )
-
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      doc_topic(published_id(doc.doc_id), doc.type, doc.workspace_id, dataset),
-      {:doc_updated, msg}
-    )
-
-    if doc.workspace_id do
-      Phoenix.PubSub.broadcast(
-        Barkpark.PubSub,
-        "documents:ws:#{doc.workspace_id}:#{dataset}",
-        {:document_changed, msg}
-      )
-    end
-
-    :ok
-  end
-
-  defp tap_broadcast(result, dataset, type, action, prev_rev) do
-    case result do
-      {:ok, doc} ->
-        save_revision(doc, type, dataset, action)
-        ev = save_event(doc, type, dataset, action, prev_rev)
-
-        msg = %{
-          event_id: ev.id,
-          type: type,
-          mutation: action,
-          action: :mutate,
-          doc_id: doc.doc_id,
-          rev: doc.rev,
-          previous_rev: prev_rev,
-          # Additive workspace/project context (LOCKED #10): existing
-          # subscribers ignore unknown keys; the nextjs revalidate consumer
-          # and workspace-scoped subscribers filter on these.
-          workspace_id: doc.workspace_id,
-          project_id: doc.project_id,
-          document: Envelope.render(doc),
-          doc: %{
-            doc_id: doc.doc_id,
-            title: doc.title,
-            status: doc.status,
-            content: doc.content,
-            updated_at: doc.updated_at
-          },
-          sender: self()
-        }
-
-        global_topic = "documents:#{dataset}"
-
-        # Workspace-scope the per-doc topic (barkpark-rwva, P1 sibling of
-        # barkpark-n56v). doc_ids/pubids are per-workspace, so the old
-        # workspace-less `doc:<dataset>:<type>:<pubid>` topic collapsed two
-        # tenants' colliding-id docs onto ONE topic — an editor in A could
-        # receive B's `{:doc_updated,…}`. Stamping the doc's workspace_id keeps
-        # them distinct; StudioLive subscribes with current_workspace.id and
-        # both sides normalize nil identically (see doc_topic/3).
-        doc_topic = doc_topic(published_id(doc.doc_id), type, doc.workspace_id, dataset)
-
-        maybe_broadcast(global_topic, {:document_changed, msg})
-        maybe_broadcast(doc_topic, {:doc_updated, msg})
-
-        # Additional workspace-scoped topic so consumers can subscribe by
-        # workspace without filtering the global stream. ADDITIVE — the
-        # global `documents:#{dataset}` topic above is untouched.
-        if doc.workspace_id do
-          maybe_broadcast(
-            "documents:ws:#{doc.workspace_id}:#{dataset}",
-            {:document_changed, msg}
-          )
-        end
-
-        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id,
-          workspace_id: doc.workspace_id,
-          project_id: doc.project_id
-        )
-
-        {:ok, doc}
-
-      error ->
-        error
-    end
-  end
-
-  # Defer if we're inside a transaction; broadcast immediately otherwise.
-  defp maybe_broadcast(topic, msg) do
-    if Repo.in_transaction?() do
-      queue = Process.get(:barkpark_deferred_broadcasts, [])
-      Process.put(:barkpark_deferred_broadcasts, [{topic, msg} | queue])
-    else
-      Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, msg)
-    end
-  end
-
-  # Defer webhook dispatch when inside a transaction, fire immediately otherwise.
-  # `opts` carries `:workspace_id` / `:project_id` so the delivered payload
-  # emits workspace/project-scoped sync-tags.
-  defp maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts) do
-    if Repo.in_transaction?() do
-      queue = Process.get(:barkpark_deferred_webhooks, [])
-
-      Process.put(
-        :barkpark_deferred_webhooks,
-        [{dataset, action, type, doc_id, document, event_id, opts} | queue]
-      )
-    else
-      Barkpark.Webhooks.Dispatcher.dispatch_async(
-        dataset,
-        action,
-        type,
-        doc_id,
-        document,
-        event_id,
-        opts
-      )
-    end
-  end
-
-  # Flush broadcasts queued during a successful transaction, preserving
-  # their original order (the queue is built by prepending).
-  defp flush_deferred_broadcasts do
-    queue = Process.delete(:barkpark_deferred_broadcasts) || []
-
-    queue
-    |> Enum.reverse()
-    |> Enum.each(fn {topic, msg} ->
-      Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, msg)
-    end)
-
-    webhook_queue = Process.delete(:barkpark_deferred_webhooks) || []
-
-    webhook_queue
-    |> Enum.reverse()
-    |> Enum.each(fn {dataset, action, type, doc_id, document, event_id, opts} ->
-      Barkpark.Webhooks.Dispatcher.dispatch_async(
-        dataset,
-        action,
-        type,
-        doc_id,
-        document,
-        event_id,
-        opts
-      )
-    end)
-  end
-
-  defp clear_deferred_broadcasts do
-    Process.delete(:barkpark_deferred_broadcasts)
-    Process.delete(:barkpark_deferred_webhooks)
-    :ok
-  end
-
-  defp save_event(doc, type, dataset, action, prev_rev) do
-    %MutationEvent{}
-    |> Ecto.Changeset.change(%{
-      dataset: dataset,
-      type: type,
-      doc_id: doc.doc_id,
-      mutation: action,
-      rev: doc.rev,
-      previous_rev: prev_rev,
-      document: Envelope.render(doc),
-      # Stamp the tenancy scope from the source document so workspace-scoped
-      # analytics (recent_activity) only surface a workspace's own events.
-      # `dataset_id` is the authoritative dataset leaf (the `dataset` STRING is
-      # the mirror): without it, recent_activity's dataset_id-scoped read would
-      # miss this event and same-named datasets across projects would conflate.
-      workspace_id: doc.workspace_id,
-      project_id: doc.project_id,
-      dataset_id: doc.dataset_id,
-      inserted_at: DateTime.utc_now()
-    })
-    |> Repo.insert!()
-  end
-
-  defp save_revision(doc, type, dataset, action) do
-    %Revision{}
-    |> Revision.changeset(%{
-      doc_id: published_id(doc.doc_id),
-      type: type,
-      dataset: dataset,
-      dataset_id: doc.dataset_id,
-      title: doc.title,
-      status: doc.status,
-      content: doc.content,
-      action: action,
-      # Stamp the tenancy scope from the source document so workspace-scoped
-      # history reads only surface a workspace's own revisions. `dataset_id` is
-      # the authoritative dataset leaf (the `dataset` STRING is the mirror) so a
-      # dataset_id-scoped list_revisions read finds it and same-named datasets
-      # across projects no longer conflate.
-      workspace_id: doc.workspace_id,
-      project_id: doc.project_id
-    })
-    |> Repo.insert()
-  end
+      when is_binary(mutation),
+      do: Broadcast.broadcast_document_mutation(doc, mutation, opts)
 
   # ── Search (extracted → Content.Search) ───────────────────────────────────
 
@@ -2715,28 +2489,12 @@ defmodule Barkpark.Content do
   Default, both sides fall back to the literal `"global"` token, so they still
   agree.
 
-  BulldocsLive subscribes to this; writes broadcast to it.
+  BulldocsLive subscribes to this; writes broadcast to it. The topic shape is
+  owned by `Content.Broadcast` — this is a thin facade so the `\\` default arg
+  stays explicit for callers.
   """
-  def paper_topic(slug, workspace_id, dataset \\ @paper_default_dataset)
-      when is_binary(slug) do
-    "doc:ws:#{normalize_topic_ws(workspace_id)}:#{dataset}:#{@paper_type}:#{slug}"
-  end
-
-  # Normalize a (possibly nil) workspace_id into the deterministic token both
-  # the broadcast side and the subscribe side use to build a PubSub topic. A
-  # present id passes through verbatim. A `nil` id (a legacy NULL-workspace
-  # row) maps to the seeded Default workspace id — the public read path
-  # (`get_public_paper/2`) resolves into exactly that workspace, so the two
-  # sides agree. When NO Default is seeded (fresh sandbox) we fall back to a
-  # literal `"global"` token so both sides STILL agree on a non-empty value.
-  defp normalize_topic_ws(ws) when is_binary(ws) and ws != "", do: ws
-
-  defp normalize_topic_ws(_nil_or_blank) do
-    case Barkpark.Tenancy.get_default_workspace() do
-      %{id: ws_id} when is_binary(ws_id) -> ws_id
-      _ -> "global"
-    end
-  end
+  def paper_topic(slug, workspace_id, dataset \\ @paper_default_dataset),
+    do: Broadcast.paper_topic(slug, workspace_id, dataset)
 
   @doc """
   Per-doc PubSub topic for an ordinary document, SCOPED to the owning
@@ -2748,12 +2506,9 @@ defmodule Barkpark.Content do
   workspaces. The `ws:<workspace_id>` segment keeps them distinct. `pubid` is
   the PUBLISHED id (the caller applies `published_id/1`). Broadcaster
   (`tap_broadcast`) and subscriber (StudioLive `subscribe_to_doc`) MUST agree
-  on `workspace_id`; both resolve a nil id through `normalize_topic_ws/1`.
+  on `workspace_id`. Topic shape owned by `Content.Broadcast`.
   """
-  def doc_topic(pubid, type, workspace_id, dataset)
-      when is_binary(pubid) and is_binary(type) do
-    "doc:ws:#{normalize_topic_ws(workspace_id)}:#{dataset}:#{type}:#{pubid}"
-  end
+  defdelegate doc_topic(pubid, type, workspace_id, dataset), to: Broadcast
 
   @doc """
   Fetch a paper (a type-"paper" document) by slug (and dataset). Returns the
