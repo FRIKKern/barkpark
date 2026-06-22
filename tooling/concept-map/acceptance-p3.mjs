@@ -73,26 +73,39 @@ function fmt(v) {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }
 
-// ── 1. GRATUITOUS-CORE — sheets core half ~97% internal, flagged ─────────────
+// ── 1. GRATUITOUS-CORE detection (improvement-proof) ─────────────────────────
+// sheets' core-half was COLOCATED into plugins/sheets/ (the solve-it-all pass),
+// so sheets is no longer gratuitous — assert that WIN, and verify the detection
+// itself still fires on whatever concept currently carries an internal-heavy
+// core. We pick the live demonstrator dynamically (never pin sheets — a tool that
+// fixes gratuitous cores must not break when one gets fixed).
 const sheets = get("sheets");
 if (sheets) {
-  const gc = sheets.gaps.gratuitousCore;
-  // ground truth: ~233 internal vs ~7 external. Live computation lands ≈226/14;
-  // assert generous ranges around that, never the exact number.
-  inRange("sheets core-half internal inbound ~233", gc.internalInbound, 180, 280);
-  inRange("sheets core-half external inbound ~7", gc.externalInbound, 0, 30);
-  // the load-bearing claim: external share is far below the colocate threshold.
   ok(
-    "sheets core-half external% < colocate threshold",
-    gc.externalPct != null && gc.externalPct < GRATUITOUS_EXTERNAL_PCT,
-    `external% = ${gc.externalPct == null ? "n/a" : gc.externalPct.toFixed(1)} (threshold ${GRATUITOUS_EXTERNAL_PCT})`
+    "sheets gratuitous-core eliminated (core-half colocated)",
+    sheets.gaps.gratuitousCore.gratuitous === false,
+    `gratuitous = ${sheets.gaps.gratuitousCore.gratuitous}`
   );
-  ok("sheets gratuitous-core FLAGGED", gc.gratuitous === true, `gratuitous = ${gc.gratuitous}`);
-  // …and the flag produces a named colocate edge in the remediation.
+}
+const gratConcepts = res.concepts
+  .filter((c) => c.gaps.gratuitousCore?.gratuitous)
+  .sort((a, b) => (b.gaps.gratuitousCore.internalInbound || 0) - (a.gaps.gratuitousCore.internalInbound || 0));
+ok(
+  "gratuitous-core detection fires on internal-heavy concepts",
+  gratConcepts.length > 0,
+  `flagged: ${gratConcepts.slice(0, 4).map((c) => c.concept).join(", ") || "(none)"}`
+);
+if (gratConcepts.length) {
+  const demo = gratConcepts[0]; // the most internal-heavy live demonstrator
   ok(
-    "sheets carries a named colocate edge",
-    sheets.remediation.colocate.length > 0,
-    `colocate = ${JSON.stringify(sheets.remediation.colocate)}`
+    `${demo.concept} core-half external% < colocate threshold`,
+    (demo.gaps.gratuitousCore.externalPct ?? 100) < GRATUITOUS_EXTERNAL_PCT,
+    `external% = ${(demo.gaps.gratuitousCore.externalPct ?? 0).toFixed(1)} (threshold ${GRATUITOUS_EXTERNAL_PCT})`
+  );
+  ok(
+    `${demo.concept} (live gratuitous-core demo) carries a named colocate edge`,
+    demo.remediation.colocate.length > 0,
+    `colocate = ${JSON.stringify(demo.remediation.colocate)}`
   );
 }
 
@@ -140,15 +153,17 @@ if (content) ok("content grades kernel", content.verdict === "kernel", `verdict 
 if (tenancy) ok("tenancy grades kernel", tenancy.verdict === "kernel", `verdict = ${tenancy.verdict}`);
 
 // the CLEAN exemplars: clean by coupling, only a minor fixable note → improvable.
-// sheets keeps its gratuitous-core colocate edge; onixedit carries its small
+// Post-colocation sheets no longer has a gratuitous core — it stays improvable for
+// a minor note (a small sideways edge + test-scatter); onixedit carries its small
 // →settings domain cut edge. Neither is tangled debt; neither is pristine-clean.
 const onixedit = get("onixedit");
 if (sheets) {
   ok("sheets grades improvable (not tangled, not clean)", sheets.verdict === "improvable", `verdict = ${sheets.verdict}`);
   ok(
-    "sheets keeps its named colocate edge",
-    sheets.remediation.colocate.length > 0,
-    `colocate = ${JSON.stringify(sheets.remediation.colocate)}`
+    "sheets is improvable for a minor note (small sideways / scatter), gratuitous-core eliminated",
+    sheets.gaps.gratuitousCore.gratuitous === false &&
+      (sheets.gaps.sideways.length > 0 || (sheets.gaps.testScatter?.testDirs?.length || 0) > 1),
+    `gratuitous=${sheets.gaps.gratuitousCore.gratuitous} · sideways=[${sheets.gaps.sideways.map((s) => `${s.to}:${s.edges}`).join(", ") || "none"}] · testDirs=${sheets.gaps.testScatter?.testDirs?.length || 0}`
   );
   ok(
     "sheets has no thick (≥ threshold) domain sideways cluster",
