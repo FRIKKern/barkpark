@@ -75,6 +75,8 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Content.{Document, MutationEvent, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.Validation
 
   # W7-04 mutation_events kinds. Routed into the existing `mutation` text column
   # so the spine, webhooks, and listen endpoint surface task ops alongside
@@ -91,16 +93,13 @@ defmodule Barkpark.Tasks do
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
 
-  @lifecycle_statuses ~w(open in_progress blocked done cancelled)
-  @kinds ~w(task)
-
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
-  def lifecycle_statuses, do: @lifecycle_statuses
+  defdelegate lifecycle_statuses, to: Validation
 
   @doc "The `content.kind` discriminator values (only `task`)."
   @spec kinds() :: [String.t()]
-  def kinds, do: @kinds
+  defdelegate kinds, to: Validation
 
   # ─── Schema definitions (registered via seeds.exs + Plugins.Bootstrap) ─────
 
@@ -560,7 +559,7 @@ defmodule Barkpark.Tasks do
 
         # ── SYSTEM — engine-owned ledger, declared for honesty ───────────
         # `select` (one option) instead of bare string: locks the value in
-        # the Studio UI; @kinds stays the source of truth.
+        # the Studio UI; Validation.kinds/0 stays the source of truth.
         %{
           "name" => "kind",
           "title" => "Kind",
@@ -640,389 +639,65 @@ defmodule Barkpark.Tasks do
     }
   end
 
-  # ─── Validation ────────────────────────────────────────────────────────────
+  # ─── Validation (extracted → Barkpark.Tasks.Validation) ─────────────────────
 
   @doc """
   Validates the `content` map of a `type:task` document against the §1
-  field contract.
-
-  Returns `:ok` on success or `{:error, errors :: map()}` where the map's
-  keys are the field names (`"kind"`, `"lifecycle_status"`, ...) and the
-  values are lists of human-readable error messages — mirroring the
-  shape `Barkpark.Content.Validation.validate/3` returns.
-
-  Required fields: `kind` (must equal `"task"`), `lifecycle_status` (must
-  be one of `lifecycle_statuses/0`).
-
-  Shape-checked when present: `priority` (integer 0..4), `assignee`
-  (string), `dependencies` (list of strings), `parent_id` (string),
-  `claim` (map) — plus the dossier fields: `description` / `design` /
-  `design_doc` / `due_at` / `blocked_reason` / `close_reason` / `retro`
-  (strings), `papers` / `attachments` (lists of strings), `labels` /
-  `history` (lists), `estimate` / `outcome` / `history_summary` (maps),
-  `worklog` / `acceptance_criteria` (lists of maps). Top-level shape only,
-  never sub-keys — the claim-map precedent.
+  field contract. See `Barkpark.Tasks.Validation.validate_task_content/1`.
   """
   @spec validate_task_content(map() | nil) :: :ok | {:error, map()}
-  def validate_task_content(content), do: validate_kind_content("task", content)
+  defdelegate validate_task_content(content), to: Validation
 
   @doc """
-  Validates `content` against the shape for the given `kind`. Dispatches
-  to the per-kind validator; unknown kinds are rejected.
-
-  Used by the document-write paths (`Content.create_document/4`,
-  `Content.upsert_document/4`) when the `type` argument equals `"task"`.
+  Validates `content` against the shape for the given `kind`.
+  See `Barkpark.Tasks.Validation.validate_kind_content/2`.
   """
   @spec validate_kind_content(String.t(), map() | nil) :: :ok | {:error, map()}
-  def validate_kind_content(kind, content) when kind in @kinds do
-    content = content || %{}
+  defdelegate validate_kind_content(kind, content), to: Validation
 
-    errors =
-      %{}
-      |> validate_kind_field(kind, content)
-      |> validate_kind_specific(kind, content)
-
-    if errors == %{}, do: :ok, else: {:error, errors}
-  end
-
-  def validate_kind_content(other, _content) do
-    {:error, %{"kind" => ["unknown kind #{inspect(other)}; must be one of #{inspect(@kinds)}"]}}
-  end
-
-  # The shared "content.kind == <type>" check — every kind must self-identify.
-  defp validate_kind_field(errors, expected_kind, content) do
-    case Map.get(content, "kind") || Map.get(content, :kind) do
-      ^expected_kind ->
-        errors
-
-      nil ->
-        Map.put(errors, "kind", ["is required"])
-
-      other ->
-        Map.put(errors, "kind", [
-          "expected #{inspect(expected_kind)}, got #{inspect(other)}"
-        ])
-    end
-  end
-
-  # Required + shape checks for `task`. Kept tight per the plan: only what the
-  # live readers consume.
-
-  defp validate_kind_specific(errors, "task", content) do
-    errors
-    |> require_string_in(content, "lifecycle_status", @lifecycle_statuses)
-    |> check_optional_priority(content)
-    |> check_optional_string(content, "assignee")
-    |> check_optional_string(content, "parent_id")
-    |> check_optional_string_list(content, "dependencies")
-    |> check_optional_map(content, "claim")
-    # Dossier fields — shape-only-when-present, following the claim
-    # precedent (top-level shape, NO sub-key enforcement). Sub-key
-    # contracts live in the schema field descriptions (agent-facing,
-    # serialized in the capabilities manifest). Keeping these loose keeps
-    # every existing writer (bd-shim, engine CAS updates, legacy docs)
-    # green.
-    |> check_optional_string(content, "description")
-    |> check_optional_string(content, "design")
-    |> check_optional_string(content, "design_doc")
-    |> check_optional_string(content, "due_at")
-    |> check_optional_string(content, "blocked_reason")
-    |> check_optional_string(content, "close_reason")
-    |> check_optional_string(content, "retro")
-    |> check_optional_string_list(content, "papers")
-    |> check_optional_string_list(content, "attachments")
-    # any-element lists: reads already tolerate legacy W7-mirror label
-    # lists, and history elements are compactor-owned event maps —
-    # don't over-constrain either.
-    |> check_optional_list(content, "labels")
-    |> check_optional_list(content, "history")
-    |> check_optional_map(content, "estimate")
-    |> check_optional_map(content, "outcome")
-    |> check_optional_map(content, "history_summary")
-    |> check_optional_map_list(content, "worklog")
-    |> check_optional_map_list(content, "acceptance_criteria")
-  end
-
-  # ─── Per-field micro-validators ────────────────────────────────────────────
-
-  defp require_string_in(errors, content, key, allowed) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      v when is_binary(v) ->
-        if v in allowed do
-          errors
-        else
-          Map.put(errors, key, [
-            "must be one of #{inspect(allowed)}, got #{inspect(v)}"
-          ])
-        end
-
-      nil ->
-        Map.put(errors, key, ["is required (one of #{inspect(allowed)})"])
-
-      other ->
-        Map.put(errors, key, ["must be a string, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_string(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil -> errors
-      v when is_binary(v) -> errors
-      other -> Map.put(errors, key, ["must be a string when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_string_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil ->
-        errors
-
-      list when is_list(list) ->
-        if Enum.all?(list, &is_binary/1) do
-          errors
-        else
-          Map.put(errors, key, ["must be a list of strings, got #{inspect(list)}"])
-        end
-
-      other ->
-        Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_priority(errors, content) do
-    case Map.get(content, "priority") || Map.get(content, :priority) do
-      nil ->
-        errors
-
-      v when is_integer(v) and v >= 0 and v <= 4 ->
-        errors
-
-      other ->
-        Map.put(errors, "priority", ["must be an integer 0..4 when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_map(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil -> errors
-      v when is_map(v) -> errors
-      other -> Map.put(errors, key, ["must be a map when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil -> errors
-      v when is_list(v) -> errors
-      other -> Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_map_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil ->
-        errors
-
-      list when is_list(list) ->
-        if Enum.all?(list, &is_map/1) do
-          errors
-        else
-          Map.put(errors, key, ["must be a list of maps, got #{inspect(list)}"])
-        end
-
-      other ->
-        Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
-    end
-  end
-
-  # ─── W7a step 2: typed dep graph (CRUD over `task_edges`) ─────────────────
+  # ─── W7a step 2: typed dep graph (extracted → Barkpark.Tasks.Edges) ──────
 
   @doc """
-  Edge kinds in this codebase today. `blocks` is the ready-query primitive;
-  `discovered-from` records walk-back / derivation lineage between tasks.
+  Edge kinds in this codebase today. See `Barkpark.Tasks.Edges.edge_kinds/0`.
   """
   @spec edge_kinds() :: [String.t()]
-  def edge_kinds, do: Edge.kinds()
+  defdelegate edge_kinds, to: Edges
 
   @doc """
-  Add a dependency edge: `child` blocks on `parent`.
-
-  Mirrors `bd dep add <child> <parent>` — the FIRST argument depends on the
-  SECOND. The edge is stored as `from_id = child_id, to_id = parent_id`
-  so the W7-03 ready query can scan a candidate's outbound `blocks` edges
-  to find its blockers.
-
-  ## Arguments
-    * `child_id`  — binary_id of the dependent document (the task that's
-      blocked on something).
-    * `parent_id` — binary_id of the blocker document.
-    * `kind`      — `:blocks` (default), `:"discovered-from"`, or the
-      string form `"blocks"` / `"discovered-from"`. Other strings are
-      rejected by the changeset.
-
-  ## Idempotency
-
-  Re-adding the same `(from, to, kind)` triple is a no-op — the migration's
-  unique index plus `on_conflict: :nothing` swallows the duplicate without
-  raising. The returned `{:ok, edge}` carries the EXISTING edge when the
-  insert was a no-op (fetched in a second query so callers always get a
-  populated struct).
-
-  Returns `{:ok, %Edge{}}` on success, `{:error, %Ecto.Changeset{}}` on
-  validation failure (missing FK target, self-edge, unknown kind).
+  Add a dependency edge: `child` blocks on `parent`. `kind` defaults to
+  `:blocks`. See `Barkpark.Tasks.Edges.add_dep/3`.
   """
   @spec add_dep(binary(), binary(), atom() | String.t()) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_id, parent_id, kind \\ :blocks) do
-    kind_str = normalize_kind(kind)
-
-    attrs = %{from_id: child_id, to_id: parent_id, kind: kind_str}
-    changeset = Edge.changeset(%Edge{}, attrs)
-
-    if changeset.valid? do
-      # `on_conflict: :nothing` + the unique index = idempotent insert.
-      # When the row already exists Postgres skips the INSERT but Ecto still
-      # returns `{:ok, %Edge{}}` with the changeset's would-be values (the
-      # `id` is the autogenerated one Ecto stamped on the cast struct, NOT
-      # the existing row's id). To return the canonical edge — same id on
-      # repeat calls — we always read the row back by its unique tuple.
-      case Repo.insert(changeset,
-             on_conflict: :nothing,
-             conflict_target: [:from_id, :to_id, :kind]
-           ) do
-        {:ok, %Edge{}} ->
-          {:ok, fetch_edge!(child_id, parent_id, kind_str)}
-
-        {:error, %Ecto.Changeset{} = cs} ->
-          {:error, cs}
-      end
-    else
-      {:error, changeset}
-    end
-  end
+  def add_dep(child_id, parent_id, kind \\ :blocks), do: Edges.add_dep(child_id, parent_id, kind)
 
   @doc """
-  Remove the `(child_id, parent_id, kind)` edge. Always returns `:ok` —
-  removing an absent edge is a no-op (matches `bd dep rm`'s tolerance,
-  and keeps the close-time `unblock_dependents` flow simple in W7-04).
+  Remove the `(child_id, parent_id, kind)` edge.
+  See `Barkpark.Tasks.Edges.remove_dep/3`.
   """
   @spec remove_dep(binary(), binary(), atom() | String.t()) :: :ok
-  def remove_dep(child_id, parent_id, kind) do
-    kind_str = normalize_kind(kind)
-
-    from(e in Edge,
-      where: e.from_id == ^child_id and e.to_id == ^parent_id and e.kind == ^kind_str
-    )
-    |> Repo.delete_all()
-
-    :ok
-  end
+  defdelegate remove_dep(child_id, parent_id, kind), to: Edges
 
   @doc """
-  The documents `task_id` depends on — the blockers, the `to_id` side of
-  every outbound edge. The W7-03 ready query is a `NOT EXISTS` over this
-  set; this function is the higher-level read for orchestrator surfaces
-  (build pre-flight, debug `bd dep ls`).
-
-  ## Options
-    * `:kind` — filter to one kind (atom or string). Default: `:blocks`.
-      Pass `:all` to return edges of every kind.
-
-  Returns a list of `%Document{}` in insertion order of the edge.
+  The documents `task_id` depends on — the blockers.
+  `opts` defaults to `[]`. See `Barkpark.Tasks.Edges.dependencies/2`.
   """
   @spec dependencies(binary(), keyword()) :: [Document.t()]
-  def dependencies(task_id, opts \\ []) do
-    kind_opt = Keyword.get(opts, :kind, :blocks)
-
-    from(d in Document,
-      join: e in Edge,
-      as: :edge,
-      on: e.to_id == d.id,
-      where: e.from_id == ^task_id,
-      order_by: e.inserted_at,
-      select: d
-    )
-    |> maybe_filter_edge_kind(kind_opt)
-    |> Repo.all()
-  end
+  def dependencies(task_id, opts \\ []), do: Edges.dependencies(task_id, opts)
 
   @doc """
-  The documents that depend on `task_id` — the dependents, the `from_id`
-  side of every inbound edge. Called when `task_id` closes, to find which
-  rows might be newly ready (the W7-04 close→unblock sweep).
-
-  ## Options
-    * `:kind` — filter to one kind (atom or string). Default: `:blocks`.
-      Pass `:all` to return edges of every kind.
+  The documents that depend on `task_id` — the dependents.
+  `opts` defaults to `[]`. See `Barkpark.Tasks.Edges.dependents/2`.
   """
   @spec dependents(binary(), keyword()) :: [Document.t()]
-  def dependents(task_id, opts \\ []) do
-    kind_opt = Keyword.get(opts, :kind, :blocks)
-
-    from(d in Document,
-      join: e in Edge,
-      as: :edge,
-      on: e.from_id == d.id,
-      where: e.to_id == ^task_id,
-      order_by: e.inserted_at,
-      select: d
-    )
-    |> maybe_filter_edge_kind(kind_opt)
-    |> Repo.all()
-  end
+  def dependents(task_id, opts \\ []), do: Edges.dependents(task_id, opts)
 
   @doc """
   Low-level query: every edge touching `task_id` on either side.
-
-  ## Options
-    * `:direction` — `:outbound` (default — `from_id == task_id`),
-      `:inbound` (`to_id == task_id`), or `:both`.
-    * `:kind` — filter to one kind (atom or string), or `:all` (default).
+  `opts` defaults to `[]`. See `Barkpark.Tasks.Edges.edges/2`.
   """
   @spec edges(binary(), keyword()) :: [Edge.t()]
-  def edges(task_id, opts \\ []) do
-    direction = Keyword.get(opts, :direction, :outbound)
-    kind_opt = Keyword.get(opts, :kind, :all)
-
-    base =
-      case direction do
-        :outbound ->
-          from(e in Edge, as: :edge, where: e.from_id == ^task_id)
-
-        :inbound ->
-          from(e in Edge, as: :edge, where: e.to_id == ^task_id)
-
-        :both ->
-          from(e in Edge,
-            as: :edge,
-            where: e.from_id == ^task_id or e.to_id == ^task_id
-          )
-      end
-
-    base
-    |> maybe_filter_edge_kind(kind_opt)
-    |> Repo.all()
-  end
-
-  defp maybe_filter_edge_kind(query, :all), do: query
-
-  defp maybe_filter_edge_kind(query, kind) do
-    kind_str = normalize_kind(kind)
-    from([edge: e] in query, where: e.kind == ^kind_str)
-  end
-
-  # The caller may pass `:blocks` / `:"discovered-from"` / `"blocks"` /
-  # `"discovered-from"` — internally we always use the string column value.
-  defp normalize_kind(kind) when is_atom(kind), do: Atom.to_string(kind)
-  defp normalize_kind(kind) when is_binary(kind), do: kind
-
-  defp fetch_edge!(from_id, to_id, kind) do
-    Repo.one!(
-      from(e in Edge,
-        where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
-      )
-    )
-  end
+  def edges(task_id, opts \\ []), do: Edges.edges(task_id, opts)
 
   # ─── W7a step 3: dependency-aware, phase-scoped ready-queue + claim ───────
 
