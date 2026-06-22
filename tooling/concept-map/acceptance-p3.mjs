@@ -20,7 +20,11 @@
 //      flaw the grade measures, not a framework requirement.
 //   4. VERDICTS — the kernel concepts (content, tenancy) grade `kernel` (not
 //      feature-graded); sheets — tripping gratuitous-core + scatter — grades
-//      `tangled`. Verdict vocabulary is exactly {kernel, clean, tangled}.
+//      `tangled`; release and portable_doc — clean by the coupling math but lacking
+//      the plugin registration surface, with NO sideways edges and NO test-scatter
+//      — grade the new `clean-lib` (NOT tangled). media keeps its `tangled` verdict
+//      (the 42-edge sideways cluster to search is a real coupling problem). Verdict
+//      vocabulary is exactly {kernel, clean, clean-lib, tangled}.
 //   5. MANIFEST-ABSENCE — no per-feature manifest exists yet, so every concept is
 //      flagged manifest-absent (P4 introduces the schema).
 //
@@ -121,11 +125,57 @@ const tenancy = get("tenancy");
 if (content) ok("content grades kernel", content.verdict === "kernel", `verdict = ${content.verdict}`);
 if (tenancy) ok("tenancy grades kernel", tenancy.verdict === "kernel", `verdict = ${tenancy.verdict}`);
 if (sheets) ok("sheets grades tangled", sheets.verdict === "tangled", `verdict = ${sheets.verdict}`);
-const VOCAB = new Set(["kernel", "clean", "tangled"]);
+
+// the clean-nonplugin band: release + portable_doc are clean by the coupling math
+// but lack the plugin registration surface, with NO sideways and NO test-scatter.
+// They must move OUT of tangled into the new `clean-lib` verdict.
+const release = get("release");
+const portableDoc = get("portable_doc");
+if (release) {
+  ok("release grades clean-lib (not tangled)", release.verdict === "clean-lib", `verdict = ${release.verdict}`);
+  ok(
+    "release has no real coupling problem (no sideways, single test home)",
+    release.gaps.sideways.length === 0 && release.gaps.testScatter.testDirs.length <= 1,
+    `sideways = ${release.gaps.sideways.length}, testDirs = ${release.gaps.testScatter.testDirs.length}`
+  );
+  ok(
+    "release carries no remediation edges",
+    release.remediation.colocate.length === 0 && release.remediation.cut.length === 0,
+    `colocate=${release.remediation.colocate.length} cut=${release.remediation.cut.length}`
+  );
+}
+if (portableDoc) {
+  ok("portable_doc grades clean-lib (not tangled)", portableDoc.verdict === "clean-lib", `verdict = ${portableDoc.verdict}`);
+  ok(
+    "portable_doc has no real coupling problem (no sideways, single test home)",
+    portableDoc.gaps.sideways.length === 0 && portableDoc.gaps.testScatter.testDirs.length <= 1,
+    `sideways = ${portableDoc.gaps.sideways.length}, testDirs = ${portableDoc.gaps.testScatter.testDirs.length}`
+  );
+}
+
+// media stays tangled — its 42-edge sideways cluster to search is a real coupling
+// problem, registration surface or not. The new band never rescues it.
+const media = get("media");
+if (media) {
+  ok("media stays tangled (real sideways cluster)", media.verdict === "tangled", `verdict = ${media.verdict}`);
+  ok(
+    "media keeps a thick sideways cut edge",
+    media.remediation.cut.some((x) => x.edges >= 10),
+    `cut = ${media.remediation.cut.map((x) => `${x.edge}:${x.edges}`).join(", ") || "(none)"}`
+  );
+}
+
+const VOCAB = new Set(["kernel", "clean", "clean-lib", "tangled"]);
 ok(
-  "verdict vocabulary is exactly {kernel, clean, tangled}",
+  "verdict vocabulary is exactly {kernel, clean, clean-lib, tangled}",
   res.concepts.every((c) => VOCAB.has(c.verdict)),
   `verdicts = [${[...new Set(res.concepts.map((c) => c.verdict))].join(", ")}]`
+);
+// the new band sums into the count math: kernel + clean + clean-lib + tangled = total.
+ok(
+  "verdict counts sum to total",
+  res.counts.kernel + res.counts.clean + res.counts.cleanLib + res.counts.tangled === res.counts.total,
+  `${res.counts.kernel}+${res.counts.clean}+${res.counts.cleanLib}+${res.counts.tangled} vs total ${res.counts.total}`
 );
 // the kernel band is never feature-graded (no colocate/cut on a kernel concept).
 ok(

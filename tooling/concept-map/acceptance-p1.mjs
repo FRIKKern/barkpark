@@ -9,9 +9,12 @@
 //   node tooling/concept-map/acceptance-p1.mjs
 //
 // ── WHAT IT GUARANTEES (spec §1–2) ───────────────────────────────────────────
-//   1. content  AND tenancy  classify as KERNEL        (Ca > 150)
-//   2. sheets   AND onixedit classify as CLEAN-FEATURE (cohesion ≥ 0.8)
-//   3. headline numbers land within tolerance of ground truth:
+//   1. content  AND tenancy  classify as KERNEL          (Ca > 150)
+//   2. sheets   AND onixedit classify as CLEAN-FEATURE   (cohesion ≥ 0.8, registered)
+//   3. release  AND portable_doc classify CLEAN-NONPLUGIN (clean by the coupling
+//        math but lacking the plugin registration surface — same cohesion gate,
+//        no registration). The ONLY difference from sheets/onixedit is registration.
+//   4. headline numbers land within tolerance of ground truth:
 //        content  Ca   ~390   (range 360–420)
 //        tenancy  Ca   ~201   (range 180–220)
 //        sheets   cohesion ~0.87 (range 0.83–0.92)
@@ -40,6 +43,13 @@ function inRange(label, value, lo, hi) {
   checks.push({ label, ok, detail: `${fmt(value)} ∈ [${lo}, ${hi}]` });
   if (!ok) failures.push(`${label}: ${fmt(value)} not in [${lo}, ${hi}]`);
   return ok;
+}
+
+// assert a boolean condition
+function ok2(label, cond, detail) {
+  checks.push({ label, ok: !!cond, detail });
+  if (!cond) failures.push(`${label}: ${detail}`);
+  return !!cond;
 }
 
 // assert a concept's band
@@ -72,6 +82,21 @@ band("sheets", "CLEAN-FEATURE");
 band("onixedit", "CLEAN-FEATURE");
 if (sheets) inRange("sheets cohesion ≥ 0.8", sheets.cohesion, 0.8, 1.0);
 if (onixedit) inRange("onixedit cohesion ≥ 0.8", onixedit.cohesion, 0.8, 1.0);
+
+// ── 2b. CLEAN-NONPLUGIN band — release + portable_doc, clean-by-coupling but ──
+// not registered. Same cohesion gate as CLEAN-FEATURE; only registration differs.
+const release = get("release");
+const portableDoc = get("portable_doc");
+band("release", "CLEAN-NONPLUGIN");
+band("portable_doc", "CLEAN-NONPLUGIN");
+if (release) inRange("release cohesion ≥ 0.8", release.cohesion, 0.8, 1.0);
+if (portableDoc) inRange("portable_doc cohesion ≥ 0.8", portableDoc.cohesion, 0.8, 1.0);
+// they must NOT land in the registered CLEAN-FEATURE band.
+if (release) ok2("release is NOT CLEAN-FEATURE", release.band !== "CLEAN-FEATURE", `band = ${release.band}`);
+if (portableDoc) ok2("portable_doc is NOT CLEAN-FEATURE", portableDoc.band !== "CLEAN-FEATURE", `band = ${portableDoc.band}`);
+// the registered exemplars stay CLEAN-FEATURE, never the new band.
+if (sheets) ok2("sheets stays CLEAN-FEATURE (registered)", sheets.band === "CLEAN-FEATURE", `band = ${sheets.band}`);
+if (onixedit) ok2("onixedit stays CLEAN-FEATURE (registered)", onixedit.band === "CLEAN-FEATURE", `band = ${onixedit.band}`);
 
 // ── 3. headline numbers within tolerance of ground truth ─────────────────────
 if (content) inRange("content Ca ~390", content.ca, 360, 420);

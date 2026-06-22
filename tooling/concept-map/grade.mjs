@@ -36,13 +36,21 @@
 //      between it and the framework minimum is the actionable slice.
 //
 // ── THE VERDICT ──────────────────────────────────────────────────────────────
-//   kernel   — P1 put it in the KERNEL band. High Ca IS the substrate role; it is
-//              NOT graded as a feature (you do not colocate the kernel).
-//   clean    — a non-kernel concept with NO gratuitous core, NO sideways edges,
-//              and a single test home. The shape the whole capability targets.
-//   tangled  — a non-kernel concept that trips ANY feature gap (gratuitous core,
-//              sideways edges, or test-scatter). Carries the named colocate/cut
-//              edges + the scatter number so the remediation is concrete.
+//   kernel    — P1 put it in the KERNEL band. High Ca IS the substrate role; it is
+//               NOT graded as a feature (you do not colocate the kernel).
+//   clean     — a non-kernel concept with NO gratuitous core, NO sideways edges,
+//               and a single test home. The shape the whole capability targets.
+//   clean-lib — a CLEAN-NONPLUGIN concept (clean by the coupling math but lacking
+//               the plugin registration surface) whose ONLY tripped gap is the
+//               gratuitous-core flag — and that flag is expected for an internally
+//               cohesive domain lib, NOT a real coupling problem. No sideways edges,
+//               no test-scatter. release (coh 1.00, Ca 0) and portable_doc (coh
+//               0.86, Ce 0, genuinely reused) live here — pristine, just unregistered.
+//   tangled   — a non-kernel concept with a REAL coupling problem: sideways edges,
+//               test-scatter, OR a gratuitous core it cannot excuse (a registered
+//               feature, or one that ALSO trips sideways/scatter). Carries the
+//               named colocate/cut edges + the scatter number so the remediation
+//               is concrete.
 //
 // Dependency-free. ESM, node: builtins only. Reuses P1 (runConcepts) for the
 // bands + per-concept coupling, the real symbol graph for the core-half + sideways
@@ -55,6 +63,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
+import { isRegistered } from "./registration.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -241,15 +250,24 @@ function manifestPresence(concept) {
 }
 
 // ── the verdict ──────────────────────────────────────────────────────────────
-// kernel concepts are not feature-graded. A non-kernel concept is clean only if
-// it trips NONE of the feature gaps (no gratuitous core, no sideways edges, one
-// test home); otherwise tangled.
+// kernel concepts are not feature-graded. Otherwise we read the three feature
+// gaps. A "real" coupling problem is sideways edges OR test-scatter.
+//
+// The gratuitous-core flag means a concept's core half is reused almost entirely
+// from inside its own feature. For a registered plugin that is a colocate signal.
+// But for a CLEAN-NONPLUGIN concept — clean by the coupling math, just lacking the
+// plugin registration surface — internal-only reuse is the EXPECTED shape of a
+// pristine domain library, not architectural debt. So when a CLEAN-NONPLUGIN
+// concept trips ONLY the gratuitous-core gap (no sideways edges, no test-scatter),
+// we excuse it and grade `clean-lib` instead of `tangled`. The instant it ALSO
+// trips a real coupling problem, it is tangled like anything else.
 function verdictFor(band, gaps) {
   if (band === "KERNEL") return "kernel";
-  const featureFlaw =
-    gaps.gratuitousCore.gratuitous ||
-    gaps.sideways.length > 0 ||
-    gaps.testScatter.testDirs.length > TEST_HOME_TARGET;
+  const sideways = gaps.sideways.length > 0;
+  const scatter = gaps.testScatter.testDirs.length > TEST_HOME_TARGET;
+  const realProblem = sideways || scatter;
+  if (band === "CLEAN-NONPLUGIN" && !realProblem) return "clean-lib";
+  const featureFlaw = gaps.gratuitousCore.gratuitous || realProblem;
   return featureFlaw ? "tangled" : "clean";
 }
 
@@ -281,8 +299,11 @@ export function runGrade() {
     const verdict = verdictFor(c.band, gaps);
 
     // named remediation edges: colocate (core into the feature) + cut (sideways).
+    // Only TANGLED concepts carry remediation — a clean-lib concept's gratuitous
+    // core is the expected shape of an unregistered domain library, not debt, so
+    // it earns no colocate edge.
     const colocate =
-      gratuitousCore.gratuitous && c.band !== "KERNEL"
+      gratuitousCore.gratuitous && verdict === "tangled"
         ? [
             {
               what: c.concept + " core-half → feature folder",
@@ -293,7 +314,7 @@ export function runGrade() {
           ]
         : [];
     const cut =
-      c.band !== "KERNEL"
+      verdict === "tangled"
         ? sideways.map((s) => ({ edge: c.concept + " → " + s.to, edges: s.edges }))
         : [];
 
@@ -309,9 +330,9 @@ export function runGrade() {
     });
   }
 
-  // order: tangled first (most actionable), then clean, then kernel; within a
-  // verdict the worst sideways/scatter offenders lead.
-  const VERDICT_ORDER = { tangled: 0, clean: 1, kernel: 2 };
+  // order: tangled first (most actionable), then the two clean verdicts, then
+  // kernel; within a verdict the worst sideways/scatter offenders lead.
+  const VERDICT_ORDER = { tangled: 0, "clean-lib": 1, clean: 2, kernel: 3 };
   rows.sort(
     (a, b) =>
       VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
@@ -334,6 +355,7 @@ export function runGrade() {
       total: rows.length,
       kernel: rows.filter((r) => r.verdict === "kernel").length,
       clean: rows.filter((r) => r.verdict === "clean").length,
+      cleanLib: rows.filter((r) => r.verdict === "clean-lib").length,
       tangled: tangled.length,
     },
     concepts: rows,
@@ -341,7 +363,7 @@ export function runGrade() {
 }
 
 // ── human output ─────────────────────────────────────────────────────────────
-const VERDICT_GLYPH = { kernel: "▓", clean: "░", tangled: "✗" };
+const VERDICT_GLYPH = { kernel: "▓", clean: "░", "clean-lib": "▒", tangled: "✗" };
 
 function pad(s, n) {
   s = String(s);
@@ -359,21 +381,22 @@ function printHuman(res) {
   out(`cqv8 P3 — grade pass (five measured gaps)\n`);
   out(
     `${res.graph.nodes} nodes · ${res.graph.edges} edges · ` +
-      `${res.counts.tangled} tangled · ${res.counts.clean} clean · ${res.counts.kernel} kernel\n`
+      `${res.counts.tangled} tangled · ${res.counts.cleanLib} clean-lib · ` +
+      `${res.counts.clean} clean · ${res.counts.kernel} kernel\n`
   );
   out(`${bar}\n\n`);
 
   out(
-    `  ${pad("concept", 16)}${pad("verdict", 9)}${padL("ext%", 7)}` +
+    `  ${pad("concept", 16)}${pad("verdict", 12)}${padL("ext%", 7)}` +
       `${padL("tests", 7)}${padL("sdwys", 7)}${padL("scatter", 9)}  manifest\n`
   );
-  out(`  ${"-".repeat(78)}\n`);
+  out(`  ${"-".repeat(81)}\n`);
   for (const r of res.concepts) {
     const ext = r.gaps.gratuitousCore.externalPct;
     const extStr =
       ext == null ? "—" : ext.toFixed(1) + (r.gaps.gratuitousCore.gratuitous ? "!" : "");
     out(
-      `  ${pad(r.concept, 16)}${pad(VERDICT_GLYPH[r.verdict] + " " + r.verdict, 9)}` +
+      `  ${pad(r.concept, 16)}${pad(VERDICT_GLYPH[r.verdict] + " " + r.verdict, 12)}` +
         `${padL(extStr, 7)}${padL(r.gaps.testScatter.testDirs.length, 7)}` +
         `${padL(r.gaps.sideways.length, 7)}${padL(r.gaps.frameworkScatter, 9)}` +
         `  ${r.gaps.manifestAbsent ? "absent" : "present"}\n`
