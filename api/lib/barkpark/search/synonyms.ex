@@ -259,7 +259,7 @@ defmodule Barkpark.Search.Synonyms do
   end
 
   defp preview_count("media", scope, query) do
-    {_, count, _, _} = Barkpark.Media.Search.search(scope, q: query, limit: 1)
+    {_, count, _, _} = Barkpark.Search.MediaSearch.search(scope, q: query, limit: 1)
     count
   end
 

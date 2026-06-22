@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Search do
+defmodule Barkpark.Search.MediaSearch do
   @moduledoc """
   Faceted search over `media_files` joined with linked `mediaAsset` documents.
 

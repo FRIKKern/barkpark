@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.SearchIntelligence do
+defmodule Barkpark.Search.MediaIntelligence do
   @moduledoc """
   Media DAM adapter for `Barkpark.Search.Intelligence`.
 

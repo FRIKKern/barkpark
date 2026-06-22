@@ -206,7 +206,7 @@ defmodule Barkpark.Search.QueryPipeline do
   defp try_typo_widen(_scope, _parsed, _config, _opts, _strategy), do: nil
 
   defp search_media(_scope, _parsed, _config, _context, _opts) do
-    # Media search runs through Media.Search.search/2 with pipeline opts; hits filled by caller.
+    # Media search runs through Search.MediaSearch.search/2 with pipeline opts; hits filled by caller.
     {[], 0, nil}
   end
 

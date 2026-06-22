@@ -63,7 +63,7 @@ defmodule Barkpark.Search.MediaRetriever do
   end
 
   # Pre-scoped Document subquery the text-match LEFT-JOIN binds against. Mirrors
-  # Barkpark.Media.Search.asset_doc_join_query/4: type + NULL-tolerant dataset
+  # Barkpark.Search.MediaSearch.asset_doc_join_query/4: type + NULL-tolerant dataset
   # (dataset_id authoritative, string fallback) + NULL-tolerant workspace
   # envelope. Closes the search arm of the cross-workspace metadata leak — the
   # `ilike(d.title, …)` / tag match can no longer attach another workspace's

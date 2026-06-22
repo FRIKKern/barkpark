@@ -152,7 +152,7 @@ defmodule Barkpark.Media.AssetMetadataTenancyTest do
 
       # Workspace B searches for A's exclusive token — must find NOTHING in B.
       {files, total, _facets, _meta} =
-        Media.Search.search(@dataset,
+        Barkpark.Search.MediaSearch.search(@dataset,
           q: "zzqqxx-a-only-token",
           workspace_id: ws_b.id,
           project_id: proj_b.id

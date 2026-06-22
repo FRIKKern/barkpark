@@ -6,7 +6,7 @@ defmodule Barkpark.Search.Intelligence do
   `surface` tag and a `scope` (e.g. `"media", "production"`). Surfaces translate
   their native params into a `%{}` context with `:query`, `:filters`, and `:offset`.
 
-  See `docs/search/INTELLIGENCE.md` and `Barkpark.Media.SearchIntelligence`.
+  See `docs/search/INTELLIGENCE.md` and `Barkpark.Search.MediaIntelligence`.
   """
 
   import Ecto.Query

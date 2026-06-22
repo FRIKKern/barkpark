@@ -11,8 +11,8 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations, SearchIntelligence}
-  alias Barkpark.Search.{SurfaceConfigs, Synonyms}
+  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations}
+  alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
   action_fallback BarkparkWeb.FallbackController
@@ -45,7 +45,7 @@ defmodule BarkparkWeb.V1.MediaController do
     ]
 
     record_result =
-      SearchIntelligence.record(dataset, params, total, ms, record_opts)
+      MediaIntelligence.record(dataset, params, total, ms, record_opts)
 
     search_event_id =
       case record_result do
@@ -53,7 +53,7 @@ defmodule BarkparkWeb.V1.MediaController do
         _ -> nil
       end
 
-    next_cursor = Barkpark.Media.Search.next_cursor(files)
+    next_cursor = Barkpark.Search.MediaSearch.next_cursor(files)
     has_more = next_cursor != nil and length(files) >= opts[:limit]
 
     json(conn, %{
@@ -86,7 +86,7 @@ defmodule BarkparkWeb.V1.MediaController do
         _ -> opts
       end
 
-    result = SearchIntelligence.insights(dataset, opts)
+    result = MediaIntelligence.insights(dataset, opts)
 
     json(conn, %{result: result, syncTags: ["bp:ds:#{dataset}:media:search:insights"]})
   end
@@ -161,7 +161,7 @@ defmodule BarkparkWeb.V1.MediaController do
     limit = parse_int(params["limit"], 8) |> min(20)
 
     result =
-      SearchIntelligence.suggestions(
+      MediaIntelligence.suggestions(
         dataset,
         SearchIntel.actor_key(conn),
         prefix,
@@ -182,7 +182,7 @@ defmodule BarkparkWeb.V1.MediaController do
       disabled: SearchIntel.recording_disabled?(conn)
     ]
 
-    case SearchIntelligence.record_interaction(dataset, params, record_opts) do
+    case MediaIntelligence.record_interaction(dataset, params, record_opts) do
       {:ok, id} -> json(conn, %{ok: true, interactionEventId: id})
       _ -> json(conn, %{ok: true})
     end
