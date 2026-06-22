@@ -64,7 +64,7 @@ import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
 import { isRegistered } from "./registration.mjs";
-import { isWebLayerFile } from "./weblayer.mjs";
+import { isEntryPoint, isMixTaskFile } from "./entrypoints.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -130,6 +130,9 @@ function assignConcepts(graph) {
   );
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
+    // Mix CLI tasks are entry-points, never feature members — mirror P1's fold
+    // exclusion so the grade speaks the SAME concept vocabulary (see concepts.mjs).
+    if (isMixTaskFile(n.file)) continue;
     const low = n.file.toLowerCase();
     for (const t of tokens) {
       if (tokenRe.get(t).test(low)) {
@@ -216,34 +219,49 @@ function testScatter(concept, allTestFiles) {
   return { testFileCount: matches.length, testDirs: [...dirs].sort() };
 }
 
-// ── web-layer predicate (Fix 1) ──────────────────────────────────────────────
-// A feature→feature edge whose SOURCE file is a web-layer file is ORCHESTRATION,
-// not a boundary violation: controllers and LiveViews legitimately compose
-// multiple features. Such an edge is excluded from the sideways (domain-coupling)
-// counter. The predicate matches anything under api/lib/barkpark_web/, plus the
+// ── entry-point predicate (Fix 1) ────────────────────────────────────────────
+// A feature→feature edge whose SOURCE file is an ENTRY-POINT is ORCHESTRATION,
+// not a boundary violation: web controllers/LiveViews compose multiple features
+// per request, and Mix CLI tasks (api/lib/mix/tasks/*) drive a plugin from the
+// command line. Such an edge is excluded from the sideways (domain-coupling)
+// counter. The predicate matches anything under api/lib/barkpark_web/, the
 // Phoenix web role suffixes (*_controller.ex / *_live.ex / *_html.ex) wherever
-// they live. Evidence: ~22 of media's 42 media→search edges originate in
-// media_controller.ex / web params — the real domain knot is the ~20 from
-// media/search.ex + media/search_intelligence.ex. The predicate itself lives in
-// weblayer.mjs so the grade pass and the decycle proposer share ONE definition.
+// they live, AND anything under api/lib/mix/tasks/. Evidence: ~22 of media's 42
+// media→search edges originate in media_controller.ex / web params; the 13
+// tasks→onixedit "edges" all originate in api/lib/mix/tasks/onix.*.ex — the real
+// domain knots survive, the orchestration artifacts drop. The predicate itself
+// lives in entrypoints.mjs so the grade pass and the decycle proposer share ONE
+// definition.
 
 // ── gap 3: sideways edges ────────────────────────────────────────────────────
 // Feature→feature: an edge FROM this concept TO a DIFFERENT concept, where the
 // target is itself a non-kernel feature. Kernel targets are allowed (depend
 // inward); sideways targets are the violations. We count DOMAIN→DOMAIN edges only
-// — edges whose source is a web-layer file (see isWebLayerFile) are orchestration
-// and skipped. `rawCrossConcept` keeps the pre-exclusion tally per target so the
+// — edges whose source is an entry-point file (see isEntryPoint: web-layer OR
+// Mix CLI task) are orchestration and skipped. `rawCrossConcept` keeps the
+// pre-exclusion tally per target so the
 // Fix-1 effect is observable; `clusters` is the domain-only "cut" list.
 function sidewaysEdges(concept, graph, conceptOf, kernelSet, fileOf) {
   const domain = new Map();
   const raw = new Map();
+  // A KERNEL concept emitting outward is NOT feature→feature sideways coupling —
+  // the kernel legitimately uses foundational libs (e.g. content → portable_doc).
+  // Sideways is about a FEATURE reaching into another feature, so a kernel SOURCE
+  // has no sideways edges. (kernel→feature is a separate, rarer wrong-direction smell.)
+  if (kernelSet.has(concept)) {
+    const empty = [];
+    empty.rawCrossConcept = 0;
+    empty.domainCrossConcept = 0;
+    empty.rawClusters = [];
+    return empty;
+  }
   for (const e of graph.edges) {
     if (conceptOf.get(e.from) !== concept) continue;
     const ct = conceptOf.get(e.to);
     if (!ct || ct === concept) continue;
     if (kernelSet.has(ct)) continue; // inward dep on the kernel is allowed
     raw.set(ct, (raw.get(ct) || 0) + 1);
-    if (isWebLayerFile(fileOf.get(e.from))) continue; // Fix 1: web edge = orchestration
+    if (isEntryPoint(fileOf.get(e.from))) continue; // Fix 1: entry-point edge = orchestration (web OR mix-task)
     domain.set(ct, (domain.get(ct) || 0) + 1);
   }
   const clusters = [...domain.entries()]

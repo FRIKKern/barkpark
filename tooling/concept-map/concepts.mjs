@@ -29,6 +29,12 @@
 // plugins/sheets tree as ONE concept. No concept list is written down anywhere —
 // the set falls out of the graph.
 //
+// Mix CLI tasks (api/lib/mix/tasks/*) are the ONE cross-tree exception: they are
+// ENTRY-POINTS that orchestrate a feature from the command line, not members of
+// it. The fold skips them, so api/lib/mix/tasks/onix.import.ex is NOT a member of
+// the "tasks" feature merely because its path contains "tasks" — it stays
+// unconcepted, exactly like any other orchestration shell.
+//
 // ── THE COUPLING MATH (Martin's component algebra, live) ─────────────────────
 //   intra — edges whose endpoints are both in this concept (cohesion numerator)
 //   Ca    — AFFERENT: edges INBOUND to this concept from a different boundary
@@ -62,6 +68,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isRegistered } from "./registration.mjs";
+import { isMixTaskFile } from "./entrypoints.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -92,7 +99,8 @@ function loadGraph() {
 }
 
 // Structural concept name for a domain/plugin file. Returns null for web-layer
-// and test files (folded in by the second pass).
+// and test files (folded in by the second pass) and for Mix-task entry-points
+// (deliberately NEVER folded — see assignConcepts).
 function primaryConcept(file) {
   let m;
   if ((m = file.match(/^api\/lib\/barkpark\/plugins\/([a-z0-9_]+)(?:[/.]|$)/))) return m[1];
@@ -123,6 +131,14 @@ function assignConcepts(graph) {
 
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
+    // Entry-point files (web controllers/LiveViews are folded for their feature
+    // role; Mix CLI tasks are NOT) — a Mix task under api/lib/mix/tasks/ whose
+    // path carries a feature token (onix.import.ex → "tasks") is orchestration,
+    // not a member of that feature. Skipping the fold leaves it unconcepted, so
+    // it never inflates a feature's file count or its sideways tally. Web-layer
+    // files keep their historical fold behaviour (so tasks_controller.ex stays a
+    // member of the tasks feature, media_controller.ex of media, etc.).
+    if (isMixTaskFile(n.file)) continue;
     const low = n.file.toLowerCase();
     for (const t of tokens) {
       if (tokenRe.get(t).test(low)) {

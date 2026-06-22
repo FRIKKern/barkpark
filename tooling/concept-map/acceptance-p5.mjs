@@ -169,10 +169,14 @@ ok(
   Array.isArray(rec.moveFiles) && rec.moveFiles.length > 0,
   `moveFiles=[${(rec.moveFiles || []).join(", ")}] direction=${rec.direction}`
 );
+// Magnitude is NOT hardcoded: a successful de-cycle (media→search was cut 20→1)
+// must not break this gate. Test the decycle MATH invariant instead — improvement-robust.
 ok(
-  "decycle eliminates ≥ 15 cross edges by the recommended cut",
-  rec.eliminated >= 15,
-  `eliminated=${rec.eliminated} (direction ${rec.direction})`
+  "decycle math is sound — netReduction === eliminated − residual, recommended direction wins",
+  rec.netReduction === rec.eliminated - rec.residual &&
+    (!dec.alternative || rec.netReduction >= dec.alternative.netReduction),
+  `rec ${rec.direction}: elim ${rec.eliminated} − resid ${rec.residual} = net ${rec.netReduction}` +
+    (dec.alternative ? ` · alt net ${dec.alternative.netReduction}` : "")
 );
 ok(
   "decycle reports an HONEST residual > 0 (the cut is not clean — callers remain)",
@@ -215,6 +219,29 @@ ok(
   "cycle counts are DOMAIN (web-excluded), materially below raw cross-concept",
   dec.cycle.a2b > 0 && dec.cycle.a2b === gradeDomainA2B && dec.cycle.a2b < rawA2B,
   `decycle domain media→search=${dec.cycle.a2b} · grade domain=${gradeDomainA2B} · raw=${rawA2B}`
+);
+
+// ── ENTRY-POINT EXCLUSION — the false tasks⇄onixedit cycle is GONE ────────────
+// The grade pass once named a 13-edge tasks→onixedit knot. Every one of those
+// edges originates in a Mix CLI task under api/lib/mix/tasks/ (mix onix.import,
+// onix.export_proof, …) — orchestration, not domain coupling. With Mix tasks now
+// treated as entry-points (same exclusion as web-layer), proposeDecycle no longer
+// finds ANY domain cycle between the two: both directions drop to 0 and the
+// recommended bridge is empty — it recommends moving NO lib/mix/tasks/ file.
+const noKnot = proposeDecycle("tasks", "onixedit", { p1 });
+ok(
+  "proposeDecycle(tasks,onixedit) reports NO domain cycle (Mix-task edges excluded)",
+  noKnot.cycle.a2b === 0 && noKnot.cycle.b2a === 0,
+  `cycle a2b=${noKnot.cycle.a2b} b2a=${noKnot.cycle.b2a} (was 13 when Mix tasks were mis-folded)`
+);
+ok(
+  "proposeDecycle(tasks,onixedit) recommends moving NO Mix-task (api/lib/mix/tasks/) file",
+  !((noKnot.recommendation && noKnot.recommendation.moveFiles) || []).some((f) =>
+    /^api\/lib\/mix\/tasks\//.test(f)
+  ) && !((noKnot.alternative && noKnot.alternative.moveFiles) || []).some((f) =>
+    /^api\/lib\/mix\/tasks\//.test(f)
+  ),
+  `recommendation.moveFiles=[${((noKnot.recommendation || {}).moveFiles || []).join(", ") || "(none)"}]`
 );
 
 // ── report ───────────────────────────────────────────────────────────────────
