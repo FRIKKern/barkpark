@@ -23,6 +23,17 @@
 //   5. PROPOSE-ONLY — the recolocation is marked proposeOnly:true AND moves
 //      nothing: the working tree is unchanged across the call (git status
 //      --porcelain identical before/after).
+//   6. DECYCLE (media ⇄ search) — proposeDecycle returns a residual-aware,
+//      propose-only cut of a mutual feature→feature cycle: a recommendation with
+//      a non-empty bridge (moveFiles), eliminated ≥ 15, an HONEST residual > 0
+//      (the cut is not clean — ~3 media callers remain), neverWorse.lost === 0,
+//      and BOTH recommendation + alternative populated with OPPOSITE directions.
+//   7. RESIDUAL-PICK — the recommended direction is the one with the higher
+//      netReduction (recommendation.netReduction ≥ alternative.netReduction), NOT
+//      the one current instability/Ca would pick.
+//   8. WEB EXCLUSION — the cycle counts are the DOMAIN (web-excluded) counts,
+//      materially lower than the raw cross-concept tally (media→search domain
+//      ≈ 20, well under the raw ≈ 42).
 //
 // Dependency-free. ESM, node: builtins only.
 
@@ -31,7 +42,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
-import { gateBoundary, proposeRecolocation } from "./boundary.mjs";
+import { runGrade } from "./grade.mjs";
+import { gateBoundary, proposeRecolocation, proposeDecycle } from "./boundary.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -142,6 +154,69 @@ ok(
   afterStatus === beforeStatus ? "git status identical" : "WORKING TREE MUTATED — propose-only violated"
 );
 
+// ── 6/7/8. DECYCLE — residual-aware cycle cut (media ⇄ search) ────────────────
+// media ⇄ search is the live mutual feature→feature cycle the grade pass names.
+// These concepts are read as fixed names ONLY in the assertion (the brief targets
+// this specific cycle); every NUMBER is computed live by proposeDecycle.
+const DEC_A = "media";
+const DEC_B = "search";
+const dec = proposeDecycle(DEC_A, DEC_B, { p1 });
+const rec = dec.recommendation || {};
+const alt = dec.alternative || {};
+
+ok(
+  "proposeDecycle(media,search) recommends a non-empty bridge to relocate",
+  Array.isArray(rec.moveFiles) && rec.moveFiles.length > 0,
+  `moveFiles=[${(rec.moveFiles || []).join(", ")}] direction=${rec.direction}`
+);
+ok(
+  "decycle eliminates ≥ 15 cross edges by the recommended cut",
+  rec.eliminated >= 15,
+  `eliminated=${rec.eliminated} (direction ${rec.direction})`
+);
+ok(
+  "decycle reports an HONEST residual > 0 (the cut is not clean — callers remain)",
+  rec.residual > 0 && Array.isArray(rec.residualCallers) && rec.residualCallers.length > 0,
+  `residual=${rec.residual} callers=[${(rec.residualCallers || []).join(", ")}]`
+);
+ok(
+  "decycle is a MOVE — neverWorse.lost === 0, filesBefore === filesAfter",
+  dec.neverWorse &&
+    dec.neverWorse.lost === 0 &&
+    dec.neverWorse.filesBefore === dec.neverWorse.filesAfter &&
+    dec.proposeOnly === true,
+  `neverWorse=${JSON.stringify(dec.neverWorse)} proposeOnly=${dec.proposeOnly}`
+);
+ok(
+  "BOTH recommendation and alternative are populated with OPPOSITE directions",
+  rec.direction &&
+    alt.direction &&
+    rec.direction !== alt.direction &&
+    rec.origin === alt.target &&
+    rec.target === alt.origin,
+  `recommendation=${rec.direction} alternative=${alt.direction}`
+);
+ok(
+  "recommended direction has the higher netReduction (residual-picked, not Ca-picked)",
+  rec.netReduction >= alt.netReduction,
+  `rec.netReduction=${rec.netReduction} alt.netReduction=${alt.netReduction}`
+);
+
+// WEB EXCLUSION — the cycle counts are the DOMAIN counts, materially below the
+// raw (web-inclusive) cross-concept tally. The grade pass already computes the
+// raw media→search cluster (pre web-exclusion) off the SAME two-pass concept
+// assignment, so we read it from runGrade rather than re-deriving it. Assert the
+// decycle domain count equals grade's DOMAIN count and is well below raw.
+const grade = runGrade();
+const mediaRow = grade.concepts.find((c) => c.concept === DEC_A);
+const rawA2B = (mediaRow.gaps.sidewaysRawClusters.find((r) => r.to === DEC_B) || { edges: 0 }).edges;
+const gradeDomainA2B = (mediaRow.gaps.sideways.find((r) => r.to === DEC_B) || { edges: 0 }).edges;
+ok(
+  "cycle counts are DOMAIN (web-excluded), materially below raw cross-concept",
+  dec.cycle.a2b > 0 && dec.cycle.a2b === gradeDomainA2B && dec.cycle.a2b < rawA2B,
+  `decycle domain media→search=${dec.cycle.a2b} · grade domain=${gradeDomainA2B} · raw=${rawA2B}`
+);
+
 // ── report ───────────────────────────────────────────────────────────────────
 function run() {
   const out = (s) => process.stdout.write(s);
@@ -154,6 +229,11 @@ function run() {
   out(`  · wrong-direction: ${kernelConcept} → ${featA}  (kernel → feature)\n`);
   out(`  · inward (ok):     ${featA} → ${kernelConcept}  (feature → kernel)\n`);
   out(`recolocation('sheets'): ${reco.counts.filesBefore} files → home ${reco.homeDir}\n`);
+  out(
+    `decycle(media,search): cycle ${dec.cycle.a2b}/${dec.cycle.b2a} → recommend ` +
+      `${rec.direction} (elim ${rec.eliminated} · resid ${rec.residual} · net ${rec.netReduction}) ` +
+      `vs alt ${alt.direction} (net ${alt.netReduction})\n`
+  );
   out(`${"─".repeat(64)}\n`);
   for (const c of checks) {
     out(`  ${c.ok ? "✓" : "✗"} ${c.label}\n      ${c.detail}\n`);

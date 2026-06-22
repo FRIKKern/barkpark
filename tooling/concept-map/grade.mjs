@@ -64,6 +64,7 @@ import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
 import { isRegistered } from "./registration.mjs";
+import { isWebLayerFile } from "./weblayer.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -223,13 +224,8 @@ function testScatter(concept, allTestFiles) {
 // Phoenix web role suffixes (*_controller.ex / *_live.ex / *_html.ex) wherever
 // they live. Evidence: ~22 of media's 42 media→search edges originate in
 // media_controller.ex / web params — the real domain knot is the ~20 from
-// media/search.ex + media/search_intelligence.ex.
-function isWebLayerFile(file) {
-  return (
-    /^api\/lib\/barkpark_web\//.test(file) ||
-    /(_controller|_live|_html)\.ex$/.test(file)
-  );
-}
+// media/search.ex + media/search_intelligence.ex. The predicate itself lives in
+// weblayer.mjs so the grade pass and the decycle proposer share ONE definition.
 
 // ── gap 3: sideways edges ────────────────────────────────────────────────────
 // Feature→feature: an edge FROM this concept TO a DIFFERENT concept, where the
