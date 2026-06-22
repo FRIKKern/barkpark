@@ -29,9 +29,11 @@ defmodule Barkpark.Content do
     DraftId,
     Edge,
     Envelope,
+    Export,
     MutationEvent,
     Revision,
     SchemaDefinition,
+    Search,
     Validation
   }
 
@@ -3227,40 +3229,15 @@ defmodule Barkpark.Content do
     |> Repo.insert()
   end
 
-  # ── Search ──────────────────────────────────────────────────────────────
+  # ── Search (extracted → Content.Search) ───────────────────────────────────
 
   @doc "Search documents by title using the QueryPipeline. Returns `{docs, count, meta}`."
-  def search_documents(query, dataset, opts \\ []) do
-    context = %{
-      query: query,
-      filters: %{"type" => Keyword.get(opts, :type)},
-      offset: Keyword.get(opts, :offset, 0)
-    }
+  def search_documents(query, dataset, opts \\ []), do: Search.search_documents(query, dataset, opts)
 
-    {:ok, result} = Barkpark.Search.QueryPipeline.search("documents", dataset, context, opts)
-
-    meta = Map.take(result, [:parsed, :highlights, :recovery, :corrected_to, :facets, :truncation])
-    {result.hits, result.total, meta}
-  end
-
-  # ── Export ──────────────────────────────────────────────────────────────
+  # ── Export (extracted → Content.Export) ────────────────────────────────────
 
   @doc "Stream all documents for a dataset as envelope maps. Optionally filter by type."
-  def export_stream(dataset, opts \\ []) do
-    type = Keyword.get(opts, :type)
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    Document
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> then(fn q ->
-      if type, do: where(q, [d], d.type == ^type), else: q
-    end)
-    |> order_by([d], asc: d.inserted_at)
-    |> Repo.stream()
-    |> Stream.map(&Envelope.render/1)
-  end
+  def export_stream(dataset, opts \\ []), do: Export.export_stream(dataset, opts)
 
   # ── Revision queries ──────────────────────────────────────────────────────
 
