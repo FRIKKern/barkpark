@@ -49,11 +49,12 @@
 // expected edge, file, count, or verdict.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
+import { isWebLayerFile } from "./weblayer.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -61,6 +62,10 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
   .trim();
 
 const SYMBOLS_PATH = join(ROOT, "tooling/symbol-graph/symbols.json");
+
+// Propose-only staging tree (gitignored) — decycle may stage a human-readable
+// plan here, mirroring scaffold.mjs. NOTHING tracked is ever written.
+const STAGING_ROOT = join(HERE, ".scaffold-staging");
 
 // ── load + concept assignment (mirrors concepts.mjs structural detection) ────
 // P5 must speak the EXACT same concept vocabulary P1 banded against, so the
@@ -405,6 +410,240 @@ function relTail(file, concept, homeRootDir) {
   return tail || parts[parts.length - 1];
 }
 
+// ── the decycle proposer ───────────────────────────────────────────────────────
+// proposeDecycle(conceptA, conceptB, opts) — break a MUTUAL feature→feature cycle
+// (domain edges in BOTH directions A→B and B→A) by directionally relocating one
+// side's BRIDGE modules into the other concept. Propose-only, residual-aware,
+// never-worse. NOTHING moves.
+//
+// THE METHOD vs. THE TRAP. A cycle inflates BOTH concepts' instability/Ca — the
+// metric is distorted, so picking the cut direction by current instability/Ca is
+// wrong. Instead we COMPUTE both candidate cuts and pick by MEASURED residual:
+//
+//   For a candidate "relocate ORIGIN's bridge → TARGET":
+//     bridge      = ORIGIN's NON-web files with ≥1 domain edge to TARGET. Moving
+//                   them into TARGET turns those edges into intra-TARGET edges.
+//     eliminated  = the bridge's domain edges to TARGET (vanish from the cross-cut).
+//     residual    = domain edges from ORIGIN's REMAINING (non-bridge, non-web)
+//                   files INTO the relocated bridge — after the move these become
+//                   NEW origin→target edges (the bridge is still called from home).
+//                   The residual caller files are listed explicitly. The cut is
+//                   honest: it is rarely clean.
+//     reverseBecomesCorrect = the bridge's edges back to ORIGIN — after the move
+//                   these flip to TARGET→ORIGIN, the OTHER (intended) direction.
+//                   Reported as a count; this is the cycle straightening, not debt.
+//     netReduction = eliminated − residual.
+//     remainingCycleEdges = the cross edges still standing after the move:
+//                   residual (new origin→target) + the OTHER direction's full
+//                   domain weight (target→origin), which this cut does not touch.
+//
+// We compute BOTH directions (A's bridge→B, B's bridge→A) and RECOMMEND the one
+// with the higher netReduction; the other rides along as `alternative`. Tie →
+// alphabetical origin so the pick is deterministic. loseNoFile: it is a MOVE, so
+// filesBefore === filesAfter and lost === 0 (mirrors proposeRecolocation).
+//
+// Computed live off the symbol graph — no hardcoded concept names or counts.
+export function proposeDecycle(conceptA, conceptB, opts = {}) {
+  const graph = opts.graph || loadGraph();
+  const p1 = opts.p1 || runConcepts();
+  const assigned = opts.assigned || assignConcepts(graph);
+  const { conceptOf, concepts, filesOf } = assigned;
+  const fileOf = new Map(graph.nodes.map((n) => [n.id, n.file]));
+
+  if (!concepts.has(conceptA) || !concepts.has(conceptB) || conceptA === conceptB) {
+    return {
+      a: conceptA,
+      b: conceptB,
+      proposeOnly: true,
+      error:
+        conceptA === conceptB
+          ? `conceptA and conceptB must differ (both "${conceptA}")`
+          : `unknown concept(s): ${[conceptA, conceptB].filter((c) => !concepts.has(c)).join(", ")}`,
+      cycle: { a2b: 0, b2a: 0 },
+    };
+  }
+
+  // ── domain (web-excluded) cross edges between the two concepts ───────────────
+  // An edge counts toward the cycle only when its SOURCE file is NON-web — a
+  // web-origin edge is orchestration (same exclusion the grade pass applies), so
+  // it is kept out of the cycle counts entirely. Each direction is tallied with
+  // the per-source-file weights we need for the bridge/residual arithmetic.
+  //
+  // domainEdge(origin, target):
+  //   perSource : origin-file → count of its NON-web domain edges to target
+  //   total     : sum of those weights (the domain edge count origin→target)
+  function domainEdges(origin, target) {
+    const perSource = new Map(); // origin file → edge count to target
+    let total = 0;
+    for (const e of graph.edges) {
+      if (conceptOf.get(e.from) !== origin) continue;
+      if (conceptOf.get(e.to) !== target) continue;
+      const srcFile = fileOf.get(e.from);
+      if (isWebLayerFile(srcFile)) continue; // web edge = orchestration, excluded
+      perSource.set(srcFile, (perSource.get(srcFile) || 0) + 1);
+      total++;
+    }
+    return { perSource, total };
+  }
+
+  const a2bEdges = domainEdges(conceptA, conceptB);
+  const b2aEdges = domainEdges(conceptB, conceptA);
+  const a2b = a2bEdges.total;
+  const b2a = b2aEdges.total;
+
+  // ── evaluate ONE candidate cut: relocate origin's bridge → target ───────────
+  function candidate(origin, target, originEdges) {
+    const targetDir = `api/lib/barkpark/${target}/from_${origin}`;
+
+    // BRIDGE = origin's NON-web files with ≥1 domain edge to target.
+    const bridgeSet = new Set([...originEdges.perSource.keys()]);
+    const moveFiles = [...bridgeSet].sort();
+
+    // eliminated = the bridge's domain edges to target (these become intra-target).
+    let eliminated = 0;
+    for (const f of moveFiles) eliminated += originEdges.perSource.get(f) || 0;
+
+    // bridge node ids — needed for residual (origin→bridge) and reverse
+    // (bridge→origin) tallies. Restricted to NON-web origin nodes in the bridge.
+    const bridgeIds = new Set();
+    for (const n of graph.nodes) {
+      if (conceptOf.get(n.id) !== origin) continue;
+      if (bridgeSet.has(n.file)) bridgeIds.add(n.id);
+    }
+
+    // RESIDUAL = domain edges from origin's REMAINING (non-bridge, non-web) files
+    // INTO the relocated bridge. After the move the bridge lives in target, so
+    // these home calls become NEW origin→target edges. Tally per remaining caller.
+    const residualPerCaller = new Map(); // caller file → count into bridge
+    // REVERSE = bridge → origin edges (any origin target). After the move these
+    // flip to target→origin — the OTHER (intended) cycle direction.
+    let reverseBecomesCorrect = 0;
+    for (const e of graph.edges) {
+      // residual: remaining-origin → bridge
+      if (
+        bridgeIds.has(e.to) &&
+        conceptOf.get(e.from) === origin &&
+        !bridgeIds.has(e.from)
+      ) {
+        const callerFile = fileOf.get(e.from);
+        if (!isWebLayerFile(callerFile)) {
+          residualPerCaller.set(callerFile, (residualPerCaller.get(callerFile) || 0) + 1);
+        }
+      }
+      // reverse: bridge → (other origin file)
+      if (
+        bridgeIds.has(e.from) &&
+        conceptOf.get(e.to) === origin &&
+        !bridgeIds.has(e.to)
+      ) {
+        const srcFile = fileOf.get(e.from);
+        if (!isWebLayerFile(srcFile)) reverseBecomesCorrect++;
+      }
+    }
+    const residualCallers = [...residualPerCaller.keys()].sort();
+    const residual = [...residualPerCaller.values()].reduce((s, n) => s + n, 0);
+
+    const netReduction = eliminated - residual;
+
+    // remaining cycle edges after this cut: the new origin→target residual edges
+    // plus the UNTOUCHED reverse-direction domain weight (target→origin), which
+    // this cut does not address.
+    const otherDirTotal = origin === conceptA ? b2a : a2b;
+    const remainingCycleEdges = residual + otherDirTotal;
+
+    const filesBefore = (filesOf.get(origin) || new Set()).size;
+
+    return {
+      direction: `${origin}→${target}`,
+      origin,
+      target,
+      targetDir,
+      moveFiles,
+      eliminated,
+      residual,
+      residualCallers,
+      reverseBecomesCorrect,
+      netReduction,
+      remainingCycleEdges,
+      neverWorse: { filesBefore, filesAfter: filesBefore, lost: 0 },
+    };
+  }
+
+  const candA = candidate(conceptA, conceptB, a2bEdges); // relocate A's bridge → B
+  const candB = candidate(conceptB, conceptA, b2aEdges); // relocate B's bridge → A
+
+  // RECOMMEND by measured residual, NOT by current instability/Ca. Higher
+  // netReduction wins; tie broken on lower residual, then alphabetical origin.
+  const [recommendation, alternative] =
+    candB.netReduction > candA.netReduction ||
+    (candB.netReduction === candA.netReduction &&
+      (candB.residual < candA.residual ||
+        (candB.residual === candA.residual && candB.origin < candA.origin)))
+      ? [candB, candA]
+      : [candA, candB];
+
+  const result = {
+    a: conceptA,
+    b: conceptB,
+    cycle: { a2b, b2a },
+    recommendation,
+    alternative,
+    proposeOnly: true,
+    neverWorse: recommendation.neverWorse,
+  };
+
+  // optionally stage a human-readable plan into the gitignored staging tree —
+  // never into a tracked path (mirrors scaffold.mjs's assertUnderStaging guard).
+  if (opts.stage) {
+    const dir = join(STAGING_ROOT, `decycle-${conceptA}-${conceptB}`);
+    assertUnderStaging(dir);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "plan.json"), JSON.stringify(result, null, 2) + "\n");
+    writeFileSync(join(dir, "PLAN.md"), decyclePlanText(result));
+    result.stagingDir = join(
+      "tooling/concept-map/.scaffold-staging",
+      `decycle-${conceptA}-${conceptB}`
+    );
+  }
+
+  return result;
+}
+
+// HARD GUARD — refuse to write anywhere but the gitignored staging tree.
+function assertUnderStaging(abs) {
+  const prefix = STAGING_ROOT.endsWith("/") ? STAGING_ROOT : STAGING_ROOT + "/";
+  if (abs !== STAGING_ROOT && !abs.startsWith(prefix)) {
+    throw new Error(
+      `propose-only violation: refused to write outside staging\n  target: ${abs}\n  staging: ${STAGING_ROOT}`
+    );
+  }
+}
+
+// Human-readable decycle plan body for the staging sidecar.
+function decyclePlanText(res) {
+  const r = res.recommendation;
+  const a = res.alternative;
+  const lines = [];
+  lines.push(`# Decycle plan — ${res.a} ⇄ ${res.b}  (PROPOSE-ONLY · nothing moves)`);
+  lines.push("");
+  lines.push(`Cycle (domain, web-excluded): ${res.a}→${res.b} = ${res.cycle.a2b}, ${res.b}→${res.a} = ${res.cycle.b2a}`);
+  lines.push("");
+  lines.push(`## Recommended: ${r.direction}  (netReduction ${r.netReduction})`);
+  lines.push(`Relocate ${r.moveFiles.length} bridge file(s) → ${r.targetDir}`);
+  lines.push(`  eliminated ${r.eliminated} · residual ${r.residual} · reverse-now-correct ${r.reverseBecomesCorrect} · remaining-cycle ${r.remainingCycleEdges}`);
+  for (const f of r.moveFiles) lines.push(`    move  ${f}`);
+  if (r.residualCallers.length) {
+    lines.push(`  residual callers (remain in ${r.origin}, still reach the bridge):`);
+    for (const f of r.residualCallers) lines.push(`    ·  ${f}`);
+  }
+  lines.push("");
+  lines.push(`## Alternative: ${a.direction}  (netReduction ${a.netReduction})`);
+  lines.push(`Relocate ${a.moveFiles.length} bridge file(s) → ${a.targetDir}`);
+  lines.push(`  eliminated ${a.eliminated} · residual ${a.residual} · reverse-now-correct ${a.reverseBecomesCorrect} · remaining-cycle ${a.remainingCycleEdges}`);
+  lines.push("");
+  return lines.join("\n") + "\n";
+}
+
 // ── public entrypoint ────────────────────────────────────────────────────────
 // The CLI surfaces (a) the CURRENT boundary violations already on the graph —
 // every existing sideways/wrong-direction edge framed as if it were proposed —
@@ -524,11 +763,71 @@ function printHuman(res) {
   out(`\n${bar}\n`);
 }
 
+// ── decycle human output ─────────────────────────────────────────────────────
+function printDecycle(res) {
+  const out = (s) => process.stdout.write(s);
+  const bar = "─".repeat(82);
+  out(`\n${bar}\n`);
+  out(`cqv8 P5 — decycle proposer  (PROPOSE-ONLY · nothing moves)\n`);
+  if (res.error) {
+    out(`  error: ${res.error}\n${bar}\n`);
+    return;
+  }
+  out(
+    `  cycle (domain, web-excluded):  ${res.a}→${res.b} = ${res.cycle.a2b}` +
+      `   ·   ${res.b}→${res.a} = ${res.cycle.b2a}\n`
+  );
+  out(`${bar}\n\n`);
+
+  const block = (label, c) => {
+    out(`${label}: ${c.direction}   netReduction ${c.netReduction}\n`);
+    out(`  ${"-".repeat(78)}\n`);
+    out(`  target dir:   ${c.targetDir}\n`);
+    out(
+      `  eliminated ${c.eliminated} · residual ${c.residual} · ` +
+        `reverse-now-correct ${c.reverseBecomesCorrect} · remaining-cycle ${c.remainingCycleEdges}\n`
+    );
+    out(
+      `  never-worse:  ${c.neverWorse.filesBefore} files before → ` +
+        `${c.neverWorse.filesAfter} after · ${c.neverWorse.lost} lost\n`
+    );
+    out(`  bridge (${c.moveFiles.length} file(s) to relocate):\n`);
+    for (const f of c.moveFiles) out(`      → ${f}\n`);
+    if (c.residualCallers.length) {
+      out(`  residual callers (${c.residualCallers.length} — stay in ${c.origin}, still reach the bridge):\n`);
+      for (const f of c.residualCallers) out(`      · ${f}\n`);
+    }
+    out(`\n`);
+  };
+
+  block("RECOMMENDATION", res.recommendation);
+  block("ALTERNATIVE", res.alternative);
+  if (res.stagingDir) out(`  staged plan: ${res.stagingDir}\n\n`);
+  out(`${bar}\n`);
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 function main() {
   const argv = process.argv.slice(2);
+  const json = argv.includes("--json");
+
+  if (argv[0] === "decycle") {
+    const rest = argv.slice(1).filter((a) => !a.startsWith("--"));
+    const [a, b] = rest;
+    if (!a || !b) {
+      process.stderr.write(
+        "usage: node tooling/concept-map/boundary.mjs decycle <A> <B> [--stage] [--json]\n"
+      );
+      process.exit(2);
+    }
+    const res = proposeDecycle(a, b, { stage: argv.includes("--stage") });
+    if (json) process.stdout.write(JSON.stringify(res, null, 2) + "\n");
+    else printDecycle(res);
+    process.exit(0);
+  }
+
   const res = runBoundary();
-  if (argv.includes("--json")) {
+  if (json) {
     process.stdout.write(JSON.stringify(res, null, 2) + "\n");
   } else {
     printHuman(res);
