@@ -111,7 +111,10 @@ const code = sig.filter(s => s.kind === "code");
 const realCov = {};
 let goPct = null, exPct = null, jsPct = null;
 function tryRun(cmd, a, opts) {
-  try { return execFileSync(cmd, a, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300000, ...opts }); }
+  // 30-min ceiling: the full `mix test --cover` suite prints its coverage table
+  // only at the very end, so a too-short timeout (was 300_000) truncated the run
+  // before the table → 0% coverage. Generous so coverage is actually captured.
+  try { return execFileSync(cmd, a, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 1_800_000, ...opts }); }
   catch (e) { return (e.stdout || "") + (e.stderr || ""); }  // non-zero exit (e.g. coverage threshold) still yields data
 }
 const COVSIG = covSig();

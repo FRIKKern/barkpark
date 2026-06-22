@@ -265,7 +265,13 @@ function record(r) {
 
 // ======================================================================= run
 const r = scan();
-if (cmd === "merge") attachVerdicts(r);
+if (cmd === "merge") {
+  attachVerdicts(r);
+  // scan() wrote consistency-report.json WITHOUT verdicts; re-write it now that
+  // attachVerdicts has folded them in, so the JSON (not just the HTML) is the
+  // authoritative, verdict-carrying report for downstream/external readers.
+  writeFileSync(join(HERE, "consistency-report.json"), JSON.stringify(r, null, 2));
+}
 if (cmd === "report" || cmd === "scan" || cmd === "merge") writeHtml(r);
 if (cmd === "batches") batches(r);
 if (cmd === "record") record(r);
