@@ -167,7 +167,7 @@ defmodule Barkpark.SheetsParityTest do
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -264,11 +264,11 @@ defmodule Barkpark.SheetsParityTest do
     %{
       values:
         for({{c, r}, v, _span, _style} <- all, v != "", into: %{}) do
-          {Barkpark.Sheets.format_ref({c, r}), v}
+          {Barkpark.Plugins.Sheets.Core.format_ref({c, r}), v}
         end,
       spans:
         for({{c, r}, _v, span, _style} <- all, span != {1, 1}, into: %{}) do
-          {Barkpark.Sheets.format_ref({c, r}), span}
+          {Barkpark.Plugins.Sheets.Core.format_ref({c, r}), span}
         end,
       widths:
         for(
@@ -288,7 +288,7 @@ defmodule Barkpark.SheetsParityTest do
           markers != %{},
           into: %{}
         ) do
-          {Barkpark.Sheets.format_ref({c, r}), markers}
+          {Barkpark.Plugins.Sheets.Core.format_ref({c, r}), markers}
         end
     }
   end

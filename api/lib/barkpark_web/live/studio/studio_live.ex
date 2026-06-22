@@ -203,7 +203,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
        # A type:"sheet" document opens as the collaborative grid editor
        # (`editor_view: :sheet`), not the field form. The LiveView
        # subscribes to the sheet session's delta topic
-       # (`Barkpark.Sheets.Session.topic/3` — the doc topic suffixed with
+       # (`Barkpark.Plugins.Sheets.Session.topic/3` — the doc topic suffixed with
        # ":sheets:op"); `{:sheets_op, …}` payloads forward into the
        # SheetGrid LiveComponent via send_update — the component owns all
        # grid state and applies deltas in place (no rebuild, no remount).
@@ -3953,8 +3953,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   defp ensure_sheet_subscription(socket, doc) do
     {new_topic, new_presence_topic} =
       if doc != nil and connected?(socket) do
-        {Barkpark.Sheets.Session.topic(doc.doc_id, socket.assigns.dataset, doc.workspace_id),
-         Barkpark.Sheets.Session.presence_topic(
+        {Barkpark.Plugins.Sheets.Session.topic(doc.doc_id, socket.assigns.dataset, doc.workspace_id),
+         Barkpark.Plugins.Sheets.Session.presence_topic(
            doc.doc_id,
            socket.assigns.dataset,
            doc.workspace_id

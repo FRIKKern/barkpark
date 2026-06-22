@@ -4,7 +4,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
   Two LiveViewTest mounts on the same sheet prove the full presence loop
   through the real spine: the hosting StudioLive tracks each editor on the
-  per-sheet topic (`Barkpark.Sheets.Session.presence_topic/3` via
+  per-sheet topic (`Barkpark.Plugins.Sheets.Session.presence_topic/3` via
   `BarkparkWeb.Presence`); the SheetGrid component renders collaborators'
   cursors (colored outline + name tag), selection overlays and the
   emphasized editing tag; meta updates ride the component's `presence-meta`
@@ -31,7 +31,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     put_cfg(debounce_ms: 60_000, idle_stop_ms: 60_000)
@@ -40,12 +40,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
   end
 
   defp put_cfg(overrides) do
-    base = Application.get_env(:barkpark, Barkpark.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Sheets.Session, Keyword.merge(base, overrides))
+    base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)

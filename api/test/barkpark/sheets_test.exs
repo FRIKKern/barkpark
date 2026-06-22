@@ -1,13 +1,13 @@
 defmodule Barkpark.SheetsTest do
   @moduledoc """
-  Unit tests for `Barkpark.Sheets` — A1 helpers and snapshot synthesis.
+  Unit tests for `Barkpark.Plugins.Sheets.Core` — A1 helpers and snapshot synthesis.
   Pure functions, no DB.
   """
   use ExUnit.Case, async: true
 
-  doctest Barkpark.Sheets
+  doctest Barkpark.Plugins.Sheets.Core
 
-  alias Barkpark.Sheets
+  alias Barkpark.Plugins.Sheets.Core, as: Sheets
 
   # ── parse_ref/1 ────────────────────────────────────────────────────────────
 

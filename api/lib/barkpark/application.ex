@@ -83,8 +83,8 @@ defmodule Barkpark.Application do
           # next op). CORE, plugin-independent (fresh-install invariant):
           # only the HTTP ops route is plugin wiring. Needs Repo (load /
           # persist) and PubSub (delta broadcasts) — both above.
-          {Registry, keys: :unique, name: Barkpark.Sheets.SessionRegistry},
-          {DynamicSupervisor, name: Barkpark.Sheets.SessionSupervisor, strategy: :one_for_one},
+          {Registry, keys: :unique, name: Barkpark.Plugins.Sheets.SessionRegistry},
+          {DynamicSupervisor, name: Barkpark.Plugins.Sheets.SessionSupervisor, strategy: :one_for_one},
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,

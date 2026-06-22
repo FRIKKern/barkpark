@@ -97,7 +97,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
     # when no session is live for this sheet. A FAILED persist means the
     # row below is stale — surface a clean 503 instead of serving it; the
     # session keeps retrying on its debounce, so the hint is honest.
-    case Barkpark.Sheets.Session.flush(slug, dataset) do
+    case Barkpark.Plugins.Sheets.Session.flush(slug, dataset) do
       :ok ->
         with {:error, :not_found} <-
                Content.get_document(Content.draft_id(slug), "sheet", dataset),

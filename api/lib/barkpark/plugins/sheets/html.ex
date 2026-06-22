@@ -3,7 +3,7 @@ defmodule Barkpark.Plugins.Sheets.Html do
   Sheet-document content → a standalone minimal HTML page (M5).
 
   Every tab renders through the SAME path the reader uses: the tab's
-  snapshot (`Barkpark.Sheets.snapshot_for/2`) composed as a `"sheet"`
+  snapshot (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`) composed as a `"sheet"`
   portable-doc block and walked by `Barkpark.PortableDoc.Render` in the
   article palette — so merges (colspan/rowspan) and basic styles paint
   exactly as they do at `/papers/:slug`, with zero renderer duplication.
@@ -12,7 +12,7 @@ defmodule Barkpark.Plugins.Sheets.Html do
   """
 
   alias Barkpark.PortableDoc.Render
-  alias Barkpark.Sheets, as: Core
+  alias Barkpark.Plugins.Sheets.Core, as: Core
 
   @doc "Render the content as a full standalone HTML page."
   @spec export(map(), String.t() | nil) :: String.t()

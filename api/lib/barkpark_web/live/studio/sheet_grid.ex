@@ -8,7 +8,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   ## Wire protocol — edits are ops, state is deltas
 
-  EVERY edit becomes a `Barkpark.Sheets.Session.apply_ops/3` call
+  EVERY edit becomes a `Barkpark.Plugins.Sheets.Session.apply_ops/3` call
   (server-side, no HTTP hop) and the component NEVER applies an op to its
   own assigns. The hosting StudioLive subscribes to the session delta topic
   (`Session.topic/3`) and forwards each `{:sheets_op, payload}` here via
@@ -93,8 +93,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   use BarkparkWeb, :live_component
 
   alias Barkpark.Content
-  alias Barkpark.Sheets
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.Presence
   alias BarkparkWeb.Studio.PresenceState
 

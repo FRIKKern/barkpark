@@ -6,14 +6,14 @@ defmodule Barkpark.Plugins.Sheets.Markdown do
   (a GitHub table has nowhere to put them).
 
   The grid is the same dense projection every other read surface uses
-  (`Barkpark.Sheets.snapshot_for/2`): a frozen first row becomes the table
+  (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`): a frozen first row becomes the table
   header; without one the header is synthesized column letters (A, B, …) —
   a GitHub table requires a header row. Pipes escape as `\\|`; embedded
   line breaks flatten to spaces. Tab headings (`## name`) appear when a tab
   is named or when the document has several tabs.
   """
 
-  alias Barkpark.Sheets, as: Core
+  alias Barkpark.Plugins.Sheets.Core, as: Core
 
   @doc "Render every tab as a Markdown section."
   @spec export(map()) :: String.t()

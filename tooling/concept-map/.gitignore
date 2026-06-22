@@ -1,2 +1,4 @@
 # Propose-only scaffold proposals — dry-run output, never committed.
 .scaffold-staging/
+# Decomposition / migration proposals — human-execution plans, never committed.
+.proposals/

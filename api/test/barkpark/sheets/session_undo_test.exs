@@ -1,6 +1,6 @@
-defmodule Barkpark.Sheets.SessionUndoTest do
+defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
   @moduledoc """
-  M4 locks for per-user undo/redo in `Barkpark.Sheets.Session`.
+  M4 locks for per-user undo/redo in `Barkpark.Plugins.Sheets.Session`.
 
   The matrix: undo is OWN-OP only (per-user inverse stacks keyed by the
   op's `"user"` stamp); inverse correctness per op type — cell ops restore
@@ -13,12 +13,12 @@ defmodule Barkpark.Sheets.SessionUndoTest do
   documented); undo deltas broadcast like normal ops.
 
   `async: false` — sessions are globally registered processes, same as
-  `Barkpark.Sheets.SessionTest`.
+  `Barkpark.Plugins.Sheets.SessionTest`.
   """
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   @dataset "sheets_m4_undo_test"
 
@@ -27,7 +27,7 @@ defmodule Barkpark.Sheets.SessionUndoTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     put_cfg(debounce_ms: 60_000, idle_stop_ms: 60_000)
@@ -35,12 +35,12 @@ defmodule Barkpark.Sheets.SessionUndoTest do
   end
 
   defp put_cfg(overrides) do
-    base = Application.get_env(:barkpark, Barkpark.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Sheets.Session, Keyword.merge(base, overrides))
+    base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)

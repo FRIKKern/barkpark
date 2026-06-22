@@ -1,0 +1,89 @@
+name: architecture
+
+# The never-worse gate, pointed at architecture (cqv8).
+#
+# Rebuilds the symbol graph and runs tooling/concept-map/ci-boundary.mjs, which
+# fails on REGRESSION versus tooling/concept-map/boundary-baseline.json — a NEW
+# feature→feature sideways edge, a NEW kernel→feature edge, or a NEW feature
+# cycle. Existing known debt is grandfathered by the baseline, so it never
+# breaks CI; only NEW debt does.
+#
+# ADVISORY AT FIRST (continue-on-error: true), matching the format-gate
+# precedent in ci.yml — the job reports the regression to the PR summary but
+# does not block the merge. Flip continue-on-error to false to make it a hard
+# gate once the signal has proven stable on real PRs.
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - "internal/**"
+      - "js/**"
+      - "tooling/concept-map/**"
+      - "tooling/symbol-graph/**"
+      - ".github/workflows/architecture.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: architecture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boundary-gate:
+    name: Boundary gate (advisory)
+    runs-on: ubuntu-latest
+    # Advisory at first — report, don't block. Matches ci.yml's format gate.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.1"
+
+      # build-symbols.mjs lifts the mix-xref module graph to raise edge
+      # confidence; it auto-compiles api/_build when absent but does NOT fetch
+      # deps. Fetch them here first, same as codebase-intel.yml.
+      - name: Fetch Elixir deps (for mix xref warming)
+        working-directory: api
+        env:
+          MIX_ENV: dev
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Run boundary gate
+        run: |
+          node tooling/concept-map/ci-boundary.mjs --json 2>&1 | tee /tmp/boundary-gate.txt
+
+      - name: Report to PR summary
+        if: always()
+        run: |
+          {
+            echo "## cqv8 — architecture boundary gate"
+            echo ""
+            echo "The never-worse gate, pointed at architecture. Fails on NEW"
+            echo "feature→feature, kernel→feature, or cycle debt vs the committed"
+            echo "baseline. Advisory at first — does not block the merge."
+            echo ""
+            echo '```'
+            tail -40 /tmp/boundary-gate.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

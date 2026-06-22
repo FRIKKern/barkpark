@@ -15,7 +15,7 @@ defmodule BarkparkWeb.SheetsPluginRoutesTest do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.XlsxImport
-  alias Barkpark.Sheets.Engine
+  alias Barkpark.Plugins.Sheets.Engine
   alias Elixlsx.{Sheet, Workbook}
 
   # Set in config/test.exs.

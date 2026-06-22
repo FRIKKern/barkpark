@@ -20,7 +20,7 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   @dataset "production"
 
@@ -29,7 +29,7 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     put_cfg(debounce_ms: 60_000, idle_stop_ms: 60_000)
@@ -40,12 +40,12 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
   end
 
   defp put_cfg(overrides) do
-    base = Application.get_env(:barkpark, Barkpark.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Sheets.Session, Keyword.merge(base, overrides))
+    base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)

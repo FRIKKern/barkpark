@@ -31,7 +31,7 @@ defmodule Barkpark.SheetsM1ProofTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   # Papers resolve publicly only in dataset "production" (the write-through
   # targets same-scope embeds only), so the whole story lives there.
@@ -60,7 +60,7 @@ defmodule Barkpark.SheetsM1ProofTest do
     # Persistence purely debounce-driven (no mid-stream count flush), short
     # enough to observe inside the test; idle-stop long so no session dies
     # mid-story.
-    Application.put_env(:barkpark, Barkpark.Sheets.Session,
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session,
       debounce_ms: 300,
       flush_after_ops: 1_000,
       idle_stop_ms: 60_000
@@ -68,14 +68,14 @@ defmodule Barkpark.SheetsM1ProofTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     :ok
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)

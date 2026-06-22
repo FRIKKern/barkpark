@@ -1,6 +1,6 @@
-defmodule Barkpark.Sheets.SessionTest do
+defmodule Barkpark.Plugins.Sheets.SessionTest do
   @moduledoc """
-  M1 locks for `Barkpark.Sheets.Session` — the per-sheet collaborative
+  M1 locks for `Barkpark.Plugins.Sheets.Session` — the per-sheet collaborative
   GenServer: lazy lifecycle (start on first op, hibernate, idle stop),
   mailbox-serialized last-write-wins ops, per-op recompute deltas on the
   suffixed doc topic, op-count/idle-debounced persistence through the
@@ -16,7 +16,7 @@ defmodule Barkpark.Sheets.SessionTest do
   import ExUnit.CaptureLog
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   @dataset "sheets_m1_session_test"
 
@@ -25,7 +25,7 @@ defmodule Barkpark.Sheets.SessionTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     # Keep the production 2s debounce / 5min idle-stop out of test timing by
@@ -35,12 +35,12 @@ defmodule Barkpark.Sheets.SessionTest do
   end
 
   defp put_cfg(overrides) do
-    base = Application.get_env(:barkpark, Barkpark.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Sheets.Session, Keyword.merge(base, overrides))
+    base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
