@@ -19,8 +19,6 @@ Ingest is tier `ingest` — token read from `BARKPARK_INGEST_TOKEN` (bearer fall
 | Pending intents | `BARKPARK_INGEST_TOKEN=… bp bulldocs intents` | `GET /v1/plugins/bulldocs/intents` (ingest tier, not your admin token) |
 | Drain one intent | `bp bulldocs intent-processed <id>` | `POST /v1/plugins/bulldocs/intents/:id/processed` |
 
-`/v1/paperflow/*` is a back-compat alias of `/v1/plugins/bulldocs/*`.
-
 Publish payload: `{"slug":…,"blocks":[…]}` or `{"body_html":…}`. Patch payload: `{"ops":[…]}`; `--if-rev` rejects unless the paper is still at that rev.
 
 The paper schema uses v2 field types, so the TUI renders papers read-only — edit in Studio. Clean installs ship one paper at `/papers/welcome`.

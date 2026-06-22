@@ -1,6 +1,6 @@
 defmodule Barkpark.Papers.TextDiff do
   @moduledoc """
-  Pure line-level diff — a faithful Elixir port of paperflow's vendored
+  Pure line-level diff — a faithful Elixir port of the vendored
   `lib/text-diff.js` (classic dynamic-programming LCS over the two line
   arrays). No `Repo`, no PubSub, no deps; backs the P6.U3 diff modal where
   shift-clicking two goal-path rail nodes opens a line-diff of their event

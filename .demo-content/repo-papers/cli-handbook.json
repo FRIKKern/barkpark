@@ -29,7 +29,7 @@
 [[{"type":"text","value":"none","marks":["code"]}],[{"type":"text","value":"nothing"}]],
 [[{"type":"text","value":"read","marks":["code"]}],[{"type":"text","value":"bearer only when path is scoped"}]],
 [[{"type":"text","value":"write","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"admin","marks":["code"]},{"type":"text","value":"/"},{"type":"text","value":"scoped_admin","marks":["code"]}],[{"type":"text","value":"Authorization: Bearer <token>","marks":["code"]}]],
-[[{"type":"text","value":"ingest","marks":["code"]}],[{"type":"text","value":"Authorization: Bearer <secret>","marks":["code"]},{"type":"text","value":" (reads "},{"type":"text","value":"BARKPARK_INGEST_TOKEN","marks":["code"]},{"type":"text","value":" → "},{"type":"text","value":"PAPERFLOW_INGEST_TOKEN","marks":["code"]},{"type":"text","value":" → bearer fallback)"}]]
+[[{"type":"text","value":"ingest","marks":["code"]}],[{"type":"text","value":"Authorization: Bearer <secret>","marks":["code"]},{"type":"text","value":" (reads "},{"type":"text","value":"BARKPARK_INGEST_TOKEN","marks":["code"]},{"type":"text","value":" → bearer fallback)"}]]
 ]},
 {"id":"b18","type":"paragraph","content":[{"type":"text","value":"scoped_admin","marks":["code"]},{"type":"text","value":" is never client-refused","marks":["strong"]},{"type":"text","value":" (M0 contract rule #2) — the server's 403 is surfaced cleanly."}]},
 {"id":"b19","type":"heading","level":2,"text":"Core verbs (summary)"},

@@ -121,8 +121,8 @@ Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server
 - `WorkingDirectory` = the `api/` directory
 - Environment: `PORT=4000`, `MIX_ENV=dev`
 - `RunAtLoad` = true, `KeepAlive` = true
-- `StandardOutPath` = `~/.paperflow/barkpark-server.out.log`
-- `StandardErrorPath` = `~/.paperflow/barkpark-server.err.log`
+- `StandardOutPath` = `~/.barkpark/barkpark-server.out.log`
+- `StandardErrorPath` = `~/.barkpark/barkpark-server.err.log`
 
 `KeepAlive=true` means launchd respawns the server if it dies. This is the only approach that survives logout/reboot.
 

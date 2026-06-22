@@ -1,6 +1,6 @@
 defmodule Barkpark.TextDiffTest do
   @moduledoc """
-  W7c step 3 (w7-11 / paperflow-158) — rail wrapper around
+  W7c step 3 (w7-11 / paper-158) — rail wrapper around
   `Barkpark.Papers.TextDiff`. The underlying LCS port is exhaustively
   tested in `Barkpark.Papers.TextDiffTest`; these tests assert the
   rail-shaped translation (op `=` → `" "`, html shape, etc.) and a few

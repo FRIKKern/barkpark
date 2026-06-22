@@ -41,7 +41,7 @@ const ENV = await resolveEnv(argv, { dataset: "codebase", datasetKey: "codebase"
 const HOST = ENV.host, DATASET = ENV.dataset;
 const SRC_DATASET = flag(argv, "--src-dataset", "production"); // where the tasks live
 const LIMIT = +flag(argv, "--limit", "200");
-const DEV = ENV.token, INGEST = process.env.BARKPARK_INGEST_TOKEN || "paperflow-dev-ingest-token";
+const DEV = ENV.token, INGEST = process.env.BARKPARK_INGEST_TOKEN || "barkpark-dev-ingest-token";
 e(banner(ENV, "tasks"));
 
 // ──────────── load the codebase graph + the quality reports ────────────

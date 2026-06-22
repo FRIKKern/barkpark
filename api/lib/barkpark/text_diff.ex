@@ -1,12 +1,12 @@
 defmodule Barkpark.TextDiff do
   @moduledoc """
   Line-level LCS diff at the rail surface — W7c step 3 / w7-11 /
-  paperflow-158. The /v1/rail/diff endpoint serves the goal-path rail's
+  paper-158. The /v1/rail/diff endpoint serves the goal-path rail's
   diff modal by computing hunks between two events' html_payloads.
 
   This module is the **rail-shaped wrapper** around the already-vendored
   `Barkpark.Papers.TextDiff` (which is itself a faithful port of
-  paperflow's `lib/text-diff.js`). The wrapper exists because:
+  the vendored `lib/text-diff.js`). The wrapper exists because:
 
     * `Papers.TextDiff` lives under the *papers* namespace — the rail is a
       separate consumer at the Beads-task substrate level and shouldn't

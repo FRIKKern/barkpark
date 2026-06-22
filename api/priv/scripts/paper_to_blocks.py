@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-paperflow_to_blocks.py — convert a paperflow article HTML doc into a
+paper_to_blocks.py — convert a paper article HTML doc into a
 portable-doc block list that Barkpark.PortableDoc.Render.compose_block accepts.
 
 Dep-light: Python 3 stdlib only (html.parser, html, json, hashlib, re).
 
-Maps the paperflow article grammar to the EXACT block shapes the Elixir
+Maps the paper article grammar to the EXACT block shapes the Elixir
 renderer's `compose_block/2` clauses pattern-match on (see
 api/lib/barkpark/portable_doc/render.ex):
 
@@ -35,8 +35,8 @@ Skips the doc.css <link>, the mermaid/doc.js <script> tail, <head>, and any
 chrome. Each block gets a stable id derived from its index + a content hash.
 
 Usage:
-  paperflow_to_blocks.py INPUT.html            # prints {"style","rev","blocks"} JSON
-  paperflow_to_blocks.py INPUT.html --blocks   # prints just the blocks array
+  paper_to_blocks.py INPUT.html            # prints {"style","rev","blocks"} JSON
+  paper_to_blocks.py INPUT.html --blocks   # prints just the blocks array
 """
 
 import sys
@@ -528,7 +528,7 @@ def main():
     blocks_only = "--blocks" in args
     paths = [a for a in args if not a.startswith("--")]
     if not paths:
-        sys.stderr.write("usage: paperflow_to_blocks.py INPUT.html [--blocks]\n")
+        sys.stderr.write("usage: paper_to_blocks.py INPUT.html [--blocks]\n")
         sys.exit(2)
     with open(paths[0], "r", encoding="utf-8") as f:
         html_text = f.read()

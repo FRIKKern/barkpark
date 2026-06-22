@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.TasksController do
   @moduledoc """
-  W7b step 1 (paperflow-rx0 / w7-07a) — HTTP surface for paperflow's
-  bd-compatible shim (`bin/bd-shim`, paperflow side).
+  W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the
+  bd-compatible shim (`bin/bd-shim`).
 
   Eleven endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.TasksController do
     do: from(e in query, where: e.workspace_id == ^ws_id)
 
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
-  # w7-08c (paperflow-y1c): list-all endpoint. Returns every task doc in the
+  # w7-08c (paper-y1c): list-all endpoint. Returns every task doc in the
   # caller's tenant, optionally narrowed by `kind`, `lifecycle_status`, or
   # `phase_id` (parent match). Everything is a task — goals/phases/events are
   # gone as types. Used by the bd-shim's `bd list --json` family — replaces
@@ -723,7 +723,7 @@ defmodule BarkparkWeb.TasksController do
   # task.relabeled mutation_event). Returns { ok, doc }.
   #
   # Backs the bd-shim's `bd update <id> --add-label/--remove-label`, which in
-  # turn backs paperflow-claim-files' `file-claim:<path>` ownership labels.
+  # turn backs paper-claim-files' `file-claim:<path>` ownership labels.
 
   def relabel(conn, %{"doc_id" => doc_id} = params) do
     add = string_list(params["add"])
@@ -889,7 +889,7 @@ defmodule BarkparkWeb.TasksController do
     }
   end
 
-  # w7-08c (paperflow-y1c): batch edge-count maps so a list response
+  # w7-08c (paper-y1c): batch edge-count maps so a list response
   # (ready/index) doesn't N+1 the task_edges table.
   #
   # Returns %{doc_id => {dependency_count, dependent_count}}. Single query

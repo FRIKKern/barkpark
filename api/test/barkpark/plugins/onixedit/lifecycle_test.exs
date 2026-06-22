@@ -5,8 +5,6 @@ defmodule Barkpark.Plugins.OnixEdit.LifecycleTest do
   no-ops for non-books, and (critically) no-ops when `ctx.source == :worker`
   to break the worker self-feedback loop.
 
-  See `~/docs/paperflow/plans/2026-05-17-lifecycle-hooks.html` §4.
-
   The hook lives at `lib/barkpark/plugins/onixedit/lifecycle.ex` and is
   fired by `Barkpark.Plugins.Hooks` after `Content.publish_document/4`.
   The worker's arg shape is `%{"document_id" => id, "type" => "book",

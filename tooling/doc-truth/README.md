@@ -294,7 +294,7 @@ remake is a separate, explicitly-invoked step that is out of scope for P5
 (propose + gate only, exactly like P2). A remake that merges docs, alters the
 canonical H2 structure, or touches a verbatim-exempt / `requiresOwnerSignoff`
 region routes to **`human`** — the never-auto guarantee. Rejects append one line
-to `remake-failures.log` (gitignored, like paperflow's `simplify-failures.log`);
+to `remake-failures.log` (gitignored);
 they never pollute git or a rail.
 
 ```bash

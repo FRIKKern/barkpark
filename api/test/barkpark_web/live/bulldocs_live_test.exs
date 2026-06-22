@@ -485,7 +485,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           "slug" => @action_slug,
           "style" => "article",
           "goal_id" => @action_goal,
-          "source_doc" => "/paperflow/plans/2026-05-25-convergence-plan.html",
+          "source_doc" => "/plans/2026-05-25-convergence-plan.html",
           "body_html" => "<p id=\"action-body\">Action demo body.</p>"
         })
 

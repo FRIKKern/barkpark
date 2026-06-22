@@ -4,7 +4,7 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
   Barkpark half of the loop-closer.
 
   Mirrors the paper-ingest endpoint's auth shape: `Authorization: Bearer
-  <ingest token>` via the `:paperflow_ingest` pipeline (RequireIngestToken).
+  <ingest token>` via the `:ingest` pipeline (RequireIngestToken).
   Asserts a valid token lists pending `action:*`/`simplify-*` intents, that
   `POST …/processed` marks one (so a follow-up GET omits it), and that a
   request without the token is rejected 401 (same as BulldocsIngestControllerTest).
@@ -14,8 +14,8 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
   alias Barkpark.Plugins.Bulldocs.Events
 
   # Set in config/test.exs (same shared-secret ingest token the papers test uses).
-  @token "paperflow-test-ingest-token"
-  @index_path "/v1/paperflow/intents"
+  @token "barkpark-test-ingest-token"
+  @index_path "/v1/plugins/bulldocs/intents"
 
   defp authed(conn) do
     conn
@@ -44,7 +44,7 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
     end
   end
 
-  describe "GET /v1/paperflow/intents" do
+  describe "GET /v1/plugins/bulldocs/intents" do
     test "returns only the pending actionable intents", %{conn: conn} do
       {:ok, build} =
         Events.create_event(%{"goal_id" => "bd-ix", "event_type" => "action:build"})
@@ -71,7 +71,7 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
     end
   end
 
-  describe "POST /v1/paperflow/intents/:id/processed" do
+  describe "POST /v1/plugins/bulldocs/intents/:id/processed" do
     test "marks the intent so a follow-up GET omits it", %{conn: conn} do
       {:ok, intent} =
         Events.create_event(%{"goal_id" => "bd-mark", "event_type" => "simplify-request"})
@@ -86,7 +86,7 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
 
       assert intent.id in before_ids
 
-      conn = authed(conn) |> post("/v1/paperflow/intents/#{intent.id}/processed")
+      conn = authed(conn) |> post("/v1/plugins/bulldocs/intents/#{intent.id}/processed")
       resp = json_response(conn, 200)
       assert resp["ok"] == true
       assert resp["id"] == intent.id
@@ -103,14 +103,14 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
     end
 
     test "unknown id → 404 not_found", %{conn: conn} do
-      conn = authed(conn) |> post("/v1/paperflow/intents/#{Ecto.UUID.generate()}/processed")
+      conn = authed(conn) |> post("/v1/plugins/bulldocs/intents/#{Ecto.UUID.generate()}/processed")
       resp = json_response(conn, 404)
       assert resp["ok"] == false
       assert resp["error"] == "not_found"
     end
 
     test "non-UUID id → 404 not_found (no Ecto.Query.CastError)", %{conn: conn} do
-      conn = authed(conn) |> post("/v1/paperflow/intents/evt_does_not_exist_12345/processed")
+      conn = authed(conn) |> post("/v1/plugins/bulldocs/intents/evt_does_not_exist_12345/processed")
       resp = json_response(conn, 404)
       assert resp["ok"] == false
       assert resp["error"] == "not_found"
@@ -124,7 +124,7 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
       conn =
         conn
         |> put_req_header("content-type", "application/json")
-        |> post("/v1/paperflow/intents/#{intent.id}/processed")
+        |> post("/v1/plugins/bulldocs/intents/#{intent.id}/processed")
 
       assert json_response(conn, 401)["error"]["code"] == "unauthorized"
       # Untouched — still pending.

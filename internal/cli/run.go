@@ -132,8 +132,8 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 		// Ingest commands (e.g. bulldocs writes) authenticate with the shared
 		// ingest secret, NOT the api_tokens bearer. The server's
 		// RequireIngestToken plug reads `Authorization: Bearer <secret>` and
-		// constant-time-compares it against the configured :paperflow_ingest_token
-		// (wired from PAPERFLOW_INGEST_TOKEN / BARKPARK_INGEST_TOKEN). So the
+		// constant-time-compares it against the configured :ingest_token
+		// (wired from BARKPARK_INGEST_TOKEN). So the
 		// secret rides the standard Authorization: Bearer header — same header,
 		// different credential source than the bearer api token.
 		if secret := ingestSecret(ctx); secret != "" {
@@ -149,11 +149,11 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 }
 
 // ingestSecret resolves the shared ingest secret for an `auth_tier: ingest`
-// command. It reads BARKPARK_INGEST_TOKEN first, then the PAPERFLOW_INGEST_TOKEN
-// alias (the original convergence env var the server still honours). As a last
+// command. It reads BARKPARK_INGEST_TOKEN first, then the legacy
+// PAPERFLOW_INGEST_TOKEN env var the server still honours. As a last
 // resort it falls back to the resolved bearer token — best-effort only, for the
 // single-secret dev setup where both happen to be the same value. The server's
-// RequireIngestToken plug compares this against :paperflow_ingest_token.
+// RequireIngestToken plug compares this against :ingest_token.
 func ingestSecret(ctx manifest.Context) string {
 	if s := os.Getenv("BARKPARK_INGEST_TOKEN"); s != "" {
 		return s

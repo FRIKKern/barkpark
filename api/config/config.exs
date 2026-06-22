@@ -57,11 +57,10 @@ config :barkpark, :media_processing_callback_token, "dev-media-processing-callba
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
 config :barkpark, :default_cors_origins, []
 
-# Shared secret for the paperflow → Barkpark paper-ingest endpoint
-# (convergence MVP, masterplan Figure 6). Matches BARKPARK_INGEST_TOKEN
-# from ~/.paperflow/barkpark.env. Overridden per-env: runtime.exs reads
-# PAPERFLOW_INGEST_TOKEN in prod; dev.exs/test.exs set a local default.
-config :barkpark, :paperflow_ingest_token, nil
+# Shared secret for the paper-ingest endpoint. Overridden per-env: runtime.exs
+# reads BARKPARK_INGEST_TOKEN in prod (PAPERFLOW_INGEST_TOKEN as legacy
+# fallback); dev.exs/test.exs set a local default.
+config :barkpark, :ingest_token, nil
 
 config :barkpark, :search_query_exclude_patterns, [
   ~r/^(test|asdf|qwerty|foo|bar)$/i
@@ -123,7 +122,7 @@ config :barkpark, Oban,
 # 5-minute lease is the contract: any worker that hasn't refreshed
 # its claim.ts_iso in 300 s is considered crashed. Sweep cadence is
 # fixed by the Oban.Cron entry above — once per minute. Sub-minute
-# cadence is intentionally NOT supported: paperflow's recovery SLO
+# cadence is intentionally NOT supported: the task recovery SLO
 # is "minutes, not seconds," and the per-minute cron + per-task
 # advisory lock + fencing epoch already cover the crash path
 # without driving Oban poll pressure higher than the rest of the

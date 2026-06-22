@@ -285,7 +285,7 @@ function readFailureLog() {
 
 // ── reporting (the human-review queue + recent rejects) ───────────────────────
 // P5 itself never persists the human queue (the gate is invoked per-proposal by
-// a caller, e.g. /paperflow). The CLI shows the recent reject log so an operator
+// a caller). The CLI shows the recent reject log so an operator
 // can see what the gate has been turning away.
 function printHuman() {
   const bar = "─".repeat(74);

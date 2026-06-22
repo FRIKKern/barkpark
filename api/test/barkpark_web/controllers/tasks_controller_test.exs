@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.TasksControllerTest do
   @moduledoc """
-  W7b step 1 (paperflow-rx0 / w7-07a) — contract tests for the bd-shim
+  W7b step 1 (paper-rx0 / w7-07a) — contract tests for the bd-shim
   surface. One happy path per endpoint + one auth-fail + one error shape.
 
     * `ready` happy path (one open task surfaces)
@@ -95,7 +95,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert first["lifecycle_status"] == "open"
       assert first["type"] == "task"
 
-      # w7-08c (paperflow-y1c): edge-count fields present on the ready shape
+      # w7-08c (paper-y1c): edge-count fields present on the ready shape
       # (the bd-shim's list/ready renderers carry them into the consumer JSON).
       assert Map.has_key?(first, "dependency_count")
       assert Map.has_key?(first, "dependent_count")
@@ -393,7 +393,7 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
-  # ─── w7-08c (paperflow-y1c): list-all endpoint ─────────────────────────
+  # ─── w7-08c (paper-y1c): list-all endpoint ─────────────────────────
 
   describe "GET /v1/tasks" do
     test "basic list: returns tasks in the tenant (root + child are both tasks)",

@@ -2,8 +2,7 @@
 
 Makes Cody good at **feature-based architecture as a core skill**: grade how well a
 codebase materializes its concepts as feature folders, and scaffold new ones into the
-right shape. Built on the cqv5 symbol graph + `what-breaks`; spec at
-`~/docs/paperflow/specs/2026-06-22-cody-cqv8-feature-layer.html`.
+right shape. Built on the cqv5 symbol graph + `what-breaks`.
 
 The thesis: **feature architecture = making the filesystem agree with the dependency
 graph.** A concept is a cohesive cluster of symbols; a feature folder makes it

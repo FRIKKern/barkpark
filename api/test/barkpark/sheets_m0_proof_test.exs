@@ -7,7 +7,7 @@ defmodule Barkpark.SheetsM0ProofTest do
 
     1. `POST /v1/data/mutate/production` creates a 2-tab `sheet` document
        (strings, numbers, a date, col_widths) via the mutation envelope.
-    2. `POST /v1/paperflow/papers` ingests a paper embedding that sheet via
+    2. `POST /v1/plugins/bulldocs/papers` ingests a paper embedding that sheet via
        two core `"sheet"` blocks (tab 0 + tab 1).
     3. `GET /papers/:slug` — the sheet existed BEFORE the embed, so the
        ingest hydrated BOTH blocks' snapshots immediately (M0a): the first
@@ -38,7 +38,7 @@ defmodule Barkpark.SheetsM0ProofTest do
   # mutate_controller_test.exs, distinct value to avoid any sharing).
   @write_token "sheets-m0-proof-write-token"
   # Fixed paper-ingest secret from config/test.exs.
-  @ingest_token "paperflow-test-ingest-token"
+  @ingest_token "barkpark-test-ingest-token"
 
   setup do
     # The Default workspace/project must exist: AssignDefaultScope stamps the
@@ -60,7 +60,7 @@ defmodule Barkpark.SheetsM0ProofTest do
     conn
     |> put_req_header("authorization", "Bearer " <> @ingest_token)
     |> put_req_header("content-type", "application/json")
-    |> post("/v1/paperflow/papers", Jason.encode!(body))
+    |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
   end
 
   defp read_paper(conn) do

@@ -1,6 +1,6 @@
 defmodule Barkpark.Papers.PaperEventsWorkspaceScopeTest do
   @moduledoc """
-  Cross-tenant leak guard for the paperflow document surface (Wave 1.5-C).
+  Cross-tenant leak guard for the paper document surface (Wave 1.5-C).
 
   A paper_event FOLLOWS its goal — its scope = the goal's (and its paper's)
   workspace/project. Before this fix, `paper_events` carried no tenancy
@@ -13,7 +13,7 @@ defmodule Barkpark.Papers.PaperEventsWorkspaceScopeTest do
     1. `Events.list_for_goal/2` scoped to B never returns A's event,
     2. `Events.list_for_paper/2` scoped to B never returns A's event,
     3. the Default-scoped (flat back-compat) path still sees a Default-stamped
-       event — the unscoped paperflow ingest keeps working.
+       event — the unscoped paper ingest keeps working.
 
   Isolation must come from `workspace_id`, never the dataset leaf — both
   workspaces share `@dataset`.

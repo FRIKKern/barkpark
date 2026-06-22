@@ -9,7 +9,7 @@ defmodule Barkpark.SheetsM1ProofTest do
 
     1. `POST /v1/data/mutate/production` creates the "Budsjett" sheet (a few
        numbers + an `E1 = SUM(B1:C20)` total) via the mutation envelope, and
-       `POST /v1/paperflow/papers` embeds it in a dashboard paper.
+       `POST /v1/plugins/bulldocs/papers` embeds it in a dashboard paper.
     2. Watcher W subscribes to the delta stream the way an external consumer
        must: `Phoenix.PubSub` on `Session.topic/3` (the doc topic suffixed
        `":sheets:op"`). The `/v1/data/listen/:dataset` SSE stream does NOT
@@ -42,7 +42,7 @@ defmodule Barkpark.SheetsM1ProofTest do
 
   # Fresh write token for mutate/read; fixed ingest secret from config/test.exs.
   @write_token "sheets-m1-proof-write-token"
-  @ingest_token "paperflow-test-ingest-token"
+  @ingest_token "barkpark-test-ingest-token"
 
   @rows 20
   @batch_rows 4
@@ -100,7 +100,7 @@ defmodule Barkpark.SheetsM1ProofTest do
     build_conn()
     |> put_req_header("authorization", "Bearer " <> @ingest_token)
     |> put_req_header("content-type", "application/json")
-    |> post("/v1/paperflow/papers", Jason.encode!(body))
+    |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
   end
 
   # Explicit JSON body: Phoenix.ConnTest's map-params encoding would

@@ -253,8 +253,8 @@ function status() {
 // the map every commit. We bracket our block in clear sentinel markers and skip
 // re-insertion if the block is already present (idempotent). We respect any
 // existing hook content — append, never clobber.
-const SENTINEL_BEGIN = "# >>> paperflow re-indexer (cqv5 phase 5) >>>";
-const SENTINEL_END = "# <<< paperflow re-indexer (cqv5 phase 5) <<<";
+const SENTINEL_BEGIN = "# >>> barkpark re-indexer (cqv5 phase 5) >>>";
+const SENTINEL_END = "# <<< barkpark re-indexer (cqv5 phase 5) <<<";
 
 function hookBlock() {
   // Use a path relative to the repo root so the hook is checkout-portable.

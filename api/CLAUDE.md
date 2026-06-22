@@ -21,13 +21,13 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 ## Bulldocs (the Papers surface)
 
-The built-in "Papers"/"paperflow" feature is now the **Bulldocs plugin**. Bulldocs is the plugin/producer brand; a **paper** is the artifact — persisted `type` stays `"paper"`, reader URL stays `/papers/:slug` (no data migration, no public-URL break). **Core keeps the reusable machinery, the plugin is thin wiring.**
+The built-in **Papers** feature is the **Bulldocs plugin**. Bulldocs is the plugin/producer brand; a **paper** is the artifact — persisted `type` stays `"paper"`, reader URL stays `/papers/:slug` (no data migration, no public-URL break). **Core keeps the reusable machinery, the plugin is thin wiring.**
 
 - **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
 - **Plugin module:** `register_schemas/1` (the `paper` schema) + `register_routes/1` — reader on the `:public_root` bucket, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Any plugin needing a public reader page or token-gated ingest API reuses these buckets.
 
-**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` until paperflow's `event-on-save.sh` producers repoint — externally gated; do NOT drop unilaterally. `:paperflow_ingest_token` / `PAPERFLOW_INGEST_TOKEN` unchanged. Tracked in `docs/decisions/deferred.md`.
+**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy external producers — externally gated; do NOT drop unilaterally. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN` still honored). See `docs/decisions/deferred.md`.
 
 ## Sheets
 

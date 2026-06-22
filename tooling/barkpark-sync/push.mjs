@@ -21,7 +21,7 @@ const HOST = ENV.host, DATASET = ENV.dataset, ROOT = ENV.root;
 const LIMIT = +flag(argv, "--limit", "0");
 console.error(banner(ENV, "push"));
 if (DATASET === "production") { console.error("[push] refusing to publish code papers into 'production' — pass a non-production --dataset (the isolated 'codebase' is the default)."); process.exit(2); }
-const DEV = ENV.token, INGEST = process.env.BARKPARK_INGEST_TOKEN || "paperflow-dev-ingest-token";
+const DEV = ENV.token, INGEST = process.env.BARKPARK_INGEST_TOKEN || "barkpark-dev-ingest-token";
 
 const all = JSON.parse(readFileSync(join(HERE, "nodes.json"), "utf8")).nodes;
 const taxPath = join(ROOT, "tooling/intentions/intentions-report.json");

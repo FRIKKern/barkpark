@@ -258,8 +258,7 @@ defmodule BarkparkWeb.Router do
 
   # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
   # table). Used by the Bulldocs paper-ingest API and any plugin that ships an
-  # `auth: :ingest` route via the plugin highway. (Convergence MVP — masterplan
-  # Figure 6 — originally `:paperflow_ingest`.)
+  # `auth: :ingest` route via the plugin highway.
   pipeline :ingest do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireIngestToken)
@@ -320,16 +319,15 @@ defmodule BarkparkWeb.Router do
   # `BarkparkWeb.BulldocsLive` in its own live_session with the full-document
   # `:bulldocs` root layout: byte-identical URL + layout to the former hardcoded
   # `scope "/papers"`, just sourced from the plugin. (The route template still
-  # matches `BARKPARK_LIVEVIEW_PATH_TEMPLATE` = "/papers/{slug}" in paperflow's
-  # event-on-save.sh.)
+  # matches the `/papers/{slug}` reader URL.)
 
   # ── Bulldocs paper ingest (JSON POST) — back-compat alias ───────────────
   # The CANONICAL ingest API is now the Bulldocs plugin's `/v1/plugins/bulldocs/*`
   # (the `:ingest` route bucket — see `Barkpark.Plugins.Bulldocs.register_routes/1`).
-  # These flat `/v1/paperflow/*` routes are kept as a back-compat alias so
-  # existing producers (paperflow's event-on-save.sh) keep working until
-  # repointed — same controllers, same `:ingest` (RequireIngestToken) pipeline.
-  # Remove once every producer posts to the plugin URL.
+  # These flat `/v1/paperflow/*` routes are kept as a back-compat alias for legacy
+  # external producers that have not yet repointed — same controllers, same
+  # `:ingest` (RequireIngestToken) pipeline. The path name is historical; it is an
+  # EXTERNAL contract, so do NOT drop it unilaterally (see docs/decisions/deferred.md).
   scope "/v1/paperflow", BarkparkWeb do
     pipe_through(:ingest)
 
@@ -337,8 +335,8 @@ defmodule BarkparkWeb.Router do
     # Wave 4 block-ingest: POST a single DocPatchOp for a slug. Same bearer
     # auth; applies via Content.apply_paper_block_op, broadcasts a delta frame.
     post("/papers/:slug/ops", BulldocsIngestController, :apply_op)
-    # P6.U6a loop-closer (barkpark-jwai): the paperflow-side reader loop (U6b)
-    # drains pending action:*/simplify-* intents here, then marks each done.
+    # Loop-closer: the external reader loop drains pending action:*/simplify-*
+    # intents here, then marks each done.
     get("/intents", BulldocsIntentsController, :index)
     post("/intents/:id/processed", BulldocsIntentsController, :mark_processed)
   end
@@ -747,9 +745,9 @@ defmodule BarkparkWeb.Router do
     post("/mutate/:dataset", MutateController, :mutate)
   end
 
-  # ── Tasks API — paperflow bd-shim surface (W7b step 1 / paperflow-rx0) ──
-  # The ten `bin/bd-shim` endpoints now live in `Barkpark.Plugins.Tasks`'
-  # `register_routes/1` (auth: :token_root) and mount via the dormant
+  # ── Tasks API surface ───────────────────────────────────────────────────
+  # The task endpoints live in `Barkpark.Plugins.Tasks`' `register_routes/1`
+  # (auth: :token_root) and mount via the dormant
   # `scope "/v1" … plugin_routes(scope: :token_root)` wrapper above (C4-3b).
   # The flat `scope "/v1/tasks"` block was deleted — the plugin OWNS its routes.
 

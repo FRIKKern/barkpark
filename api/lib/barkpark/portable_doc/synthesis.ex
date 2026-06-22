@@ -3,7 +3,7 @@ defmodule Barkpark.PortableDoc.Synthesis do
   Lazy in-memory synthesis of a block list for a LEGACY document that has no
   `content["blocks"]` yet (Exp-P2, barkpark-emxg, step 2.5).
 
-  On the first Beta-open of such a document, paperflow needs a block list to
+  On the first Beta-open of such a document, the paper surface needs a block list to
   drive the bound/free editor — but nothing should be PERSISTED until the user
   makes the first edit. `synthesize/3` builds that block list purely in memory
   from:

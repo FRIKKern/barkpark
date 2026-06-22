@@ -845,7 +845,7 @@
     {
       "name": "bulldocs",
       "plugin": "bulldocs",
-      "summary": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers / paperflow feature; now a first-party plugin built on the core portable-doc utilities."
+      "summary": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers feature; now a first-party plugin built on the core portable-doc utilities."
     },
     {
       "name": "onixedit",

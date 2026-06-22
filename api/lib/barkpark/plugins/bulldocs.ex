@@ -2,8 +2,8 @@ defmodule Barkpark.Plugins.Bulldocs do
   @moduledoc """
   Bulldocs — the live, no-reload paper/document surface, as a first-party plugin.
 
-  Bulldocs is the *producer* brand; a **paper** is what it produces. An external
-  tool (formerly "paperflow") POSTs block-structured papers to Bulldocs's ingest
+  Bulldocs is the *producer* brand; a **paper** is what it produces. A producer
+  POSTs block-structured papers to Bulldocs's ingest
   API; Bulldocs stores them as type-`"paper"` documents and renders them at
   `/papers/:slug` with real-time per-block streaming and rev-gap recovery.
 
@@ -80,9 +80,7 @@ defmodule Barkpark.Plugins.Bulldocs do
       `BulldocsIngestController` / `BulldocsIntentsController`.
 
   The reader URL stays `/papers/:slug` (the artifact noun is unchanged). The
-  ingest API gains the canonical plugin prefix `/v1/plugins/bulldocs/…`; the
-  host keeps `/v1/paperflow/*` as a back-compat alias for existing producers
-  (see `BarkparkWeb.Router`).
+  ingest API gains the canonical plugin prefix `/v1/plugins/bulldocs/…`.
 
   These point at modules that remain in core — Bulldocs is the wiring layer, the
   core block-document machinery is the utility it builds on.
@@ -112,8 +110,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   Ergonomic CLI verbs Bulldocs contributes to the `/v1/capabilities` manifest
   (M3). Each command is grounded in a route that `register_routes/1` ABOVE
   actually mounts — `path_template` is the flat plugin path (the canonical
-  `/v1/plugins/bulldocs/…` prefix; the `/v1/paperflow/…` alias is a back-compat
-  mirror, not modelled here). Every ingest route maps to `auth_tier: "ingest"`,
+  `/v1/plugins/bulldocs/…` prefix). Every ingest route maps to `auth_tier: "ingest"`,
   the route's highway bucket.
 
   Five verbs over four routes:

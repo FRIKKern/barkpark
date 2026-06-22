@@ -14,7 +14,7 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
 
   The fix routes the public surface through `Content.get_public_paper/2`, which
   resolves the slug ONLY within the seeded **Default** (public) workspace — the
-  one deterministic public tenant (where the flat, unauthenticated paperflow
+  one deterministic public tenant (where the flat, unauthenticated paper
   ingest lands by Default fallback).
 
   These tests stand up the Default workspace plus a SEPARATE non-Default

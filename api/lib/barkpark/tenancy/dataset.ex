@@ -2,8 +2,8 @@ defmodule Barkpark.Tenancy.Dataset do
   @moduledoc """
   Wave-2: a Dataset is a first-class entity living under exactly one Project
   (the layer below Workspace -> Project). It promotes the plain `dataset`
-  STRING that every content table carries ("production" default, "paperflow"
-  for papers) into a row. Slug is unique within its Project.
+  STRING that every content table carries ("production" default) into a
+  row. Slug is unique within its Project.
 
   Additive seam only: the `dataset` string stays authoritative for reads and
   uniqueness; `dataset_id` rides alongside until later W2 steps flip over.

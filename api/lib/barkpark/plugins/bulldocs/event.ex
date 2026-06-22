@@ -1,6 +1,6 @@
 defmodule Barkpark.Plugins.Bulldocs.Event do
   @moduledoc """
-  Ecto schema for `paper_events` — an append-only paperflow lifecycle event
+  Ecto schema for `paper_events` — an append-only paper lifecycle event
   (`plan-written`, `goal-snapshot`, `phase-advanced`, …) scoped to a goal
   and/or paper. Backs the native goal-path rail (P6.U2).
 
@@ -25,7 +25,7 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
 
     # W1.5-C tenancy scope. A paper_event FOLLOWS its goal — its scope = the
     # goal's (and its paper's) workspace/project. NULLABLE: NULL = unscoped /
-    # back-compat (paperflow ingest still sends FLAT). Stamped on create from
+    # back-compat (paper ingest still sends FLAT). Stamped on create from
     # the resolved workspace/project (Default fallback); queries filter by
     # workspace_id only when a scope is provided (nil = unscoped read).
     field :workspace_id, :binary_id
@@ -37,7 +37,7 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
     belongs_to :dataset, Barkpark.Tenancy.Dataset, type: :binary_id
 
     # P6.U6a (barkpark-jwai): NULL = pending intent; a timestamp = consumed by
-    # the paperflow-side reader loop. Set on `Events.mark_processed/1`, never on
+    # the paper-side reader loop. Set on `Events.mark_processed/1`, never on
     # create — deliberately omitted from the changeset cast/validation.
     field :processed_at, :utc_datetime_usec
 

@@ -1,20 +1,20 @@
 defmodule BarkparkWeb.BulldocsIntentsController do
   @moduledoc """
   Pending-intents API over `paper_events` — the Barkpark half of the
-  loop-closer (P6.U6a, barkpark-jwai). The paperflow-side reader loop (U6b)
+  loop-closer (P6.U6a, barkpark-jwai). The paper-side reader loop (U6b)
   polls these token-gated endpoints to drain the actionable intents that
   U4/U5 record into `paper_events`.
 
-  Token-gated via the `:paperflow_ingest` pipeline (RequireIngestToken plug —
+  Token-gated via the `:ingest` pipeline (RequireIngestToken plug —
   shared-secret bearer, NOT the api_tokens table), same as the paper-ingest
   endpoint.
 
-      GET /v1/paperflow/intents
+      GET /v1/plugins/bulldocs/intents
       Authorization: Bearer <BARKPARK_INGEST_TOKEN>
       → 200 {"intents": [{id, event_type, goal_id, paper_slug, branch,
                           payload_html, inserted_at}, …]}
 
-      POST /v1/paperflow/intents/:id/processed
+      POST /v1/plugins/bulldocs/intents/:id/processed
       Authorization: Bearer <BARKPARK_INGEST_TOKEN>
       → 200 {"ok": true, "id": "<id>"}        marked processed
       → 404 {"ok": false, "error": "not_found"} no such event

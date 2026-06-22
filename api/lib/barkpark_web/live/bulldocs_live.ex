@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.BulldocsLive do
   @moduledoc """
-  Live render of a paperflow paper inside Barkpark (convergence masterplan
+  Live render of a paper inside Barkpark (convergence masterplan
   Figure 6; block-streaming in Wave 4).
 
   ## Two render paths
@@ -32,7 +32,7 @@ defmodule BarkparkWeb.BulldocsLive do
   Layout: the full-document `paper.html.heex` is the ROOT layout (set in the
   router's `:papers` live_session); `mount/3` returns `layout: false`.
 
-  Note on `raw/1`: papers are our own HTML, produced by paperflow's doc
+  Note on `raw/1`: papers are our own HTML, produced by the paper doc
   pipeline, so injecting it unescaped is acceptable for personal-local use.
   """
   use BarkparkWeb, :live_view
@@ -54,7 +54,7 @@ defmodule BarkparkWeb.BulldocsLive do
     dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
     # Two front doors, one LiveView (P4 of Scoped-by-URL):
     #   * flat /papers/:slug — PUBLIC surface, resolves ONLY within the seeded
-    #     Default workspace (barkpark-w9dg; the locked paperflow contract).
+    #     Default workspace (barkpark-w9dg; the locked paper-ingest contract).
     #   * scoped /w/:ws/p/:proj/papers/:slug — the dead-render-resolved scope
     #     arrives via PluginScopeSession (member, section share, or ?share=
     #     item token — RequireShareScope/ResolveWorkspace already gated);
@@ -118,7 +118,7 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:diff_from, nil)
       |> assign(:diff_to, nil)
       # P6.U5 action buttons: the per-type action set derived from the paper's
-      # originating paperflow doc path (`content["source_doc"]`), mirroring
+      # originating doc path (`content["source_doc"]`), mirroring
       # doc.js. Empty when there's no/unknown source_doc → the bar renders not
       # at all. `:last_action` acknowledges the most recent click inline.
       |> assign(:paper_actions, paper_actions(paper))
@@ -139,7 +139,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # ── P6.U5 action buttons ──────────────────────────────────────────────────
 
-  # Derive the action set from the paper's originating paperflow doc path,
+  # Derive the action set from the paper's originating doc path,
   # mirroring doc.js's per-type button mapping. The path lives at
   # `content["source_doc"]`. A `/specs/` doc gets create-plan + grill; a
   # `/plans/` doc gets build + grill; a `/grills/` doc gets submit. Anything
@@ -667,7 +667,7 @@ defmodule BarkparkWeb.BulldocsLive do
             no-reload. --%>
       <div id="paper-sentinel" data-slug={@slug} hidden></div>
 
-      <%!-- P6.U5 action bar. These are the paperflow doc action buttons
+      <%!-- P6.U5 action bar. These are the paper doc action buttons
             (Create plan / Grill / Build / Submit) rendered NATIVELY on the
             paper. The set is derived from content["source_doc"] in mount; an
             empty set (no/unknown source_doc) renders no bar at all. Each click

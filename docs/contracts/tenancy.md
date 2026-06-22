@@ -59,7 +59,7 @@ When `multi_tenant?/0` is true, the content-edge projection path uses strict `sc
 
 ### The dataset string↔id duality (in-progress migration)
 
-Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default, `"paperflow"` for papers) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`, etc.). `dataset_id` is **nullable everywhere** and FKs use `nilify_all`, so deleting a Dataset row only NULLs dependents' `dataset_id` — it does not delete them.
+Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`, etc.). `dataset_id` is **nullable everywhere** and FKs use `nilify_all`, so deleting a Dataset row only NULLs dependents' `dataset_id` — it does not delete them.
 
 `Content.scope_to_dataset/3` is the **never-worse** read scope:
 

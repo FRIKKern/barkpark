@@ -574,7 +574,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	}
 
 	// task claim <doc_id> <worker_id> — doc_id is the path arg, worker_id is body.
-	claimArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paperflow-agent"}
+	claimArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paper-agent"}
 	body, ct, err := buildBody(*claim, map[string][]string{}, claimArgs)
 	if err != nil {
 		t.Fatalf("buildBody task claim: %v", err)
@@ -586,15 +586,15 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	if json.Unmarshal(body, &claimObj) != nil {
 		t.Fatalf("claim body not valid JSON: %s", body)
 	}
-	if claimObj["worker_id"] != "paperflow-agent" {
-		t.Errorf("claim body worker_id = %v, want paperflow-agent; body = %s", claimObj["worker_id"], body)
+	if claimObj["worker_id"] != "paper-agent" {
+		t.Errorf("claim body worker_id = %v, want paper-agent; body = %s", claimObj["worker_id"], body)
 	}
 	if _, leaked := claimObj["doc_id"]; leaked {
 		t.Errorf("path arg doc_id must not appear in claim body: %s", body)
 	}
 
 	// task close <doc_id> <worker_id> <observed_epoch> — all body args except doc_id.
-	closeArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paperflow-agent", "observed_epoch": "42"}
+	closeArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paper-agent", "observed_epoch": "42"}
 	body2, _, err := buildBody(*close, map[string][]string{}, closeArgs)
 	if err != nil {
 		t.Fatalf("buildBody task close: %v", err)
@@ -603,7 +603,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	if json.Unmarshal(body2, &closeObj) != nil {
 		t.Fatalf("close body not valid JSON: %s", body2)
 	}
-	if closeObj["worker_id"] != "paperflow-agent" {
+	if closeObj["worker_id"] != "paper-agent" {
 		t.Errorf("close body worker_id = %v; body = %s", closeObj["worker_id"], body2)
 	}
 	if closeObj["observed_epoch"] != "42" {
@@ -617,7 +617,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	}
 
 	// Optional lifecycle_status is included when supplied as a positional arg.
-	closeArgsWithStatus := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paperflow-agent", "observed_epoch": "42", "lifecycle_status": "done"}
+	closeArgsWithStatus := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paper-agent", "observed_epoch": "42", "lifecycle_status": "done"}
 	body3, _, err := buildBody(*close, map[string][]string{}, closeArgsWithStatus)
 	if err != nil {
 		t.Fatalf("buildBody task close with status: %v", err)

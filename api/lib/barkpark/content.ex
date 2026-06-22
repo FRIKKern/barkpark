@@ -48,7 +48,7 @@ defmodule Barkpark.Content do
   # rendered by `Barkpark.PortableDoc.Render`. The monotonic integer streaming
   # rev — distinct from the document's opaque string `rev` used by the mutation
   # spine — lives at `content["rev"]`. `content["source_doc"]`, `["goal_id"]`,
-  # and `["event_type"]` carry paperflow provenance.
+  # and `["event_type"]` carry paper-ingest provenance.
   #
   # Papers ride the SAME per-doc PubSub topic shape used in Wave 4 —
   # `doc:<dataset>:paper:<slug>` — and broadcast the SAME two frames
@@ -3395,8 +3395,8 @@ defmodule Barkpark.Content do
 
   @doc """
   The default dataset papers live under. Convergence: papers are now
-  first-class documents in the `production` dataset (was `paperflow`),
-  so they surface in the Studio desk at `/studio/production`.
+  first-class documents in the `production` dataset, so they surface
+  in the Studio desk at `/studio/production`.
   """
   def paper_default_dataset, do: @paper_default_dataset
 
@@ -3499,7 +3499,7 @@ defmodule Barkpark.Content do
   non-deterministic (barkpark-w9dg, P0).
 
   The public paper surface is intentionally the seeded **Default** workspace —
-  that is where the flat, unauthenticated paperflow ingest lands by Default
+  that is where the flat, unauthenticated paper ingest lands by Default
   fallback (`upsert_paper`'s scope contract), so it is the one deterministic
   public tenant. This function resolves the Default workspace id and scopes the
   read to it, so:
@@ -3906,7 +3906,7 @@ defmodule Barkpark.Content do
     # Stamp tenancy scope on the paper row. W1.5-C: an ingest/Studio caller MAY
     # thread an explicit workspace/project (via `attrs["workspace_id"]` /
     # `["project_id"]`) — when present it ALWAYS wins, so the surface is ready
-    # the moment paperflow starts sending the goal's scope. Absent it, this
+    # the moment paper ingest starts sending the goal's scope. Absent it, this
     # falls back to the seeded Default workspace/project (same contract as
     # create_document/4) — without that a NULL-workspace paper is invisible to
     # the now-scoped Studio desk (B8/qucz). An UPDATE only re-stamps when the
@@ -4466,7 +4466,7 @@ defmodule Barkpark.Content do
   # same-slug write in workspace B never finds (and clobbers) workspace A's row
   # (barkpark-w9dg). The scope mirrors the write-stamp fallback: an explicit
   # workspace in attrs wins; absent it, the seeded Default workspace — so the
-  # flat, unscoped paperflow ingest keeps upserting its own Default-scoped row.
+  # flat, unscoped paper ingest keeps upserting its own Default-scoped row.
   defp get_existing_paper_for_write(slug, dataset, attrs) do
     case paper_scope_opts(attrs) do
       [_ | _] = opts ->

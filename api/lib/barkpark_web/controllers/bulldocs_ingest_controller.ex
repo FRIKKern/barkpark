@@ -1,13 +1,12 @@
 defmodule BarkparkWeb.BulldocsIngestController do
   @moduledoc """
-  Ingest endpoint for paperflow papers (convergence MVP, masterplan Figure 6).
+  Ingest endpoint for papers (convergence MVP, masterplan Figure 6).
 
-  Matches the request the `paperflow/hooks/event-on-save.sh` mirror block
-  POSTs. Two body shapes are accepted, both keyed by `slug`:
+  Two body shapes are accepted, both keyed by `slug`:
 
   NATIVE BLOCKS (preferred — renders in article mode at /papers/:slug):
 
-      POST /v1/paperflow/papers
+      POST /v1/plugins/bulldocs/papers
       Authorization: Bearer <BARKPARK_INGEST_TOKEN>   (RequireIngestToken plug)
       Content-Type: application/json
       {
@@ -21,7 +20,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   RAW HTML (legacy fallback — stored verbatim, no article projection):
 
-      POST /v1/paperflow/papers
+      POST /v1/plugins/bulldocs/papers
       …
       { "slug": "2026-05-23-foo", "body_html": "<article>…</article>", … }
 
@@ -34,7 +33,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   Wave 4 adds a second action, `apply_op/2`, for block-streaming:
 
-      POST /v1/paperflow/papers/:slug/ops
+      POST /v1/plugins/bulldocs/papers/:slug/ops
       Authorization: Bearer <BARKPARK_INGEST_TOKEN>   (RequireIngestToken plug)
       Content-Type: application/json
       { "op": "append-block", "block": { "id": "b1", "type": "paragraph", … } }
@@ -62,8 +61,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   # Native portable-doc blocks path (preferred). Renders in article mode so
   # the doc shows native typography at /papers/:slug. `style` defaults to
-  # "article" since paperflow only mirrors article-grammar docs through this
-  # endpoint; an explicit `style` in the body overrides it.
+  # "article" since this endpoint only ingests article-grammar docs;
+  # an explicit `style` in the body overrides it.
   def ingest(conn, %{"slug" => slug, "blocks" => blocks} = params)
       when is_binary(slug) and slug != "" and is_list(blocks) do
     attrs =
@@ -88,7 +87,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
           liveview_path: "/papers/#{paper.doc_id}",
           # ADDITIVE (P4) — the canonical scoped reader URL when the paper's
           # tenancy resolves; liveview_path stays byte-identical forever
-          # (locked paperflow contract).
+          # (locked paper-ingest contract).
           scoped_liveview_path: scoped_liveview_path(paper)
         })
 
@@ -310,12 +309,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   # W1.5-C: thread an OPTIONAL workspace/project into the upsert attrs so a
   # paper (and its emitted lifecycle event) lands in the goal's scope when
-  # paperflow starts sending it. The scope may arrive as either a JSON body
+  # paper ingest starts sending it. The scope may arrive as either a JSON body
   # field (`workspace`/`project`, OR the explicit id `workspace_id`/`project_id`)
   # or an HTTP header (`x-barkpark-workspace` / `x-barkpark-project`, carrying a
   # slug). Slugs are resolved to ids via Tenancy; an unknown slug resolves to no
   # scope key → upsert_paper's Default fallback applies (never a hard error, so
-  # the flat paperflow ingest keeps working unchanged). When NO scope is given,
+  # the flat paper ingest keeps working unchanged). When NO scope is given,
   # the attrs are returned untouched and Default fallback handles it.
   defp put_scope(attrs, conn, params) do
     {ws_id, project_id} = resolve_scope(conn, params)

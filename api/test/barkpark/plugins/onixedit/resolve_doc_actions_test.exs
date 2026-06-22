@@ -5,8 +5,6 @@ defmodule Barkpark.Plugins.OnixEdit.ResolveDocActionsTest do
   Bokbasen submission is in-flight (`queued | staging | staged | polling`)
   and leaves it visible otherwise.
 
-  See `~/docs/paperflow/plans/2026-05-17-plugin-resolvers.html` §3.
-
   The resolver in `lib/barkpark/plugins/onixedit.ex` reads
   `bp_export_status.state` via THREE fall-through paths (in order):
 

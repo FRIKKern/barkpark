@@ -1,7 +1,7 @@
 defmodule Barkpark.Papers.TextDiffTest do
   @moduledoc """
   P6.U3 (barkpark-q3sf) — pure line-level LCS differ, an Elixir port of
-  paperflow's `lib/text-diff.js`. No DB: this exercises `diff_lines/2` golden
+  the vendored `lib/text-diff.js`. No DB: this exercises `diff_lines/2` golden
   cases (identical / pure-add / pure-remove / mixed) and the escaping +
   per-op classes of `format_diff_html/1`.
   """

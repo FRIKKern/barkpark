@@ -5,4 +5,4 @@ The Elixir/Phoenix backend: all CRUD, real-time, plugins, and the LiveView Studi
 
 - [`CLAUDE.md`](CLAUDE.md) — surface card: key files, Bulldocs, schema registration, PubSub
 - [`../docs/api-v1.md`](../docs/api-v1.md) — HTTP API contract
-- [`../docs/setup/SETUP.md`](../docs/setup/SETUP.md) — full local setup (deps, DB, paperflow cutover lives alongside)
+- [`../docs/setup/SETUP.md`](../docs/setup/SETUP.md) — full local setup (deps, DB, paper ingest lives alongside)

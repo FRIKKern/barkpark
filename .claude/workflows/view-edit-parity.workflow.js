@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Sources',   detail: 'extract render.ex inline emitters + root.html.heex CSS rules' },
     { title: 'Diff',      detail: 'one parity check per block × variant' },
     { title: 'Verify',    detail: 'adversarial refute on each divergence (2 voters)' },
-    { title: 'Report',    detail: 'write the parity matrix HTML to docs/paperflow/specs/' },
+    { title: 'Report',    detail: 'write the parity matrix HTML to docs/specs/' },
   ],
 };
 
@@ -85,7 +85,7 @@ For each block, list its variants. Examples:
   • paragraph, pullquote, eyebrow, byline, code, divider — ["default"]
 
 Skip blocks that don't render visible HTML. Skip inline marks. Return via schema.`,
-  { schema: ENUM_SCHEMA, agentType: 'paperflow-researcher', phase: 'Enumerate', label: 'enumerate' }
+  { schema: ENUM_SCHEMA, agentType: 'paper-researcher', phase: 'Enumerate', label: 'enumerate' }
 );
 
 const blocks = enumeration.blocks;
@@ -118,7 +118,7 @@ outer tag and any nested span styles. Use actual values as emitted
 (e.g. \`margin:0\` not \`margin:1.6rem 0 0.8rem\` after the recent zeroing).
 
 Return ONLY the structured text reference, no preamble.`,
-    { agentType: 'paperflow-researcher', phase: 'Sources', label: 'render.ex emitters' }
+    { agentType: 'paper-researcher', phase: 'Sources', label: 'render.ex emitters' }
   ),
   () => agent(
     `Read ${ROOT_HEEX} and produce a stable text reference of every CSS rule
@@ -143,7 +143,7 @@ Also include the \`--paper-*\` CSS variable definitions on both surfaces
 (light + dark + fallback) since some inline emitters resolve to those vars.
 
 Return ONLY the structured text reference, no preamble.`,
-    { agentType: 'paperflow-researcher', phase: 'Sources', label: 'root.html.heex rules' }
+    { agentType: 'paper-researcher', phase: 'Sources', label: 'root.html.heex rules' }
   ),
 ]);
 
@@ -244,7 +244,7 @@ Reject when:
   • Property is intentionally surface-specific.
 
 Return isReal=true only when values are accurate AND visible.`,
-      { schema: VERDICT_SCHEMA, agentType: 'paperflow-researcher', label: `refute:${f.block}/${f.property}`, phase: 'Verify' }
+      { schema: VERDICT_SCHEMA, agentType: 'paper-researcher', label: `refute:${f.block}/${f.property}`, phase: 'Verify' }
     ),
     () => agent(
       `Independent second-vote refute. Different verifier; same claim; default
@@ -262,7 +262,7 @@ claim:
 Look at ${RENDER_EX} and ${ROOT_HEEX}. Designer-with-pixel-ruler question:
 would this show as visible drift side-by-side, or noise? Half of CSS diffs
 are noise — be skeptical.`,
-      { schema: VERDICT_SCHEMA, agentType: 'paperflow-researcher', label: `refute2:${f.block}/${f.property}`, phase: 'Verify' }
+      { schema: VERDICT_SCHEMA, agentType: 'paper-researcher', label: `refute2:${f.block}/${f.property}`, phase: 'Verify' }
     ),
   ]).then(votes => {
     const valid = votes.filter(Boolean);
@@ -283,8 +283,8 @@ phase('Report');
 const passedBlocks = expanded.filter(b => !confirmed.some(c => c.block === b.name && (c.variant || 'default') === b.variant));
 
 await agent(
-  `Write a paperflow article-style HTML parity report at:
-  /Users/pelle/docs/paperflow/specs/2026-05-31-view-edit-parity-matrix.html
+  `Write a native paper-article-style HTML parity report at:
+  /Users/pelle/docs/specs/2026-05-31-view-edit-parity-matrix.html
 
 CONFIRMED DIVERGENCES (sorted by severity, both refuters agreed):
 ${JSON.stringify(confirmed.map(c => ({
@@ -298,9 +298,9 @@ PASSED (clean block × variant combos):
 ${JSON.stringify(passedBlocks.map(b => ({ block: b.name, variant: b.variant })), null, 2)}
 
 WRITE THE REPORT
-Strict paperflow conventions:
+Strict paper-article conventions:
 - Eyebrow "View ↔ Edit parity" + h1 "View ↔ Edit parity matrix" + byline (date string "2026-05-31").
-- Link <link rel="stylesheet" href="/paperflow/_lib/doc.css">
+- Link <link rel="stylesheet" href="/paper/_lib/doc.css">
 - Mermaid CDN <script> in <head>.
 - Two <figure><pre class="mermaid">…</pre><figcaption><b>Figure N.</b> …</figcaption></figure>:
   1. Flowchart side-by-side:
@@ -322,12 +322,12 @@ Strict paperflow conventions:
 - H2 "Re-run" — quote the workflow name "view-edit-parity" and explain it
   re-runs via the Workflow tool with that name.
 - Close with:
-    <script>window.PAPERFLOW_NO_RAIL = true;</script>
-    <script src="/paperflow/_lib/doc.js"></script>
+    <script>window.PAPER_NO_RAIL = true;</script>
+    <script src="/paper/_lib/doc.js"></script>
 - No inline <style> block.
 
 Return the absolute path of the file you wrote.`,
-  { agentType: 'paperflow-doc-writer', phase: 'Report', label: 'parity matrix report' }
+  { agentType: 'paper-doc-writer', phase: 'Report', label: 'parity matrix report' }
 );
 
 return {
@@ -340,5 +340,5 @@ return {
   mediumSeverity: confirmed.filter(c => c.severity === 'medium').length,
   lowSeverity: confirmed.filter(c => c.severity === 'low').length,
   confirmedSample: confirmed.slice(0, 8),
-  reportPath: '/Users/pelle/docs/paperflow/specs/2026-05-31-view-edit-parity-matrix.html',
+  reportPath: '/Users/pelle/docs/specs/2026-05-31-view-edit-parity-matrix.html',
 };

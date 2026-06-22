@@ -33,7 +33,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
   alias Barkpark.Sheets.Session
 
   # Set in config/test.exs.
-  @token "paperflow-test-ingest-token"
+  @token "barkpark-test-ingest-token"
   @dataset "sheets_m1_ops_route_test"
 
   setup do

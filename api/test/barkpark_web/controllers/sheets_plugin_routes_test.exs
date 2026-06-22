@@ -19,7 +19,7 @@ defmodule BarkparkWeb.SheetsPluginRoutesTest do
   alias Elixlsx.{Sheet, Workbook}
 
   # Set in config/test.exs.
-  @token "paperflow-test-ingest-token"
+  @token "barkpark-test-ingest-token"
   @import_path "/v1/plugins/sheets/import"
   @dataset "sheets_m5_routes_test"
 

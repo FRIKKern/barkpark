@@ -41,8 +41,8 @@ When it finishes you get:
 ### Create a paper
 
 ```powershell
-irm http://localhost:4000/v1/paperflow/papers -Method Post `
-  -Headers @{Authorization='Bearer paperflow-dev-ingest-token'} `
+irm http://localhost:4000/v1/plugins/bulldocs/papers -Method Post `
+  -Headers @{Authorization='Bearer barkpark-dev-ingest-token'} `
   -ContentType 'application/json' `
   -Body '{"slug":"hello","style":"article","blocks":[{"type":"heading","level":1,"text":"Hello from Windows"},{"type":"paragraph","content":[{"type":"text","value":"Made on a native Windows dev server."}]}]}'
 ```

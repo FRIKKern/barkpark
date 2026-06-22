@@ -34,7 +34,7 @@ defmodule Barkpark.PortableDoc.Render do
   # is `:email` — its values are the module constants above, so existing call
   # sites that pass no `:style` are byte-identical to before. `:article` mirrors
   # doc.css `:root` (serif body, parchment bg, terracotta accent) for the
-  # paperflow-native article surface. The palette also carries `:style` so the
+  # native paper-article surface. The palette also carries `:style` so the
   # compose / walk clauses that diverge by mode (headings, eyebrow, byline,
   # ingress) can branch on it.
   #
@@ -108,7 +108,7 @@ defmodule Barkpark.PortableDoc.Render do
       Defaults to `true`; pass `false` to emit only the body fragment.
     * `:container_width` — outer width budget in px. Defaults to `600`.
     * `:style` — render palette: `:email` (default, the module constants) or
-      `:article` (paperflow-native serif/parchment palette). Opt-in only; the
+      `:article` (native paper-article serif/parchment palette). Opt-in only; the
       `:email` default keeps existing output byte-unchanged.
   """
   def render_html(root, opts \\ %{}) do
@@ -390,7 +390,7 @@ defmodule Barkpark.PortableDoc.Render do
   def compose_block(%{"type" => "divider"}, _style), do: %{"kind" => "PdHr"}
 
   # ── diagram / figure blocks (P1 slice 2) ───────────────────────────────────
-  # `diagram` emits the canonical paperflow Mermaid figure. Unlike every other
+  # `diagram` emits the canonical paper-article Mermaid figure. Unlike every other
   # block, this clause emits HTML DIRECTLY (a `_raw` Pd-node the walker passes
   # through verbatim) rather than composing to a styled PdText tree — the
   # `<pre class="mermaid">` literal must reach the DOM byte-exact so the engine's
@@ -783,7 +783,7 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   # ── form block (P4): native grill / questionnaire ─────────────────────────
-  # Renders a paperflow grill / questionnaire as native portable-doc markup.
+  # Renders a grill / questionnaire as native portable-doc markup.
   # `"type" => "questionnaire"` is a pure ALIAS of `"type" => "form"` — both
   # land here, differentiated only by the container class (`kind` discriminator,
   # default "grill"). Like the diagram / code clauses this emits HTML DIRECTLY
@@ -937,7 +937,7 @@ defmodule Barkpark.PortableDoc.Render do
     end
   end
 
-  # The canonical paperflow figure for a Mermaid diagram. Article mode: a
+  # The canonical paper-article figure for a Mermaid diagram. Article mode: a
   # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
   # is muted/italic with the bold "Figure N." run-in. Email mode degrades to the
   # caption line + the source as a plain code block (Mermaid never runs there).
@@ -1673,7 +1673,7 @@ defmodule Barkpark.PortableDoc.Render do
     # any data table that didn't carry a header (every body row shifted up by
     # one, and 1-row tables lost their only row to the header band). Upstream
     # converters that don't distinguish `<th>` from `<td>` (e.g. the
-    # paperflow_to_blocks.py table walker) now get a header-less table
+    # paper_to_blocks.py table walker) now get a header-less table
     # rendered the way they meant it; producers that DO want a header band
     # set `head` explicitly.
     head = Map.get(n, "head", []) |> List.wrap()

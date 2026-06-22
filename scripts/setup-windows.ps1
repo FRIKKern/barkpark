@@ -213,8 +213,8 @@ function Show-Summary([bool]$serverUp) {
   else { Write-Host "  Token    : printed once above (clean profile)" }
   Write-Host ""
   Write-Host "  Create a paper:" -ForegroundColor Cyan
-  Write-Host "    irm http://localhost:$Port/v1/paperflow/papers -Method Post ``"
-  Write-Host "      -Headers @{Authorization='Bearer paperflow-dev-ingest-token'} ``"
+  Write-Host "    irm http://localhost:$Port/v1/plugins/bulldocs/papers -Method Post ``"
+  Write-Host "      -Headers @{Authorization='Bearer barkpark-dev-ingest-token'} ``"
   Write-Host "      -ContentType 'application/json' -Body '{""slug"":""hi"",""blocks"":[{""type"":""heading"",""level"":1,""text"":""Hi""}]}'"
   Write-Host ""
   Write-Host "  Restart later: .\scripts\setup-windows.ps1 start"

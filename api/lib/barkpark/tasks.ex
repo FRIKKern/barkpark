@@ -1073,9 +1073,9 @@ defmodule Barkpark.Tasks do
 
   The W7-01 contract pins `content.parent_id` as the parent's `doc_id`
   string (e.g. `"phase-build-a1b2"`), mirroring `bd`'s `--parent <slug>`
-  shape. The orchestrator surfaces the active phase as a slug from
-  `<repo>/.paperflow/active-phase`; reading the row's `documents.id`
-  uuid every time the statusline composes would be wasted DB chatter.
+  shape. The orchestrator surfaces the active phase as a slug;
+  reading the row's `documents.id` uuid every time the statusline
+  composes would be wasted DB chatter.
   """
   @spec ready(keyword()) :: [Document.t()]
   def ready(opts \\ []) do
@@ -1185,7 +1185,7 @@ defmodule Barkpark.Tasks do
     * `:stale_claim` — CAS lost (extremely rare under the advisory lock)
 
   ## Arguments
-    * `doc_id`     — string doc_id of the target (e.g. `"paperflow-5wk"`).
+    * `doc_id`     — string doc_id of the target (e.g. `"paper-5wk"`).
     * `worker_id`  — string identifier for the claimer.
     * `opts`
       * `:workspace_id` (required for tenant scoping)
@@ -1572,7 +1572,7 @@ defmodule Barkpark.Tasks do
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
   CAS-on-rev guarded, emitting a `task.relabeled` mutation_event. Powers the
   bd-shim's `bd update <id> --add-label/--remove-label` translation (which in
-  turn backs paperflow-claim-files' `file-claim:<path>` ownership labels).
+  turn backs paper-claim-files' `file-claim:<path>` ownership labels).
 
   `add` and `remove` are lists of exact label strings. The result is a union
   add (dedup-preserving) minus the remove set. Idempotent: re-adding an

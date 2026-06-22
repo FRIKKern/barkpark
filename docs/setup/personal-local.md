@@ -55,7 +55,7 @@ Postgres cannot open a data dir across major versions.
 Barkpark reads its secrets and tokens from `~/.barkpark/.env` **at boot only**.
 Neither `mix phx.server` nor a `mix release` hot-reloads `config/*.exs` or
 re-reads the env file while running. So when you change a value in
-`~/.barkpark/.env` — most commonly `PAPERFLOW_INGEST_TOKEN` — the running server
+`~/.barkpark/.env` — most commonly `BARKPARK_INGEST_TOKEN` — the running server
 keeps the **old** value until it is restarted.
 
 That is why `barkpark reload` exists. It is a full stop + start of the server
@@ -63,7 +63,7 @@ process (Postgres keeps running), which re-sources `~/.barkpark/.env` and
 re-runs `config/runtime.exs`:
 
 ```bash
-$EDITOR ~/.barkpark/.env      # change PAPERFLOW_INGEST_TOKEN
+$EDITOR ~/.barkpark/.env      # change BARKPARK_INGEST_TOKEN
 bin/barkpark reload           # new token now in effect
 ```
 

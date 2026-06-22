@@ -154,10 +154,6 @@ defmodule Barkpark.Plugin do
   `codelist_seeders` returns a list of zero-arg functions; `settings_schema`
   returns a list of fields). When neither form is implemented, the default
   returns `prev` unchanged (identity).
-
-  See `~/docs/paperflow/plans/2026-05-17-plugin-resolvers.html` §0 for the
-  full decision record (Q1 callback shape, Q3 ctx shape, Q4 host seeds
-  prev).
   """
 
   @typedoc """

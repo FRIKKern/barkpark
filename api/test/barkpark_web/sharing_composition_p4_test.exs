@@ -26,7 +26,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
   alias Barkpark.Sharing.Links
 
   @dataset "production"
-  @ingest_token "paperflow-test-ingest-token"
+  @ingest_token "barkpark-test-ingest-token"
 
   setup %{conn: conn} do
     ws = create_workspace!("p4-share-ws")

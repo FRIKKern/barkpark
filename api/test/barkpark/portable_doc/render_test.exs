@@ -532,7 +532,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
-  # diagram / figure blocks (P1 slice 2) — the canonical paperflow Mermaid
+  # diagram / figure blocks (P1 slice 2) — the canonical paper-article Mermaid
   # figure. Article mode emits `<pre class="mermaid">` (the engine's selector)
   # with the source entity-encoded so it round-trips the static extractor and
   # Mermaid decodes it at runtime; email mode degrades (no engine trigger).
@@ -880,7 +880,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
-  # form block (P4) — native portable-doc render of a paperflow grill /
+  # form block (P4) — native portable-doc render of a grill /
   # questionnaire. Render-only: clean semantic <fieldset>/<legend>/<input>/
   # <textarea> markup, NO <script>, NO action/method, NO submit wiring (the
   # interactive layer is a later phase). Mirrors grill.js input types

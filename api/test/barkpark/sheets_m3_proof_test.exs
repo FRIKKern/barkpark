@@ -8,7 +8,7 @@ defmodule Barkpark.SheetsM3ProofTest do
        a deliberate `1/0`).
     2. The mutation response envelope already carries COMPUTED `"v"` values —
        the engine ran inside the same save, before the row persisted.
-    3. A paper ingested via `/v1/paperflow/papers` embeds the sheet; a
+    3. A paper ingested via `/v1/plugins/bulldocs/papers` embeds the sheet; a
        follow-up mutate fires the write-through, and `GET /papers/:slug`
        renders the computed results (and the `#DIV/0!`) in the HTML grid —
        zero renderer changes.
@@ -24,7 +24,7 @@ defmodule Barkpark.SheetsM3ProofTest do
   @slug "sheets-m3-proof-paper"
 
   @write_token "sheets-m3-proof-write-token"
-  @ingest_token "paperflow-test-ingest-token"
+  @ingest_token "barkpark-test-ingest-token"
 
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
@@ -43,7 +43,7 @@ defmodule Barkpark.SheetsM3ProofTest do
     conn
     |> put_req_header("authorization", "Bearer " <> @ingest_token)
     |> put_req_header("content-type", "application/json")
-    |> post("/v1/paperflow/papers", Jason.encode!(body))
+    |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
   end
 
   defp read_paper(conn) do

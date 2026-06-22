@@ -46,7 +46,7 @@ defmodule Barkpark.SheetsM3M5ProofTest do
 
   @write_token "sheets-m3-m5-proof-write-token"
   # Fixed ingest secret from config/test.exs.
-  @ingest_token "paperflow-test-ingest-token"
+  @ingest_token "barkpark-test-ingest-token"
 
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
@@ -88,7 +88,7 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     build_conn()
     |> ingest_authed()
     |> put_req_header("content-type", "application/json")
-    |> post("/v1/paperflow/papers", Jason.encode!(body))
+    |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
   end
 
   defp read_paper do

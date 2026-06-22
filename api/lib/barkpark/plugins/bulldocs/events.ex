@@ -64,7 +64,7 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   @doc """
   Pending actionable intents for the loop-closer (P6.U6a, barkpark-jwai).
 
-  An *intent* is an event the paperflow-side reader loop (U6b) must act on —
+  An *intent* is an event the paper-side reader loop (U6b) must act on —
   the `action:*` clicks (`action:build`, `action:grill`, …) and the
   `simplify-*` requests (`simplify-request`, …) that U4/U5 record. Lifecycle
   events (`goal-opened`, `plan-written`, `phase-advanced`, …) are NOT intents
@@ -91,7 +91,7 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   already-processed row.
 
   Returns `{:ok, %Event{}}` on success, `{:error, :not_found}` when no event
-  has the given id (including ids that aren't a valid UUID — paperflow-intents
+  has the given id (including ids that aren't a valid UUID — paper-intents
   ships opaque `evt_…` strings on bad input, and Ecto would otherwise raise
   `Ecto.Query.CastError` trying to bind them to the `:binary_id` primary key).
   """

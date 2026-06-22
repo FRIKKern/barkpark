@@ -1,8 +1,8 @@
 defmodule BarkparkWeb.BulldocsIngestControllerTest do
   @moduledoc """
-  Focused test for the paperflow paper-ingest endpoint (convergence MVP).
+  Focused test for the paper-ingest endpoint (convergence MVP).
 
-  Mirrors the request `paperflow/hooks/event-on-save.sh` POSTs:
+  Exercises the ingest request shape:
   `Authorization: Bearer <ingest token>` + JSON `{source_doc, slug,
   event_type, body_html, goal_id?}`. Asserts a valid token upserts +
   broadcasts on the per-doc PubSub topic, and that a bad / missing token is
@@ -18,8 +18,8 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
   defp pc(doc, key), do: get_in(doc.content || %{}, [key])
 
   # Set in config/test.exs.
-  @token "paperflow-test-ingest-token"
-  @path "/v1/paperflow/papers"
+  @token "barkpark-test-ingest-token"
+  @path "/v1/plugins/bulldocs/papers"
 
   defp body(slug) do
     %{
