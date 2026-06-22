@@ -1,0 +1,441 @@
+defmodule Barkpark.Content.Writer do
+  @moduledoc """
+  The document WRITE concern (E) — create / clone / upsert plus the write-path
+  helpers: envelope coercion, id/rev generation, task-kind validation, schema
+  initial-values + Expectation scaffolding, deep-merge, and dynamic-token
+  resolution.
+
+  Extracted from `Barkpark.Content` (decomposition Step 13, concern E).
+  `Barkpark.Content` keeps facade delegations so every external caller is
+  unchanged; reads (`get_document`/`get_schema`), the lifecycle hub, and the
+  edges/sheets collaborators are called back through `Barkpark.Content.*` /
+  their own modules.
+  """
+
+  alias Barkpark.Repo
+  alias Barkpark.Content
+
+  alias Barkpark.Content.{
+    Broadcast,
+    Document,
+    DraftId,
+    Labels,
+    SchemaDefinition,
+    Sheets,
+    WriteScope
+  }
+
+  alias Barkpark.PortableDoc.{Projection, Synthesis}
+
+  # W7a step 1 — task documents carry a tight `content` field contract
+  # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
+  # schema-field validation. Enforced here at the write boundary so neither
+  # `create_document/4` nor `upsert_document/4` can land a malformed task
+  # row. Defense-in-depth: migration `20260528100000_w7a_task_schema` adds a
+  # DB CHECK constraint that catches raw-Repo writes that bypass this hook.
+  #
+  # Everything is a task — goals/phases/events are gone as document types.
+  # Returns `:ok` for non-task types so the existing post/page/paper write
+  # path is unaffected.
+  def validate_task_kind("task", attrs) do
+    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
+
+    case Barkpark.Tasks.validate_kind_content("task", content) do
+      :ok ->
+        :ok
+
+      {:error, errors} ->
+        {:error, {:invalid_task_content, errors}}
+    end
+  end
+
+  def validate_task_kind(_type, _attrs), do: :ok
+
+  @doc "Validate document content against its schema. Returns {:ok, content} or {:error, errors_map}."
+  def validate_document(type, title, content, dataset) do
+    case Content.get_schema(type, dataset) do
+      {:ok, schema} -> Barkpark.Content.Validation.validate(content, title, schema)
+      _ -> {:ok, content}
+    end
+  end
+
+  @doc """
+  Create or update a document. New docs are always created as drafts.
+
+  `opts` is a keyword list carrying hook context:
+    - `:source` — `:studio | :api | :cli | :worker` (default `:api`)
+    - `:user_id` — string id of the acting user, or `nil`
+
+  Fires `:before_save` synchronously before the DB write; on
+  `{:halt, reason}` returns `{:error, {:halted, reason}}` and skips the
+  write. Fires `:after_save` asynchronously after a successful write.
+  """
+  def create_document(type, attrs, dataset, opts \\ []) do
+    attrs = from_envelope(attrs)
+    raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
+    doc_id = DraftId.draft_id(raw_id)
+
+    attrs =
+      attrs
+      |> Map.put("doc_id", doc_id)
+      |> Map.put("type", type)
+      |> Map.put("dataset", dataset)
+      |> Map.put_new("status", "draft")
+      |> Map.put("rev", generate_rev())
+      |> WriteScope.put_scope_attrs(opts)
+      |> Sheets.maybe_recompute_sheet_formulas(type)
+      |> Sheets.hydrate_sheet_embed_snapshots()
+
+    with :ok <- validate_task_kind(type, attrs) do
+      do_create_document(type, attrs, dataset, doc_id, opts)
+    end
+  end
+
+  defp do_create_document(type, attrs, dataset, doc_id, opts) do
+    ctx = WriteScope.build_ctx(opts)
+
+    # Scope the prev-doc lookup to the writer's workspace/project. An UNSCOPED
+    # lookup here would resolve (and then UPDATE/overwrite) another workspace's
+    # row that happens to share the (doc_id, type, dataset) leaf — the inner
+    # half of the B3 mutate leak. Scoped, a same-id write from a different
+    # workspace sees no prev_doc and falls through to an insert of its own row.
+    prev_doc =
+      case Content.get_document(doc_id, type, dataset, opts) do
+        {:ok, d} -> d
+        _ -> nil
+      end
+
+    payload = %{
+      event: :before_save,
+      doc: attrs,
+      dataset: dataset,
+      prev_doc: prev_doc,
+      ctx: ctx
+    }
+
+    case Barkpark.Plugins.Hooks.fire(:before_save, payload) do
+      {:halt, reason} ->
+        {:error, {:halted, reason}}
+
+      :ok ->
+        result =
+          case prev_doc do
+            %Document{} = existing ->
+              existing
+              |> Document.changeset(attrs)
+              |> Repo.update()
+              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
+
+            _ ->
+              attrs = scaffold_or_initial_values(attrs, type, dataset)
+
+              %Document{}
+              |> Document.changeset(attrs)
+              |> Repo.insert()
+              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
+          end
+
+        result
+        |> WriteScope.fire_after(:after_save, payload)
+        |> Sheets.tap_sheet_writethrough()
+    end
+  end
+
+  @doc """
+  Clone a document into a fresh draft. Copies `title` (with " (copy)"
+  suffix) and the full `content` map verbatim, assigns a new generated
+  id, and inserts via `create_document/3` so the draft prefix, status,
+  and PubSub broadcast all go through the canonical write path.
+
+  Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
+  insert failure. Used by the Studio's "Duplicate" header action.
+  """
+  @spec clone_document(map(), String.t(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def clone_document(doc, type, dataset, opts \\ [])
+      when is_map(doc) and is_binary(type) and is_binary(dataset) do
+    new_id = generate_id(type)
+    src_title = Map.get(doc, :title) || "Untitled"
+    src_content = Map.get(doc, :content) || %{}
+
+    create_document(
+      type,
+      %{
+        "doc_id" => new_id,
+        "title" => "#{src_title} (copy)",
+        "status" => "draft",
+        "content" => src_content
+      },
+      dataset,
+      opts
+    )
+  end
+
+  # ── Initial values (Sanity-style schema-declared defaults) ────────────────
+  #
+  # When a schema declares an `initial_values` map, those keys pre-fill the
+  # content of a newly created document. Provided values always win — the
+  # initial_values map is a FLOOR, never a ceiling.
+  #
+  # Maps merge deeply. Lists do NOT merge (a provided list replaces the
+  # initial list wholesale — recursive list merging is ambiguous and a
+  # publisher who provides a list almost always means "use exactly this").
+  #
+  # Dynamic tokens resolved at create time only:
+  #   * `"$today"`      → today's ISO-8601 date string (e.g. "2026-05-14")
+  #   * `"$today.year"` → today's year as a 4-digit string (e.g. "2026")
+
+  defp apply_initial_values(attrs, type, dataset)
+       when is_binary(type) and is_binary(dataset) do
+    initial =
+      case Content.get_schema(type, dataset) do
+        {:ok, %SchemaDefinition{initial_values: iv}} when is_map(iv) and map_size(iv) > 0 ->
+          resolve_dynamics(iv)
+
+        _ ->
+          nil
+      end
+
+    case initial do
+      nil ->
+        attrs
+
+      iv ->
+        provided = Map.get(attrs, "content") || %{}
+        Map.put(attrs, "content", deep_merge(iv, provided))
+    end
+  end
+
+  defp apply_initial_values(attrs, _type, _dataset), do: attrs
+
+  # ── Exp-P3.1 — Create-from-Expectation scaffold ──────────────────────────
+  #
+  # On creating a new document of an EXPECTATION-BEARING type — a type whose
+  # schema carries an EXPLICIT stored `layout` (e.g. `post`; see seeds) — the
+  # Expectation is instantiated into `content["blocks"]`: one BOUND block per
+  # layout field (valued from provided content / row title / prefill / empty)
+  # plus the body region as free blocks (an empty paragraph placeholder when
+  # none provided). Then `Projection.project/3` derives `content[fieldName]` +
+  # `content["body"]` from those blocks — replacing the flat
+  # `apply_initial_values` for these types.
+  #
+  # A type with NO explicit layout (a plain v1 schema relying only on flat
+  # `initial_values`, or no schema at all) keeps the unchanged
+  # `apply_initial_values` path. The explicit-layout gate is what marks a type
+  # as Expectation-bearing here — a derived-default layout alone does not flip
+  # an existing v1 type onto the block path (it would silently drop
+  # initial_values keys that are not declared fields).
+  defp scaffold_or_initial_values(attrs, type, dataset)
+       when is_binary(type) and is_binary(dataset) do
+    case Content.get_schema(type, dataset) do
+      {:ok, %SchemaDefinition{layout: layout} = schema}
+      when is_list(layout) and layout != [] ->
+        scaffold_expectation(attrs, schema, dataset)
+
+      _ ->
+        apply_initial_values(attrs, type, dataset)
+    end
+  end
+
+  defp scaffold_or_initial_values(attrs, type, dataset),
+    do: apply_initial_values(attrs, type, dataset)
+
+  # Build the scaffold block list from the schema's Expectation + provided
+  # values, persist it under content["blocks"], and project. The row title
+  # lives on the document row, not under content — it is folded in under
+  # "title" so a bound title field-block picks it up, and re-derived into
+  # content["title"] by projection (mirroring synthesize_blocks/3).
+  defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset) do
+    %{layout: layout, prefill: prefill} = Content.resolve_expectation(schema)
+    prefill = resolve_dynamics(prefill)
+    provided = Map.get(attrs, "content") || %{}
+
+    values =
+      provided
+      |> Map.put_new("title", Map.get(attrs, "title"))
+      |> drop_nil_values()
+
+    blocks = Synthesis.scaffold(layout, values, prefill, schema.fields || [])
+
+    content =
+      provided
+      |> Map.put("blocks", blocks)
+      |> Projection.project(blocks, Labels.render_opts(dataset))
+
+    Map.put(attrs, "content", content)
+  end
+
+  defp drop_nil_values(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn {k, v}, acc ->
+      if is_nil(v), do: acc, else: Map.put(acc, k, v)
+    end)
+  end
+
+  @doc false
+  def deep_merge(a, b) when is_map(a) and is_map(b) do
+    Map.merge(a, b, fn _k, av, bv ->
+      cond do
+        is_map(av) and is_map(bv) -> deep_merge(av, bv)
+        true -> bv
+      end
+    end)
+  end
+
+  def deep_merge(_a, b), do: b
+
+  @doc false
+  def resolve_dynamics(term) when is_map(term) do
+    Map.new(term, fn {k, v} -> {k, resolve_dynamics(v)} end)
+  end
+
+  def resolve_dynamics(list) when is_list(list), do: Enum.map(list, &resolve_dynamics/1)
+
+  def resolve_dynamics("$today"), do: Date.utc_today() |> Date.to_iso8601()
+
+  def resolve_dynamics("$today.year"),
+    do: Date.utc_today().year |> Integer.to_string()
+
+  def resolve_dynamics(other), do: other
+
+  # ── Legacy upsert (for backward compat) ───────────────────────────────────
+
+  @doc """
+  Upsert a document — used by autosave and patch paths.
+
+  `opts` accepts `:source` and `:user_id`. Fires `:before_save` and
+  `:after_save` around the DB write, same contract as `create_document/4`.
+  """
+  def upsert_document(type, attrs, dataset, opts \\ []) do
+    attrs = from_envelope(attrs)
+    raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
+    doc_id = raw_id && DraftId.draft_id(raw_id)
+
+    attrs =
+      attrs
+      |> Map.put("doc_id", doc_id)
+      |> Map.put("type", type)
+      |> Map.put("dataset", dataset)
+      |> Map.put_new("status", "draft")
+      |> Map.put("rev", generate_rev())
+      |> WriteScope.put_scope_attrs(opts)
+      |> Sheets.maybe_recompute_sheet_formulas(type)
+      |> Sheets.hydrate_sheet_embed_snapshots()
+      # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
+      # carries content["blocks"] re-derives content[fieldName]/content["body"]
+      # from those blocks — the same project-on-write the paper path runs.
+      # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
+      # (legacy field-map save) skips it untouched.
+      |> maybe_project_document_content(dataset)
+
+    with :ok <- validate_task_kind(type, attrs) do
+      do_upsert_document(type, attrs, dataset, doc_id, opts)
+    end
+  end
+
+  defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
+    ctx = WriteScope.build_ctx(opts)
+
+    # Scope the prev-doc lookup to the writer's workspace/project (mirror of
+    # create_document:654). An UNSCOPED lookup here would resolve (and then
+    # UPDATE/overwrite) another workspace's row sharing the (doc_id, type,
+    # dataset) leaf — the write-path scoping gap. Scoped, a same-id write from
+    # a different workspace sees no prev_doc and inserts its own row.
+    prev_doc =
+      case doc_id && Content.get_document(doc_id, type, dataset, opts) do
+        {:ok, d} -> d
+        _ -> nil
+      end
+
+    payload = %{
+      event: :before_save,
+      doc: attrs,
+      dataset: dataset,
+      prev_doc: prev_doc,
+      ctx: ctx
+    }
+
+    case Barkpark.Plugins.Hooks.fire(:before_save, payload) do
+      {:halt, reason} ->
+        {:error, {:halted, reason}}
+
+      :ok ->
+        result =
+          case prev_doc do
+            %Document{} = existing ->
+              existing
+              |> Document.changeset(attrs)
+              |> Repo.update()
+              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
+
+            _ ->
+              %Document{}
+              |> Document.changeset(attrs)
+              |> Repo.insert()
+              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
+          end
+
+        result
+        |> WriteScope.fire_after(:after_save, payload)
+        |> Sheets.tap_sheet_writethrough()
+    end
+  end
+
+  # Re-project content[fieldName]/content["body"] from content["blocks"] when a
+  # whole-document write carries a block list (Exp-P3.1 — generalizes the
+  # paper-path project-on-write to the document path). A write whose content has
+  # no "blocks" key is returned untouched, so legacy field-map saves are
+  # unaffected and projection remains the SOLE writer of the projected keys.
+  defp maybe_project_document_content(attrs, dataset) do
+    content = Map.get(attrs, "content")
+
+    case content && Map.get(content, "blocks") do
+      blocks when is_list(blocks) ->
+        Map.put(attrs, "content", Projection.project(content, blocks, Labels.render_opts(dataset)))
+
+      _ ->
+        attrs
+    end
+  end
+
+  # ── Envelope coercion + id/rev generation ─────────────────────────────────
+
+  @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
+
+  @doc false
+  def from_envelope(attrs) do
+    cond do
+      # Already legacy shape — pass through, but honor a Sanity-style "_id"
+      # when no "doc_id" was given. Mixing `_id` with a nested `content` map
+      # used to silently DROP the supplied id (create fell back to a generated
+      # task-### id), which broke every doc example that followed the id.
+      Map.has_key?(attrs, "content") and is_map(Map.get(attrs, "content")) ->
+        case {Map.get(attrs, "doc_id"), Map.get(attrs, "_id")} do
+          {nil, id} when is_binary(id) and id != "" -> Map.put(attrs, "doc_id", id)
+          _ -> attrs
+        end
+
+      true ->
+        id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")
+        title = Map.get(attrs, "title")
+        status = Map.get(attrs, "status", "draft")
+        content = Map.drop(attrs, @reserved_in)
+
+        %{
+          "doc_id" => id,
+          "title" => title,
+          "status" => status,
+          "content" => content
+        }
+    end
+  end
+
+  @doc false
+  def generate_id(type) do
+    "#{type}-#{:rand.uniform(999_999)}"
+  end
+
+  @doc false
+  def generate_rev do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+end

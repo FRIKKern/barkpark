@@ -20,35 +20,27 @@ defmodule Barkpark.Content do
     - `:raw`       — all documents including both drafts and published
   """
 
-  import Ecto.Query
-  alias Barkpark.Repo
-
   alias Barkpark.Content.{
     Analytics,
     Broadcast,
     Document,
     DraftId,
     Edge,
-    Envelope,
+    Edges,
     Export,
     Forms,
     Labels,
+    Lifecycle,
+    Mutations,
+    Papers,
     Query,
     Revisions,
     Schema,
     SchemaDefinition,
     Search,
-    Sheets,
-    Validation,
-    WriteScope
+    WriteScope,
+    Writer
   }
-
-  import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, scope_to_workspace: 3]
-
-  alias Barkpark.PortableDoc.{Projection, Synthesis}
-
-  alias Barkpark.Content.Papers
 
   # ── Draft/Published helpers (extracted → Content.DraftId) ──────────────────
 
@@ -152,849 +144,115 @@ defmodule Barkpark.Content do
   def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []),
     do: Forms.upsert_draft(base_doc, type, schema, params, dataset, opts)
 
-  # W7a step 1 — task documents carry a tight `content` field contract
-  # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
-  # schema-field validation. Enforced here at the write boundary so neither
-  # `create_document/4` nor `upsert_document/4` can land a malformed task
-  # row. Defense-in-depth: migration `20260528100000_w7a_task_schema` adds a
-  # DB CHECK constraint that catches raw-Repo writes that bypass this hook.
+  # ── Document write path (extracted → Content.Writer, concern E) ────────────
   #
-  # Everything is a task — goals/phases/events are gone as document types.
-  # Returns `:ok` for non-task types so the existing post/page/paper write
-  # path is unaffected.
-  defp validate_task_kind("task", attrs) do
-    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
-
-    case Barkpark.Tasks.validate_kind_content("task", content) do
-      :ok ->
-        :ok
-
-      {:error, errors} ->
-        {:error, {:invalid_task_content, errors}}
-    end
-  end
-
-  defp validate_task_kind(_type, _attrs), do: :ok
+  # create / clone / upsert + the write-path helpers (envelope coercion,
+  # id/rev generation, task-kind validation, initial-values + Expectation
+  # scaffolding, deep-merge, dynamic-token resolution) live in
+  # `Barkpark.Content.Writer`. These thin facade wrappers keep every external
+  # caller (`Barkpark.Content.<fn>`) unchanged. Defaults (\\) are spelled out
+  # as explicit wrappers rather than bare defdelegate.
 
   @doc "Validate document content against its schema. Returns {:ok, content} or {:error, errors_map}."
-  def validate_document(type, title, content, dataset) do
-    case get_schema(type, dataset) do
-      {:ok, schema} -> Validation.validate(content, title, schema)
-      _ -> {:ok, content}
-    end
-  end
+  def validate_document(type, title, content, dataset),
+    do: Writer.validate_document(type, title, content, dataset)
 
   @doc """
   Create or update a document. New docs are always created as drafts.
-
-  `opts` is a keyword list carrying hook context:
-    - `:source` — `:studio | :api | :cli | :worker` (default `:api`)
-    - `:user_id` — string id of the acting user, or `nil`
-
-  Fires `:before_save` synchronously before the DB write; on
-  `{:halt, reason}` returns `{:error, {:halted, reason}}` and skips the
-  write. Fires `:after_save` asynchronously after a successful write.
+  See `Barkpark.Content.Writer.create_document/4`.
   """
-  def create_document(type, attrs, dataset, opts \\ []) do
-    attrs = from_envelope(attrs)
-    raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
-    doc_id = draft_id(raw_id)
-
-    attrs =
-      attrs
-      |> Map.put("doc_id", doc_id)
-      |> Map.put("type", type)
-      |> Map.put("dataset", dataset)
-      |> Map.put_new("status", "draft")
-      |> Map.put("rev", generate_rev())
-      |> WriteScope.put_scope_attrs(opts)
-      |> Sheets.maybe_recompute_sheet_formulas(type)
-      |> Sheets.hydrate_sheet_embed_snapshots()
-
-    with :ok <- validate_task_kind(type, attrs) do
-      do_create_document(type, attrs, dataset, doc_id, opts)
-    end
-  end
-
-  defp do_create_document(type, attrs, dataset, doc_id, opts) do
-    ctx = WriteScope.build_ctx(opts)
-
-    # Scope the prev-doc lookup to the writer's workspace/project. An UNSCOPED
-    # lookup here would resolve (and then UPDATE/overwrite) another workspace's
-    # row that happens to share the (doc_id, type, dataset) leaf — the inner
-    # half of the B3 mutate leak. Scoped, a same-id write from a different
-    # workspace sees no prev_doc and falls through to an insert of its own row.
-    prev_doc =
-      case get_document(doc_id, type, dataset, opts) do
-        {:ok, d} -> d
-        _ -> nil
-      end
-
-    payload = %{
-      event: :before_save,
-      doc: attrs,
-      dataset: dataset,
-      prev_doc: prev_doc,
-      ctx: ctx
-    }
-
-    case Barkpark.Plugins.Hooks.fire(:before_save, payload) do
-      {:halt, reason} ->
-        {:error, {:halted, reason}}
-
-      :ok ->
-        result =
-          case prev_doc do
-            %Document{} = existing ->
-              existing
-              |> Document.changeset(attrs)
-              |> Repo.update()
-              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
-
-            _ ->
-              attrs = scaffold_or_initial_values(attrs, type, dataset)
-
-              %Document{}
-              |> Document.changeset(attrs)
-              |> Repo.insert()
-              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
-          end
-
-        result
-        |> WriteScope.fire_after(:after_save, payload)
-        |> Sheets.tap_sheet_writethrough()
-    end
-  end
+  def create_document(type, attrs, dataset, opts \\ []),
+    do: Writer.create_document(type, attrs, dataset, opts)
 
   @doc """
-  Clone a document into a fresh draft. Copies `title` (with " (copy)"
-  suffix) and the full `content` map verbatim, assigns a new generated
-  id, and inserts via `create_document/3` so the draft prefix, status,
-  and PubSub broadcast all go through the canonical write path.
-
-  Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
-  insert failure. Used by the Studio's "Duplicate" header action.
+  Clone a document into a fresh draft. See `Content.Writer.clone_document/4`.
   """
   @spec clone_document(map(), String.t(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
-  def clone_document(doc, type, dataset, opts \\ [])
-      when is_map(doc) and is_binary(type) and is_binary(dataset) do
-    new_id = generate_id(type)
-    src_title = Map.get(doc, :title) || "Untitled"
-    src_content = Map.get(doc, :content) || %{}
-
-    create_document(
-      type,
-      %{
-        "doc_id" => new_id,
-        "title" => "#{src_title} (copy)",
-        "status" => "draft",
-        "content" => src_content
-      },
-      dataset,
-      opts
-    )
-  end
-
-  # ── Initial values (Sanity-style schema-declared defaults) ────────────────
-  #
-  # When a schema declares an `initial_values` map, those keys pre-fill the
-  # content of a newly created document. Provided values always win — the
-  # initial_values map is a FLOOR, never a ceiling.
-  #
-  # Maps merge deeply. Lists do NOT merge (a provided list replaces the
-  # initial list wholesale — recursive list merging is ambiguous and a
-  # publisher who provides a list almost always means "use exactly this").
-  #
-  # Dynamic tokens resolved at create time only:
-  #   * `"$today"`      → today's ISO-8601 date string (e.g. "2026-05-14")
-  #   * `"$today.year"` → today's year as a 4-digit string (e.g. "2026")
-
-  defp apply_initial_values(attrs, type, dataset)
-       when is_binary(type) and is_binary(dataset) do
-    initial =
-      case get_schema(type, dataset) do
-        {:ok, %SchemaDefinition{initial_values: iv}} when is_map(iv) and map_size(iv) > 0 ->
-          resolve_dynamics(iv)
-
-        _ ->
-          nil
-      end
-
-    case initial do
-      nil ->
-        attrs
-
-      iv ->
-        provided = Map.get(attrs, "content") || %{}
-        Map.put(attrs, "content", deep_merge(iv, provided))
-    end
-  end
-
-  defp apply_initial_values(attrs, _type, _dataset), do: attrs
-
-  # ── Exp-P3.1 — Create-from-Expectation scaffold ──────────────────────────
-  #
-  # On creating a new document of an EXPECTATION-BEARING type — a type whose
-  # schema carries an EXPLICIT stored `layout` (e.g. `post`; see seeds) — the
-  # Expectation is instantiated into `content["blocks"]`: one BOUND block per
-  # layout field (valued from provided content / row title / prefill / empty)
-  # plus the body region as free blocks (an empty paragraph placeholder when
-  # none provided). Then `Projection.project/3` derives `content[fieldName]` +
-  # `content["body"]` from those blocks — replacing the flat
-  # `apply_initial_values` for these types.
-  #
-  # A type with NO explicit layout (a plain v1 schema relying only on flat
-  # `initial_values`, or no schema at all) keeps the unchanged
-  # `apply_initial_values` path. The explicit-layout gate is what marks a type
-  # as Expectation-bearing here — a derived-default layout alone does not flip
-  # an existing v1 type onto the block path (it would silently drop
-  # initial_values keys that are not declared fields).
-  defp scaffold_or_initial_values(attrs, type, dataset)
-       when is_binary(type) and is_binary(dataset) do
-    case get_schema(type, dataset) do
-      {:ok, %SchemaDefinition{layout: layout} = schema}
-      when is_list(layout) and layout != [] ->
-        scaffold_expectation(attrs, schema, dataset)
-
-      _ ->
-        apply_initial_values(attrs, type, dataset)
-    end
-  end
-
-  defp scaffold_or_initial_values(attrs, type, dataset),
-    do: apply_initial_values(attrs, type, dataset)
-
-  # Build the scaffold block list from the schema's Expectation + provided
-  # values, persist it under content["blocks"], and project. The row title
-  # lives on the document row, not under content — it is folded in under
-  # "title" so a bound title field-block picks it up, and re-derived into
-  # content["title"] by projection (mirroring synthesize_blocks/3).
-  defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset) do
-    %{layout: layout, prefill: prefill} = resolve_expectation(schema)
-    prefill = resolve_dynamics(prefill)
-    provided = Map.get(attrs, "content") || %{}
-
-    values =
-      provided
-      |> Map.put_new("title", Map.get(attrs, "title"))
-      |> drop_nil_values()
-
-    blocks = Synthesis.scaffold(layout, values, prefill, schema.fields || [])
-
-    content =
-      provided
-      |> Map.put("blocks", blocks)
-      |> Projection.project(blocks, Labels.render_opts(dataset))
-
-    Map.put(attrs, "content", content)
-  end
-
-  defp drop_nil_values(map) when is_map(map) do
-    Enum.reduce(map, %{}, fn {k, v}, acc ->
-      if is_nil(v), do: acc, else: Map.put(acc, k, v)
-    end)
-  end
+  def clone_document(doc, type, dataset, opts \\ []),
+    do: Writer.clone_document(doc, type, dataset, opts)
 
   @doc false
-  def deep_merge(a, b) when is_map(a) and is_map(b) do
-    Map.merge(a, b, fn _k, av, bv ->
-      cond do
-        is_map(av) and is_map(bv) -> deep_merge(av, bv)
-        true -> bv
-      end
-    end)
-  end
-
-  def deep_merge(_a, b), do: b
+  defdelegate deep_merge(a, b), to: Writer
 
   @doc false
-  def resolve_dynamics(term) when is_map(term) do
-    Map.new(term, fn {k, v} -> {k, resolve_dynamics(v)} end)
-  end
+  defdelegate resolve_dynamics(term), to: Writer
 
-  def resolve_dynamics(list) when is_list(list), do: Enum.map(list, &resolve_dynamics/1)
+  @doc """
+  Upsert a document — used by autosave and patch paths.
+  See `Barkpark.Content.Writer.upsert_document/4`.
+  """
+  def upsert_document(type, attrs, dataset, opts \\ []),
+    do: Writer.upsert_document(type, attrs, dataset, opts)
 
-  def resolve_dynamics("$today"), do: Date.utc_today() |> Date.to_iso8601()
-
-  def resolve_dynamics("$today.year"),
-    do: Date.utc_today().year |> Integer.to_string()
-
-  def resolve_dynamics(other), do: other
+  # ── Publish lifecycle (extracted → Content.Lifecycle, concern F) ───────────
+  #
+  # publish / unpublish / discard-draft / delete moved to
+  # `Barkpark.Content.Lifecycle`. Thin facade wrappers keep every external
+  # caller unchanged; defaults (\\) are explicit wrappers.
 
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
-  If no draft exists, returns error.
-
-  `opts` accepts `:source` and `:user_id` for lifecycle-hook context.
-  Fires `:before_publish` (halt-capable) and `:after_publish` (async).
+  See `Barkpark.Content.Lifecycle.publish_document/4`.
   """
-  def publish_document(published_doc_id, type, dataset, opts \\ []) do
-    did = draft_id(published_doc_id)
-    pid = published_id(published_doc_id)
-
-    case get_document(did, type, dataset, opts) do
-      {:ok, draft} ->
-        ctx = WriteScope.build_ctx(opts)
-
-        payload = %{
-          event: :before_publish,
-          doc: draft,
-          dataset: dataset,
-          prev_doc: draft,
-          ctx: ctx
-        }
-
-        case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
-
-          :ok ->
-            # Upsert the published version with draft's content. Inherit the
-            # draft's tenancy scope so a publish never drops workspace_id/
-            # project_id on the published row.
-            pub_attrs =
-              %{
-                "doc_id" => pid,
-                "type" => type,
-                "dataset" => dataset,
-                "title" => draft.title,
-                "status" => "published",
-                "content" => draft.content,
-                "rev" => generate_rev()
-              }
-              |> WriteScope.inherit_scope_attrs(draft)
-
-            {pub_result, prev_pub_rev} =
-              case get_document(pid, type, dataset, opts) do
-                {:ok, existing} ->
-                  {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
-
-                _ ->
-                  {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-              end
-
-            result =
-              case pub_result do
-                {:ok, published} ->
-                  # Delete the draft
-                  Repo.delete(draft)
-                  Broadcast.tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
-
-                error ->
-                  error
-              end
-
-            WriteScope.fire_after(result, :after_publish, payload)
-        end
-
-      {:error, :not_found} ->
-        {:error, :not_found}
-    end
-  end
+  def publish_document(published_doc_id, type, dataset, opts \\ []),
+    do: Lifecycle.publish_document(published_doc_id, type, dataset, opts)
 
   @doc """
   Unpublish: move published doc back to draft, delete published version.
-
-  `opts` accepts `:source` and `:user_id`. Fires `:before_unpublish`
-  (halt-capable) and `:after_unpublish` (async).
+  See `Barkpark.Content.Lifecycle.unpublish_document/4`.
   """
-  def unpublish_document(published_doc_id, type, dataset, opts \\ []) do
-    pid = published_id(published_doc_id)
-    did = draft_id(published_doc_id)
+  def unpublish_document(published_doc_id, type, dataset, opts \\ []),
+    do: Lifecycle.unpublish_document(published_doc_id, type, dataset, opts)
 
-    case get_document(pid, type, dataset, opts) do
-      {:ok, pub} ->
-        ctx = WriteScope.build_ctx(opts)
-
-        payload = %{
-          event: :before_unpublish,
-          doc: pub,
-          dataset: dataset,
-          prev_doc: pub,
-          ctx: ctx
-        }
-
-        case Barkpark.Plugins.Hooks.fire(:before_unpublish, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
-
-          :ok ->
-            # Create draft with published content. Inherit the published row's
-            # tenancy scope so an unpublish keeps workspace_id/project_id.
-            draft_attrs =
-              %{
-                "doc_id" => did,
-                "type" => type,
-                "dataset" => dataset,
-                "title" => pub.title,
-                "status" => "draft",
-                "content" => pub.content,
-                "rev" => generate_rev()
-              }
-              |> WriteScope.inherit_scope_attrs(pub)
-
-            {draft_result, prev_draft_rev} =
-              case get_document(did, type, dataset, opts) do
-                {:ok, existing} ->
-                  {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
-
-                _ ->
-                  {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
-              end
-
-            result =
-              case draft_result do
-                {:ok, draft} ->
-                  Repo.delete(pub)
-                  Broadcast.tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
-
-                error ->
-                  error
-              end
-
-            WriteScope.fire_after(result, :after_unpublish, payload)
-        end
-
-      error ->
-        error
-    end
-  end
-
-  @doc "Discard a draft without publishing. Published version (if any) remains."
-  def discard_draft(published_doc_id, type, dataset, opts \\ []) do
-    did = draft_id(published_doc_id)
-
-    case get_document(did, type, dataset, opts) do
-      {:ok, draft} ->
-        prev_rev = draft.rev
-
-        Repo.delete(draft)
-        |> Broadcast.tap_broadcast(dataset, type, "discardDraft", prev_rev)
-
-      error ->
-        error
-    end
-  end
+  @doc "Discard a draft without publishing. See `Content.Lifecycle.discard_draft/4`."
+  def discard_draft(published_doc_id, type, dataset, opts \\ []),
+    do: Lifecycle.discard_draft(published_doc_id, type, dataset, opts)
 
   @doc """
   Delete both the published and draft variants of a document.
-
-  `opts` accepts `:source` and `:user_id`. Fires `:before_delete`
-  (halt-capable) and `:after_delete` (async). The payload's `:doc` and
-  `:prev_doc` carry the about-to-be-deleted document (the published row
-  if present, otherwise the draft).
+  See `Barkpark.Content.Lifecycle.delete_document/4`.
   """
-  def delete_document(doc_id, type, dataset, opts \\ []) do
-    pid = published_id(doc_id)
-    did = draft_id(doc_id)
+  def delete_document(doc_id, type, dataset, opts \\ []),
+    do: Lifecycle.delete_document(doc_id, type, dataset, opts)
 
-    existing =
-      [pid, did]
-      |> Enum.map(fn id -> get_document(id, type, dataset, opts) end)
-      |> Enum.filter(&match?({:ok, _}, &1))
-      |> Enum.map(fn {:ok, doc} -> doc end)
-
-    case existing do
-      [] ->
-        {:error, :not_found}
-
-      [target | _] = docs ->
-        ctx = WriteScope.build_ctx(opts)
-
-        payload = %{
-          event: :before_delete,
-          doc: target,
-          dataset: dataset,
-          prev_doc: target,
-          ctx: ctx
-        }
-
-        case Barkpark.Plugins.Hooks.fire(:before_delete, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
-
-          :ok ->
-            [{first_result, prev_rev} | _] =
-              Enum.map(docs, fn doc -> {Repo.delete(doc), doc.rev} end)
-
-            result = Broadcast.tap_broadcast(first_result, dataset, type, "delete", prev_rev)
-            WriteScope.fire_after(result, :after_delete, payload)
-        end
-    end
-  end
+  # ── Batch mutations (extracted → Content.Mutations, concern H) ─────────────
+  #
+  # `apply_mutations/3` (transaction + broadcast-deferral + per-op dispatch)
+  # moved to `Barkpark.Content.Mutations`. Thin facade wrapper preserves the
+  # default arg.
 
   @doc """
-  Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
-  or `{:error, reason}` with rollback on any failure.
-
-  `opts` accepts `:source` and `:user_id` and is threaded into every
-  per-mutation Content call so lifecycle-hook context (`ctx.source`,
-  `ctx.user_id`) is set correctly for each fired hook.
-
-  PubSub broadcasts queued inside the transaction are flushed AFTER a
-  successful commit, and discarded on rollback — no ghost events on
-  the SSE stream when a batch fails partway through.
+  Apply a batch of mutations atomically.
+  See `Barkpark.Content.Mutations.apply_mutations/3`.
   """
-  def apply_mutations(mutations, dataset, opts \\ []) when is_list(mutations) do
-    # Initialise the deferred-broadcast queue for this process so
-    # tap_broadcast/5 knows to queue instead of broadcast immediately.
-    Process.put(:barkpark_deferred_broadcasts, [])
+  def apply_mutations(mutations, dataset, opts \\ []),
+    do: Mutations.apply_mutations(mutations, dataset, opts)
 
-    try do
-      result =
-        Repo.transaction(fn ->
-          tx_id = generate_rev()
-
-          results =
-            Enum.map(mutations, fn m ->
-              case apply_one(m, dataset, opts) do
-                {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
-                {:error, reason} -> Repo.rollback(reason)
-              end
-            end)
-
-          {tx_id, results}
-        end)
-
-      case result do
-        {:ok, _} ->
-          Broadcast.flush_deferred_broadcasts()
-          result
-
-        _ ->
-          Broadcast.clear_deferred_broadcasts()
-          result
-      end
-    rescue
-      e ->
-        Broadcast.clear_deferred_broadcasts()
-        reraise(e, __STACKTRACE__)
-    end
-  end
-
-  defp apply_one(%{"create" => attrs}, dataset, opts) do
-    type = attrs["_type"] || attrs["type"]
-    id = attrs["_id"] || attrs["doc_id"]
-
-    # A create must NOT overwrite an existing draft. Skip the lookup when
-    # type/id are missing — let create_document/3 surface a validation error
-    # (Ecto rejects nil equality comparisons in queries).
-    existing =
-      if id && type do
-        case get_document(draft_id(id), type, dataset, opts) do
-          {:ok, doc} -> doc
-          _ -> nil
-        end
-      end
-
-    case existing do
-      %_{} = doc ->
-        case if_rev(attrs) do
-          nil -> {:error, :conflict}
-          expected -> {:error, {:rev_mismatch, %{expected: expected, actual: doc.rev}}}
-        end
-
-      _ ->
-        with {:ok, doc} <- create_document(type, attrs, dataset, opts), do: {:ok, doc, "create"}
-    end
-  end
-
-  defp apply_one(%{"createOrReplace" => attrs}, dataset, opts) do
-    type = attrs["_type"] || attrs["type"]
-    id = attrs["_id"] || attrs["doc_id"]
-    expected = if_rev(attrs)
-
-    existing =
-      case id && get_document(draft_id(id), type, dataset, opts) do
-        {:ok, doc} -> doc
-        _ -> nil
-      end
-
-    with :ok <- ensure_rev(existing, expected),
-         {:ok, doc} <- create_document(type, attrs, dataset, opts) do
-      {:ok, doc, "createOrReplace"}
-    end
-  end
-
-  defp apply_one(%{"createIfNotExists" => attrs}, dataset, opts) do
-    type = attrs["_type"] || attrs["type"]
-    id = attrs["_id"] || attrs["doc_id"]
-
-    case id && get_document(draft_id(id), type, dataset, opts) do
-      {:ok, existing} ->
-        case ensure_rev(existing, if_rev(attrs)) do
-          :ok -> {:ok, existing, "noop"}
-          err -> err
-        end
-
-      _ ->
-        with {:ok, doc} <- create_document(type, attrs, dataset, opts), do: {:ok, doc, "create"}
-    end
-  end
-
-  defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- publish_document(id, type, dataset, opts), do: {:ok, doc, "publish"}
-  end
-
-  defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- unpublish_document(id, type, dataset, opts), do: {:ok, doc, "unpublish"}
-  end
-
-  defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- discard_draft(id, type, dataset, opts), do: {:ok, doc, "discardDraft"}
-  end
-
-  defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
-    case if_rev(op) do
-      nil ->
-        with {:ok, doc} <- delete_document(id, type, dataset, opts), do: {:ok, doc, "delete"}
-
-      expected ->
-        with {:ok, existing} <- get_document(id, type, dataset, opts),
-             :ok <- ensure_rev(existing, expected),
-             {:ok, doc} <- delete_document(id, type, dataset, opts) do
-          {:ok, doc, "delete"}
-        end
-    end
-  end
-
-  defp apply_one(%{"replace" => attrs}, dataset, opts) do
-    type = attrs["_type"] || attrs["type"]
-    id = attrs["_id"] || attrs["doc_id"]
-
-    with {:ok, existing} <- get_document(id && draft_id(id), type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(attrs)),
-         {:ok, doc} <- create_document(type, attrs, dataset, opts) do
-      {:ok, doc, "replace"}
-    end
-  end
-
-  defp apply_one(
-         %{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch},
-         dataset,
-         opts
-       ) do
-    with {:ok, existing} <- get_document(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)) do
-      merged =
-        Map.merge(
-          existing.content || %{},
-          Map.drop(fields, ~w(title status _id _type _rev))
-        )
-
-      attrs = %{
-        "doc_id" => id,
-        "title" => fields["title"] || existing.title,
-        "content" => merged
-      }
-
-      with {:ok, doc} <- upsert_document(type, attrs, dataset, opts), do: {:ok, doc, "update"}
-    end
-  end
-
-  defp apply_one(_, _, _), do: {:error, :malformed}
-
-  defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
-  defp if_rev(_), do: nil
-
-  defp ensure_rev(_doc, nil), do: :ok
-  defp ensure_rev(_doc, ""), do: :ok
-
-  defp ensure_rev(nil, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: nil}}}
-
-  defp ensure_rev(%{rev: r}, r), do: :ok
-
-  defp ensure_rev(%{rev: actual}, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+  # ── Content-graph edges (extracted → Content.Edges, concern I) ─────────────
+  #
+  # Reference discovery / disconnect + content-edge CRUD moved to
+  # `Barkpark.Content.Edges` (which sits ABOVE the `Content.Edge`/
+  # `Content.Graph` schema modules). Thin facade wrappers keep every external
+  # caller unchanged; defaults (\\) are explicit wrappers.
 
   @doc """
   Find all documents that reference a given document ID.
-
-  `opts` may carry `:workspace_id` / `:project_id`; when present the schema
-  scan and the per-type document scan are scoped to that tenant so the
-  reference search never crosses the workspace boundary (barkpark-af50).
-  Callers that pass no scope keep the explicit-global behaviour.
+  See `Barkpark.Content.Edges.find_referencing_docs/3`.
   """
-  def find_referencing_docs(doc_id, dataset, opts \\ []) do
-    pub_id = published_id(doc_id)
-    schemas = list_schemas(dataset, opts)
-
-    # Find all schema fields that are references
-    ref_fields =
-      for schema <- schemas,
-          field <- schema.fields,
-          field["type"] == "reference",
-          do: {schema.name, field["name"]}
-
-    # Search each type for docs that reference this ID. The predicate
-    # (`content->>field == pub_id`) is pushed into SQL via the `:filter_map`
-    # eq op so the DB returns ONLY the referencing rows — was a full
-    # load-all-of-type per reference field followed by an in-memory
-    # Enum.filter (barkpark-sji2). Scope opts (workspace/project/dataset) stay
-    # threaded as before. limit: 1000 so a high fan-in reference is not
-    # truncated by the default 100-row cap.
-    Enum.flat_map(ref_fields, fn {type_name, field_name} ->
-      ref_opts =
-        opts
-        |> Keyword.put(:perspective, :raw)
-        |> Keyword.put(:filter_map, %{field_name => pub_id})
-        |> Keyword.put_new(:limit, 1000)
-
-      list_documents(type_name, dataset, ref_opts)
-      |> Enum.map(fn doc ->
-        %{doc_id: doc.doc_id, type: type_name, title: doc.title, field: field_name}
-      end)
-    end)
-  end
+  def find_referencing_docs(doc_id, dataset, opts \\ []),
+    do: Edges.find_referencing_docs(doc_id, dataset, opts)
 
   @doc """
   Remove all references to a document ID from other documents.
-
-  `opts` may carry `:workspace_id` / `:project_id` — threaded into both the
-  referencing-doc scan and the per-doc read so the disconnect stays inside the
-  tenant boundary (barkpark-af50).
-
-  ## arrayOf-aware (the blast-radius fix)
-
-  The referencing-source set is the UNION of two probes, so it matches the
-  Studio guard modal exactly while staying robust when edges are not yet
-  materialised:
-
-    * the scalar SQL scan `find_referencing_docs/3` (`content->>field == pub_id`)
-      — finds scalar `reference` referencers WITHOUT depending on the
-      `content_edges` projection (the projector is async / `:manual` in tests);
-      and
-    * `Content.Graph.reverse_referencers/2` — the arrayOf-aware inbound-edge
-      query over `content_edges` (materialised in Phase 2) — finds referencers
-      via `arrayOf`-of-`reference` fields like `task.attachments`.
-
-  The previous path built its `ref_fields` from `field["type"] == "reference"`
-  ONLY, so it silently skipped arrayOf referencers: the guard modal warned about
-  them (it probes via `reverse_referencers`) but the disconnect never acted on
-  them, leaving those references dangling after the doc was unpublished anyway —
-  defeating the disconnect remediation for the headline arrayOf case. This
-  closes the gap: for each referencing source we strip the target from BOTH
-  scalar `reference` fields (delete the field) AND `arrayOf`-of-`reference`
-  fields (`List.delete` the element, keeping the array's other references).
+  See `Barkpark.Content.Edges.disconnect_references/3`.
   """
-  def disconnect_references(doc_id, dataset, opts \\ []) do
-    pub_id = published_id(doc_id)
-
-    scalar_refs =
-      find_referencing_docs(doc_id, dataset, opts)
-      |> Enum.map(fn ref -> {ref.doc_id, ref.type} end)
-
-    array_refs =
-      Barkpark.Content.Graph.reverse_referencers(pub_id, [dataset: dataset] ++ opts)
-      |> Enum.map(fn ref -> {ref[:from_doc_id] || ref[:from_id], ref[:type]} end)
-
-    # Distinct referencing sources — a source can reference the target via
-    # several edges (a scalar `rel` AND an `arrayOf` `attachments`), and the two
-    # probes can both surface the same scalar source; we load + rewrite each
-    # source doc once, stripping the id from every matching field in one update.
-    (scalar_refs ++ array_refs)
-    |> Enum.reject(fn {ref_doc_id, type} -> is_nil(ref_doc_id) or is_nil(type) end)
-    |> Enum.uniq()
-    |> Enum.each(fn {ref_doc_id, type} ->
-      disconnect_one_source(ref_doc_id, type, pub_id, dataset, opts)
-    end)
-  end
-
-  # Strip every reference to `target_pub_id` out of one referencing source doc,
-  # across BOTH scalar `reference` fields and `arrayOf`-of-`reference` fields.
-  defp disconnect_one_source(ref_doc_id, type, target_pub_id, dataset, opts) do
-    with {:ok, schema} <- get_schema(type, dataset),
-         {:ok, doc} <- get_document(ref_doc_id, type, dataset, opts) do
-      content = doc.content || %{}
-      updated_content = strip_reference_fields(content, schema.fields, target_pub_id)
-
-      if updated_content != content do
-        prev_rev = doc.rev
-
-        doc
-        |> Document.changeset(%{"content" => updated_content, "rev" => generate_rev()})
-        |> Repo.update()
-        |> Broadcast.tap_broadcast(dataset, type, "update", prev_rev)
-      end
-
-      :ok
-    else
-      _ -> :ok
-    end
-  end
-
-  # Walk the schema fields and remove `target_pub_id` from each reference-bearing
-  # field of `content`. Scalar `reference` whose value coalesces to the target →
-  # delete the key. `arrayOf` of `reference` → keep every element that is NOT the
-  # target (published-coalesced compare), so OTHER references in the array
-  # survive. All other fields pass through untouched.
-  defp strip_reference_fields(content, fields, target_pub_id) do
-    Enum.reduce(fields, content, fn field, acc ->
-      name = field["name"]
-      value = Map.get(acc, name)
-
-      cond do
-        field["type"] == "reference" and is_binary(value) and
-            published_id(value) == target_pub_id ->
-          Map.delete(acc, name)
-
-        get_in(field, ["of", "type"]) == "reference" and is_list(value) ->
-          kept =
-            Enum.reject(value, fn v ->
-              is_binary(v) and published_id(v) == target_pub_id
-            end)
-
-          if kept == value, do: acc, else: Map.put(acc, name, kept)
-
-        true ->
-          acc
-      end
-    end)
-  end
-
-  # ── Content graph edges (reference-field extraction + CRUD) ─────────────────
-  #
-  # extract_edges/2 walks a document's schema reference fields (scalar AND
-  # arrayOf-of-reference) and emits one raw edge per target. from_id/to_id are
-  # ALWAYS published-coalesced (published_id/1) so keys are publish-stable and a
-  # draft is never a from_id. Dangling is computed here at READ time — there is
-  # no dangling column (the to_id FK makes a dangling edge unstorable; see
-  # `Barkpark.Content.Edge` moduledoc). The closest live precedents are the
-  # scalar-only find_referencing_docs/3 and the untyped reference_title/4.
+  def disconnect_references(doc_id, dataset, opts \\ []),
+    do: Edges.disconnect_references(doc_id, dataset, opts)
 
   @doc """
   Extract the outbound reference-field edges of a document.
-
-  For the doc's schema (`list_schemas/2` → matched by `doc.type`) enumerate
-  BOTH:
-
-    * scalar fields where `f["type"] == "reference"` — value is
-      `doc.content[field]`, refType `f["refType"]` (MAY be nil); and
-    * arrayOf fields where `get_in(f, ["of", "type"]) == "reference"` — value is
-      `List.wrap(doc.content[field])` (one edge per element), refType
-      `get_in(f, ["of", "refType"])` (MAY be nil).
-
-  Each raw target value becomes one edge map with `from_id` =
-  `published_id(doc.doc_id)`, `to_id` = `published_id(target)`. `dangling` is
-  resolved per target via `resolve_target_existence/4` (typed `get_document/4`
-  when refType is a non-empty binary; type-agnostic `Repo.exists?` when refType
-  is nil/empty — NEVER `get_document` with a nil type, which would short-circuit
-  to `:not_found` and false-flag every untyped ref). Resolution runs under the
-  `:published` lens (mirrors anonymous reads); a target whose published twin
-  does not yet exist is reported dangling.
-
-  Pure of plugins — reads only core schema reference fields, so it still emits
-  core edges with `Application.put_env(:barkpark, :plugins, [])` (fresh-install
-  invariant). Resolves EACH target → O(edges) DB round-trips; the Phase-3
-  projector runs it off the request path.
-
-  Returns `[%{from_id, to_id, kind, field, refType, dangling}]`. `kind` is the
-  source reference field's NAME (e.g. `"dependencies"`, `"intentions"`,
-  `"related"`) so distinct reference fields become distinct edge kinds in
-  /v1/graph; plugin-projected kinds (Phase 3) arrive via the registry
-  collector, not this function.
+  See `Barkpark.Content.Edges.extract_edges/2`.
   """
   @spec extract_edges(map() | Document.t(), keyword()) :: [
           %{
@@ -1006,539 +264,33 @@ defmodule Barkpark.Content do
             dangling: boolean()
           }
         ]
-  def extract_edges(doc, opts \\ []) do
-    doc_id = Map.get(doc, :doc_id) || Map.get(doc, "doc_id")
-    type = Map.get(doc, :type) || Map.get(doc, "type")
-    dataset = Map.get(doc, :dataset) || Map.get(doc, "dataset")
-    content = Map.get(doc, :content) || Map.get(doc, "content") || %{}
-
-    from_id = published_id(doc_id)
-
-    schema =
-      dataset
-      |> list_schemas(opts)
-      |> Enum.find(fn s -> s.name == type end)
-
-    case schema do
-      nil ->
-        []
-
-      %SchemaDefinition{fields: fields} ->
-        fields
-        |> Enum.flat_map(fn field -> extract_field_edges(field, content) end)
-        |> Enum.map(fn {raw_target, field_name, ref_type} ->
-          to_id = published_id(raw_target)
-
-          dangling =
-            not resolve_target_existence(to_id, ref_type, dataset, opts)
-
-          %{
-            from_id: from_id,
-            to_id: to_id,
-            # kind IS the source reference field's name (graph-edge-seam): a
-            # `dependencies` ref → kind "dependencies", `intentions` → "intentions",
-            # `related` → "related". This makes distinct reference fields distinct
-            # edge kinds in /v1/graph (bp-graph.js colours by kind) WITHOUT a
-            # via_field column or API change — the kind column already surfaces.
-            # Was the generic "references" for every field. Plugin-projected kinds
-            # (Phase 3) arrive via the registry collector, not this function.
-            kind: field_name,
-            field: field_name,
-            refType: ref_type,
-            dangling: dangling
-          }
-        end)
-    end
-  end
-
-  # Scalar reference field → at most one {raw_target, field_name, ref_type}.
-  defp extract_field_edges(%{"type" => "reference"} = field, content) do
-    field_name = field["name"]
-    ref_type = field["refType"]
-
-    case Map.get(content, field_name) do
-      value when is_binary(value) and value != "" ->
-        [{value, field_name, ref_type}]
-
-      _ ->
-        []
-    end
-  end
-
-  # arrayOf-of-reference field → one entry per non-blank element (bare-id
-  # string array, the task.attachments shape).
-  defp extract_field_edges(%{"type" => "arrayOf", "of" => %{"type" => "reference"} = of} = field, content) do
-    field_name = field["name"]
-    ref_type = of["refType"]
-
-    content
-    |> Map.get(field_name)
-    |> List.wrap()
-    |> Enum.filter(fn v -> is_binary(v) and v != "" end)
-    |> Enum.map(fn value -> {value, field_name, ref_type} end)
-  end
-
-  defp extract_field_edges(_field, _content), do: []
-
-  # The SHARED resolve-and-dangling helper (gap #2). TWO branches that MUST
-  # agree on lens (:published) + scope so a typed and an untyped ref to the same
-  # target never disagree:
-  #
-  #   (i)  refType is a non-empty binary → typed get_document/4; resolvable
-  #        unless it returns {:error, :not_found}.
-  #   (ii) refType is nil OR "" → DO NOT call get_document with a nil type
-  #        (get_document/4 short-circuits to :not_found on a nil type and would
-  #        false-positive EVERY untyped ref). Instead run a type-agnostic
-  #        existence query — present? under the :published lens means
-  #        resolvable.
-  #
-  # BOTH branches share the :published lens: the typed branch resolves only the
-  # published row (get_document/4 matches `doc_id == to_id` where to_id is
-  # already published-coalesced), and the untyped branch matches the published
-  # id ONLY — NOT the `drafts.` twin. A draft-only target (no published twin)
-  # is therefore dangling under EITHER branch, so a typed ref and an untyped ref
-  # to the same target never disagree on dangling (gap #2 contract). This is
-  # why we do NOT copy reference_title/4's `or doc_id == draft` clause —
-  # reference_title intentionally falls back to the draft twin for a cosmetic
-  # title, which is the WRONG lens for published-dangling.
-  #
-  # Returns true when the target is resolvable (NOT dangling).
-  @spec resolve_target_existence(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
-          boolean()
-  defp resolve_target_existence(to_id, ref_type, dataset, opts)
-       when is_binary(ref_type) and ref_type != "" do
-    case get_document(to_id, ref_type, dataset, opts) do
-      {:ok, _doc} -> true
-      {:error, :not_found} -> false
-    end
-  end
-
-  defp resolve_target_existence(to_id, _ref_type, dataset, opts) do
-    pub_id = published_id(to_id)
-
-    Document
-    |> where([d], d.doc_id == ^pub_id)
-    |> WriteScope.scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(
-      Keyword.get(opts, :workspace_id),
-      Keyword.get(opts, :project_id)
-    )
-    |> Repo.exists?()
-  end
+  def extract_edges(doc, opts \\ []), do: Edges.extract_edges(doc, opts)
 
   @doc """
   Insert (or REPLACE) a single content edge by its `(from_id, to_id, kind)`
-  triple.
-
-  ## Id model — slug `doc_id` IN, `documents.id` UUID stored
-
-  `extract_edges/2` emits `from_id`/`to_id` as STRING slug `doc_id`s (e.g.
-  `"art-1"`), but the `content_edges` FKs reference `documents.id` — the
-  binary_id UUID PK, NOT the `doc_id` slug (same contract as `task_edges`,
-  whose `Tasks.add_dep/3` is called with `child.id`/`parent.id` UUIDs). So
-  `add_edge/4` RESOLVES each endpoint slug to its `documents.id` before
-  inserting, preferring the published row (mirroring `reference_title/4`'s
-  published-before-draft pick). A value that is already a UUID for an existing
-  `documents.id` is used as-is. An unresolvable endpoint → `{:error, :no_target}`
-  (a dangling edge is UNSTORABLE — the read-time `extract_edges/2` dangling
-  signal is the place that surfaces it, not this writer).
-
-  Resolution scope is read from `attrs` (`dataset`, optional `workspace_id` /
-  `project_id`) — `extract_edges/2`'s slugs are scope-relative, so a caller
-  MUST pass the same `dataset` it extracted under.
-
-  `on_conflict: {:replace, [:weight, :plugin_source, :updated_at]}` with
-  `conflict_target: [:from_id, :to_id, :kind]` — REPLACE (not `:nothing`) so a
-  re-extracted edge with changed `weight`/`plugin_source` UPDATES rather than
-  keeping stale values (gap #9). `updated_at` exists per the schema divergence
-  so it is bumped on conflict. The row is reloaded by its unique triple so
-  callers always get the canonical struct (same shape as `Tasks.add_dep/3`).
-
-  Returns `{:ok, %Edge{}}` on success, `{:error, :no_target}` when an endpoint
-  cannot be resolved to a `documents.id`, or `{:error, %Ecto.Changeset{}}` on
-  validation failure (self-edge, unknown kind).
+  triple. See `Barkpark.Content.Edges.add_edge/4`.
   """
   @spec add_edge(binary(), binary(), String.t(), map()) ::
           {:ok, Edge.t()} | {:error, :no_target} | {:error, Ecto.Changeset.t()}
-  def add_edge(from_id, to_id, kind, attrs \\ %{}) do
-    attrs = Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
-    dataset = attrs["dataset"]
-    scope_opts = edge_scope_opts(attrs)
-
-    with from_pk when is_binary(from_pk) <- resolve_doc_pk(from_id, dataset, scope_opts),
-         to_pk when is_binary(to_pk) <- resolve_doc_pk(to_id, dataset, scope_opts) do
-      base = %{"from_id" => from_pk, "to_id" => to_pk, "kind" => to_string(kind)}
-
-      changeset =
-        Edge.changeset(
-          %Edge{},
-          Map.merge(base, %{
-            "weight" => attrs["weight"],
-            "plugin_source" => attrs["plugin_source"]
-          })
-        )
-
-      if changeset.valid? do
-        case Repo.insert(changeset,
-               on_conflict: {:replace, [:weight, :plugin_source, :updated_at]},
-               conflict_target: [:from_id, :to_id, :kind]
-             ) do
-          {:ok, %Edge{}} ->
-            {:ok, fetch_content_edge!(from_pk, to_pk, to_string(kind))}
-
-          {:error, %Ecto.Changeset{} = cs} ->
-            {:error, cs}
-        end
-      else
-        {:error, changeset}
-      end
-    else
-      _ -> {:error, :no_target}
-    end
-  end
-
-  # Resolve a slug `doc_id` (or an already-resolved `documents.id` UUID) to the
-  # `documents.id` binary_id PK the content_edges FKs reference. Published row
-  # preferred over its `drafts.` twin (CASE-ordered, mirroring reference_title/4)
-  # so the stored edge is publish-stable. Returns the UUID string, or nil when
-  # nothing in scope matches (caller turns that into {:error, :no_target} — a
-  # dangling edge is unstorable).
-  defp resolve_doc_pk(nil, _dataset, _scope_opts), do: nil
-
-  defp resolve_doc_pk(id, dataset, scope_opts) when is_binary(id) do
-    pub_id = published_id(id)
-    draft = draft_id(pub_id)
-
-    query =
-      Document
-      |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft or d.id == ^id)
-      |> scope_edge_endpoint(scope_opts)
-      |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
-
-    query =
-      if is_binary(dataset) and dataset != "" do
-        WriteScope.scope_to_dataset(query, dataset, scope_opts)
-      else
-        query
-      end
-
-    case query |> Repo.all() |> List.first() do
-      %Document{id: pk} -> pk
-      _ -> nil
-    end
-  rescue
-    # An `id` that is not a valid binary_id makes `d.id == ^id` raise on cast.
-    # Fall back to the slug-only match (drop the `d.id == ^id` disjunct).
-    Ecto.Query.CastError -> resolve_doc_pk_by_slug(id, dataset, scope_opts)
-  end
-
-  defp resolve_doc_pk_by_slug(id, dataset, scope_opts) do
-    pub_id = published_id(id)
-    draft = draft_id(pub_id)
-
-    query =
-      Document
-      |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
-      |> scope_edge_endpoint(scope_opts)
-      |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
-
-    query =
-      if is_binary(dataset) and dataset != "" do
-        WriteScope.scope_to_dataset(query, dataset, scope_opts)
-      else
-        query
-      end
-
-    case query |> Repo.all() |> List.first() do
-      %Document{id: pk} -> pk
-      _ -> nil
-    end
-  end
-
-  # Tenancy scope for an edge endpoint resolution. With `require_workspace:
-  # true` (the multi-tenant projector, FIX 3) the STRICT `scope_to_workspace/3`
-  # is used — a nil workspace_id FAILS CLOSED (where: false), so a nil-scope
-  # endpoint resolves to NOTHING and add_edge/4 returns {:error, :no_target}
-  # rather than crossing into another tenant's colliding-slug doc. Without the
-  # flag (single-tenant / unflagged callers) it is the documented or-global
-  # back-compat resolution, byte-identical to before.
-  defp scope_edge_endpoint(query, scope_opts) do
-    ws = Keyword.get(scope_opts, :workspace_id)
-    proj = Keyword.get(scope_opts, :project_id)
-
-    if Keyword.get(scope_opts, :require_workspace, false) do
-      scope_to_workspace(query, ws, proj)
-    else
-      scope_to_workspace_or_global(query, ws, proj)
-    end
-  end
-
-  defp edge_scope_opts(attrs) do
-    []
-    |> maybe_put_kw(:dataset_id, attrs["dataset_id"])
-    |> maybe_put_kw(:workspace_id, attrs["workspace_id"])
-    |> maybe_put_kw(:project_id, attrs["project_id"])
-    # FAIL-CLOSED flag (FIX 3) — carried so resolve_doc_pk/3 can refuse a
-    # cross-tenant slug match when the multi-tenant projector demands a
-    # resolved workspace. Only put when truthy so single-tenant callers keep
-    # the default or-global resolution.
-    |> maybe_put_kw(:require_workspace, truthy(attrs["require_workspace"]))
-  end
-
-  # Keep only a genuinely-true flag (drop nil/false) so `maybe_put_kw` leaves
-  # the default resolution untouched on a single-tenant / unflagged caller.
-  defp truthy(true), do: true
-  defp truthy(_), do: nil
-
-  defp maybe_put_kw(opts, _key, nil), do: opts
-  defp maybe_put_kw(opts, key, value), do: Keyword.put(opts, key, value)
+  def add_edge(from_id, to_id, kind, attrs \\ %{}),
+    do: Edges.add_edge(from_id, to_id, kind, attrs)
 
   @doc """
-  Insert/replace a batch of edge maps (the `extract_edges/2` shape, or any map
-  carrying `from_id`/`to_id`/`kind` + optional `weight`/`plugin_source`).
-  Returns the list of CRUD results in order. `dangling`/`field`/`refType` keys
-  on the input maps are ignored (they are read-time signals, not stored).
-
-  Because `extract_edges/2` emits scope-relative slug `doc_id`s, the resolution
-  `dataset` (and optional `workspace_id`/`project_id`) MUST be passed via
-  `opts` so each `add_edge/4` can resolve the slugs to `documents.id` UUIDs in
-  the SAME scope they were extracted under. A per-edge `dataset` key wins over
-  the batch `opts` default.
+  Insert/replace a batch of edge maps. See `Barkpark.Content.Edges.add_edges/2`.
   """
-  @spec add_edges([map()], keyword()) ::
-          [{:ok, Edge.t()} | {:error, :no_target} | {:error, Ecto.Changeset.t()}]
-  def add_edges(edges, opts \\ []) when is_list(edges) do
-    scope = %{
-      "dataset" => Keyword.get(opts, :dataset),
-      "dataset_id" => Keyword.get(opts, :dataset_id),
-      "workspace_id" => Keyword.get(opts, :workspace_id),
-      "project_id" => Keyword.get(opts, :project_id),
-      # FAIL-CLOSED tenancy (Goal ges/graph-edge-seam, FIX 3). When the
-      # projector runs in a multi-tenant install it sets this so a nil-workspace
-      # endpoint is REFUSED across tenants (→ {:error, :no_target}) instead of
-      # resolving a colliding-slug doc in another tenant and storing a
-      # cross-tenant content_edges row. Absent/false = the documented
-      # single-tenant or-global back-compat resolution.
-      "require_workspace" => Keyword.get(opts, :require_workspace, false)
-    }
+  def add_edges(edges, opts \\ []), do: Edges.add_edges(edges, opts)
 
-    Enum.map(edges, fn e ->
-      from_id = e[:from_id] || e["from_id"]
-      to_id = e[:to_id] || e["to_id"]
-      kind = e[:kind] || e["kind"]
+  @doc "Outbound edges of a document id. See `Content.Edges.list_outbound_edges/2`."
+  def list_outbound_edges(from_id, opts \\ []), do: Edges.list_outbound_edges(from_id, opts)
 
-      attrs =
-        scope
-        |> Map.put("dataset", (e[:dataset] || e["dataset"]) || scope["dataset"])
-        |> Map.put("weight", e[:weight] || e["weight"])
-        |> Map.put("plugin_source", e[:plugin_source] || e["plugin_source"])
-        |> Map.put("require_workspace", scope["require_workspace"])
-
-      add_edge(from_id, to_id, kind, attrs)
-    end)
-  end
+  @doc "Inbound edges of a document id. See `Content.Edges.list_inbound_edges/2`."
+  def list_inbound_edges(to_id, opts \\ []), do: Edges.list_inbound_edges(to_id, opts)
 
   @doc """
-  Outbound edges of a document id (indexed `(from_id, kind)` scan). Ordered by
-  `inserted_at` ASC — the forward-BFS input for Phase 4. `:kind` opt narrows to
-  one kind.
-  """
-  @spec list_outbound_edges(binary(), keyword()) :: [Edge.t()]
-  def list_outbound_edges(from_id, opts \\ []) do
-    Edge
-    |> where([e], e.from_id == ^from_id)
-    |> maybe_filter_edge_kind(opts)
-    |> order_by([e], asc: e.inserted_at)
-    |> Repo.all()
-  end
-
-  @doc """
-  Inbound edges of a document id (indexed `(to_id, kind)` scan). Ordered by
-  `inserted_at` ASC — the reverse-walk input for the Studio unpublish guard
-  (Phase 4/5). `:kind` opt narrows to one kind.
-  """
-  @spec list_inbound_edges(binary(), keyword()) :: [Edge.t()]
-  def list_inbound_edges(to_id, opts \\ []) do
-    Edge
-    |> where([e], e.to_id == ^to_id)
-    |> maybe_filter_edge_kind(opts)
-    |> order_by([e], asc: e.inserted_at)
-    |> Repo.all()
-  end
-
-  defp maybe_filter_edge_kind(query, opts) do
-    case Keyword.get(opts, :kind) do
-      nil -> query
-      kind -> where(query, [e], e.kind == ^to_string(kind))
-    end
-  end
-
-  defp fetch_content_edge!(from_id, to_id, kind) do
-    Repo.one!(
-      from(e in Edge,
-        where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
-      )
-    )
-  end
-
-  @doc """
-  The projection SOURCE corpus — fold `extract_edges/2` over every published
-  document of the given `type` in `dataset`. `perspective: :published` so no
-  `drafts.<id>` is ever a from_id (drafts decision guard a). The Phase-3
-  projector folds this across all types to build the materialised graph.
+  The projection SOURCE corpus. See `Barkpark.Content.Edges.corpus_edges/3`.
   """
   @spec corpus_edges(String.t(), String.t(), keyword()) :: [map()]
-  def corpus_edges(type, dataset, opts \\ []) do
-    list_opts = Keyword.put(opts, :perspective, :published)
-
-    type
-    |> list_documents(dataset, list_opts)
-    |> Enum.flat_map(fn doc -> extract_edges(doc, opts) end)
-  end
-
-  # ── Sheets write-through + embed hydration (extracted → Content.Sheets) ─────
-  #
-  # Concern J — recompute, write-through, and embed-snapshot hydration live in
-  # `Barkpark.Content.Sheets`. The create/upsert write path calls through
-  # `Sheets.*` directly; the paper-ingest block path uses `Sheets.hydrate_sheet_blocks/3`.
-
-
-  @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
-
-  defp from_envelope(attrs) do
-    cond do
-      # Already legacy shape — pass through, but honor a Sanity-style "_id"
-      # when no "doc_id" was given. Mixing `_id` with a nested `content` map
-      # used to silently DROP the supplied id (create fell back to a generated
-      # task-### id), which broke every doc example that followed the id.
-      Map.has_key?(attrs, "content") and is_map(Map.get(attrs, "content")) ->
-        case {Map.get(attrs, "doc_id"), Map.get(attrs, "_id")} do
-          {nil, id} when is_binary(id) and id != "" -> Map.put(attrs, "doc_id", id)
-          _ -> attrs
-        end
-
-      true ->
-        id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")
-        title = Map.get(attrs, "title")
-        status = Map.get(attrs, "status", "draft")
-        content = Map.drop(attrs, @reserved_in)
-
-        %{
-          "doc_id" => id,
-          "title" => title,
-          "status" => status,
-          "content" => content
-        }
-    end
-  end
-
-  defp generate_id(type) do
-    "#{type}-#{:rand.uniform(999_999)}"
-  end
-
-  defp generate_rev do
-    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
-  end
-
-  # ── Legacy upsert (for backward compat) ───────────────────────────────────
-
-  @doc """
-  Upsert a document — used by autosave and patch paths.
-
-  `opts` accepts `:source` and `:user_id`. Fires `:before_save` and
-  `:after_save` around the DB write, same contract as `create_document/4`.
-  """
-  def upsert_document(type, attrs, dataset, opts \\ []) do
-    attrs = from_envelope(attrs)
-    raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
-    doc_id = raw_id && draft_id(raw_id)
-
-    attrs =
-      attrs
-      |> Map.put("doc_id", doc_id)
-      |> Map.put("type", type)
-      |> Map.put("dataset", dataset)
-      |> Map.put_new("status", "draft")
-      |> Map.put("rev", generate_rev())
-      |> WriteScope.put_scope_attrs(opts)
-      |> Sheets.maybe_recompute_sheet_formulas(type)
-      |> Sheets.hydrate_sheet_embed_snapshots()
-      # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
-      # carries content["blocks"] re-derives content[fieldName]/content["body"]
-      # from those blocks — the same project-on-write the paper path runs.
-      # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
-      # (legacy field-map save) skips it untouched.
-      |> maybe_project_document_content(dataset)
-
-    with :ok <- validate_task_kind(type, attrs) do
-      do_upsert_document(type, attrs, dataset, doc_id, opts)
-    end
-  end
-
-  defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
-    ctx = WriteScope.build_ctx(opts)
-
-    # Scope the prev-doc lookup to the writer's workspace/project (mirror of
-    # create_document:654). An UNSCOPED lookup here would resolve (and then
-    # UPDATE/overwrite) another workspace's row sharing the (doc_id, type,
-    # dataset) leaf — the write-path scoping gap. Scoped, a same-id write from
-    # a different workspace sees no prev_doc and inserts its own row.
-    prev_doc =
-      case doc_id && get_document(doc_id, type, dataset, opts) do
-        {:ok, d} -> d
-        _ -> nil
-      end
-
-    payload = %{
-      event: :before_save,
-      doc: attrs,
-      dataset: dataset,
-      prev_doc: prev_doc,
-      ctx: ctx
-    }
-
-    case Barkpark.Plugins.Hooks.fire(:before_save, payload) do
-      {:halt, reason} ->
-        {:error, {:halted, reason}}
-
-      :ok ->
-        result =
-          case prev_doc do
-            %Document{} = existing ->
-              existing
-              |> Document.changeset(attrs)
-              |> Repo.update()
-              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
-
-            _ ->
-              %Document{}
-              |> Document.changeset(attrs)
-              |> Repo.insert()
-              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
-          end
-
-        result
-        |> WriteScope.fire_after(:after_save, payload)
-        |> Sheets.tap_sheet_writethrough()
-    end
-  end
-
-  # Re-project content[fieldName]/content["body"] from content["blocks"] when a
-  # whole-document write carries a block list (Exp-P3.1 — generalizes the
-  # paper-path project-on-write to the document path). A write whose content has
-  # no "blocks" key is returned untouched, so legacy field-map saves are
-  # unaffected and projection remains the SOLE writer of the projected keys.
-  defp maybe_project_document_content(attrs, dataset) do
-    content = Map.get(attrs, "content")
-
-    case content && Map.get(content, "blocks") do
-      blocks when is_list(blocks) ->
-        Map.put(attrs, "content", Projection.project(content, blocks, Labels.render_opts(dataset)))
-
-      _ ->
-        attrs
-    end
-  end
+  def corpus_edges(type, dataset, opts \\ []), do: Edges.corpus_edges(type, dataset, opts)
 
   # ── Scope resolution (extracted → Content.WriteScope) ─────────────────────
   #
