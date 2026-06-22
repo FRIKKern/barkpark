@@ -105,7 +105,9 @@ defmodule Barkpark.Content.Sheets do
       Enum.map_reduce(blocks, false, fn block, changed ->
         if is_map(block) and Map.get(block, "type") == "sheet" and
              Map.get(block, "ref") in refs do
-          snapshot = Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
+          snapshot =
+            Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
+
           {Map.put(block, "snapshot", snapshot), true}
         else
           {block, changed}
@@ -200,7 +202,9 @@ defmodule Barkpark.Content.Sheets do
         Enum.map(blocks, fn block ->
           with %{"type" => "sheet", "ref" => ref} when is_binary(ref) <- block,
                %{} = sheet_content <- Map.get(sheets, published_id(ref)) do
-            snapshot = Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
+            snapshot =
+              Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
+
             Map.put(block, "snapshot", snapshot)
           else
             _ -> block

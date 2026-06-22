@@ -390,7 +390,11 @@ defmodule Barkpark.Content.Writer do
 
     case content && Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        Map.put(attrs, "content", Projection.project(content, blocks, Labels.render_opts(dataset)))
+        Map.put(
+          attrs,
+          "content",
+          Projection.project(content, blocks, Labels.render_opts(dataset))
+        )
 
       _ ->
         attrs

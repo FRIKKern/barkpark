@@ -451,7 +451,8 @@ defmodule Barkpark.Content do
   # ── Search (extracted → Content.Search) ───────────────────────────────────
 
   @doc "Search documents by title using the QueryPipeline. Returns `{docs, count, meta}`."
-  def search_documents(query, dataset, opts \\ []), do: Search.search_documents(query, dataset, opts)
+  def search_documents(query, dataset, opts \\ []),
+    do: Search.search_documents(query, dataset, opts)
 
   # ── Export (extracted → Content.Export) ────────────────────────────────────
 

@@ -279,7 +279,10 @@ defmodule Barkpark.Content.Edges do
 
   # arrayOf-of-reference field → one entry per non-blank element (bare-id
   # string array, the task.attachments shape).
-  defp extract_field_edges(%{"type" => "arrayOf", "of" => %{"type" => "reference"} = of} = field, content) do
+  defp extract_field_edges(
+         %{"type" => "arrayOf", "of" => %{"type" => "reference"} = of} = field,
+         content
+       ) do
     field_name = field["name"]
     ref_type = of["refType"]
 
@@ -547,7 +550,7 @@ defmodule Barkpark.Content.Edges do
 
       attrs =
         scope
-        |> Map.put("dataset", (e[:dataset] || e["dataset"]) || scope["dataset"])
+        |> Map.put("dataset", e[:dataset] || e["dataset"] || scope["dataset"])
         |> Map.put("weight", e[:weight] || e["weight"])
         |> Map.put("plugin_source", e[:plugin_source] || e["plugin_source"])
         |> Map.put("require_workspace", scope["require_workspace"])

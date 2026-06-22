@@ -71,7 +71,14 @@ defmodule Barkpark.Content.Lifecycle do
                 {:ok, published} ->
                   # Delete the draft
                   Repo.delete(draft)
-                  Broadcast.tap_broadcast({:ok, published}, dataset, type, "publish", prev_pub_rev)
+
+                  Broadcast.tap_broadcast(
+                    {:ok, published},
+                    dataset,
+                    type,
+                    "publish",
+                    prev_pub_rev
+                  )
 
                 error ->
                   error
@@ -139,7 +146,14 @@ defmodule Barkpark.Content.Lifecycle do
               case draft_result do
                 {:ok, draft} ->
                   Repo.delete(pub)
-                  Broadcast.tap_broadcast({:ok, draft}, dataset, type, "unpublish", prev_draft_rev)
+
+                  Broadcast.tap_broadcast(
+                    {:ok, draft},
+                    dataset,
+                    type,
+                    "unpublish",
+                    prev_draft_rev
+                  )
 
                 error ->
                   error

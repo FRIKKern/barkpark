@@ -88,7 +88,8 @@ defmodule Barkpark.Content.Mutations do
         end
 
       _ ->
-        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts), do: {:ok, doc, "create"}
+        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
+             do: {:ok, doc, "create"}
     end
   end
 
@@ -121,26 +122,31 @@ defmodule Barkpark.Content.Mutations do
         end
 
       _ ->
-        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts), do: {:ok, doc, "create"}
+        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
+             do: {:ok, doc, "create"}
     end
   end
 
   defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- Content.publish_document(id, type, dataset, opts), do: {:ok, doc, "publish"}
+    with {:ok, doc} <- Content.publish_document(id, type, dataset, opts),
+         do: {:ok, doc, "publish"}
   end
 
   defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- Content.unpublish_document(id, type, dataset, opts), do: {:ok, doc, "unpublish"}
+    with {:ok, doc} <- Content.unpublish_document(id, type, dataset, opts),
+         do: {:ok, doc, "unpublish"}
   end
 
   defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- Content.discard_draft(id, type, dataset, opts), do: {:ok, doc, "discardDraft"}
+    with {:ok, doc} <- Content.discard_draft(id, type, dataset, opts),
+         do: {:ok, doc, "discardDraft"}
   end
 
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
     case if_rev(op) do
       nil ->
-        with {:ok, doc} <- Content.delete_document(id, type, dataset, opts), do: {:ok, doc, "delete"}
+        with {:ok, doc} <- Content.delete_document(id, type, dataset, opts),
+             do: {:ok, doc, "delete"}
 
       expected ->
         with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
@@ -181,7 +187,8 @@ defmodule Barkpark.Content.Mutations do
         "content" => merged
       }
 
-      with {:ok, doc} <- Content.upsert_document(type, attrs, dataset, opts), do: {:ok, doc, "update"}
+      with {:ok, doc} <- Content.upsert_document(type, attrs, dataset, opts),
+           do: {:ok, doc, "update"}
     end
   end
 
