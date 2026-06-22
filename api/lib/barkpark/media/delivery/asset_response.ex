@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.AssetResponse do
+defmodule Barkpark.Media.Delivery.AssetResponse do
   @moduledoc """
   Unified JSON shape for media API responses — blob row + optional
   `mediaAsset` document metadata in one resource.
@@ -7,7 +7,8 @@ defmodule Barkpark.Media.AssetResponse do
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Document
   alias Barkpark.Media.Access
-  alias Barkpark.Media.Delivery
+  alias Barkpark.Media.Delivery.Cdn
+  alias Barkpark.Media.Delivery.Urls
   alias Barkpark.Media.MediaFile
   alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Plugins.Registry
@@ -62,12 +63,12 @@ defmodule Barkpark.Media.AssetResponse do
       filename: file.filename,
       originalName: file.original_name,
       path: file.path,
-      url: Delivery.original_url(file, url_opts),
-      originalUrl: Delivery.original_url(file, url_opts),
-      thumbnailUrl: Delivery.thumbnail_url(file, url_opts),
-      previewUrl: Delivery.preview_url(file, url_opts),
-      renditions: Delivery.rendition_urls(file, url_opts),
-      cdnUrls: Barkpark.Media.Cdn.url_map(file),
+      url: Urls.original_url(file, url_opts),
+      originalUrl: Urls.original_url(file, url_opts),
+      thumbnailUrl: Urls.thumbnail_url(file, url_opts),
+      previewUrl: Urls.preview_url(file, url_opts),
+      renditions: Urls.rendition_urls(file, url_opts),
+      cdnUrls: Cdn.url_map(file),
       mimeType: file.mime_type,
       size: file.size,
       createdAt: file.inserted_at,

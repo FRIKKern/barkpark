@@ -7,7 +7,7 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
 
   alias Barkpark.Content
   alias Barkpark.Media
-  alias Barkpark.Media.{AssetResponse, Cdn, Events}
+  alias Barkpark.Media.Delivery.{AssetResponse, Cdn, Events}
 
   action_fallback BarkparkWeb.FallbackController
 

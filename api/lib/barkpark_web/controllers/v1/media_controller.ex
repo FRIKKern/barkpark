@@ -11,7 +11,8 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Access, AssetResponse, Checkout, Relations}
+  alias Barkpark.Media.{Access, Checkout, Relations}
+  alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
@@ -53,7 +54,7 @@ defmodule BarkparkWeb.V1.MediaController do
         _ -> nil
       end
 
-    next_cursor = Barkpark.Search.MediaSearch.next_cursor(files)
+    next_cursor = Barkpark.Media.Delivery.Search.next_cursor(files)
     has_more = next_cursor != nil and length(files) >= opts[:limit]
 
     json(conn, %{

@@ -6,7 +6,7 @@ defmodule Barkpark.Media.Processing do
   alias Barkpark.Content
   alias Barkpark.Media
   alias Barkpark.Media.{MediaFile, Probe, Renditions}
-  alias Barkpark.Media.{Cdn, Events}
+  alias Barkpark.Media.Delivery.{Cdn, Events}
   alias Barkpark.Plugins.Media.Assets
 
   @asset_type "mediaAsset"

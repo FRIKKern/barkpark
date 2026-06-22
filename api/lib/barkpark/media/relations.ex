@@ -7,7 +7,8 @@ defmodule Barkpark.Media.Relations do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Media
-  alias Barkpark.Media.{AssetResponse, MediaFile}
+  alias Barkpark.Media.Delivery.AssetResponse
+  alias Barkpark.Media.MediaFile
   alias Barkpark.Plugins.Media.Assets
   alias Barkpark.Repo
 

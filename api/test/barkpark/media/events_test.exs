@@ -1,7 +1,7 @@
-defmodule Barkpark.Media.EventsTest do
+defmodule Barkpark.Media.Delivery.EventsTest do
   use ExUnit.Case, async: false
 
-  alias Barkpark.Media.Events
+  alias Barkpark.Media.Delivery.Events
   alias Barkpark.Media.MediaFile
 
   setup do

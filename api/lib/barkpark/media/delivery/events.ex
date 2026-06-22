@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Events do
+defmodule Barkpark.Media.Delivery.Events do
   @moduledoc """
   Outbound webhooks for the media lifecycle (`media.uploaded`, `media.processed`, `media.deleted`).
 
@@ -7,7 +7,7 @@ defmodule Barkpark.Media.Events do
   """
 
   require Logger
-  alias Barkpark.Media.Cdn
+  alias Barkpark.Media.Delivery.Cdn
   alias Barkpark.Webhooks.Dispatcher
 
   @retry_delays_ms [100, 500, 2_000]

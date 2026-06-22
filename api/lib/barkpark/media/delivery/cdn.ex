@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Cdn do
+defmodule Barkpark.Media.Delivery.Cdn do
   @moduledoc """
   CDN delivery URL prefixing and cache invalidation (WoodWing-style publish plane).
 
@@ -8,7 +8,8 @@ defmodule Barkpark.Media.Cdn do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Media.{Delivery, MediaFile, Renditions}
+  alias Barkpark.Media.Delivery.Urls
+  alias Barkpark.Media.{MediaFile, Renditions}
 
   @asset_type "mediaAsset"
 
@@ -48,11 +49,11 @@ defmodule Barkpark.Media.Cdn do
   @spec url_map(%MediaFile{}) :: map()
   def url_map(%MediaFile{} = file) do
     %{
-      original: public_url(Delivery.original_url(file)),
-      thumbnail: public_url(Delivery.thumbnail_url(file)),
-      preview: public_url(Delivery.preview_url(file)),
+      original: public_url(Urls.original_url(file)),
+      thumbnail: public_url(Urls.thumbnail_url(file)),
+      preview: public_url(Urls.preview_url(file)),
       renditions:
-        Map.new(Delivery.rendition_urls(file), fn {preset, url} -> {preset, public_url(url)} end)
+        Map.new(Urls.rendition_urls(file), fn {preset, url} -> {preset, public_url(url)} end)
     }
   end
 
@@ -165,6 +166,6 @@ defmodule Barkpark.Media.Cdn do
 
   defp log_warning(message) do
     require Logger
-    Logger.warning("Barkpark.Media.Cdn: #{message}")
+    Logger.warning("Barkpark.Media.Delivery.Cdn: #{message}")
   end
 end

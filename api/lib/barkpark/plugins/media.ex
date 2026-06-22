@@ -16,7 +16,7 @@ defmodule Barkpark.Plugins.Media do
 
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Events
+  alias Barkpark.Media.Delivery.Events
   alias Barkpark.Plugins.Media.{Assets, Codelists}
 
   @plugin_name "media"

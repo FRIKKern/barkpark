@@ -87,7 +87,7 @@ defmodule BarkparkWeb.FederatedSearchController do
 
     hits =
       Enum.map(files, fn file ->
-        Barkpark.Media.AssetResponse.render(file, Map.get(docs, file.id), render_opts)
+        Barkpark.Media.Delivery.AssetResponse.render(file, Map.get(docs, file.id), render_opts)
       end)
 
     %{
