@@ -1,0 +1,61 @@
+defmodule Barkpark.PortableDoc.Render.Util do
+  @moduledoc """
+  Leaf string-safety + tone helpers for the PortableDoc render engine.
+
+  Pure, dependency-free: HTML escaping, URL scheme allowlisting, and the
+  callout tone palette. Extracted verbatim from `Barkpark.PortableDoc.Render`
+  (module location only — NO logic change) so the many call sites across the
+  compose / walk / forms / figures families share one owner. Output is
+  byte-identical to the pre-split engine.
+  """
+
+  @allowed_scheme ~r/^(?:https?|mailto|tel):/i
+
+  @doc """
+  Escape the five HTML-significant characters in the EXACT order `& < > " '`.
+
+  The ampersand must go first so we never double-escape the entities the later
+  replacements introduce.
+  """
+  def escape_html(s) when is_binary(s) do
+    s
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("'", "&#39;")
+  end
+
+  @doc "Stricter escape for attribute values — same as `escape_html/1`."
+  def escape_attr(s) when is_binary(s), do: escape_html(s)
+
+  @doc """
+  Return the URL attribute-escaped if its scheme is allowlisted
+  (`http | https | mailto | tel`, case-insensitive), else `#`.
+
+  Leading ASCII control characters / whitespace are stripped before matching,
+  mirroring browser tolerance for `\\tjavascript:…`.
+  """
+  def safe_url(href) when is_binary(href) do
+    trimmed = String.replace(href, ~r/^[\x00-\x20]+/, "")
+
+    cond do
+      String.starts_with?(trimmed, "/") ->
+        escape_attr(trimmed)
+
+      Regex.match?(@allowed_scheme, trimmed) ->
+        escape_attr(trimmed)
+
+      true ->
+        "#"
+    end
+  end
+
+  @doc "Background / foreground palette for a callout tone."
+  def tone_palette("success"), do: %{bg: "#ecfdf5", fg: "#047857"}
+  def tone_palette("warning"), do: %{bg: "#fffbeb", fg: "#92400e"}
+  def tone_palette("danger"), do: %{bg: "#fef2f2", fg: "#b91c1c"}
+  def tone_palette("info"), do: %{bg: "#eff6ff", fg: "#1d4ed8"}
+  def tone_palette("neutral"), do: %{bg: "#f3f4f6", fg: "#374151"}
+  def tone_palette(_), do: %{bg: "#eff6ff", fg: "#1d4ed8"}
+end
