@@ -24,6 +24,7 @@ defmodule Barkpark.Content do
   alias Barkpark.Repo
 
   alias Barkpark.Content.{
+    Analytics,
     Document,
     DraftId,
     Edge,
@@ -2941,59 +2942,16 @@ defmodule Barkpark.Content do
     :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower) |> binary_part(0, 16)
   end
 
-  # ── Analytics ───────────────────────────────────────────────────────────
+  # ── Analytics (extracted → Content.Analytics) ─────────────────────────────
 
   @doc "Count documents grouped by type, with published/draft breakdown."
-  def document_stats(dataset, opts \\ []) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    Document
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> group_by([d], d.type)
-    |> select([d], %{
-      type: d.type,
-      total: count(d.id),
-      published: count(fragment("CASE WHEN ? NOT LIKE 'drafts.%' THEN 1 END", d.doc_id)),
-      drafts: count(fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 END", d.doc_id))
-    })
-    |> order_by([d], asc: d.type)
-    |> Repo.all()
-  end
+  def document_stats(dataset, opts \\ []), do: Analytics.document_stats(dataset, opts)
 
   @doc "Count total documents in a dataset."
-  def total_documents(dataset, opts \\ []) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    Document
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> select([d], count(d.id))
-    |> Repo.one()
-  end
+  def total_documents(dataset, opts \\ []), do: Analytics.total_documents(dataset, opts)
 
   @doc "Recent mutation activity — last N events."
-  def recent_activity(dataset, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    MutationEvent
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> order_by([e], desc: e.inserted_at)
-    |> limit(^limit)
-    |> select([e], %{
-      id: e.id,
-      type: e.type,
-      doc_id: e.doc_id,
-      mutation: e.mutation,
-      timestamp: e.inserted_at
-    })
-    |> Repo.all()
-  end
+  def recent_activity(dataset, opts \\ []), do: Analytics.recent_activity(dataset, opts)
 
   # ── PubSub ────────────────────────────────────────────────────────────────
   #
