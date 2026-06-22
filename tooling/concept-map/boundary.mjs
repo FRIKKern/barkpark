@@ -54,7 +54,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
-import { isWebLayerFile } from "./weblayer.mjs";
+import { isEntryPoint, isMixTaskFile } from "./entrypoints.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -104,6 +104,9 @@ function assignConcepts(graph) {
   );
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
+    // Mix CLI tasks are entry-points, never feature members — mirror P1's fold
+    // exclusion so all three passes share ONE concept vocabulary (concepts.mjs).
+    if (isMixTaskFile(n.file)) continue;
     const low = n.file.toLowerCase();
     for (const t of tokens) {
       if (tokenRe.get(t).test(low)) {
@@ -463,10 +466,12 @@ export function proposeDecycle(conceptA, conceptB, opts = {}) {
     };
   }
 
-  // ── domain (web-excluded) cross edges between the two concepts ───────────────
-  // An edge counts toward the cycle only when its SOURCE file is NON-web — a
-  // web-origin edge is orchestration (same exclusion the grade pass applies), so
-  // it is kept out of the cycle counts entirely. Each direction is tallied with
+  // ── domain (entry-point-excluded) cross edges between the two concepts ───────
+  // An edge counts toward the cycle only when its SOURCE file is NOT an
+  // entry-point — a web-layer OR Mix-task origin edge is orchestration (same
+  // exclusion the grade pass applies), so it is kept out of the cycle counts
+  // entirely. This is what kills the false tasks→onixedit cycle: all 13 of those
+  // edges originate in api/lib/mix/tasks/onix.*.ex. Each direction is tallied with
   // the per-source-file weights we need for the bridge/residual arithmetic.
   //
   // domainEdge(origin, target):
@@ -479,7 +484,7 @@ export function proposeDecycle(conceptA, conceptB, opts = {}) {
       if (conceptOf.get(e.from) !== origin) continue;
       if (conceptOf.get(e.to) !== target) continue;
       const srcFile = fileOf.get(e.from);
-      if (isWebLayerFile(srcFile)) continue; // web edge = orchestration, excluded
+      if (isEntryPoint(srcFile)) continue; // entry-point edge = orchestration (web OR mix-task), excluded
       perSource.set(srcFile, (perSource.get(srcFile) || 0) + 1);
       total++;
     }
@@ -526,7 +531,7 @@ export function proposeDecycle(conceptA, conceptB, opts = {}) {
         !bridgeIds.has(e.from)
       ) {
         const callerFile = fileOf.get(e.from);
-        if (!isWebLayerFile(callerFile)) {
+        if (!isEntryPoint(callerFile)) {
           residualPerCaller.set(callerFile, (residualPerCaller.get(callerFile) || 0) + 1);
         }
       }
@@ -537,7 +542,7 @@ export function proposeDecycle(conceptA, conceptB, opts = {}) {
         !bridgeIds.has(e.to)
       ) {
         const srcFile = fileOf.get(e.from);
-        if (!isWebLayerFile(srcFile)) reverseBecomesCorrect++;
+        if (!isEntryPoint(srcFile)) reverseBecomesCorrect++;
       }
     }
     const residualCallers = [...residualPerCaller.keys()].sort();

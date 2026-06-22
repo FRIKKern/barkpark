@@ -41,6 +41,7 @@
 
 import { fileURLToPath } from "node:url";
 import { runGrade, GRATUITOUS_EXTERNAL_PCT, REAL_SIDEWAYS_CLUSTER } from "./grade.mjs";
+import { isEntryPoint, isMixTaskFile, isWebLayerFile } from "./entrypoints.mjs";
 
 const res = runGrade();
 const byName = new Map(res.concepts.map((c) => [c.concept, c]));
@@ -96,22 +97,27 @@ if (sheets) {
 }
 
 // ── 2. SIDEWAYS — at least one real cluster with ≥ 10 edges ───────────────────
-let maxCluster = { edges: 0, edge: "(none)" };
+// Largest FEATURE-sourced sideways cluster (kernel sources are excluded by the
+// grade pass, so content→portable_doc no longer pollutes this). Magnitude is NOT
+// hardcoded — a successful de-cycle (e.g. media→search, cut from 20→1) must not
+// break this gate. We assert the surfacing LOGIC, not a specific live knot size.
+let maxCluster = { edges: 0, concept: null, to: null };
 for (const c of res.concepts) {
   for (const s of c.gaps.sideways) {
-    if (s.edges > maxCluster.edges) maxCluster = { edges: s.edges, edge: `${c.concept} → ${s.to}` };
+    if (s.edges > maxCluster.edges) maxCluster = { edges: s.edges, concept: c.concept, to: s.to };
   }
 }
 ok(
-  "≥ 1 sideways cluster with ≥ 10 edges",
-  maxCluster.edges >= 10,
-  `largest = ${maxCluster.edge} (${maxCluster.edges} edges)`
+  "a feature→feature sideways cluster exists and is named (kernel sources excluded)",
+  maxCluster.edges >= 3,
+  `largest feature-sourced sideways = ${maxCluster.concept} → ${maxCluster.to} (${maxCluster.edges} edges)`
 );
-// that thick cluster must also appear as a named cut edge on its concept.
+// the largest such cluster must surface as a named cut edge on its own concept.
+const maxC = res.concepts.find((c) => c.concept === maxCluster.concept);
 ok(
   "largest sideways cluster surfaces as a named cut edge",
-  res.concepts.some((c) => c.remediation.cut.some((x) => x.edges >= 10)),
-  `cut edges with ≥10: ${res.concepts.flatMap((c) => c.remediation.cut.filter((x) => x.edges >= 10).map((x) => x.edge)).join(", ") || "(none)"}`
+  !!maxC && maxC.remediation.cut.some((x) => x.to === maxCluster.to || String(x.edge || "").includes(maxCluster.to)),
+  `largest = ${maxCluster.concept}→${maxCluster.to}; ${maxCluster.concept} cut edges = ${(maxC ? maxC.remediation.cut : []).map((x) => x.edge || x.to).join(", ") || "(none)"}`
 );
 
 // ── 3. TEST-SCATTER — every real feature ≥ 2 test dirs ────────────────────────
@@ -193,15 +199,70 @@ const media = get("media");
 const search = get("search");
 const tasks = get("tasks");
 if (media) {
-  ok("media stays tangled (real sideways cluster)", media.verdict === "tangled", `verdict = ${media.verdict}`);
+  ok("media stays tangled (real coupling debt)", media.verdict === "tangled", `verdict = ${media.verdict}`);
+  // Tangled for a CONCRETE, named reason — but the reason is not hardcoded to a
+  // thick sideways knot: the media→search cycle was cut (20→1), so media is now
+  // tangled for its Ce sprawl / gratuitous-core / test-scatter. Assert it's
+  // surfaced, whatever the current shape — improvement-robust.
   ok(
-    "media keeps a thick sideways cut edge (≥ knot threshold)",
-    media.remediation.cut.some((x) => x.edges >= REAL_SIDEWAYS_CLUSTER),
-    `cut = ${media.remediation.cut.map((x) => `${x.edge}:${x.edges}`).join(", ") || "(none)"}`
+    "media is tangled for a concrete surfaced reason (sideways cut · gratuitous-core · scatter)",
+    media.remediation.cut.length > 0 ||
+      !!media.gaps.gratuitousCore?.gratuitous ||
+      (media.gaps.testScatter?.testDirs?.length || 0) > 1,
+    `cut=[${media.remediation.cut.map((x) => `${x.edge}:${x.edges}`).join(", ") || "none"}] · gratCore=${!!media.gaps.gratuitousCore?.gratuitous} · testDirs=${media.gaps.testScatter?.testDirs?.length || 0}`
   );
 }
 if (search) ok("search stays tangled", search.verdict === "tangled", `verdict = ${search.verdict}`);
 if (tasks) ok("tasks stays tangled", tasks.verdict === "tangled", `verdict = ${tasks.verdict}`);
+
+// ── ENTRY-POINT EXCLUSION (Mix tasks) — the false tasks→onixedit knot is gone ──
+// The 13 "tasks→onixedit" edges were an ARTIFACT: every one originates in a Mix
+// CLI task under api/lib/mix/tasks/ (mix onix.import / onix.export_proof / …),
+// which the path-token fold mis-counted as a member of the "tasks" feature. Mix
+// tasks are entry-points (orchestration), so those edges are now excluded from
+// the sideways tally exactly like web-layer edges. After the fix the de-conflated
+// `tasks` feature has NO onixedit domain sideways cluster at all — its remaining
+// sideways are genuine (e.g. tasks→repo), all below the knot threshold. The knot
+// must not reappear as a domain sideways cluster nor as a named cut edge.
+if (tasks) {
+  ok(
+    "tasks → onixedit is NOT a domain sideways cluster (Mix-task edges excluded)",
+    !tasks.gaps.sideways.some((s) => s.to === "onixedit"),
+    `tasks sideways = ${tasks.gaps.sideways.map((s) => `${s.to}:${s.edges}`).join(", ") || "(none)"}`
+  );
+  ok(
+    "tasks → onixedit is NOT a named cut edge (the false knot is gone)",
+    !tasks.remediation.cut.some((x) => x.edge === "tasks → onixedit"),
+    `tasks cut = ${tasks.remediation.cut.map((x) => `${x.edge}:${x.edges}`).join(", ") || "(none)"}`
+  );
+  // de-conflation: the real `tasks` feature is the 6 source files
+  // (plugins/tasks.ex + tasks.ex + tasks/{compactor,edge,ttl_sweeper}.ex +
+  // tasks_controller.ex) — the 8 Mix CLI tasks are no longer members, so the
+  // tasks→onixedit raw cluster (the inflated 13) is materially reduced.
+  const rawOnix = (tasks.gaps.sidewaysRawClusters.find((c) => c.to === "onixedit") || { edges: 0 }).edges;
+  ok(
+    "tasks → onixedit raw cluster collapses (Mix tasks no longer folded into the feature)",
+    rawOnix < REAL_SIDEWAYS_CLUSTER,
+    `tasks→onixedit raw = ${rawOnix} (< ${REAL_SIDEWAYS_CLUSTER}; was 13 when Mix tasks were mis-folded)`
+  );
+}
+
+// onix.import.ex is an ENTRY-POINT (a Mix CLI task), NOT a member of the `tasks`
+// feature. Assert the classifier directly via the shared predicate so the test
+// tracks the production logic, not a re-derivation.
+ok(
+  "api/lib/mix/tasks/onix.import.ex classifies as an entry-point (Mix CLI task)",
+  isEntryPoint("api/lib/mix/tasks/onix.import.ex") &&
+    isMixTaskFile("api/lib/mix/tasks/onix.import.ex") &&
+    !isWebLayerFile("api/lib/mix/tasks/onix.import.ex"),
+  `isEntryPoint=${isEntryPoint("api/lib/mix/tasks/onix.import.ex")} isMixTask=${isMixTaskFile("api/lib/mix/tasks/onix.import.ex")}`
+);
+// a real `tasks` feature source file is NOT an entry-point (stays a member).
+ok(
+  "api/lib/barkpark/tasks/compactor.ex is NOT an entry-point (real tasks member)",
+  !isEntryPoint("api/lib/barkpark/tasks/compactor.ex"),
+  `isEntryPoint(tasks/compactor.ex) = ${isEntryPoint("api/lib/barkpark/tasks/compactor.ex")}`
+);
 
 const VOCAB = new Set(["kernel", "clean", "clean-lib", "improvable", "tangled"]);
 ok(
