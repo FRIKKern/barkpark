@@ -6,7 +6,7 @@ defmodule Barkpark.Media.Delivery.CdnTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Media.Delivery.Cdn
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
 
   setup do
     original = Application.get_env(:barkpark, :media_cdn)

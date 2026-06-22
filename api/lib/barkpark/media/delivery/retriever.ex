@@ -3,7 +3,7 @@ defmodule Barkpark.Media.Delivery.Retriever do
 
   import Ecto.Query
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Search.Synonyms
 
   @asset_type "mediaAsset"

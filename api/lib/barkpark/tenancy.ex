@@ -13,7 +13,7 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Media
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 

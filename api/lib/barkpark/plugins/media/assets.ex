@@ -10,7 +10,7 @@ defmodule Barkpark.Plugins.Media.Assets do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
   @asset_type "mediaAsset"

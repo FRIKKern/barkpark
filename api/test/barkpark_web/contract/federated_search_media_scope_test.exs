@@ -19,7 +19,7 @@ defmodule BarkparkWeb.Contract.FederatedSearchMediaScopeTest do
 
   alias Barkpark.{Auth, Tenancy}
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
   @dataset "fed_media_leak_ds"

@@ -9,7 +9,8 @@ defmodule Barkpark.Media.Delivery.Cdn do
 
   alias Barkpark.Content
   alias Barkpark.Media.Delivery.Urls
-  alias Barkpark.Media.{MediaFile, Renditions}
+  alias Barkpark.Media.Renditions
+  alias Barkpark.Media.Storage.MediaFile
 
   @asset_type "mediaAsset"
 

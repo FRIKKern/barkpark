@@ -11,7 +11,7 @@ defmodule Barkpark.MediaWorkspaceScopeTest do
   use Barkpark.DataCase, async: true
 
   alias Barkpark.Media
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 

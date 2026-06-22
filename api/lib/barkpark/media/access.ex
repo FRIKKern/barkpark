@@ -5,7 +5,8 @@ defmodule Barkpark.Media.Access do
 
   alias Barkpark.Auth
   alias Barkpark.Content.Document
-  alias Barkpark.Media.{MediaFile, SignedUrl}
+  alias Barkpark.Media.SignedUrl
+  alias Barkpark.Media.Storage.MediaFile
 
   @type level :: :view | :preview | :original | :edit_metadata
 

@@ -2,7 +2,7 @@ defmodule Barkpark.Media.Delivery.EventsTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Media.Delivery.Events
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
 
   setup do
     original = Application.get_env(:barkpark, :media_webhooks)

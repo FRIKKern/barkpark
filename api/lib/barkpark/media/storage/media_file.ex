@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.MediaFile do
+defmodule Barkpark.Media.Storage.MediaFile do
   use Ecto.Schema
   import Ecto.Changeset
 

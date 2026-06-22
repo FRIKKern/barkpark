@@ -3,7 +3,7 @@ defmodule Barkpark.Media.Checkout do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
 
   @asset_type "mediaAsset"
 

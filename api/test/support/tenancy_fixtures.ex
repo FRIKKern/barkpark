@@ -98,7 +98,7 @@ defmodule Barkpark.TenancyFixtures do
           Tenancy.Project.t() | nil,
           map(),
           String.t()
-        ) :: {:ok, Media.MediaFile.t()}
+        ) :: {:ok, Media.Storage.MediaFile.t()}
   def create_media_file_in!(workspace, project, attrs \\ %{}, dataset \\ @default_dataset) do
     suffix = System.unique_integer([:positive])
 
@@ -116,8 +116,8 @@ defmodule Barkpark.TenancyFixtures do
       |> Map.put(:dataset, dataset)
 
     {:ok, _file} =
-      %Media.MediaFile{}
-      |> Media.MediaFile.changeset(attrs)
+      %Media.Storage.MediaFile{}
+      |> Media.Storage.MediaFile.changeset(attrs)
       |> Barkpark.Repo.insert()
   end
 

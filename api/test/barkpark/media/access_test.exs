@@ -11,7 +11,7 @@ defmodule Barkpark.Media.AccessTest do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
   alias Barkpark.Media.Access
-  alias Barkpark.Media.MediaFile
+  alias Barkpark.Media.Storage.MediaFile
 
   # ---------------------------------------------------------------------------
   # Helpers
