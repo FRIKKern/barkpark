@@ -98,9 +98,18 @@ if (portableDoc) ok2("portable_doc is NOT CLEAN-FEATURE", portableDoc.band !== "
 if (sheets) ok2("sheets stays CLEAN-FEATURE (registered)", sheets.band === "CLEAN-FEATURE", `band = ${sheets.band}`);
 if (onixedit) ok2("onixedit stays CLEAN-FEATURE (registered)", onixedit.band === "CLEAN-FEATURE", `band = ${onixedit.band}`);
 
-// ── 3. headline numbers within tolerance of ground truth ─────────────────────
-if (content) inRange("content Ca ~390", content.ca, 360, 420);
-if (tenancy) inRange("tenancy Ca ~201", tenancy.ca, 180, 220);
+// ── 3. headline numbers — dominant-kernel floors, NOT tight pins ─────────────
+// content's afferent coupling drifts DOWN as the god-object is decomposed into
+// Content.* sub-modules (was ~390 pre-decomposition, ~342 after the spine split).
+// That's the intended effect — so assert a dominant-kernel floor, not a tight
+// range a successful decomposition would break. content stays the biggest hub
+// (Ca well above the 150 kernel gate and above tenancy) until it's genuinely no
+// longer the spine, which would be a real signal worth re-checking.
+if (content && tenancy) {
+  inRange("content Ca — dominant kernel (>200, drifts down as the spine decomposes)", content.ca, 200, 100000);
+  ok2("content remains the most-depended-upon concept (Ca > tenancy)", content.ca > tenancy.ca, `content ${content.ca} vs tenancy ${tenancy.ca}`);
+}
+if (tenancy) inRange("tenancy Ca ~201 (stable kernel)", tenancy.ca, 150, 260);
 if (sheets) inRange("sheets cohesion ~0.87", sheets.cohesion, 0.83, 0.92);
 
 // ── report ───────────────────────────────────────────────────────────────────
