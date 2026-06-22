@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveEnv, banner, flag } from "../lib/barkpark-env.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -35,13 +36,13 @@ const git = (a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuff
 const e = (s = "") => process.stderr.write(s + "\n");
 
 const argv = process.argv.slice(2);
-const valOf = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
 const PUBLISH = argv.includes("publish");
-const HOST = valOf("--host", "http://localhost:4000");
-const DATASET = valOf("--dataset", "codebase");
-const SRC_DATASET = valOf("--src-dataset", "production"); // where the tasks live
-const LIMIT = +valOf("--limit", "200");
-const DEV = "barkpark-dev-token", INGEST = "paperflow-dev-ingest-token";
+const ENV = await resolveEnv(argv, { dataset: "codebase", datasetKey: "codebase" });
+const HOST = ENV.host, DATASET = ENV.dataset;
+const SRC_DATASET = flag(argv, "--src-dataset", "production"); // where the tasks live
+const LIMIT = +flag(argv, "--limit", "200");
+const DEV = ENV.token, INGEST = process.env.BARKPARK_INGEST_TOKEN || "paperflow-dev-ingest-token";
+e(banner(ENV, "tasks"));
 
 // ──────────── load the codebase graph + the quality reports ────────────
 const graph = rd("tooling/barkpark-sync/nodes.json", { nodes: [] });

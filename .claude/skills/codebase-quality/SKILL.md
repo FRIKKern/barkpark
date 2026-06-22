@@ -137,6 +137,20 @@ commits/authors/dates in one `git log` pass.
 
 ## ARC 3 — PUBLISH (into Barkpark as an interconnected graph)
 
+**Which Barkpark?** Every script (`push`, `graph-view`, `tasks`, `cody`) resolves
+its target through `tooling/lib/barkpark-env.mjs`: `--host` flag > `BARKPARK_*`
+env > repo-root `barkpark.json` > `localhost:4000`, with a `/v1/capabilities`
+probe and a local→public fallover (so a down local server falls back to the
+project's public host declared in `barkpark.json`). Each prints a one-line banner
+of where it bound. `barkpark.json` is committed and **secret-free** — tokens live
+in env, never there.
+
+**Cody** (`tooling/cody/cody.mjs` — bound variables, code↔paper) gates on this:
+`cody preflight` reports host + full-intelligence freshness (scanned + coverage ≥
+`barkpark.json:intelligence.minCoveragePct` + no pending agent work + no drift)
+and exits non-zero when stale. `apply`/`watch` (which rewrite source) **block** on
+a non-green preflight (`--force` overrides); `scan`/`status`/`set` only warn.
+
 Requires a running Barkpark with the **dataset-aware paper reader** (route
 `/d/:dataset/papers/:slug`, ingest `dataset` param) and **field-typed content
 edges** — both features shipped in `api/`. One paper per file in an isolated

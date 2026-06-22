@@ -4,19 +4,18 @@
 // colored by language (stack) and titled with the file path. Opens in a browser.
 //   graph-view.mjs [--dataset codebase] [--host URL]
 
-import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveEnv, banner } from "../lib/barkpark-env.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
 const argv = process.argv.slice(2);
-const valOf = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
-const HOST = valOf("--host", "http://localhost:4000");
-const DATASET = valOf("--dataset", "codebase");
+const ENV = await resolveEnv(argv, { dataset: "codebase", datasetKey: "codebase" });
+const HOST = ENV.host, DATASET = ENV.dataset, ROOT = ENV.root;
+console.error(banner(ENV, "graph-view"));
 
-const graph = await (await fetch(`${HOST}/v1/graph?dataset=${DATASET}`, { headers: { Authorization: "Bearer barkpark-dev-token" } })).json();
+const graph = await (await fetch(`${HOST}/v1/graph?dataset=${DATASET}`, { headers: { Authorization: "Bearer " + ENV.token } })).json();
 const meta = existsSync(join(HERE, "nodes.json")) ? Object.fromEntries(JSON.parse(readFileSync(join(HERE, "nodes.json"), "utf8")).nodes.map(n => [n.id, n.fields])) : {};
 
 // color by language; keep path as title

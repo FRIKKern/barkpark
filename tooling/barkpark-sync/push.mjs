@@ -5,24 +5,23 @@
 //   push.mjs [--limit N] [--host URL]
 // Sequence: createOrReplace all → publish all (refs resolve) → ingest blocks.
 
-import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveEnv, banner, flag } from "../lib/barkpark-env.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
 const argv = process.argv.slice(2);
-const valOf = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
-const HOST = valOf("--host", "http://localhost:4000");
-const LIMIT = +valOf("--limit", "0");
-// DEFAULT to the isolated `codebase` dataset — NEVER production. A bare
-// `push.mjs` (no --dataset) used to leak per-file code papers into production;
-// the separation is a hard requirement (graph-view.mjs + tasks.mjs already
-// default to codebase). Pass --dataset explicitly to target anything else.
-const DATASET = valOf("--dataset", "codebase");
+// Resolve the target through the shared chain (flags > BARKPARK_* env >
+// barkpark.json > localhost). DEFAULT to the isolated `codebase` dataset —
+// NEVER production. A bare push used to leak per-file code papers into prod; the
+// separation is a hard requirement (graph-view.mjs + tasks.mjs default the same).
+const ENV = await resolveEnv(argv, { dataset: "codebase", datasetKey: "codebase" });
+const HOST = ENV.host, DATASET = ENV.dataset, ROOT = ENV.root;
+const LIMIT = +flag(argv, "--limit", "0");
+console.error(banner(ENV, "push"));
 if (DATASET === "production") { console.error("[push] refusing to publish code papers into 'production' — pass a non-production --dataset (the isolated 'codebase' is the default)."); process.exit(2); }
-const DEV = "barkpark-dev-token", INGEST = "paperflow-dev-ingest-token";
+const DEV = ENV.token, INGEST = process.env.BARKPARK_INGEST_TOKEN || "paperflow-dev-ingest-token";
 
 const all = JSON.parse(readFileSync(join(HERE, "nodes.json"), "utf8")).nodes;
 const taxPath = join(ROOT, "tooling/intentions/intentions-report.json");

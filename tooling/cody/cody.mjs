@@ -6,21 +6,30 @@
 // validated + verified + reviewable (git). It also detects DRIFT — when copies
 // of one logical constant have fallen out of sync across files.
 //
+//   node cody.mjs preflight       where am I + is the codebase fully analyzed?
 //   node cody.mjs scan            code → paper  (extract literals, push to Barkpark)
 //   node cody.mjs status          control panel: code vs paper, locations, drift
 //   node cody.mjs set <var> <val> edit in Barkpark (validated at the paper)
 //   node cody.mjs apply [--write] paper → code  (rewrite EVERY bound location)
 //   node cody.mjs watch           live: SSE stream → edits land on disk instantly
+//
+// Cody is Barkpark's own agent: it ALWAYS resolves which Barkpark it is launched
+// against (local vs the project's public host, from barkpark.json), and refuses
+// to rewrite code (apply/watch) unless preflight is green — full codebase
+// intelligence is current. --force overrides; read-only commands only warn.
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { evalFormula, formulaVars } from "../lib/formula.mjs";
+import { resolveEnv, banner } from "../lib/barkpark-env.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
-const HOST = "http://localhost:4000", DATASET = "cody-poc", TOK = "barkpark-dev-token";
+const argv = process.argv.slice(2);
+const FORCE = argv.includes("--force");
+const ENV = await resolveEnv(argv, { dataset: "cody-poc", datasetKey: "cody" });
+const HOST = ENV.host, DATASET = ENV.dataset, TOK = ENV.token, ROOT = ENV.root, CFG = ENV.cfg;
 const BINDINGS = JSON.parse(readFileSync(join(HERE, "bindings.json"), "utf8"));
 const byName = Object.fromEntries(BINDINGS.map(b => [b.name, b]));
 const locs = (b) => b.locations || [{ file: b.file, pattern: b.pattern }];
@@ -104,6 +113,71 @@ function writeCode(b, newVal) {                          // newVal is canonical 
 const C = { g: "\x1b[32m", y: "\x1b[33m", r: "\x1b[31m", b: "\x1b[1m", d: "\x1b[2m", x: "\x1b[0m" };
 const docFields = (b, value) => ({ _type: "tuning", varname: b.name, value: String(value),
   vtype: b.vtype, doc: b.doc, locations: String(locs(b).length) });
+
+// ── codebase-intelligence freshness ────────────────────────────────────────
+// Reads the artifacts status.mjs already writes (ASSESS · ENRICH · PUBLISH) — it
+// never re-runs the chain. "fully analyzed" = scanned + coverage ≥ the bar in
+// barkpark.json + no pending agent work + the published graph is in sync.
+function intel() {
+  const rd = (p, d) => { const f = join(ROOT, p); return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : d; };
+  const tx = (p, d) => { const f = join(ROOT, p); return existsSync(f) ? readFileSync(f, "utf8").trim() : d; };
+  const nodesPath = join(ROOT, "tooling/barkpark-sync/nodes.json");
+  const scanned = existsSync(nodesPath);
+  const raw = scanned ? readFileSync(nodesPath) : null;
+  const nodes = scanned ? JSON.parse(raw).nodes.filter((n) => n.kind !== "intention") : [];
+  const cov = rd("tooling/research-coverage/coverage-report.json", { pct: 0, stale: 0, new: 0 });
+  const intRep = rd("tooling/intentions/intentions-report.json", { files: {}, taxonomy: [] });
+  const taxonomyN = (intRep.taxonomy || []).length;
+  const nodesHash = scanned ? createHash("sha256").update(raw).digest("hex").slice(0, 16) : "";
+  return {
+    scanned, fileCount: nodes.length, covPct: cov.pct || 0,
+    covPending: (cov.stale || 0) + (cov.new || 0),
+    intentPending: taxonomyN === 0 ? nodes.length : nodes.filter((n) => !(n.path in intRep.files)).length,
+    staleGroups: +tx("tooling/consistency/batch-count.txt", "0"),
+    issuesStale: tx("tooling/consistency/issues-stale.txt", "0") === "1",
+    publishNeeded: !!nodesHash && nodesHash !== tx("tooling/barkpark-sync/.last-push-hash", ""),
+  };
+}
+
+// Assemble the problem list. Empty ⇒ green. `set <scan>` here only the bits that
+// matter for trusting a tuning edit: a stale graph means tuning blind.
+function preflightProblems(i, drift) {
+  const minCov = CFG.intelligence?.minCoveragePct ?? 100;
+  const p = [];
+  if (!ENV.reachable) p.push(`Barkpark unreachable at ${ENV.host} — ${CFG.setup?.local ? `start it (\`${CFG.setup.local}\`)` : "start it"} or pass --host`);
+  if (!i.scanned) p.push(`codebase not scanned — run \`${CFG.intelligence?.scan || "node tooling/status/status.mjs --publish"}\``);
+  else {
+    if (i.covPct < minCov) p.push(`research coverage ${i.covPct}% < ${minCov}% (${i.covPending} file(s) pending)`);
+    if (i.intentPending) p.push(`${i.intentPending} file(s) missing intention tags`);
+    if (i.staleGroups) p.push(`${i.staleGroups} consistency group(s) stale`);
+    if (i.issuesStale) p.push(`layering/dup analysis stale`);
+    if (i.publishNeeded) p.push(`graph changed since last push — the published dataset is behind (run --publish)`);
+  }
+  if (drift.length) p.push(`${drift.length} bound variable(s) drifted: ${drift.map((b) => b.name).join(", ")}`);
+  return p;
+}
+
+async function preflight() {
+  const i = intel(), drift = BINDINGS.filter(hasDrift), problems = preflightProblems(i, drift);
+  console.log(`  ${banner(ENV, "cody")}`);
+  console.log(`  ${C.d}intelligence:${C.x} ${i.scanned ? `${i.fileCount} files · coverage ${i.covPct}% · ${i.publishNeeded ? C.y + "graph behind" + C.x : C.g + "graph in sync" + C.x}` : C.r + "not scanned" + C.x}`);
+  if (!problems.length) console.log(`  ${C.g}${C.b}✓ GREEN — Barkpark reachable, codebase fully analyzed, no drift${C.x}`);
+  else { console.log(`  ${C.r}${C.b}✗ ${problems.length} blocker(s):${C.x}`); for (const m of problems) console.log(`     ${C.r}•${C.x} ${m}`); }
+  return { fresh: problems.length === 0, problems };
+}
+
+// gate writes: apply/watch BLOCK on a non-green preflight (--force overrides);
+// scan/status/set only WARN, since they never rewrite source on disk.
+async function gate(cmd) {
+  const blocking = cmd === "apply" || cmd === "watch";
+  const { fresh, problems } = await preflight();
+  if (fresh) return;
+  if (blocking && !FORCE) {
+    console.error(`\n  ${C.r}${C.b}✗ ${cmd} blocked${C.x} — fix the above or re-run with ${C.b}--force${C.x}. Tuning against a stale graph is tuning blind.`);
+    process.exit(1);
+  }
+  console.error(`  ${C.y}⚠ proceeding with ${problems.length} unresolved warning(s)${FORCE && blocking ? " (--force)" : ""}${C.x}\n`);
+}
 
 // ── commands ──────────────────────────────────────────────────────────────
 async function scan() {
@@ -214,7 +288,10 @@ async function watch() {
   }
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
+const [cmd, ...rest] = argv;
+if (cmd === "preflight") { const { fresh } = await preflight(); process.exit(fresh ? 0 : 1); }
 const run = { scan, status, set: () => set(rest[0], rest[1]), apply: () => apply(rest.includes("--write")), watch }[cmd];
-if (!run) { console.error("usage: cody.mjs scan | status | set <var> <value> | apply [--write] | watch"); process.exit(2); }
+if (!run) { console.error("usage: cody.mjs preflight | scan | status | set <var> <value> | apply [--write] | watch  [--host URL] [--dataset DS] [--force]"); process.exit(2); }
+// every command runs the gate first: blocks apply/watch on a stale graph, warns elsewhere.
+await gate(cmd);
 await run();

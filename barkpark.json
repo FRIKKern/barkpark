@@ -1,0 +1,29 @@
+{
+  "$schema": "https://barkpark.cloud/schema/barkpark.json",
+  "project": "barkpark",
+  "description": "Project-level Barkpark connection map. Committed, public, SECRET-FREE — it says WHERE this repo's Barkpark lives and how to bring one up locally; tokens live in BARKPARK_* env or ~/.config/barkpark/config.json, never here. Read by tooling/lib/barkpark-env.mjs; precedence is flags > BARKPARK_* env > this file > localhost:4000.",
+
+  "hosts": {
+    "local":  { "url": "http://localhost:4000",        "kind": "local" },
+    "public": { "url": "https://api.barkpark.cloud",   "kind": "cloud" }
+  },
+  "defaultHost": "local",
+
+  "datasets": {
+    "codebase": "codebase",
+    "cody": "cody-poc"
+  },
+
+  "intelligence": {
+    "publishedTo": "local",
+    "minCoveragePct": 100,
+    "scan": "node tooling/status/status.mjs --publish",
+    "note": "Full codebase intelligence (ASSESS · ENRICH · PUBLISH). Cody preflight gates on this: reachable + scanned + coverage >= minCoveragePct + no pending agent work + no bound-variable drift."
+  },
+
+  "setup": {
+    "local": "make dev",
+    "smoke": "curl -s http://localhost:4000/v1/capabilities",
+    "docs": "docs/setup/SETUP.md"
+  }
+}
