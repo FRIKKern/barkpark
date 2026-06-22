@@ -301,9 +301,6 @@
     "docs/setup/TASK-SYSTEM.md": [
       "api/start.sh"
     ],
-    "docs/setup/paperflow-cutover.md": [
-      "docs/setup/SETUP.md"
-    ],
     "docs/snippets/README.md": [
       "js/tsconfig.base.json"
     ],

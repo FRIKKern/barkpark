@@ -286,4 +286,4 @@ All `/v1/*` endpoints are rate-limited per token (when present) or per IP, with 
 
 ## 14. Open items
 
-- **Does `delete` require `type`? — needs-verification against prod.** In code, `Content.apply_one/3` matches `%{"delete" => %{"id" => _, "type" => _}}`; a `delete` without `type` falls to the catch-all → `400 malformed`, matching §6's shape. NOT yet tested against the prod mutate endpoint — confirm there before relying on the without-`type` error shape; file a bd issue if prod diverges.
+- **Does `delete` require `type`? — needs-verification against prod.** In code, `Content.apply_one/3` matches `%{"delete" => %{"id" => _, "type" => _}}`; a `delete` without `type` falls to the catch-all → `400 malformed`, matching §6's shape. NOT yet tested against the prod mutate endpoint — confirm there before relying on the without-`type` error shape; file a task if prod diverges.

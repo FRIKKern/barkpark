@@ -73,13 +73,13 @@ curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Docu
 
 ## Task layer + session completion
 
-**Tasks are `type:task` documents in Barkpark's own Postgres.** `bd` is a shim over `/v1/tasks` — `.beads/` is FROZEN (since 2026-05-28): never edit it, never run Dolt sync, never `bd import`. Use `bd` (or `bp task`) for ALL task tracking — do NOT use TodoWrite or markdown TODO lists.
+**Tasks are `type:task` documents in Barkpark's own Postgres**, driven through the `bp task` CLI (over `/v1/tasks`). Beads (`bd`/`.beads/`) is RETIRED (removed 2026-06-22) — do not reinstate it. Use `bp task` for ALL task tracking — do NOT use TodoWrite or markdown TODO lists. Full guide: `docs/setup/TASK-SYSTEM.md`.
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View task details (carries children + child_count)
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+bp task ready            # Find available work
+bp task show <id>        # View task details (carries children + child_count)
+bp task next <worker>    # Atomically claim the next ready task
+bp task close <id> <worker> <epoch>   # Complete work (CAS on the claim epoch)
 ```
 
 **When ending a work session, work is NOT complete until `git push` succeeds:**

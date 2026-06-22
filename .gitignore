@@ -60,10 +60,9 @@ tooling/doc-truth/remake-failures.log
 Thumbs.db
 .worktrees/
 
-# Beads / Dolt files (added by bd init)
+# Dolt / DB artifacts
 .dolt/
 *.db
-.beads-credential-key
 .paperflow/
 
 # Working artifacts — never commit (swept in accidentally by docs-refactor merge, removed 2026-06-10)
@@ -72,5 +71,4 @@ api/.artifacts/
 .fidelity-captures/
 .visual-runtime/
 .claude/scheduled_tasks.lock
-.beads/FROZEN
 api/.claude/

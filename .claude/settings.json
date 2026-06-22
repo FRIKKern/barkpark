@@ -2,28 +2,5 @@
   "enabledPlugins": {
     "claude-md-management@claude-plugins-official": true
   },
-  "hooks": {
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "command": "bd prime",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "bd prime",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      }
-    ]
-  }
+  "hooks": {}
 }
