@@ -33,6 +33,7 @@ defmodule Barkpark.Content do
     Labels,
     MutationEvent,
     Revision,
+    Schema,
     SchemaDefinition,
     Search,
     Validation
@@ -2250,7 +2251,12 @@ defmodule Barkpark.Content do
   # authoritative scoping key. Degrades to no `dataset_id` key (string-only)
   # when the project or dataset string can't be resolved — never crashes a
   # write, and the changeset leaves an existing row's dataset_id untouched.
-  defp put_scope_attrs(attrs, opts) do
+  # Public (@doc false) so the still-on-facade write-scope stamping is reachable
+  # from concern submodules already extracted (e.g. Content.Schema's
+  # upsert_schema) while concern K (scope resolution) has not yet been relocated.
+  # Step 11 (Content.WriteScope) takes ownership; until then the facade keeps it.
+  @doc false
+  def put_scope_attrs(attrs, opts) do
     {ws_id, project_id} = resolve_write_scope(attrs, opts)
     dataset_id = resolve_dataset_id_for_write(attrs, project_id)
 
@@ -2403,7 +2409,12 @@ defmodule Barkpark.Content do
   # Same gating as resolve_read_dataset_id (barkpark-sknf): memoization only
   # fires when the caller opted in via `memoize: true`. LV/worker callers see
   # the fresh-every-call path.
-  defp read_default_project_id(opts \\ []) do
+  # Public (@doc false) so already-extracted concern submodules (e.g.
+  # Content.Schema's list_datasets/0 default-project fallback) can resolve the
+  # seeded Default project id through the facade while concern K (scope
+  # resolution) has not yet been relocated. Step 11 takes ownership.
+  @doc false
+  def read_default_project_id(opts \\ []) do
     memoize?(opts, :read_default_project_id, fn ->
       case Barkpark.Tenancy.get_default_project() do
         %{id: id} -> id
@@ -2457,22 +2468,6 @@ defmodule Barkpark.Content do
     end
   end
 
-  # Schema-specific dataset scope. Like scope_to_dataset, but ALSO matches rows
-  # whose `dataset_id` is NULL but whose `dataset` STRING equals the requested
-  # one — legacy/pre-tenancy schema fixtures that the W2 dual-write never
-  # stamped. The dataset STRING and dataset_id are 1:1 within a project, so the
-  # OR never crosses datasets; get_schema/3 orders dataset_id-first + limit 1 to
-  # resolve the (rare) backfilled-vs-fixture overlap deterministically.
-  defp scope_schema_to_dataset(query, dataset, opts) do
-    case resolve_read_dataset_id(dataset, opts) do
-      id when is_binary(id) ->
-        where(query, [s], s.dataset_id == ^id or (is_nil(s.dataset_id) and s.dataset == ^dataset))
-
-      _ ->
-        where(query, [s], s.dataset == ^dataset)
-    end
-  end
-
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs
   defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
 
@@ -2520,328 +2515,82 @@ defmodule Barkpark.Content do
 
   defp fire_after(other, _event, _payload), do: other
 
-  # ── Schema Definitions ────────────────────────────────────────────────────
+  # ── Schema Definitions (extracted → Content.Schema) ───────────────────────
+  #
+  # All schema-definition reads/writes, SDK serialization, hashing, and the
+  # dataset catalog moved to Barkpark.Content.Schema. These thin wrappers keep
+  # every external caller (SchemaController, Bootstrap, capabilities, SDK
+  # serialization) unchanged. Defaults (\\) are spelled out as explicit
+  # wrappers rather than bare defdelegate.
 
   @doc """
   The default dataset for a bare Studio landing (no `:dataset` in the URL).
-
-  The `dataset` string is the leaf content discriminator and is orthogonal to
-  the workspace/project tenancy envelope (see `Barkpark.Content.Scope`): the
-  Default-tenancy backfill assigned the seeded Default workspace/project to all
-  pre-tenancy rows, which live under the `"production"` dataset. So the Default
-  scope's content is the `"production"` dataset. Resolving it here gives the
-  Studio LiveView, the dashboard, and the bare-`/studio` redirect ONE source
-  of truth instead of three scattered `"production"` literals.
+  See `Barkpark.Content.Schema.default_dataset/0`.
   """
   @spec default_dataset() :: String.t()
-  def default_dataset, do: "production"
+  def default_dataset, do: Schema.default_dataset()
 
   @doc """
   Return the dataset slugs OWNED by a project, sorted alphabetically.
-  Always includes `"production"` so a brand-new project still has something to
-  show.
-
-  Datasets are project-owned (the `dataset` STRING is unique only *within* a
-  project), so this scopes to a project rather than listing globally. The arity
-  resolves to:
-
-    * `list_datasets(project_id)` — the slugs of that project's datasets.
-    * `list_datasets/0` — defaults to the seeded Default project (the legacy
-      flat-route landing where no workspace/project is in scope). Degrades to a
-      bare `"production"` when no Default project exists (fresh sandbox).
-
-  Reads the `dataset` STRING mirror (filtered by `project_id`) rather than the
-  Tenancy `datasets` table so pre-`get_or_create_dataset` fixtures still list.
+  See `Barkpark.Content.Schema.list_datasets/1`.
   """
-  def list_datasets(project_id \\ :default)
+  def list_datasets(project_id \\ :default), do: Schema.list_datasets(project_id)
 
-  def list_datasets(:default), do: list_datasets(read_default_project_id())
+  def list_schemas(dataset, opts \\ []), do: Schema.list_schemas(dataset, opts)
 
-  def list_datasets(nil), do: ["production"]
-
-  def list_datasets(project_id) when is_binary(project_id) do
-    from_schemas =
-      from(s in SchemaDefinition,
-        where: s.project_id == ^project_id,
-        select: s.dataset,
-        distinct: true
-      )
-      |> Repo.all()
-
-    from_docs =
-      from(d in Document,
-        where: d.project_id == ^project_id,
-        select: d.dataset,
-        distinct: true
-      )
-      |> Repo.all()
-
-    (from_schemas ++ from_docs ++ ["production"])
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
-
-  def list_schemas(dataset, opts \\ []) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    SchemaDefinition
-    |> scope_schema_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    # dataset_id-bearing rows before legacy nil-dataset_id fixtures, then dedup
-    # by name — one catalog entry per type even on a backfill/fixture overlap.
-    |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
-    |> Repo.all()
-    |> Enum.uniq_by(& &1.name)
-  end
-
-  def get_schema(name, dataset, opts \\ []) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
-    SchemaDefinition
-    |> where([s], s.name == ^name)
-    |> scope_schema_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    # A backfilled row (dataset_id set) and a legacy nil-dataset_id fixture of
-    # the same name can both match the dataset-OR-string scope. Prefer the
-    # backfilled (dataset_id-bearing) row and take exactly one — deterministic.
-    |> order_by([s], asc_nulls_last: s.dataset_id)
-    |> limit(1)
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      schema -> {:ok, schema}
-    end
-  end
+  def get_schema(name, dataset, opts \\ []), do: Schema.get_schema(name, dataset, opts)
 
   @doc """
   Resolve the full Expectation for a schema definition.
-
-  An Expectation is the schema PLUS its SOFT `layout` (ordered field-refs +
-  free-content region markers) and `prefill` (create-time scaffold). Explicit
-  stored `layout`/`prefill` columns win when non-empty; otherwise a field-order
-  default is derived (`SchemaDefinition.default_layout/1` + `default_prefill/1`)
-  so nothing has to migrate. The layout is metadata, never a constraint — a
-  document with missing or reordered fields is always valid.
-
-  Returns `%{layout: [map()], prefill: map()}`.
+  See `Barkpark.Content.Schema.resolve_expectation/1`.
   """
   @spec resolve_expectation(SchemaDefinition.t()) :: %{layout: [map()], prefill: map()}
-  def resolve_expectation(%SchemaDefinition{} = schema) do
-    SchemaDefinition.resolve_expectation(schema)
-  end
+  def resolve_expectation(%SchemaDefinition{} = schema),
+    do: Schema.resolve_expectation(schema)
 
-  def upsert_schema(attrs, dataset, opts \\ []) do
-    name = Map.get(attrs, "name") || Map.get(attrs, :name)
+  def upsert_schema(attrs, dataset, opts \\ []), do: Schema.upsert_schema(attrs, dataset, opts)
 
-    attrs =
-      attrs
-      |> Map.put("dataset", dataset)
-      |> put_scope_attrs(opts)
-
-    case name && get_schema(name, dataset, opts) do
-      {:ok, existing} ->
-        existing
-        |> SchemaDefinition.changeset(attrs)
-        |> Repo.update()
-
-      _ ->
-        %SchemaDefinition{}
-        |> SchemaDefinition.changeset(attrs)
-        |> Repo.insert()
-    end
-  end
-
-  def delete_schema(name, dataset, opts \\ []) do
-    case get_schema(name, dataset, opts) do
-      {:ok, schema} -> Repo.delete(schema)
-      error -> error
-    end
-  end
+  def delete_schema(name, dataset, opts \\ []), do: Schema.delete_schema(name, dataset, opts)
 
   @doc """
   Whether the schema's public-read gate is open for `type` in `dataset`.
-
-  Threads the caller's tenancy `opts` (`[workspace_id:, project_id:]`) into
-  `get_schema/3` so the visibility flag is read from the SAME tenant the row
-  read resolves to — never the Default project. Without `opts` (the flat /
-  legacy plug caller) it resolves against the Default scope, preserving prior
-  behavior. See barkpark-su54: closing the latent split-brain where the gate
-  and the row-read could read visibility from two different tenants.
+  See `Barkpark.Content.Schema.schema_public?/3`.
   """
-  def schema_public?(type, dataset, opts \\ []) do
-    case get_schema(type, dataset, opts) do
-      {:ok, %{visibility: "public"}} -> true
-      _ -> false
-    end
-  end
+  def schema_public?(type, dataset, opts \\ []), do: Schema.schema_public?(type, dataset, opts)
 
   @doc """
   Returns the union of CORS origin allow-lists across all schemas in the dataset.
-
-  An empty list means "no dataset-level policy" (default-allow).
-  A list containing `"*"` means "public, any origin".
-  Otherwise the list is an explicit allow-list of origin strings.
+  See `Barkpark.Content.Schema.allowed_origins_for_dataset/2`.
   """
   @spec allowed_origins_for_dataset(String.t(), keyword()) :: [String.t()]
-  def allowed_origins_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
-    SchemaDefinition
-    |> scope_to_dataset(dataset, opts)
-    |> select([s], s.cors_origins)
-    |> Repo.all()
-    |> List.flatten()
-    |> Enum.uniq()
-  end
+  def allowed_origins_for_dataset(dataset, opts \\ []) when is_binary(dataset),
+    do: Schema.allowed_origins_for_dataset(dataset, opts)
 
-  def schema_hash_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
-    SchemaDefinition
-    |> scope_to_dataset(dataset, opts)
-    |> select([s], {count(s.id), max(s.updated_at)})
-    |> Repo.one()
-    |> hash_schema_tuple()
-  end
+  def schema_hash_for_dataset(dataset, opts \\ []) when is_binary(dataset),
+    do: Schema.schema_hash_for_dataset(dataset, opts)
 
   @doc """
   Deterministic 16-char hex content hash of a single schema definition.
-  Derived from `{name, fields sorted by name}` so it changes iff the schema
-  body changes, regardless of row metadata (updated_at, id).
+  See `Barkpark.Content.Schema.schema_hash_for_schema/1`.
   """
-  def schema_hash_for_schema(%SchemaDefinition{} = schema) do
-    normalized_fields =
-      (schema.fields || [])
-      |> Enum.map(&stringify_keys/1)
-      |> Enum.sort_by(& &1["name"])
-
-    payload = :erlang.term_to_binary({schema.name, normalized_fields})
-
-    :crypto.hash(:sha256, payload)
-    |> Base.encode16(case: :lower)
-    |> binary_part(0, 16)
-  end
+  def schema_hash_for_schema(%SchemaDefinition{} = schema),
+    do: Schema.schema_hash_for_schema(schema)
 
   @doc """
-  Render a single schema in SDK envelope shape, with `schemaHash`,
-  per-field `required?`, and `of`/`to` specs where applicable.
+  Render a single schema in SDK envelope shape.
+  See `Barkpark.Content.Schema.serialize_schema_for_sdk/1`.
   """
-  def serialize_schema_for_sdk(%SchemaDefinition{} = schema) do
-    %{
-      id: schema.name,
-      name: schema.name,
-      title: schema.title,
-      icon: schema.icon,
-      visibility: schema.visibility,
-      schemaHash: schema_hash_for_schema(schema),
-      fields: Enum.map(schema.fields || [], &serialize_field/1),
-      actions: schema.actions || [],
-      groups: schema.groups || [],
-      deskGroups: schema.desk_groups || [],
-      crossValidations: schema.cross_validations || [],
-      # Generic list-row preview declaration (badge + meta content fields);
-      # empty map == no declaration, SDK/TUI rows render unchanged.
-      listPreview: schema.list_preview || %{}
-    }
-  end
+  def serialize_schema_for_sdk(%SchemaDefinition{} = schema),
+    do: Schema.serialize_schema_for_sdk(schema)
 
   @doc """
   List every schema in a dataset in SDK envelope shape, plus a
-  top-level `datasetSchemaHash` mirroring `schema_hash_for_dataset/1`.
+  top-level `datasetSchemaHash`. See `Barkpark.Content.Schema.list_schemas_for_sdk/2`.
   """
-  def list_schemas_for_sdk(dataset, opts \\ []) when is_binary(dataset) do
-    schemas = list_schemas(dataset, opts)
+  def list_schemas_for_sdk(dataset, opts \\ []) when is_binary(dataset),
+    do: Schema.list_schemas_for_sdk(dataset, opts)
 
-    %{
-      schemas: Enum.map(schemas, &serialize_schema_for_sdk/1),
-      datasetSchemaHash: schema_hash_for_dataset(dataset)
-    }
-  end
-
-  defp serialize_field(field) do
-    f = stringify_keys(field)
-    type = f["type"]
-
-    base = Map.put(f, "required?", truthy?(f["required"]))
-
-    base
-    |> maybe_put_of(type, f)
-    |> maybe_put_to(type, f)
-  end
-
-  defp maybe_put_of(out, "array", f) do
-    of =
-      cond do
-        is_list(f["of"]) ->
-          Enum.map(f["of"], &element_spec/1)
-
-        is_list(get_in(f, ["options", "list"])) ->
-          Enum.map(f["options"]["list"], &element_spec/1)
-
-        true ->
-          [%{"type" => "string"}]
-      end
-
-    Map.put(out, "of", of)
-  end
-
-  defp maybe_put_of(out, _type, _f), do: out
-
-  defp maybe_put_to(out, "reference", f) do
-    to =
-      cond do
-        is_list(f["to"]) ->
-          Enum.map(f["to"], &element_spec/1)
-
-        is_list(get_in(f, ["options", "references"])) ->
-          Enum.map(f["options"]["references"], &element_spec/1)
-
-        is_binary(f["refType"]) ->
-          [%{"type" => f["refType"]}]
-
-        true ->
-          []
-      end
-
-    Map.put(out, "to", to)
-  end
-
-  defp maybe_put_to(out, _type, _f), do: out
-
-  defp element_spec(%{} = spec) do
-    spec
-    |> stringify_keys()
-    |> Map.take(["type", "to", "name"])
-  end
-
-  defp element_spec(type) when is_binary(type), do: %{"type" => type}
-  defp element_spec(_), do: %{"type" => "string"}
-
-  defp truthy?(true), do: true
-  defp truthy?("true"), do: true
-  defp truthy?(_), do: false
-
-  defp stringify_keys(%{} = m) do
-    Map.new(m, fn {k, v} -> {to_string(k), stringify_keys(v)} end)
-  end
-
-  defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
-  defp stringify_keys(other), do: other
-
-  def schema_hash_for_all_datasets do
-    from(s in SchemaDefinition,
-      group_by: s.dataset,
-      select: {s.dataset, count(s.id), max(s.updated_at)}
-    )
-    |> Repo.all()
-    |> Map.new(fn {ds, n, t} -> {ds, hash_schema_tuple({n, t})} end)
-  end
-
-  defp hash_schema_tuple({nil, nil}), do: "0000000000000000"
-
-  defp hash_schema_tuple({n, t}) do
-    payload = "#{n}|#{inspect(t)}"
-    :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower) |> binary_part(0, 16)
-  end
+  def schema_hash_for_all_datasets, do: Schema.schema_hash_for_all_datasets()
 
   # ── Analytics (extracted → Content.Analytics) ─────────────────────────────
 
