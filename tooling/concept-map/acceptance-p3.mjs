@@ -19,20 +19,28 @@
 //      bulldocs) splits its tests across ≥ 2 distinct directories — the universal
 //      flaw the grade measures, not a framework requirement.
 //   4. VERDICTS — the kernel concepts (content, tenancy) grade `kernel` (not
-//      feature-graded); sheets — tripping gratuitous-core + scatter — grades
-//      `tangled`; release and portable_doc — clean by the coupling math but lacking
-//      the plugin registration surface, with NO sideways edges and NO test-scatter
-//      — grade the new `clean-lib` (NOT tangled). media keeps its `tangled` verdict
-//      (the 42-edge sideways cluster to search is a real coupling problem). Verdict
-//      vocabulary is exactly {kernel, clean, clean-lib, tangled}.
-//   5. MANIFEST-ABSENCE — no per-feature manifest exists yet, so every concept is
+//      feature-graded); sheets and onixedit — the CLEAN-FEATURE exemplars, clean
+//      by coupling with only a minor note (sheets: gratuitous-core + scatter;
+//      onixedit: its small →settings domain edge) — grade the new `improvable`
+//      (NOT tangled, NOT clean); release and portable_doc — clean by the coupling
+//      math but lacking the plugin registration surface, with NO sideways and NO
+//      test-scatter — grade `clean-lib`. media / search / tasks keep `tangled`
+//      (real cycles / sprawl). Verdict vocabulary is exactly
+//      {kernel, clean, clean-lib, improvable, tangled}.
+//   5. FIX-1 (web exclusion) — a feature→feature edge whose SOURCE file is a
+//      web-layer file is orchestration, not a boundary violation, and is NOT
+//      counted in the sideways tally. Asserted via media: its raw cross-concept
+//      tally materially exceeds its domain-only tally (the ~22 controller-origin
+//      media→search edges are dropped), and the media→search domain cluster is
+//      strictly below the raw media→search cluster.
+//   6. MANIFEST-ABSENCE — no per-feature manifest exists yet, so every concept is
 //      flagged manifest-absent (P4 introduces the schema).
 //
 // Every expected value is a RANGE / structural assertion against a freshly
 // computed result — no expected number is read from a fixture or hardcoded.
 
 import { fileURLToPath } from "node:url";
-import { runGrade, GRATUITOUS_EXTERNAL_PCT } from "./grade.mjs";
+import { runGrade, GRATUITOUS_EXTERNAL_PCT, REAL_SIDEWAYS_CLUSTER } from "./grade.mjs";
 
 const res = runGrade();
 const byName = new Map(res.concepts.map((c) => [c.concept, c]));
@@ -119,20 +127,46 @@ for (const f of REAL_FEATURES) {
   }
 }
 
-// ── 4. VERDICTS — kernel concepts kernel; sheets tangled; vocabulary exact ────
+// ── 4. VERDICTS — kernel kernel; exemplars improvable; debt tangled ───────────
 const content = get("content");
 const tenancy = get("tenancy");
 if (content) ok("content grades kernel", content.verdict === "kernel", `verdict = ${content.verdict}`);
 if (tenancy) ok("tenancy grades kernel", tenancy.verdict === "kernel", `verdict = ${tenancy.verdict}`);
-if (sheets) ok("sheets grades tangled", sheets.verdict === "tangled", `verdict = ${sheets.verdict}`);
 
-// the clean-nonplugin band: release + portable_doc are clean by the coupling math
-// but lack the plugin registration surface, with NO sideways and NO test-scatter.
-// They must move OUT of tangled into the new `clean-lib` verdict.
+// the CLEAN exemplars: clean by coupling, only a minor fixable note → improvable.
+// sheets keeps its gratuitous-core colocate edge; onixedit carries its small
+// →settings domain cut edge. Neither is tangled debt; neither is pristine-clean.
+const onixedit = get("onixedit");
+if (sheets) {
+  ok("sheets grades improvable (not tangled, not clean)", sheets.verdict === "improvable", `verdict = ${sheets.verdict}`);
+  ok(
+    "sheets keeps its named colocate edge",
+    sheets.remediation.colocate.length > 0,
+    `colocate = ${JSON.stringify(sheets.remediation.colocate)}`
+  );
+  ok(
+    "sheets has no thick (≥ threshold) domain sideways cluster",
+    sheets.gaps.sideways.every((s) => s.edges < REAL_SIDEWAYS_CLUSTER),
+    `sideways = ${sheets.gaps.sideways.map((s) => `${s.to}:${s.edges}`).join(", ") || "(none)"} (threshold ${REAL_SIDEWAYS_CLUSTER})`
+  );
+}
+if (onixedit) {
+  ok("onixedit grades improvable (not tangled, not clean)", onixedit.verdict === "improvable", `verdict = ${onixedit.verdict}`);
+  ok(
+    "onixedit carries a small domain sideways cut edge below the knot threshold",
+    onixedit.remediation.cut.length > 0 && onixedit.remediation.cut.every((x) => x.edges < REAL_SIDEWAYS_CLUSTER),
+    `cut = ${onixedit.remediation.cut.map((x) => `${x.edge}:${x.edges}`).join(", ") || "(none)"} (threshold ${REAL_SIDEWAYS_CLUSTER})`
+  );
+}
+
+// the clean-nonplugin pristine pair: release + portable_doc are clean by the
+// coupling math, lack the plugin registration surface, and trip NO sideways and
+// NO test-scatter — only (optionally) the excused gratuitous-core. They grade
+// `clean-lib` (NOT improvable, NOT tangled) and carry no remediation.
 const release = get("release");
 const portableDoc = get("portable_doc");
 if (release) {
-  ok("release grades clean-lib (not tangled)", release.verdict === "clean-lib", `verdict = ${release.verdict}`);
+  ok("release grades clean-lib", release.verdict === "clean-lib", `verdict = ${release.verdict}`);
   ok(
     "release has no real coupling problem (no sideways, single test home)",
     release.gaps.sideways.length === 0 && release.gaps.testScatter.testDirs.length <= 1,
@@ -145,7 +179,7 @@ if (release) {
   );
 }
 if (portableDoc) {
-  ok("portable_doc grades clean-lib (not tangled)", portableDoc.verdict === "clean-lib", `verdict = ${portableDoc.verdict}`);
+  ok("portable_doc grades clean-lib", portableDoc.verdict === "clean-lib", `verdict = ${portableDoc.verdict}`);
   ok(
     "portable_doc has no real coupling problem (no sideways, single test home)",
     portableDoc.gaps.sideways.length === 0 && portableDoc.gaps.testScatter.testDirs.length <= 1,
@@ -153,30 +187,54 @@ if (portableDoc) {
   );
 }
 
-// media stays tangled — its 42-edge sideways cluster to search is a real coupling
-// problem, registration surface or not. The new band never rescues it.
+// media / search / tasks stay tangled — real domain cycles / sprawl, not rescued
+// by Fix 1's web exclusion or the new improvable band.
 const media = get("media");
+const search = get("search");
+const tasks = get("tasks");
 if (media) {
   ok("media stays tangled (real sideways cluster)", media.verdict === "tangled", `verdict = ${media.verdict}`);
   ok(
-    "media keeps a thick sideways cut edge",
-    media.remediation.cut.some((x) => x.edges >= 10),
+    "media keeps a thick sideways cut edge (≥ knot threshold)",
+    media.remediation.cut.some((x) => x.edges >= REAL_SIDEWAYS_CLUSTER),
     `cut = ${media.remediation.cut.map((x) => `${x.edge}:${x.edges}`).join(", ") || "(none)"}`
   );
 }
+if (search) ok("search stays tangled", search.verdict === "tangled", `verdict = ${search.verdict}`);
+if (tasks) ok("tasks stays tangled", tasks.verdict === "tangled", `verdict = ${tasks.verdict}`);
 
-const VOCAB = new Set(["kernel", "clean", "clean-lib", "tangled"]);
+const VOCAB = new Set(["kernel", "clean", "clean-lib", "improvable", "tangled"]);
 ok(
-  "verdict vocabulary is exactly {kernel, clean, clean-lib, tangled}",
+  "verdict vocabulary is exactly {kernel, clean, clean-lib, improvable, tangled}",
   res.concepts.every((c) => VOCAB.has(c.verdict)),
   `verdicts = [${[...new Set(res.concepts.map((c) => c.verdict))].join(", ")}]`
 );
-// the new band sums into the count math: kernel + clean + clean-lib + tangled = total.
+// the verdict counts sum to total across the full five-word vocabulary.
 ok(
   "verdict counts sum to total",
-  res.counts.kernel + res.counts.clean + res.counts.cleanLib + res.counts.tangled === res.counts.total,
-  `${res.counts.kernel}+${res.counts.clean}+${res.counts.cleanLib}+${res.counts.tangled} vs total ${res.counts.total}`
+  res.counts.kernel + res.counts.clean + res.counts.cleanLib + res.counts.improvable + res.counts.tangled === res.counts.total,
+  `${res.counts.kernel}+${res.counts.clean}+${res.counts.cleanLib}+${res.counts.improvable}+${res.counts.tangled} vs total ${res.counts.total}`
 );
+
+// ── 5. FIX-1 — web-layer source edges are NOT counted as sideways ─────────────
+// media is the canonical web-inflated concept: ~22 of its 42 raw media→search
+// edges originate in media_controller.ex / web params (orchestration). After the
+// exclusion the domain tally is materially lower, and the media→search domain
+// cluster is strictly below the raw media→search cluster.
+if (media) {
+  ok(
+    "media domain cross-concept tally is materially below its raw tally",
+    media.gaps.sidewaysDomainCrossConcept < media.gaps.sidewaysRawCrossConcept,
+    `domain = ${media.gaps.sidewaysDomainCrossConcept}, raw = ${media.gaps.sidewaysRawCrossConcept}`
+  );
+  const rawSearch = (media.gaps.sidewaysRawClusters.find((c) => c.to === "search") || {}).edges || 0;
+  const domSearch = (media.gaps.sideways.find((s) => s.to === "search") || {}).edges || 0;
+  ok(
+    "media→search domain cluster is strictly below the raw media→search cluster",
+    domSearch > 0 && rawSearch > 0 && domSearch < rawSearch,
+    `media→search domain = ${domSearch}, raw = ${rawSearch} (≈ ${rawSearch - domSearch} web-origin edges dropped)`
+  );
+}
 // the kernel band is never feature-graded (no colocate/cut on a kernel concept).
 ok(
   "kernel concepts carry no colocate/cut remediation",
@@ -184,7 +242,7 @@ ok(
   `content cut=${content ? content.remediation.cut.length : "-"}, tenancy cut=${tenancy ? tenancy.remediation.cut.length : "-"}`
 );
 
-// ── 5. MANIFEST-ABSENCE — no per-feature manifest exists yet ──────────────────
+// ── 6. MANIFEST-ABSENCE — no per-feature manifest exists yet ──────────────────
 ok(
   "every concept flagged manifest-absent (none exist yet)",
   res.concepts.every((c) => c.gaps.manifestAbsent === true),
@@ -196,7 +254,8 @@ function run() {
   const out = (s) => process.stdout.write(s);
   out(
     `\ncqv8 P3 acceptance — ${res.graph.nodes} nodes · ${res.graph.edges} edges · ` +
-      `${res.counts.tangled} tangled · ${res.counts.clean} clean · ${res.counts.kernel} kernel\n`
+      `${res.counts.tangled} tangled · ${res.counts.improvable} improvable · ` +
+      `${res.counts.cleanLib} clean-lib · ${res.counts.clean} clean · ${res.counts.kernel} kernel\n`
   );
   out(`largest sideways cluster: ${maxCluster.edge} (${maxCluster.edges} edges)\n`);
   out(`${"─".repeat(64)}\n`);
