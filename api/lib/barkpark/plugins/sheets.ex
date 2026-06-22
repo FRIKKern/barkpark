@@ -30,7 +30,7 @@ defmodule Barkpark.Plugins.Sheets do
       Bulldocs): `POST /v1/plugins/sheets/import` (multipart xlsx/csv/tsv →
       sheet doc), `GET /v1/plugins/sheets/:slug/export.{xlsx,csv,tsv,md,html}`,
       and `POST /v1/plugins/sheets/:slug/ops` (cell-granular wire ops, applied
-      through the core `Barkpark.Sheets.Session`); plus the live public
+      through the core `Barkpark.Plugins.Sheets.Session`); plus the live public
       reader `GET /sheets/:slug` on the `:public_root` bucket (the Bulldocs
       `/papers/:slug` precedent — published-only, read-only grid, live
       deltas; the reader LiveView `BarkparkWeb.SheetsReaderLive` stays
@@ -40,12 +40,12 @@ defmodule Barkpark.Plugins.Sheets do
       reusable machinery, the plugin is the wiring).
 
   The grid machinery itself is CORE, not plugin: A1 helpers and snapshot
-  synthesis live in `Barkpark.Sheets`, the `"sheet"` portable-doc embed block
+  synthesis live in `Barkpark.Plugins.Sheets.Core`, the `"sheet"` portable-doc embed block
   composes in `Barkpark.PortableDoc.Render`, and snapshot write-through rides
   the save path in `Barkpark.Content` — so existing embeds keep rendering and
   refreshing with this plugin off (fresh-install invariant).
 
-  The collaborative session itself (`Barkpark.Sheets.Session`, M1) is CORE —
+  The collaborative session itself (`Barkpark.Plugins.Sheets.Session`, M1) is CORE —
   with this plugin off, sessions and direct mutate both keep working; only
   the wire-op HTTP route goes away.
   """
@@ -53,7 +53,7 @@ defmodule Barkpark.Plugins.Sheets do
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
 
   alias Barkpark.Content.SchemaDefinition
-  alias Barkpark.Sheets, as: SheetCore
+  alias Barkpark.Plugins.Sheets.Core, as: SheetCore
 
   @schemas_dir Path.expand("../../../priv/plugins/sheets/schemas", __DIR__)
 
@@ -61,9 +61,9 @@ defmodule Barkpark.Plugins.Sheets do
   @merge_area_cap 10_000
 
   # Excel's grid bounds — column XFD, row 1_048_576. Enforced at the gate
-  # AFTER parse (see bounds_errors/3), not inside `Barkpark.Sheets.parse_ref/1`:
+  # AFTER parse (see bounds_errors/3), not inside `Barkpark.Plugins.Sheets.Core.parse_ref/1`:
   # parse_ref stays a pure, total A1 parser (the engine, snapshot synthesis
-  # and the importers all call it), and `Barkpark.Sheets.Engine` keeps its
+  # and the importers all call it), and `Barkpark.Plugins.Sheets.Engine` keeps its
   # own copy of the same bounds for its `#REF!` semantics.
   @grid_max_col 16_384
   @grid_max_row 1_048_576
@@ -126,7 +126,7 @@ defmodule Barkpark.Plugins.Sheets do
     * `GET /v1/plugins/sheets/:slug/export.xlsx|csv|tsv|md|html` — sends
       the converted artifact (csv/tsv take `?tab=`, 0-based, default 0).
     * `POST /v1/plugins/sheets/:slug/ops` (M1) — `{"ops": [ … ]}` applied
-      through the core `Barkpark.Sheets.Session` (the session validates,
+      through the core `Barkpark.Plugins.Sheets.Session` (the session validates,
       serializes, recomputes, broadcasts deltas and debounces persistence).
 
   Route changes need a forced router recompile — the router macro reads the
@@ -164,7 +164,7 @@ defmodule Barkpark.Plugins.Sheets do
   # reach storage via plain mutate — the snapshot clips as
   # defense in depth, the gate keeps it out altogether). A STRUCTURAL gate
   # only: `v` and `f` stay free-form here — the formula engine
-  # (`Barkpark.Sheets.Engine`) recomputes `v` on the core save path.
+  # (`Barkpark.Plugins.Sheets.Engine`) recomputes `v` on the core save path.
   # Non-sheet documents pass untouched.
   defp validate_sheet_doc(%{doc: %{"type" => "sheet"} = doc}) do
     tabs =

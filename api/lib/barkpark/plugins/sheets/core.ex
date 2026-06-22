@@ -1,4 +1,4 @@
-defmodule Barkpark.Sheets do
+defmodule Barkpark.Plugins.Sheets.Core do
   @moduledoc """
   Core sheet utilities — A1 address helpers and snapshot synthesis.
 
@@ -10,7 +10,7 @@ defmodule Barkpark.Sheets do
   plugin off (fresh-install invariant), and the write-through path in
   `Barkpark.Content` refreshes it on every sheet mutation.
 
-  The formula engine lives at `Barkpark.Sheets.Engine`. It slots in AHEAD of
+  The formula engine lives at `Barkpark.Plugins.Sheets.Engine`. It slots in AHEAD of
   snapshot synthesis — `Barkpark.Content` recomputes formula `"v"` values on
   the cells map on every sheet save — so the dense grid here stays a pure
   projection of cell values.
@@ -25,13 +25,13 @@ defmodule Barkpark.Sheets do
 
   ## Examples
 
-      iex> Barkpark.Sheets.parse_ref("A1")
+      iex> Barkpark.Plugins.Sheets.Core.parse_ref("A1")
       {:ok, {1, 1}}
 
-      iex> Barkpark.Sheets.parse_ref("AA3")
+      iex> Barkpark.Plugins.Sheets.Core.parse_ref("AA3")
       {:ok, {27, 3}}
 
-      iex> Barkpark.Sheets.parse_ref("bad")
+      iex> Barkpark.Plugins.Sheets.Core.parse_ref("bad")
       :error
   """
   @spec parse_ref(term()) :: {:ok, {pos_integer(), pos_integer()}} | :error
@@ -52,10 +52,10 @@ defmodule Barkpark.Sheets do
 
   ## Examples
 
-      iex> Barkpark.Sheets.format_ref({1, 1})
+      iex> Barkpark.Plugins.Sheets.Core.format_ref({1, 1})
       "A1"
 
-      iex> Barkpark.Sheets.format_ref({27, 3})
+      iex> Barkpark.Plugins.Sheets.Core.format_ref({27, 3})
       "AA3"
   """
   @spec format_ref({pos_integer(), pos_integer()}) :: String.t()

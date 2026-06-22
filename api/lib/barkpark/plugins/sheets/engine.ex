@@ -1,8 +1,8 @@
-defmodule Barkpark.Sheets.Engine do
+defmodule Barkpark.Plugins.Sheets.Engine do
   @moduledoc """
   The Sheets formula engine — recomputes cached `"v"` values for every
   formula cell of a sheet document's content, AHEAD of snapshot synthesis
-  (`Barkpark.Sheets.snapshot_for/2`). `Barkpark.Content` calls `recompute/1`
+  (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`). `Barkpark.Content` calls `recompute/1`
   on every `"sheet"` save, so HTTP mutations persist computed values and the
   write-through snapshots project them into embeds with zero renderer
   changes. Pure functions: no Repo, no I/O.
@@ -93,17 +93,17 @@ defmodule Barkpark.Sheets.Engine do
       iex> content = %{"tabs" => [%{"cells" => %{
       ...>   "A1" => %{"v" => 2}, "A2" => %{"v" => 3},
       ...>   "A3" => %{"f" => "SUM(A1:A2)"}}}]}
-      iex> Barkpark.Sheets.Engine.recompute(content)
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
       ...> |> get_in(["tabs", Access.at(0), "cells", "A3"])
       %{"f" => "SUM(A1:A2)", "t" => "n", "v" => 5}
 
       iex> content = %{"tabs" => [%{"cells" => %{"A1" => %{"f" => "=A1+1", "v" => 0}}}]}
-      iex> Barkpark.Sheets.Engine.recompute(content)
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
       ...> |> get_in(["tabs", Access.at(0), "cells", "A1", "v"])
       "#CYCLE!"
   """
 
-  alias Barkpark.Sheets
+  alias Barkpark.Plugins.Sheets.Core, as: Sheets
 
   # Excel grid bounds: column XFD, row 1_048_576.
   @max_col 16_384

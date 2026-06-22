@@ -1,4 +1,4 @@
-defmodule Barkpark.Sheets.Session do
+defmodule Barkpark.Plugins.Sheets.Session do
   @moduledoc """
   Per-sheet collaborative session (M1) — a GenServer that owns one sheet
   document's content in memory and serializes cell-granular ops against it.
@@ -11,8 +11,8 @@ defmodule Barkpark.Sheets.Session do
   ## Lifecycle
 
   Started LAZILY on the first op via `apply_ops/3` — a `DynamicSupervisor`
-  (`Barkpark.Sheets.SessionSupervisor`) child keyed in
-  `Barkpark.Sheets.SessionRegistry` by `{dataset, published-id}`. `init/1`
+  (`Barkpark.Plugins.Sheets.SessionSupervisor`) child keyed in
+  `Barkpark.Plugins.Sheets.SessionRegistry` by `{dataset, published-id}`. `init/1`
   reads the persisted row ONCE (draft-first, published fallback — the same
   precedence the export controller uses); while the session lives, its
   memory is authoritative. The process hibernates when idle
@@ -31,7 +31,7 @@ defmodule Barkpark.Sheets.Session do
     * `%{"op" => "clear_cell", "tab" => i, "ref" => "A1"}`
 
   Structural ops (the grid editor) — Excel ref-shift semantics live in
-  `Barkpark.Sheets.Structure` (cell keys shift, formula refs/ranges
+  `Barkpark.Plugins.Sheets.Structure` (cell keys shift, formula refs/ranges
   rewrite — dead refs become the literal `#REF!` — merges shift/clip/drop,
   `col_widths`/`row_heights` re-key, frozen bands clamp), then the op's
   tab recomputes through the engine:
@@ -85,7 +85,7 @@ defmodule Barkpark.Sheets.Session do
   ## Recompute + delta broadcast
 
   After each applied op the session recomputes the op's tab through
-  `Barkpark.Sheets.Engine` (formulas are tab-local, so other tabs cannot
+  `Barkpark.Plugins.Sheets.Engine` (formulas are tab-local, so other tabs cannot
   change; tabs holding NO formula cell skip the engine entirely — a
   per-tab formula count keeps the common bulk-import case O(1) per op,
   since a full recompute measures ~70–90ms at the 50_000-cell cap) and
@@ -121,7 +121,7 @@ defmodule Barkpark.Sheets.Session do
 
   ## Configuration
 
-  `config :barkpark, Barkpark.Sheets.Session, …` — `debounce_ms` (2_000),
+  `config :barkpark, Barkpark.Plugins.Sheets.Session, …` — `debounce_ms` (2_000),
   `flush_after_ops` (25), `idle_stop_ms` (300_000), `hibernate_after`
   (15_000), `cell_cap` (50_000, mirroring the plugin gate's import cap).
   Read at session start; tests override via `Application.put_env/3`.
@@ -132,18 +132,18 @@ defmodule Barkpark.Sheets.Session do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Sheets
-  alias Barkpark.Sheets.Engine
-  alias Barkpark.Sheets.Structure
+  alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias Barkpark.Plugins.Sheets.Engine
+  alias Barkpark.Plugins.Sheets.Structure
 
-  @registry Barkpark.Sheets.SessionRegistry
-  @supervisor Barkpark.Sheets.SessionSupervisor
+  @registry Barkpark.Plugins.Sheets.SessionRegistry
+  @supervisor Barkpark.Plugins.Sheets.SessionSupervisor
 
   # Excel's grid bounds — column XFD, row 1_048_576. Deliberately duplicated
-  # (the established convention: `Barkpark.Sheets.Engine` and the plugin gate
+  # (the established convention: `Barkpark.Plugins.Sheets.Engine` and the plugin gate
   # `Barkpark.Plugins.Sheets` each keep their own copy of the same two
   # integers): the Session is CORE and must not reach into the plugin, and
-  # `Barkpark.Sheets.parse_ref/1` stays a pure, total A1 parser.
+  # `Barkpark.Plugins.Sheets.Core.parse_ref/1` stays a pure, total A1 parser.
   @grid_max_col 16_384
   @grid_max_row 1_048_576
 

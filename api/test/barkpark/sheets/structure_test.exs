@@ -1,6 +1,6 @@
-defmodule Barkpark.Sheets.StructureTest do
+defmodule Barkpark.Plugins.Sheets.StructureTest do
   @moduledoc """
-  Pure-function locks for `Barkpark.Sheets.Structure` — the Excel
+  Pure-function locks for `Barkpark.Plugins.Sheets.Structure` — the Excel
   ref-shift matrix (`rewrite_formula/3`: refs before/at/after the change
   point, ranges spanning, deletes producing literal `#REF!`, quoted-string
   literals never rewritten, `$A$1` shifting like `A1`), the tab-level
@@ -9,7 +9,7 @@ defmodule Barkpark.Sheets.StructureTest do
   """
   use ExUnit.Case, async: true
 
-  alias Barkpark.Sheets.Structure
+  alias Barkpark.Plugins.Sheets.Structure
 
   # ── rewrite_formula: rows, insert ───────────────────────────────────────────
 

@@ -20,13 +20,13 @@ defmodule Barkpark.Plugins.Sheets.Csv do
     running count at the halt) the moment the running count exceeds the
     cap, never building the rest.
   * `export/3` — one tab per call (the route's `?tab=` selector). The grid
-    comes from `Barkpark.Sheets.snapshot_for/2` — the same dense values
+    comes from `Barkpark.Plugins.Sheets.Core.snapshot_for/2` — the same dense values
     projection every other read surface uses — with a frozen head row
     re-attached as the first data row. Rows join with `CRLF`; fields quote
     only when they carry the separator, a quote, or a line break.
   """
 
-  alias Barkpark.Sheets, as: Core
+  alias Barkpark.Plugins.Sheets.Core, as: Core
 
   @seps [",", "\t"]
 

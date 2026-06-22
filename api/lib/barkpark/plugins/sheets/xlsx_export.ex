@@ -27,7 +27,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   """
 
   alias Barkpark.Plugins.Sheets.Fmt
-  alias Barkpark.Sheets, as: Core
+  alias Barkpark.Plugins.Sheets.Core, as: Core
   alias Elixlsx.{Sheet, Workbook}
 
   @px_per_width_unit 7

@@ -1,14 +1,14 @@
-defmodule Barkpark.Sheets.EngineTest do
+defmodule Barkpark.Plugins.Sheets.EngineTest do
   @moduledoc """
-  Unit tests for `Barkpark.Sheets.Engine` — the formula engine. Pure
+  Unit tests for `Barkpark.Plugins.Sheets.Engine` — the formula engine. Pure
   functions, no DB: every test drives `recompute/1` on an in-memory content
   map and asserts the written-back cell descriptors.
   """
   use ExUnit.Case, async: true
 
-  doctest Barkpark.Sheets.Engine
+  doctest Barkpark.Plugins.Sheets.Engine
 
-  alias Barkpark.Sheets.Engine
+  alias Barkpark.Plugins.Sheets.Engine
 
   # Recompute a single-tab content map and return its cells.
   defp run(cells) do

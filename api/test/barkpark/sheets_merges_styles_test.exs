@@ -1,7 +1,7 @@
 defmodule Barkpark.SheetsMergesStylesTest do
   @moduledoc """
   M5 core data-model extension: tab-level `"merges"` and cell-level `"s"`
-  styles through snapshot synthesis (`Barkpark.Sheets.snapshot_for/2`) and
+  styles through snapshot synthesis (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`) and
   the HTML walker (`Barkpark.PortableDoc.Render`). Pure functions, no DB.
 
   Fidelity contract under test: the HTML render honors merges
@@ -12,7 +12,7 @@ defmodule Barkpark.SheetsMergesStylesTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Render
-  alias Barkpark.Sheets
+  alias Barkpark.Plugins.Sheets.Core, as: Sheets
 
   defp content(tab), do: %{"tabs" => [tab]}
 

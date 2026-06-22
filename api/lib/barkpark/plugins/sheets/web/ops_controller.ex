@@ -6,7 +6,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   Mounted by `Barkpark.Plugins.Sheets.register_routes/1` on the `:ingest`
   bucket (`RequireIngestToken`), the same bucket as import/export. A THIN
   shim: the body's `{"ops": [ … ]}` list goes straight through
-  `Barkpark.Sheets.Session.apply_ops/3` — the session (CORE) owns
+  `Barkpark.Plugins.Sheets.Session.apply_ops/3` — the session (CORE) owns
   validation, serialization, recompute, delta broadcast and debounced
   persistence. The full op vocabulary (set_cell/clear_cell plus
   insert_rows/delete_rows/insert_cols/delete_cols, set_col_width/
@@ -34,7 +34,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
 
   use BarkparkWeb, :controller
 
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   @default_dataset "production"
 

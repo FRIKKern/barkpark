@@ -3,7 +3,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest.HaltingPersist do
   # A before_save hook that halts ONLY the sheets-session persist path —
   # installed via the `:barkpark, :plugins` env seam so the canonical upsert
   # fails like a real plugin gate refusing the write (no mocking). Mirrors
-  # Barkpark.Sheets.SessionHardeningTest.HaltingPersist.
+  # Barkpark.Plugins.Sheets.SessionHardeningTest.HaltingPersist.
   def lifecycle_hooks, do: %{before_save: [&__MODULE__.halt_session_persist/1]}
 
   def halt_session_persist(%{ctx: %{source: "sheets_session"}}),
@@ -19,7 +19,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       POST /v1/plugins/sheets/:slug/ops
 
   Rides the `:ingest` bucket (RequireIngestToken) like import/export. The
-  controller is a thin shim over the CORE `Barkpark.Sheets.Session` —
+  controller is a thin shim over the CORE `Barkpark.Plugins.Sheets.Session` —
   per-op errors land in the 200 receipt's `errors` (indexed), whole-request
   failures are 401/404/422 (+ 503 for the transient session/flush windows).
   The export-flush lock closes the read-your-writes loop: a wire op followed
@@ -30,7 +30,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   # Set in config/test.exs.
   @token "barkpark-test-ingest-token"
@@ -42,21 +42,21 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
     # Long debounce so persistence happens only where the test asks for it
     # (flush via export, stop via on_exit); long idle-stop so no session
     # dies mid-test.
-    Application.put_env(:barkpark, Barkpark.Sheets.Session,
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session,
       debounce_ms: 60_000,
       idle_stop_ms: 60_000
     )
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     :ok
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -452,7 +452,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
   end
 
   defp registry_partitions do
-    Barkpark.Sheets.SessionRegistry
+    Barkpark.Plugins.Sheets.SessionRegistry
     |> Supervisor.which_children()
     |> Enum.flat_map(fn
       {_, pid, :worker, _} when is_pid(pid) -> [pid]

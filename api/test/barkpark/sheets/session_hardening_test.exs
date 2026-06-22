@@ -1,4 +1,4 @@
-defmodule Barkpark.Sheets.SessionHardeningTest.HaltingPersist do
+defmodule Barkpark.Plugins.Sheets.SessionHardeningTest.HaltingPersist do
   @moduledoc false
   # A before_save hook that halts ONLY the sheets-session persist path
   # (ctx.source == "sheets_session"). Installed via the `:barkpark, :plugins`
@@ -14,9 +14,9 @@ defmodule Barkpark.Sheets.SessionHardeningTest.HaltingPersist do
   def halt_session_persist(_payload), do: :ok
 end
 
-defmodule Barkpark.Sheets.SessionHardeningTest do
+defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
   @moduledoc """
-  Review-phase locks for `Barkpark.Sheets.Session` — the verified-but-deferred
+  Review-phase locks for `Barkpark.Plugins.Sheets.Session` — the verified-but-deferred
   minors:
 
     1. `flush/2` surfaces a failed persist as `{:error, reason}` instead of a
@@ -37,8 +37,8 @@ defmodule Barkpark.Sheets.SessionHardeningTest do
   import ExUnit.CaptureLog
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
-  alias Barkpark.Sheets.SessionHardeningTest.HaltingPersist
+  alias Barkpark.Plugins.Sheets.Session
+  alias Barkpark.Plugins.Sheets.SessionHardeningTest.HaltingPersist
 
   @dataset "sheets_hardening_test"
 
@@ -47,7 +47,7 @@ defmodule Barkpark.Sheets.SessionHardeningTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     put_cfg(debounce_ms: 60_000, idle_stop_ms: 60_000)
@@ -55,12 +55,12 @@ defmodule Barkpark.Sheets.SessionHardeningTest do
   end
 
   defp put_cfg(overrides) do
-    base = Application.get_env(:barkpark, Barkpark.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Sheets.Session, Keyword.merge(base, overrides))
+    base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -202,7 +202,7 @@ defmodule Barkpark.Sheets.SessionHardeningTest do
   # The registry's partition workers — suspending them delays dead-pid
   # cleanup, which is exactly the lookup↔call race the retry bound guards.
   defp registry_partitions do
-    Barkpark.Sheets.SessionRegistry
+    Barkpark.Plugins.Sheets.SessionRegistry
     |> Supervisor.which_children()
     |> Enum.flat_map(fn
       {_, pid, :worker, _} when is_pid(pid) -> [pid]

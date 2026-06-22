@@ -1,10 +1,10 @@
-defmodule Barkpark.Sheets.Structure do
+defmodule Barkpark.Plugins.Sheets.Structure do
   @moduledoc """
   Structural rewrites for sheet tabs (the grid editor's ops) — row/column
   insert/delete with Excel-style ref shifting, plus the small layout
   setters (column width, row height). Pure functions beside
-  `Barkpark.Sheets.Engine`: no Repo, no I/O and no recompute —
-  `Barkpark.Sheets.Session` serializes these through its mailbox and runs
+  `Barkpark.Plugins.Sheets.Engine`: no Repo, no I/O and no recompute —
+  `Barkpark.Plugins.Sheets.Session` serializes these through its mailbox and runs
   the engine on the rewritten tab afterwards.
 
   ## Shift semantics (Excel's bind rules)
@@ -48,7 +48,7 @@ defmodule Barkpark.Sheets.Structure do
   words the engine would reject anyway) passes through untouched.
   """
 
-  alias Barkpark.Sheets
+  alias Barkpark.Plugins.Sheets.Core, as: Sheets
 
   # Excel grid bounds — deliberately duplicated (the established
   # convention: Engine, the plugin gate and the Session each keep their

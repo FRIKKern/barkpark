@@ -22,7 +22,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       timezone, so a trailing offset never appears.
     * formulas → `"f"` (any leading `"="` stripped — the canonical stored
       form); a numeric cached value rides along as `"v"`. The save path
-      runs `Barkpark.Sheets.Engine.recompute/1`, which keeps the file's
+      runs `Barkpark.Plugins.Sheets.Engine.recompute/1`, which keeps the file's
       cached value and flags `"stale" => true` for functions the engine
       does not know (bound grill decision).
     * number formats → `"fmt"` hints via `Barkpark.Plugins.Sheets.Fmt`
@@ -59,7 +59,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   """
 
   alias Barkpark.Plugins.Sheets.Fmt
-  alias Barkpark.Sheets, as: SheetCore
+  alias Barkpark.Plugins.Sheets.Core, as: SheetCore
   alias XlsxReader.Cell
 
   # xlsx column widths are in "character" units; Excel's default char is

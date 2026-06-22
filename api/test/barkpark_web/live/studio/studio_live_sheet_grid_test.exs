@@ -4,7 +4,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
   Proves the editing surface end-to-end through the real spine: a
   `type:"sheet"` document opens as the grid (NOT the field form); every
-  edit event becomes a `Barkpark.Sheets.Session.apply_ops/3` op; the
+  edit event becomes a `Barkpark.Plugins.Sheets.Session.apply_ops/3` op; the
   session's `{:sheets_op,…}` delta broadcast re-renders THIS pane and any
   OTHER LiveView open on the same sheet (two LiveViewTest processes).
   Covers cell edits, the formula bar, keyboard navigation + rectangular
@@ -14,14 +14,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
   `async: false` — sheet sessions are globally registered processes that
   read/persist through the SQL sandbox (shared mode), same as
-  `Barkpark.Sheets.SessionTest`.
+  `Barkpark.Plugins.Sheets.SessionTest`.
   """
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   @dataset "production"
 
@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
     on_exit(fn ->
       stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Sheets.Session)
+      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
     end)
 
     # Keep the production debounce/idle timers out of test timing.
@@ -40,12 +40,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
   end
 
   defp put_cfg(overrides) do
-    base = Application.get_env(:barkpark, Barkpark.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Sheets.Session, Keyword.merge(base, overrides))
+    base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)

@@ -11,7 +11,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.Sheets.{Fmt, XlsxExport, XlsxImport}
-  alias Barkpark.Sheets.Engine
+  alias Barkpark.Plugins.Sheets.Engine
   alias Elixlsx.{Sheet, Workbook}
 
   defp write_xlsx(sheets) do

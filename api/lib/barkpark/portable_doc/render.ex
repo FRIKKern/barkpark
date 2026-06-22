@@ -474,7 +474,7 @@ defmodule Barkpark.PortableDoc.Render do
 
   # ── sheet embed block ──────────────────────────────────────────────────────
   # `"type" => "sheet"` embeds a sheet document by `"ref"`; its `"snapshot"`
-  # key holds the cached dense value grid (`Barkpark.Sheets.snapshot_for/2`,
+  # key holds the cached dense value grid (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`,
   # refreshed by the write-through path in `Barkpark.Content` on every sheet
   # mutation). Composing straight from the snapshot means no DB call — the
   # block renders even with the Sheets plugin off (fresh-install invariant).

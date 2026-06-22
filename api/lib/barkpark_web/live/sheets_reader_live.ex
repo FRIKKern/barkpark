@@ -24,7 +24,7 @@ defmodule BarkparkWeb.SheetsReaderLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
-  alias Barkpark.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session
 
   # The public reader's tenant dataset — same constant the papers reader
   # resolves against (`Content.get_public_paper/2`'s default).
