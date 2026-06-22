@@ -1,0 +1,1042 @@
+defmodule BarkparkWeb.StudioComponents.Editor do
+  @moduledoc """
+  Studio editor-pane components — the document header, field wrappers and
+  renderer, the editor shell, doc-action buttons, cross-field validation
+  banner, schema-group helpers, the bulk action bar, secondary-pane card
+  and picker, and the presence-nav overlay. Extracted from the former
+  monolithic `BarkparkWeb.StudioComponents`; re-exported there as a thin
+  facade so every call site keeps working unchanged.
+  """
+  use Phoenix.Component
+
+  import BarkparkWeb.Icons
+
+  alias BarkparkWeb.Components.FieldInputs
+  alias BarkparkWeb.Components.Fields.Visibility
+  alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
+
+  @doc """
+  Sanity-style document chrome header for the editor pane. Emits the
+  legacy `<div class="pane-header editor-header">` markup so it can
+  replace StudioLive's hand-rolled header at studio_live.ex:1107
+  byte-identically. The component was originally also consumed by the
+  plugin BookView / BookEditor LVs (removed in Goal `barkpark-zdy`);
+  StudioLive is the sole caller today. The corresponding CSS lives in
+  `root.html.heex` (hoisted from StudioLive's inline `<style>`).
+
+  Attributes:
+    * `:dataset`   — (required) string, current dataset name. Carried
+                     so callers can compose other links if needed.
+    * `:title`     — (required) document title text.
+    * `:back_href` — (optional) when present, render a `←` arrow link
+                     before the status pill (used by plugin LVs;
+                     StudioLive omits this).
+
+  Slots:
+    * `:status_pill` — small badge rendered before the title (e.g.
+                       Draft/Published). Matches the legacy badge
+                       slot order in `editor-header`.
+    * `:presence`    — presence-dot block rendered after the title
+                       (StudioLive only — plugin LVs leave empty).
+    * `:meta`        — extra inline meta tokens (e.g. _id, _type,
+                       timestamps). Rendered as a small muted row at
+                       the end of the left flex container; empty for
+                       StudioLive (no rendered output) so byte-identity
+                       holds.
+    * `:actions`     — top-right action buttons (History/Delete/
+                       Publish in StudioLive; previously Bokbasen/
+                       ONIX export and Open-in-editor in the removed
+                       plugin LVs). Slot contents render verbatim —
+                       preserve any `data-test-id` attributes.
+  """
+  attr :dataset, :string, required: true
+  attr :title, :string, required: true
+  attr :back_href, :string, default: nil
+
+  slot :status_pill
+  slot :presence
+  slot :meta
+  slot :actions
+
+  def document_header(assigns) do
+    ~H"""
+    <div class="pane-header editor-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <%= if @back_href do %>
+          <a href={@back_href} class="btn btn-ghost btn-sm" aria-label="Back to Studio">&larr;</a>
+        <% end %>
+        <%= render_slot(@status_pill) %>
+        <span class="pane-header-title"><%= @title %></span>
+        <%= render_slot(@presence) %>
+        <%= if @meta != [] do %>
+          <div class="editor-header-meta" style="font-size: 11px; color: var(--fg-dim); display: flex; gap: 12px; flex-wrap: wrap; margin-left: 4px;">
+            <%= render_slot(@meta) %>
+          </div>
+        <% end %>
+      </div>
+      <div style="display: flex; gap: 6px; min-width: 0; flex: 1; justify-content: flex-end;">
+        <%= render_slot(@actions) %>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Wrapper for a single field row in the editor body. Emits the legacy
+  `<div class="editor-field">` markup with `<label class="editor-field-label">`
+  containing the field title, optional `*` required indicator, and
+  optional type pill. Used by StudioLive (line 1143 + 1159) and plugin
+  LVs to keep field rhythm consistent. CSS in `root.html.heex`.
+
+  Attributes:
+    * `:label`    — (required) field label text.
+    * `:type`     — (optional) field type tag (e.g. "string", "image");
+                     when set renders the small `editor-field-type`
+                     pill next to the label.
+    * `:required` — (optional, default false) renders a `*` indicator.
+    * `:errors`   — (optional, default []) list of error strings; when
+                     non-empty adds the `has-error` class and renders a
+                     `<div class="field-errors">` below the input.
+
+  Default slot: the input/control itself.
+  """
+  attr :label, :string, required: true
+  attr :type, :string, default: nil
+  attr :required, :boolean, default: false
+  attr :errors, :list, default: []
+  attr :onix_element, :string, default: nil
+  slot :inner_block, required: true
+
+  def editor_field(assigns) do
+    ~H"""
+    <div class={"editor-field #{if @errors != [], do: "has-error"}"}>
+      <label class="editor-field-label">
+        <%= @label %>
+        <%= if @required do %><span class="field-required">*</span><% end %>
+        <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
+      </label>
+      <%= if @onix_element do %>
+        <span class="bp-onix-hint" data-onix-element>
+          ONIX: <code><%= @onix_element %></code>
+        </span>
+      <% end %>
+      <%= render_slot(@inner_block) %>
+      <%= if @errors != [] do %>
+        <div class="field-errors"><%= Enum.join(@errors, ", ") %></div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc false
+  # Extract the ONIX element name from a field. Handles both atom-keyed
+  # `%Field{}` structs (post-adapter) and string-keyed raw maps (book.json
+  # passthrough). Returns the element string, or nil if not present.
+  def onix_element(%{onix: %{} = o}), do: Map.get(o, "element") || Map.get(o, :element)
+  def onix_element(%{"onix" => %{} = o}), do: Map.get(o, "element") || Map.get(o, :element)
+  def onix_element(_), do: nil
+
+  @doc """
+  Centered placeholder for the editor pane when no document is loaded
+  or loading failed. Emits the legacy `<div class="editor-empty">`
+  markup. CSS in `root.html.heex`.
+
+  Attributes:
+    * `:message` — (required) primary message text.
+
+  Optional `:icon` slot for a leading icon/glyph (e.g. `<.icon name="file-text">`).
+  """
+  attr :message, :string, required: true
+  slot :icon
+
+  def empty_editor(assigns) do
+    ~H"""
+    <div class="editor-empty">
+      <div style="color: var(--fg-dim); text-align: center;">
+        <%= if @icon != [] do %>
+          <div style="margin-bottom: 12px; opacity: 0.4;"><%= render_slot(@icon) %></div>
+        <% end %>
+        <div class="text-sm"><%= @message %></div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders one schema field row: the `<.editor_field>` wrapper plus the
+  v1/v2 fork that dispatches to either `FieldInputs.input/1` (v1 leaf
+  controls) or `PluginAdapter.render/2` (v2 composite/arrayOf/codelist/
+  localizedText). Output is byte-identical to the inline markup at the
+  former `studio_live.ex:1157-1168` call site.
+
+  The plain `<input type="text" name="doc[title]">` for the title row is
+  NOT a schema field and stays inline inside `studio_editor_shell/1`.
+
+  Attributes:
+    * `:field`             — (required) one schema field map.
+    * `:editor_form`       — (required) form state map keyed by field name.
+    * `:dataset`           — (default `"production"`) plumbed to FieldInputs.
+    * `:validation_errors` — (default `%{}`) keyed by field name; values are
+                              error string lists.
+    * `:parent_assigns`    — (default `%{}`) full parent LV assigns map,
+                              required by `PluginAdapter.render/2` for v2
+                              schema fields (OnixEdit `book` etc.).
+  """
+  attr :field, :map, required: true
+  attr :editor_form, :map, required: true
+  attr :dataset, :string, default: "production"
+  attr :validation_errors, :map, default: %{}
+  attr :parent_assigns, :map, default: %{}
+
+  def studio_field_renderer(assigns) do
+    ~H"""
+    <% field_name = @field["name"] %>
+    <% type = @field["type"] %>
+    <% rules = @field["validation"] || %{} %>
+    <% required? = rules["required"] == true %>
+    <% errors = Map.get(@validation_errors, field_name, []) %>
+    <%= if self_titled?(type) do %>
+      <%!-- v2 structural types render their own <legend>; skip outer label,
+           but keep error display + onix hint as inline rows below the field. --%>
+      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"}"}>
+        <%= if PluginAdapter.v2?(@field) do %>
+          <%= PluginAdapter.render(@parent_assigns, @field) %>
+        <% else %>
+          <FieldInputs.input
+            field={@field}
+            editor_form={@editor_form}
+            dataset={@dataset}
+            scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
+            api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+          />
+        <% end %>
+        <%= if onix = onix_element(@field) do %>
+          <span class="bp-onix-hint" data-onix-element>
+            ONIX: <code><%= onix %></code>
+          </span>
+        <% end %>
+        <%= if errors != [] do %>
+          <div class="field-errors"><%= Enum.join(errors, ", ") %></div>
+        <% end %>
+      </div>
+    <% else %>
+      <.editor_field
+        label={@field["title"] || field_name}
+        type={type}
+        required={required?}
+        errors={errors}
+        onix_element={onix_element(@field)}
+      >
+        <%= if PluginAdapter.v2?(@field) do %>
+          <%= PluginAdapter.render(@parent_assigns, @field) %>
+        <% else %>
+          <FieldInputs.input
+            field={@field}
+            editor_form={@editor_form}
+            dataset={@dataset}
+            scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
+            api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+          />
+        <% end %>
+      </.editor_field>
+    <% end %>
+    """
+  end
+
+  # v2 structural field types own their own title via <fieldset><legend>.
+  # Routing them through `editor_field` would render the same title twice
+  # — once in `<label class="editor-field-label">`, once in the legend.
+  # See `barkpark-jwcb`.
+  defp self_titled?(type), do: type in ~w(arrayOf composite localizedText)
+
+  @doc """
+  StudioLive editor column extracted from `studio_live.ex:1106-1181`.
+  Renders the `<.document_header>` (Task #9) + form-with-fields when an
+  `editor_doc` is loaded, or `<.empty_editor>` (Task #9) otherwise.
+  Schema fields delegate to `<.studio_field_renderer>` (which itself
+  wraps `FieldInputs.input/1` per Task #10 byte-identity contract).
+
+  The TODO at studio_live.ex:1099-1103 (hand-rolled editor column)
+  is preserved verbatim — WI2 does NOT absorb that debt; it requires a
+  `<.pane_column>` API change (design plan archived).
+
+  Historical note: the plugin BookView / BookEditor LVs (removed in
+  Goal `barkpark-zdy`) deliberately did NOT consume this component —
+  their action sets diverged enough (Bokbasen pills, ONIX export,
+  custom tab nav) that wrapping forced endless slots. They called
+  `<.document_header>` directly. StudioLive is the only consumer today.
+
+  Events bubble to StudioLive: save, autosave, show-history, delete-doc,
+  publish, unpublish, plus the studio_field_renderer phx-click events
+  (open-image-picker, clear-image). The reference field is now owned
+  client-side by `<bp-reference-picker>` (Task #12 WI2) and bridges
+  through autosave; open-ref-picker / clear-ref handlers in StudioLive
+  are orphaned-but-harmless until v2 cleanup.
+
+  Slots:
+    * `:extra_actions` — (optional) appended after Publish/Unpublish.
+                          Currently unused; documented for plugin LVs.
+    * `:empty_state`   — (optional) overrides the default
+                          `<.empty_editor message="Select a document …">`.
+  """
+  attr :editor_doc, :map, default: nil
+  attr :editor_schema, :map, default: nil
+  attr :editor_type, :string, default: nil
+  attr :editor_form, :map, required: true
+  attr :editor_is_draft, :boolean, default: false
+  attr :dataset, :string, required: true
+  attr :validation_errors, :map, default: %{}
+  attr :save_status, :string, default: ""
+  attr :presences, :list, default: []
+  attr :parent_assigns, :map, default: %{}
+  attr :nav_group, :string, default: nil
+
+  # ── Cross-field validations (Task barkpark-cgn) ────────────────────
+  # List of unsatisfied rule maps (string-keyed: name, title, level,
+  # fields). Empty list → banner not rendered, no visual cost on
+  # schemas that declare no rules.
+  attr :cross_violations, :list, default: []
+  # ── Content preview side-pane (Goal barkpark-G1, task s3) ──────────
+  # Doc-type-agnostic. Parent passes pre-rendered iodata + a soft
+  # toggle. The pane is rendered iff `content_preview_rendered != nil`
+  # AND the toggle is on — there is NO hardcoded doc-type gate.
+  attr :content_preview_rendered, :any, default: nil
+  attr :content_preview_visible, :boolean, default: true
+
+  # ── Draft-vs-Published diff view (Task barkpark-uix) ───────────────
+  # `diff_visible` flips the editor body between the form and the
+  # field-level diff. `published_doc` is the published twin of the open
+  # draft (nil when no draft is open, or when the draft has no
+  # published counterpart). The toggle button is gated on both
+  # editor_is_draft AND a non-nil published_doc — i.e. exactly the
+  # case where a meaningful diff exists.
+  attr :diff_visible, :boolean, default: false
+  attr :published_doc, :map, default: nil
+
+  # ── Editor-header doc actions (Goal barkpark-cjs, s4) ──────────────────
+  # List of resolved doc-action maps from
+  # `StudioLive.resolved_doc_actions/1`. Each entry is a string-keyed map
+  # matching the `Barkpark.Plugin.doc_action` typespec — `"name"`,
+  # `"label"`, `"kind"` (`"event"` | `"modal"` | `"link"`), `"scope"`
+  # (`"editor_header"` | `"overflow"`), and an `"opts"` map carrying
+  # per-kind payload (the phx-click event for `"event"`, an href template
+  # for `"link"`, a modal payload for `"modal"`). When empty (e.g. legacy
+  # callers that haven't been migrated yet), the editor header renders no
+  # action buttons — the action bar should be considered authoritative.
+  attr :doc_actions, :list, default: []
+
+  slot :extra_actions
+  slot :empty_state
+
+  def studio_editor_shell(assigns) do
+    show_diff_toggle =
+      assigns.editor_doc != nil and assigns.editor_is_draft and
+        assigns.published_doc != nil
+
+    assigns =
+      assigns
+      |> assign(
+        :show_content_preview,
+        assigns.content_preview_rendered != nil and assigns.content_preview_visible and
+          not (assigns.diff_visible and show_diff_toggle)
+      )
+      |> assign(:show_diff_toggle, show_diff_toggle)
+      |> assign(:show_diff, show_diff_toggle and assigns.diff_visible)
+
+    ~H"""
+    <%= if @editor_doc do %>
+      <div class="editor-panel">
+        <.document_header
+          dataset={@dataset}
+          title={@editor_doc.title || "Untitled"}
+        >
+          <:status_pill>
+            <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
+              <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
+            </span>
+          </:status_pill>
+          <:presence>
+            <% doc_presences = presences_on_doc(@presences, Barkpark.Content.published_id(@editor_doc.doc_id), @dataset) %>
+            <%= if doc_presences != [] do %>
+              <div class="presence-dots">
+                <%= for p <- doc_presences do %>
+                  <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
+                <% end %>
+              </div>
+            <% end %>
+          </:presence>
+          <:actions>
+            <bp-overflow-menu class="bp-overflow-menu">
+              <%= for action <- @doc_actions do %>
+                <.doc_action_button
+                  action={action}
+                  editor_doc={@editor_doc}
+                  dataset={@dataset}
+                  workspace_slug={scope_slug(@parent_assigns, :current_workspace)}
+                  project_slug={scope_slug(@parent_assigns, :current_project)}
+                />
+              <% end %>
+              <%= render_slot(@extra_actions) %>
+            </bp-overflow-menu>
+          </:actions>
+        </.document_header>
+
+        <div class={"editor-with-preview " <> if(@show_content_preview, do: "has-onix-preview", else: "")}>
+        <div class="editor-body editor-panel-main">
+          <%= if @editor_schema do %>
+            <div class="editor-meta">
+              <.icon name={@editor_schema.icon} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+            </div>
+          <% end %>
+
+          <.cross_violations_banner violations={@cross_violations} />
+
+          <%= if @show_diff do %>
+            <BarkparkWeb.Components.DraftDiff.draft_diff
+              draft={@editor_doc}
+              published={@published_doc}
+              schema={@editor_schema}
+            />
+          <% else %>
+            <%= if schema_groups(@editor_schema) != [] do %>
+              <div class="bp-tab-bar" role="tablist">
+                <%= for grp <- schema_groups(@editor_schema) do %>
+                  <button
+                    type="button"
+                    phx-click="select-group"
+                    phx-value-group={grp["name"]}
+                    role="tab"
+                    aria-selected={@nav_group == grp["name"]}
+                    title={grp["title"]}
+                    aria-label={grp["title"]}
+                    class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
+                  ><span class="bp-tab-icon" aria-hidden="true"><.icon name={tab_icon(grp)} /></span></button>
+                <% end %>
+              </div>
+            <% end %>
+
+            <form phx-submit="save" phx-change="autosave" id="editor-form">
+              <.editor_field
+                label="Title"
+                required={(get_title_validation(@editor_schema) || %{})["required"] == true}
+                errors={Map.get(@validation_errors, "title", [])}
+              >
+                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
+              </.editor_field>
+              <%= if @editor_schema do %>
+                <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
+                        Visibility.visible?(field, @editor_form) do %>
+                  <.studio_field_renderer
+                    field={field}
+                    editor_form={@editor_form}
+                    dataset={@dataset}
+                    validation_errors={@validation_errors}
+                    parent_assigns={@parent_assigns}
+                  />
+                <% end %>
+              <% end %>
+              <div class="editor-actions">
+                <span class="save-status"><%= @save_status %></span>
+              </div>
+            </form>
+          <% end %>
+        </div>
+        <BarkparkWeb.Components.OnixPreview.content_preview
+          :if={@show_content_preview}
+          rendered={@content_preview_rendered}
+          type={@editor_type || ""}
+        />
+        </div>
+      </div>
+    <% else %>
+      <%= if @empty_state != [] do %>
+        <%= render_slot(@empty_state) %>
+      <% else %>
+        <.empty_editor message="Select a document to edit">
+          <:icon><.icon name="file-text" size={40} /></:icon>
+        </.empty_editor>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  # Dataset arm mirrors PresenceState.on_doc/3 (tsk-url-p0): the same doc_id
+  # in another dataset is NOT co-presence.
+  defp presences_on_doc(presences, doc_id, dataset) do
+    Enum.filter(presences, &(&1.doc_id == doc_id and Map.get(&1, :dataset) == dataset))
+  end
+
+  # Slug off the parent LV's resolved scope structs — "" when unscoped
+  # (flat surface) so href interpolation degrades to empty segments.
+  defp scope_slug(parent_assigns, key) do
+    case Map.get(parent_assigns || %{}, key) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> ""
+    end
+  end
+
+  @doc """
+  Renders a single editor-header doc-action — `"event"`, `"modal"`, or
+  `"link"` — from a resolved doc-action map (see
+  `Barkpark.Plugin.doc_action` typespec + `StudioLive.default_doc_actions/2`).
+
+  Used by `studio_editor_shell/1` to walk the resolved list inside
+  `<bp-overflow-menu>`. Splits out so the case statement stays out of the
+  shell's main HEEx.
+
+    * `"event"` → `<button phx-click=<opts.event>>`
+    * `"modal"` → `<button phx-click="schema_action" phx-value-name=<name>>`
+    * `"link"`  → `<a href=<interpolated-href>>`
+
+  Class / style / `data-test-id` are read off `opts` so the host's built-in
+  buttons preserve their existing attrs (`btn btn-primary btn-sm` on
+  Publish, `color: var(--destructive)` on Delete, `data-test-id` on
+  Duplicate / Open another / schema actions). Plugin-contributed actions
+  without those opts fall back to `btn btn-ghost btn-sm`.
+  """
+  attr :action, :map, required: true
+  attr :editor_doc, :map, default: nil
+  attr :dataset, :string, required: true
+  # Scope slugs for href interpolation (tsk-url-p2): a schema action may
+  # carry :workspace / :project placeholders alongside :dataset / :id.
+  attr :workspace_slug, :string, default: ""
+  attr :project_slug, :string, default: ""
+
+  def doc_action_button(assigns) do
+    ~H"""
+    <%= case @action["kind"] do %>
+      <% "link" -> %>
+        <a
+          href={
+            interpolate_doc_action_href(
+              @action,
+              @editor_doc,
+              @dataset,
+              @workspace_slug,
+              @project_slug
+            )
+          }
+          class={action_button_class(@action)}
+          title={@action["label"]}
+          aria-label={@action["label"]}
+          data-test-id={doc_action_test_id(@action)}
+        ><.doc_action_glyph action={@action} /></a>
+      <% "modal" -> %>
+        <button
+          type="button"
+          class={action_button_class(@action)}
+          style={action_button_style(@action)}
+          title={@action["label"]}
+          aria-label={@action["label"]}
+          data-test-id={doc_action_test_id(@action)}
+          phx-click="schema_action"
+          phx-value-name={@action["name"]}
+        ><.doc_action_glyph action={@action} /></button>
+      <% _ -> %>
+        <%!-- default: "event" — dispatch the named phx-click event --%>
+        <button
+          type="button"
+          class={action_button_class(@action)}
+          style={action_button_style(@action)}
+          title={@action["label"]}
+          aria-label={@action["label"]}
+          data-test-id={doc_action_test_id(@action)}
+          phx-click={doc_action_event(@action)}
+        ><.doc_action_glyph action={@action} /></button>
+    <% end %>
+    """
+  end
+
+  # Renders the action's icon if one is declared, falling back to the
+  # text label so plugin-contributed actions that pre-date the icon
+  # convention still render a clickable button. The icon SVG is
+  # aria-hidden so screen readers announce the parent button's
+  # aria-label exactly once. See task barkpark-jl4x.
+  attr :action, :map, required: true
+
+  defp doc_action_glyph(assigns) do
+    icon_name = doc_action_icon(assigns.action)
+    assigns = assign(assigns, :icon_name, icon_name)
+
+    ~H"""
+    <%= if @icon_name do %>
+      <span class="bp-action-icon" aria-hidden="true"><.icon name={@icon_name} size={16} /></span>
+    <% else %>
+      <%= @action["label"] %>
+    <% end %>
+    """
+  end
+
+  # Read the icon name from either `opts.icon` (task barkpark-jl4x
+  # convention for built-ins) or the top-level `"icon"` key (existing
+  # schema-action spec — see `Barkpark.Plugin.doc_action` typespec and
+  # `OnixEdit.document_actions/0`). Returns nil when neither is set;
+  # callers fall back to the text label so the button stays usable.
+  defp doc_action_icon(action) do
+    case action do
+      %{"opts" => %{"icon" => icon}} when is_binary(icon) -> icon
+      %{"icon" => icon} when is_binary(icon) -> icon
+      _ -> nil
+    end
+  end
+
+  defp doc_action_event(action) do
+    case action["opts"] do
+      %{"event" => ev} when is_binary(ev) -> ev
+      _ -> action["name"]
+    end
+  end
+
+  defp action_button_class(action) do
+    case action["opts"] do
+      %{"class" => c} when is_binary(c) -> c
+      _ -> "btn btn-ghost btn-sm"
+    end
+  end
+
+  defp action_button_style(action) do
+    case action["opts"] do
+      %{"style" => s} when is_binary(s) -> s
+      _ -> nil
+    end
+  end
+
+  defp doc_action_test_id(action) do
+    case action["opts"] do
+      %{"data_test_id" => id} when is_binary(id) ->
+        id
+
+      _ ->
+        case action["kind"] do
+          k when k in ["modal", "link"] -> "schema-action-#{action["name"]}"
+          _ -> nil
+        end
+    end
+  end
+
+  # Same interpolation StudioLive used for schema-declared `"link"`
+  # actions. Falls back to `"#"` when href is missing. Substitutes
+  # `:dataset` and `:id` (published id — drafts. prefix stripped).
+  defp interpolate_doc_action_href(action, doc, dataset, ws_slug, proj_slug) do
+    case action["opts"] do
+      %{"href" => href} when is_binary(href) ->
+        do_interpolate_href(href, doc, dataset, ws_slug, proj_slug)
+
+      _ ->
+        case action["href"] do
+          href when is_binary(href) -> do_interpolate_href(href, doc, dataset, ws_slug, proj_slug)
+          _ -> "#"
+        end
+    end
+  end
+
+  # Placeholder vocabulary: :dataset · :id · :workspace · :project
+  # (tsk-url-p2 added the scope pair — a plugin action can address the
+  # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
+  # :workspace is replaced before :w-anything ambiguity can arise because
+  # the replacements run longest-token-first.
+  defp do_interpolate_href(href, doc, dataset, ws_slug, proj_slug) do
+    id =
+      case doc do
+        %{doc_id: doc_id} -> Barkpark.Content.published_id(doc_id)
+        _ -> ""
+      end
+
+    href
+    |> String.replace(":workspace", to_string(ws_slug || ""))
+    |> String.replace(":project", to_string(proj_slug || ""))
+    |> String.replace(":dataset", to_string(dataset || ""))
+    |> String.replace(":id", id)
+  end
+
+  @doc """
+  Renders the cross-field validation banner at the top of the editor pane
+  (Task barkpark-cgn). Empty list → nothing renders. Each violation
+  surfaces its title and level (error|warning) plus the first involved
+  field as a hint.
+
+  This is the first-pass UI from the task spec — count + per-rule rows.
+  The inline-per-field highlight pass lives behind future work, gated on
+  stable per-field DOM ids (currently absent from `editor_field`).
+  """
+  attr :violations, :list, default: []
+
+  def cross_violations_banner(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :counts,
+        %{
+          error: Enum.count(assigns.violations, &(&1["level"] == "error")),
+          warning: Enum.count(assigns.violations, &(&1["level"] == "warning"))
+        }
+      )
+
+    ~H"""
+    <%= if @violations != [] do %>
+      <div class="bp-violations" role="status" aria-live="polite" data-test-id="cross-violations">
+        <div class="bp-violations-summary">
+          <span class="bp-violations-count">
+            <%= length(@violations) %> issue<%= if length(@violations) != 1, do: "s" %>:
+          </span>
+          <%= if @counts.error > 0 do %>
+            <span class="bp-violations-error"><%= @counts.error %> error<%= if @counts.error != 1, do: "s" %></span>
+          <% end %>
+          <%= if @counts.error > 0 and @counts.warning > 0 do %>
+            <span>·</span>
+          <% end %>
+          <%= if @counts.warning > 0 do %>
+            <span class="bp-violations-warning"><%= @counts.warning %> warning<%= if @counts.warning != 1, do: "s" %></span>
+          <% end %>
+        </div>
+        <ul class="bp-violations-list">
+          <%= for v <- @violations do %>
+            <li class={"bp-violation-item bp-violations-#{v["level"] || "error"}"}
+                data-test-id={"cross-violation-#{v["name"]}"}>
+              <span class="bp-violation-title"><%= v["title"] || v["name"] %></span>
+              <%= if is_list(v["fields"]) and v["fields"] != [] do %>
+                <span class="bp-violation-fields">&nbsp;— <%= List.first(v["fields"]) %></span>
+              <% end %>
+            </li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp get_title_validation(nil), do: nil
+
+  defp get_title_validation(schema) do
+    case Enum.find(schema.fields, &(&1["name"] == "title")) do
+      %{"validation" => v} -> v
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Read the `groups` declaration from a schema map (Sanity-style field-group
+  tabs). Tolerates atom or string keys; returns `[]` for legacy schemas that
+  never declared any groups so the editor's tab bar is hidden entirely
+  (back-compat invariant — post/page/author/etc. render unchanged).
+  """
+  def schema_groups(nil), do: []
+
+  def schema_groups(schema) do
+    case Map.get(schema, :groups) || Map.get(schema, "groups") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  # Per-group icon (task barkpark-sfzn). Plugins that omit "icon" still
+  # render — falls back to a neutral "circle" so the tab bar never blanks.
+  defp tab_icon(%{"icon" => icon}) when is_binary(icon) and icon != "", do: icon
+  defp tab_icon(_), do: "circle"
+
+  @doc """
+  Filter top-level fields to those visible on the currently selected tab.
+
+  `nav_group == nil` — no active tab → show everything (legacy / no-groups
+  schemas, plus the back-compat path while StudioLive is mounting).
+
+  `nav_group` set — keep only fields whose `"group"` attribute matches the
+  active tab. Fields without a `"group"` are not surfaced on any tab; the
+  ONIX book schema tags every top-level field explicitly so this is a
+  deliberate signal, not an oversight (decision recorded in this task).
+  """
+  def visible_fields(fields, nil), do: fields
+
+  def visible_fields(fields, group_name) when is_binary(group_name) do
+    Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
+  end
+
+  # ── Document actions chrome (Task barkpark-3yq) ───────────────────────────
+  # Three small components for the Sanity-style document actions: bulk
+  # publish floating action bar, read-only secondary editor card, and the
+  # secondary-doc picker modal. Kept here next to the other Studio chrome.
+
+  @doc """
+  Floating action bar shown at the bottom of the viewport when one or
+  more documents are checkbox-selected on the active list pane. Hidden
+  entirely when the set is empty so the bar never crowds normal browsing.
+
+  Buttons emit `phx-click="bulk-publish"` / `"bulk-unpublish"` /
+  `"bulk-clear"` against the parent LV. The "Selected" count comes from
+  `MapSet.size(@selected_doc_ids)`.
+  """
+  attr :selected_doc_ids, :any, required: true
+
+  def bulk_action_bar(assigns) do
+    count = MapSet.size(assigns.selected_doc_ids)
+    assigns = assign(assigns, :count, count)
+
+    ~H"""
+    <%= if @count > 0 do %>
+      <div class="bp-bulk-action-bar" role="region" aria-label="Bulk actions" data-test-id="bulk-action-bar">
+        <span class="bp-bulk-action-count">
+          <%= @count %> selected
+        </span>
+        <div class="bp-bulk-action-buttons">
+          <button
+            type="button"
+            class="btn btn-primary btn-sm"
+            phx-click="bulk-publish"
+            data-test-id="bulk-publish"
+          >Publish selected</button>
+          <button
+            type="button"
+            class="btn btn-sm"
+            phx-click="bulk-unpublish"
+            data-test-id="bulk-unpublish"
+          >Unpublish selected</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="bulk-clear"
+            data-test-id="bulk-clear"
+          >Clear</button>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Read-only secondary editor card — the "Open in new pane" target. Shows
+  the secondary doc's title, type, status pill, and a flat key-value
+  table of its content fields. v1 is deliberately read-only so primary
+  autosave never collides with a secondary edit (decision in task brief).
+  The Close button reveals the floating "Open another" button again via
+  the `close-secondary` event.
+  """
+  attr :secondary_doc, :map, default: nil
+  attr :secondary_schema, :map, default: nil
+  attr :secondary_type, :string, default: nil
+
+  def secondary_editor_card(assigns) do
+    ~H"""
+    <%= if @secondary_doc do %>
+      <aside class="bp-secondary-pane" data-test-id="secondary-pane">
+        <header class="bp-secondary-pane-header">
+          <div class="bp-secondary-pane-title">
+            <span class="badge badge-draft" :if={Barkpark.Content.draft?(@secondary_doc.doc_id)}>
+              draft
+            </span>
+            <span class="badge" :if={!Barkpark.Content.draft?(@secondary_doc.doc_id)}>
+              <%= @secondary_doc.status %>
+            </span>
+            <span class="bp-secondary-pane-type"><%= @secondary_type %></span>
+            <strong><%= @secondary_doc.title || "Untitled" %></strong>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="close-secondary"
+            data-test-id="close-secondary"
+            aria-label="Close secondary pane"
+          >×</button>
+        </header>
+        <div class="bp-secondary-pane-body">
+          <dl class="bp-secondary-pane-fields">
+            <%= for field <- secondary_visible_fields(@secondary_schema) do %>
+              <% key = field["name"] %>
+              <dt><%= field["title"] || key %></dt>
+              <dd><%= secondary_format_value(get_in(@secondary_doc.content || %{}, [key])) %></dd>
+            <% end %>
+          </dl>
+          <p class="bp-secondary-pane-readonly">Read-only — edit via primary pane.</p>
+        </div>
+      </aside>
+    <% end %>
+    """
+  end
+
+  defp secondary_visible_fields(nil), do: []
+
+  defp secondary_visible_fields(%{fields: fields}) when is_list(fields) do
+    Enum.reject(fields, &(&1["name"] in ["title", "status"]))
+  end
+
+  defp secondary_visible_fields(_), do: []
+
+  defp secondary_format_value(nil), do: "—"
+  defp secondary_format_value(""), do: "—"
+  defp secondary_format_value(v) when is_binary(v), do: v
+  defp secondary_format_value(v) when is_boolean(v), do: to_string(v)
+  defp secondary_format_value(v) when is_number(v), do: to_string(v)
+  defp secondary_format_value(v), do: inspect(v, limit: 50)
+
+  @doc """
+  Secondary-doc picker modal — reuses the reference-picker visual
+  treatment so users get a familiar interaction. Filter is client-side
+  string-contains against the candidates list bound on `open-secondary-picker`.
+  Selecting a row fires `select-secondary`; clicking the backdrop or the
+  ✕ fires `close-secondary-picker`.
+  """
+  attr :show_secondary_picker, :boolean, default: false
+  attr :secondary_search, :string, default: ""
+  attr :secondary_candidates, :list, default: []
+
+  def secondary_picker_modal(assigns) do
+    filtered =
+      if assigns.secondary_search == "" do
+        assigns.secondary_candidates
+      else
+        q = String.downcase(assigns.secondary_search)
+
+        Enum.filter(assigns.secondary_candidates, fn c ->
+          String.contains?(String.downcase(c.title || ""), q) or
+            String.contains?(String.downcase(c.id || ""), q)
+        end)
+      end
+
+    assigns = assign(assigns, :filtered, filtered)
+
+    ~H"""
+    <%= if @show_secondary_picker do %>
+      <div class="modal-backdrop" phx-click="close-secondary-picker" data-test-id="secondary-picker-modal">
+        <div class="modal-card" phx-click-away="close-secondary-picker" onclick="event.stopPropagation()">
+          <div class="modal-header">
+            <h3>Open in new pane</h3>
+            <button class="btn btn-ghost btn-sm" phx-click="close-secondary-picker" aria-label="Close">×</button>
+          </div>
+          <div class="modal-body">
+            <input
+              type="text"
+              class="form-input"
+              placeholder="Search documents…"
+              value={@secondary_search}
+              phx-keyup="secondary-search"
+              phx-debounce="150"
+              autofocus
+            />
+            <ul class="bp-secondary-candidates">
+              <%= for c <- @filtered do %>
+                <li
+                  class="bp-secondary-candidate"
+                  phx-click="select-secondary"
+                  phx-value-id={c.id}
+                  data-test-id={"secondary-candidate-#{c.id}"}
+                >
+                  <strong><%= c.title %></strong>
+                  <span class="bp-secondary-candidate-id"><%= c.id %></span>
+                </li>
+              <% end %>
+              <%= if @filtered == [] do %>
+                <li class="bp-secondary-empty">No matches.</li>
+              <% end %>
+            </ul>
+          </div>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Presence-nav overlay (top-right) extracted from `studio_live.ex:947-984`.
+  Renders one avatar+tooltip per other user plus the self pill. The
+  outer wrapper preserves the LV hook contract:
+
+      <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
+
+  Both `id="presence-hook"` AND `phx-hook="PresenceIdentity"` are
+  load-bearing — the localStorage-sync mechanism declared in
+  `root.html.heex` listens on this element. Do NOT change either.
+
+  Events bubble to the parent LV: `jump-to-user`, `show-profile`.
+  Helpers `truncate_text/2` and `resolve_presence_doc_title/2` migrate
+  from StudioLive into module-private of this component.
+  """
+  attr :user_id, :string, required: true
+  attr :user_name, :string, required: true
+  attr :user_color, :string, required: true
+  attr :presences, :list, default: []
+  attr :editor_doc, :map, default: nil
+  attr :dataset, :string, required: true
+  attr :current_workspace, :map, default: nil
+  attr :current_project, :map, default: nil
+
+  def presence_nav(assigns) do
+    ~H"""
+    <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
+      <% scope_opts = build_scope_opts(@current_workspace, @current_project) %>
+      <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
+      <%= for p <- others do %>
+        <% p_doc_title = resolve_presence_doc_title(p, @dataset, scope_opts) %>
+        <%= if p.doc_id && p.type do %>
+          <div class="presence-user-wrap"
+               phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
+            <div class="presence-avatar clickable" style={"background: #{p.color}"}>
+              <%= String.first(Map.get(p, :name, "U")) %>
+            </div>
+            <div class="presence-tooltip">
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+              <div class="presence-tooltip-location">editing <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
+              <div class="presence-tooltip-hint">Click to jump there</div>
+            </div>
+          </div>
+        <% else %>
+          <div class="presence-user-wrap">
+            <div class="presence-avatar" style={"background: #{p.color}"}>
+              <%= String.first(Map.get(p, :name, "U")) %>
+            </div>
+            <div class="presence-tooltip">
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
+              <div class="presence-tooltip-location">browsing</div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+      <div class="presence-me-group" phx-click="show-profile" title={"#{@user_name} — profile"}>
+        <div class="presence-me-info">
+          <span class="presence-me-name"><%= @user_name %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
+        </div>
+        <div class="presence-me" style={"background: #{@user_color}"}>
+          <%= String.first(@user_name) %>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp truncate_text(nil, _max), do: ""
+  defp truncate_text(text, max) when byte_size(text) <= max, do: text
+  defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
+
+  # Build scope opts from the workspace/project assigns the parent LV holds.
+  # Mirrors `BarkparkWeb.ScopeHelpers.scope_opts(%Socket{})` for the Socket
+  # variant — no `memoize: true` (LV processes are long-lived; see sknf).
+  # Nil-safe: an absent workspace or project drops its key entirely.
+  defp build_scope_opts(workspace, project) do
+    []
+    |> put_scope_key(:workspace_id, workspace)
+    |> put_scope_key(:project_id, project)
+  end
+
+  defp put_scope_key(opts, _key, nil), do: opts
+  defp put_scope_key(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
+  defp put_scope_key(opts, _key, _other), do: opts
+
+  defp resolve_presence_doc_title(presence, dataset, scope_opts) do
+    type = presence.type
+    doc_id = presence.doc_id
+
+    if type && doc_id do
+      case Barkpark.Content.get_document(doc_id, type, dataset, scope_opts) do
+        {:ok, doc} ->
+          doc.title || doc_id
+
+        _ ->
+          case Barkpark.Content.get_document("drafts.#{doc_id}", type, dataset, scope_opts) do
+            {:ok, doc} -> doc.title || doc_id
+            _ -> doc_id
+          end
+      end
+    else
+      "browsing"
+    end
+  end
+end
