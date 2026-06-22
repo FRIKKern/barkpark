@@ -40,13 +40,18 @@
 //   cohesion = intra / (intra + Ca + Ce). Share of a concept's edges that stay
 //              inside its own boundary.
 //
-// ── THE THREE BANDS ──────────────────────────────────────────────────────────
-//   KERNEL        high Ca, low I — depended-upon substrate. NOT extractable;
-//                 high reach IS the substrate role (content Ca 390, tenancy 199).
-//   CLEAN-FEATURE high cohesion, low Ca — depends inward, nothing depends back.
-//                 Extractable in principle (sheets coh 0.87, onixedit 0.84).
-//   UNSTABLE-EDGE high Ce, Ca ~0 — glue / entrypoints / seeders. Thin by design,
-//                 wires into the kernel and is depended on by nothing.
+// ── THE BANDS ────────────────────────────────────────────────────────────────
+//   KERNEL          high Ca, low I — depended-upon substrate. NOT extractable;
+//                   high reach IS the substrate role (content Ca 390, tenancy 199).
+//   CLEAN-FEATURE   high cohesion, low Ca, AND a plugin registration surface —
+//                   a registered, extractable feature (sheets coh 0.87, onixedit).
+//   CLEAN-NONPLUGIN clean by the SAME coupling math (high cohesion, low Ca) but
+//                   WITHOUT the plugin registration surface — a pristine domain
+//                   library, clean-by-coupling, just not a plugin (release coh
+//                   1.00, portable_doc coh 0.86). The ONLY difference from
+//                   CLEAN-FEATURE is the missing registration.
+//   UNSTABLE-EDGE   high Ce, Ca ~0 — glue / entrypoints / seeders. Thin by design,
+//                   wires into the kernel and is depended on by nothing.
 //
 // Dependency-free. ESM, node: builtins only. Computes everything from the real
 // graph — never hardcodes an expected number.
@@ -55,6 +60,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { isRegistered } from "./registration.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -175,7 +182,7 @@ function computeConcepts(graph) {
       cohesion,
       fileCount,
       dirSpread,
-      band: classify({ ca: s.ca, ce: s.ce, instability, cohesion, fileCount }),
+      band: classify({ concept: c, ca: s.ca, ce: s.ce, instability, cohesion, fileCount }),
     });
   }
 
@@ -185,12 +192,17 @@ function computeConcepts(graph) {
 }
 
 // Partition a concept onto the dependency-stability gradient. KERNEL is checked
-// first (depended-upon substrate trumps everything); then clean feature; then
-// unstable edge; otherwise the concept is "mixed" (or "noise" if tiny).
+// first (depended-upon substrate trumps everything); then the clean band — split
+// into CLEAN-FEATURE (registered plugin) vs CLEAN-NONPLUGIN (clean by the same
+// coupling math but lacking the plugin registration surface); then unstable edge;
+// otherwise the concept is "mixed" (or "noise" if tiny). The clean-by-coupling
+// gate is identical for both clean bands — only the registration surface differs.
 function classify(m) {
   if (m.fileCount < MIN_FILES) return "noise";
   if (m.ca >= KERNEL_CA && m.instability <= KERNEL_I) return "KERNEL";
-  if (m.cohesion >= FEATURE_COHESION && m.ca < FEATURE_CA) return "CLEAN-FEATURE";
+  if (m.cohesion >= FEATURE_COHESION && m.ca < FEATURE_CA) {
+    return isRegistered(m.concept) ? "CLEAN-FEATURE" : "CLEAN-NONPLUGIN";
+  }
   if (m.instability >= EDGE_INSTABILITY && m.ca < EDGE_CA) return "UNSTABLE-EDGE";
   return "mixed";
 }
@@ -207,6 +219,7 @@ export function runConcepts() {
     bands: {
       kernel: banded("KERNEL").map((r) => r.concept),
       cleanFeature: banded("CLEAN-FEATURE").map((r) => r.concept),
+      cleanNonplugin: banded("CLEAN-NONPLUGIN").map((r) => r.concept),
       unstableEdge: banded("UNSTABLE-EDGE").map((r) => r.concept),
     },
     concepts: rows,
@@ -217,6 +230,7 @@ export function runConcepts() {
 const BAND_GLYPH = {
   KERNEL: "▓",
   "CLEAN-FEATURE": "░",
+  "CLEAN-NONPLUGIN": "▒",
   "UNSTABLE-EDGE": "·",
   mixed: " ",
   noise: " ",
@@ -257,8 +271,10 @@ function printHuman(res) {
   out(`\nBANDS\n`);
   out(`  ▓ KERNEL        (Ca ≥ ${KERNEL_CA}, I ≤ ${KERNEL_I}) — depended-upon, NOT extractable\n`);
   out(`      ${res.bands.kernel.join(", ") || "none"}\n`);
-  out(`  ░ CLEAN-FEATURE (cohesion ≥ ${FEATURE_COHESION}, Ca < ${FEATURE_CA}) — extractable in principle\n`);
+  out(`  ░ CLEAN-FEATURE (cohesion ≥ ${FEATURE_COHESION}, Ca < ${FEATURE_CA}, registered) — extractable plugin\n`);
   out(`      ${res.bands.cleanFeature.join(", ") || "none"}\n`);
+  out(`  ▒ CLEAN-NONPLUGIN (cohesion ≥ ${FEATURE_COHESION}, Ca < ${FEATURE_CA}, NOT registered) — pristine domain lib\n`);
+  out(`      ${res.bands.cleanNonplugin.join(", ") || "none"}\n`);
   out(`  · UNSTABLE-EDGE (I ≥ ${EDGE_INSTABILITY}, Ca < ${EDGE_CA}) — thin glue / entrypoints\n`);
   out(`      ${res.bands.unstableEdge.join(", ") || "none"}\n`);
   out(`\n${bar}\n`);
