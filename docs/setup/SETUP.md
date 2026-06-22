@@ -87,7 +87,7 @@ Both profiles bootstrap tenancy and are idempotent on re-run. Demo counts, verif
 | `documents` | 27 | post 9, page 5, project 4, author 3, category 3, colors/navigation/siteSettings 1 each |
 | Workspaces | 1 | Default Workspace |
 | Projects | 1 | Default Project (slug `default`) |
-| Datasets | 2 | `production`, `paperflow` |
+| Datasets | 1 | `production` |
 | API tokens | 1 | `barkpark-dev-token` |
 
 Details worth knowing:

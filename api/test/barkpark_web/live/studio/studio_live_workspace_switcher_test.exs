@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
     # Datasets under the Acme/Blog project — the controlled data for the
     # project-scoped Dataset column (Task barkpark-dgpf). Mirrors the real
-    # Default-project shape (production/paperflow/reftest_16835): "production"
+    # Default-project shape (production/reftest_16835): "production"
     # is the auto-select default; "staging"/"reftest" are the alternates.
     {:ok, acme_production} =
       Tenancy.create_dataset(acme_blog, %{slug: "production", name: "Production"})

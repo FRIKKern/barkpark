@@ -1,10 +1,11 @@
 defmodule Barkpark.TenancyDatasetsTest do
   @moduledoc """
   Wave-2 foundation: the additive datasets seam. Asserts the migration-time
-  SEED (20260527132000) produced a `datasets` row for "production" (+
-  "paperflow") under the Default project, and that the BACKFILL shape links a
-  content row's `dataset_id` to the datasets row whose (project_id, slug)
-  matches the row's dataset string.
+  SEED (20260527132000) produced a `datasets` row for "production" under the
+  Default project, that the vestigial "paperflow" dataset was removed
+  (20260622120000), and that the BACKFILL shape links a content row's
+  `dataset_id` to the datasets row whose (project_id, slug) matches the row's
+  dataset string.
   """
   use Barkpark.DataCase, async: false
 
@@ -24,19 +25,16 @@ defmodule Barkpark.TenancyDatasetsTest do
       assert ds.project_id == project.id
     end
 
-    test "a 'paperflow' dataset exists under the Default project" do
+    test "the vestigial 'paperflow' dataset was removed (migration 20260622120000)" do
       project = Tenancy.get_default_project()
-      ds = Tenancy.get_dataset(project, "paperflow")
-      assert %Dataset{} = ds
-      assert ds.slug == "paperflow"
-      assert ds.project_id == project.id
+      assert Tenancy.get_dataset(project, "paperflow") == nil
     end
 
-    test "list_datasets/1 returns the seeded datasets, slug-ordered" do
+    test "list_datasets/1 returns production and not the removed paperflow dataset" do
       project = Tenancy.get_default_project()
       slugs = project |> Tenancy.list_datasets() |> Enum.map(& &1.slug)
-      assert "paperflow" in slugs
       assert "production" in slugs
+      refute "paperflow" in slugs
     end
   end
 
