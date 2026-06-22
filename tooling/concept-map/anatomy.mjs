@@ -72,14 +72,16 @@ const PLUGINS_DIR = join(ROOT, "api/lib/barkpark/plugins");
 const TEST_DIR = join(ROOT, "api/test");
 
 // ── exemplar-selection thresholds (computed-against, documented) ─────────────
-// A clean-feature exemplar sits low on the afferent gradient and high on
-// cohesion. EXEMPLAR_CA_MAX is deliberately below media's Ca (≈28): media is
-// half-infrastructure and would pollute the learned skeleton with substrate
-// coupling. EXEMPLAR_COH_MIN keeps the leaf exemplar (tasks ≈0.72) while cutting
-// frt / bulldocs (≈0.6) that lack role-variety.
-export const EXEMPLAR_CA_MAX = 25; // afferent coupling an exemplar stays below
-export const EXEMPLAR_COH_MIN = 0.7; // cohesion an exemplar stays at/above
-export const MIN_CLEAN_EXEMPLARS = 3; // below this, use the curated fallback
+// An exemplar must be a genuine CLEAN-FEATURE — the band (from P1's coupling
+// classifier) already encodes cohesion ≥ the feature gate, low Ca, AND a plugin
+// registration surface. We gate on the BAND, not a hand-tuned Ca/cohesion pair:
+// the old EXEMPLAR_CA_MAX=25 was set just below media's Ca (~28), so when the
+// media-storage extraction dropped media's Ca to 25, a tangled `mixed` concept
+// slipped in. The band moves with the math; a magic number doesn't.
+// EXEMPLAR_CA_MAX / EXEMPLAR_COH_MIN are retained for reference/back-compat only.
+export const EXEMPLAR_CA_MAX = 25; // (superseded by the CLEAN-FEATURE band gate)
+export const EXEMPLAR_COH_MIN = 0.7; // (superseded by the CLEAN-FEATURE band gate)
+export const MIN_CLEAN_EXEMPLARS = 2; // below this, use the curated fallback (sheets+onixedit are the repo's two genuine clean features)
 export const MAX_EXEMPLARS = 5; // cap on how many exemplars feed the skeleton
 
 // The repo's registration convention — the recurring wiring call. cqv8 LOOKS for
@@ -275,11 +277,12 @@ export function runAnatomy() {
   // AND carrying the registration convention (a real pluggable feature).
   const candidates = [];
   for (const c of p1.concepts) {
-    if (c.band === "KERNEL" || c.band === "noise") continue;
-    if (c.ca > EXEMPLAR_CA_MAX) continue;
-    if (c.cohesion < EXEMPLAR_COH_MIN) continue;
+    // Gate on the CLEAN-FEATURE band (clean-by-coupling AND registered) — not a
+    // hand-tuned Ca/cohesion pair. This robustly excludes tangled `mixed`
+    // concepts like media (Ce-heavy) regardless of where their Ca happens to sit.
+    if (c.band !== "CLEAN-FEATURE") continue;
     const registration = registrationOf(c.concept);
-    if (!registration) continue; // registration filter = the discriminator
+    if (!registration) continue; // CLEAN-FEATURE implies registered; keep as a guard
     const files = filesOf.get(c.concept) || new Set();
     const testFiles = testFilesForConcept(c.concept, allTestFiles);
     const roles = rolesOfConcept(c.concept, files, registration, testFiles.length > 0);
