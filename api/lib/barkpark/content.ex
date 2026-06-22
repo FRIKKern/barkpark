@@ -25,6 +25,7 @@ defmodule Barkpark.Content do
 
   alias Barkpark.Content.{
     Document,
+    DraftId,
     Edge,
     Envelope,
     MutationEvent,
@@ -37,8 +38,6 @@ defmodule Barkpark.Content do
     only: [scope_to_workspace_or_global: 3, scope_to_workspace: 3]
 
   alias Barkpark.PortableDoc.{Patch, Projection, Render, Synthesis}
-
-  @drafts_prefix "drafts."
 
   # ── Papers (convergence: papers are first-class documents) ────────────────
   #
@@ -57,21 +56,11 @@ defmodule Barkpark.Content do
   @paper_type "paper"
   @paper_default_dataset "production"
 
-  # ── Draft/Published helpers ────────────────────────────────────────────────
+  # ── Draft/Published helpers (extracted → Content.DraftId) ──────────────────
 
-  def draft_id(published_id) do
-    if String.starts_with?(published_id, @drafts_prefix) do
-      published_id
-    else
-      @drafts_prefix <> published_id
-    end
-  end
-
-  def published_id(doc_id) do
-    String.replace_prefix(doc_id, @drafts_prefix, "")
-  end
-
-  def draft?(doc_id), do: String.starts_with?(doc_id, @drafts_prefix)
+  defdelegate draft_id(published_id), to: DraftId
+  defdelegate published_id(doc_id), to: DraftId
+  defdelegate draft?(doc_id), to: DraftId
 
   # ── Documents ──────────────────────────────────────────────────────────────
 
@@ -147,7 +136,7 @@ defmodule Barkpark.Content do
   end
 
   defp apply_perspective(query, :published) do
-    prefix = @drafts_prefix <> "%"
+    prefix = DraftId.drafts_prefix() <> "%"
     where(query, [d], not like(d.doc_id, ^prefix))
   end
 
