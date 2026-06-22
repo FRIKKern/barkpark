@@ -1,4 +1,4 @@
-defmodule Barkpark.Search.MediaSearch do
+defmodule Barkpark.Media.Delivery.Search do
   @moduledoc """
   Faceted search over `media_files` joined with linked `mediaAsset` documents.
 
@@ -16,7 +16,8 @@ defmodule Barkpark.Search.MediaSearch do
   alias Barkpark.Content.Document
   alias Barkpark.Media.MediaFile
   alias Barkpark.Repo
-  alias Barkpark.Search.{MediaRetriever, QueryParser, QueryPipeline, SurfaceConfigs}
+  alias Barkpark.Media.Delivery.Retriever, as: MediaRetriever
+  alias Barkpark.Search.{QueryParser, QueryPipeline, SurfaceConfigs}
 
   @asset_type "mediaAsset"
   @facet_fields ~w(kind tags mimeType status processing collection visibility)

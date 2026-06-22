@@ -142,7 +142,7 @@ defmodule Barkpark.Media.AssetMetadataTenancyTest do
       # dataset_id — so the dataset envelope ALONE cannot exclude it. Only the
       # WORKSPACE envelope on the join (workspace_id=A) keeps it out of B's
       # search. Pre-fix (bare type+dataset join), the A-only token matched B's
-      # blob via `ilike(d.title, ...)` in MediaRetriever.
+      # blob via `ilike(d.title, ...)` in Media.Delivery.Retriever.
       _doc_a =
         insert_asset_doc!(file_b.id, "zzqqxx-a-only-token", ["a-secret-tag"], %{
           workspace_id: ws_a.id,
@@ -152,7 +152,7 @@ defmodule Barkpark.Media.AssetMetadataTenancyTest do
 
       # Workspace B searches for A's exclusive token — must find NOTHING in B.
       {files, total, _facets, _meta} =
-        Barkpark.Search.MediaSearch.search(@dataset,
+        Barkpark.Media.Delivery.Search.search(@dataset,
           q: "zzqqxx-a-only-token",
           workspace_id: ws_b.id,
           project_id: proj_b.id

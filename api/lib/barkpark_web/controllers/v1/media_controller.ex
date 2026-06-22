@@ -54,7 +54,7 @@ defmodule BarkparkWeb.V1.MediaController do
         _ -> nil
       end
 
-    next_cursor = Barkpark.Search.MediaSearch.next_cursor(files)
+    next_cursor = Barkpark.Media.Delivery.Search.next_cursor(files)
     has_more = next_cursor != nil and length(files) >= opts[:limit]
 
     json(conn, %{

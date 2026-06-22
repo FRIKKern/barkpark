@@ -14,7 +14,7 @@ defmodule Barkpark.Search.MediaSearchScopeTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content.Document
-  alias Barkpark.Search.MediaSearch, as: Search
+  alias Barkpark.Media.Delivery.Search, as: Search
 
   @dataset "test"
   @asset_type "mediaAsset"
