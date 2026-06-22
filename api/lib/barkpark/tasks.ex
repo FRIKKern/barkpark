@@ -75,6 +75,9 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Content.{Document, MutationEvent, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.Schema
+  alias Barkpark.Tasks.Validation
 
   # W7-04 mutation_events kinds. Routed into the existing `mutation` text column
   # so the spine, webhooks, and listen endpoint surface task ops alongside
@@ -91,938 +94,91 @@ defmodule Barkpark.Tasks do
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
 
-  @lifecycle_statuses ~w(open in_progress blocked done cancelled)
-  @kinds ~w(task)
-
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
-  def lifecycle_statuses, do: @lifecycle_statuses
+  defdelegate lifecycle_statuses, to: Validation
 
   @doc "The `content.kind` discriminator values (only `task`)."
   @spec kinds() :: [String.t()]
-  def kinds, do: @kinds
+  defdelegate kinds, to: Validation
 
-  # ─── Schema definitions (registered via seeds.exs + Plugins.Bootstrap) ─────
+  # ─── Schema definitions (extracted → Barkpark.Tasks.Schema) ───────────────
 
   @doc """
-  Returns the `%SchemaDefinition{}` struct the W7 substrate needs: `task`.
-
-  The schema is the **task dossier** — the complete working memory an AI
-  agent needs for one unit of work, in four editor groups: a *Brief* it
-  claims against (description, design, acceptance criteria, a reference to
-  the design paper, an estimate), a *Work* surface it appends to (worklog,
-  blocked_reason, attachments), a *Close-out* it should fill (outcome with
-  resolution + actuals, retro), and a *System* ledger only engines write
-  (claim, history, edges mirror). Every storage shape stays byte-compatible
-  with the engine: the schema declares the truth about every live key
-  instead of leaving half the contract undeclared, and upgrades exactly the
-  fields where a richer type buys workflow value (parent_id → reference,
-  design_doc → expandable reference, acceptance_criteria → checkable
-  arrayOf-composite) without changing what the ready query, sweeper, or
-  compactor read. The hard write contract is still `validate_task_content/1`.
-
-  Everything is a task: goals/epics, phases, and events are all just tasks
-  (a goal is a root task, a phase is a task with children).
-
-  `dataset` defaults to `"production"` — matching every other seed schema.
+  Returns the `%SchemaDefinition{}` list the W7 substrate needs.
+  `dataset` defaults to `"production"`.
+  See `Barkpark.Tasks.Schema.schema_definitions/1`.
   """
   @spec schema_definitions(String.t()) :: [SchemaDefinition.t()]
-  def schema_definitions(dataset \\ "production") do
-    [task_schema(dataset)]
-  end
+  def schema_definitions(dataset \\ "production"), do: Schema.schema_definitions(dataset)
 
-  @doc "Just the `task` schema struct (callers that only need one)."
+  @doc """
+  Just the `task` schema struct (callers that only need one).
+  `dataset` defaults to `"production"`.
+  See `Barkpark.Tasks.Schema.task_schema/1`.
+  """
   @spec task_schema(String.t()) :: SchemaDefinition.t()
-  def task_schema(dataset \\ "production") do
-    %SchemaDefinition{
-      name: "task",
-      title: "Task",
-      icon: "✅",
-      visibility: "public",
-      dataset: dataset,
+  def task_schema(dataset \\ "production"), do: Schema.task_schema(dataset)
 
-      # Generic list-row preview (host affordance, plugin-declared data):
-      # badge + "P<n>" meta. UNCHANGED on purpose — only two slots exist
-      # (PaneBuilder), the pane-doc-badge--<slug> CSS modifiers already
-      # theme the lifecycle values, and priority is the ready-sort key so
-      # it earns the meta slot over assignee/due_at.
-      list_preview: %{
-        "badge" => "lifecycle_status",
-        "meta" => %{"field" => "priority", "prefix" => "P"}
-      },
-
-      # Editor tab bar (Sanity-style groups; lucide icons — book.json idiom).
-      # INVARIANT: once groups exist, a field without a "group" key appears
-      # on NO tab — every field below must carry one (regression-tested in
-      # tasks_schema_dossier_test.exs).
-      groups: [
-        %{"name" => "brief", "title" => "Brief", "icon" => "clipboard-list"},
-        %{"name" => "work", "title" => "Work", "icon" => "activity"},
-        %{"name" => "close", "title" => "Close", "icon" => "flag"},
-        %{"name" => "system", "title" => "System", "icon" => "settings"}
-      ],
-
-      # Bookmarkable ?desk= filter chips over the task list pane.
-      desk_groups: [
-        %{
-          "name" => "open",
-          "title" => "Open",
-          "filter" => %{"content.lifecycle_status" => %{"eq" => "open"}}
-        },
-        %{
-          "name" => "in_progress",
-          "title" => "In progress",
-          "filter" => %{"content.lifecycle_status" => %{"eq" => "in_progress"}}
-        },
-        %{
-          "name" => "blocked",
-          "title" => "Blocked",
-          "filter" => %{"content.lifecycle_status" => %{"eq" => "blocked"}}
-        },
-        %{
-          "name" => "closed",
-          "title" => "Closed",
-          "filter" => %{"content.lifecycle_status" => %{"in" => ["done", "cancelled"]}}
-        },
-        %{"name" => "all", "title" => "All", "filter" => %{}}
-      ],
-
-      # `initial_values` is deliberately ABSENT. `create_document` validates
-      # task content BEFORE the initial-values merge, so defaults here cannot
-      # make a bare Studio create pass `validate_task_content/1` — and a
-      # priority default WOULD deep-merge into every API create that omits
-      # priority, silently moving those tasks from NULLS-LAST to mid-queue
-      # in the ready sort. Studio task creation needs a create-path change,
-      # not schema metadata.
-
-      # Soft cross-field nudges → Studio banner only, never blocks a save.
-      # Close-loop discipline without fighting the API-single-writer model.
-      cross_validations: [
-        %{
-          "name" => "done_needs_outcome",
-          "title" => "A finished task should record an outcome summary",
-          "rule" => %{
-            "any" => [
-              %{
-                "field" => "lifecycle_status",
-                "operator" => "in",
-                "value" => ["open", "in_progress", "blocked"]
-              },
-              %{"field" => "outcome.summary", "operator" => "non_empty"}
-            ]
-          },
-          "level" => "warning",
-          "fields" => ["outcome"]
-        },
-        %{
-          "name" => "blocked_needs_reason",
-          "title" => "A blocked task should say what it is blocked on",
-          "rule" => %{
-            "any" => [
-              %{"field" => "lifecycle_status", "operator" => "neq", "value" => "blocked"},
-              %{"field" => "blocked_reason", "operator" => "non_empty"}
-            ]
-          },
-          "level" => "warning",
-          "fields" => ["blocked_reason"]
-        },
-        # status==in_progress without a live claim.worker means someone
-        # hand-flipped status around the claim/close engine.
-        %{
-          "name" => "claimed_has_worker",
-          "title" =>
-            "in_progress tasks should carry a live claim (set via POST /v1/tasks/:id/claim, not by hand)",
-          "rule" => %{
-            "any" => [
-              %{"field" => "lifecycle_status", "operator" => "neq", "value" => "in_progress"},
-              %{"field" => "claim.worker", "operator" => "non_empty"}
-            ]
-          },
-          "level" => "warning",
-          "fields" => ["lifecycle_status", "claim"]
-        },
-        %{
-          "name" => "cancelled_needs_reason",
-          "title" => "Cancelled tasks should record why",
-          "rule" => %{
-            "any" => [
-              %{"field" => "lifecycle_status", "operator" => "neq", "value" => "cancelled"},
-              %{"field" => "close_reason", "operator" => "non_empty"}
-            ]
-          },
-          "level" => "warning",
-          "fields" => ["close_reason"]
-        }
-      ],
-
-      # Editor-header link action — agent/human bridge to the raw API view.
-      actions: [
-        %{
-          "name" => "open_api",
-          "label" => "Open in Tasks API",
-          "kind" => "link",
-          "icon" => "external-link",
-          "opts" => %{"href" => "/v1/tasks/:id"}
-        }
-      ],
-      fields: [
-        # ── BRIEF — what the claiming agent reads first ─────────────────
-        %{"name" => "title", "title" => "Title", "type" => "string", "group" => "brief"},
-
-        # The what/why. The only free-text field bd-shim writes today
-        # (`bd create --description`) — finally declared. `text` not
-        # richText: agents write markdown strings, a textarea round-trips
-        # them verbatim.
-        %{
-          "name" => "description",
-          "title" => "Description",
-          "type" => "text",
-          "rows" => 6,
-          "group" => "brief",
-          "description" =>
-            "What this task is and why it exists. Markdown. Written at create time; the claiming agent reads this first."
-        },
-
-        # Approach sketch inline; the FULL design doc travels as design_doc.
-        %{
-          "name" => "design",
-          "title" => "Design notes",
-          "type" => "text",
-          "rows" => 8,
-          "group" => "brief",
-          "description" =>
-            "Approach / architecture sketch, constraints, files to touch. Markdown. For a full design paper, set design_doc instead."
-        },
-
-        # Single reference = the ONE join the read path supports:
-        # ?expand=design_doc inlines the whole paper in one hop (Expand
-        # requires a single non-empty string id — arrays never expand).
-        # Stored as a bare paper doc-id string (v1 reference model).
-        # Distinct from `papers` (engine-owned list, see system group).
-        %{
-          "name" => "design_doc",
-          "title" => "Design paper",
-          "type" => "reference",
-          "refType" => "paper",
-          "group" => "brief",
-          "description" =>
-            "Primary design paper (paper doc-id). Expand on read with ?expand=design_doc to get the full paper inline when claiming."
-        },
-
-        # Checkable contract for "done". arrayOf-composite renders editable
-        # rows with ▲/▼ ordering in Studio; agents tick `met` and cite
-        # `evidence` (commit/test) before close — auditable close-out.
-        %{
-          "name" => "acceptance_criteria",
-          "title" => "Acceptance criteria",
-          "type" => "arrayOf",
-          "ordered" => true,
-          "group" => "brief",
-          "description" =>
-            "Definition of done. The closing agent must set met=true with evidence (commit SHA, test name, URL) per criterion.",
-          "of" => %{
-            "name" => "criterion",
-            "type" => "composite",
-            "fields" => [
-              %{"name" => "criterion", "title" => "Criterion", "type" => "text", "rows" => 2},
-              %{"name" => "met", "title" => "Met", "type" => "boolean"},
-              %{"name" => "evidence", "title" => "Evidence", "type" => "string"}
-            ]
-          }
-        },
-
-        # Estimate at create; calibrated against outcome.actual_size at
-        # close. Lets a context-budget-constrained agent pick small work
-        # off `bd ready`.
-        %{
-          "name" => "estimate",
-          "title" => "Estimate",
-          "type" => "composite",
-          "group" => "brief",
-          "description" =>
-            "Set before work starts. Compare with outcome.actual_size at close to calibrate future estimates.",
-          "fields" => [
-            %{
-              "name" => "size",
-              "title" => "Size",
-              "type" => "select",
-              "options" => ["xs", "s", "m", "l", "xl"]
-            },
-            %{"name" => "reason", "title" => "Reason", "type" => "string"}
-          ]
-        },
-
-        # Native datetime-local picker in Studio. Engine-inert by design;
-        # agents/humans set it. (Started/closed timestamps live in the
-        # engine-owned claim map — NOT duplicated here to avoid drift.)
-        %{
-          "name" => "due_at",
-          "title" => "Due",
-          "type" => "datetime",
-          "group" => "brief",
-          "description" =>
-            "Soft deadline. Engine-inert — for humans and planners, not the ready sort."
-        },
-
-        # UNCHANGED storage: integer 0..4, 0 highest (ready ORDER BY
-        # (content->>'priority')::int ASC NULLS LAST). Stays `number` — a
-        # select would store strings and break both the sort cast and the
-        # micro-validator's integer check.
-        %{
-          "name" => "priority",
-          "title" => "Priority",
-          "type" => "number",
-          "group" => "brief",
-          "description" => "0 (highest) .. 4 (lowest). Drives bd-ready ordering."
-        },
-
-        # PROMOTED from undeclared: the relabel endpoint union-writes it;
-        # now also human-editable rows in Studio (arrayOf-of-string).
-        # NOTE: dual-writer — a Studio save replaces the whole list while
-        # agents union-write via the endpoint; rev CAS makes it
-        # last-write-wins.
-        %{
-          "name" => "labels",
-          "title" => "Labels",
-          "type" => "arrayOf",
-          "ordered" => false,
-          "group" => "brief",
-          "description" =>
-            "Free-form scope tags. Agents: POST /v1/tasks/:id/labels {add,remove} (union semantics).",
-          "of" => %{"type" => "string"}
-        },
-
-        # UPGRADED string → reference. Persistence is IDENTICAL (a
-        # reference stores the bare doc-id string), so the ready phase
-        # filter (exact match) and the controller's prefix-agnostic
-        # filters read exactly what they read today. Studio gains a
-        # typeahead pill; the read path gains ?expand=parent_id.
-        %{
-          "name" => "parent_id",
-          "title" => "Parent task",
-          "type" => "reference",
-          "refType" => "task",
-          "group" => "brief",
-          "description" =>
-            "Doc-id of the parent task (a goal is a root task; this task is one rail of its parent). Plain string, may carry a drafts. prefix."
-        },
-
-        # ── WORK — the in_progress surface ──────────────────────────────
-        # `select` keeps the Elixir-side single source of truth
-        # (`lifecycle_statuses/0` feeds options, `require_string_in/4`,
-        # and the DB CHECK). Deliberately NOT a codelist — that would mint
-        # a second source of truth for an enum three layers already
-        # enforce.
-        %{
-          "name" => "lifecycle_status",
-          "title" => "Lifecycle",
-          "type" => "select",
-          "options" => lifecycle_statuses(),
-          "group" => "work",
-          "validation" => %{"required" => true},
-          "description" =>
-            "open | in_progress | blocked | done | cancelled. Engine-written by claim/close/sweep; agents do not set in_progress by hand."
-        },
-        %{
-          "name" => "assignee",
-          "title" => "Assignee",
-          "type" => "string",
-          "group" => "work",
-          "description" =>
-            "Worker id holding the claim. Engine-written on claim, cleared on lease reap. Close does NOT clear it (last worker stays attributed)."
-        },
-
-        # Fleet handoff memory. Append-only by convention via the generic
-        # mutate path. NOT named `history` — the compactor owns that key
-        # and tail-replaces it; worklog must never collide.
-        %{
-          "name" => "worklog",
-          "title" => "Worklog",
-          "type" => "arrayOf",
-          "ordered" => true,
-          "group" => "work",
-          "description" =>
-            "Append-only progress journal. Each claiming agent reads this for handoff context and appends terse entries (decisions, obstacles). Keep entries short — this is not compacted.",
-          "of" => %{
-            "name" => "entry",
-            "type" => "composite",
-            "fields" => [
-              %{"name" => "ts", "title" => "At", "type" => "datetime"},
-              %{"name" => "worker", "title" => "Worker", "type" => "string"},
-              %{
-                "name" => "kind",
-                "title" => "Kind",
-                "type" => "select",
-                "options" => ["progress", "decision", "obstacle", "handoff"]
-              },
-              %{"name" => "note", "title" => "Note", "type" => "text", "rows" => 3}
-            ]
-          }
-        },
-
-        # Conditional: only rendered while the task is actually blocked.
-        # Paired with the blocked_needs_reason soft banner.
-        %{
-          "name" => "blocked_reason",
-          "title" => "Blocked on",
-          "type" => "text",
-          "rows" => 3,
-          "group" => "work",
-          "visibleWhen" => %{
-            "field" => "lifecycle_status",
-            "operator" => "eq",
-            "value" => "blocked"
-          },
-          "description" =>
-            "What this task is waiting for. Set when closing with lifecycle_status=blocked, or when filing a blocks edge."
-        },
-
-        # Evidence artifacts (screenshots, logs, exports). Values are bare
-        # mediaAsset doc-id strings; each Studio row mounts a per-row media
-        # picker (tsk-dossier-ref-picker — ArrayField reference rows).
-        %{
-          "name" => "attachments",
-          "title" => "Attachments",
-          "type" => "arrayOf",
-          "ordered" => false,
-          "group" => "work",
-          "description" =>
-            "mediaAsset doc-ids: screenshots, logs, exports produced while working. Arrays of references do not server-expand; fetch each by id.",
-          "of" => %{"type" => "reference", "refType" => "mediaAsset"}
-        },
-
-        # ── CLOSE — what `bd close` should leave behind ──────────────────
-        %{
-          "name" => "outcome",
-          "title" => "Outcome",
-          "type" => "composite",
-          "group" => "close",
-          "description" =>
-            "Written at close. summary = what shipped/changed; resolution = how it ended; actual_size = calibration vs estimate.size; commits = SHAs / PR URLs.",
-          "fields" => [
-            %{"name" => "summary", "title" => "Summary", "type" => "text", "rows" => 4},
-            %{
-              "name" => "resolution",
-              "title" => "Resolution",
-              "type" => "select",
-              "options" => ["shipped", "fixed", "partial", "wont_do", "duplicate", "superseded"]
-            },
-            %{
-              "name" => "actual_size",
-              "title" => "Actual size",
-              "type" => "select",
-              "options" => ["xs", "s", "m", "l", "xl"]
-            },
-            %{
-              "name" => "commits",
-              "title" => "Commits / PRs",
-              "type" => "arrayOf",
-              "ordered" => true,
-              "of" => %{"type" => "string"}
-            }
-          ]
-        },
-
-        # One-liner landing slot for `bd close --reason` (cheaper for an
-        # agent to reach than the outcome composite). Paired with the
-        # cancelled_needs_reason soft banner.
-        %{
-          "name" => "close_reason",
-          "title" => "Close reason",
-          "type" => "text",
-          "rows" => 2,
-          "group" => "close",
-          "visibleWhen" => %{
-            "field" => "lifecycle_status",
-            "operator" => "in",
-            "value" => ["done", "cancelled", "blocked"]
-          },
-          "description" => "One-line close rationale. For the full close-out use outcome."
-        },
-
-        # Retro shown only once the task is terminal. Wall-clock actuals
-        # are derivable from claim.ts_iso/closed_at/epoch — retro captures
-        # the part the engine can't: what to do differently.
-        %{
-          "name" => "retro",
-          "title" => "Retro",
-          "type" => "text",
-          "rows" => 3,
-          "group" => "close",
-          "visibleWhen" => %{
-            "field" => "lifecycle_status",
-            "operator" => "in",
-            "value" => ["done", "cancelled"]
-          },
-          "description" =>
-            "One-paragraph retrospective: surprises, estimate drift, advice for the next agent on sibling tasks."
-        },
-
-        # ── SYSTEM — engine-owned ledger, declared for honesty ───────────
-        # `select` (one option) instead of bare string: locks the value in
-        # the Studio UI; @kinds stays the source of truth.
-        %{
-          "name" => "kind",
-          "title" => "Kind",
-          "type" => "select",
-          "options" => kinds(),
-          "group" => "system",
-          "validation" => %{"required" => true},
-          "description" =>
-            "Discriminator; always \"task\". Everything is a task — a goal is a root task."
-        },
-
-        # v1 `object` = read-only JSON in Studio that emits NO form input,
-        # so saves preserve it byte-identically — exactly right for the
-        # fencing token. Sub-keys (engine-written, never schema-enforced):
-        # worker, ts_iso, epoch, closed_by, closed_at, expired_at,
-        # previous_worker. Hidden until a claim exists.
-        %{
-          "name" => "claim",
-          "title" => "Claim (engine)",
-          "type" => "object",
-          "group" => "system",
-          "visibleWhen" => %{"field" => "claim", "operator" => "non_empty"},
-          "description" =>
-            "Lease + fencing token. Read claim.epoch and pass it as observed_epoch on close. API is the single writer."
-        },
-
-        # LEGACY, kept declared so old docs still render their data: the
-        # engine never reads this — task_edges is the only authoritative
-        # dependency store (ready/claim/unblock all query edges).
-        %{
-          "name" => "dependencies",
-          "title" => "Dependencies (legacy)",
-          "type" => "array",
-          "group" => "system",
-          "visibleWhen" => %{"field" => "dependencies", "operator" => "non_empty"},
-          "description" =>
-            "DEAD KEY — do not write. Real dependencies are task_edges rows: POST /v1/tasks/edges {from_id,to_id,kind:\"blocks\"}."
-        },
-
-        # PROMOTED from undeclared. Stays a v1 array (read-only in Studio):
-        # the API is the single writer via /v1/tasks/:id/papers. Values
-        # ARE valid paper doc-ids (a paper's doc_id is its slug).
-        %{
-          "name" => "papers",
-          "title" => "Linked papers",
-          "type" => "array",
-          "group" => "system",
-          "description" =>
-            "Paper doc-ids (= slugs) linked via POST /v1/tasks/:id/papers {add,remove}. For the primary design doc use design_doc (an expandable reference)."
-        },
-
-        # Compactor-owned: history is tail-replaced to last-3 on
-        # compaction, history_summary is the rollup. Declared read-only so
-        # the ledger is visible; never form-writable. compacted_at and
-        # compaction_snapshot_revision_id stay DELIBERATELY UNDECLARED —
-        # restore/2 strips them, and declaring them would render editable
-        # text inputs a human could corrupt.
-        %{
-          "name" => "history",
-          "title" => "History (engine)",
-          "type" => "array",
-          "group" => "system",
-          "visibleWhen" => %{"field" => "history", "operator" => "non_empty"},
-          "description" =>
-            "Compactor-managed event tail. Live audit log is mutation_events, not this key."
-        },
-        %{
-          "name" => "history_summary",
-          "title" => "History summary (engine)",
-          "type" => "object",
-          "group" => "system",
-          "visibleWhen" => %{"field" => "history_summary", "operator" => "non_empty"},
-          "description" =>
-            "Compaction rollup: event_count, first/last ts, status_transitions, workers."
-        }
-      ]
-    }
-  end
-
-  # ─── Validation ────────────────────────────────────────────────────────────
+  # ─── Validation (extracted → Barkpark.Tasks.Validation) ─────────────────────
 
   @doc """
   Validates the `content` map of a `type:task` document against the §1
-  field contract.
-
-  Returns `:ok` on success or `{:error, errors :: map()}` where the map's
-  keys are the field names (`"kind"`, `"lifecycle_status"`, ...) and the
-  values are lists of human-readable error messages — mirroring the
-  shape `Barkpark.Content.Validation.validate/3` returns.
-
-  Required fields: `kind` (must equal `"task"`), `lifecycle_status` (must
-  be one of `lifecycle_statuses/0`).
-
-  Shape-checked when present: `priority` (integer 0..4), `assignee`
-  (string), `dependencies` (list of strings), `parent_id` (string),
-  `claim` (map) — plus the dossier fields: `description` / `design` /
-  `design_doc` / `due_at` / `blocked_reason` / `close_reason` / `retro`
-  (strings), `papers` / `attachments` (lists of strings), `labels` /
-  `history` (lists), `estimate` / `outcome` / `history_summary` (maps),
-  `worklog` / `acceptance_criteria` (lists of maps). Top-level shape only,
-  never sub-keys — the claim-map precedent.
+  field contract. See `Barkpark.Tasks.Validation.validate_task_content/1`.
   """
   @spec validate_task_content(map() | nil) :: :ok | {:error, map()}
-  def validate_task_content(content), do: validate_kind_content("task", content)
+  defdelegate validate_task_content(content), to: Validation
 
   @doc """
-  Validates `content` against the shape for the given `kind`. Dispatches
-  to the per-kind validator; unknown kinds are rejected.
-
-  Used by the document-write paths (`Content.create_document/4`,
-  `Content.upsert_document/4`) when the `type` argument equals `"task"`.
+  Validates `content` against the shape for the given `kind`.
+  See `Barkpark.Tasks.Validation.validate_kind_content/2`.
   """
   @spec validate_kind_content(String.t(), map() | nil) :: :ok | {:error, map()}
-  def validate_kind_content(kind, content) when kind in @kinds do
-    content = content || %{}
+  defdelegate validate_kind_content(kind, content), to: Validation
 
-    errors =
-      %{}
-      |> validate_kind_field(kind, content)
-      |> validate_kind_specific(kind, content)
-
-    if errors == %{}, do: :ok, else: {:error, errors}
-  end
-
-  def validate_kind_content(other, _content) do
-    {:error, %{"kind" => ["unknown kind #{inspect(other)}; must be one of #{inspect(@kinds)}"]}}
-  end
-
-  # The shared "content.kind == <type>" check — every kind must self-identify.
-  defp validate_kind_field(errors, expected_kind, content) do
-    case Map.get(content, "kind") || Map.get(content, :kind) do
-      ^expected_kind ->
-        errors
-
-      nil ->
-        Map.put(errors, "kind", ["is required"])
-
-      other ->
-        Map.put(errors, "kind", [
-          "expected #{inspect(expected_kind)}, got #{inspect(other)}"
-        ])
-    end
-  end
-
-  # Required + shape checks for `task`. Kept tight per the plan: only what the
-  # live readers consume.
-
-  defp validate_kind_specific(errors, "task", content) do
-    errors
-    |> require_string_in(content, "lifecycle_status", @lifecycle_statuses)
-    |> check_optional_priority(content)
-    |> check_optional_string(content, "assignee")
-    |> check_optional_string(content, "parent_id")
-    |> check_optional_string_list(content, "dependencies")
-    |> check_optional_map(content, "claim")
-    # Dossier fields — shape-only-when-present, following the claim
-    # precedent (top-level shape, NO sub-key enforcement). Sub-key
-    # contracts live in the schema field descriptions (agent-facing,
-    # serialized in the capabilities manifest). Keeping these loose keeps
-    # every existing writer (bd-shim, engine CAS updates, legacy docs)
-    # green.
-    |> check_optional_string(content, "description")
-    |> check_optional_string(content, "design")
-    |> check_optional_string(content, "design_doc")
-    |> check_optional_string(content, "due_at")
-    |> check_optional_string(content, "blocked_reason")
-    |> check_optional_string(content, "close_reason")
-    |> check_optional_string(content, "retro")
-    |> check_optional_string_list(content, "papers")
-    |> check_optional_string_list(content, "attachments")
-    # any-element lists: reads already tolerate legacy W7-mirror label
-    # lists, and history elements are compactor-owned event maps —
-    # don't over-constrain either.
-    |> check_optional_list(content, "labels")
-    |> check_optional_list(content, "history")
-    |> check_optional_map(content, "estimate")
-    |> check_optional_map(content, "outcome")
-    |> check_optional_map(content, "history_summary")
-    |> check_optional_map_list(content, "worklog")
-    |> check_optional_map_list(content, "acceptance_criteria")
-  end
-
-  # ─── Per-field micro-validators ────────────────────────────────────────────
-
-  defp require_string_in(errors, content, key, allowed) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      v when is_binary(v) ->
-        if v in allowed do
-          errors
-        else
-          Map.put(errors, key, [
-            "must be one of #{inspect(allowed)}, got #{inspect(v)}"
-          ])
-        end
-
-      nil ->
-        Map.put(errors, key, ["is required (one of #{inspect(allowed)})"])
-
-      other ->
-        Map.put(errors, key, ["must be a string, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_string(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil -> errors
-      v when is_binary(v) -> errors
-      other -> Map.put(errors, key, ["must be a string when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_string_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil ->
-        errors
-
-      list when is_list(list) ->
-        if Enum.all?(list, &is_binary/1) do
-          errors
-        else
-          Map.put(errors, key, ["must be a list of strings, got #{inspect(list)}"])
-        end
-
-      other ->
-        Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_priority(errors, content) do
-    case Map.get(content, "priority") || Map.get(content, :priority) do
-      nil ->
-        errors
-
-      v when is_integer(v) and v >= 0 and v <= 4 ->
-        errors
-
-      other ->
-        Map.put(errors, "priority", ["must be an integer 0..4 when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_map(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil -> errors
-      v when is_map(v) -> errors
-      other -> Map.put(errors, key, ["must be a map when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil -> errors
-      v when is_list(v) -> errors
-      other -> Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
-    end
-  end
-
-  defp check_optional_map_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
-      nil ->
-        errors
-
-      list when is_list(list) ->
-        if Enum.all?(list, &is_map/1) do
-          errors
-        else
-          Map.put(errors, key, ["must be a list of maps, got #{inspect(list)}"])
-        end
-
-      other ->
-        Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
-    end
-  end
-
-  # ─── W7a step 2: typed dep graph (CRUD over `task_edges`) ─────────────────
+  # ─── W7a step 2: typed dep graph (extracted → Barkpark.Tasks.Edges) ──────
 
   @doc """
-  Edge kinds in this codebase today. `blocks` is the ready-query primitive;
-  `discovered-from` records walk-back / derivation lineage between tasks.
+  Edge kinds in this codebase today. See `Barkpark.Tasks.Edges.edge_kinds/0`.
   """
   @spec edge_kinds() :: [String.t()]
-  def edge_kinds, do: Edge.kinds()
+  defdelegate edge_kinds, to: Edges
 
   @doc """
-  Add a dependency edge: `child` blocks on `parent`.
-
-  Mirrors `bd dep add <child> <parent>` — the FIRST argument depends on the
-  SECOND. The edge is stored as `from_id = child_id, to_id = parent_id`
-  so the W7-03 ready query can scan a candidate's outbound `blocks` edges
-  to find its blockers.
-
-  ## Arguments
-    * `child_id`  — binary_id of the dependent document (the task that's
-      blocked on something).
-    * `parent_id` — binary_id of the blocker document.
-    * `kind`      — `:blocks` (default), `:"discovered-from"`, or the
-      string form `"blocks"` / `"discovered-from"`. Other strings are
-      rejected by the changeset.
-
-  ## Idempotency
-
-  Re-adding the same `(from, to, kind)` triple is a no-op — the migration's
-  unique index plus `on_conflict: :nothing` swallows the duplicate without
-  raising. The returned `{:ok, edge}` carries the EXISTING edge when the
-  insert was a no-op (fetched in a second query so callers always get a
-  populated struct).
-
-  Returns `{:ok, %Edge{}}` on success, `{:error, %Ecto.Changeset{}}` on
-  validation failure (missing FK target, self-edge, unknown kind).
+  Add a dependency edge: `child` blocks on `parent`. `kind` defaults to
+  `:blocks`. See `Barkpark.Tasks.Edges.add_dep/3`.
   """
   @spec add_dep(binary(), binary(), atom() | String.t()) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_id, parent_id, kind \\ :blocks) do
-    kind_str = normalize_kind(kind)
-
-    attrs = %{from_id: child_id, to_id: parent_id, kind: kind_str}
-    changeset = Edge.changeset(%Edge{}, attrs)
-
-    if changeset.valid? do
-      # `on_conflict: :nothing` + the unique index = idempotent insert.
-      # When the row already exists Postgres skips the INSERT but Ecto still
-      # returns `{:ok, %Edge{}}` with the changeset's would-be values (the
-      # `id` is the autogenerated one Ecto stamped on the cast struct, NOT
-      # the existing row's id). To return the canonical edge — same id on
-      # repeat calls — we always read the row back by its unique tuple.
-      case Repo.insert(changeset,
-             on_conflict: :nothing,
-             conflict_target: [:from_id, :to_id, :kind]
-           ) do
-        {:ok, %Edge{}} ->
-          {:ok, fetch_edge!(child_id, parent_id, kind_str)}
-
-        {:error, %Ecto.Changeset{} = cs} ->
-          {:error, cs}
-      end
-    else
-      {:error, changeset}
-    end
-  end
+  def add_dep(child_id, parent_id, kind \\ :blocks), do: Edges.add_dep(child_id, parent_id, kind)
 
   @doc """
-  Remove the `(child_id, parent_id, kind)` edge. Always returns `:ok` —
-  removing an absent edge is a no-op (matches `bd dep rm`'s tolerance,
-  and keeps the close-time `unblock_dependents` flow simple in W7-04).
+  Remove the `(child_id, parent_id, kind)` edge.
+  See `Barkpark.Tasks.Edges.remove_dep/3`.
   """
   @spec remove_dep(binary(), binary(), atom() | String.t()) :: :ok
-  def remove_dep(child_id, parent_id, kind) do
-    kind_str = normalize_kind(kind)
-
-    from(e in Edge,
-      where: e.from_id == ^child_id and e.to_id == ^parent_id and e.kind == ^kind_str
-    )
-    |> Repo.delete_all()
-
-    :ok
-  end
+  defdelegate remove_dep(child_id, parent_id, kind), to: Edges
 
   @doc """
-  The documents `task_id` depends on — the blockers, the `to_id` side of
-  every outbound edge. The W7-03 ready query is a `NOT EXISTS` over this
-  set; this function is the higher-level read for orchestrator surfaces
-  (build pre-flight, debug `bd dep ls`).
-
-  ## Options
-    * `:kind` — filter to one kind (atom or string). Default: `:blocks`.
-      Pass `:all` to return edges of every kind.
-
-  Returns a list of `%Document{}` in insertion order of the edge.
+  The documents `task_id` depends on — the blockers.
+  `opts` defaults to `[]`. See `Barkpark.Tasks.Edges.dependencies/2`.
   """
   @spec dependencies(binary(), keyword()) :: [Document.t()]
-  def dependencies(task_id, opts \\ []) do
-    kind_opt = Keyword.get(opts, :kind, :blocks)
-
-    from(d in Document,
-      join: e in Edge,
-      as: :edge,
-      on: e.to_id == d.id,
-      where: e.from_id == ^task_id,
-      order_by: e.inserted_at,
-      select: d
-    )
-    |> maybe_filter_edge_kind(kind_opt)
-    |> Repo.all()
-  end
+  def dependencies(task_id, opts \\ []), do: Edges.dependencies(task_id, opts)
 
   @doc """
-  The documents that depend on `task_id` — the dependents, the `from_id`
-  side of every inbound edge. Called when `task_id` closes, to find which
-  rows might be newly ready (the W7-04 close→unblock sweep).
-
-  ## Options
-    * `:kind` — filter to one kind (atom or string). Default: `:blocks`.
-      Pass `:all` to return edges of every kind.
+  The documents that depend on `task_id` — the dependents.
+  `opts` defaults to `[]`. See `Barkpark.Tasks.Edges.dependents/2`.
   """
   @spec dependents(binary(), keyword()) :: [Document.t()]
-  def dependents(task_id, opts \\ []) do
-    kind_opt = Keyword.get(opts, :kind, :blocks)
-
-    from(d in Document,
-      join: e in Edge,
-      as: :edge,
-      on: e.from_id == d.id,
-      where: e.to_id == ^task_id,
-      order_by: e.inserted_at,
-      select: d
-    )
-    |> maybe_filter_edge_kind(kind_opt)
-    |> Repo.all()
-  end
+  def dependents(task_id, opts \\ []), do: Edges.dependents(task_id, opts)
 
   @doc """
   Low-level query: every edge touching `task_id` on either side.
-
-  ## Options
-    * `:direction` — `:outbound` (default — `from_id == task_id`),
-      `:inbound` (`to_id == task_id`), or `:both`.
-    * `:kind` — filter to one kind (atom or string), or `:all` (default).
+  `opts` defaults to `[]`. See `Barkpark.Tasks.Edges.edges/2`.
   """
   @spec edges(binary(), keyword()) :: [Edge.t()]
-  def edges(task_id, opts \\ []) do
-    direction = Keyword.get(opts, :direction, :outbound)
-    kind_opt = Keyword.get(opts, :kind, :all)
-
-    base =
-      case direction do
-        :outbound ->
-          from(e in Edge, as: :edge, where: e.from_id == ^task_id)
-
-        :inbound ->
-          from(e in Edge, as: :edge, where: e.to_id == ^task_id)
-
-        :both ->
-          from(e in Edge,
-            as: :edge,
-            where: e.from_id == ^task_id or e.to_id == ^task_id
-          )
-      end
-
-    base
-    |> maybe_filter_edge_kind(kind_opt)
-    |> Repo.all()
-  end
-
-  defp maybe_filter_edge_kind(query, :all), do: query
-
-  defp maybe_filter_edge_kind(query, kind) do
-    kind_str = normalize_kind(kind)
-    from([edge: e] in query, where: e.kind == ^kind_str)
-  end
-
-  # The caller may pass `:blocks` / `:"discovered-from"` / `"blocks"` /
-  # `"discovered-from"` — internally we always use the string column value.
-  defp normalize_kind(kind) when is_atom(kind), do: Atom.to_string(kind)
-  defp normalize_kind(kind) when is_binary(kind), do: kind
-
-  defp fetch_edge!(from_id, to_id, kind) do
-    Repo.one!(
-      from(e in Edge,
-        where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
-      )
-    )
-  end
+  def edges(task_id, opts \\ []), do: Edges.edges(task_id, opts)
 
   # ─── W7a step 3: dependency-aware, phase-scoped ready-queue + claim ───────
 

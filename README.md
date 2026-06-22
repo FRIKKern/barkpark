@@ -5,6 +5,18 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
+## Codebase grade — C+ · 68 / 100
+
+Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live from the dependency graph (`node tooling/quality/quality.mjs`):
+
+| Critic | | Critic | | Critic | |
+|---|--:|---|--:|---|--:|
+| Architecture | 100 | Consistency | 78 | Tested | 55 |
+| Duplication | 100 | Reliability | 65 | Hotspots | 44 |
+| Dead-code | 100 | Evaluated | 100 | **Modularity** | **17** |
+
+Weighted **68 / 100 (C+)**. The lowest three — **Modularity · Hotspots · Tested** — are Cody's live worklist; every fix below is graded, gated, and re-scored against the dependency graph, so the number only moves on real, verified improvement.
+
 ## Get started
 
 Install the `bp` CLI, then `bp setup` walks you through connecting to a server — or bringing one up locally:
@@ -16,7 +28,7 @@ bp setup          # local · deploy · connect — pick one, it does the rest
 bp task ready     # see what's ready to work
 ```
 
-Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1` (installs the toolchain + starts Phoenix). Want a local server in one step? `bp setup --target local` (native or `--docker`).
+Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1` (toolchain + Phoenix).
 
 [Quickstart](docs/setup/QUICKSTART.md) · [Windows](docs/setup/WINDOWS.md) · [from source](docs/setup/SETUP.md)
 
@@ -47,9 +59,9 @@ Preflight resolves the host, then verifies your project is scanned. If Barkpark 
 node tooling/status/status.mjs --publish   # score every file + publish it into Barkpark
 ```
 
-**Codebase Intelligence** ([`tooling/`](tooling/README.md)) scores every file across nine quality dimensions, maps how files relate, and publishes one paper per file into an isolated `codebase` dataset — an interconnected graph you browse in Studio. Then Cody runs it backwards: tuning constants live as typed, validated papers, and editing one rewrites the bound code literals on disk, verified, in a reviewable diff.
+**Codebase Intelligence** ([`tooling/`](tooling/README.md)) scores every file across the nine quality dimensions above, maps how files relate, and publishes one paper per file into an isolated `codebase` dataset — an interconnected graph you browse in Studio. Cody also runs it backwards: tuning constants live as typed papers whose edits rewrite the bound code literals on disk, verified, in a reviewable diff.
 
-Every tool finds your Barkpark through [`barkpark.json`](barkpark.json) at the repo root — a committed, **secret-free** map of this project's hosts (local + public). Resolution is `--host` > `BARKPARK_*` env > `barkpark.json` > `localhost`, with a health probe and automatic local→public fallover, so a tool keeps working even when your local server is down.
+Every tool finds your Barkpark through [`barkpark.json`](barkpark.json) — a committed, **secret-free** host map (local + public) with a health probe and automatic local→public fallover, so tools keep working when your local server is down.
 
 ## Play around without stacking up mess
 
@@ -69,7 +81,7 @@ bp -w spike workspace project-create agents-v2
 | **Terminal TUI** | The same desk, keyboard-driven (`barkpark` with no args). |
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutations, SSE change stream. |
 
-Stack: Elixir 1.15+ / Phoenix LiveView 1.1 / PostgreSQL / Oban · Go 1.24+ (CLI + TUI, one binary) · Caddy. 2400+ mix tests, 89 HTTP integration tests.
+Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one binary) · Caddy. 3300+ mix tests, 89 HTTP integration tests.
 
 ## Design philosophy
 
