@@ -5,8 +5,8 @@ defmodule Barkpark.Media.Delivery.Urls do
 
   alias Barkpark.Content.Document
   alias Barkpark.Media.Delivery.Cdn
-  alias Barkpark.Media.{Access, Renditions, SignedUrl}
-  alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Media.Renditions
+  alias Barkpark.Media.Storage.{Access, MediaFile, SignedUrl}
 
   @immutable_cache "public, max-age=31536000, immutable"
 

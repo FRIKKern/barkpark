@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Collections do
+defmodule Barkpark.Media.Storage.Collections do
   @moduledoc """
   Folder and virtual media collections — membership queries and member CRUD.
   """

@@ -1,7 +1,7 @@
-defmodule Barkpark.Media.SignedUrlTest do
+defmodule Barkpark.Media.Storage.SignedUrlTest do
   use ExUnit.Case, async: true
 
-  alias Barkpark.Media.SignedUrl
+  alias Barkpark.Media.Storage.SignedUrl
 
   test "sign and verify round-trip" do
     path = "/media/files/2026/05/sample.png"

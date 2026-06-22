@@ -1,6 +1,6 @@
-defmodule Barkpark.Media.AccessTest do
+defmodule Barkpark.Media.Storage.AccessTest do
   @moduledoc """
-  Unit tests for Barkpark.Media.Access — pure logic, no DB calls.
+  Unit tests for Barkpark.Media.Storage.Access — pure logic, no DB calls.
 
   Every test builds minimal structs (Plug.Conn, Document, MediaFile) inline so
   the suite is async-safe and runs without a sandbox.
@@ -10,7 +10,7 @@ defmodule Barkpark.Media.AccessTest do
 
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Access
+  alias Barkpark.Media.Storage.Access
   alias Barkpark.Media.Storage.MediaFile
 
   # ---------------------------------------------------------------------------

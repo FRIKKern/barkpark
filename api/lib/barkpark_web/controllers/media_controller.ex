@@ -3,7 +3,8 @@ defmodule BarkparkWeb.MediaController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Access, Delivery, Renditions}
+  alias Barkpark.Media.{Delivery, Renditions}
+  alias Barkpark.Media.Storage.Access
 
   action_fallback BarkparkWeb.FallbackController
 

@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Relations do
+defmodule Barkpark.Media.Storage.Relations do
   @moduledoc """
   Asset relation graph — outbound refs on the asset doc plus inbound back-links.
   """

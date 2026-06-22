@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.Share do
+defmodule Barkpark.Media.Storage.Share do
   @moduledoc """
   Public share links for media collections (WoodWing-style gallery URLs).
   """
@@ -6,7 +6,7 @@ defmodule Barkpark.Media.Share do
   import Ecto.Query
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Collections
+  alias Barkpark.Media.Storage.Collections
   alias Barkpark.Repo
 
   @collection_type "mediaCollection"

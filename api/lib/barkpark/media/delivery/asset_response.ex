@@ -6,7 +6,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
 
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Access
+  alias Barkpark.Media.Storage.Access
   alias Barkpark.Media.Delivery.Cdn
   alias Barkpark.Media.Delivery.Urls
   alias Barkpark.Media.Storage.MediaFile

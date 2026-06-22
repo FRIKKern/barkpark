@@ -9,7 +9,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   alias Barkpark.Auth
   alias Barkpark.Media
-  alias Barkpark.Media.{Collections, Share}
+  alias Barkpark.Media.Storage.{Collections, Share}
   alias Barkpark.Media.Delivery.AssetResponse
   alias BarkparkWeb.V1.MediaSearchParams
 
