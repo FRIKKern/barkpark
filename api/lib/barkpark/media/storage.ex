@@ -60,9 +60,15 @@ defmodule Barkpark.Media.Storage do
   # ── collection membership (Collections) ───────────────────────────────────
 
   def list_collections(dataset, opts \\ []), do: Collections.list(dataset, opts)
-  def get_collection(collection_id, dataset, opts \\ []), do: Collections.get(collection_id, dataset, opts)
-  def collection_assets(collection_id, dataset, opts \\ []), do: Collections.assets(collection_id, dataset, opts)
-  def add_member(collection_id, file, dataset, opts \\ []), do: Collections.add_member(collection_id, file, dataset, opts)
+
+  def get_collection(collection_id, dataset, opts \\ []),
+    do: Collections.get(collection_id, dataset, opts)
+
+  def collection_assets(collection_id, dataset, opts \\ []),
+    do: Collections.assets(collection_id, dataset, opts)
+
+  def add_member(collection_id, file, dataset, opts \\ []),
+    do: Collections.add_member(collection_id, file, dataset, opts)
 
   def remove_member(collection_id, file, dataset, opts \\ []),
     do: Collections.remove_member(collection_id, file, dataset, opts)
@@ -75,8 +81,12 @@ defmodule Barkpark.Media.Storage do
 
   # ── public share links (Share) ────────────────────────────────────────────
 
-  def create_share(collection_id, dataset, opts \\ []), do: Share.create(collection_id, dataset, opts)
-  def revoke_share(collection_id, dataset, opts \\ []), do: Share.revoke(collection_id, dataset, opts)
+  def create_share(collection_id, dataset, opts \\ []),
+    do: Share.create(collection_id, dataset, opts)
+
+  def revoke_share(collection_id, dataset, opts \\ []),
+    do: Share.revoke(collection_id, dataset, opts)
+
   defdelegate resolve_share(token, dataset), to: Share, as: :resolve
   defdelegate share_path(dataset, token), to: Share
 end
