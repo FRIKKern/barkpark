@@ -259,7 +259,20 @@ defmodule Barkpark.Content.Papers do
         ) :: [map()]
   def available_expected_fields(blocks, expectation, schema \\ nil)
 
-  def available_expected_fields(blocks, %{layout: layout}, schema)
+  def available_expected_fields(blocks, expectation, schema),
+    do: blocks |> all_expected_fields(expectation, schema) |> Enum.reject(&field_at_cap?/1)
+
+  @doc """
+  EVERY expected `field` descriptor for a document's block list — the unfiltered
+  sibling of `available_expected_fields/3`. Runs the identical pipeline but OMITS
+  the trailing hide-at-cap reject, so the returned list includes bound-and-at-cap
+  fields. Each entry is the full `%{name, type, label, count, max, enforce}` map;
+  the Properties panel derives its `count/max` badge and at-cap styling from it.
+  Pure: no Repo access.
+  """
+  def all_expected_fields(blocks, expectation, schema \\ nil)
+
+  def all_expected_fields(blocks, %{layout: layout}, schema)
       when is_list(blocks) and is_list(layout) do
     type_by_name = expected_field_type_index(schema)
     label_by_name = expected_field_label_index(schema)
@@ -268,10 +281,9 @@ defmodule Barkpark.Content.Papers do
     |> Enum.filter(&match?(%{"kind" => "field"}, &1))
     |> Enum.map(&expected_field_descriptor(&1, blocks, type_by_name, label_by_name))
     |> Enum.reject(&is_nil/1)
-    |> Enum.reject(&field_at_cap?/1)
   end
 
-  def available_expected_fields(_blocks, _expectation, _schema), do: []
+  def all_expected_fields(_blocks, _expectation, _schema), do: []
 
   @doc """
   True when a HARD cap blocks inserting another bound block for `field_name`.

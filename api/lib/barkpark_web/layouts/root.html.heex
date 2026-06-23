@@ -2492,6 +2492,43 @@
     .bp-paper-edit-ordered { font-size: 14px; color: var(--paper-ink-faint); display: inline-flex; align-items: center; gap: 4px; flex: 1 1 100%; }
     .bp-paper-edit-readonly { color: var(--paper-ink-faint); font-style: italic; font-size: 14px; }
 
+    /* ── arrayOf chips variant (data-array-variant="chips") ──────────────────
+       A thin render skin over the arrayOf data path: each chip is an editable
+       text input + a remove affordance; "+ Add" appends an empty chip. */
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chips {
+      list-style: none; margin: 0; padding: 0;
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 6px; border-radius: 999px;
+      background: var(--paper-accent-soft); color: var(--paper-ink);
+      font-size: 14px; font-family: var(--font);
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip input {
+      border: none; background: transparent; color: inherit;
+      font: inherit; padding: 0; min-width: 4ch; width: auto;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip input:focus {
+      outline: none;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button {
+      border: none; background: transparent; cursor: pointer;
+      color: var(--paper-ink-faint); font-size: 14px; line-height: 1; padding: 0;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button:hover {
+      color: var(--paper-ink);
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] > form > button {
+      margin-top: 6px; font-size: 14px; font-family: var(--font);
+      color: var(--paper-ink-soft); background: transparent;
+      border: 1px dashed var(--paper-ink-faint); border-radius: 6px;
+      padding: 2px 8px; cursor: pointer;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] > form > button:hover {
+      background: var(--paper-accent-soft); color: var(--paper-ink);
+    }
+
     /* ── View ↔ Edit parity per block type ──────────────────────────────────
        Edit-side rules that mirror the View pane's inline styling for blocks
        that aren't rich-text (byline / callout / eyebrow / ingress / pullquote
@@ -2715,6 +2752,43 @@
     }
     .bp-paper-add-block label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--paper-ink-soft); font-family: var(--font); }
     .bp-paper-add-block select { font-family: var(--font); font-size: 13px; }
+
+    /* ── Properties panel (Storage Model A) — a quiet collapsible above the
+       body. Each row is a bound field rendered as label + cap badge + unbind ×
+       over the existing value control. */
+    .bp-properties {
+      margin: 0 0 18px; padding: 0 0 14px;
+      border-bottom: 1px solid var(--paper-rule);
+    }
+    .bp-properties-summary {
+      cursor: pointer; list-style: none;
+      font-family: var(--font); font-size: 12px; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--paper-ink-faint);
+      margin-bottom: 8px;
+    }
+    .bp-properties-summary::-webkit-details-marker { display: none; }
+    .bp-prop-row { margin-top: 8px; }
+    .bp-prop-head {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font);
+    }
+    .bp-prop-label { font-size: 13px; color: var(--paper-ink-soft); }
+    .bp-prop-badge {
+      font-size: 11px; color: var(--paper-ink-faint);
+      border: 1px solid var(--paper-rule); border-radius: 999px;
+      padding: 1px 7px; line-height: 1.4;
+    }
+    .bp-prop-badge.is-at-cap {
+      color: var(--paper-accent); border-color: var(--paper-accent);
+    }
+    .bp-prop-unbind { margin-left: auto; opacity: 0.5; }
+    .bp-prop-unbind:hover { opacity: 1; color: var(--paper-accent); background: transparent; }
+    .bp-prop-row .bp-paper-edit-field { margin-top: 2px; }
+    .bp-prop-add {
+      display: flex; align-items: center; gap: 8px; margin-top: 12px;
+    }
+    .bp-prop-add label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--paper-ink-soft); font-family: var(--font); }
+    .bp-prop-add select { font-family: var(--font); font-size: 13px; }
 
     /* Rich-text WC wrapper — the editable "paragraph/heading/list" surface.
        No card frame; it sits flush on the page reading as prose. */

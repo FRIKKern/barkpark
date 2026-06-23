@@ -515,6 +515,10 @@ defmodule Barkpark.Content do
   def available_expected_fields(blocks, expectation, schema \\ nil),
     do: Papers.available_expected_fields(blocks, expectation, schema)
 
+  @doc "Every expected `field` descriptor (incl. bound-and-at-cap). See `Content.Papers`."
+  def all_expected_fields(blocks, expectation, schema \\ nil),
+    do: Papers.all_expected_fields(blocks, expectation, schema)
+
   @doc "True when a HARD cap blocks inserting another bound block. See `Content.Papers`."
   defdelegate expected_field_blocked?(blocks, expectation, field_name), to: Papers
 

@@ -14,7 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   import Phoenix.LiveView
 
   alias Barkpark.{Content, Tenancy}
-  alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.{Projection, Render}
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
@@ -284,6 +284,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
           _ -> []
         end
+    end
+  end
+
+  @doc false
+  def paper_top_level_free(socket) do
+    socket |> paper_top_level_blocks() |> Projection.partition() |> elem(1)
+  end
+
+  @doc false
+  # Every expected `field` descriptor for the live editor block list (incl.
+  # bound-and-at-cap). [] when there is no schema/Expectation.
+  def paper_all_descriptors(socket) do
+    case slash_expectation(socket) do
+      %{layout: _} = expectation ->
+        Content.all_expected_fields(
+          paper_top_level_blocks(socket),
+          expectation,
+          socket.assigns[:editor_schema]
+        )
+
+      _ ->
+        []
     end
   end
 

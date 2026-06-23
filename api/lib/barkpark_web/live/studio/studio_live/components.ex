@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   import Phoenix.HTML, only: [raw: 1]
 
   alias Barkpark.Content
+  alias Barkpark.PortableDoc.Projection
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
   alias BarkparkWeb.Studio.StudioLive.{Blocks, DocActions, Paths}
 
@@ -291,10 +292,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # the carrier <div> lives OUTSIDE any phx-update="ignore" node.
   attr(:expected_fields, :list, default: [])
 
+  # Full expected-field descriptors (incl. bound-and-at-cap) for the Properties
+  # panel. Empty list ⇒ no panel + body shows ALL blocks (the paper pane, which
+  # has no Expectation, passes none — so it is byte-unchanged).
+  attr(:descriptors, :list, default: [])
+
   def paper_block_editor(assigns) do
+    # Gate the bound/free split on having descriptors: only the Beta editor (with
+    # an Expectation) shows the Properties panel. The paper pane passes
+    # descriptors=[] ⇒ properties?=false ⇒ free == all blocks, panel self-hides.
+    properties? = assigns.descriptors != []
+
+    {bound, free} =
+      if properties?, do: Projection.partition(assigns.blocks), else: {[], assigns.blocks}
+
     assigns =
       assigns
-      |> assign(:last_index, length(assigns.blocks) - 1)
+      |> assign(:bound_blocks, bound)
+      |> assign(:free_blocks, free)
+      |> assign(:last_index, length(free) - 1)
       |> assign(:doc_stats, beta_doc_stats(assigns.blocks))
 
     ~H"""
@@ -325,12 +341,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         hidden
       ></div>
 
-      <p :if={@blocks == []} class="bp-paper-editor-empty">
-        This paper has no blocks yet. Add one below.
+      <.properties_panel
+        rows={Enum.map(@bound_blocks, fn b -> {b, descriptor_for(@descriptors, b)} end)}
+        unbound={Enum.filter(@descriptors, fn d -> d.count == 0 end)}
+        dataset={@dataset}
+        api_token_raw={@api_token_raw}
+      />
+
+      <p :if={@free_blocks == []} class="bp-paper-editor-empty">
+        This paper has no body blocks yet. Add one below.
       </p>
 
       <div
-        :for={{block, index} <- Enum.with_index(@blocks)}
+        :for={{block, index} <- Enum.with_index(@free_blocks)}
         class="bp-paper-edit-block"
         data-edit-block-id={Map.get(block, "id")}
         data-block-type={Map.get(block, "type")}
@@ -476,6 +499,82 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   end
 
   defp beta_node_text(_), do: ""
+
+  # ── Properties panel (Storage Model A) ──────────────────────────────────────
+  # A collapsible section ABOVE the body editor. Each row is a BOUND field-block
+  # rendered as: schema label + type/cap badge + unbind × + the EXISTING value
+  # control (paper_block_fields/1, unchanged — so the JS bridge + LiveComponent
+  # keep working). The Add-property <select> lists unbound expected fields. The
+  # panel emits NO new ops beyond paper-add-property / paper-unbind-property.
+  attr(:rows, :list, default: [])
+  attr(:unbound, :list, default: [])
+  attr(:dataset, :string, default: "production")
+  attr(:api_token_raw, :string, default: "")
+
+  def properties_panel(assigns) do
+    ~H"""
+    <details
+      :if={@rows != [] or @unbound != []}
+      class="bp-properties"
+      open
+      data-test-id="studio-properties-panel"
+    >
+      <summary class="bp-properties-summary">Properties</summary>
+
+      <div :for={{block, descriptor} <- @rows} class="bp-prop-row" data-prop-block-id={Map.get(block, "id")}>
+        <div class="bp-prop-head">
+          <span class="bp-prop-label">{prop_label(block, descriptor)}</span>
+          <span :if={descriptor} class={"bp-prop-badge " <> if(prop_at_cap?(descriptor), do: "is-at-cap", else: "")}>
+            {prop_badge(descriptor)}
+          </span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm bp-prop-unbind"
+            title="Unbind property"
+            phx-click="paper-unbind-property"
+            phx-value-id={Map.get(block, "id")}
+            data-test-id="paper-unbind-property"
+          >×</button>
+        </div>
+        <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
+      </div>
+
+      <form
+        :if={@unbound != []}
+        class="bp-prop-add"
+        phx-submit="paper-add-property"
+        data-test-id="paper-add-property"
+      >
+        <label>
+          + Add property
+          <select name="fieldName">
+            <option value="" disabled selected>Choose a field…</option>
+            <option :for={d <- @unbound} value={d.name}>{d.label}</option>
+          </select>
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+      </form>
+    </details>
+    """
+  end
+
+  # The descriptor whose name matches a bound block's fieldName (nil when the
+  # block binds a field not in the current layout — still rendered, bare label).
+  defp descriptor_for(descriptors, block) do
+    name = Map.get(block, "fieldName")
+    Enum.find(descriptors, fn d -> d.name == name end)
+  end
+
+  defp prop_label(_block, %{label: label}) when is_binary(label) and label != "", do: label
+
+  defp prop_label(block, _descriptor),
+    do: Map.get(block, "label") || Map.get(block, "fieldName") || ""
+
+  defp prop_badge(%{count: count, max: max}) when is_integer(max), do: "#{count}/#{max}"
+  defp prop_badge(%{count: count}), do: "#{count}"
+
+  defp prop_at_cap?(%{count: count, max: max}) when is_integer(max), do: count >= max
+  defp prop_at_cap?(_), do: false
 
   # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
   # carries a hidden `id` and submits its changed field(s); the handler maps
@@ -1055,6 +1154,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     slug={@editor_doc.doc_id}
                     blocks={@editor_blocks}
                     expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}
+                    descriptors={beta_all_descriptors(@editor_schema, @editor_blocks)}
                     paper_rev={0}
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
@@ -1221,4 +1321,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   end
 
   defp beta_expected_fields(_schema, _blocks), do: []
+
+  # Full expected-field descriptors (incl. bound-and-at-cap) for the Properties
+  # panel. [] when there is no schema/Expectation.
+  defp beta_all_descriptors(%Barkpark.Content.SchemaDefinition{} = schema, blocks)
+       when is_list(blocks) do
+    Content.all_expected_fields(blocks, Content.resolve_expectation(schema), schema)
+  end
+
+  defp beta_all_descriptors(_schema, _blocks), do: []
 end

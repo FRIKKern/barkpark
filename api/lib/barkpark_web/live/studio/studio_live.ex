@@ -225,6 +225,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-slash-insert", params, socket),
     do: Paper.paper_slash_insert(params, socket)
 
+  def handle_event("paper-add-property", params, socket),
+    do: Paper.paper_add_property(params, socket)
+
+  def handle_event("paper-unbind-property", params, socket),
+    do: Paper.paper_unbind_property(params, socket)
+
   def handle_event("paper-delete-block", params, socket),
     do: Paper.paper_delete_block(params, socket)
 
