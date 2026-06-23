@@ -83,6 +83,19 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		}
 		return ir.renderLink(attrStr(n, "href"), inner, ctx)
 
+	case "wikilink":
+		// Unresolved internal link — no href yet. Render the label (children)
+		// in the link style; a resolver task adds navigation later.
+		return ir.theme.Link.Render(ir.children(n, ctx, insideLink))
+
+	case "blockref":
+		// Leaf — the "^anchor" pointer token, dimmed.
+		return ir.theme.Dim.Render("^" + attrStr(n, "anchor"))
+
+	case "tag":
+		// Leaf — the "#name" token, link-styled.
+		return ir.theme.Link.Render("#" + attrStr(n, "name"))
+
 	default:
 		// Unknown inline type → render its children if any, else nothing.
 		// (compose_inline raises here; we degrade gracefully like the block path.)

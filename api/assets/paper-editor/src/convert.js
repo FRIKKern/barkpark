@@ -68,6 +68,37 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
+    case "wikilink": {
+      // Wrapper, link-shaped. `target` is UNRESOLVED (slug/title); `alias` is
+      // optional ([[target|alias]]). Children carry the rendered label text.
+      const attrs = { target: node.target || "" };
+      if (node.alias != null) attrs.alias = node.alias;
+      const next = [...marks, { type: "wikilink", attrs }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "blockref": {
+      // Leaf — the visible text is the `^anchor` token; target/anchor ride the
+      // mark attrs (read back from attrs, not text, on the return trip).
+      out.push({
+        type: "text",
+        text: "^" + (node.anchor || ""),
+        marks: [
+          ...marks,
+          { type: "blockref", attrs: { target: node.target || "", anchor: node.anchor || "" } },
+        ],
+      });
+      return;
+    }
+    case "tag": {
+      // Leaf — the visible text is the `#name` token; name rides the mark attrs.
+      out.push({
+        type: "text",
+        text: "#" + (node.name || ""),
+        marks: [...marks, { type: "tag", attrs: { name: node.name || "" } }],
+      });
+      return;
+    }
     default:
       // Unknown inline type: render its children if any, else drop.
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, marks, out));
@@ -85,10 +116,21 @@ function inlineArrayToTiptap(inline) {
 // ── flat TipTap text nodes  →  portable-doc inline tree ────────────────────
 
 // Mark priority controls nesting order when a run carries multiple marks.
-// Outer-most first. strike/underline map to portable-doc strikethrough/underline
-// wrapper nodes (rendered by walk.ex strike/underline, pdrender, and the web
-// renderer); `code` stays inner-most because it is a value-leaf.
-const MARK_ORDER = ["link", "strong", "em", "underline", "strikethrough", "code"];
+// Outer-most first. link/wikilink are the outermost wrappers; strong/em/
+// underline/strikethrough nest inside; code/blockref/tag are value-LEAVES
+// (the node IS the leaf — see LEAF_KINDS). This order MUST stay aligned with
+// inline.ex's right-to-left apply_marks fold or round-trips lose idempotency.
+const MARK_ORDER = [
+  "link",
+  "wikilink",
+  "strong",
+  "em",
+  "underline",
+  "strikethrough",
+  "code",
+  "blockref",
+  "tag",
+];
 
 // Map a TipTap mark to a portable-doc wrapper descriptor.
 function markToPd(mark) {
@@ -105,13 +147,33 @@ function markToPd(mark) {
       return { kind: "underline" };
     case "link":
       return { kind: "link", href: (mark.attrs && mark.attrs.href) || "" };
+    case "wikilink": {
+      const w = { kind: "wikilink", target: (mark.attrs && mark.attrs.target) || "" };
+      // Only carry `alias` when present — a stray `alias:undefined` would fail
+      // the byte-exact round-trip for a plain (no-alias) wikilink.
+      if (mark.attrs && mark.attrs.alias != null) w.alias = mark.attrs.alias;
+      return w;
+    }
+    case "blockref":
+      return {
+        kind: "blockref",
+        target: (mark.attrs && mark.attrs.target) || "",
+        anchor: (mark.attrs && mark.attrs.anchor) || "",
+      };
+    case "tag":
+      return { kind: "tag", name: (mark.attrs && mark.attrs.name) || "" };
     default:
       return null; // unknown marks: no portable-doc node, unwrap silently
   }
 }
 
-// Build a portable-doc inline subtree for one flat TipTap text node, wrapping
-// the bare {type:"text",value} leaf in mark wrappers from inner to outer.
+// Value-LEAF marks: the node IS the leaf, not a wrapper. `code` takes its value
+// from the text; `blockref`/`tag` take theirs from the mark attrs (the visible
+// text is just the `^anchor`/`#name` display token). At most one per run.
+const LEAF_KINDS = ["code", "blockref", "tag"];
+
+// Build a portable-doc inline subtree for one flat TipTap text node: pick the
+// value-leaf (if any), then wrap the remaining marks from inner to outer.
 function tiptapTextNodeToPd(tnode) {
   const text = tnode.text || "";
   // Collect wrappers, ordered outer→inner per MARK_ORDER.
@@ -126,23 +188,36 @@ function tiptapTextNodeToPd(tnode) {
       MARK_ORDER.indexOf(pdKindToMark(b.kind)),
   );
 
-  // `code` is a leaf (value, no children). If a code wrapper is present it must
-  // be the value-leaf; any other wrappers nest around a code node's text.
-  const hasCode = wrappers.some((w) => w.kind === "code");
-  const nonCode = wrappers.filter((w) => w.kind !== "code");
+  const leaf = wrappers.find((w) => LEAF_KINDS.includes(w.kind));
+  const nestW = wrappers.filter((w) => !LEAF_KINDS.includes(w.kind));
 
-  let node = hasCode ? { type: "code", value: text } : { type: "text", value: text };
+  let node = leafNode(leaf, text);
 
-  // Wrap from inner-most non-code mark outward.
-  for (let i = nonCode.length - 1; i >= 0; i--) {
-    const w = nonCode[i];
+  // Wrap from inner-most non-leaf mark outward.
+  for (let i = nestW.length - 1; i >= 0; i--) {
+    const w = nestW[i];
     if (w.kind === "link") {
       node = { type: "link", href: w.href, children: [node] };
+    } else if (w.kind === "wikilink") {
+      node = { type: "wikilink", target: w.target, children: [node] };
+      if (w.alias != null) node.alias = w.alias;
     } else {
       node = { type: w.kind, children: [node] };
     }
   }
   return node;
+}
+
+// The value-leaf node for a flat text run: `code` → value from text; `blockref`
+// /`tag` → fields from the mark descriptor; none → a plain text leaf.
+function leafNode(leaf, text) {
+  if (!leaf) return { type: "text", value: text };
+  if (leaf.kind === "code") return { type: "code", value: text };
+  if (leaf.kind === "blockref") {
+    return { type: "blockref", target: leaf.target, anchor: leaf.anchor };
+  }
+  if (leaf.kind === "tag") return { type: "tag", name: leaf.name };
+  return { type: "text", value: text };
 }
 
 function pdKindToMark(kind) {
@@ -151,7 +226,10 @@ function pdKindToMark(kind) {
   if (kind === "underline") return "underline";
   if (kind === "strikethrough") return "strikethrough";
   if (kind === "link") return "link";
+  if (kind === "wikilink") return "wikilink";
   if (kind === "code") return "code";
+  if (kind === "blockref") return "blockref";
+  if (kind === "tag") return "tag";
   return kind;
 }
 

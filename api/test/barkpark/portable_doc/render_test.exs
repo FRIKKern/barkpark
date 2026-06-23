@@ -119,6 +119,34 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_html(underline, @opts) =~ "text-decoration:underline"
     end
 
+    test "wikilink / blockref / tag inline nodes compose + render (no raise, graceful)" do
+      # Internal-link infra: compose_inline must produce PdWikilink/PdBlockref/
+      # PdTag (NOT hit the inline.ex:88 or walk.ex:62 catch-all raise), and the
+      # walk degrades gracefully on an UNRESOLVED target (raw label/anchor/name).
+      wikilink =
+        Render.Inline.compose_inline(
+          %{
+            "type" => "wikilink",
+            "target" => "intro",
+            "children" => [%{"type" => "text", "value" => "intro"}]
+          },
+          false
+        )
+
+      assert Render.render_html(wikilink, @opts) =~ ~s(data-wikilink="intro")
+
+      blockref =
+        Render.Inline.compose_inline(
+          %{"type" => "blockref", "target" => "doc-7", "anchor" => "abc"},
+          false
+        )
+
+      assert Render.render_html(blockref, @opts) =~ "^abc"
+
+      tag = Render.Inline.compose_inline(%{"type" => "tag", "name" => "epic"}, false)
+      assert Render.render_html(tag, @opts) =~ "#epic"
+    end
+
     test "PdButton primary uses brand background" do
       node = %{
         "kind" => "PdButton",

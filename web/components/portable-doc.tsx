@@ -82,6 +82,43 @@ function renderInline(node: Inline, key: Key): ReactNode {
           {renderInlines(node.children)}
         </a>
       );
+    // Internal-link kinds. Targets are UNRESOLVED (no href/title yet); render a
+    // styled, non-navigating affordance with a data-* hook for a later resolver.
+    case "wikilink":
+      return (
+        <span
+          key={key}
+          data-wikilink={(node as { target?: string }).target ?? ""}
+          className="text-zinc-900 underline decoration-dotted underline-offset-2 dark:text-zinc-100"
+        >
+          {renderInlines(node.children)}
+        </span>
+      );
+    case "blockref": {
+      const anchor = (node as { anchor?: string }).anchor ?? "";
+      return (
+        <span
+          key={key}
+          data-blockref={(node as { target?: string }).target ?? ""}
+          data-anchor={anchor}
+          className="text-[0.9em] text-zinc-500 dark:text-zinc-400"
+        >
+          ^{anchor}
+        </span>
+      );
+    }
+    case "tag": {
+      const name = (node as { name?: string }).name ?? "";
+      return (
+        <span
+          key={key}
+          data-tag={name}
+          className="rounded bg-zinc-200/70 px-1.5 text-[0.9em] text-zinc-700 dark:bg-zinc-800/70 dark:text-zinc-300"
+        >
+          #{name}
+        </span>
+      );
+    }
     default:
       return null;
   }

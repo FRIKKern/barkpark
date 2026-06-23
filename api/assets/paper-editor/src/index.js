@@ -23,6 +23,10 @@ import Typography from "@tiptap/extension-typography";
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
 import { FormatBubble } from "./format-bubble.js";
+// Internal-link marks (wikilink/blockref/tag) — schema registration only, so
+// the editor holds these nodes through a setContent->getJSON round-trip. Defined
+// in the DOM-free marks.js so the smoke harness can assert their schema.
+import { Wikilink, Blockref, Tag } from "./marks.js";
 
 const DEBOUNCE_MS = 300;
 
@@ -85,6 +89,10 @@ class BpPaperEditor extends HTMLElement {
         // ever hosts prose blocks (paragraph/heading/list — see convert.js), so
         // there is no code block to exclude.
         Typography,
+        // Internal-link marks — schema registration only (see top of file).
+        Wikilink,
+        Blockref,
+        Tag,
       ],
       content: blockToTiptap(block),
       editorProps: {

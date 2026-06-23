@@ -49,7 +49,7 @@ func renderFixture(t *testing.T, name string, width int) string {
 }
 
 func TestGolden(t *testing.T) {
-	fixtures := []string{"sample.json"}
+	fixtures := []string{"sample.json", "internal_links.json"}
 	for _, fx := range fixtures {
 		for _, w := range goldenWidths {
 			fx, w := fx, w

@@ -43,6 +43,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       escape_html(Map.get(n, "value", "")) <> "</code>"
   end
 
+  def walk(%{"kind" => "PdWikilink"} = n, width, pal), do: wikilink(n, width, pal)
+  def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
+  def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
+
   def walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
   def walk(%{"kind" => "PdHr"} = n, _width, pal), do: hr(n, pal)
   def walk(%{"kind" => "PdImage"} = n, _width, _pal), do: image(n)
@@ -359,6 +363,34 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color};text-decoration:underline">#{inner}</a>)
+  end
+
+  # Internal-link kinds. Targets are UNRESOLVED (no href yet) — render the label
+  # with a data-* hook a later resolver/JS can upgrade, degrading to a styled,
+  # non-navigating span. escape_html escapes quotes too, so it is attr-safe.
+  defp wikilink(n, width, pal) do
+    inner =
+      Map.get(n, "children", [])
+      |> Enum.map(fn
+        k when is_binary(k) -> escape_html(k)
+        k -> walk(k, width, pal)
+      end)
+      |> Enum.join("")
+
+    target = escape_html(Map.get(n, "target", ""))
+    ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
+  end
+
+  defp blockref(n, _pal) do
+    target = escape_html(Map.get(n, "target", ""))
+    anchor = escape_html(Map.get(n, "anchor", ""))
+    ~s(<span data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em">^#{anchor}</span>)
+  end
+
+  defp tag_node(n, pal) do
+    name = escape_html(Map.get(n, "name", ""))
+
+    ~s(<span data-tag="#{name}" style="color:#{pal.link_color};background:#{pal.code_bg};padding:1px 6px;border-radius:3px;font-size:0.9em">##{name}</span>)
   end
 
   defp button(n, pal) do
