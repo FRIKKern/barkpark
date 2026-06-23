@@ -5,17 +5,17 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B+ · 81 / 100
+## Codebase grade — B · 79 / 100
 
 Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live from the dependency graph (`node tooling/quality/quality.mjs`):
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
-| Architecture | 100 | Consistency | 78 | Tested | 87 |
+| Architecture | 85 | Consistency | 78 | Tested | 87 |
 | Duplication | 100 | Reliability | 65 | Hotspots | 60 |
 | Dead-code | 100 | Evaluated | 100 | **Modularity** | **66** |
 
-Weighted **81 / 100 (B+)**. The lowest three (**Hotspots 60**, Reliability 65, Modularity 66) are Cody's live worklist; the number only moves on gated, re-scored improvement (e.g. decomposing god-modules like `sheet_grid`/`router` behind facades). Modularity counts **structural** god-modules (>8k tok × high reach) — churn lives in Hotspots, contracts excluded, every count annotated with its reasoning.
+Weighted **79 / 100 (B)** — honest: Architecture counts 5 real layering violations, not a façade 100. The grade measures **maintainability, not correctness/security/runtime**; `web/` ships untested, deps and contract-drift ungraded. Every run pairs an *agent critique* of where the number lies → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest three: Hotspots 60, Reliability 65, Modularity 66.
 
 ## Get started
 

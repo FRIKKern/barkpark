@@ -11,8 +11,8 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias BarkparkWeb.Studio.PresenceState
 
-  # Layout constants — duplicated from the facade so the px math is
-  # self-contained (the facade keeps its own copies for derive_grid/1).
+  # Layout constants — the single home for the px dimensions used by the
+  # frozen-band math here; the facade does not keep its own copies.
   @default_col_px 88
   @default_row_px 24
   @rowhead_px 44
