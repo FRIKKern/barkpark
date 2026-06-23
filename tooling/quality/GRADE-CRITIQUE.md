@@ -7,7 +7,7 @@
 
 ---
 
-## Latest critique — 2026-06-23 · grade B 75 (was a false B+ 81; B 79 after the read fix, B 75 once Contract+Dependencies were wired and exposed real CVEs)
+## Latest critique — 2026-06-23 · grade B 79 (was a false B+ 81 → B 79 read fix → B 75 wiring Contract+Dependencies exposed real CVEs → B 79 after triaging every critical + high CVE and refining the Dependencies gradient)
 
 Four critics audited the live grade. Headline truth: **the 9 critics measure how *maintainable* the code is to change — not whether it is correct, secure, or fast at runtime.** Two findings changed the number:
 
@@ -26,7 +26,7 @@ Ranked by danger × cheapness. The first three are the most dangerous *and* chea
 |---|---|---|---|
 | **Security-critical coverage** | cross-tenant leak / GROQ-or-SQL injection ships green; grade is silent | cheap | tag auth/tenancy seams (`scope.ex`, token plug, query compiler), assert sibling isolation test; regress if dropped |
 | ~~API-contract stability~~ **→ WIRED** (`Contract` critic, scored **63**) | a `/v1/capabilities` shape change bricks the Go CLI + JS SDK | done | reads `blast-radius` seam guards; 1 seam has an executable contract test, 3 are doc-only (weak) — add `.exs` guards to lift it |
-| ~~Dependency / supply chain~~ **→ WIRED** (`Dependencies` critic, scored **0**) | CVE in Phoenix/Plug/Oban/npm on the open internet; CI runs `--no-audit` | done | `tooling/deps/deps.mjs` (`mix hex.audit` + `npm`/`pnpm audit`; `govulncheck` skipped — not installed). **Found 2 critical + 19 high + 23 moderate in `js/` — previously invisible. Triage these.** |
+| ~~Dependency / supply chain~~ **→ WIRED + TRIAGED** (`Dependencies` **86**) | CVE in Phoenix/Plug/Oban/npm on the open internet; CI runs `--no-audit` | done | `tooling/deps/deps.mjs` (`mix hex.audit` + `npm`/`pnpm audit`; `govulncheck` skipped). Surfaced **2 critical + 14 high** in `js/` (CI's `--no-audit` hid them) → **all cleared** (vitest 2→4, next bump, ws/form-data/undici overrides); 7 moderate remain. The critic formula was a saturating cliff (pinned at 0); **refined to a gradient** (criticals dominate linearly, high/mod/low saturate) so triage moved it 0→44→86. |
 | **`web/` frontend coverage** | a whole shipped surface has zero tests, excluded by reach | medium | vitest + Istanbul under `web/`; `risk.mjs:166` already scans for it |
 | **Type safety (dialyzer)** | spec rot in the dynamically-typed core | medium | dialyzer warnings/module as a critic (PLT cacheable) |
 | **Runtime perf / N+1** | the classic CMS killer; "Hotspots" measures change-difficulty, not runtime cost | medium→hard | static `Repo.all`-inside-`Enum.map` lint cheap; true N+1 needs a telemetry harness |
