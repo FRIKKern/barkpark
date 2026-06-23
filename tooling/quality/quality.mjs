@@ -76,7 +76,15 @@ const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 const driftN = deduped.filter(f => f.kind === "drift").length;
 const layN = deduped.filter(f => f.kind === "layering");
 const dupN = deduped.filter(f => f.kind === "duplication").length;
-const bloatBig = deduped.filter(f => f.kind === "bloat" && f.reach >= 50).length;
+// Count god-modules by ABSOLUTE reach (raw transitive-dependent count), not the
+// normalized 0–100 reach: normalized reach re-normalizes when the graph gains/loses
+// nodes, so a hard cutoff on it flipped borderline files (and swung the grade)
+// when decomposing one module added 3 nodes. GOD_MODULE_REACH=15 is the absolute
+// equivalent of the old normalized-50 cutoff on the current graph — baseline-neutral
+// now, and stable under graph perturbation going forward.
+const GOD_MODULE_REACH = 15;
+const reachAbsOf = (p) => roots[p]?._raw.reachAbs ?? 0;
+const bloatBig = deduped.filter(f => f.kind === "bloat" && reachAbsOf(f.file) >= GOD_MODULE_REACH).length;
 const evaluated = Object.values(ledger.files).length ? 100 : 0;
 
 // HOTSPOT dimension — churn × complexity density (the refactor-target axis)

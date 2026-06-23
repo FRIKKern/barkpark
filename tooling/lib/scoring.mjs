@@ -72,7 +72,10 @@ export function gatherRoots(root) {
       defectDensity: clamp01(rk.defectDensity ?? 0),                // already 0–1
       testScore: clamp01((rk.testScore ?? 0) / 100),                // 0–100 → 0–1
       // raw passthroughs for display
-      _raw: { reach: u.reachScore ?? u.reach ?? 0, churn: s.churn ?? e.churn ?? 0, tokens: e.tokens ?? 0, defs: e.defs ?? 0, defect: rk.defectDensity ?? 0, testScore: rk.testScore ?? 0, hasTest: !!rk.hasTest },
+      // reach = normalized 0–100 (re-normalizes with graph size); reachAbs = raw
+      // transitive-dependent count (stable under node add/remove) — use reachAbs
+      // for hard cutoffs so graph perturbation can't flip a borderline file.
+      _raw: { reach: u.reachScore ?? u.reach ?? 0, reachAbs: u.reach ?? 0, churn: s.churn ?? e.churn ?? 0, tokens: e.tokens ?? 0, defs: e.defs ?? 0, defect: rk.defectDensity ?? 0, testScore: rk.testScore ?? 0, hasTest: !!rk.hasTest },
     };
   }
   return out;
