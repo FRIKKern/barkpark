@@ -91,11 +91,21 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
         Registry.all() |> Enum.sort_by(& &1.name)
 
       configured when is_list(configured) ->
+        # Resolve names against the snapshot-backed `all/0`, NOT the
+        # GenServer-backed `lookup/1`. `refresh_snapshot/1` installs the new
+        # plugin list into `:persistent_term` BEFORE driving the resolver chain,
+        # so `all/0` returns ground truth here WITHOUT a GenServer.call. That is
+        # load-bearing: this branch runs INSIDE the Registry process during
+        # `register/2`, and routing through `lookup/1` (a `GenServer.call` to
+        # self) deadlocks the registry — "process attempted to call itself" — on
+        # any boot with `:barkpark, :plugins` configured (e.g. BARKPARK_PLUGINS).
+        by_name = Map.new(Registry.all(), &{&1.name, &1})
+
         configured
         |> Enum.map(&plugin_name_of/1)
         |> Enum.reject(&is_nil/1)
         |> Enum.flat_map(fn name ->
-          case Registry.lookup(name) do
+          case Map.fetch(by_name, name) do
             {:ok, entry} ->
               [entry]
 

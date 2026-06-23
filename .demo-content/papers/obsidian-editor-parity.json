@@ -1,0 +1,756 @@
+{
+  "slug": "obsidian-editor-parity",
+  "title": "Obsidian Editor Parity",
+  "blocks": [
+    {
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "A plan to remake Barkpark's PortableDoc editor so it feels like Obsidian — without throwing away the structured block model that makes Barkpark more than a notebook. The verdict from a full survey of the LiveView editor, the web renderer, and the content model: most of the substrate already exists; what's missing is Obsidian's "
+        },
+        {
+          "type": "text",
+          "value": "interaction layer",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "b1"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "The decision",
+      "id": "b2"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Two forks were settled up front. Storage: "
+        },
+        {
+          "type": "text",
+          "value": "Obsidian-skin on the block model",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — PortableDoc stays the system of record; the Obsidian experience is layered on top, and a "
+        },
+        {
+          "type": "text",
+          "value": "source mode",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " shows a Markdown "
+        },
+        {
+          "type": "text",
+          "value": "projection",
+          "marks": [
+            "em"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", never the canonical store. This keeps the rich vocabulary — diagrams, schema fields, sheets, asciicasts — that plain Markdown can't hold. Editor surface: "
+        },
+        {
+          "type": "text",
+          "value": "unify on one engine",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — a single editing core shared by both LiveView Studio and the Next.js web app, rather than two editors drifting apart."
+        }
+      ],
+      "id": "b3"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Why this isn't a rewrite",
+      "id": "b4"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The expensive parts of Obsidian's model are already paid for in Barkpark. The gap is mostly surfacing data and adding inline-authoring affordances:"
+        }
+      ],
+      "id": "b5"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Block ids",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — every block already carries a stable id, so "
+          },
+          {
+            "type": "text",
+            "value": "^block-ref",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " targeting is natural."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Content-edge graph",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "reverse_referencers",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "list_inbound_edges",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " already compute backlinks server-side. No panel yet — that's the only missing piece."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Schema fields",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — bound field blocks already are document properties; aliases and tags are just fields. A Properties panel is a presentation reshuffle."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Callouts",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — already a first-class block type with tones. Needs only a "
+          },
+          {
+            "type": "text",
+            "value": "> [!type]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " authoring affordance and foldability."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Corpus graph",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — the web app already ships an Obsidian-styled graph view ("
+          },
+          {
+            "type": "text",
+            "value": "bp-graph.js",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Framework-neutral editor",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — the Studio editor is a vanilla "
+          },
+          {
+            "type": "text",
+            "value": "<bp-paper-editor>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Web Component (TipTap/ProseMirror), so it can drop into Next.js too. Unification is cheaper than it looks."
+          }
+        ]
+      ],
+      "id": "b6"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Parity matrix",
+      "id": "b7"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Each Obsidian editor capability against today's state, ranked by lift:"
+        }
+      ],
+      "id": "b8"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Backlinks panel",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "LOW",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Graph data already computed; surface it."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Properties panel",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "LOW–MED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". A GUI over bound field blocks."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Foldable callouts",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "LOW",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Block type exists; add fold + authoring."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "^block-ref",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "LOW–MED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Block ids exist; add targeting + resolve."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Command palette / quick switcher",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "MED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Slash menu exists; generalize to a command registry."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "[[wikilink]]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " inline + autocomplete — "
+          },
+          {
+            "type": "text",
+            "value": "MED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". New inline node; resolve by title/alias to "
+          },
+          {
+            "type": "text",
+            "value": "doc_id",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Inline #tags",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "MED",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". New inline node + tag index."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "![[embed]]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " transclusion — "
+          },
+          {
+            "type": "text",
+            "value": "MED–HIGH",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Embed node, resolver, render in all three surfaces."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Live Preview continuous canvas",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "HIGH",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". Collapse per-block editors into one ProseMirror document."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Markdown source mode",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "HIGH",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ". A PortableDoc→Markdown projection (read-only under storage model A)."
+          }
+        ]
+      ],
+      "id": "b9"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "The phased plan",
+      "id": "b10"
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Foundation",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — extract "
+          },
+          {
+            "type": "text",
+            "value": "<bp-paper-editor>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " as the single shared editing core, embed it (read mode first) in the Next.js web app, and add inline-node infrastructure to the portable-doc inline tree + "
+          },
+          {
+            "type": "text",
+            "value": "convert.js",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " round-trip."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Harvest the substrate",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — backlinks panel, properties panel, foldable callouts. Fast wins on data and blocks that already exist."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Linking layer",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — inline "
+          },
+          {
+            "type": "text",
+            "value": "[[ ]]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " wikilinks with title/alias autocomplete, "
+          },
+          {
+            "type": "text",
+            "value": "^",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " block refs, inline "
+          },
+          {
+            "type": "text",
+            "value": "#",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " tags. This is where it starts to feel like Obsidian."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Continuous canvas",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — merge per-block editors into one Live-Preview surface with ProseMirror node-views for structured/field blocks. The deep rearchitect."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Embeds + navigation",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "![[ ]]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " transclusion, command palette (⌘P), quick switcher (⌘O), and the Markdown source-mode projection."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Parity review",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — Obsidian parity audit with before/after visual evidence, tests across LiveView + web + pdrender, doc-anchor updates."
+          }
+        ]
+      ],
+      "id": "b11"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Unify on one engine",
+      "id": "b12"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Both surfaces converge on the same Web Component, eliminating the read-only/edit split on web and the two-editors-drift risk:"
+        }
+      ],
+      "id": "b13"
+    },
+    {
+      "type": "code",
+      "value": "<bp-paper-editor>   (TipTap / ProseMirror, framework-neutral)\n   |\n   +-- LiveView Studio   phx-hook -> paper-op -> Patch.apply_patch -> Projection\n   +-- Next.js web       same component; read mode now, edit mode later\n   +-- pdrender (Go)     terminal render of the same {version, blocks[]} tree",
+      "id": "b14"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "The biggest risk",
+      "id": "b15"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Phase 4 is the load-bearing one. Today each rich-text block is its "
+        },
+        {
+          "type": "text",
+          "value": "own",
+          "marks": [
+            "em"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " TipTap instance, and non-prose blocks are HTML forms; the View pane is a separate read-only stream. Obsidian's defining feel — one continuous typewriter surface where structure and prose coexist — requires collapsing that into a "
+        },
+        {
+          "type": "text",
+          "value": "single",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " ProseMirror document with node-views for callouts, code, diagrams, and field blocks. Everything in phases 1–3 is additive and low-risk; phase 4 touches the editor's spine. Sequence it last, behind a flag, after the substrate wins have proven the model."
+        }
+      ],
+      "id": "b16"
+    }
+  ],
+  "related": [
+    "portabledoc",
+    "bulldocs",
+    "liveview-studio",
+    "content-graph",
+    "graph-view",
+    "blast-radius",
+    "pdrender",
+    "reference-field",
+    "schema-v2",
+    "document"
+  ]
+}
