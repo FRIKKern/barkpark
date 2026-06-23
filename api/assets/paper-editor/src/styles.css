@@ -1,0 +1,165 @@
+/* bp-paper-editor — standalone portable stylesheet.
+ *
+ * Extracted from api/lib/barkpark_web/layouts/root.html.heex's inline <style>
+ * (the .bp-paper-surface / .bp-paper-editor-body / --paper-* paper rules) and
+ * DE-SCOPED so the editor renders styled in a bare host (no html[data-theme]
+ * ancestor, no host-page --font/--font-mono vars).
+ *
+ * Two-file embed contract: load <script src="bp-paper-editor.bundle.js"> AND
+ * <link rel="stylesheet" href="bp-paper-editor.css">. The :root,:host fallback
+ * below defines all 15 --paper-* tokens at their LIGHT values so the editor is
+ * self-sufficient. Studio keeps its own inline rules and opts out of the JS
+ * self-inject via window.BP_PAPER_EDITOR_NO_INJECT — this file is for embedders.
+ *
+ * Light is canonical/default (paper.css is light-only). The dark companion is
+ * Barkpark-authored, keyed on [data-theme="dark"] the host sets. */
+
+/* ── Token fallback — all 15 --paper-* tokens at light defaults. ──────────
+ * The three font tokens that resolve through host-app vars in Studio
+ * (--font / --font-mono, which DO NOT EXIST in a bare host) are inlined to
+ * literal stacks here. */
+:root, :host {
+  --paper-bg:            #fefdf9;
+  --paper-bg-deep:       #f5f2e9;
+  --paper-ink:           #1f1a14;
+  --paper-ink-soft:      #5b524a;
+  --paper-ink-faint:     #8a8278;
+  --paper-rule:          rgba(31, 26, 20, 0.08);
+  --paper-rule-soft:     rgba(31, 26, 20, 0.04);
+  --paper-edit-hover:    rgba(31, 26, 20, 0.10);
+  --paper-accent:        #a23925;
+  --paper-accent-soft:   rgba(162, 57, 37, 0.10);
+  --paper-chrome-bg:     #fefdf9;
+  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  --paper-font-serif:    "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
+  --paper-font-sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --paper-font-mono:     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark companion — opt in by setting [data-theme="dark"] on the host. */
+:root[data-theme="dark"], :host([data-theme="dark"]) {
+  --paper-bg:            #1b1815;
+  --paper-bg-deep:       #221e1a;
+  --paper-ink:           #ece6dc;
+  --paper-ink-soft:      #b8ad9e;
+  --paper-ink-faint:     #7f7568;
+  --paper-rule:          rgba(236, 230, 220, 0.10);
+  --paper-rule-soft:     rgba(236, 230, 220, 0.05);
+  --paper-edit-hover:    rgba(236, 230, 220, 0.12);
+  --paper-accent:        #d97a5f;
+  --paper-accent-soft:   rgba(217, 122, 95, 0.14);
+  --paper-chrome-bg:     #221e1a;
+  --paper-chrome-border: rgba(236, 230, 220, 0.14);
+}
+
+/* ── Editor body wrapper (the WC's <div class="bp-paper-editor-body">). ───
+ * Carries the serif page typography so the editor reads as warm-paper prose
+ * even when the embedder does NOT wrap it in a .bp-paper-surface column. */
+.bp-paper-editor-body {
+  outline: none;
+  background: var(--paper-bg);
+  color: var(--paper-ink);
+  font-family: var(--paper-font-serif);
+  font-size: 18px;
+  line-height: 1.70;
+  letter-spacing: 0.005em;
+  font-feature-settings: "kern", "liga", "onum";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Block typography. line-height + letter-spacing values are byte-aligned
+ * with render.ex heading_style/2 inline values (h1 1.1/-0.02em, h2 1.2,
+ * h3 1.25) — a parity contract; do NOT change them or View<->Edit drift
+ * returns. Heading margins are intentionally ZERO. */
+.bp-paper-editor-body h1 { font-size: 32px; font-weight: 600; line-height: 1.1;  letter-spacing: -0.02em; margin: 0; }
+.bp-paper-editor-body h2 { font-size: 24px; font-weight: 600; line-height: 1.2;  margin: 0; }
+.bp-paper-editor-body h3 { font-size: 20px; font-weight: 600; line-height: 1.25; margin: 0; }
+.bp-paper-editor-body p  { margin: 12pt 0 0; hyphens: auto; }
+.bp-paper-editor-body a  {
+  color: var(--paper-accent); text-decoration: none;
+  border-bottom: 1px solid var(--paper-accent-soft);
+}
+/* padding-left only — matches the EDIT rule in root.html.heex (the bottom
+ * margin belongs to the VIEW rule; pulling it here re-introduces double-spacing). */
+.bp-paper-editor-body ul,
+.bp-paper-editor-body ol { padding-left: 24px; }
+.bp-paper-editor-body li { margin: 4pt 0 0; }
+.bp-paper-editor-body ul li { list-style: disc; }
+.bp-paper-editor-body ol li { list-style: decimal; }
+.bp-paper-editor-body code {
+  font-family: var(--paper-font-mono); font-size: 0.92em;
+  background: var(--paper-bg-deep); padding: 0.08em 0.35em; border-radius: 3px;
+}
+.bp-paper-editor-body pre {
+  font-family: var(--paper-font-mono); font-size: 14px; line-height: 1.5;
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
+  border-radius: 4px; padding: 14px 16px; margin: 0 0 22px; overflow-x: auto;
+}
+.bp-paper-editor-body blockquote {
+  margin: 12pt 0 0; padding: 12pt 16pt;
+  border-left: 4px solid var(--paper-accent);
+  background: var(--paper-accent-soft); border-radius: 2px; font-style: normal;
+}
+.bp-paper-editor-body blockquote > :first-child { margin-top: 0; }
+.bp-paper-editor-body blockquote > :last-child { margin-bottom: 0; }
+.bp-paper-editor-body hr {
+  border: 0; border-top: 1px solid var(--paper-rule); margin: 12pt 0 0;
+}
+.bp-paper-editor-body img {
+  display: block; max-width: 100%; height: auto; margin: 0 0 22px;
+  border-radius: 3px; border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
+}
+.bp-paper-editor-body > :first-child { margin-top: 0; }
+
+/* ── Empty-block placeholder ghost text. ─────────────────────────────────── */
+.bp-paper-editor-body .ProseMirror .is-empty::before,
+.bp-paper-editor-body .ProseMirror .is-editor-empty::before {
+  content: attr(data-placeholder);
+  color: var(--paper-ink-faint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ── Focus-ring kill — DE-SCOPED from `.bp-paper-surface [contenteditable]`.
+ * Standalone hosts have no .bp-paper-surface ancestor; without this the
+ * browser blue focus ring returns. */
+[contenteditable]:focus,
+.ProseMirror:focus,
+.ProseMirror-focused { outline: none; }
+
+/* ── Old-style hanging figures — DE-SCOPED from `.bp-paper-surface
+ * .ProseMirror`. Wins back ligatures + onum that ProseMirror base CSS kills. */
+.ProseMirror {
+  font-variant-ligatures: normal;
+  -webkit-font-variant-ligatures: normal;
+  font-variant-numeric: oldstyle-nums;
+  font-feature-settings: "kern", "liga", "onum";
+}
+
+/* ── View-mode inline-style overrides — DE-SCOPED from `.bp-paper-surface`.
+ * render.ex emits CANONICAL portable inline styles (#ffffff / #111827 /
+ * #1d4ed8 / #f3f4f6) for standalone export; render.ex must NOT change, so we
+ * override those inline colors HERE with !important so a rendered paper stays
+ * readable on warm paper in VIEW mode standalone too. Attribute-substring
+ * matching is byte-aligned with render.ex output — do not edit the hex. */
+[data-block-id] div[style*="background:#ffffff"],
+article div[style*="background:#ffffff"] {
+  background: transparent !important;
+  color: var(--paper-ink) !important;
+}
+[data-block-id] span[style*="color:#111827"],
+article span[style*="color:#111827"] {
+  color: var(--paper-ink) !important;
+}
+[data-block-id] a[style*="color:#1d4ed8"],
+article a[style*="color:#1d4ed8"] {
+  color: var(--paper-accent) !important;
+}
+[data-block-id] code[style*="background:#f3f4f6"],
+article code[style*="background:#f3f4f6"] {
+  background: var(--paper-bg-deep) !important;
+  color: var(--paper-ink) !important;
+}
