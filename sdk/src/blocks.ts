@@ -64,6 +64,14 @@ export interface InlineEm {
   type: "em";
   children: Inline[];
 }
+export interface InlineStrike {
+  type: "strikethrough";
+  children: Inline[];
+}
+export interface InlineUnderline {
+  type: "underline";
+  children: Inline[];
+}
 export interface InlineCode {
   type: "code";
   value: string;
@@ -78,7 +86,15 @@ export interface InlineMark {
   attrs?: Record<string, unknown>;
 }
 
-export type Inline = string | InlineText | InlineStrong | InlineEm | InlineCode | InlineLink;
+export type Inline =
+  | string
+  | InlineText
+  | InlineStrong
+  | InlineEm
+  | InlineStrike
+  | InlineUnderline
+  | InlineCode
+  | InlineLink;
 
 /** Coerce a string|Inline[] into the inline-node array the renderer reads. */
 function inlineContent(content: string | Inline[]): Inline[] {

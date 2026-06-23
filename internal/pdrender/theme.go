@@ -63,6 +63,10 @@ func (t Theme) markStyle(kind string) lipgloss.Style {
 		return t.Body.Bold(true)
 	case "italic":
 		return t.Body.Italic(true)
+	case "underline":
+		return t.Body.Underline(true)
+	case "strike", "s", "strikethrough":
+		return t.Body.Strikethrough(true)
 	default:
 		return t.Body
 	}

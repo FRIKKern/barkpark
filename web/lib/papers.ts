@@ -3,7 +3,8 @@ import type { BarkparkClient, BarkparkDocument } from "@barkpark/core";
 /**
  * Inline content node (PortableDoc). Mirrors `Barkpark.PortableDoc.Render`'s
  * inline model: a `text` leaf (optionally carrying ProseMirror-style `marks`),
- * the `strong`/`em`/`code`/`link` wrappers, or a bare string/number.
+ * the `strong`/`em`/`strikethrough`/`underline`/`code`/`link` wrappers, or a
+ * bare string/number.
  */
 export type Inline =
   | string
@@ -15,6 +16,10 @@ export type Inline =
     }
   | { type: "strong"; children?: Inline[] }
   | { type: "em"; children?: Inline[] }
+  | { type: "strikethrough"; children?: Inline[] }
+  | { type: "strike"; children?: Inline[] }
+  | { type: "s"; children?: Inline[] }
+  | { type: "underline"; children?: Inline[] }
   | { type: "code"; value?: string }
   | { type: "link"; href?: string; children?: Inline[] };
 

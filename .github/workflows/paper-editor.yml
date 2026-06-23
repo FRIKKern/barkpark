@@ -1,0 +1,62 @@
+name: paper-editor
+
+# Gate for the Studio rich-text editor (api/assets/paper-editor). Before
+# 2026-06-23 NOTHING ran its converter round-trip smoke suite, and nothing
+# checked the committed IIFE bundle (api/priv/static/assets/bp-paper-editor
+# .bundle.js — the artifact the LiveView editor actually loads) for staleness.
+# A source edit that wasn't rebuilt shipped a stale bundle once already
+# (strike/underline round-trip was inert in Studio because convert.js changed
+# but the bundle didn't). This workflow catches both classes:
+#   1. convert.js round-trip regressions  -> npm run smoke
+#   2. stale committed bundle             -> rebuild + git diff --exit-code
+# The freshness check is deterministic: `npm ci` pins esbuild via the
+# lockfile, and esbuild's minified output is reproducible per version.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/assets/paper-editor/**"
+      - "api/priv/static/assets/bp-paper-editor.bundle.js"
+      - ".github/workflows/paper-editor.yml"
+  pull_request:
+    paths:
+      - "api/assets/paper-editor/**"
+      - "api/priv/static/assets/bp-paper-editor.bundle.js"
+      - ".github/workflows/paper-editor.yml"
+
+concurrency:
+  group: paper-editor-${{ github.ref }}
+  # Never cancel main; collapse superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  smoke-and-bundle:
+    name: Round-trip smoke + bundle freshness
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api/assets/paper-editor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install (pinned via lockfile)
+        run: npm ci
+
+      - name: Converter round-trip smoke
+        run: npm run smoke
+
+      - name: Rebuild bundle
+        run: npm run build
+
+      - name: Assert committed bundle is fresh
+        run: |
+          if ! git diff --exit-code ../../priv/static/assets/bp-paper-editor.bundle.js; then
+            echo "::error file=api/priv/static/assets/bp-paper-editor.bundle.js::Committed bundle is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
+            exit 1
+          fi
