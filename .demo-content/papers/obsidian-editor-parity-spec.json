@@ -1,0 +1,1629 @@
+{
+  "slug": "obsidian-editor-parity-spec",
+  "title": "Obsidian Editor Parity — Technical Spec",
+  "blocks": [
+    {
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "The implementation spec for "
+        },
+        {
+          "type": "text",
+          "value": "Obsidian Editor Parity",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — the engineering detail behind the goal tree. Storage model "
+        },
+        {
+          "type": "text",
+          "value": "A",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (skin-on-blocks) and a single shared editor engine are fixed; this doc turns each phase into concrete data-model shapes, render-contract obligations, file touchpoints, and acceptance criteria. Companion to the overview at "
+        },
+        {
+          "type": "text",
+          "value": "/papers/obsidian-editor-parity",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "b1"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Scope and non-goals",
+      "id": "b2"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "In scope: the editing surface and the linked-knowledge layer — Live-Preview canvas, "
+        },
+        {
+          "type": "text",
+          "value": "[[wikilinks]]",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "type": "text",
+          "value": "![[embeds]]",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "type": "text",
+          "value": "^block-refs",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", inline "
+        },
+        {
+          "type": "text",
+          "value": "#tags",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ", a backlinks panel, a properties panel, command palette, and a read-only Markdown projection."
+        }
+      ],
+      "id": "b3"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "NOT converging storage to Markdown",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — PortableDoc stays the system of record. "
+          },
+          {
+            "type": "text",
+            "value": "Source mode",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " renders a one-way projection."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT dropping the rich vocabulary",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — diagrams, sheets, asciicasts, schema-field blocks all survive; Obsidian has no equivalent and we keep them."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT a second editor",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — exactly one engine (the "
+          },
+          {
+            "type": "text",
+            "value": "<bp-paper-editor>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Web Component) serves Studio and web."
+          }
+        ]
+      ],
+      "id": "b4"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Load-bearing decisions",
+      "id": "b5"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Storage A",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": the Obsidian experience is a layer over the block AST. Wikilinks/tags/embeds become new node kinds in the existing inline/block model, NOT Markdown syntax in a text file."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Unified engine",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": Studio already runs a framework-neutral "
+          },
+          {
+            "type": "text",
+            "value": "<bp-paper-editor>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (TipTap/ProseMirror). The web app embeds the same component instead of its read-only React renderer."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Three renderers stay in lockstep",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": every new node kind ships in all three render sites in the same change (see the render contract below)."
+          }
+        ]
+      ],
+      "id": "b6"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Data model — new node kinds",
+      "id": "b7"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Today the inline tree ("
+        },
+        {
+          "type": "text",
+          "value": "api/lib/barkpark/portable_doc/render/inline.ex",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") has five kinds: "
+        },
+        {
+          "type": "text",
+          "value": "text · strong · em · code · link",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ". Parity adds three inline leaves and one block. All are additive — existing docs are untouched."
+        }
+      ],
+      "id": "b8"
+    },
+    {
+      "type": "code",
+      "lang": "json",
+      "value": "// Inline leaves (additive to inline.ex)\n{ \"type\":\"wikilink\", \"docId\":\"content-graph\", \"label\":\"Content Graph\" }            // [[Content Graph]]\n{ \"type\":\"blockref\", \"docId\":\"content-graph\", \"blockId\":\"b7\", \"label\":\"…\" }        // [[Content Graph#^b7]]\n{ \"type\":\"tag\",      \"name\":\"editor\" }                                             // #editor\n\n// Block-level transclusion — mirrors the existing {type:\"sheet\", ref, snapshot} precedent\n{ \"id\":\"b9\", \"type\":\"embed\",\n  \"ref\":      { \"docId\":\"document\", \"section\":\"Shape of a Document\" },             // ![[Document#Shape…]]\n  \"snapshot\": { \"html\":\"<…cached rendered fragment…>\", \"rev\":4 } }                 // write-through refreshed",
+      "id": "b9"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Key design choice: "
+        },
+        {
+          "type": "text",
+          "value": "references store the resolved "
+        },
+        {
+          "type": "text",
+          "value": "docId",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " (the stable slug), not the typed title"
+        },
+        {
+          "type": "text",
+          "value": " — the label is display-only and re-resolved on render via "
+        },
+        {
+          "type": "text",
+          "value": "Content.reference_title/4",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " ("
+        },
+        {
+          "type": "text",
+          "value": "render.ex",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "). This matches how "
+        },
+        {
+          "type": "text",
+          "value": "field-reference",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " already works, so the content-edge graph picks up wikilinks for free once they project as edges."
+        }
+      ],
+      "id": "b10"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "The three-renderer contract",
+      "id": "b11"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "One node kind ⇒ three render sites must change together, plus the editor round-trip. This is the single most important discipline in the epic — a node that renders in one surface and breaks in another is the top regression risk."
+        }
+      ],
+      "id": "b12"
+    },
+    {
+      "type": "code",
+      "lang": "text",
+      "value": "api/lib/barkpark/portable_doc/render/{inline,compose}.ex   # HTML — web reader + Studio View pane\ninternal/pdrender/*.go                                      # terminal (Go)\nweb/components/portable-doc.tsx                             # Next.js read renderer\napi/assets/paper-editor/src/convert.js                      # TipTap <-> portable-doc round-trip (editor)",
+      "id": "b13"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Add a parity-matrix test",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": one fixture doc containing every new node kind, asserted byte-stable across all three HTML/terminal/web renderers (extend the existing render snapshot tests)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "pdrender degrades gracefully",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": wikilink/tag render as styled text; embed renders the cached snapshot or a labeled box (its unknown-block fallback already exists)."
+          }
+        ]
+      ],
+      "id": "b14"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Cross-cutting infrastructure",
+      "id": "b15"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Backlinks — data already exists",
+      "id": "b16"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "No new storage. The content-edge graph ("
+        },
+        {
+          "type": "text",
+          "value": "api/lib/barkpark/content/graph.ex",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") already computes both directions; the panel is pure presentation:"
+        }
+      ],
+      "id": "b17"
+    },
+    {
+      "type": "code",
+      "lang": "elixir",
+      "value": "Content.Graph.list_inbound_edges(doc_id, dataset: ds)    # linked mentions (who points here)\nContent.Graph.reverse_referencers(doc_id, [ds, scope])   # same, ranked by topology (distance, in-degree)\nContent.Graph.list_outbound_edges(doc_id, dataset: ds)   # this doc's own links\n# unlinked mentions = full-text scan for title/alias, minus the docs already in inbound_edges",
+      "id": "b18"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Persistence — the op pipeline is unchanged",
+      "id": "b19"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "New nodes flow through the SAME patch pipeline: editor emits a "
+        },
+        {
+          "type": "text",
+          "value": "patch-block",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " op → "
+        },
+        {
+          "type": "text",
+          "value": "paper-op",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " LiveView event ("
+        },
+        {
+          "type": "text",
+          "value": "studio_live.ex",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ") → "
+        },
+        {
+          "type": "text",
+          "value": "Content.apply_paper_block_op/3",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " → "
+        },
+        {
+          "type": "text",
+          "value": "Patch.apply_patch/2",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " → "
+        },
+        {
+          "type": "text",
+          "value": "Projection.project/3",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " re-derives "
+        },
+        {
+          "type": "text",
+          "value": "content[body]",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " and field index. Wikilinks/embeds project into "
+        },
+        {
+          "type": "text",
+          "value": "content_edges",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " via the existing "
+        },
+        {
+          "type": "text",
+          "value": "extract_edges/2",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " pass once they’re recognized as references."
+        }
+      ],
+      "id": "b20"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Phase 1 — Foundation: shared engine + inline infra",
+      "id": "b21"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Extract the editor as a reusable core and stand up the inline-node plumbing every later phase builds on. No user-visible Obsidian features yet — this de-risks the unified-engine bet and makes phases 2–5 additive."
+        }
+      ],
+      "id": "b22"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Files",
+      "id": "b23"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "api/assets/paper-editor/src/index.js",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — factor the TipTap init + emit pipeline behind a clean embed contract (mount target, doc in/out, op-emit callback)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "web/components/portable-doc.tsx",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — host "
+          },
+          {
+            "type": "text",
+            "value": "<bp-paper-editor>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " in read mode; keep SSR fallback"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/portable_doc/render/inline.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — register wikilink/blockref/tag leaves (render = styled text for now)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/assets/paper-editor/src/convert.js",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — round-trip the new leaves TipTap⇄portable-doc"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "internal/pdrender/",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " + "
+          },
+          {
+            "type": "text",
+            "value": "web/components/portable-doc.tsx",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — text-level render of the new leaves"
+          }
+        ]
+      ],
+      "id": "b24"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Acceptance criteria",
+      "id": "b25"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "The same compiled "
+          },
+          {
+            "type": "text",
+            "value": "<bp-paper-editor>",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " bundle mounts and renders a doc in BOTH Studio and the Next.js app"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A doc containing wikilink/blockref/tag nodes round-trips editor→save→reload with zero data loss"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Parity-matrix fixture renders byte-stable across all three renderers"
+          }
+        ]
+      ],
+      "id": "b26"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Risk: ",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "the web app currently has NO editor; embedding a ProseMirror Web Component in Next.js (SSR + hydration) is the unknown. Mitigate by shipping read-mode first."
+        }
+      ],
+      "id": "b27"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Phase 2 — Harvest the substrate (fast wins)",
+      "id": "b28"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Three features whose data or block types already exist — highest leverage, lowest risk. Do these first to prove the model before the deep canvas work."
+        }
+      ],
+      "id": "b29"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Files",
+      "id": "b30"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/content/graph.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — reuse "
+          },
+          {
+            "type": "text",
+            "value": "reverse_referencers",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "list_inbound_edges",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " (no change; read-only)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Studio LiveView — new backlinks pane + properties pane components ("
+          },
+          {
+            "type": "text",
+            "value": "live/studio/",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ")"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/portable_doc/render/compose.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — callout: add foldable + "
+          },
+          {
+            "type": "text",
+            "value": "> [!type]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " authoring affordance"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/portable_doc/projection.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — properties panel reads bound field blocks (no schema change)"
+          }
+        ]
+      ],
+      "id": "b31"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Acceptance criteria",
+      "id": "b32"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Backlinks panel lists linked + unlinked mentions for the open doc; clicking navigates"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Properties panel edits bound fields (incl. aliases, tags) and round-trips through the projection"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Callouts fold/unfold; typing "
+          },
+          {
+            "type": "text",
+            "value": "> [!warning]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " creates a callout block"
+          }
+        ]
+      ],
+      "id": "b33"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Phase 3 — Linking layer",
+      "id": "b34"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The phase where it starts to feel like Obsidian. Inline authoring of links and tags with autocomplete, resolving against the document corpus."
+        }
+      ],
+      "id": "b35"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Files",
+      "id": "b36"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "api/assets/paper-editor/src/",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — "
+          },
+          {
+            "type": "text",
+            "value": "[[",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "#",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "^",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " trigger suggesters (model on the existing slash-menu.js)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "New resolver endpoint — title/alias → "
+          },
+          {
+            "type": "text",
+            "value": "docId",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " autocomplete (reads schema "
+          },
+          {
+            "type": "text",
+            "value": "title",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " + "
+          },
+          {
+            "type": "text",
+            "value": "aliases",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " field)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/content/edges.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — recognize wikilink/blockref inline nodes as reference edges in "
+          },
+          {
+            "type": "text",
+            "value": "extract_edges/2",
+            "marks": [
+              "code"
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "All three renderers — resolve "
+          },
+          {
+            "type": "text",
+            "value": "docId",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "→href; phantom styling for unresolved targets"
+          }
+        ]
+      ],
+      "id": "b37"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Acceptance criteria",
+      "id": "b38"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Typing "
+          },
+          {
+            "type": "text",
+            "value": "[[",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " opens an autocomplete over titles + aliases; selection inserts a wikilink node"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Wikilinks appear as edges in "
+          },
+          {
+            "type": "text",
+            "value": "content_edges",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " and surface in the phase-2 backlinks panel"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Unresolved "
+          },
+          {
+            "type": "text",
+            "value": "[[Ghost]]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " renders dimmed and is one click to create (matching Obsidian)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "`^` copies a block ref; "
+          },
+          {
+            "type": "text",
+            "value": "#tag",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " inserts a tag node indexed for the tag pane"
+          }
+        ]
+      ],
+      "id": "b39"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Phase 4 — Continuous canvas (deep rearchitect)",
+      "id": "b40"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The defining Obsidian feel: one continuous typewriter surface. Today each rich-text block is its own TipTap instance and non-prose blocks are forms. Collapse them into a single ProseMirror document with node-views for structured blocks. Highest effort; ship behind a flag."
+        }
+      ],
+      "id": "b41"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Files",
+      "id": "b42"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "api/assets/paper-editor/src/index.js",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — one editor instance spanning the whole doc (was: N per-block instances)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "New ProseMirror node-views — callout, code, diagram, "
+          },
+          {
+            "type": "text",
+            "value": "field-*",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " rendered as embedded interactive nodes inside the single doc"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/portable_doc/patch.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — verify "
+          },
+          {
+            "type": "text",
+            "value": "insert-after",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "text",
+            "value": "move-block",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " semantics under one continuous selection"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Slash menu + format bubble rebind to the unified surface"
+          }
+        ]
+      ],
+      "id": "b43"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Acceptance criteria",
+      "id": "b44"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Whole document edits as one continuous surface; cursor crosses block boundaries naturally"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Structured blocks (callout/code/diagram/field) edit in place as node-views, not separate forms"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Behind a flag with the per-block editor as fallback; op pipeline + persisted output byte-identical to phase-3 baseline"
+          }
+        ]
+      ],
+      "id": "b45"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Risk: ",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "this touches the editor’s spine. Everything in phases 1–3 is additive; this is not. Sequence it LAST, behind a flag, after the substrate wins have validated the model."
+        }
+      ],
+      "id": "b46"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Phase 5 — Embeds, navigation, source mode",
+      "id": "b47"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Round out parity: transclusion, global navigation, and the read-only Markdown projection that backs source mode under storage model A."
+        }
+      ],
+      "id": "b48"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Files",
+      "id": "b49"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "New "
+          },
+          {
+            "type": "text",
+            "value": "embed",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " block + resolver — model on the "
+          },
+          {
+            "type": "text",
+            "value": "{type:\"sheet\", ref, snapshot}",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " write-through precedent in "
+          },
+          {
+            "type": "text",
+            "value": "content.ex",
+            "marks": [
+              "code"
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "api/lib/barkpark/portable_doc/render/compose.ex",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " + pdrender + web — render the embed snapshot; refresh on target mutation"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Command palette + quick switcher — generalize the slash-menu command registry to a global ⌘P/⌘O"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "New "
+          },
+          {
+            "type": "text",
+            "value": "PortableDoc→Markdown",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " projector — read-only source view (lossy for rich blocks, which emit fenced placeholders)"
+          }
+        ]
+      ],
+      "id": "b50"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Acceptance criteria",
+      "id": "b51"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "![[Doc#Section]]",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " renders the target inline across all three surfaces; edits to the target refresh embeds via write-through"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "⌘P lists every command; ⌘O jumps to any doc by title/alias"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Source mode shows faithful Markdown for prose/list/callout/code; rich blocks show a labeled fenced placeholder (never silent data loss)"
+          }
+        ]
+      ],
+      "id": "b52"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Phase 6 — Parity review",
+      "id": "b53"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Prove parity and guard it. Feature-by-feature audit with evidence, full cross-surface test pass, and doc updates."
+        }
+      ],
+      "id": "b54"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Files",
+      "id": "b55"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Visual evidence — before/after captures via the visual-investigator flow; changelog under "
+          },
+          {
+            "type": "text",
+            "value": "~/docs/paperflow/changelog/",
+            "marks": [
+              "code"
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Test suites — LiveView + web + "
+          },
+          {
+            "type": "text",
+            "value": "pdrender",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": "; the parity-matrix render-sync test from phase 1"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Doc anchors / cards touched (per the doc contract)"
+          }
+        ]
+      ],
+      "id": "b56"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Acceptance criteria",
+      "id": "b57"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "An Obsidian-vs-Barkpark parity matrix with each feature marked done + evidence"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Green across LiveView, web, and pdrender suites; render-sync test passes for all node kinds"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Updated cards/anchors for every file a card references"
+          }
+        ]
+      ],
+      "id": "b58"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Sequencing and risk",
+      "id": "b59"
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Phase 1 → 2 → 3 are additive and low-risk; do them in order, ship each."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Phase 4 is the spine rearchitect — gate behind a flag, land only after 2–3 prove the model."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Phase 5 depends on the inline/embed infra from 1 and the resolver from 3."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Phase 6 runs continuously as a gate, not just at the end — the parity-matrix test lands in phase 1."
+          }
+        ]
+      ],
+      "id": "b60"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Open decisions",
+      "id": "b61"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Tag storage",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": inline "
+          },
+          {
+            "type": "text",
+            "value": "#tag",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " nodes vs a projected "
+          },
+          {
+            "type": "text",
+            "value": "tags",
+            "marks": [
+              "code"
+            ]
+          },
+          {
+            "type": "text",
+            "value": " field — likely both (inline authoring projects into the field for query)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Embed freshness",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": write-through snapshot (sheet precedent) vs resolve-on-read — write-through chosen for render parity, but cross-doc invalidation fan-out needs a bound."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Markdown projector fidelity",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "text",
+            "value": ": which block types get real Markdown vs fenced placeholders — enumerate in phase 5."
+          }
+        ]
+      ],
+      "id": "b62"
+    }
+  ],
+  "related": [
+    "obsidian-editor-parity",
+    "portabledoc",
+    "bulldocs",
+    "liveview-studio",
+    "content-graph",
+    "content-edges-table",
+    "reference-field",
+    "pdrender",
+    "graph-view",
+    "schema-v2",
+    "document",
+    "blast-radius"
+  ]
+}
