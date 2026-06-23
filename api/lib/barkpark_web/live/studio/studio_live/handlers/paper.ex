@@ -166,8 +166,55 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     {:noreply, Shared.paper_op(socket, %{"op" => "remove-block", "id" => id})}
   end
 
+  @doc """
+  Bind an as-yet-unbound expected field: create a default block of the field's
+  type, stamp its fieldName + label, and append — ONE op via Shared.paper_op
+  (the paper_slash_insert pattern). projection.ex then re-projects content[name].
+  """
+  def paper_add_property(%{"fieldName" => fname} = _params, socket)
+      when is_binary(fname) and fname != "" do
+    cond do
+      Shared.expected_field_blocked?(socket, fname) ->
+        {:noreply, put_flash(socket, :error, "That field is already at its limit.")}
+
+      true ->
+        case Enum.find(Shared.paper_all_descriptors(socket), fn d -> d.name == fname end) do
+          %{type: type, label: label} ->
+            new =
+              Blocks.default_block(type, Blocks.new_block_id())
+              |> Map.put("fieldName", fname)
+              |> Map.put("label", label)
+
+            {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(nil, new))}
+
+          _ ->
+            {:noreply, put_flash(socket, :error, "Unknown property.")}
+        end
+    end
+  end
+
+  def paper_add_property(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  Unbind a property: patch-block clearing fieldName so the block becomes FREE
+  (joins content["body"]). project/4 then drops the orphaned content[fieldName].
+  """
+  def paper_unbind_property(%{"id" => id}, socket) when is_binary(id) and id != "" do
+    {:noreply,
+     Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => %{"fieldName" => nil}})}
+  end
+
+  def paper_unbind_property(_params, socket), do: {:noreply, socket}
+
   def paper_move_block(%{"id" => id, "dir" => dir}, socket) do
-    blocks = Shared.paper_top_level_blocks(socket)
+    # Match the displayed body order: the Properties panel renders FREE-only
+    # blocks when it is active (Beta with expected fields); otherwise the body
+    # shows ALL blocks (paper pane). Gate the same way so move-index never drifts.
+    blocks =
+      if Shared.paper_all_descriptors(socket) == [],
+        do: Shared.paper_top_level_blocks(socket),
+        else: Shared.paper_top_level_free(socket)
+
     idx = Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
 
     {:noreply, Shared.paper_reorder(socket, blocks, idx, dir)}

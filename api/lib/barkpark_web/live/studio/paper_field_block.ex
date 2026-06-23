@@ -78,7 +78,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       # the same default CodelistField carries) and the picker variant
       # ("flat" → CodelistField <select>/<datalist>; "tree" → TreeCodelistField).
       |> assign(:plugin, Map.get(block, "plugin", "core"))
-      |> assign(:variant, codelist_variant(block))
+      |> assign(:variant, block_variant(block))
       # Always re-derive value from the block. The local-first update on inner
       # change means the server echo carries the value already in the DOM, so
       # this re-derive is a no-op diff for the edited input (focus preserved).
@@ -117,6 +117,40 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     <div id={@id} class="bp-paper-composite-block" data-field-type="composite" data-block-id={@block_id}>
       <form phx-change="inner-change" phx-target={@myself}>
         <CompositeField.composite_field field={@field} value={@value} on_change="inner-change" path="" />
+      </form>
+    </div>
+    """
+  end
+
+  # chips — a thin RENDER variant of arrayOf (string `of`). Scalar chip inputs
+  # name themselves `[i]` so the form's phx-change="inner-change" routes inline
+  # edits through merge_change("arrayOf",…) verbatim; the × / + Add buttons route
+  # through the existing inner-array-op handler (remove_row/add_row → persist/2).
+  # Must precede the bare arrayOf head (function-clause order: specific first),
+  # exactly like the codelist+tree head precedes the bare codelist head.
+  def render(%{field_type: "arrayOf", variant: "chips"} = assigns) do
+    ~H"""
+    <div id={@id} class="bp-paper-composite-block" data-field-type="arrayOf" data-block-id={@block_id} data-array-variant="chips">
+      <form phx-change="inner-change" phx-target={@myself}>
+        <ul class="bp-paper-chips">
+          <li :for={{chip, i} <- Enum.with_index(@value)} class="bp-paper-chip">
+            <input type="text" name={"[#{i}]"} value={chip} />
+            <button
+              type="button"
+              phx-click="inner-array-op"
+              phx-target={@myself}
+              phx-value-action="remove_row"
+              phx-value-index={i}
+              aria-label="Remove"
+            >×</button>
+          </li>
+        </ul>
+        <button
+          type="button"
+          phx-click="inner-array-op"
+          phx-target={@myself}
+          phx-value-action="add_row"
+        >+ Add</button>
       </form>
     </div>
     """
@@ -464,6 +498,15 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   # host honours the block's stated intent.
   defp codelist_variant(%{"variant" => "tree"}), do: "tree"
   defp codelist_variant(_), do: "flat"
+
+  # Block render variant — the union of the arrayOf chips axis and the codelist
+  # tree/flat axis. arrayOf honours an explicit "chips" intent (a thin render
+  # skin over the arrayOf data path); codelist delegates to codelist_variant/1
+  # so its tree/flat render heads keep matching unchanged. Everything else is
+  # "flat". Keep codelist_variant/1 codelist-specific — do NOT widen it.
+  defp block_variant(%{"type" => "arrayOf", "variant" => "chips"}), do: "chips"
+  defp block_variant(%{"type" => "codelist"} = b), do: codelist_variant(b)
+  defp block_variant(_), do: "flat"
 
   defp parse_idx(idx) when is_binary(idx) do
     case Integer.parse(idx) do
