@@ -37,6 +37,7 @@ run("blast-index", "tooling/blast-radius/build-index.mjs", argv.includes("--skip
 run("signals", "tooling/file-importance/build-signals.mjs", ["10"]);
 run("ergonomics", "tooling/ergonomics/ergonomics.mjs");
 run("risk", "tooling/risk/risk.mjs", argv.includes("--no-coverage") ? ["--no-coverage"] : []);
+run("deps", "tooling/deps/deps.mjs");
 run("consistency", "tooling/consistency/consistency.mjs", ["scan"]);
 run("coverage", "tooling/research-coverage/coverage.mjs", ["scan"]);
 run("consistency-batches", "tooling/consistency/consistency.mjs", ["batches"]);

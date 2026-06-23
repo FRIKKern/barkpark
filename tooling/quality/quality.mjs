@@ -35,6 +35,7 @@ const crep = rd("tooling/consistency/consistency-report.json", { groups: [], lay
 const erg = rd("tooling/ergonomics/ergonomics-report.json", { files: [], splitCandidates: [], summary: {} });
 const riskRpt = rd("tooling/risk/risk-report.json", { files: {}, coverageTotals: {} });
 const risk = riskRpt.files;
+const deps = rd("tooling/deps/deps-report.json", { totals: {}, skipped: ["all"] });
 const covT = riskRpt.coverageTotals || {};
 // The batches/record agent cycle writes results/_layering.json + _dup.json; a
 // plain `consistency.mjs scan` does NOT. When those issue files are absent the
@@ -124,6 +125,38 @@ const testedFrac = impCode.length ? impCode.filter(([, v]) => v.testScore >= 50)
 const fragileN = impCode.filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).length;
 const critN = critArr.slice(0, dangerTopK).filter(x => x.v >= 50).length;
 
+// ── Contract — cross-language wire-seam guard strength (cheap static check, no generator) ──
+// Each seam in blast-radius config declares guard files. A seam is:
+//   strong (1.0) — has a present executable/snapshot guard (.exs/.ex or .json snapshot)
+//   weak   (0.5) — only present guard(s) are .md docs
+//   0            — no guard file exists on disk
+// drift on an unguarded/doc-only seam silently breaks the Go CLI / JS SDK.
+const brCfg = rd("tooling/blast-radius/config.json", { seam: { surfaces: [] } });
+const surfaces = brCfg.seam?.surfaces || [];
+let contractGuarded = 0, contractStrong = 0, contractWeak = 0, contractSum = 0;
+const contractWeakIds = [], contractUnguardedIds = [];
+for (const s of surfaces) {
+  const guards = (s.guards || []).map(g => String(g).trim().split(/\s+/)[0]).filter(Boolean);
+  let hasExec = false, hasDoc = false;
+  for (const g of guards) {
+    if (!existsSync(join(ROOT, g))) continue;
+    if (/\.(exs?|json)$/.test(g)) hasExec = true;
+    else if (/\.md$/.test(g)) hasDoc = true;
+  }
+  if (hasExec) { contractStrong++; contractGuarded++; contractSum += 1.0; }
+  else if (hasDoc) { contractWeak++; contractGuarded++; contractSum += 0.5; contractWeakIds.push(s.id); }
+  else { contractUnguardedIds.push(s.id); }
+}
+const contractTotal = surfaces.length;
+const contractScore = clamp(contractTotal ? 100 * contractSum / contractTotal : 100);
+const unguardedNote = (contractUnguardedIds.length || contractWeakIds.length)
+  ? ` · weak/unguarded: ${[...contractUnguardedIds, ...contractWeakIds].join(", ")}`
+  : "";
+
+// ── Dependencies — supply-chain vuln load from the deps generator ──
+const dv = deps.totals || {};
+const depScore = clamp(100 - (dv.critical || 0) * 25 - (dv.high || 0) * 10 - (dv.moderate || 0) * 3 - (dv.low || 0) * 0.5);
+
 const dims = [
   { name: "Evaluated", root: "—", score: evaluated, note: `${Object.keys(ledger.files).length} files researched · last full ${ledger.meta.lastFullResearch ? "set" : "—"}`, weight: 0.06 },
   { name: "Consistency", root: "conventions", score: clamp(100 - driftN * 10 - (crep.summary?.totalOutliers || 0) * 0.2), note: `${driftN} real drift · ${crep.groups?.filter(g=>g.outliers.length).length||0} groups w/ deviations (mostly intentional)`, weight: 0.13 },
@@ -134,8 +167,11 @@ const dims = [
   { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥${FRAGILE_DENSITY})`, weight: 0.10 },
   { name: "Duplication", root: "relationships", score: clamp(100 - dupN * 6), note: `${dupN} extract-worthy (of ${crep.duplication?.length || 0} dup pairs)`, weight: 0.06 },
   { name: "Dead code", root: "reach", score: clamp(100 - (crep.deadGoPackages?.length || 0) * 8), note: `${crep.deadGoPackages?.length || 0} dead Go packages`, weight: 0.07 },
+  { name: "Contract", root: "wire seams", score: contractScore, note: `${contractGuarded}/${contractTotal} cross-language wire seams guarded (${contractStrong} executable, ${contractWeak} doc-only) · drift breaks the Go CLI / JS SDK${unguardedNote}`, weight: 0.05 },
+  { name: "Dependencies", root: "supply chain", score: depScore, note: `${dv.critical || 0} crit · ${dv.high || 0} high · ${dv.moderate || 0} moderate vulns${deps.skipped?.length ? ` · unaudited: ${deps.skipped.join("/")}` : ""}`, weight: 0.05 },
 ];
-const overall = Math.round(dims.reduce((a, d) => a + d.score * d.weight, 0));
+const wsum = dims.reduce((a, d) => a + d.weight, 0);
+const overall = Math.round(dims.reduce((a, d) => a + d.score * d.weight, 0) / wsum);
 const grade = overall >= 90 ? "A" : overall >= 85 ? "A−" : overall >= 80 ? "B+" : overall >= 75 ? "B" : overall >= 70 ? "B−" : overall >= 65 ? "C+" : overall >= 55 ? "C" : "D";
 
 // ── the four composite worklists (top entries, for the dashboard + JSON) ──
