@@ -17,6 +17,12 @@ function wrapMark(name: string, href: string | undefined, el: ReactNode): ReactN
     case "em":
     case "italic":
       return <em>{el}</em>;
+    case "strike":
+    case "strikethrough":
+    case "s":
+      return <s>{el}</s>;
+    case "underline":
+      return <u>{el}</u>;
     case "code":
       return <code className={inlineCode}>{el}</code>;
     case "link":
@@ -53,6 +59,12 @@ function renderInline(node: Inline, key: Key): ReactNode {
       return <strong key={key}>{renderInlines(node.children)}</strong>;
     case "em":
       return <em key={key}>{renderInlines(node.children)}</em>;
+    case "strikethrough":
+    case "strike":
+    case "s":
+      return <s key={key}>{renderInlines(node.children)}</s>;
+    case "underline":
+      return <u key={key}>{renderInlines(node.children)}</u>;
     case "code":
       return (
         <code key={key} className={inlineCode}>

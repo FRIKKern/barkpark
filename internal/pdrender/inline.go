@@ -63,6 +63,14 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		inner := ir.children(n, ctx, insideLink)
 		return ir.theme.markStyle("italic").Render(inner)
 
+	case "underline":
+		inner := ir.children(n, ctx, insideLink)
+		return ir.theme.markStyle("underline").Render(inner)
+
+	case "strikethrough", "strike", "s":
+		inner := ir.children(n, ctx, insideLink)
+		return ir.theme.markStyle("strikethrough").Render(inner)
+
 	case "code":
 		return ir.theme.InlineCode.Render(attrStr(n, "value"))
 

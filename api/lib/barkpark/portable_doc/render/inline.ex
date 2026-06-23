@@ -51,6 +51,23 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
+  def compose_inline(%{"type" => type} = n, inside_link)
+      when type in ["strikethrough", "strike", "s"] do
+    %{
+      "kind" => "PdText",
+      "strike" => true,
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
+  def compose_inline(%{"type" => "underline"} = n, inside_link) do
+    %{
+      "kind" => "PdText",
+      "underline" => true,
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
   def compose_inline(%{"type" => "code"} = n, _inside_link) do
     %{"kind" => "PdInlineCode", "value" => Map.get(n, "value", "")}
   end

@@ -98,6 +98,27 @@ defmodule Barkpark.PortableDoc.RenderTest do
                ~s(<code style="background:#f3f4f6;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">a &amp; b</code>)
     end
 
+    test "strikethrough / underline inline WRAPPER nodes compose + render to text-decoration" do
+      # The new convert.js round-trip emits wrapper nodes; compose_inline must
+      # turn them into PdText strike/underline (NOT hit the catch-all raise),
+      # and the walk must render text-decoration. Guards the t4 marks round-trip.
+      strike =
+        Render.Inline.compose_inline(
+          %{"type" => "strikethrough", "children" => [%{"type" => "text", "value" => "gone"}]},
+          false
+        )
+
+      assert Render.render_html(strike, @opts) =~ "text-decoration:line-through"
+
+      underline =
+        Render.Inline.compose_inline(
+          %{"type" => "underline", "children" => [%{"type" => "text", "value" => "keep"}]},
+          false
+        )
+
+      assert Render.render_html(underline, @opts) =~ "text-decoration:underline"
+    end
+
     test "PdButton primary uses brand background" do
       node = %{
         "kind" => "PdButton",

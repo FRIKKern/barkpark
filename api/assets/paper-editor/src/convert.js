@@ -53,6 +53,16 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
+    case "strikethrough": {
+      const next = [...marks, { type: "strike" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "underline": {
+      const next = [...marks, { type: "underline" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
     case "link": {
       const next = [...marks, { type: "link", attrs: { href: node.href || "" } }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
@@ -75,9 +85,10 @@ function inlineArrayToTiptap(inline) {
 // ── flat TipTap text nodes  →  portable-doc inline tree ────────────────────
 
 // Mark priority controls nesting order when a run carries multiple marks.
-// Outer-most first. `strike` has no portable-doc equivalent yet, so we drop
-// the wrapper but keep the text (P1 scope: bold/italic/code/link round-trip).
-const MARK_ORDER = ["link", "strong", "em", "code"];
+// Outer-most first. strike/underline map to portable-doc strikethrough/underline
+// wrapper nodes (rendered by walk.ex strike/underline, pdrender, and the web
+// renderer); `code` stays inner-most because it is a value-leaf.
+const MARK_ORDER = ["link", "strong", "em", "underline", "strikethrough", "code"];
 
 // Map a TipTap mark to a portable-doc wrapper descriptor.
 function markToPd(mark) {
@@ -88,10 +99,14 @@ function markToPd(mark) {
       return { kind: "em" };
     case "code":
       return { kind: "code" };
+    case "strike":
+      return { kind: "strikethrough" };
+    case "underline":
+      return { kind: "underline" };
     case "link":
       return { kind: "link", href: (mark.attrs && mark.attrs.href) || "" };
     default:
-      return null; // strike / others: no portable-doc node, unwrap silently
+      return null; // unknown marks: no portable-doc node, unwrap silently
   }
 }
 
@@ -133,6 +148,8 @@ function tiptapTextNodeToPd(tnode) {
 function pdKindToMark(kind) {
   if (kind === "strong") return "strong";
   if (kind === "em") return "em";
+  if (kind === "underline") return "underline";
+  if (kind === "strikethrough") return "strikethrough";
   if (kind === "link") return "link";
   if (kind === "code") return "code";
   return kind;

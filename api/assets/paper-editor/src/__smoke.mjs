@@ -105,6 +105,54 @@ check("patch-block op shape for 'Hello **world**'", () => {
   console.log("      emitted op:", JSON.stringify(op));
 });
 
+// 6) strikethrough round-trips (the canonical bug: strike typed in Studio was
+//    dropped on save — MARK_ORDER had no portable-doc equivalent).
+check("paragraph round-trip (strikethrough)", () => {
+  const sample = {
+    id: "p-6",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "was " },
+      { type: "strikethrough", children: [{ type: "text", value: "removed" }] },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-6", "paragraph");
+  assert.deepEqual(back, sample);
+});
+
+// 7) underline round-trips.
+check("paragraph round-trip (underline)", () => {
+  const sample = {
+    id: "p-7",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "see " },
+      { type: "underline", children: [{ type: "text", value: "here" }] },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-7", "paragraph");
+  assert.deepEqual(back, sample);
+});
+
+// 8) nested bold > strikethrough round-trips (nesting matches MARK_ORDER:
+//    strong outer, strikethrough inner).
+check("paragraph round-trip (bold > strikethrough)", () => {
+  const sample = {
+    id: "p-8",
+    type: "paragraph",
+    content: [
+      {
+        type: "strong",
+        children: [
+          { type: "strikethrough", children: [{ type: "text", value: "gone" }] },
+        ],
+      },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-8", "paragraph");
+  assert.deepEqual(back, sample);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
