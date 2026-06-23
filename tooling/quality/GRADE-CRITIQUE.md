@@ -7,7 +7,7 @@
 
 ---
 
-## Latest critique — 2026-06-23 · grade B 79 (was a false B+ 81)
+## Latest critique — 2026-06-23 · grade B 75 (was a false B+ 81; B 79 after the read fix, B 75 once Contract+Dependencies were wired and exposed real CVEs)
 
 Four critics audited the live grade. Headline truth: **the 9 critics measure how *maintainable* the code is to change — not whether it is correct, secure, or fast at runtime.** Two findings changed the number:
 
@@ -25,8 +25,8 @@ Ranked by danger × cheapness. The first three are the most dangerous *and* chea
 | Gap | Why it's dangerous for a public multi-tenant CMS | Cost | How |
 |---|---|---|---|
 | **Security-critical coverage** | cross-tenant leak / GROQ-or-SQL injection ships green; grade is silent | cheap | tag auth/tenancy seams (`scope.ex`, token plug, query compiler), assert sibling isolation test; regress if dropped |
-| **API-contract stability** | a `/v1/capabilities` shape change bricks the Go CLI + JS SDK | cheap | `tooling/blast-radius/` already computes the four wire seams — **wire it into the grade** (machinery built, unplugged) |
-| **Dependency / supply chain** | CVE in Phoenix/Plug/Oban/npm on the open internet; CI runs `--no-audit` | cheap | a "Hygiene" critic: `mix hex.audit` + `npm audit` + `govulncheck` |
+| ~~API-contract stability~~ **→ WIRED** (`Contract` critic, scored **63**) | a `/v1/capabilities` shape change bricks the Go CLI + JS SDK | done | reads `blast-radius` seam guards; 1 seam has an executable contract test, 3 are doc-only (weak) — add `.exs` guards to lift it |
+| ~~Dependency / supply chain~~ **→ WIRED** (`Dependencies` critic, scored **0**) | CVE in Phoenix/Plug/Oban/npm on the open internet; CI runs `--no-audit` | done | `tooling/deps/deps.mjs` (`mix hex.audit` + `npm`/`pnpm audit`; `govulncheck` skipped — not installed). **Found 2 critical + 19 high + 23 moderate in `js/` — previously invisible. Triage these.** |
 | **`web/` frontend coverage** | a whole shipped surface has zero tests, excluded by reach | medium | vitest + Istanbul under `web/`; `risk.mjs:166` already scans for it |
 | **Type safety (dialyzer)** | spec rot in the dynamically-typed core | medium | dialyzer warnings/module as a critic (PLT cacheable) |
 | **Runtime perf / N+1** | the classic CMS killer; "Hotspots" measures change-difficulty, not runtime cost | medium→hard | static `Repo.all`-inside-`Enum.map` lint cheap; true N+1 needs a telemetry harness |
@@ -35,7 +35,8 @@ Ranked by danger × cheapness. The first three are the most dangerous *and* chea
 **Grader bugs / limits to keep honest:** broken `_layering/_dup` read (FIXED); proxy `+60` hatch ungated on assertion density (`risk.mjs:191`); reach is both value-axis and coverage-filter, so reach-0 surfaces (web/, Go `main`) vanish from Tested; layering rule set is two regexes (`Repo.` in web, `BarkparkWeb.` in core) — cannot see god-context fan-in, plugin↔plugin, or runtime/PubSub cycles.
 
 ## Code anchors
-- tooling/quality/quality.mjs — the 9 `dims`, the verdict-cache fallback, the honest dim notes
+- tooling/quality/quality.mjs — the 11 `dims` (weights renormalized), the verdict-cache fallback, the inline Contract signal, the honest dim notes
+- tooling/deps/deps.mjs — the Dependencies critic (`mix hex.audit` + `npm`/`pnpm audit` + `govulncheck`); writes deps-report.json
 - tooling/consistency/verdict-cache.json — real layering/duplication verdicts (the grader's source of truth when results/_*.json are absent)
 - tooling/risk/risk.mjs — coverage measurement + the proxy hatch (line ~191)
-- tooling/blast-radius/ — built contract-drift seams, not yet a grade input
+- tooling/blast-radius/config.json — the four wire seams + their guards (now read by the Contract critic)
