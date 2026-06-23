@@ -15,7 +15,7 @@ Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite 
 | Duplication | 100 | Reliability | 65 | Hotspots | 60 |
 | Dead-code | 100 | Evaluated | 100 | **Modularity** | **10** |
 
-Weighted **74 / 100 (B−)**. The lowest three (**Modularity 10**, Reliability 65, Hotspots 60) are Cody's live worklist; the number only moves on gated, re-scored improvement (e.g. decomposing god-modules like `studio_live`/`registry`/`api_tester_live` behind facades). Modularity counts god-modules by **absolute** reach, so the score is stable under graph churn — and honest: it surfaces all 10 reach-heavy god-modules (`content`, `plugin`, `tasks`, `tenancy`, …) rather than letting normalization hide them.
+Weighted **74 / 100 (B−)**. The lowest three (**Modularity 10**, Reliability 65, Hotspots 60) are Cody's live worklist; the number only moves on gated, re-scored improvement (e.g. decomposing god-modules like `studio_live`/`registry`/`api_tester_live` behind facades). Modularity counts god-modules by **absolute** reach — stable under graph churn, and honest about all 10 reach-heavy ones.
 
 ## Get started
 
