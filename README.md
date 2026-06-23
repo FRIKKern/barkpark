@@ -5,17 +5,18 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B · 79 / 100
+## Codebase grade — B · 75 / 100
 
-Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live from the dependency graph (`node tooling/quality/quality.mjs`):
+Barkpark grades *itself* — **Cody**, its 11-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
 | Architecture | 85 | Consistency | 78 | Tested | 87 |
 | Duplication | 100 | Reliability | 65 | Hotspots | 60 |
-| Dead-code | 100 | Evaluated | 100 | **Modularity** | **66** |
+| Dead-code | 100 | Evaluated | 100 | Modularity | 66 |
+| Contract | 63 | **Dependencies** | **0** | | |
 
-Weighted **79 / 100 (B)** — honest: Architecture counts 5 real layering violations, not a façade 100. The grade measures **maintainability, not correctness/security/runtime**; `web/` ships untested, deps and contract-drift ungraded. Every run pairs an *agent critique* of where the number lies → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest three: Hotspots 60, Reliability 65, Modularity 66.
+Weighted **75 / 100 (B)** — honest: Architecture shows 5 real layering violations (not a façade 100), and **Dependencies is 0** — `pnpm audit` finds 2 critical + 19 high CVEs in `js/` that CI's `--no-audit` hid. Keys maintainability + supply-chain + contract, not runtime correctness. Every run pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Dependencies 0, Hotspots 60, Contract 63.
 
 ## Get started
 
