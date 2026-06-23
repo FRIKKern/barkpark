@@ -75,4 +75,56 @@ defmodule Barkpark.Content.WikilinkResolveTest do
     assert Content.resolve_wikilink("   ", @dataset) == nil
     assert Content.resolve_wikilink("", @dataset) == nil
   end
+
+  test "resolve_wikilinks_in_blocks deep-collects + resolves, dedups, omits misses" do
+    paper!("p-intro", "Intro to X")
+
+    blocks = [
+      %{
+        "id" => "b1",
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "text", "value" => "see "},
+          %{
+            "type" => "wikilink",
+            "target" => "Intro to X",
+            "children" => [%{"type" => "text", "value" => "intro"}]
+          },
+          %{"type" => "text", "value" => " and "},
+          %{
+            "type" => "wikilink",
+            "target" => "Nonexistent",
+            "children" => [%{"type" => "text", "value" => "x"}]
+          }
+        ]
+      },
+      # The same target again, nested inside a mark inside a list item.
+      %{
+        "id" => "b2",
+        "type" => "list",
+        "ordered" => false,
+        "items" => [
+          [
+            %{
+              "type" => "strong",
+              "children" => [
+                %{
+                  "type" => "wikilink",
+                  "target" => "Intro to X",
+                  "children" => [%{"type" => "text", "value" => "again"}]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    ]
+
+    map = Content.resolve_wikilinks_in_blocks(blocks, @dataset)
+
+    assert %{"Intro to X" => %{id: "p-intro"}} = map
+    # unresolved targets are absent; duplicates resolve once.
+    refute Map.has_key?(map, "Nonexistent")
+    assert map_size(map) == 1
+  end
 end

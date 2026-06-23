@@ -365,9 +365,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color};text-decoration:underline">#{inner}</a>)
   end
 
-  # Internal-link kinds. Targets are UNRESOLVED (no href yet) — render the label
-  # with a data-* hook a later resolver/JS can upgrade, degrading to a styled,
-  # non-navigating span. escape_html escapes quotes too, so it is attr-safe.
+  # Internal-link kinds. A RESOLVED target (present in the palette's `:wikilinks`
+  # map, stamped by the caller via Content.resolve_wikilink) renders a real
+  # navigable <a href>; an UNRESOLVED target degrades to the styled,
+  # non-navigating dotted span (the Obsidian broken-link look) — byte-identical
+  # to the pre-resolution render whenever the map is empty. escape_html escapes
+  # quotes too, so it is attr-safe.
   defp wikilink(n, width, pal) do
     inner =
       Map.get(n, "children", [])
@@ -377,8 +380,18 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    target = escape_html(Map.get(n, "target", ""))
-    ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
+    raw = Map.get(n, "target", "")
+    target = escape_html(raw)
+
+    case Map.get(Map.get(pal, :wikilinks, %{}), raw) do
+      %{id: id} ->
+        href = escape_html("/papers/" <> id)
+
+        ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+
+      _ ->
+        ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
+    end
   end
 
   defp blockref(n, _pal) do
