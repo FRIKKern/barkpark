@@ -58,7 +58,7 @@ const findings = [];
 for (const l of layV) if (l.verdict === "violation") findings.push({ kind: "layering", file: l.file, dim: "Architecture", sev: 1.0, effort: 2, action: l.fix || "Move data access into a domain context", why: l.reason });
 for (const [f, v] of Object.entries(gV)) if (v.verdict === "drift") findings.push({ kind: "drift", file: f, dim: "Consistency", sev: 0.9, effort: 1, action: v.recommendation, why: "diverges from the group's own pattern" });
 for (const v of dupV) if (v.verdict === "extract") findings.push({ kind: "duplication", file: v.a, dim: "Duplication", sev: 0.55, effort: 2, action: `Extract shared logic (≈ ${v.b})`, why: v.reason });
-for (const r of erg.splitCandidates) if (r.refactorWorth > 5000) findings.push({ kind: "bloat", file: r.path, dim: "Modularity", sev: Math.min(1, r.refactorWorth / 40000), effort: evalFormula(EFFORT_FN, { tokens: r.tokens }), action: `Split god-module (${r.defs} defs, ${r.tokens.toLocaleString()} tok) read every change (churn ${r.churn})`, why: "context-bloat paid on every read" });
+for (const r of erg.splitCandidates) if (r.refactorWorth > 5000 && !r.contract) findings.push({ kind: "bloat", file: r.path, dim: "Modularity", sev: Math.min(1, r.refactorWorth / 40000), effort: evalFormula(EFFORT_FN, { tokens: r.tokens }), action: `Split god-module (${r.defs} defs, ${r.tokens.toLocaleString()} tok) read every change (churn ${r.churn})`, why: "context-bloat paid on every read" });
 // HOTSPOT findings — churn × complexity above the fitted percentile (the refactor gold standard)
 for (const [f, c] of allComp) if (c.hotspot >= hotspotCut && c.hotspot >= 60 && (roots[f]?._raw.churn ?? 0) >= 8) findings.push({ kind: "hotspot", file: f, dim: "Hotspot", sev: Math.min(1, c.hotspot / 100), effort: roots[f]._raw.tokens > 20000 ? 4 : 3, action: `Refactor hotspot — churn ${roots[f]._raw.churn} × ${roots[f]._raw.tokens.toLocaleString()} tok (hotspot ${c.hotspot})`, why: "high-churn high-complexity: the field's gold-standard refactor target" });
 // CRITICAL-UNTESTED findings — reach × ¬coverage in the danger top-K
@@ -84,7 +84,21 @@ const dupN = deduped.filter(f => f.kind === "duplication").length;
 // now, and stable under graph perturbation going forward.
 const GOD_MODULE_REACH = 15;
 const reachAbsOf = (p) => roots[p]?._raw.reachAbs ?? 0;
-const bloatBig = deduped.filter(f => f.kind === "bloat" && reachAbsOf(f.file) >= GOD_MODULE_REACH).length;
+// Modularity counts STRUCTURAL god-modules: large by SIZE (ergonomics sizeClass
+// "bloat" = >8k tokens) AND high-reach. NOT refactorWorth — that folds in churn,
+// which Hotspots already owns, so counting it here double-penalized churn-heavy
+// but size-normal files (e.g. content.ex: 5.8k tok, churn 149 — a Hotspot, not a
+// god-module). Behaviour-contract modules (@callback-dominated, e.g. plugin.ex)
+// are excluded: their bulk is spec, not splittable logic. Each exclusion is
+// surfaced in the dimension note so a reader never sees an unexplained number.
+const ergFiles = erg.files || [];
+const isGodMod = (r) => r.sizeClass === "bloat" && reachAbsOf(r.path) >= GOD_MODULE_REACH;
+const godMods = ergFiles.filter((r) => isGodMod(r) && !r.contract);
+const bloatBig = godMods.length;
+const godExcludedContract = ergFiles.filter((r) => isGodMod(r) && r.contract).length;
+// high-reach + refactorWorth-flagged but NOT structurally large → churn-driven
+// (counted under Hotspots instead). Reported for transparency only.
+const godChurnDriven = deduped.filter((f) => f.kind === "bloat" && reachAbsOf(f.file) >= GOD_MODULE_REACH && !godMods.some((g) => g.path === f.file)).length;
 const evaluated = Object.values(ledger.files).length ? 100 : 0;
 
 // HOTSPOT dimension — churn × complexity density (the refactor-target axis)
@@ -102,7 +116,7 @@ const dims = [
   { name: "Consistency", root: "conventions", score: clamp(100 - driftN * 10 - (crep.summary?.totalOutliers || 0) * 0.2), note: `${driftN} real drift · ${crep.groups?.filter(g=>g.outliers.length).length||0} groups w/ deviations (mostly intentional)`, weight: 0.13 },
   { name: "Architecture", root: "relationships", score: clamp(100 - layN.reduce((a, f) => a + (f.reach || 50) / 100 * 9, 0)), note: `${layN.length} verified layering violations · compile-DAG acyclic`, weight: 0.15 },
   { name: "Hotspots", root: "churn × complexity", score: clamp(100 - hotspotN * 4), note: `${hotspotN} files churn×complexity ≥70 · ${deduped.filter(f=>f.kind==="hotspot").length} above the ${cfg.thresholds.hotspotPercentile}th-pct refactor line`, weight: 0.16 },
-  { name: "Modularity", root: "complexity", score: clamp(100 - bloatBig * 7 - Math.min(20, (erg.summary?.bloat || 0))), note: `${erg.summary?.bloat || 0} bloated files · ${bloatBig} high-reach god-modules`, weight: 0.12 },
+  { name: "Modularity", root: "complexity", score: clamp(100 - bloatBig * 7 - Math.min(20, (erg.summary?.bloat || 0))), note: `${bloatBig} high-reach god-modules (>8k tok)${godExcludedContract ? ` · ${godExcludedContract} behaviour-contract excluded` : ""}${godChurnDriven ? ` · ${godChurnDriven} churn-driven → Hotspots` : ""} · ${erg.summary?.bloat || 0} bloated files (−7/god, −1/bloat≤20)`, weight: 0.12 },
   { name: "Tested", root: "tests", score: clamp(testedFrac * 100), note: `${Math.round(testedFrac*100)}% of high-reach code has coverage · ${critN} critical-untested (reach × ¬coverage)`, weight: 0.15 },
   { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥${FRAGILE_DENSITY})`, weight: 0.10 },
   { name: "Duplication", root: "relationships", score: clamp(100 - dupN * 6), note: `${dupN} extract-worthy (of ${crep.duplication?.length || 0} dup pairs)`, weight: 0.06 },

@@ -20,12 +20,16 @@ const IDEAL_CEIL = 4000, BLOAT = 8000, FRAGMENT = 250;
 const tokens = (t) => Math.ceil(t.length / 4);
 const defCount = (f, t) => (t.match(f.endsWith(".go") ? /^func\s/gm : /\.exs?$/.test(f) ? /^\s*defp?\s/gm : /^\s*export\s+(async\s+)?(function|const|class|interface|type)\s|^(async\s+)?function\s|^class\s/gm) || []).length;
 const sizeClass = (t) => t > BLOAT ? "bloat" : t > IDEAL_CEIL ? "large" : t < FRAGMENT ? "fragment" : "ideal";
+// A behaviour-CONTRACT module (Elixir @callback-dominated) is not a decomposition
+// target — its "bloat" is @callback specs + the contract moduledoc, not splittable
+// logic. Flagged so the Modularity dimension can exclude it (e.g. Barkpark.Plugin).
+const cbCount = (t) => (t.match(/^\s*@(macro)?callback\s/gm) || []).length;
 
 const rows = sig.filter(s => s.kind === "code" || s.kind === "test").map(s => {
   let txt = ""; try { txt = readFileSync(join(ROOT, s.path), "utf8"); } catch {}
-  const t = tokens(txt), d = Math.max(1, defCount(s.path, txt));
+  const t = tokens(txt), d = Math.max(1, defCount(s.path, txt)), cb = cbCount(txt);
   const worth = Math.round(Math.max(0, t - IDEAL_CEIL) * Math.log2(1 + s.churn) * Math.min(1, d / 30));
-  return { path: s.path, stack: s.stack, loc: s.loc, churn: s.churn, tokens: t, defs: d, sizeClass: sizeClass(t), refactorWorth: worth };
+  return { path: s.path, stack: s.stack, loc: s.loc, churn: s.churn, tokens: t, defs: d, callbacks: cb, contract: cb >= 3, sizeClass: sizeClass(t), refactorWorth: worth };
 });
 
 const cls = (c) => rows.filter(r => r.sizeClass === c).length;
