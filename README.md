@@ -5,17 +5,17 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B− · 73 / 100
+## Codebase grade — B− · 74 / 100
 
 Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live from the dependency graph (`node tooling/quality/quality.mjs`):
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
-| Architecture | 100 | Consistency | 78 | Tested | 55 |
+| Architecture | 100 | Consistency | 78 | Tested | 83 |
 | Duplication | 100 | Reliability | 65 | Hotspots | 60 |
-| Dead-code | 100 | Evaluated | 100 | **Modularity** | **38** |
+| Dead-code | 100 | Evaluated | 100 | **Modularity** | **10** |
 
-Weighted **73 / 100 (B−)**. The lowest three are Cody's live worklist; the number only moves on gated, re-scored improvement (**C+ 68 → B− 73** by decomposing the god-modules — `content`/`studio_components`/`render`/`registry` + the 5483-line `studio_live` LiveView — behind facades).
+Weighted **74 / 100 (B−)**. The lowest three (**Modularity 10**, Reliability 65, Hotspots 60) are Cody's live worklist; the number only moves on gated, re-scored improvement (e.g. decomposing god-modules like `studio_live`/`registry`/`api_tester_live` behind facades). Modularity counts god-modules by **absolute** reach, so the score is stable under graph churn — and honest: it surfaces all 10 reach-heavy god-modules (`content`, `plugin`, `tasks`, `tenancy`, …) rather than letting normalization hide them.
 
 ## Get started
 
