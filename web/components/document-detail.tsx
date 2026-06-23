@@ -2,7 +2,7 @@ import { getDocument } from "@/lib/get-document";
 import { paperBlocks, type PaperDocument } from "@/lib/papers";
 import type { PostDocument } from "@/lib/posts";
 import { PostArticle } from "@/components/post-article";
-import { PortableDoc } from "@/components/portable-doc";
+import { PortableDoc, PaperEditorDoc } from "@/components/portable-doc";
 import { SheetGrid, type SheetTab } from "@/components/sheet-grid";
 import { MetaCard } from "@/components/meta-card";
 import { DetailChrome } from "@/components/detail-chrome";
@@ -25,12 +25,23 @@ function renderBody(
           <PostArticle post={doc as PostDocument} error={null} embedded />
         </div>
       );
-    case "paper":
+    case "paper": {
+      // Flag-gated read-mode editor embed. OFF (default) keeps the server
+      // PortableDoc — zero client-editor bundle cost, no SSR/demo regression.
+      // ON swaps in PaperEditorDoc, which mounts one read-only <bp-paper-editor>
+      // per top-level prose block and server-renders the rest.
+      const paperReadMode = process.env.NEXT_PUBLIC_PAPER_EDITOR === "read";
+      const blocks = paperBlocks(doc as PaperDocument);
       return (
         <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
-          <PortableDoc blocks={paperBlocks(doc as PaperDocument)} />
+          {paperReadMode ? (
+            <PaperEditorDoc blocks={blocks} />
+          ) : (
+            <PortableDoc blocks={blocks} />
+          )}
         </article>
       );
+    }
     case "sheet":
       return (
         <div className="w-full px-4 py-6">

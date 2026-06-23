@@ -51,6 +51,11 @@ function ensureStyles() {
 class BpPaperEditor extends HTMLElement {
   static CONTRACT_VERSION = CONTRACT_VERSION;
 
+  // Observe `editable` so post-mount toggles route through attributeChangedCallback.
+  static get observedAttributes() {
+    return ["editable"];
+  }
+
   constructor() {
     super();
     this._editor = null;
@@ -60,12 +65,20 @@ class BpPaperEditor extends HTMLElement {
     this._debounceTimer = null;
     this._slash = null; // SlashMenu instance (lazy, created on first trigger)
     this._bubble = null; // FormatBubble instance (selection format toolbar)
+    // Read-mode flag. Defaults TRUE (current edit behavior). Only the literal
+    // attribute value editable="false" disables editing — a presence-boolean
+    // can't express default-true, hence the by-value convention.
+    this._editable = true;
   }
 
   connectedCallback() {
     if (this._editor) return; // double-mount guard
 
     ensureStyles();
+
+    // Default true; only the literal string "false" disables. This mount-time
+    // read is authoritative — attributeChangedCallback only handles later toggles.
+    this._editable = this.getAttribute("editable") !== "false";
 
     const block = this._readBlock();
     this._blockId = block && block.id != null ? block.id : null;
@@ -78,6 +91,9 @@ class BpPaperEditor extends HTMLElement {
 
     this._editor = new Editor({
       element: this._mount,
+      // Read mode (editable:false) gives a non-editing, correctly-styled render
+      // and suppresses onUpdate-driven typing, so no bp-op/slash ever fires.
+      editable: this._editable,
       extensions: [
         StarterKit.configure({
           // Single-block editing: heading levels 1–3, lists, history on.
@@ -149,7 +165,10 @@ class BpPaperEditor extends HTMLElement {
     // Selection format toolbar (B6) — B / I / </> / link, shown on a non-empty
     // text selection. Hand-rolled (no tippy) and fully decoupled from the
     // patch-block round-trip and the slash menu.
-    this._bubble = new FormatBubble({ editor: this._editor });
+    // Skipped in read mode; every downstream consumer is `if (this._bubble)` guarded.
+    if (this._editable) {
+      this._bubble = new FormatBubble({ editor: this._editor });
+    }
     // Lifecycle: one-shot bubbling/composed signal a host hook can await
     // (LiveView ignores unknown events → additive, zero regression).
     this.dispatchEvent(
@@ -163,6 +182,17 @@ class BpPaperEditor extends HTMLElement {
         composed: true,
       }),
     );
+  }
+
+  // Live editable toggling (post-mount). Guarded against the spec'd ordering
+  // quirk where this fires before connectedCallback for initial attributes —
+  // in that case this._editor is null and we no-op; connectedCallback's read
+  // is authoritative at mount.
+  attributeChangedCallback(name, _old, val) {
+    if (name === "editable") {
+      this._editable = val !== "false";
+      if (this._editor) this._editor.setEditable(this._editable);
+    }
   }
 
   disconnectedCallback() {
@@ -211,6 +241,7 @@ class BpPaperEditor extends HTMLElement {
   }
 
   _scheduleEmit() {
+    if (!this._editable) return; // read mode emits no patch-block op
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {
       this._debounceTimer = null;
@@ -242,6 +273,7 @@ class BpPaperEditor extends HTMLElement {
   // that does NOT start with "/" (a slash mid-prose), a multi-line block, or a
   // non-collapsed selection all keep the menu closed.
   _maybeSlash() {
+    if (!this._editable) return; // read mode: no slash menu, no bp-slash-insert
     if (!this._editor) return;
 
     const { state } = this._editor;

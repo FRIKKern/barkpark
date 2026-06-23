@@ -295,6 +295,23 @@ check("contract exposes CONTRACT_VERSION", () => {
   assert.equal(CONTRACT_VERSION, "1.0.0");
 });
 
+// 17) blockToTiptap is editability-independent — the read-mode `editable`
+//     attribute lives entirely in the Web Component (index.js); convert.js has
+//     no editability parameter and no DOM, so its output is byte-identical in
+//     read and edit mode. This proves the editable seam never reaches convert.js.
+check("blockToTiptap is identical regardless of editability", () => {
+  const sample = {
+    id: "p-17",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "read " },
+      { type: "strong", children: [{ type: "text", value: "or" }] },
+      { type: "text", value: " edit" },
+    ],
+  };
+  assert.deepEqual(blockToTiptap(sample), blockToTiptap(sample));
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
