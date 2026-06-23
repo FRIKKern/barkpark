@@ -147,6 +147,48 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_html(tag, @opts) =~ "#epic"
     end
 
+    test "wikilink renders <a href> when the target resolves, dotted span otherwise" do
+      node =
+        Render.Inline.compose_inline(
+          %{
+            "type" => "wikilink",
+            "target" => "Intro to X",
+            "children" => [%{"type" => "text", "value" => "the intro"}]
+          },
+          false
+        )
+
+      # No :wikilinks map → unresolved → the dotted span.
+      unresolved = Render.render_html(node, @opts)
+      assert unresolved =~ ~s(<span data-wikilink="Intro to X")
+      assert unresolved =~ "underline dotted"
+      refute unresolved =~ "<a href"
+
+      # Caller passes a resolved map → a navigable <a href="/papers/<id>">.
+      resolved =
+        Render.render_html(node, Map.put(@opts, :wikilinks, %{"Intro to X" => %{id: "p-intro"}}))
+
+      assert resolved =~ ~s(<a href="/papers/p-intro")
+      assert resolved =~ ~s(data-wikilink="Intro to X")
+      assert resolved =~ "the intro"
+      refute resolved =~ "underline dotted"
+    end
+
+    test "an empty :wikilinks map is byte-identical to no map (opt-in regression guard)" do
+      node =
+        Render.Inline.compose_inline(
+          %{
+            "type" => "wikilink",
+            "target" => "intro",
+            "children" => [%{"type" => "text", "value" => "intro"}]
+          },
+          false
+        )
+
+      assert Render.render_html(node, @opts) ==
+               Render.render_html(node, Map.put(@opts, :wikilinks, %{}))
+    end
+
     test "collapsible callout renders <details> in article, expanded <div> in email" do
       block = %{
         "id" => "c1",

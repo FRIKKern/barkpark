@@ -52,7 +52,17 @@ defmodule Barkpark.PortableDoc.Render do
       `:email` default keeps existing output byte-unchanged.
   """
   def render_html(root, opts \\ %{}) do
-    palette = Palettes.palette_for(Map.get(opts, :style, :email))
+    palette =
+      Map.get(opts, :style, :email)
+      |> Palettes.palette_for()
+      # Wikilink resolution rides the palette (already threaded to every walk/3).
+      # `:wikilinks` is a caller-supplied %{raw_target => %{id: ...}} map — the
+      # caller pre-resolves targets (via Content.resolve_wikilink) and passes it.
+      # Absent ⇒ %{} ⇒ every wikilink stays the unresolved dotted span (the
+      # render is byte-identical for callers that don't opt in). Same
+      # pure-renderer + injected-resolution pattern as :ref_resolver below.
+      |> Map.put(:wikilinks, Map.get(opts, :wikilinks, %{}))
+
     width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
     body = Walk.render_body(root, width, palette)
 

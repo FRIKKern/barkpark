@@ -124,6 +124,48 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  Pre-resolve every wikilink target in a block list into the render-opts map
+  `%{raw_target => %{id, title}}` that `Render.render_html/2` threads onto the
+  palette (so `walk/3` emits a navigable `<a>` for resolved targets).
+
+  Collects every distinct `target` from any inline `wikilink` node anywhere in
+  `blocks` (deep walk — paragraph content, list items, nested marks), resolves
+  each ONCE via `resolve_wikilink/3`, and keeps only the hits. Unresolved
+  targets are simply absent (they degrade to the dotted broken-link span).
+  """
+  @spec resolve_wikilinks_in_blocks(list(), String.t(), keyword()) :: %{
+          optional(String.t()) => %{id: String.t(), title: String.t()}
+        }
+  def resolve_wikilinks_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_list(blocks) do
+    blocks
+    |> collect_wikilink_targets([])
+    |> Enum.uniq()
+    |> Enum.reduce(%{}, fn target, acc ->
+      case resolve_wikilink(target, dataset, opts) do
+        nil -> acc
+        hit -> Map.put(acc, target, hit)
+      end
+    end)
+  end
+
+  # Deep walk: collect the `target` of every `wikilink`-typed inline node, no
+  # matter how deeply nested (marks carry `children`; list items are nested
+  # lists). Pure structural recursion over maps + lists.
+  defp collect_wikilink_targets(%{"type" => "wikilink", "target" => t} = node, acc)
+       when is_binary(t) and t != "" do
+    Enum.reduce(Map.values(node), [t | acc], &collect_wikilink_targets/2)
+  end
+
+  defp collect_wikilink_targets(node, acc) when is_map(node),
+    do: Enum.reduce(Map.values(node), acc, &collect_wikilink_targets/2)
+
+  defp collect_wikilink_targets(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_wikilink_targets/2)
+
+  defp collect_wikilink_targets(_other, acc), do: acc
+
+  @doc """
   Resolve a paper for the PUBLIC, unauthenticated `/papers/:slug` surface.
 
   Papers are stamped `workspace_id` on write and slugs are PER-WORKSPACE (the

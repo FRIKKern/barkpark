@@ -500,6 +500,10 @@ defmodule Barkpark.Content do
   def resolve_wikilink(target, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.resolve_wikilink(target, dataset, opts)
 
+  @doc "Pre-resolve all wikilink targets in a block list to the render-opts map. See `Content.Papers`."
+  def resolve_wikilinks_in_blocks(blocks, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    do: Papers.resolve_wikilinks_in_blocks(blocks, dataset, opts)
+
   @doc "Resolve a doc by title|alias within scope (the wikilink read). See `Content.Query`."
   def resolve_doc_by_title_or_alias(target, type, dataset, opts \\ []),
     do: Query.resolve_doc_by_title_or_alias(target, type, dataset, opts)

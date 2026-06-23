@@ -1059,7 +1059,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       Content.codelist_label(plugin, codelist_id, code)
     end
 
-    opts = %{ref_resolver: resolver, codelist_resolver: codelist_resolver, style: :article}
+    # Pre-resolve every wikilink target ONCE so the view-mode render emits
+    # navigable <a> links for resolved targets (unresolved → the dotted span).
+    wikilinks = Content.resolve_wikilinks_in_blocks(blocks, dataset, scope)
+
+    opts = %{
+      ref_resolver: resolver,
+      codelist_resolver: codelist_resolver,
+      style: :article,
+      wikilinks: wikilinks
+    }
 
     blocks
     |> Enum.with_index()
