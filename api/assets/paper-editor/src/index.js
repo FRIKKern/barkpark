@@ -23,6 +23,7 @@ import Typography from "@tiptap/extension-typography";
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
 import { FormatBubble } from "./format-bubble.js";
+import { normalizeTone } from "./tone.js";
 // Internal-link marks (wikilink/blockref/tag) — schema registration only, so
 // the editor holds these nodes through a setContent->getJSON round-trip. Defined
 // in the DOM-free marks.js so the smoke harness can assert their schema.
@@ -104,7 +105,13 @@ class BpPaperEditor extends HTMLElement {
       },
       onUpdate: () => {
         this._scheduleEmit();
-        this._maybeSlash();
+        // Callout shorthand is mutually exclusive with the slash menu: it runs
+        // FIRST and short-circuits _maybeSlash when it consumes the update, so
+        // the two detectors can never both fire on one mutation. Their leading
+        // tokens are already disjoint ('>' vs '/'), but the explicit `consumed`
+        // gate makes the contract code-enforced, not incidental.
+        const consumed = this._maybeCalloutShorthand();
+        if (!consumed) this._maybeSlash();
         if (this._bubble) this._bubble.update();
       },
       // Selection-only changes (drag-select, shift-arrow, click-place) don't
@@ -216,6 +223,49 @@ class BpPaperEditor extends HTMLElement {
     }
   }
 
+  // ── callout authoring shorthand ────────────────────────────────────────
+  //
+  // Obsidian-style `> [!type]` gesture: when the user types `> [!note] `,
+  // `> [!warn]- `, or `> [!info]+ ` at the start of an otherwise-empty block,
+  // turn it into a foldable callout (collapsed when the modifier is "-").
+  // Mutually exclusive with _maybeSlash by leading token ('>' vs '/') AND by
+  // the explicit `consumed` gate in onUpdate. Returns true iff it consumed the
+  // update (origin block wiped + bp-slash-insert dispatched), false otherwise.
+  //
+  // Predicate parity with _maybeSlash: caret collapsed, caret at end, single
+  // line, doc.childCount <= 2 — so it never fires mid-prose or across
+  // multi-line / multi-block content. The trailing space in the regex is what
+  // commits the gesture (so `> [!note]` alone keeps typing freely).
+  _maybeCalloutShorthand() {
+    if (!this._editor) return false;
+
+    const { state } = this._editor;
+    const { selection, doc } = state;
+
+    // Caret only — never on a range selection.
+    if (!selection.empty) return false;
+
+    const text = this._editor.getText();
+    const atEnd = selection.$from.parentOffset === text.length;
+    if (!atEnd || text.includes("\n") || doc.childCount > 2) return false;
+
+    // ^>\s*\[!(\w+)\]([+-]?)\s$ — the trailing \s (the committing space) plus the
+    // no-newline guard above means \s only ever matches that space here.
+    const m = /^>\s*\[!(\w+)\]([+-]?)\s$/.exec(text);
+    if (!m) return false;
+
+    const tone = normalizeTone(m[1]);
+    const collapsed = m[2] === "-";
+    this._emitSlashInsert({
+      type: "callout",
+      afterId: this._blockId,
+      tone,
+      collapsible: true,
+      collapsed,
+    });
+    return true;
+  }
+
   _openSlash(query = "") {
     if (!this._slash) {
       this._slash = new SlashMenu({
@@ -283,12 +333,19 @@ class BpPaperEditor extends HTMLElement {
   // fieldName, so the detail omits it and the server takes the unchanged path.
   _chooseSlash(item) {
     this._closeSlash();
-    // Remove the ENTIRE "/query" the user typed (not just the "/") so the
-    // trigger text never persists in the now-empty origin block.
-    this._editor.chain().focus().selectAll().deleteSelection().run();
-
     const detail = { type: item.type, afterId: this._blockId };
     if (item.fieldName) detail.fieldName = item.fieldName;
+    this._emitSlashInsert(detail);
+  }
+
+  // Shared teardown + dispatch for every slash-style insertion (menu pick AND
+  // callout shorthand). Wipes the origin block so the trigger text never
+  // persists into the now-empty origin paragraph, then emits the bubbling/
+  // composed `bp-slash-insert` the LiveView hook forwards as `paper-slash-insert`.
+  _emitSlashInsert(detail) {
+    // Remove the ENTIRE typed trigger (not just its first char) so the trigger
+    // text never persists in the now-empty origin block.
+    this._editor.chain().focus().selectAll().deleteSelection().run();
 
     this.dispatchEvent(
       new CustomEvent("bp-slash-insert", {

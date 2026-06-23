@@ -136,6 +136,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     :for={{dom_id, block} <- @streams.paper_blocks}
                     id={dom_id}
                     data-block-id={block.id}
+                    phx-hook="BarkparkCalloutFold"
                   >
                     {raw(block.html)}
                   </div>
@@ -434,6 +435,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <%= t %>
             </option>
           </select>
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="collapsible" checked={Map.get(@block, "collapsible") == true} /> Foldable
+          </label>
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="collapsed" checked={Map.get(@block, "collapsed") == true} /> Start collapsed
+          </label>
           <input
             type="text"
             name="title"

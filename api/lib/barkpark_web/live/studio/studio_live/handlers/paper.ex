@@ -59,6 +59,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   def paper_block_autosave(_params, socket), do: {:noreply, socket}
 
+  # Persist a callout's native <details> fold state. The JS hook
+  # (BarkparkCalloutFold) sends the post-toggle `collapsed` bool keyed by
+  # `block_id`. Emits exactly ONE patch-block op via Shared.paper_op/2 so the
+  # View pane re-streams with the new `open`. compose.ex threads `collapsed`
+  # in :article only (maybe_put_true drops false → an expanded callout stays
+  # byte-identical), so writing collapsed:false equals absent (expanded).
+  def paper_callout_fold(%{"block_id" => id} = params, socket) do
+    collapsed = Map.get(params, "collapsed") == true
+
+    {:noreply,
+     Shared.paper_op(socket, %{
+       "op" => "patch-block",
+       "id" => id,
+       "patch" => %{"collapsed" => collapsed}
+     })}
+  end
+
   def paper_op(%{"op" => _} = op, socket) do
     {:noreply, Shared.paper_op(socket, op)}
   end
@@ -86,6 +103,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       new = Map.put(Blocks.default_block(type, Blocks.new_block_id()), "fieldName", fname)
       {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(params["afterId"], new))}
     end
+  end
+
+  # Shorthand-inserted callout carries tone + collapsible/collapsed from the
+  # `> [!type]` gesture; merge them onto the seeded default block. Ordered ABOVE
+  # the generic clause (a more specific head must match first).
+  def paper_slash_insert(%{"type" => "callout"} = params, socket) do
+    id = Blocks.new_block_id()
+
+    new =
+      "callout"
+      |> Blocks.default_block(id)
+      |> Map.merge(Map.take(params, ["tone", "collapsible", "collapsed"]))
+
+    {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(params["afterId"], new))}
   end
 
   def paper_slash_insert(%{"type" => type} = params, socket) do

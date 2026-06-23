@@ -7,7 +7,8 @@
   "scripts": {
     "build": "esbuild src/index.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-editor.bundle.js --minify",
     "build:dev": "esbuild src/index.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-editor.bundle.js --sourcemap",
-    "smoke": "node src/__smoke.mjs"
+    "smoke": "node src/__smoke.mjs",
+    "test": "node src/__smoke.mjs && node src/__callout_shorthand.test.mjs"
   },
   "dependencies": {
     "@tiptap/core": "^2.11.5",

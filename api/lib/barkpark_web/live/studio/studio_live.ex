@@ -229,6 +229,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-move-block-to", params, socket),
     do: Paper.paper_move_block_to(params, socket)
 
+  def handle_event("paper-callout-fold", params, socket),
+    do: Paper.paper_callout_fold(params, socket)
+
   # ── Public, test-facing path/parse delegations (StudioLive.Path) ────────────
 
   @doc false
