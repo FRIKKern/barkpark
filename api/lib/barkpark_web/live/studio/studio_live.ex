@@ -53,7 +53,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
-  alias BarkparkWeb.Studio.StudioLive.{Blocks, DocActions, Mount, Path}
+  alias BarkparkWeb.Studio.StudioLive.{Blocks, DocActions, Mount, Path, Paths}
 
   # The in-Studio paper view / Beta editor / per-block-field function
   # components live in StudioLive.Components; import so the `<.studio_paper_view
@@ -2602,54 +2602,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # `/d/:dataset/studio[/...]` suffix, composing the canonical
   # `/w/<ws>/p/<proj>/d/<ds>/studio[/...]` shape.
   defp studio_path(socket, path, dataset, opts \\ []) do
-    (socket.assigns[:scope_prefix] || "") <> studio_path_for(path, dataset, opts)
+    (socket.assigns[:scope_prefix] || "") <> Paths.studio_path_for(path, dataset, opts)
   end
 
-  defp studio_path_for([], dataset, opts),
-    do: append_desk_query("/d/#{dataset}/studio", opts)
-
-  defp studio_path_for(segments, dataset, opts),
-    do:
-      append_desk_query(
-        "/d/#{dataset}/studio/" <> Enum.join(segments, "/"),
-        opts
-      )
-
-  defp append_desk_query(path, opts) do
-    case Keyword.get(opts, :desk) do
-      nil -> path
-      "" -> path
-      desk -> path <> "?desk=" <> URI.encode_www_form(to_string(desk))
-    end
-  end
-
-  # Render-side helper — the chip href shows the URL the user would
-  # land on if they clicked. (The actual navigation goes through
-  # `phx-click="select-desk"` → `push_patch`, so JS isn't required;
-  # the href makes the chip bookmarkable + middle-clickable.)
-  defp desk_chip_href(scope_prefix, nav_path, dataset, desk) do
-    (scope_prefix || "") <> studio_path_for(nav_path, dataset, desk: desk)
-  end
-
-  # Render-side scoping for `:plugin_link` hrefs. Structure/PaneBuilder emit
-  # them in the legacy FLAT shape `/studio/<ds>[/...]` — Structure has no
-  # scope knowledge, so the rewrite happens here, where `@scope_prefix` is
-  # in hand. On the scoped surface the flat shape would ride the
-  # flat→scoped 302 funnel, which re-resolves the workspace from the
-  # SESSION and can teleport the user out of the workspace they're on, so
-  # rewrite to the /d/ canonical instead. Empty prefix (flat surfaces, e.g.
-  # the /studio/:dataset/_plugins admin LV) keeps the flat path — mirrors
-  # the branch in StudioComponents.default_top_menu_entries/2.
-  defp scoped_plugin_href("", href), do: href
-
-  defp scoped_plugin_href(scope_prefix, "/studio/" <> rest) when is_binary(scope_prefix) do
-    case String.split(rest, "/", parts: 2) do
-      [ds, suffix] -> "#{scope_prefix}/d/#{ds}/studio/#{suffix}"
-      [ds] -> "#{scope_prefix}/d/#{ds}/studio"
-    end
-  end
-
-  defp scoped_plugin_href(_scope_prefix, href), do: href
 
   # ── ArrayField helpers (Studio reorder/add/remove wiring) ───────────────────
   #
@@ -3344,7 +3299,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                   class={"bp-desk-chip " <> if(active, do: "is-active", else: "")}
                   role="tab"
                   aria-selected={active}
-                  href={desk_chip_href(@scope_prefix, @nav_path, @dataset, gname)}
+                  href={Paths.desk_chip_href(@scope_prefix, @nav_path, @dataset, gname)}
                   phx-click="select-desk"
                   phx-value-desk={gname}
                 ><%= gtitle %></a>
@@ -3377,7 +3332,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
                 <% :plugin_link -> %>
                   <a
                     id={"plugin-link-#{item.id}"}
-                    href={scoped_plugin_href(@scope_prefix || "", item.href)}
+                    href={Paths.scoped_plugin_href(@scope_prefix || "", item.href)}
                     class="pane-item nav-plugin-entry"
                     data-test-id="nav-plugin-entry"
                   >
