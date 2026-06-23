@@ -67,7 +67,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
       Barkpark.Sharing.Links.revoke(id)
 
       {:noreply,
-       assign(socket, item_share_links: Shared.load_item_links(socket, socket.assigns[:item_share]))}
+       assign(socket,
+         item_share_links: Shared.load_item_links(socket, socket.assigns[:item_share])
+       )}
     else
       {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
     end

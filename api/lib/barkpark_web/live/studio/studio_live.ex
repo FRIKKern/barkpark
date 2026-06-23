@@ -109,12 +109,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("save", params, socket), do: Fields.save(params, socket)
   def handle_event("slug-generate", params, socket), do: Fields.slug_generate(params, socket)
   def handle_event("autosave", params, socket), do: Fields.autosave(params, socket)
-  def handle_event("toggle-content-preview", _params, socket), do: Fields.toggle_content_preview(socket)
+
+  def handle_event("toggle-content-preview", _params, socket),
+    do: Fields.toggle_content_preview(socket)
+
   def handle_event("toggle-diff", _params, socket), do: Fields.toggle_diff(socket)
   def handle_event("editor-set-mode", params, socket), do: Fields.editor_set_mode(params, socket)
   def handle_event("array_op", params, socket), do: Fields.array_op(params, socket)
 
-  def handle_event("open-image-picker", params, socket), do: Media.open_image_picker(params, socket)
+  def handle_event("open-image-picker", params, socket),
+    do: Media.open_image_picker(params, socket)
+
   def handle_event("close-image-picker", _params, socket), do: Media.close_image_picker(socket)
   def handle_event("select-media", params, socket), do: Media.select_media(params, socket)
   def handle_event("clear-image", params, socket), do: Media.clear_image(params, socket)
@@ -129,7 +134,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("show-history", _params, socket), do: History.show_history(socket)
   def handle_event("close-history", _params, socket), do: History.close_history(socket)
-  def handle_event("restore-revision", params, socket), do: History.restore_revision(params, socket)
+
+  def handle_event("restore-revision", params, socket),
+    do: History.restore_revision(params, socket)
+
   def handle_event("show-profile", _params, socket), do: History.show_profile(socket)
   def handle_event("close-profile", _params, socket), do: History.close_profile(socket)
   def handle_event("preview-profile", params, socket), do: History.preview_profile(params, socket)
@@ -145,7 +153,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("publish", _params, socket), do: Doc.publish(socket)
   def handle_event("unpublish", _params, socket), do: Doc.unpublish(socket)
-  def handle_event("close-unpublish-guard", _params, socket), do: Doc.close_unpublish_guard(socket)
+
+  def handle_event("close-unpublish-guard", _params, socket),
+    do: Doc.close_unpublish_guard(socket)
+
   def handle_event("confirm-unpublish", params, socket), do: Doc.confirm_unpublish(params, socket)
   def handle_event("duplicate-doc", _params, socket), do: Doc.duplicate_doc(socket)
 
@@ -154,38 +165,69 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("shares-add", params, socket), do: Shares.shares_add(params, socket)
   def handle_event("shares-remove", params, socket), do: Shares.shares_remove(params, socket)
 
-  def handle_event("item-share-open", params, socket), do: ItemShare.item_share_open(params, socket)
+  def handle_event("item-share-open", params, socket),
+    do: ItemShare.item_share_open(params, socket)
+
   def handle_event("item-share-close", _params, socket), do: ItemShare.item_share_close(socket)
-  def handle_event("item-share-create", params, socket), do: ItemShare.item_share_create(params, socket)
-  def handle_event("item-share-revoke", params, socket), do: ItemShare.item_share_revoke(params, socket)
+
+  def handle_event("item-share-create", params, socket),
+    do: ItemShare.item_share_create(params, socket)
+
+  def handle_event("item-share-revoke", params, socket),
+    do: ItemShare.item_share_revoke(params, socket)
+
   def handle_event("jump-to-user", params, socket), do: ItemShare.jump_to_user(params, socket)
 
-  def handle_event("open-secondary-picker", _params, socket), do: Secondary.open_secondary_picker(socket)
+  def handle_event("open-secondary-picker", _params, socket),
+    do: Secondary.open_secondary_picker(socket)
+
   def handle_event("view-graph", _params, socket), do: Secondary.view_graph(socket)
-  def handle_event("close-secondary-picker", _params, socket), do: Secondary.close_secondary_picker(socket)
-  def handle_event("secondary-search", params, socket), do: Secondary.secondary_search(params, socket)
-  def handle_event("select-secondary", params, socket), do: Secondary.select_secondary(params, socket)
+
+  def handle_event("close-secondary-picker", _params, socket),
+    do: Secondary.close_secondary_picker(socket)
+
+  def handle_event("secondary-search", params, socket),
+    do: Secondary.secondary_search(params, socket)
+
+  def handle_event("select-secondary", params, socket),
+    do: Secondary.select_secondary(params, socket)
+
   def handle_event("close-secondary", _params, socket), do: Secondary.close_secondary(socket)
 
-  def handle_event("toggle-doc-checkbox", params, socket), do: Bulk.toggle_doc_checkbox(params, socket)
+  def handle_event("toggle-doc-checkbox", params, socket),
+    do: Bulk.toggle_doc_checkbox(params, socket)
+
   def handle_event("bulk-clear", _params, socket), do: Bulk.bulk_clear(socket)
   def handle_event("bulk-publish", _params, socket), do: Bulk.bulk_publish(socket)
   def handle_event("bulk-unpublish", _params, socket), do: Bulk.bulk_unpublish(socket)
 
   def handle_event("schema_action", params, socket), do: Schema.schema_action(params, socket)
   def handle_event("close-confirm-modal", _params, socket), do: Schema.close_confirm_modal(socket)
-  def handle_event("confirm-modal-dryrun", _params, socket), do: Schema.confirm_modal_dryrun(socket)
+
+  def handle_event("confirm-modal-dryrun", _params, socket),
+    do: Schema.confirm_modal_dryrun(socket)
+
   def handle_event("confirm-modal-real", _params, socket), do: Schema.confirm_modal_real(socket)
 
   def handle_event("paper-toggle-edit", _params, socket), do: Paper.paper_toggle_edit(socket)
   def handle_event("paper-edit-block", params, socket), do: Paper.paper_edit_block(params, socket)
-  def handle_event("paper-block-autosave", params, socket), do: Paper.paper_block_autosave(params, socket)
+
+  def handle_event("paper-block-autosave", params, socket),
+    do: Paper.paper_block_autosave(params, socket)
+
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-add-block", params, socket), do: Paper.paper_add_block(params, socket)
-  def handle_event("paper-slash-insert", params, socket), do: Paper.paper_slash_insert(params, socket)
-  def handle_event("paper-delete-block", params, socket), do: Paper.paper_delete_block(params, socket)
+
+  def handle_event("paper-slash-insert", params, socket),
+    do: Paper.paper_slash_insert(params, socket)
+
+  def handle_event("paper-delete-block", params, socket),
+    do: Paper.paper_delete_block(params, socket)
+
   def handle_event("paper-move-block", params, socket), do: Paper.paper_move_block(params, socket)
-  def handle_event("paper-move-block-to", params, socket), do: Paper.paper_move_block_to(params, socket)
+
+  def handle_event("paper-move-block-to", params, socket),
+    do: Paper.paper_move_block_to(params, socket)
 
   # ── Public, test-facing path/parse delegations (StudioLive.Path) ────────────
 

@@ -45,7 +45,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
         )
       end
 
-      case Content.delete_document(doc.doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      case Content.delete_document(
+             doc.doc_id,
+             type,
+             socket.assigns.dataset,
+             Shared.hook_opts(socket)
+           ) do
         {:error, {:halted, reason}} ->
           {:noreply,
            socket

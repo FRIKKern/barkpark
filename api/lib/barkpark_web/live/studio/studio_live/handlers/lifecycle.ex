@@ -114,8 +114,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, assign(socket, sheet_presences: PresenceState.list(topic))}
 
       socket.assigns[:presence_topic] != nil ->
-        {:noreply,
-         assign(socket, presences: PresenceState.list(socket.assigns.presence_topic))}
+        {:noreply, assign(socket, presences: PresenceState.list(socket.assigns.presence_topic))}
 
       true ->
         {:noreply, socket}

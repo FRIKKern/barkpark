@@ -45,7 +45,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Secondary do
       %{doc_id: doc_id} when is_binary(doc_id) ->
         pub_id = Content.published_id(doc_id)
         path = ["graph", pub_id]
-        {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, socket.assigns.dataset))}
+
+        {:noreply,
+         push_patch(socket, to: Shared.studio_path(socket, path, socket.assigns.dataset))}
 
       _ ->
         {:noreply, socket}

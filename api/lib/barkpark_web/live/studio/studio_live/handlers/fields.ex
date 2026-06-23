@@ -16,14 +16,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     case Content.create_document(
            type,
-           %{"doc_id" => id, "title" => "Untitled", "content" => Shared.seed_new_doc_content(type)},
+           %{
+             "doc_id" => id,
+             "title" => "Untitled",
+             "content" => Shared.seed_new_doc_content(type)
+           },
            socket.assigns.dataset,
            Shared.hook_opts(socket)
          ) do
       {:ok, doc} ->
         pub_id = Content.published_id(doc.doc_id)
         new_path = socket.assigns.nav_path ++ [pub_id]
-        {:noreply, push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+
+        {:noreply,
+         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       {:error, {:halted, reason}} ->
         {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}

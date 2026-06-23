@@ -12,7 +12,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def select(%{"pane" => pane_str, "id" => id}, socket) do
     pane_idx = String.to_integer(pane_str)
     new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
-    {:noreply, push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+
+    {:noreply,
+     push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
   end
 
   def select_group(%{"group" => name}, socket) do
@@ -154,6 +156,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def expand_pane(%{"idx" => idx_str}, socket) do
     idx = String.to_integer(idx_str)
     new_path = Enum.take(socket.assigns.nav_path, idx)
-    {:noreply, push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+
+    {:noreply,
+     push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
   end
 end

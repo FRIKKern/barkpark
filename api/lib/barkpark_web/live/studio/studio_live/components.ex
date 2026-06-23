@@ -714,7 +714,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     """
   end
 
-
   # ── Studio shell (the full render/1 template, extracted) ────────────────────
   def studio_live_shell(assigns) do
     ~H"""

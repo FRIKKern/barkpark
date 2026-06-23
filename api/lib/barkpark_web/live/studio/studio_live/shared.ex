@@ -859,7 +859,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def ensure_sheet_subscription(socket, doc) do
     {new_topic, new_presence_topic} =
       if doc != nil and connected?(socket) do
-        {Barkpark.Plugins.Sheets.Session.topic(doc.doc_id, socket.assigns.dataset, doc.workspace_id),
+        {Barkpark.Plugins.Sheets.Session.topic(
+           doc.doc_id,
+           socket.assigns.dataset,
+           doc.workspace_id
+         ),
          Barkpark.Plugins.Sheets.Session.presence_topic(
            doc.doc_id,
            socket.assigns.dataset,
