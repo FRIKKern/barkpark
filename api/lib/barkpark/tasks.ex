@@ -71,12 +71,11 @@ defmodule Barkpark.Tasks do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.Content
   alias Barkpark.Content.{Document, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Edges
-  alias Barkpark.Tasks.Mutations
+  alias Barkpark.Tasks.{Close, Mutations}
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Validation
 
@@ -99,7 +98,6 @@ defmodule Barkpark.Tasks do
   # via update_paper_refs_by_id/3 (the `/v1/tasks/:doc_id/papers` path).
   @event_task_referenced "task.referenced"
 
-  @closed_lifecycle_statuses ~w(done cancelled blocked)
 
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
@@ -651,75 +649,7 @@ defmodule Barkpark.Tasks do
   @spec close(binary(), String.t(), keyword()) ::
           {:ok, Document.t()}
           | {:error, :not_found | :fenced_off | :stale_claim | {:invalid_lifecycle, term()}}
-  def close(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
-    observed_epoch = Keyword.fetch!(opts, :observed_epoch)
-    new_status = Keyword.get(opts, :lifecycle_status, "done")
-    observed_rev_opt = Keyword.get(opts, :observed_rev)
-    reason = Keyword.get(opts, :reason)
-
-    cond do
-      new_status not in @closed_lifecycle_statuses ->
-        {:error, {:invalid_lifecycle, new_status}}
-
-      true ->
-        do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status, reason)
-    end
-  end
-
-  defp do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status, reason) do
-    result =
-      Repo.transaction(fn ->
-        # 1. Advisory lock — per-task. hashtext('task:' || doc_id) gives a
-        #    deterministic int4 key; pg_advisory_xact_lock takes an int4 or
-        #    bigint and auto-releases at COMMIT/ROLLBACK.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
-
-        case Repo.get(Document, task_id) do
-          nil ->
-            {:error, :not_found}
-
-          %Document{} = doc ->
-            observed_rev = observed_rev_opt || doc.rev
-
-            # Already-terminal guard. Under the advisory lock, a serialized
-            # 2nd+ caller reads the row AFTER the winner committed → sees
-            # `lifecycle_status` already in a terminal state. Without this
-            # the default-observed-rev path would let every caller "succeed"
-            # in turn (CAS passes against the just-read rev). Treat the
-            # already-terminal row as a lost race; the explicit-rev CAS
-            # path below still wins/loses on rev when callers pass their
-            # own observation.
-            cond do
-              observed_rev_opt == nil and
-                  Map.get(doc.content, "lifecycle_status") in @closed_lifecycle_statuses ->
-                {:error, :stale_claim}
-
-              true ->
-                with :ok <- check_fencing(doc, observed_epoch),
-                     {:ok, updated} <-
-                       apply_close_update(doc, worker_id, observed_rev, new_status, reason) do
-                  ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
-                  unblocked = cascade_unblock_dependents!(updated)
-
-                  {:ok, updated,
-                   [task_broadcast(updated, @event_task_closed, ev, observed_rev) | unblocked]}
-                end
-            end
-        end
-      end)
-
-    case result do
-      {:ok, {:ok, doc, broadcasts}} ->
-        :ok = emit_broadcasts(broadcasts)
-        {:ok, doc}
-
-      {:ok, {:error, reason}} ->
-        {:error, reason}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  defdelegate close(task_id, worker_id, opts \\ []), to: Close
 
   @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
@@ -768,105 +698,9 @@ defmodule Barkpark.Tasks do
   # close via this same path — the close is keyed on the absence of a lease,
   # not on the doc type. A task WITH a claim ALWAYS requires the epoch to
   # match — the fencing guarantee for real claimed work is unchanged.
-  defp check_fencing(%Document{content: content}, observed_epoch) do
-    case content do
-      %{"claim" => %{"epoch" => row_epoch}} when row_epoch == observed_epoch -> :ok
-      %{"claim" => %{"epoch" => _}} -> {:error, :fenced_off}
-      # No claim lease — nothing to fence against, close cleanly.
-      _ -> :ok
-    end
-  end
-
-  defp apply_close_update(%Document{} = doc, worker_id, observed_rev, new_status, reason) do
-    new_rev = generate_rev()
-    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
-
-    # Stamp close metadata into the claim lease when one exists (work-tasks).
-    # A never-claimed root/container task has no claim — close it without
-    # inventing one; we only flip lifecycle_status. `Map.update/4`'s default
-    # is used verbatim (NOT run through the fun), so a no-claim doc would
-    # otherwise get a bare `claim => %{}`; the explicit branch keeps the doc
-    # shape honest.
-    new_content =
-      case doc.content do
-        %{"claim" => claim} when is_map(claim) ->
-          updated_claim =
-            claim
-            |> Map.put("closed_by", worker_id)
-            |> Map.put("closed_at", ts_iso)
-
-          doc.content
-          |> Map.put("lifecycle_status", new_status)
-          |> Map.put("claim", updated_claim)
-
-        _ ->
-          Map.put(doc.content, "lifecycle_status", new_status)
-      end
-
-    # Dossier close rationale (tsk-dossier-cli): one scalar write riding the
-    # close call — far cheaper for an agent than a separate mutate round-trip
-    # to fill outcome. Blank reasons never overwrite an existing value.
-    new_content =
-      case reason do
-        r when is_binary(r) and r != "" -> Map.put(new_content, "close_reason", r)
-        _ -> new_content
-      end
-
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
-      0 -> {:error, :stale_claim}
-    end
-  end
-
-  # After a task flips to `done`, walk every inbound `blocks` edge and flip
-  # the dependent's `lifecycle_status` from "blocked"→"open" IFF every one of
-  # ITS blockers is now `done`. We do this in the same advisory-lock-guarded
-  # transaction so two concurrent closes that both unblock the same
-  # dependent can't double-flip it.
-  #
-  # Returns one broadcast bundle per flipped dependent (possibly []) so the
-  # caller can announce the unblocks on PubSub after its transaction commits.
-  defp cascade_unblock_dependents!(%Document{content: %{"lifecycle_status" => "done"}} = parent) do
-    parent
-    |> Map.fetch!(:id)
-    |> dependents(kind: :blocks)
-    |> Enum.flat_map(fn %Document{} = dep ->
-      if all_blockers_done?(dep) and Map.get(dep.content, "lifecycle_status") == "blocked" do
-        new_rev = generate_rev()
-        new_content = Map.put(dep.content, "lifecycle_status", "open")
-
-        {1, _} =
-          from(d in Document, where: d.id == ^dep.id and d.rev == ^dep.rev)
-          |> Repo.update_all(
-            set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-          )
-
-        unblocked = %{dep | content: new_content, rev: new_rev}
-        ev = insert_mutation_event!(unblocked, @event_task_mutated, dep.rev)
-        [task_broadcast(unblocked, @event_task_mutated, ev, dep.rev)]
-      else
-        []
-      end
-    end)
-  end
-
-  defp cascade_unblock_dependents!(_non_done_parent), do: []
-
-  defp all_blockers_done?(%Document{} = dep) do
-    dep.id
-    |> dependencies(kind: :blocks)
-    |> Enum.all?(fn %Document{content: c} ->
-      Map.get(c, "lifecycle_status") == "done"
-    end)
-  end
-
-  # current_epoch/1, insert_mutation_event!/3, generate_rev/0 → Tasks.Internal (imported above).
+  # close/3 + its internals (do_close_txn, check_fencing, apply_close_update,
+  # cascade_unblock_dependents!, all_blockers_done?) → Tasks.Close (defdelegated).
+  # CAS primitives (current_epoch/insert_mutation_event!/generate_rev) → Tasks.Internal.
 
   @doc "The mutation_events kinds emitted by this module."
   @spec event_kinds() :: %{
