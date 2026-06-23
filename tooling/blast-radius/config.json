@@ -46,7 +46,11 @@
           { "label": "js:@barkpark/core — SDK fetch layer", "files": ["js/packages/core/src/client.ts", "js/packages/core/src/fetchRaw.ts"], "anchor": "/v1|fetch|path" },
           { "label": "js:@barkpark/codegen — generates types from /v1 shapes", "files": ["js/packages/codegen/src/schema-url.ts", "js/packages/codegen/src/types.ts"], "anchor": "/v1|schema|type" }
         ],
-        "guards": ["docs/api-v1.md (contract doc — keep in sync)"]
+        "guards": [
+          "docs/api-v1.md (contract doc — keep in sync)",
+          "api/test/barkpark_web/contract/query_test.exs (contract test — /v1/data/query response shape, envelope keys, etag/304, filter forms)",
+          "api/test/barkpark_web/contract/mutate_test.exs (contract test — /v1/data/mutate status codes, atomic batch, ifRevisionID/If-Match, error envelope)"
+        ]
       },
       {
         "id": "schema-v2-fields",
@@ -55,7 +59,11 @@
           { "label": "js:@barkpark/codegen — field-type codegen", "files": ["js/packages/codegen/src/types.ts"], "anchor": "field|type" },
           { "label": "go:internal/manifest — field-type rendering in TUI", "files": ["internal/manifest/tree.go"], "anchor": "[Ff]ield|[Tt]ype" }
         ],
-        "guards": ["docs/contracts/schema-v2.md"]
+        "guards": [
+          "docs/contracts/schema-v2.md",
+          "api/test/barkpark_web/contract/schema_envelope_test.exs (contract test — field-type wire shape: required?, array `of`, reference `to`, listPreview, schemaHash)",
+          "api/test/barkpark_web/contract/schema_test.exs (contract test — schema index/show _schemaVersion envelope)"
+        ]
       },
       {
         "id": "webhooks-realtime",
@@ -63,7 +71,11 @@
         "consumers": [
           { "label": "js:@barkpark/nextjs-query — cache revalidation", "files": ["js/packages/nextjs-query/src/**/*.ts"], "anchor": "revalidat|webhook|tag" }
         ],
-        "guards": ["docs/contracts/webhook-realtime.md"]
+        "guards": [
+          "docs/contracts/webhook-realtime.md",
+          "api/test/barkpark_web/contract/webhooks_test.exs (contract test — /v1/webhooks CRUD status codes + envelope, admin auth, validation)",
+          "api/test/barkpark_web/contract/listen_test.exs (contract test — SSE mutation frame + syncTags shape consumed by nextjs-query revalidation)"
+        ]
       }
     ]
   },
