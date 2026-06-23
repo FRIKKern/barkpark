@@ -5,17 +5,17 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B− · 72 / 100
+## Codebase grade — B− · 73 / 100
 
 Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live from the dependency graph (`node tooling/quality/quality.mjs`):
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
 | Architecture | 100 | Consistency | 78 | Tested | 55 |
-| Duplication | 100 | Reliability | 65 | Hotspots | 48 |
+| Duplication | 100 | Reliability | 65 | Hotspots | 60 |
 | Dead-code | 100 | Evaluated | 100 | **Modularity** | **38** |
 
-Weighted **72 / 100 (B−)**. The lowest three — **Modularity · Hotspots · Tested** — are Cody's live worklist; every fix is graded, gated, and re-scored against the dependency graph, so the number only moves on real, verified improvement (Modularity climbed **17→38** — C+ 68 → B− 72 — as the `content`, `studio_components`, `render`, and `registry` god-modules were decomposed behind facades).
+Weighted **73 / 100 (B−)**. The lowest three are Cody's live worklist; the number only moves on gated, re-scored improvement (**C+ 68 → B− 73** by decomposing the god-modules — `content`/`studio_components`/`render`/`registry` + the 5483-line `studio_live` LiveView — behind facades).
 
 ## Get started
 
