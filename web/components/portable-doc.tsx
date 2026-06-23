@@ -1,6 +1,7 @@
 import type { ReactNode, Key } from "react";
 import type { Block, Inline } from "@/lib/papers";
 import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
+import { PaperEditorMount } from "@/components/paper-editor-mount";
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -176,7 +177,7 @@ function toneLabel(tone: string): string {
 
 /* ── blocks ─────────────────────────────────────────────────────────────── */
 
-function renderBlock(block: Block, key: Key): ReactNode {
+export function renderBlock(block: Block, key: Key): ReactNode {
   switch (block.type) {
     case "heading": {
       const level = [1, 2, 3].includes(block.level as number)
@@ -438,4 +439,39 @@ export function PortableDoc({ blocks }: { blocks: Block[] }) {
       {blocks.map((b, i) => renderBlock(b, i))}
     </div>
   );
+}
+
+/** Top-level PROSE block types the bp-paper-editor web component can host —
+ * authoritative from the WC source (index.js StarterKit config + convert.js).
+ * `code` is explicitly NOT prose; everything else stays server-rendered. */
+const PROSE_TYPES = new Set(["paragraph", "heading", "list"]);
+
+/**
+ * Read-mode editor-aware variant of {@link PortableDoc}. STAYS a Server
+ * Component (this file must never become "use client" — renderBlock statically
+ * imports the client SheetSnapshot, so a client conversion ships the whole sheet
+ * engine to the browser). It partitions blocks in document order:
+ *   • non-prose → server-rendered via renderBlock, passed down as opaque
+ *     ReactNode slots;
+ *   • prose (paragraph|heading|list) → a `null` hole in the slot stream + the
+ *     raw Block in `proseBlocks`, which the client {@link PaperEditorMount}
+ *     fills with one <bp-paper-editor> each.
+ * The client child imports nothing from this file, so the bundle gains only the
+ * mount + the WC loader — never the renderer.
+ */
+export function PaperEditorDoc({ blocks }: { blocks: Block[] }) {
+  if (!blocks.length) {
+    return (
+      <p className="text-sm text-zinc-400 italic">This paper has no content.</p>
+    );
+  }
+  const proseBlocks: Block[] = [];
+  const slots: Array<ReactNode | null> = blocks.map((b, i) => {
+    if (PROSE_TYPES.has(b.type)) {
+      proseBlocks.push(b);
+      return null; // hole — the client mount fills it with <bp-paper-editor>.
+    }
+    return renderBlock(b, i); // server-rendered, serializable ReactNode.
+  });
+  return <PaperEditorMount proseBlocks={proseBlocks} slots={slots} />;
 }
