@@ -5,7 +5,7 @@
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B · 79 / 100
+## Codebase grade — B+ · 81 / 100
 
 Barkpark grades *itself* — **Cody**, its 11-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
 
@@ -14,9 +14,9 @@ Barkpark grades *itself* — **Cody**, its 11-critic Codebase-Intelligence suite
 | Architecture | 85 | Consistency | 78 | Tested | 87 |
 | Duplication | 100 | Reliability | 65 | **Hotspots** | **60** |
 | Dead-code | 100 | Evaluated | 100 | Modularity | 66 |
-| Contract | 63 | Dependencies | 86 | | |
+| Contract | 100 | Dependencies | 94 | | |
 
-Weighted **79 / 100 (B)** — honest: Architecture shows 5 real layering violations (not a façade 100). `Dependencies` surfaced **2 critical + 14 high CVEs** in `js/` (CI ran `--no-audit`) — now triaged and cleared (0→86). Keys maintainability + supply-chain + contract, not runtime. Every run pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Contract 63, Reliability 65.
+Weighted **81 / 100 (B+)** — honest: Architecture counts 5 real layering violations (not 100). `Dependencies` found **2 critical + 14 high CVEs** in `js/`, all cleared (→94); `Contract` hit 100 once every wire seam had an executable test. Keys maintainability, not runtime. Every run pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65, Modularity 66.
 
 ## Get started
 
