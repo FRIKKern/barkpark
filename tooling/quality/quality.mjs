@@ -33,9 +33,22 @@ const rd = (p, d) => existsSync(join(ROOT, p)) ? JSON.parse(readFileSync(join(RO
 const ledger = rd("tooling/research-coverage/research-ledger.json", { files: {}, meta: {} });
 const crep = rd("tooling/consistency/consistency-report.json", { groups: [], layering: [], duplication: [], deadGoPackages: [] });
 const erg = rd("tooling/ergonomics/ergonomics-report.json", { files: [], splitCandidates: [], summary: {} });
-const risk = rd("tooling/risk/risk-report.json", { files: {} }).files;
-const layV = rd("tooling/consistency/results/_layering.json", []);
-const dupV = rd("tooling/consistency/results/_dup.json", []);
+const riskRpt = rd("tooling/risk/risk-report.json", { files: {}, coverageTotals: {} });
+const risk = riskRpt.files;
+const covT = riskRpt.coverageTotals || {};
+// The batches/record agent cycle writes results/_layering.json + _dup.json; a
+// plain `consistency.mjs scan` does NOT. When those issue files are absent the
+// grader must not read [] and award a false 100 — fall back to the agent-confirmed
+// verdicts persisted in verdict-cache.json. Architecture/Duplication then reflect
+// real violations instead of a missing file. (Bug: this path was silently empty,
+// hiding 5 confirmed layering violations behind a perfect Architecture score.)
+const _vcache = rd("tooling/consistency/verdict-cache.json", { layering: [], duplication: [] });
+const layV = existsSync(join(ROOT, "tooling/consistency/results/_layering.json"))
+  ? rd("tooling/consistency/results/_layering.json", [])
+  : (_vcache.layering || []);
+const dupV = existsSync(join(ROOT, "tooling/consistency/results/_dup.json"))
+  ? rd("tooling/consistency/results/_dup.json", [])
+  : (_vcache.duplication || []);
 const gV = {}; const RES = join(ROOT, "tooling/consistency/results");
 for (const f of (existsSync(RES) ? readdirSync(RES) : []).filter(f => f.endsWith(".json") && !f.startsWith("_"))) { try { for (const x of JSON.parse(readFileSync(join(RES, f), "utf8")).verdicts || []) gV[x.file] = x; } catch {} }
 
@@ -117,7 +130,7 @@ const dims = [
   { name: "Architecture", root: "relationships", score: clamp(100 - layN.reduce((a, f) => a + (f.reach || 50) / 100 * 9, 0)), note: `${layN.length} verified layering violations · compile-DAG acyclic`, weight: 0.15 },
   { name: "Hotspots", root: "churn × complexity", score: clamp(100 - hotspotN * 4), note: `${hotspotN} files churn×complexity ≥70 · ${deduped.filter(f=>f.kind==="hotspot").length} above the ${cfg.thresholds.hotspotPercentile}th-pct refactor line`, weight: 0.16 },
   { name: "Modularity", root: "complexity", score: clamp(100 - bloatBig * 7 - Math.min(20, (erg.summary?.bloat || 0))), note: `${bloatBig} high-reach god-modules (>8k tok)${godExcludedContract ? ` · ${godExcludedContract} behaviour-contract excluded` : ""}${godChurnDriven ? ` · ${godChurnDriven} churn-driven → Hotspots` : ""} · ${erg.summary?.bloat || 0} bloated files (−7/god, −1/bloat≤20)`, weight: 0.12 },
-  { name: "Tested", root: "tests", score: clamp(testedFrac * 100), note: `${Math.round(testedFrac*100)}% of high-reach code has coverage · ${critN} critical-untested (reach × ¬coverage)`, weight: 0.15 },
+  { name: "Tested", root: "tests", score: clamp(testedFrac * 100), note: `${Math.round(testedFrac*100)}% of high-reach code covered — measured: elixir ${covT.elixir ?? "—"}% · go ${covT.go ?? "—"}% · js ${covT.js ?? "—"}% · web/ UNTESTED (reach-0, excluded not failed) · ${critN} critical-untested`, weight: 0.15 },
   { name: "Reliability", root: "defects", score: clamp(100 - fragileN * 5), note: `${fragileN} high-reach files are defect-prone (bug-fix density ≥${FRAGILE_DENSITY})`, weight: 0.10 },
   { name: "Duplication", root: "relationships", score: clamp(100 - dupN * 6), note: `${dupN} extract-worthy (of ${crep.duplication?.length || 0} dup pairs)`, weight: 0.06 },
   { name: "Dead code", root: "reach", score: clamp(100 - (crep.deadGoPackages?.length || 0) * 8), note: `${crep.deadGoPackages?.length || 0} dead Go packages`, weight: 0.07 },
