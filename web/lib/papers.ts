@@ -21,7 +21,10 @@ export type Inline =
   | { type: "s"; children?: Inline[] }
   | { type: "underline"; children?: Inline[] }
   | { type: "code"; value?: string }
-  | { type: "link"; href?: string; children?: Inline[] };
+  | { type: "link"; href?: string; children?: Inline[] }
+  | { type: "wikilink"; target?: string; alias?: string; children?: Inline[] }
+  | { type: "blockref"; target?: string; anchor?: string }
+  | { type: "tag"; name?: string };
 
 /** A PortableDoc block. Loosely typed — `type` drives rendering, attrs vary. */
 export interface Block {

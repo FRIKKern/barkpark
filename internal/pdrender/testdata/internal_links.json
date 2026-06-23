@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "blocks": [
+    { "id": "h", "type": "heading", "level": 2, "text": "Internal links" },
+    {
+      "id": "p",
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "value": "See " },
+        {
+          "type": "wikilink",
+          "target": "intro-to-x",
+          "alias": "the intro",
+          "children": [{ "type": "text", "value": "the intro" }]
+        },
+        { "type": "text", "value": ", block " },
+        { "type": "blockref", "target": "doc-7", "anchor": "abc123" },
+        { "type": "text", "value": ", and tag " },
+        { "type": "tag", "name": "epic" },
+        { "type": "text", "value": "." }
+      ]
+    }
+  ]
+}

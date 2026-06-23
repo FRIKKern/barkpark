@@ -83,6 +83,31 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     end
   end
 
+  # Internal-link node kinds (storage model A — first-class AST nodes, not
+  # Markdown). Targets are UNRESOLVED here; a render-time resolver task turns
+  # them into hrefs/titles. Renderers degrade gracefully (raw target/name text).
+  def compose_inline(%{"type" => "wikilink"} = n, inside_link) do
+    children = Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    base = %{"kind" => "PdWikilink", "target" => Map.get(n, "target", ""), "children" => children}
+
+    case Map.get(n, "alias") do
+      nil -> base
+      alias_val -> Map.put(base, "alias", alias_val)
+    end
+  end
+
+  def compose_inline(%{"type" => "blockref"} = n, _inside_link) do
+    %{
+      "kind" => "PdBlockref",
+      "target" => Map.get(n, "target", ""),
+      "anchor" => Map.get(n, "anchor", "")
+    }
+  end
+
+  def compose_inline(%{"type" => "tag"} = n, _inside_link) do
+    %{"kind" => "PdTag", "name" => Map.get(n, "name", "")}
+  end
+
   def compose_inline(%{"type" => type}, _inside_link) do
     raise ArgumentError, "compose_inline: unhandled inline type #{type}"
   end
@@ -148,6 +173,33 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     else
       %{"kind" => "PdLink", "href" => href, "children" => children}
     end
+  end
+
+  defp apply_mark(%{"type" => "wikilink"} = mark, acc, _il) do
+    base = %{
+      "kind" => "PdWikilink",
+      "target" => get_in(mark, ["attrs", "target"]) || "",
+      "children" => wrap_children(acc)
+    }
+
+    case get_in(mark, ["attrs", "alias"]) do
+      nil -> base
+      alias_val -> Map.put(base, "alias", alias_val)
+    end
+  end
+
+  defp apply_mark(%{"type" => "blockref"} = mark, _acc, _il) do
+    # Read target/anchor from attrs ONLY — the text leaf carries the "^anchor"
+    # DISPLAY token, never the bare anchor (must NOT fall back to acc).
+    %{
+      "kind" => "PdBlockref",
+      "target" => get_in(mark, ["attrs", "target"]) || "",
+      "anchor" => get_in(mark, ["attrs", "anchor"]) || ""
+    }
+  end
+
+  defp apply_mark(%{"type" => "tag"} = mark, _acc, _il) do
+    %{"kind" => "PdTag", "name" => get_in(mark, ["attrs", "name"]) || ""}
   end
 
   # Unknown marks pass through (no wrapper).

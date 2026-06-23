@@ -81,6 +81,23 @@ export interface InlineLink {
   href: string;
   children: Inline[];
 }
+// Internal-link nodes. `target` is an UNRESOLVED doc reference (slug/title);
+// resolution to an href/title is a separate render-time task.
+export interface InlineWikilink {
+  type: "wikilink";
+  target: string;
+  alias?: string;
+  children: Inline[];
+}
+export interface InlineBlockref {
+  type: "blockref";
+  target: string;
+  anchor: string;
+}
+export interface InlineTag {
+  type: "tag";
+  name: string;
+}
 export interface InlineMark {
   type: string;
   attrs?: Record<string, unknown>;
@@ -94,7 +111,10 @@ export type Inline =
   | InlineStrike
   | InlineUnderline
   | InlineCode
-  | InlineLink;
+  | InlineLink
+  | InlineWikilink
+  | InlineBlockref
+  | InlineTag;
 
 /** Coerce a string|Inline[] into the inline-node array the renderer reads. */
 function inlineContent(content: string | Inline[]): Inline[] {

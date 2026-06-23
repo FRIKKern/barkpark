@@ -1,0 +1,3 @@
+Internal links                              
+                                            
+See the intro, block ^abc123, and tag #epic.
