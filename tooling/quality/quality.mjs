@@ -154,8 +154,19 @@ const unguardedNote = (contractUnguardedIds.length || contractWeakIds.length)
   : "";
 
 // ── Dependencies — supply-chain vuln load from the deps generator ──
+// A GRADIENT, not a cliff. The old linear `100 - high*10 - …` saturated to 0
+// well before the tree was clean (14 highs alone = −140), so it couldn't tell
+// "2 crit + 19 high" (dire) from "0 crit + 14 high" (improved) — fixing the
+// criticals moved nothing. Now: criticals dominate LINEARLY and steeply (an RCE
+// should tank the score, ~3 crit ≈ fatal), while high/moderate/low feed a
+// SATURATING curve so the number keeps moving as you triage (clearing 14→7 highs
+// visibly helps) and only approaches 100 when genuinely clean. Never rewards
+// leaving a critical. NOT tuned to a target — magnitudes chosen for the curve shape.
 const dv = deps.totals || {};
-const depScore = clamp(100 - (dv.critical || 0) * 25 - (dv.high || 0) * 10 - (dv.moderate || 0) * 3 - (dv.low || 0) * 0.5);
+const critPenalty = (dv.critical || 0) * 45;
+const restLoad = (dv.high || 0) * 8 + (dv.moderate || 0) * 2.5 + (dv.low || 0) * 0.5;
+const restPenalty = 65 * (1 - Math.pow(0.5, restLoad / 55));
+const depScore = clamp(100 - critPenalty - restPenalty);
 
 const dims = [
   { name: "Evaluated", root: "—", score: evaluated, note: `${Object.keys(ledger.files).length} files researched · last full ${ledger.meta.lastFullResearch ? "set" : "—"}`, weight: 0.06 },
