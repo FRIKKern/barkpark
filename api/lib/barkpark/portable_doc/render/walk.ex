@@ -702,18 +702,48 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp callout(n, width, pal) do
     tone = tone_palette(Map.get(n, "tone"))
-
-    title_html =
-      case Map.get(n, "title") do
-        nil -> ""
-        "" -> ""
-        title -> "<strong>#{escape_html(title)}</strong> "
-      end
-
     inner = render_children(Map.get(n, "children", []), width, pal)
 
-    ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{title_html}#{inner}</div>)
+    # `collapsible` is only ever present in ARTICLE mode (compose.ex gates it),
+    # so email/non-collapsible callouts take the byte-identical legacy <div>.
+    if Map.get(n, "collapsible") == true do
+      collapsible_callout(n, tone, inner)
+    else
+      title_html =
+        case Map.get(n, "title") do
+          nil -> ""
+          "" -> ""
+          title -> "<strong>#{escape_html(title)}</strong> "
+        end
+
+      ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{title_html}#{inner}</div>)
+    end
   end
+
+  # Zero-JS native fold via <details>/<summary>. `open` reflects !collapsed; the
+  # summary is the title, or a tone label so it is never empty.
+  defp collapsible_callout(n, tone, inner) do
+    open = if Map.get(n, "collapsed") == true, do: "", else: " open"
+    summary = escape_html(callout_summary(n))
+
+    ~s(<details#{open} style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">) <>
+      ~s(<summary style="cursor:pointer;font-weight:bold">#{summary}</summary>) <>
+      ~s(<div style="margin-top:8px">#{inner}</div></details>)
+  end
+
+  defp callout_summary(n) do
+    case Map.get(n, "title") do
+      nil -> tone_label(Map.get(n, "tone"))
+      "" -> tone_label(Map.get(n, "tone"))
+      title -> title
+    end
+  end
+
+  defp tone_label("success"), do: "Success"
+  defp tone_label("warning"), do: "Warning"
+  defp tone_label("danger"), do: "Danger"
+  defp tone_label("neutral"), do: "Neutral"
+  defp tone_label(_), do: "Info"
 
   # Semantic `<ul>` / `<ol>` for article mode. Email mode never reaches these
   # renderers — its list compose clause still emits the flex-row PdBox scaffold

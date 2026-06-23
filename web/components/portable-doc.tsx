@@ -146,12 +146,33 @@ const HEADING = {
 
 const calloutTone: Record<string, string> = {
   info: "border-blue-300/70 bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/30",
+  // `warn` is the legacy key; `warning` is the server/shorthand canonical tone.
   warn: "border-amber-300/70 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30",
+  warning:
+    "border-amber-300/70 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30",
   success:
     "border-emerald-300/70 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30",
   danger:
     "border-red-300/70 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30",
+  neutral:
+    "border-zinc-300/70 bg-zinc-50 dark:border-zinc-800/60 dark:bg-zinc-900/40",
 };
+
+function toneLabel(tone: string): string {
+  switch (tone) {
+    case "success":
+      return "Success";
+    case "warning":
+    case "warn":
+      return "Warning";
+    case "danger":
+      return "Danger";
+    case "neutral":
+      return "Neutral";
+    default:
+      return "Info";
+  }
+}
 
 /* ── blocks ─────────────────────────────────────────────────────────────── */
 
@@ -228,17 +249,29 @@ function renderBlock(block: Block, key: Key): ReactNode {
     }
     case "callout": {
       const tone = str(block.tone) || "info";
+      const toneClass = `rounded-lg border px-4 py-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200 ${
+        calloutTone[tone] ?? calloutTone.info
+      }`;
+      const title = str(block.title);
+      const body = <div>{renderInlines(inlineArr(block.content))}</div>;
+
+      // Native zero-JS fold when collapsible; the toggle is ephemeral in the
+      // read-only web reader (resets on reload). Title or tone label as summary.
+      if (block.collapsible === true) {
+        return (
+          <details key={key} className={toneClass} open={block.collapsed !== true}>
+            <summary className="cursor-pointer font-medium">
+              {title || toneLabel(tone)}
+            </summary>
+            <div className="mt-1">{body}</div>
+          </details>
+        );
+      }
+
       return (
-        <aside
-          key={key}
-          className={`rounded-lg border px-4 py-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200 ${
-            calloutTone[tone] ?? calloutTone.info
-          }`}
-        >
-          {block.title ? (
-            <p className="mb-1 font-medium">{str(block.title)}</p>
-          ) : null}
-          <div>{renderInlines(inlineArr(block.content))}</div>
+        <aside key={key} className={toneClass}>
+          {title ? <p className="mb-1 font-medium">{title}</p> : null}
+          {body}
         </aside>
       );
     }

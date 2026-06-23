@@ -147,6 +147,57 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_html(tag, @opts) =~ "#epic"
     end
 
+    test "collapsible callout renders <details> in article, expanded <div> in email" do
+      block = %{
+        "id" => "c1",
+        "type" => "callout",
+        "tone" => "warning",
+        "title" => "Heads up",
+        "collapsible" => true,
+        "content" => [%{"type" => "text", "value" => "body text"}]
+      }
+
+      article = Render.render_blocks([block], %{style: :article})
+      assert article =~ "<details"
+      assert article =~ "Heads up"
+      assert article =~ "body text"
+
+      # Email shares walk.ex callout/3 — it MUST stay an expanded <div>, never
+      # <details> (Gmail/Outlook strip <details> and hide the body).
+      email = Render.render_blocks([block], %{style: :email})
+      refute email =~ "<details"
+      assert email =~ "body text"
+    end
+
+    test "callout collapsed omits open attr; expanded keeps it" do
+      mk = fn collapsed ->
+        %{
+          "id" => "c",
+          "type" => "callout",
+          "tone" => "info",
+          "collapsible" => true,
+          "collapsed" => collapsed,
+          "content" => [%{"type" => "text", "value" => "x"}]
+        }
+      end
+
+      assert Render.render_blocks([mk.(false)], %{style: :article}) =~ "<details open"
+      refute Render.render_blocks([mk.(true)], %{style: :article}) =~ "<details open"
+    end
+
+    test "non-collapsible callout is byte-identical (no <details>, no collapsible leak)" do
+      block = %{
+        "id" => "c2",
+        "type" => "callout",
+        "tone" => "info",
+        "content" => [%{"type" => "text", "value" => "plain"}]
+      }
+
+      html = Render.render_blocks([block], %{style: :article})
+      refute html =~ "<details"
+      assert html =~ ~s(<div style="border-left:4px solid)
+    end
+
     test "PdButton primary uses brand background" do
       node = %{
         "kind" => "PdButton",
