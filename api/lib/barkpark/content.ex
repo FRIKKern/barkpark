@@ -496,6 +496,14 @@ defmodule Barkpark.Content do
   def get_paper(slug, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.get_paper(slug, dataset, opts)
 
+  @doc "Resolve a wikilink target (title|alias) to `%{id, title}` or nil. See `Content.Papers`."
+  def resolve_wikilink(target, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    do: Papers.resolve_wikilink(target, dataset, opts)
+
+  @doc "Resolve a doc by title|alias within scope (the wikilink read). See `Content.Query`."
+  def resolve_doc_by_title_or_alias(target, type, dataset, opts \\ []),
+    do: Query.resolve_doc_by_title_or_alias(target, type, dataset, opts)
+
   @doc "Resolve a paper for the PUBLIC, unauthenticated surface. See `Content.Papers`."
   def get_public_paper(slug, dataset \\ Papers.paper_default_dataset()),
     do: Papers.get_public_paper(slug, dataset)
