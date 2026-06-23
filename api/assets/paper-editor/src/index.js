@@ -28,10 +28,29 @@ import { normalizeTone } from "./tone.js";
 // the editor holds these nodes through a setContent->getJSON round-trip. Defined
 // in the DOM-free marks.js so the smoke harness can assert their schema.
 import { Wikilink, Blockref, Tag } from "./marks.js";
+import { CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } from "./contract.js";
 
-const DEBOUNCE_MS = 300;
+// One-shot, id-guarded self-inject of the standalone stylesheet so a bare
+// embedder (no Studio inline rules) renders the editor STYLED. Gated by
+// window.BP_PAPER_EDITOR_NO_INJECT: Studio keeps its own inline
+// .bp-paper-surface rules and sets this flag true to opt OUT — avoiding a
+// double-CSS / specificity clash. Other hosts leave it unset. The <link>
+// points at the esbuild-emitted bp-paper-editor.css that ships beside the
+// bundle in priv/static/assets/.
+function ensureStyles() {
+  if (typeof window !== "undefined" && window.BP_PAPER_EDITOR_NO_INJECT) return;
+  if (typeof document === "undefined") return;
+  if (document.getElementById("bp-paper-editor-styles")) return;
+  const link = document.createElement("link");
+  link.id = "bp-paper-editor-styles";
+  link.rel = "stylesheet";
+  link.href = "/assets/bp-paper-editor.css";
+  (document.head || document.documentElement).appendChild(link);
+}
 
 class BpPaperEditor extends HTMLElement {
+  static CONTRACT_VERSION = CONTRACT_VERSION;
+
   constructor() {
     super();
     this._editor = null;
@@ -45,6 +64,8 @@ class BpPaperEditor extends HTMLElement {
 
   connectedCallback() {
     if (this._editor) return; // double-mount guard
+
+    ensureStyles();
 
     const block = this._readBlock();
     this._blockId = block && block.id != null ? block.id : null;
@@ -80,9 +101,9 @@ class BpPaperEditor extends HTMLElement {
           showOnlyWhenEditable: true,
           placeholder: ({ node }) => {
             if (node.type.name === "heading") {
-              return `Heading ${(node.attrs && node.attrs.level) || 1}`;
+              return PLACEHOLDER.heading(node.attrs && node.attrs.level);
             }
-            return "Start typing, or press / for blocks…";
+            return PLACEHOLDER.paragraph;
           },
         }),
         // Smart typography (— for --, “ ” for quotes, … for ...) — parity with
@@ -129,6 +150,19 @@ class BpPaperEditor extends HTMLElement {
     // text selection. Hand-rolled (no tippy) and fully decoupled from the
     // patch-block round-trip and the slash menu.
     this._bubble = new FormatBubble({ editor: this._editor });
+    // Lifecycle: one-shot bubbling/composed signal a host hook can await
+    // (LiveView ignores unknown events → additive, zero regression).
+    this.dispatchEvent(
+      new CustomEvent("bp-ready", {
+        detail: {
+          blockId: this._blockId,
+          blockType: this._blockType,
+          contractVersion: BpPaperEditor.CONTRACT_VERSION,
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   disconnectedCallback() {
@@ -161,6 +195,15 @@ class BpPaperEditor extends HTMLElement {
       try {
         return JSON.parse(raw);
       } catch (_e) {
+        // Surface bad inbound data to the host (additive); the silent default
+        // below is preserved so a malformed data-block never blocks the editor.
+        this.dispatchEvent(
+          new CustomEvent("bp-error", {
+            detail: { error: _e.message, raw },
+            bubbles: true,
+            composed: true,
+          }),
+        );
         // fall through to a default empty paragraph
       }
     }
@@ -383,4 +426,4 @@ if (!customElements.get("bp-paper-editor")) {
   customElements.define("bp-paper-editor", BpPaperEditor);
 }
 
-export { BpPaperEditor };
+export { BpPaperEditor, CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER };

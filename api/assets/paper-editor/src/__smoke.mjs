@@ -13,6 +13,7 @@ import {
   buildPatchBlockOp,
 } from "./convert.js";
 import { Wikilink, Blockref, Tag } from "./marks.js";
+import { CONTRACT_VERSION } from "./contract.js";
 
 let failures = 0;
 function check(name, fn) {
@@ -284,6 +285,14 @@ check("editor mark schemas match convert.js attrs", () => {
   ]);
   assert.equal(Tag.name, "tag");
   assert.deepEqual(Object.keys(Tag.config.addAttributes()), ["name"]);
+});
+
+// 16) the embed contract exposes a stable CONTRACT_VERSION from a DOM-free
+//     module (so this guard runs in pure Node, never importing index.js).
+check("contract exposes CONTRACT_VERSION", () => {
+  assert.equal(typeof CONTRACT_VERSION, "string");
+  assert.ok(CONTRACT_VERSION.length > 0, "non-empty");
+  assert.equal(CONTRACT_VERSION, "1.0.0");
 });
 
 if (failures > 0) {
