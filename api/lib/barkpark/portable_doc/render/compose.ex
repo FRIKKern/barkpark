@@ -151,12 +151,28 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => item_rows}
   end
 
-  def compose_block(%{"type" => "callout"} = b, _style) do
+  def compose_block(%{"type" => "callout"} = b, style) do
     body = %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
 
     tone = Map.get(b, "tone") || "info"
-    base = %{"kind" => "PdCallout", "tone" => tone, "children" => [body]}
-    maybe_put(base, "title", Map.get(b, "title"))
+
+    base =
+      %{"kind" => "PdCallout", "tone" => tone, "children" => [body]}
+      |> maybe_put("title", Map.get(b, "title"))
+
+    # Collapse is a SCREEN-only affordance: thread collapsible/collapsed ONLY in
+    # article mode (and only when `true`) so the email renderer — which shares
+    # walk.ex callout/3 — always emits the expanded <div>. Email clients strip
+    # <details> and would HIDE the body (the opposite of degrade-to-expanded).
+    # Skipping non-true also keeps existing callouts byte-identical at the Pd
+    # level, even after a re-save that writes an explicit collapsible:false.
+    if style == :article do
+      base
+      |> maybe_put_true("collapsible", Map.get(b, "collapsible"))
+      |> maybe_put_true("collapsed", Map.get(b, "collapsed"))
+    else
+      base
+    end
   end
 
   def compose_block(%{"type" => "action"} = b, _style) do
@@ -691,6 +707,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # spreads in kernel.ts, e.g. `...(title !== undefined ? {title} : {})`).
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # Like maybe_put but writes ONLY when the value is exactly `true` — so a
+  # boolean attr's absence and an explicit `false` render identically (an
+  # un-folded callout stays byte-identical even after a re-save).
+  defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
+  defp maybe_put_true(map, _key, _value), do: map
 
   # ── generic figure HTML emission (compose + walk bridge) ───────────────────
   # Generic figure: a composed child block + caption. nil child → caption only.
