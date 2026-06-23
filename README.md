@@ -15,7 +15,7 @@ Barkpark grades *itself* — **Cody**, its 9-critic Codebase-Intelligence suite 
 | Duplication | 100 | Reliability | 65 | Hotspots | 60 |
 | Dead-code | 100 | Evaluated | 100 | **Modularity** | **31** |
 
-Weighted **76 / 100 (B)**. The lowest three (**Modularity 31**, Hotspots 60, Reliability 65) are Cody's live worklist; the number only moves on gated, re-scored improvement (e.g. decomposing god-modules like `studio_live`/`tasks` behind facades). Modularity counts **structural** god-modules (>8k tok × high reach) — churn lives in Hotspots, contracts excluded; every count carries its reasoning so no number passes unexplained.
+Weighted **76 / 100 (B)**. The lowest three (**Modularity 31**, Hotspots 60, Reliability 65) are Cody's live worklist; the number only moves on gated, re-scored improvement (e.g. decomposing god-modules like `studio_live`/`tasks` behind facades). Modularity counts **structural** god-modules (>8k tok × high reach) — churn lives in Hotspots, contracts excluded; every count carries its reasoning in the dimension note.
 
 ## Get started
 
