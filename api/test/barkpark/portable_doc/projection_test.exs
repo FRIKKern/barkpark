@@ -76,6 +76,34 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
       content = Projection.project(%{}, blocks)
       assert content["featured"] == true
     end
+
+    test "project/4 clears the orphan index entry when a bound field is unbound" do
+      bound = %{
+        "id" => "b1",
+        "type" => "arrayOf",
+        "fieldName" => "aliases",
+        "of" => %{"type" => "string"},
+        "value" => ["a", "b"]
+      }
+
+      # Unbind = the same block with fieldName cleared (the patch-block fieldName→nil
+      # shape; patch.ex keeps the key present-but-nil so bound?/1 reads it FREE).
+      freed = Map.put(bound, "fieldName", nil)
+      content = %{"aliases" => ["a", "b"]}
+
+      out = Projection.project(content, [bound], [freed], %{})
+
+      # The orphaned index entry is dropped...
+      refute Map.has_key?(out, "aliases")
+      # ...and the now-free block lands in the body.
+      body_blocks = get_in(out, ["body", "blocks"]) || []
+      assert Enum.any?(body_blocks, &(&1["id"] == "b1"))
+    end
+
+    test "project/4 is byte-identical to project/3 when the bound set is unchanged" do
+      blocks = [%{"id" => "b1", "type" => "field-string", "fieldName" => "title", "value" => "X"}]
+      assert Projection.project(%{}, blocks, blocks, %{}) == Projection.project(%{}, blocks)
+    end
   end
 
   describe "Synthesis.synthesize/3 — lazy in-memory synthesis, byte-equal round-trip" do

@@ -104,20 +104,57 @@ defmodule Barkpark.PortableDoc.Projection do
   @spec project(content(), [block()], map()) :: content()
   def project(content, blocks, render_opts \\ %{})
       when is_map(content) and is_list(blocks) do
+    # Shim: no separate OLD block list (fresh-doc seeders / whole-content
+    # replacements, AND the project/2 callers in tests — projection_test,
+    # content_projection_test, content_classic_save_guard_test — which keep
+    # resolving ONLY because this default-arg head stays). prior == current ⇒
+    # dropped == [] ⇒ byte-identical to the pre-delta behaviour. Real write-path
+    # callers that flip a block bound→free call project/4 with their pre-patch
+    # block list.
+    project(content, blocks, blocks, render_opts)
+  end
+
+  @doc """
+  Project a freshly-written block list, clearing the orphan index entries of any
+  field that was BOUND in `old_blocks` but is no longer bound in `blocks`.
+
+  `old_blocks` is the PRE-patch block list. The dropped set is
+  `prior_bound_field_names -- current_bound_field_names` — exactly the unbind
+  orphans (and the old name of a rename). It MUST be threaded in: at every
+  write-path caller `content["blocks"]` is already the NEW list by project-time,
+  and `content[fieldName]` is indistinguishable from a Classic field key, so the
+  dropped set is unrecoverable from `content` alone.
+
+  Byte-identical to the legacy behaviour whenever the bound set is unchanged
+  (`dropped == []` ⇒ `Map.drop([])` no-op). Pure: `Map.drop`/`Map.put` only.
+  """
+  @spec project(content(), [block()], [block()], map()) :: content()
+  def project(content, old_blocks, blocks, render_opts)
+      when is_map(content) and is_list(old_blocks) and is_list(blocks) and is_map(render_opts) do
     {bound, free} = partition(blocks)
+    prior = for b <- old_blocks, bound?(b), do: b["fieldName"]
 
     content
-    |> project_bound_fields(bound)
+    |> project_bound_fields(prior, bound)
     |> Map.put("body", project_body(free, render_opts))
   end
 
-  # Fold each bound block into content[fieldName] = projected value. Last writer
-  # wins on a duplicated fieldName (two bound blocks for the same field — an
-  # editor anomaly, not a normal shape); the later block in document order wins,
-  # matching a single left-to-right walk.
-  defp project_bound_fields(content, bound) do
-    Enum.reduce(bound, content, fn block, acc ->
-      Map.put(acc, block["fieldName"], projected_value(block))
+  # Drop the field names that were bound in the prior block list but are no
+  # longer bound (unbind orphans / the old name of a rename), THEN fold each
+  # now-bound block into content[fieldName] = projected value. Last writer wins
+  # on a duplicated fieldName (two bound blocks for the same field — an editor
+  # anomaly, not a normal shape); the later block in document order wins,
+  # matching a single left-to-right walk. `dropped == []` for any non-unbind
+  # write ⇒ Map.drop([]) is a no-op ⇒ byte-identical output.
+  defp project_bound_fields(content, prior_field_names, bound) do
+    dropped = prior_field_names -- Enum.map(bound, & &1["fieldName"])
+
+    content
+    |> Map.drop(dropped)
+    |> then(fn acc0 ->
+      Enum.reduce(bound, acc0, fn block, acc ->
+        Map.put(acc, block["fieldName"], projected_value(block))
+      end)
     end)
   end
 
