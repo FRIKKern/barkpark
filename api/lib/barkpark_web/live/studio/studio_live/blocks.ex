@@ -28,6 +28,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_if_present("tone", params["tone"])
     |> Map.put("content", text_to_inline(params["text"] || ""))
     |> put_callout_title(params["title"])
+    # Unchecked checkbox sends no param → parse_bool(nil)=false (clears a prior
+    # true so the toggle un-checks). Map.put = always-write semantics.
+    |> Map.put("collapsible", parse_bool(params["collapsible"]))
+    |> Map.put("collapsed", parse_bool(params["collapsed"]))
   end
 
   def build_block_patch(%{"type" => "code"}, params) do

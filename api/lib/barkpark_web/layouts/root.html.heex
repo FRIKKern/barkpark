@@ -3475,6 +3475,30 @@
       }
     };
 
+    // BarkparkCalloutFold — persists a foldable callout's native <details> fold
+    // state (article mode only). Attached to the per-block stream wrapper
+    // <div id={dom_id} data-block-id={...}> (NOT the inner streamed <details>,
+    // which can't carry a stable hook id). The `toggle` event bubbles from the
+    // inner <details>; the listener guards on e.target being a <details> and
+    // reads its post-toggle `.open` to derive `collapsed`. mounted/destroyed
+    // add/removeEventListener so the streamed View pane never leaks listeners.
+    Hooks.BarkparkCalloutFold = {
+      mounted() {
+        this._onToggle = (e) => {
+          const d = e.target;
+          if (!d || typeof d.matches !== "function" || !d.matches("details")) return;
+          this.pushEvent("paper-callout-fold", {
+            block_id: this.el.dataset.blockId,
+            collapsed: !d.open,
+          });
+        };
+        this.el.addEventListener("toggle", this._onToggle, true);
+      },
+      destroyed() {
+        this.el.removeEventListener("toggle", this._onToggle, true);
+      },
+    };
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: {
         _csrf_token: csrfToken,
