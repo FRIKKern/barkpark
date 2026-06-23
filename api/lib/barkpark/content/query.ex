@@ -252,6 +252,54 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  Resolve a wikilink `target` (a human title or alias string) to the single
+  best-matching document of `type`, scoped to `dataset` + the caller's tenant.
+
+  ONE scoped `Repo.one` (never two round-trips):
+
+    * TITLE match is CASE-INSENSITIVE — `lower(title) = lower(target)`. The
+      `title` column is matched directly (a real `Document` column, not under
+      `content`).
+    * ALIAS match is the scalar-membership JSONB containment
+      `content->'aliases' @> to_jsonb(target::text)` — the proven pattern from
+      the task-label query (`?->'labels' @> to_jsonb(?::text)`). Alias match is
+      EXACT (the `@>` form cannot case-fold).
+    * PRECEDENCE — a title match OUTRANKS an alias-only match on collision via a
+      `CASE`-ranked `order_by` + `limit(1)`, so the function stays one query.
+      Ties break deterministically by `doc_id`.
+
+  Scoping is identical to `get_document/4` (`scope_to_dataset` +
+  `scope_to_workspace_or_global` — the P0 leak guard), so a wikilink only
+  resolves cross-workspace when the caller deliberately omits `:workspace_id`
+  (a global read, as in `get_document/4`).
+
+  Returns the `%Document{}` on a hit, `nil` on no match.
+  """
+  @spec resolve_doc_by_title_or_alias(String.t(), String.t(), String.t(), keyword()) ::
+          Document.t() | nil
+  def resolve_doc_by_title_or_alias(target, type, dataset, opts \\ []) when is_binary(target) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.type == ^type)
+    |> where(
+      [d],
+      fragment("lower(?) = lower(?)", d.title, ^target) or
+        fragment("?->'aliases' @> to_jsonb(?::text)", d.content, ^target)
+    )
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> order_by(
+      [d],
+      asc: fragment("CASE WHEN lower(?) = lower(?) THEN 0 ELSE 1 END", d.title, ^target),
+      asc: d.doc_id
+    )
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
   Batch sibling of `get_document/4`: load many documents by `doc_id` in ONE
   scoped query, returned as a `%{doc_id => %Document{}}` map.
 

@@ -94,6 +94,36 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  Resolve a wikilink `target` (a human title or alias) to the linked paper.
+
+  Returns `%{id, title}` for the single best match (title beats alias on a
+  collision; see `Content.Query.resolve_doc_by_title_or_alias/4`), or `nil`
+  when nothing matches or `target` is blank. Pinned to `type:"paper"` — papers
+  are the wikilink corpus.
+
+  This is the AUTHORITY that turns ANY stored `target` string (typed or picked
+  by the `[[` autocomplete) into a link. Resolution is RENDER-TIME and
+  scope-bound: `opts` may carry `:workspace_id` / `:project_id`, mirroring
+  `get_paper/3`. The stored node keeps the raw `target`; the resolved id appears
+  only in emitted HTML.
+  """
+  @spec resolve_wikilink(String.t(), String.t(), keyword()) ::
+          %{id: String.t(), title: String.t()} | nil
+  def resolve_wikilink(target, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_binary(target) do
+    case String.trim(target) do
+      "" ->
+        nil
+
+      trimmed ->
+        case Content.resolve_doc_by_title_or_alias(trimmed, @paper_type, dataset, opts) do
+          %Document{doc_id: id, title: title} -> %{id: id, title: title}
+          nil -> nil
+        end
+    end
+  end
+
+  @doc """
   Resolve a paper for the PUBLIC, unauthenticated `/papers/:slug` surface.
 
   Papers are stamped `workspace_id` on write and slugs are PER-WORKSPACE (the
