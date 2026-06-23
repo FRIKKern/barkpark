@@ -214,8 +214,8 @@ defmodule Barkpark.Tasks do
       filter is applied (matches `Content.list_documents/3`'s default).
     * `:phase_id`     — string doc_id of the parent phase document. When
       omitted, returns ready tasks across all phases in scope.
-    * `:limit`        — integer max rows. Default
-      #{@ready_default_limit}.
+    * `:limit`        — integer max rows. Default 50
+      (`Barkpark.Tasks.Queue`'s `@ready_default_limit`).
 
   Returns a list of `%Document{}` structs.
 
