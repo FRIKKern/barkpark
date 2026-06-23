@@ -634,8 +634,9 @@ defmodule Barkpark.Content.Papers do
         # Project-on-write (Exp-P2): the SOLE writer of content[fieldName] and
         # content["body"]. Re-derives the bound-field index + body from the
         # block list we just computed, so Classic queries stay in sync with the
-        # blocks and never drift.
-        |> Projection.project(new_blocks, render_opts)
+        # blocks and never drift. Threads the PRE-patch `blocks` as old_blocks so
+        # an unbind (fieldName→nil) clears the now-orphaned content[fieldName].
+        |> Projection.project(blocks, new_blocks, render_opts)
 
       title = paper_title(content, slug)
 
@@ -733,7 +734,9 @@ defmodule Barkpark.Content.Papers do
             |> Map.put("blocks", new_blocks)
             |> Map.put("body_html", body_html)
             |> Map.put("rev", rev)
-            |> Projection.project(new_blocks, render_opts)
+            # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
+            # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
+            |> Projection.project(blocks, new_blocks, render_opts)
 
           title = paper_title(content, slug)
 
@@ -872,8 +875,9 @@ defmodule Barkpark.Content.Papers do
         |> Map.put("blocks", new_blocks)
         # Project-on-write — the SOLE writer of content[fieldName]/content["body"]
         # for this document, identical to the paper path. Bound title → "title",
-        # free body blocks → content["body"].
-        |> Projection.project(new_blocks, Labels.render_opts(dataset))
+        # free body blocks → content["body"]. Pre-patch `blocks` as old_blocks so
+        # a Beta-editor unbind clears the orphaned content[fieldName].
+        |> Projection.project(blocks, new_blocks, Labels.render_opts(dataset))
 
       # Derive the row title from the bound title field if present (matches the
       # Classic-save title precedence), else keep the document's current title.
