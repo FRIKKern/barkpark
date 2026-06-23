@@ -931,6 +931,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     blocks = Map.get(content, "blocks")
     rev = Map.get(content, "rev") || 0
     html = Map.get(content, "body_html") || ""
+    {linked, unlinked} = load_backlinks(socket, paper)
 
     if is_list(blocks) do
       socket
@@ -940,7 +941,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         paper_rev: rev,
         paper_html: html,
         paper_block_mode: true,
-        paper_edit_mode: false
+        paper_edit_mode: false,
+        backlinks_linked: linked,
+        backlinks_unlinked: unlinked,
+        backlinks_open: true
       )
       |> stream(
         :paper_blocks,
@@ -955,13 +959,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         paper_rev: rev,
         paper_html: html,
         paper_block_mode: false,
-        paper_edit_mode: false
+        paper_edit_mode: false,
+        backlinks_linked: linked,
+        backlinks_unlinked: unlinked,
+        backlinks_open: true
       )
       |> stream(:paper_blocks, [], reset: true)
     end
   end
 
   def setup_paper_view(socket, _paper), do: clear_paper_view(socket)
+
+  @doc """
+  Read-only inbound-reference load for the backlinks panel. Resolves the paper's
+  published id and runs the arrayOf-aware `Content.Graph.reverse_referencers/2`
+  ONCE (scope + dataset bound), then partitions the single result into two
+  mutually-exclusive lists by edge origin:
+
+    * `linked`  — direct schema-field reference edges (`plugin_source == nil`),
+                  i.e. real "Linked mentions".
+    * `derived` — plugin/derived inbound edges (`plugin_source` set).
+
+  Returns `{[], []}` for a draft / unresolvable / never-referenced paper — the
+  panel renders an empty state, never crashes.
+  """
+  def load_backlinks(socket, %{doc_id: doc_id}) when is_binary(doc_id) do
+    published_id = Content.published_id(doc_id)
+    opts = [dataset: socket.assigns.dataset] ++ ScopeHelpers.scope_opts(socket)
+
+    published_id
+    |> Content.Graph.reverse_referencers(opts)
+    |> Enum.split_with(fn ref -> is_nil(ref[:plugin_source]) end)
+  end
+
+  def load_backlinks(_socket, _paper), do: {[], []}
 
   @doc false
   def clear_paper_view(socket) do
@@ -972,10 +1003,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         paper_rev: 0,
         paper_html: "",
         paper_block_mode: false,
-        paper_edit_mode: false
+        paper_edit_mode: false,
+        backlinks_linked: [],
+        backlinks_unlinked: [],
+        backlinks_open: true
       )
     else
-      assign(socket, editor_view: :form)
+      assign(socket,
+        editor_view: :form,
+        backlinks_linked: [],
+        backlinks_unlinked: [],
+        backlinks_open: true
+      )
     end
   end
 

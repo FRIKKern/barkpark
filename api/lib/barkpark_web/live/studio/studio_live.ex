@@ -215,6 +215,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-block-autosave", params, socket),
     do: Paper.paper_block_autosave(params, socket)
 
+  def handle_event("backlinks-toggle", _params, socket), do: Paper.backlinks_toggle(socket)
+  def handle_event("backlinks-refresh", _params, socket), do: Paper.backlinks_refresh(socket)
+  def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)
+
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-add-block", params, socket), do: Paper.paper_add_block(params, socket)
 

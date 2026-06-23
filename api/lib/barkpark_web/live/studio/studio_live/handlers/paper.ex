@@ -76,6 +76,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
      })}
   end
 
+  @doc """
+  Collapse / expand the backlinks panel. Pure assign flip — no re-query (the
+  list was loaded once in `Shared.setup_paper_view/2`).
+  """
+  def backlinks_toggle(socket) do
+    {:noreply, assign(socket, backlinks_open: !socket.assigns[:backlinks_open])}
+  end
+
+  @doc """
+  Re-run the inbound-reference load for the currently-open paper. Read-only;
+  no-ops (preserving the existing lists) when no paper is open.
+  """
+  def backlinks_refresh(socket) do
+    case socket.assigns[:paper_doc] do
+      %{} = paper ->
+        {linked, unlinked} = Shared.load_backlinks(socket, paper)
+        {:noreply, assign(socket, backlinks_linked: linked, backlinks_unlinked: unlinked)}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Open a backlink source in-pane via the reserved ["open", type, id] nav path
+  (PaneBuilder.walk_path resolves it with no structure lookup; handle_params
+  rebuilds the editor, no remount). Blank/nil slug or type is a no-op.
+  """
+  def open_backlink(%{"slug" => slug, "type" => type}, socket)
+      when is_binary(slug) and slug != "" and is_binary(type) and type != "" do
+    {:noreply,
+     push_patch(socket,
+       to: Shared.studio_path(socket, ["open", type, slug], socket.assigns.dataset)
+     )}
+  end
+
+  def open_backlink(_params, socket), do: {:noreply, socket}
+
   def paper_op(%{"op" => _} = op, socket) do
     {:noreply, Shared.paper_op(socket, op)}
   end

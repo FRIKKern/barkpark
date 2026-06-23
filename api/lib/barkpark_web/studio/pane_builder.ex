@@ -108,6 +108,56 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     {panes, editor}
   end
 
+  # RESERVED literal "open" segment — direct doc-open by [type, doc_id], used by
+  # the Studio backlinks panel to jump to a referencer that may live OUTSIDE the
+  # currently-navigated structure subtree. Like "graph", it runs BEFORE the
+  # structure Enum.find below (no node has type_name == "open"), resolves the doc
+  # by id+type with NO structure lookup, and emits the same editor map a desk
+  # row-click would. rebuild_panes then dispatches on editor[:view].
+  def walk_path(["open", type, id | _], _depth, _current, panes, _editor, dataset, opts) do
+    editor =
+      if type == "paper" do
+        case Content.get_paper(id, dataset, scope(opts)) do
+          nil ->
+            nil
+
+          paper_doc ->
+            %{
+              view: :paper,
+              doc: paper_doc,
+              schema: nil,
+              type: type,
+              is_draft: false,
+              has_published: false,
+              form: %{}
+            }
+        end
+      else
+        case Content.fetch_doc_with_draft(type, id, dataset, scope(opts)) do
+          {doc, is_draft, has_pub} when not is_nil(doc) ->
+            schema =
+              case Content.get_schema(type, dataset) do
+                {:ok, s} -> s
+                _ -> nil
+              end
+
+            %{
+              doc: doc,
+              schema: schema,
+              type: type,
+              is_draft: is_draft,
+              has_published: has_pub,
+              form: (schema && Content.doc_to_form(doc, schema)) || %{}
+            }
+
+          _ ->
+            nil
+        end
+      end
+
+    {panes, editor}
+  end
+
   def walk_path([id | rest], depth, current, panes, _editor, dataset, opts) do
     found =
       Enum.find(current.items, fn node ->

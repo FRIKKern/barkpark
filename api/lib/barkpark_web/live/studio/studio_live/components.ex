@@ -33,6 +33,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
   attr(:streams, :map, required: true)
+  attr(:backlinks_linked, :list, default: [])
+  attr(:backlinks_unlinked, :list, default: [])
+  attr(:backlinks_open, :boolean, default: true)
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -148,6 +151,91 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <% end %>
           </main>
         </div>
+        <aside
+          :if={@paper_doc}
+          class={"bp-backlinks-panel " <> if(@backlinks_open, do: "is-open", else: "is-collapsed")}
+          data-test-id="studio-backlinks-panel"
+        >
+          <div class="bp-backlinks-head">
+            <button
+              type="button"
+              class="bp-backlinks-toggle"
+              phx-click="backlinks-toggle"
+              aria-expanded={to_string(@backlinks_open)}
+              data-test-id="backlinks-toggle"
+            >
+              <.icon name={if @backlinks_open, do: "chevron-down", else: "chevron-right"} size={14} />
+              <span>Backlinks</span>
+            </button>
+            <button
+              type="button"
+              class="bp-backlinks-refresh"
+              phx-click="backlinks-refresh"
+              title="Refresh backlinks"
+              data-test-id="backlinks-refresh"
+            >
+              <.icon name="refresh-cw" size={12} />
+            </button>
+          </div>
+
+          <div :if={@backlinks_open} class="bp-backlinks-body">
+            <section class="bp-backlinks-section" data-test-id="backlinks-linked">
+              <h4 class="bp-backlinks-section-title">Linked mentions ({length(@backlinks_linked)})</h4>
+              <%= if @backlinks_linked == [] do %>
+                <p class="bp-backlinks-empty">No linked mentions.</p>
+              <% else %>
+                <ul class="bp-backlinks-list">
+                  <li :for={ref <- @backlinks_linked}>
+                    <button
+                      :if={ref[:from_doc_id]}
+                      type="button"
+                      class="bp-backlinks-row is-clickable"
+                      phx-click="open-backlink"
+                      phx-value-slug={ref.from_doc_id}
+                      phx-value-type={ref.type}
+                      data-test-id="backlink-row"
+                    >
+                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
+                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
+                    </button>
+                    <div :if={!ref[:from_doc_id]} class="bp-backlinks-row" data-test-id="backlink-row">
+                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
+                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
+                    </div>
+                  </li>
+                </ul>
+              <% end %>
+            </section>
+
+            <section class="bp-backlinks-section" data-test-id="backlinks-unlinked">
+              <h4 class="bp-backlinks-section-title">Derived mentions ({length(@backlinks_unlinked)})</h4>
+              <%= if @backlinks_unlinked == [] do %>
+                <p class="bp-backlinks-empty">No derived mentions.</p>
+              <% else %>
+                <ul class="bp-backlinks-list">
+                  <li :for={ref <- @backlinks_unlinked}>
+                    <button
+                      :if={ref[:from_doc_id]}
+                      type="button"
+                      class="bp-backlinks-row is-clickable"
+                      phx-click="open-backlink"
+                      phx-value-slug={ref.from_doc_id}
+                      phx-value-type={ref.type}
+                      data-test-id="backlink-row"
+                    >
+                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
+                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
+                    </button>
+                    <div :if={!ref[:from_doc_id]} class="bp-backlinks-row" data-test-id="backlink-row">
+                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
+                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
+                    </div>
+                  </li>
+                </ul>
+              <% end %>
+            </section>
+          </div>
+        </aside>
       </div>
     </div>
     """
@@ -880,6 +968,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           shares_admin?={@shares_admin?}
           dataset={@dataset}
           streams={@streams}
+          backlinks_linked={@backlinks_linked}
+          backlinks_unlinked={@backlinks_unlinked}
+          backlinks_open={@backlinks_open}
         />
         <% @editor_view == :sheet and @sheet_doc != nil -> %>
         <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
