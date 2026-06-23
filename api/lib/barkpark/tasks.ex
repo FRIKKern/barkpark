@@ -72,12 +72,19 @@ defmodule Barkpark.Tasks do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, MutationEvent, Scope, SchemaDefinition}
+  alias Barkpark.Content.{Document, Scope, SchemaDefinition}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.Mutations
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Validation
+
+  # The CAS write paths (claim/close/do_claim/cascade) call these bare; they now
+  # live in Tasks.Internal (shared with Tasks.Mutations). Imported so the call
+  # sites stay unchanged.
+  import Barkpark.Tasks.Internal,
+    only: [generate_rev: 0, current_epoch: 1, insert_mutation_event!: 3, task_broadcast: 4, emit_broadcasts: 1]
 
   # W7-04 mutation_events kinds. Routed into the existing `mutation` text column
   # so the spine, webhooks, and listen endpoint surface task ops alongside
@@ -585,17 +592,7 @@ defmodule Barkpark.Tasks do
   # (broadcasting inside the txn would let subscribers read uncommitted
   # state). Content stays the single owner of the topic shapes.
 
-  defp task_broadcast(%Document{} = doc, kind, %MutationEvent{} = ev, previous_rev) do
-    %{doc: doc, kind: kind, event_id: ev.id, previous_rev: previous_rev}
-  end
-
-  defp emit_broadcasts(broadcasts) when is_list(broadcasts) do
-    Enum.each(broadcasts, fn %{doc: doc, kind: kind, event_id: eid, previous_rev: prev} ->
-      Content.broadcast_document_mutation(doc, kind, event_id: eid, previous_rev: prev)
-    end)
-
-    :ok
-  end
+  # task_broadcast/4 + emit_broadcasts/1 → Tasks.Internal (imported above).
 
   @doc """
   Close (terminate) a claimed task — W7-04 full primitives.
@@ -740,68 +737,7 @@ defmodule Barkpark.Tasks do
   """
   @spec relabel_by_id(binary(), [binary()], [binary()]) ::
           {:ok, Document.t()} | {:error, term()}
-  def relabel_by_id(task_id, add, remove)
-      when is_binary(task_id) and is_list(add) and is_list(remove) do
-    result =
-      Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
-
-        case Repo.get(Document, task_id) do
-          nil ->
-            {:error, :not_found}
-
-          %Document{} = doc ->
-            observed_rev = doc.rev
-            current = labels_of(doc.content)
-            add = Enum.filter(add, &is_binary/1)
-            remove = MapSet.new(Enum.filter(remove, &is_binary/1))
-
-            # Union add (append new, preserve order), then drop the remove set.
-            next =
-              (current ++ add)
-              |> Enum.uniq()
-              |> Enum.reject(&MapSet.member?(remove, &1))
-
-            new_content = Map.put(doc.content, "labels", next)
-            new_rev = generate_rev()
-
-            {rows, _} =
-              from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-              |> Repo.update_all(
-                set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-              )
-
-            case rows do
-              1 ->
-                updated = %{doc | content: new_content, rev: new_rev}
-                ev = insert_mutation_event!(updated, @event_task_relabeled, observed_rev)
-
-                {:ok, updated, [task_broadcast(updated, @event_task_relabeled, ev, observed_rev)]}
-
-              0 ->
-                {:error, :stale_claim}
-            end
-        end
-      end)
-
-    case result do
-      {:ok, {:ok, doc, broadcasts}} ->
-        :ok = emit_broadcasts(broadcasts)
-        {:ok, doc}
-
-      {:ok, {:error, reason}} ->
-        {:error, reason}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # content.labels is a free-form JSON array (the W7 mirror writes goals/phases
-  # with [kind, goal] etc.; tasks may have none). Defensive: coerce non-list /
-  # missing to [].
-  defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
-  defp labels_of(_), do: []
+  defdelegate relabel_by_id(task_id, add, remove), to: Mutations
 
   @doc """
   Phase A: add/remove `content.papers` entries (paper slugs) on a single task,
@@ -820,68 +756,7 @@ defmodule Barkpark.Tasks do
   """
   @spec update_paper_refs_by_id(binary(), [binary()], [binary()]) ::
           {:ok, Document.t()} | {:error, term()}
-  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs)
-      when is_binary(task_id) and is_list(add_slugs) and is_list(remove_slugs) do
-    result =
-      Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
-
-        case Repo.get(Document, task_id) do
-          nil ->
-            {:error, :not_found}
-
-          %Document{} = doc ->
-            observed_rev = doc.rev
-            current = papers_of(doc.content)
-            add = Enum.filter(add_slugs, &is_binary/1)
-            remove = MapSet.new(Enum.filter(remove_slugs, &is_binary/1))
-
-            # Union add (append new, preserve order), then drop the remove set.
-            next =
-              (current ++ add)
-              |> Enum.uniq()
-              |> Enum.reject(&MapSet.member?(remove, &1))
-
-            new_content = Map.put(doc.content, "papers", next)
-            new_rev = generate_rev()
-
-            {rows, _} =
-              from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-              |> Repo.update_all(
-                set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-              )
-
-            case rows do
-              1 ->
-                updated = %{doc | content: new_content, rev: new_rev}
-                ev = insert_mutation_event!(updated, @event_task_referenced, observed_rev)
-
-                {:ok, updated,
-                 [task_broadcast(updated, @event_task_referenced, ev, observed_rev)]}
-
-              0 ->
-                {:error, :stale_claim}
-            end
-        end
-      end)
-
-    case result do
-      {:ok, {:ok, doc, broadcasts}} ->
-        :ok = emit_broadcasts(broadcasts)
-        {:ok, doc}
-
-      {:ok, {:error, reason}} ->
-        {:error, reason}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # content.papers is a JSON array of paper slugs. Defensive: coerce non-list /
-  # missing to [].
-  defp papers_of(%{"papers" => papers}) when is_list(papers), do: papers
-  defp papers_of(_), do: []
+  defdelegate update_paper_refs_by_id(task_id, add_slugs, remove_slugs), to: Mutations
 
   # Fencing applies only to tasks that carry a claim lease. Work-tasks are
   # claimed before close, so they have `content.claim.epoch` and the observed
@@ -991,45 +866,7 @@ defmodule Barkpark.Tasks do
     end)
   end
 
-  defp current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
-  defp current_epoch(_), do: 0
-
-  # Mutation-events insert. The existing `mutation_events` schema (used by
-  # the document spine) is reused verbatim — the `mutation` text column
-  # carries our `task.claimed` / `task.closed` / `task.mutated` kinds, the
-  # `document` map carries an Envelope-shaped view of the post-update row.
-  # Tenancy stamps mirror `Content.save_event/5` so workspace-scoped
-  # `recent_activity` reads surface task ops.
-  defp insert_mutation_event!(%Document{} = doc, kind, previous_rev) do
-    %MutationEvent{}
-    |> Ecto.Changeset.change(%{
-      dataset: doc.dataset,
-      type: doc.type,
-      doc_id: doc.doc_id,
-      mutation: kind,
-      rev: doc.rev,
-      previous_rev: previous_rev,
-      document: %{
-        "doc_id" => doc.doc_id,
-        "type" => doc.type,
-        "title" => doc.title,
-        "status" => doc.status,
-        "content" => doc.content,
-        "rev" => doc.rev
-      },
-      workspace_id: doc.workspace_id,
-      project_id: doc.project_id,
-      dataset_id: doc.dataset_id,
-      inserted_at: DateTime.utc_now()
-    })
-    |> Repo.insert!()
-  end
-
-  # New rev token, same shape as `Content.generate_rev/0`. Kept private here
-  # so `Tasks` does not depend on a private function in another module.
-  defp generate_rev do
-    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
-  end
+  # current_epoch/1, insert_mutation_event!/3, generate_rev/0 → Tasks.Internal (imported above).
 
   @doc "The mutation_events kinds emitted by this module."
   @spec event_kinds() :: %{
