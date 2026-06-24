@@ -472,18 +472,23 @@ class BpPaperCanvas extends HTMLElement {
         // <pre data-bp-type='diagram'> (it does NOT claim the bare <pre> the code node
         // already owns).
         Diagram,
-        // S3.5: the field CONTROL-ATOM node + its node-view. Registers the SINGLE
-        // `bpField` node type serving ALL 7 native field-* kinds (field-string /
-        // field-slug / field-text / field-boolean / field-select / field-datetime /
-        // field-color), discriminated by the bpType attr. An atom whose VALUE rides an
-        // attr and is edited by a NATIVE control (input / textarea / checkbox / select
-        // / datetime-local / color), with the control wrapped in a stopEvent/
-        // ignoreMutation island so PM never turns its keystrokes/toggles/selections
-        // into transactions. On change the value is COERCED BY FIELD TYPE exactly like
-        // the per-block BarkparkFieldBlockBridge (boolean → control.checked; else
-        // control.value), so a canvas field edit persists IDENTICALLY. field-image /
-        // field-reference (pickers) are NOT in this set — they stay run boundaries
-        // (bpOpaque). bpField parses ONLY its own <div data-bp-type='field'>.
+        // S3.5 + run-splitter tail: the field CONTROL-ATOM node + its node-view.
+        // Registers the SINGLE `bpField` node type serving ALL 9 field-* kinds — the 7
+        // NATIVE controls (field-string / field-slug / field-text / field-boolean /
+        // field-select / field-datetime / field-color), edited by a NATIVE control
+        // (input / textarea / checkbox / select / datetime-local / color), PLUS the 2
+        // PICKER fields (field-image → bp-media-picker, field-reference →
+        // bp-reference-picker), edited by the EXISTING client-side picker WC. Both
+        // variants are atoms whose VALUE rides an attr and whose edit surface is wrapped
+        // in a stopEvent/ignoreMutation island so PM never turns its keystrokes / toggles
+        // / selections / picker-fetches into transactions. On change the value is COERCED
+        // exactly like the per-block BarkparkFieldBlockBridge — native: boolean →
+        // control.checked, else control.value; picker: identity on the bp-change
+        // detail.value — so a canvas field edit persists IDENTICALLY to the per-block
+        // path. The pickers are CLIENT-SIDE (no LiveView / pushEvent dependency), so they
+        // mount inside the node-view exactly like a native control. bpField parses ONLY
+        // its own <div data-bp-type='field'>. Only the nested-structure fields
+        // (composite / arrayOf / codelist / localizedText / section) remain bpOpaque.
         Field,
         // S3.6: the sheet + embed READ-ONLY ATOM nodes + their node-views. Registers
         // the `bpSheet` and `bpEmbed` node types (atom, NO edit surface; the WHOLE

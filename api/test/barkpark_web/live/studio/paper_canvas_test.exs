@@ -19,15 +19,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp list(id), do: %{"id" => id, "type" => "list", "ordered" => false, "items" => []}
   defp callout(id), do: %{"id" => id, "type" => "callout", "tone" => "info"}
   defp divider(id), do: %{"id" => id, "type" => "divider"}
-  # S3.5: the 7 NATIVE field-* types are now canvas-eligible, so the still-splitting
-  # field BOUNDARY is a PICKER field (field-image / field-reference) — its
-  # bp-media-picker WC carries its own LiveView event flow. `field/1` therefore
-  # produces a field-IMAGE (a boundary); `native_field/1` produces a field-string
-  # (canvas-eligible) for the S3.5 widen tests. `field_ref/1` is the SECOND picker
-  # boundary (field-reference), used where a non-field boundary is needed now that
-  # S3.6 made sheet/embed canvas-eligible.
-  defp field(id), do: %{"id" => id, "type" => "field-image", "value" => ""}
-  defp field_ref(id), do: %{"id" => id, "type" => "field-reference", "value" => ""}
+  # RUN-SPLITTER TAIL (part 1): the 2 PICKER field-* types (field-image /
+  # field-reference) are now canvas-eligible too (their WCs are client-side — no
+  # LiveView dependency — so they mount inside the canvas as control-atoms). The ONLY
+  # remaining run boundaries are the NESTED-STRUCTURE fields (composite / arrayOf /
+  # codelist / localizedText / section), a separate increment. `boundary/1` therefore
+  # produces a `composite` (a still-splitting boundary); `boundary2/1` produces an
+  # `arrayOf` (a SECOND distinct boundary, used where two adjacent boundaries are
+  # needed). `picker/1` and `picker_ref/1` produce the now-canvas-eligible picker fields
+  # used to prove they RIDE a run. `native_field/1` produces a field-string.
+  defp boundary(id), do: %{"id" => id, "type" => "composite", "fields" => [], "value" => %{}}
+  defp boundary2(id), do: %{"id" => id, "type" => "arrayOf", "of" => %{}, "value" => []}
+  defp picker(id), do: %{"id" => id, "type" => "field-image", "value" => ""}
+  defp picker_ref(id), do: %{"id" => id, "type" => "field-reference", "value" => ""}
   defp native_field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
   # S3.6: sheet AND embed are now canvas-eligible READ-ONLY atoms (they carry the whole
   # block verbatim and never emit a value/content op), so they NO LONGER split a run.
@@ -47,14 +51,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "no canvas blocks → every block is its own boundary segment" do
-      # divider/callout/code/field IS canvas, and as of S3.6 sheet/embed are too, so
-      # this all-boundary case uses the two PICKER fields (field-image /
-      # field-reference) — the only remaining run boundaries.
-      blocks = [field("f1"), field_ref("r1")]
+      # divider/callout/code IS canvas; sheet/embed are (S3.6); the 7 native field-*
+      # types AND the 2 PICKER fields are (run-splitter tail). So this all-boundary case
+      # uses the NESTED-STRUCTURE fields (composite / arrayOf) — the only remaining run
+      # boundaries.
+      blocks = [boundary("f1"), boundary2("r1")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:block, field("f1")},
-               {:block, field_ref("r1")}
+               {:block, boundary("f1")},
+               {:block, boundary2("r1")}
              ]
     end
 
@@ -76,14 +81,28 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.6: ONLY the PICKER fields (field-image / field-reference) STILL split a run" do
-      # divider/callout/code/diagram IS canvas, the 7 NATIVE field-* types are (S3.5),
-      # and as of S3.6 sheet/embed are too — so the ONLY still-splitting boundaries are
-      # the PICKER fields (field-image / field-reference; their WCs carry their own
-      # LiveView flow). sheet/embed have moved OUT of this list (now canvas-eligible).
+    test "TAIL: the PICKER fields (field-image / field-reference) now RIDE a run (no longer split)" do
+      # Run-splitter tail (part 1): both pickers mount client-side WCs inside the canvas,
+      # so a picker between two prose blocks is ONE maximal run — it no longer splits.
+      for pkr <- [picker("img"), picker_ref("ref")] do
+        blocks = [para("p1"), pkr, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}],
+               "expected #{pkr["type"]} to RIDE the run (canvas-eligible)"
+      end
+    end
+
+    test "TAIL: ONLY the NESTED-STRUCTURE fields STILL split a run" do
+      # Everything common is canvas now (prose, divider, callout, code, diagram, the 7
+      # native field-* types, the 2 pickers, sheet, embed) — so the ONLY still-splitting
+      # boundaries are the nested-structure fields (composite / arrayOf / codelist /
+      # localizedText / section).
       for boundary <- [
-            %{"id" => "b", "type" => "field-image", "value" => ""},
-            %{"id" => "b", "type" => "field-reference", "value" => ""}
+            %{"id" => "b", "type" => "composite", "fields" => [], "value" => %{}},
+            %{"id" => "b", "type" => "arrayOf", "of" => %{}, "value" => []},
+            %{"id" => "b", "type" => "codelist", "value" => ""},
+            %{"id" => "b", "type" => "localizedText", "value" => %{}},
+            %{"id" => "b", "type" => "section"}
           ] do
         blocks = [para("p1"), boundary, para("p2")]
 
@@ -120,13 +139,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.6: field-image/field-reference STILL split a run while sheet+embed ride it" do
-      # A picker field between two prose+sheet+embed runs is the ONLY split point.
-      blocks = [para("p1"), sheet("s1"), field("img"), embed("e1"), para("p2")]
+    test "TAIL: a nested-structure boundary splits while sheet+embed+picker ride it" do
+      # A composite (nested-structure) field between two runs is the ONLY split point;
+      # sheet, embed, AND a picker (field-image) all RIDE their surrounding runs.
+      blocks = [para("p1"), sheet("s1"), picker("img"), boundary("cmp"), embed("e1"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [para("p1"), sheet("s1")]},
-               {:block, field("img")},
+               {:run, [para("p1"), sheet("s1"), picker("img")]},
+               {:block, boundary("cmp")},
                {:run, [embed("e1"), para("p2")]}
              ]
     end
@@ -160,16 +180,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       end
     end
 
-    test "S3.5: a native field directly between prose joins ONE run; a picker field STILL splits" do
-      # native_field (field-string) is canvas; field/field-reference (pickers) split.
-      blocks = [para("p1"), native_field("n1"), para("p2")]
-      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    test "TAIL: a native field AND a picker field both join ONE run; a nested-structure field STILL splits" do
+      # native_field (field-string) AND picker (field-image) are BOTH canvas now.
+      assert PaperCanvas.partition_runs([para("p1"), native_field("n1"), para("p2")]) ==
+               [{:run, [para("p1"), native_field("n1"), para("p2")]}]
 
-      split = [para("p1"), field("img"), para("p2")]
+      assert PaperCanvas.partition_runs([para("p1"), picker("img"), para("p2")]) ==
+               [{:run, [para("p1"), picker("img"), para("p2")]}]
+
+      # Only a nested-structure field (composite) still splits.
+      split = [para("p1"), boundary("cmp"), para("p2")]
 
       assert PaperCanvas.partition_runs(split) == [
                {:run, [para("p1")]},
-               {:block, field("img")},
+               {:block, boundary("cmp")},
                {:run, [para("p2")]}
              ]
     end
@@ -186,6 +210,22 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
       # native field (control-atom) AND code/diagram (attr-atoms) AND callout (content)
       # are ALL canvas-eligible, so the whole stretch is ONE maximal run — none split.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "TAIL: a picker field + a native field + code in ONE run (all canvas-eligible)" do
+      blocks = [
+        para("p1"),
+        picker("img"),
+        picker_ref("ref"),
+        native_field("n1"),
+        code("k1"),
+        para("p2")
+      ]
+
+      # picker fields (control-atoms mounting WCs) AND the native field (control-atom)
+      # AND code (attr-atom) are ALL canvas-eligible, so the whole stretch is ONE maximal
+      # run — none split.
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
@@ -257,14 +297,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.2: a picker field STILL splits, with a callout riding each surrounding run" do
-      # field-image (a picker) is still a boundary; the callouts are canvas, so each
-      # rides the prose run on its side of the field.
-      blocks = [para("p1"), callout("c1"), field("f1"), callout("c2"), para("p2")]
+    test "TAIL: a nested-structure boundary splits, with a callout (and a picker) riding each surrounding run" do
+      # composite (a nested-structure field) is still a boundary; the callouts AND the
+      # pickers are canvas, so each rides the prose run on its side of the boundary.
+      blocks = [para("p1"), callout("c1"), picker("img"), boundary("cmp"), callout("c2"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [para("p1"), callout("c1")]},
-               {:block, field("f1")},
+               {:run, [para("p1"), callout("c1"), picker("img")]},
+               {:block, boundary("cmp")},
                {:run, [callout("c2"), para("p2")]}
              ]
     end
@@ -277,38 +317,39 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         para("p2"),
         list("l1"),
         divider("d1"),
-        field("f1"),
+        picker("img"),
+        boundary("cmp"),
         para("p3")
       ]
 
-      # As of S3.2 neither the callout NOR the divider splits — they ride the
-      # leading run; only the field (still a boundary) splits it off from p3.
+      # Neither the callout NOR the divider NOR the picker splits — they ride the
+      # leading run; only the nested-structure field (composite) splits it off from p3.
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [heading("h1"), para("p1"), callout("c1"), para("p2"), list("l1"), divider("d1")]},
-               {:block, field("f1")},
+               {:run, [heading("h1"), para("p1"), callout("c1"), para("p2"), list("l1"), divider("d1"), picker("img")]},
+               {:block, boundary("cmp")},
                {:run, [para("p3")]}
              ]
     end
 
     test "leading non-canvas then a run" do
-      # field is still a boundary (callout is canvas as of S3.2, so it would merge).
-      blocks = [field("f1"), para("p1"), para("p2")]
+      # composite is a boundary (callout/picker are canvas, so they would merge).
+      blocks = [boundary("cmp"), para("p1"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:block, field("f1")},
+               {:block, boundary("cmp")},
                {:run, [para("p1"), para("p2")]}
              ]
     end
 
     test "two non-canvas boundaries between two runs do NOT merge into one run" do
-      # field-reference + field-image — both still PICKER boundaries (callout/divider/
-      # sheet/embed are all canvas now).
-      blocks = [para("p1"), field_ref("r1"), field("f1"), para("p2")]
+      # composite + arrayOf — both still NESTED-STRUCTURE boundaries (callout/divider/
+      # sheet/embed/pickers are all canvas now).
+      blocks = [para("p1"), boundary("cmp"), boundary2("arr"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
                {:run, [para("p1")]},
-               {:block, field_ref("r1")},
-               {:block, field("f1")},
+               {:block, boundary("cmp")},
+               {:block, boundary2("arr")},
                {:run, [para("p2")]}
              ]
     end
@@ -334,14 +375,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       refute PaperCanvas.prose?(callout("c"))
       # A divider is canvas-eligible but NOT prose — it is an atom, not a textblock.
       refute PaperCanvas.prose?(divider("d"))
-      refute PaperCanvas.prose?(field("f"))
+      # A picker field is canvas-eligible (control-atom) but NOT prose.
+      refute PaperCanvas.prose?(picker("f"))
+      # A composite is neither prose nor canvas.
+      refute PaperCanvas.prose?(boundary("b"))
       refute PaperCanvas.prose?(%{"id" => "x"})
       refute PaperCanvas.prose?(%{"type" => "code"})
     end
   end
 
-  describe "canvas?/1 (S3.6: prose ∪ divider ∪ callout ∪ code ∪ diagram ∪ native field-* ∪ sheet ∪ embed)" do
-    test "prose, divider, callout, code, diagram, the 7 native field-* types AND sheet/embed are canvas-eligible; pickers are not" do
+  describe "canvas?/1 (TAIL: prose ∪ divider ∪ callout ∪ code ∪ diagram ∪ native ∪ picker fields ∪ sheet ∪ embed)" do
+    test "prose/divider/callout/code/diagram/native fields/picker fields/sheet/embed are canvas; nested-structure fields are not" do
       assert PaperCanvas.canvas?(para("p"))
       assert PaperCanvas.canvas?(heading("h"))
       assert PaperCanvas.canvas?(list("l"))
@@ -368,10 +412,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.canvas?(sheet("s"))
       assert PaperCanvas.canvas?(embed("e"))
 
-      # Still boundaries — only the PICKER fields (their WCs carry their own LiveView
-      # flow) stay run boundaries.
-      refute PaperCanvas.canvas?(field("f"))
-      refute PaperCanvas.canvas?(field_ref("fr"))
+      # TAIL: the 2 PICKER fields are canvas-eligible (control-atoms mounting client-side
+      # picker WCs; coerced/patched as { value } like the native fields).
+      assert PaperCanvas.canvas?(picker("f"))
+      assert PaperCanvas.canvas?(picker_ref("fr"))
+
+      # Still boundaries — only the NESTED-STRUCTURE fields stay run boundaries.
+      refute PaperCanvas.canvas?(boundary("cmp"))
+      refute PaperCanvas.canvas?(boundary2("arr"))
       refute PaperCanvas.canvas?(%{"id" => "x"})
     end
   end
@@ -398,17 +446,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
   describe "with_run_ordinals/1 (Bug #1a: single source of truth for run ordinals)" do
     test "stamps each {:run, _} with a sequential ordinal; {:block, _} passes through" do
-      # Two runs separated by a picker-field boundary → run ordinals 0 and 1, with
+      # Two runs separated by a nested-structure boundary → run ordinals 0 and 1, with
       # the {:block, _} boundary carrying no ordinal.
       segments = [
         {:run, [para("p1"), para("p2")]},
-        {:block, field("img1")},
+        {:block, boundary("cmp1")},
         {:run, [heading("h1")]}
       ]
 
       assert PaperCanvas.with_run_ordinals(segments) == [
                {:run, [para("p1"), para("p2")], 0},
-               {:block, field("img1")},
+               {:block, boundary("cmp1")},
                {:run, [heading("h1")], 1}
              ]
     end

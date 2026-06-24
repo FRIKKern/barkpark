@@ -487,7 +487,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert html =~ "title"
     end
 
-    test "S3.5: [paragraph, field-image, paragraph] — the field-image is STILL a boundary widget (NOT in the canvas)" do
+    test "TAIL: [paragraph, field-image, paragraph] renders ONE canvas run containing the picker field (NO per-block boundary widget)" do
       blocks = [
         %{
           "id" => "p-1",
@@ -517,19 +517,74 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
           canvas_eligible: true
         )
 
-      # The field-image (a PICKER) STILL splits the run: it is its OWN per-block
-      # boundary widget, NOT inside the canvas. So TWO canvas runs flank it (p-1 and
-      # p-2 each on their own), and the field-image keeps its per-block edit wrapper
-      # mounted with the BarkparkFieldBlockBridge hook.
-      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 2
-      # Bug #1a: each run keyed by its ORDINAL — p-1 is run 0, p-2 is run 1.
+      # Run-splitter tail: the field-image picker now RIDES the run as a control-atom
+      # (its bp-media-picker WC is client-side). So ONE <bp-paper-canvas> run keyed by
+      # the run's first block (p-1) — NOT split into two canvases with a per-block widget.
+      assert html =~ ~s(<bp-paper-canvas)
       assert html =~ ~s(id="paper-canvas-run-0")
-      assert html =~ ~s(id="paper-canvas-run-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
-      # The field-image is a standalone per-block widget — its edit-block wrapper is
-      # present and it carries the per-block bridge hook + its picker WC.
-      assert html =~ ~s(data-edit-block-id="img-1")
-      assert html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+      # The field-image is NOT a separate per-block widget — it lives INSIDE the single
+      # run (no edit-block wrapper, no per-block BarkparkFieldBlockBridge hook).
+      refute html =~ ~s(data-edit-block-id="img-1")
+      refute html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+
+      # The picker rides the run's data-canvas-blocks carrier (its id + label + value are
+      # in the Jason-encoded block list on the canvas wrapper).
+      assert html =~ "img-1"
+      assert html =~ "Hero"
+
+      # The canvas HOST carries the picker fetch-scope (dataset + token) so the mounted
+      # bp-media-picker fetches/uploads exactly as the per-block render does.
+      assert html =~ ~s(data-canvas-dataset="#{@dataset}")
+      assert html =~ ~s(data-canvas-token=)
+    end
+
+    test "TAIL: [paragraph, field-reference, paragraph] renders ONE canvas run containing the reference picker" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{
+          "id" => "ref-1",
+          "type" => "field-reference",
+          "label" => "Author",
+          "refType" => "author",
+          "value" => "doc-7"
+        },
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-field-reference",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE canvas run — the field-reference picker rides it as a control-atom.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-run-0")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # NOT a per-block boundary widget.
+      refute html =~ ~s(data-edit-block-id="ref-1")
+      refute html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+
+      # The reference (id + label + refType + value) rides the run's data-canvas-blocks.
+      assert html =~ "ref-1"
+      assert html =~ "Author"
+      assert html =~ "author"
+      assert html =~ "doc-7"
     end
 
     test "S3.6: [paragraph, sheet, paragraph] renders ONE canvas run containing the (read-only) sheet" do
@@ -649,11 +704,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert Enum.map(blocks, & &1["id"]) == ["p-intro", "c-note", "p-after", "d-end"]
     end
 
-    test "S4a: a batch spanning TWO runs (a picker field splits them) pushes ONE entry per run",
+    test "S4a: a batch spanning TWO runs (a nested-structure field splits them) pushes ONE entry per run",
          %{conn: conn} do
-      # A paper whose field-image PICKER splits two prose runs. partition_runs →
-      # [{:run,[p-a]}, {:block, img}, {:run,[p-b]}], so the echo carries TWO runs
-      # (the boundary block has no canvas to update).
+      # A paper whose composite (nested-structure) field splits two prose runs.
+      # partition_runs → [{:run,[p-a]}, {:block, cmp}, {:run,[p-b]}], so the echo
+      # carries TWO runs (the boundary block has no canvas to update). (Pickers no
+      # longer split — only nested-structure fields do, per the run-splitter tail.)
       split_slug = "2026-06-23-canvas-split"
 
       blocks = [
@@ -662,7 +718,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
           "type" => "paragraph",
           "content" => [%{"type" => "text", "value" => "run one"}]
         },
-        %{"id" => "img-1", "type" => "field-image", "label" => "Hero", "value" => ""},
+        %{"id" => "cmp-1", "type" => "composite", "fields" => [], "value" => %{}},
         %{
           "id" => "p-b",
           "type" => "paragraph",
@@ -689,9 +745,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
 
-      # TWO runs (the field-image boundary is NOT echoed — it has no canvas),
+      # TWO runs (the composite boundary is NOT echoed — it has no canvas),
       # keyed by each run's ORDINAL (Bug #1a): the first prose run is "run-0", the
-      # second (after the picker boundary) is "run-1".
+      # second (after the nested-structure boundary) is "run-1".
       assert [%{run_id: "run-0", blocks: run_a}, %{run_id: "run-1", blocks: run_b}] = runs
       assert Enum.map(run_a, & &1["id"]) == ["p-a"]
       assert Enum.map(run_b, & &1["id"]) == ["p-b"]
