@@ -3008,6 +3008,31 @@
       margin: 0 1px;
     }
 
+    /* ── P5 command palette (Cmd-P) — the Obsidian Cmd-P analog. REUSES the
+       `.bp-slash-*` popup DOM/CSS verbatim (rows / group headers / eyebrow /
+       footer all identical), so this modifier only does two things: widen the
+       centered modal a touch and style the query <input> the palette renders
+       under its eyebrow. No row restyling → no styling drift from the slash
+       menu. The popup carries BOTH `bp-slash-menu bp-cmd-palette`, so all the
+       themed --paper-* tokens above already apply. */
+    .bp-slash-menu.bp-cmd-palette {
+      width: 440px; max-width: calc(100vw - 24px);
+    }
+    .bp-cmd-input {
+      margin: 4px 14px 6px; padding: 7px 10px;
+      width: calc(100% - 28px); box-sizing: border-box;
+      background: var(--paper-bg);
+      border: 1px solid var(--paper-chrome-border); border-radius: 5px;
+      color: var(--paper-ink);
+      font-family: var(--paper-font-sans); font-size: 14px; line-height: 1.3;
+      outline: none;
+    }
+    .bp-cmd-input:focus {
+      border-color: var(--paper-accent);
+      box-shadow: 0 0 0 2px var(--paper-accent-soft);
+    }
+    .bp-cmd-input::placeholder { color: var(--paper-ink-faint); }
+
     /* ── Selection format bubble (B6) — "1:1 with Portable-Doc". ───────────
        Rendered into <body> by FormatBubble (src/format-bubble.js) and
        positioned fixed above the text selection. Mirrors Portable-Doc's
