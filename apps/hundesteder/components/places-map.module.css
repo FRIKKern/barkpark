@@ -1,0 +1,163 @@
+.wrap {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--paper-deep);
+  border-radius: var(--radius-lg);
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.controls {
+  position: absolute;
+  right: var(--space-3);
+  top: var(--space-3);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ctrl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  width: 34px;
+  border: var(--border-strong);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink-soft);
+  border-radius: var(--radius-md);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.08);
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+  font-family: var(--sans);
+}
+.ctrl:hover {
+  background: #fff;
+  color: var(--accent);
+}
+.ctrlFit {
+  margin-top: var(--space-1);
+}
+
+/* ── marker popover — a DOM card anchored to the clicked pin ─────────────── */
+
+.popover {
+  position: absolute;
+  z-index: 30;
+  width: 248px;
+  transform: translate(-50%, -100%);
+  background: var(--paper-white);
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-pop);
+}
+
+.popClose {
+  position: absolute;
+  right: var(--space-2);
+  top: var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+.popClose:hover {
+  color: var(--ink);
+}
+
+.popHead {
+  padding-right: var(--space-5);
+}
+
+.popTitle {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+  color: var(--ink);
+  margin: 0;
+  font-variation-settings: "opsz" 40;
+}
+
+.popMeta {
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  margin: var(--space-1) 0 0;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.popDesc {
+  font-family: var(--serif);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  color: var(--ink-soft);
+  margin: var(--space-3) 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.popLinks {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.popLink {
+  color: var(--accent);
+  text-decoration: none;
+}
+.popLink:hover {
+  text-decoration: underline;
+}
+
+.popLinkMuted {
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.popLinkMuted:hover {
+  text-decoration: underline;
+}
+
+.attribution {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 2px 6px;
+  border-top-left-radius: var(--radius-sm);
+  font-family: var(--sans);
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.attribution a {
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.attribution a:hover {
+  text-decoration: underline;
+}
