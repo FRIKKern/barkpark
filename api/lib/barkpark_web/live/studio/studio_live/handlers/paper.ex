@@ -202,7 +202,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   """
   def paper_unbind_property(%{"id" => id}, socket) when is_binary(id) and id != "" do
     {:noreply,
-     Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => %{"fieldName" => nil}})}
+     Shared.paper_op(socket, %{
+       "op" => "patch-block",
+       "id" => id,
+       "patch" => %{"fieldName" => nil}
+     })}
   end
 
   def paper_unbind_property(_params, socket), do: {:noreply, socket}

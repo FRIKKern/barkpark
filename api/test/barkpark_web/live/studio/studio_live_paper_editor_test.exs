@@ -633,7 +633,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     seed_author!("ref-a1", "Solveig Aamodt")
     seed_ref_view_paper!("ref-a1")
 
-    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@ref_view_slug}"))
+    {:ok, _view, html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@ref_view_slug}"))
 
     # The streamed read-only View shows the resolved title for the reference
     # row; the raw doc id never appears as the displayed value.
@@ -646,7 +647,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     # No author doc seeded for "ghost-ref" → reference_title returns the id.
     seed_ref_view_paper!("ghost-ref")
 
-    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@ref_view_slug}"))
+    {:ok, _view, html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@ref_view_slug}"))
 
     assert html =~ "ghost-ref"
   end
@@ -712,7 +714,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "Edit mode renders a PaperFieldBlock LiveComponent for each composite block",
        %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
     edit_html = open_editor(view)
 
     # Each composite block renders the nested LiveComponent wrapper, keyed by
@@ -747,7 +752,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "an inner composite change → handle_info({:paper_op,…}) persists the merged value",
        %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
     open_editor(view)
 
     pid_before = view.pid
@@ -781,7 +789,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "an inner localizedText change persists the merged %{lang => text} value",
        %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
     open_editor(view)
 
     view
@@ -798,7 +809,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "an inner codelist change persists the selected code", %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
     open_editor(view)
 
     # codelist renders with path="value", so the code arrives as %{"value" => …}.
@@ -821,7 +835,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "an arrayOf reorder (move_up) persists the reordered list", %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
     open_editor(view)
 
     # Initial order: ["history", "norway"]. Moving row index 1 up swaps them.
@@ -842,7 +859,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
 
   test "an arrayOf add_row appends an empty element", %{conn: conn} do
     seed_composite_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@composite_slug}"))
+
     open_editor(view)
 
     view
@@ -900,7 +920,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "an inner-change on a composite element subfield inside an arrayOf updates the right nested value + persists",
        %{conn: conn} do
     seed_arraycomp_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@arraycomp_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@arraycomp_slug}"))
+
     open_editor(view)
 
     pid_before = view.pid
@@ -933,7 +956,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   test "editing two subfields of the same arrayOf composite element in one change merges both",
        %{conn: conn} do
     seed_arraycomp_paper!()
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@arraycomp_slug}"))
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@arraycomp_slug}"))
+
     open_editor(view)
 
     view
@@ -1553,7 +1579,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
           slug: @wikilink_slug,
           dataset: @dataset,
           blocks: [
-            %{"id" => "h-1", "type" => "heading", "text" => "Wikilink Candidate Paper", "level" => 1}
+            %{
+              "id" => "h-1",
+              "type" => "heading",
+              "text" => "Wikilink Candidate Paper",
+              "level" => 1
+            }
           ]
         })
 
