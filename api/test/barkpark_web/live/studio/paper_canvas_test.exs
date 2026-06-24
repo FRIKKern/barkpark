@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
   defp sheet(id), do: %{"id" => id, "type" => "sheet", "rows" => []}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
+  defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
 
   describe "partition_runs/1" do
     test "empty list → []" do
@@ -62,8 +63,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.2: field / sheet / code STILL split a run (callout/divider aside)" do
-      for boundary <- [field("b"), sheet("b"), code("b")] do
+    test "S3.3: field / sheet / diagram STILL split a run (callout/divider/code aside)" do
+      # divider IS canvas (S3), callout IS canvas (S3.2), code IS canvas (S3.3), so
+      # the still-splitting boundaries are field / sheet / diagram.
+      for boundary <- [field("b"), sheet("b"), diagram("b")] do
         blocks = [para("p1"), boundary, para("p2")]
 
         assert PaperCanvas.partition_runs(blocks) == [
@@ -75,11 +78,28 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       end
     end
 
+    # ── S3.3: the code block is now CANVAS-ELIGIBLE too — it no longer splits ────
+
+    test "S3.3: a code block INSIDE prose keeps the run whole (was split by the code)" do
+      blocks = [para("p1"), code("k1"), para("p2")]
+
+      # All three are canvas-eligible (prose ∪ code attr-atom) ⇒ ONE maximal run.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
     test "S3.2: mixed callout + divider in ONE run (both canvas-eligible)" do
       blocks = [para("p1"), callout("c1"), divider("d1"), para("p2")]
 
       # callout (content node) AND divider (atom) are both canvas-eligible, so the
       # whole stretch is ONE maximal run — neither splits.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "S3.3: mixed code + divider + callout in ONE run (all canvas-eligible)" do
+      blocks = [para("p1"), code("k1"), divider("d1"), callout("c1"), para("p2")]
+
+      # code (attr-atom) AND divider (atom) AND callout (content) are ALL
+      # canvas-eligible, so the whole stretch is ONE maximal run — none split.
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
@@ -191,8 +211,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "canvas?/1 (S3.2: prose ∪ divider ∪ callout)" do
-    test "prose, divider AND callout are canvas-eligible; field/sheet/code are not" do
+  describe "canvas?/1 (S3.3: prose ∪ divider ∪ callout ∪ code)" do
+    test "prose, divider, callout AND code are canvas-eligible; field/sheet/diagram are not" do
       assert PaperCanvas.canvas?(para("p"))
       assert PaperCanvas.canvas?(heading("h"))
       assert PaperCanvas.canvas?(list("l"))
@@ -200,10 +220,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.canvas?(divider("d"))
       # S3.2: a callout is canvas-eligible (a content node with an editable body).
       assert PaperCanvas.canvas?(callout("c"))
+      # S3.3: a code block is canvas-eligible (an attr-atom: value/lang in attrs,
+      # edited by a non-PM textarea island).
+      assert PaperCanvas.canvas?(code("k"))
       # Still boundaries — not yet pulled into the canvas.
       refute PaperCanvas.canvas?(field("f"))
       refute PaperCanvas.canvas?(sheet("s"))
-      refute PaperCanvas.canvas?(code("c"))
+      refute PaperCanvas.canvas?(diagram("g"))
       refute PaperCanvas.canvas?(%{"id" => "x"})
     end
   end

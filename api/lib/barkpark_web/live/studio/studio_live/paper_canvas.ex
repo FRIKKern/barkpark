@@ -16,13 +16,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       MAXIMAL CONTIGUOUS CANVAS RUNS. A run is a maximal stretch of CANVAS-
       ELIGIBLE blocks: prose (`paragraph | heading | list`) PLUS the canvas atom
       types the canvas handles inline. As of S3 that is `divider` (a ProseMirror
-      ATOM node) and as of S3.2 also `callout` (a CONTENT node with an editable
-      body) — both pulled INTO the canvas (see
+      ATOM node), as of S3.2 also `callout` (a CONTENT node with an editable
+      body), and as of S3.3 also `code` (an ATTR-ATOM node whose text rides in a
+      `value` attr edited by a non-PM textarea) — all pulled INTO the canvas (see
       `assets/paper-editor/src/canvas/run-convert.js` `CANVAS_ATOM_TYPES` /
-      `CANVAS_CONTENT_TYPES`), so neither SPLITS a run anymore. A run of
+      `CANVAS_CONTENT_TYPES` / `CANVAS_ATTR_ATOM_TYPES`), so none SPLIT a run
+      anymore. A run of
       one-or-more adjacent canvas blocks becomes one `{:run, [block, …]}`; every
       block that is NOT canvas-eligible (field-* / sheet / diagram / section /
-      code / embed / …) is a run boundary emitted as `{:block, block}`. The
+      embed / …) is a run boundary emitted as `{:block, block}`. The
       segment order matches the input order exactly. Pure: no socket, no I/O.
 
   Neither function is wired into the OFF path — `partition_runs/1` is only ever
@@ -45,16 +47,27 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # with an EDITABLE body living INSIDE the run (run-convert.js
   # CANVAS_CONTENT_TYPES). The callout is the first: its prose body becomes a real
   # editable PM region and its chrome (tone/title/fold) renders around it, so it
-  # no longer SPLITS a run. field-* / sheet / code STILL split until their own S3
+  # no longer SPLITS a run. field-* / sheet STILL split until their own S3
   # increments.
   @canvas_content_types ~w(callout)
 
+  # S3.3: the non-prose block kinds the canvas handles as ATTR-ATOM nodes — atom
+  # nodes (no PM-managed body, like the divider) whose body TEXT rides in an attr
+  # and is edited by a NON-PM <textarea> island (run-convert.js
+  # CANVAS_ATTR_ATOM_TYPES). The code block is the first: its `value` is a plain
+  # string (compose.ex:272 reads only `value`) plus an optional `lang`, so it no
+  # longer SPLITS a run. UNLIKE the divider it carries a mutable value/lang and CAN
+  # emit a patch-block; UNLIKE the callout it has no inline body. field-* / sheet /
+  # diagram STILL split until their own increments (diagram reuses this shape next).
+  @canvas_attr_atom_types ~w(code)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
-  # content nodes. A run is a maximal contiguous stretch of these; any other kind
-  # is a run boundary. Keep this aligned with run-convert.js (PROSE_TYPES ∪
-  # CANVAS_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES) so the Elixir partition and the JS
-  # projection agree on what a run may contain.
-  @canvas_types @prose_types ++ @canvas_atom_types ++ @canvas_content_types
+  # attr-atoms ∪ canvas content nodes. A run is a maximal contiguous stretch of
+  # these; any other kind is a run boundary. Keep this aligned with run-convert.js
+  # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES)
+  # so the Elixir partition and the JS projection agree on what a run may contain.
+  @canvas_types @prose_types ++
+                  @canvas_atom_types ++ @canvas_attr_atom_types ++ @canvas_content_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default FALSE.**
@@ -81,12 +94,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
     * `{:run, [canvas_block, …]}` — one-or-more adjacent CANVAS-ELIGIBLE blocks
       (prose `paragraph|heading|list` PLUS canvas atoms `divider` PLUS canvas
-      content nodes `callout`). A MAXIMAL run: it extends as far as the next
-      non-canvas boundary. As of S3.2 both a divider and a callout are
-      canvas-eligible, so a `[heading, paragraph, callout, paragraph]` is ONE run
-      (the callout no longer splits it).
+      content nodes `callout` PLUS canvas attr-atoms `code`). A MAXIMAL run: it
+      extends as far as the next non-canvas boundary. As of S3.3 a divider, a
+      callout AND a code block are all canvas-eligible, so a
+      `[heading, paragraph, code, paragraph]` is ONE run (the code no longer
+      splits it).
     * `{:block, boundary_block}` — a single non-canvas block (field-* / sheet /
-      code / …) that is a run boundary.
+      diagram / …) that is a run boundary.
 
   Pure. An empty list ⇒ `[]`. A list with no canvas blocks ⇒ all `{:block, _}`.
   A list that is all canvas-eligible ⇒ a single `{:run, _}` (even a lone divider).
@@ -121,9 +135,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
   @doc """
   True when a block is CANVAS-ELIGIBLE — prose (`paragraph | heading | list`) OR
-  a canvas atom (`divider`) OR a canvas content node (`callout` as of S3.2).
-  Canvas-eligible blocks make up a `{:run, …}` segment; anything else is a
-  `{:block, …}` boundary. This is the predicate `partition_runs/1` chunks on.
+  a canvas atom (`divider`) OR a canvas content node (`callout` as of S3.2) OR a
+  canvas attr-atom (`code` as of S3.3). Canvas-eligible blocks make up a
+  `{:run, …}` segment; anything else is a `{:block, …}` boundary. This is the
+  predicate `partition_runs/1` chunks on.
   """
   @spec canvas?(map()) :: boolean()
   def canvas?(block) when is_map(block), do: Map.get(block, "type") in @canvas_types
