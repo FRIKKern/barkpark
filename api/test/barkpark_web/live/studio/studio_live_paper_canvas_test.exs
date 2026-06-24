@@ -386,6 +386,55 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert html =~ "IO.puts(:ok)"
       assert html =~ "elixir"
     end
+
+    test "S3.4: [paragraph, diagram, paragraph] renders ONE canvas run containing the diagram" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{
+          "id" => "g-1",
+          "type" => "diagram",
+          "source" => "graph TD\n  A-->B",
+          "caption" => "Figure 1."
+        },
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-diagram",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the diagram
+      # block does NOT split it into two canvases with a per-block widget between.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The diagram block is NOT rendered as a separate per-block widget — it lives
+      # INSIDE the single run (no edit-block wrapper, no per-block diagram form).
+      refute html =~ ~s(data-edit-block-id="g-1")
+      refute html =~ ~s(data-block-type="diagram")
+      refute html =~ ~s(id="paper-ed-p-1")
+
+      # The diagram rides the run's data-canvas-blocks carrier (its id + source +
+      # caption are in the Jason-encoded block list on the canvas wrapper).
+      assert html =~ "g-1"
+      assert html =~ "graph TD"
+      assert html =~ "Figure 1."
+    end
   end
 
   # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────

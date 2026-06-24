@@ -75,21 +75,31 @@ const CANVAS_CONTENT_TYPES = new Set(["callout"]);
 // the divider ATOM (which has NOTHING to edit and emits zero ops forever), an
 // attr-atom HAS a mutable value/lang, so it CAN emit a patch-block when those
 // change — but UNLIKE the callout CONTENT node it has no contentDOM and no inline
-// body (the text is an opaque string, not PM runs). The diagram block (source +
-// caption attrs) will reuse this exact shape next.
+// body (the text is an opaque string, not PM runs).
+//
+// S3.4 adds the `diagram` block to this SAME set: it reuses the code attr-atom shape
+// ALMOST VERBATIM with two field differences — its body field is `source` (the
+// Mermaid text, not `value`) plus an OPTIONAL `caption` (where code had `lang`).
+// compose.ex:224 reads Map.get(b,"source") + Map.get(b,"caption"); the source rides
+// the textarea island, edited outside ProseMirror. field-* / sheet STILL split until
+// their own increments.
 //
 // A node is "canvas-handled" if it is PROSE, a canvas ATOM, a canvas ATTR-ATOM, or
 // a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
-const CANVAS_ATTR_ATOM_TYPES = new Set(["code"]);
+const CANVAS_ATTR_ATOM_TYPES = new Set(["code", "diagram"]);
 
-// The TipTap NODE name for the code block is `bpCode`, NOT `code` — `code` is the
-// StarterKit inline code MARK (a node + mark can't share a name). runToTiptap maps
-// a block.type "code" → a node.type "bpCode"; runToOps maps it back via bpType.
-// Keep this aligned with code-node.js:BP_CODE_NODE_NAME.
-const CANVAS_ATTR_ATOM_NODE_NAMES = { code: "bpCode" };
-// Reverse: node.type "bpCode" → bpType "code". Used by runToOps to detect an
-// attr-atom by its NODE type (the type carried on a getJSON node).
-const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code" };
+// The TipTap NODE name for an attr-atom block differs from its bpType. For code it is
+// `bpCode`, NOT `code` — `code` is the StarterKit inline code MARK (a node + mark
+// can't share a name). For diagram it is `bpDiagram` (the canvas naming convention;
+// there is no StarterKit `diagram` node to collide with, but the canvas keeps the
+// bp-prefix). runToTiptap maps a block.type → its node.type; runToOps maps it back
+// via bpType. Keep aligned with code-node.js:BP_CODE_NODE_NAME and
+// diagram-node.js:BP_DIAGRAM_NODE_NAME.
+const CANVAS_ATTR_ATOM_NODE_NAMES = { code: "bpCode", diagram: "bpDiagram" };
+// Reverse: node.type "bpCode" → bpType "code", "bpDiagram" → "diagram". Used by
+// runToOps to detect an attr-atom by its NODE type (the type carried on a getJSON
+// node).
+const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code", bpDiagram: "diagram" };
 
 function isProseType(type) {
   return PROSE_TYPES.has(type);
@@ -173,12 +183,13 @@ export function runToTiptap(blocks) {
     }
 
     if (isCanvasAttrAtomType(bpType)) {
-      // A canvas ATTR-ATOM node (S3.3: code): an atom node whose body TEXT rides in
-      // the `value` attr (a plain string, edited by a non-PM textarea) plus an
-      // optional `lang`. The canvas schema (code-node.js) declares the `bpCode`
-      // node, so getJSON() round-trips value+lang. NOTE the node.type is the NODE
-      // name (bpCode), not the bpType (code) — the StarterKit inline code MARK owns
-      // the name `code`, so the block node takes a distinct name.
+      // A canvas ATTR-ATOM node (S3.3: code; S3.4: diagram): an atom node whose body
+      // TEXT rides in an attr (a plain string, edited by a non-PM textarea) plus an
+      // optional second field. The canvas schema declares the node (code-node.js /
+      // diagram-node.js), so getJSON() round-trips the body + optional field. NOTE the
+      // node.type is the NODE name (bpCode / bpDiagram), not the bpType (code /
+      // diagram). Dispatch by bpType: code → value/lang; diagram → source/caption.
+      if (bpType === "diagram") return diagramBlockToNode(block, bpId, bpType);
       return codeBlockToNode(block, bpId, bpType);
     }
 
@@ -382,6 +393,100 @@ function stableCodeKey(node) {
   return canonicalJSON({
     value: a.value || "",
     lang: a.lang == null ? "" : a.lang,
+  });
+}
+
+// ── diagram ⇄ canvas attr-atom node (S3.4) ──────────────────────────────────
+//
+// MIRRORS the code mapping (S3.3) ALMOST VERBATIM with two field renames: the body
+// field is `source` (not `value`) and the optional second field is `caption` (not
+// `lang`). The diagram block { id, type:"diagram", source:"<text>", caption?:"<short>" }
+// ⇄ the TipTap `bpDiagram` ATOM node. UNLIKE the callout (whose body is inline runs),
+// the diagram's body is a PLAIN STRING in the `source` attr — there is NO inline
+// serialization; the string rides verbatim (multi-line Mermaid and all).
+//
+// caption handling MIRRORS code's lang: although the STORED diagram always carries
+// caption (build_block_patch writes it UNCONDITIONALLY, NOT via put_if_present —
+// blocks.ex:47), the CANVAS round-trip treats caption like the optional/droppable
+// `lang`: omit it on insert and on the projection when absent/empty (compose.ex
+// defaults a missing caption to "", so an omitted caption is render-equivalent to ""),
+// and emit it EXPLICITLY ("" when cleared) on the patch for the removal-safe shallow
+// merge. So an absent/empty caption round-trips as ABSENT and the canonical compare
+// treats ""/null/absent EQUAL → zero spurious ops.
+//
+// node.type is `bpDiagram` (the NODE name), NOT `diagram` (the bpType) — see the
+// CANVAS_ATTR_ATOM_NODE_NAMES note.
+
+// diagramBlockToNode(block) → { type:"bpDiagram", attrs:{ bpId, bpType, source, caption? } }
+//
+// The Mermaid SOURCE → the `source` attr verbatim (default "" — the diagram patch
+// always writes a source). `caption` → the `caption` attr ONLY when present +
+// non-empty (byte-fidelity: an absent caption has no key). Mirrors codeBlockToNode.
+function diagramBlockToNode(block, bpId, bpType) {
+  const nodeName = CANVAS_ATTR_ATOM_NODE_NAMES[bpType] || "bpDiagram";
+  const attrs = {
+    bpId,
+    bpType,
+    source: (block && block.source) || "",
+  };
+  // Carry caption ONLY when present + non-empty, so an untouched caption-less diagram
+  // block's getJSON re-projection matches and emits zero ops.
+  if (block && block.caption != null && block.caption !== "")
+    attrs.caption = block.caption;
+  return { type: nodeName, attrs };
+}
+
+// diagramNodeToBlock(node, id) → { id, type:"diagram", source, caption? }
+//
+// Reconstruct the portable-doc diagram block from a bpDiagram NODE (the inverse of
+// diagramBlockToNode). `source` reads off the attr (default ""); `caption` is
+// threaded ONLY when present + non-empty so the reconstructed block is byte-identical
+// to a caption-less round-trip (no stray caption:""). Mirrors codeNodeToBlock.
+function diagramNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = {
+    id,
+    type: "diagram",
+    source: attrs.source || "",
+  };
+  if (attrs.caption != null && attrs.caption !== "")
+    block.caption = attrs.caption;
+  return block;
+}
+
+// The mutable-fields PATCH for a diagram block (the analogue of codeNodeToPatch).
+// `source` always rides the patch. `caption` rides EXPLICITLY — but the explicit
+// value is the empty string "" when absent, NOT a dropped key (removal-safe). The
+// canvas paper-ops path folds via Patch.apply_patches, where patch-block is a SHALLOW
+// Map.merge (patch.ex merge_block) that can REPLACE or PRESERVE a key but never DELETE
+// one. So clearing a previously-set caption must emit caption:"" — the merge then
+// STORES caption:"", render-equivalent to a caption-less diagram (compose/walk treat
+// ""/absent the same) and round-tripping (stableDiagramKey normalizes ""/null equal →
+// zero spurious ops). Omitting caption would instead leave the STALE old caption. So:
+// source always; caption as the string ("" when cleared). Mirrors codeNodeToPatch.
+function diagramNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return {
+    source: attrs.source || "",
+    caption: attrs.caption == null ? "" : attrs.caption,
+  };
+}
+
+// True when a diagram node's source OR caption changed (an attr edit). Canonical
+// (key-order-insensitive) compare of the diff-relevant fields — source + caption — so
+// a source edit or a caption change flips it, but a pure reorder (bpId/bpType only)
+// does not. An absent caption normalizes to "" so a caption-less node and one carrying
+// caption:"" / caption:null compare EQUAL (they persist render-identically). Mirrors
+// codeNodeChanged.
+function diagramNodeChanged(prevNode, nextNode) {
+  return stableDiagramKey(prevNode) !== stableDiagramKey(nextNode);
+}
+
+function stableDiagramKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    source: a.source || "",
+    caption: a.caption == null ? "" : a.caption,
   });
 }
 
@@ -662,8 +767,21 @@ export function runToOps(prevBlocks, nextDoc) {
     }
 
     if (entry.isAttrAtom) {
-      // Canvas attr-atom node (code): diff value + lang; emit one patch-block
-      // carrying value (always) + lang (the string, "" when cleared) when changed.
+      // Canvas attr-atom node (S3.3: code; S3.4: diagram): diff the body + optional
+      // field; emit one patch-block carrying the body (always) + the optional field
+      // (the string, "" when cleared) when changed. Dispatch by NODE type:
+      //   bpDiagram → source/caption (diagramNodeChanged / diagramNodeToPatch);
+      //   bpCode    → value/lang     (codeNodeChanged    / codeNodeToPatch).
+      if (entry.node.type === "bpDiagram") {
+        if (diagramNodeChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: diagramNodeToPatch(entry.node),
+          });
+        }
+        continue;
+      }
       if (codeNodeChanged(prevNode, entry.node)) {
         ops.push({
           op: "patch-block",
@@ -703,9 +821,11 @@ function nextNodeToBlock(entry) {
     return calloutNodeToBlock(node, entry.id);
   }
   if (entry.isAttrAtom) {
-    // Canvas attr-atom insert (code): reconstruct the code block (value + optional
-    // lang) with the minted id. lang is OMITTED on insert when absent/empty — the
-    // insert path mirrors the persist default (a lang-less code block has no key).
+    // Canvas attr-atom insert (S3.3: code; S3.4: diagram): reconstruct the block (body
+    // + optional field) with the minted id. The optional field is OMITTED on insert
+    // when absent/empty — the insert path mirrors the persist default (a lang-less
+    // code / caption-less diagram has no key). Dispatch by NODE type.
+    if (node.type === "bpDiagram") return diagramNodeToBlock(node, entry.id);
     return codeNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
