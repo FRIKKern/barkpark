@@ -64,6 +64,14 @@ import { Code } from "./code-node.js";
 // ships no `diagram` node), so NO StarterKit node is disabled for it. See
 // ./diagram-node.js.
 import { Diagram } from "./diagram-node.js";
+// S3.5: the 7 native-control field-* blocks as a canvas CONTROL-ATOM node — the
+// FOURTH node-view variant. A SINGLE `bpField` node serves all 7 native field types
+// (string/slug/text/boolean/select/datetime/color), discriminated by bpType; the
+// value is edited by a NATIVE control (input/textarea/checkbox/select/datetime-local
+// /color) wrapped in a stopEvent/ignoreMutation island, and COERCED by field type
+// exactly like the per-block BarkparkFieldBlockBridge. field-image/field-reference
+// (pickers) stay run boundaries (bpOpaque). See ./field-node.js.
+import { Field } from "./field-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
@@ -286,6 +294,19 @@ class BpPaperCanvas extends HTMLElement {
         // <pre data-bp-type='diagram'> (it does NOT claim the bare <pre> the code node
         // already owns).
         Diagram,
+        // S3.5: the field CONTROL-ATOM node + its node-view. Registers the SINGLE
+        // `bpField` node type serving ALL 7 native field-* kinds (field-string /
+        // field-slug / field-text / field-boolean / field-select / field-datetime /
+        // field-color), discriminated by the bpType attr. An atom whose VALUE rides an
+        // attr and is edited by a NATIVE control (input / textarea / checkbox / select
+        // / datetime-local / color), with the control wrapped in a stopEvent/
+        // ignoreMutation island so PM never turns its keystrokes/toggles/selections
+        // into transactions. On change the value is COERCED BY FIELD TYPE exactly like
+        // the per-block BarkparkFieldBlockBridge (boolean → control.checked; else
+        // control.value), so a canvas field edit persists IDENTICALLY. field-image /
+        // field-reference (pickers) are NOT in this set — they stay run boundaries
+        // (bpOpaque). bpField parses ONLY its own <div data-bp-type='field'>.
+        Field,
       ],
       content: runToTiptap(this._blocks),
       // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup
