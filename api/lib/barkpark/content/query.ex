@@ -300,6 +300,30 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  Every document of `type` carrying `tag` in its `content["tags"]` array, scoped
+  to `dataset` + the caller's tenant — the tag-index read.
+
+  Tag membership is the scalar-membership JSONB containment
+  `content->'tags' @> to_jsonb(tag::text)` (the same proven pattern as the alias
+  read and the task-label query), so it matches a tag EXACTLY (Obsidian-parity).
+  Results are title-ordered (then `doc_id` for a stable tie-break). Scoping is
+  identical to `get_document/4` (the P0 leak guard).
+  """
+  @spec docs_with_tag(String.t(), String.t(), String.t(), keyword()) :: [Document.t()]
+  def docs_with_tag(tag, type, dataset, opts \\ []) when is_binary(tag) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.type == ^type)
+    |> where([d], fragment("?->'tags' @> to_jsonb(?::text)", d.content, ^tag))
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> order_by([d], asc: d.title, asc: d.doc_id)
+    |> Repo.all()
+  end
+
+  @doc """
   Batch sibling of `get_document/4`: load many documents by `doc_id` in ONE
   scoped query, returned as a `%{doc_id => %Document{}}` map.
 

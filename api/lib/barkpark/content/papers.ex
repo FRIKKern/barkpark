@@ -124,6 +124,26 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  Every paper carrying `tag` — the tag-index read for the `#tag` pane /
+  navigation. Returns `[%{id, title}]` (title-ordered), pinned to `type:"paper"`.
+  A blank tag yields `[]`.
+  """
+  @spec papers_with_tag(String.t(), String.t(), keyword()) :: [
+          %{id: String.t(), title: String.t()}
+        ]
+  def papers_with_tag(tag, dataset \\ @paper_default_dataset, opts \\ []) when is_binary(tag) do
+    case String.trim(tag) do
+      "" ->
+        []
+
+      trimmed ->
+        trimmed
+        |> Content.docs_with_tag(@paper_type, dataset, opts)
+        |> Enum.map(&%{id: &1.doc_id, title: &1.title})
+    end
+  end
+
+  @doc """
   Pre-resolve every wikilink target in a block list into the render-opts map
   `%{raw_target => %{id, title}}` that `Render.render_html/2` threads onto the
   palette (so `walk/3` emits a navigable `<a>` for resolved targets).
