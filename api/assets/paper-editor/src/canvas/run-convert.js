@@ -148,13 +148,38 @@ function proseNodeChanged(prevNode, nextNode) {
   return stableProseKey(prevNode) !== stableProseKey(nextNode);
 }
 
+// Order-insensitive deep stringify: sorts OBJECT keys recursively (array order
+// is preserved — content/marks order is significant). Without this, two
+// semantically-identical text nodes that differ only in KEY ORDER would hash
+// differently — exactly the runToTiptap `{type,text,marks}` vs ProseMirror
+// getJSON `{type,marks,text}` mismatch that otherwise flags EVERY marked block
+// as "changed" on every keystroke.
+function canonicalJSON(value) {
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalJSON).join(",") + "]";
+  }
+  if (value && typeof value === "object") {
+    return (
+      "{" +
+      Object.keys(value)
+        .sort()
+        .map((k) => JSON.stringify(k) + ":" + canonicalJSON(value[k]))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value);
+}
+
 // The byte-significant projection of a prose node for change detection: its
 // type, heading level (if any), and content — i.e. exactly the inputs to
 // buildPatchBlockOp / tiptapToBlock. bpId/bpType are excluded so an identity
-// move never looks like an edit.
+// move never looks like an edit. Canonicalized (key-order-insensitive) so a
+// node serialized by runToTiptap and the SAME node serialized by the live
+// editor's getJSON compare EQUAL despite their differing attr/text key order.
 function stableProseKey(node) {
   const level = node.attrs && node.attrs.level;
-  return JSON.stringify({
+  return canonicalJSON({
     type: node.type,
     level: level == null ? null : level,
     content: node.content || null,

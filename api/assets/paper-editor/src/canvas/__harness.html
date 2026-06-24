@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>bp-paper-canvas — S1 harness (continuous canvas over one prose run)</title>
+
+  <!--
+    Phase-4 Stage S1 harness. A standalone page the orchestrator drives with
+    chrome-devtools to PROVE the continuous-canvas behavior: cross-block caret,
+    multi-block selection, Enter-split, Backspace-merge — and that each edit
+    serializes to the EXACT op array S0 produces, captured into window.__ops.
+
+    It loads the BUILT bundle + css straight from priv/static/assets (relative
+    from this file: ../../../../priv/static/assets/…), sets
+    BP_PAPER_EDITOR_NO_INJECT so the element does NOT also self-inject the
+    stylesheet from the absolute /assets/ path (which wouldn't resolve under
+    file://), and mounts ONE <bp-paper-canvas> over a 3-prose-block run
+    ([heading, paragraph, list]).
+  -->
+
+  <script>
+    // Opt OUT of the element's self-inject — the harness owns the <link> below so
+    // the relative path resolves under file:// / any static host.
+    window.BP_PAPER_EDITOR_NO_INJECT = true;
+  </script>
+  <link rel="stylesheet" href="../../../../priv/static/assets/bp-paper-editor.css" />
+
+  <style>
+    body { margin: 0; padding: 2rem; font-family: system-ui, sans-serif; background: #fafafa; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1rem; color: #666; font-weight: 600; }
+    .surface { background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; padding: 1.25rem 1.5rem; }
+    .ops { margin-top: 1.5rem; }
+    .ops h2 { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+    pre#ops-dump { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 320px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>bp-paper-canvas · S1 continuous-canvas harness</h1>
+
+    <!-- The continuous canvas. ONE TipTap doc over the whole run. -->
+    <div class="surface">
+      <bp-paper-canvas id="canvas"></bp-paper-canvas>
+    </div>
+
+    <div class="ops">
+      <h2>bp-canvas-ops (window.__ops — latest batch)</h2>
+      <pre id="ops-dump">// edit the canvas → debounced op batch lands here</pre>
+    </div>
+  </div>
+
+  <!-- The BUILT bundle: both <bp-paper-editor> and <bp-paper-canvas> register. -->
+  <script src="../../../../priv/static/assets/bp-paper-editor.bundle.js"></script>
+
+  <script>
+    // The 3-prose-block run: heading | paragraph | list. Stable, known ids so a
+    // driver can assert the emitted ops by id. These are the EXACT portable-doc
+    // shapes convert.js consumes (heading flat text; paragraph inline array;
+    // list items as inline arrays).
+    const RUN = [
+      { id: "b-h", type: "heading", level: 2, text: "Canvas heading" },
+      {
+        id: "b-p",
+        type: "paragraph",
+        // Includes a MARK on purpose — the key-order class of diff bug only
+        // surfaces with marks, so a clean mount over this run is a real proof.
+        content: [
+          { type: "text", value: "First " },
+          { type: "strong", children: [{ type: "text", value: "bold" }] },
+          { type: "text", value: " prose paragraph." },
+        ],
+      },
+      {
+        id: "b-l",
+        type: "list",
+        ordered: false,
+        items: [
+          [{ type: "text", value: "alpha" }],
+          [{ type: "text", value: "beta" }],
+        ],
+      },
+    ];
+
+    const el = document.getElementById("canvas");
+
+    // Expose the element + the mounted run so a chrome-devtools driver can read
+    // el._editor (the live TipTap instance) and replay the baseline.
+    window.__canvas = el;
+    window.__run = RUN;
+
+    // Capture EVERY bp-canvas-ops batch. window.__ops holds the LATEST detail.ops
+    // (the cumulative diff from the mounted run — S1 does not advance the
+    // baseline). window.__opsLog keeps the full history for assertions.
+    window.__ops = null;
+    window.__opsLog = [];
+    el.addEventListener("bp-canvas-ops", (e) => {
+      window.__ops = e.detail.ops;
+      window.__opsLog.push(e.detail.ops);
+      document.getElementById("ops-dump").textContent = JSON.stringify(e.detail.ops, null, 2);
+    });
+
+    // bp-ready fires once on mount — flip a flag so a driver can wait on it.
+    window.__ready = false;
+    el.addEventListener("bp-ready", () => { window.__ready = true; });
+
+    // Mount the run. Assigning .blocks projects it through runToTiptap into the
+    // single PM doc.
+    el.blocks = RUN;
+
+    // ── round-trip self-check helper (the make-or-break of S1) ───────────────
+    //
+    // The orchestrator / reviewer confirms BpAttrs works by calling this AFTER
+    // mount: every top-level node in editor.getJSON() MUST still carry
+    // attrs.bpId === the run's id, in order. If BpAttrs were wrong/missing the
+    // bpIds would be dropped on the setContent->getJSON round-trip and this
+    // returns false (and runToOps would mis-diff the whole run as new).
+    //
+    //   In chrome-devtools:  window.__assertRoundTrip()  → { ok, ids }
+    window.__assertRoundTrip = function () {
+      const json = el._editor.getJSON();
+      const ids = (json.content || []).map((n) => n.attrs && n.attrs.bpId);
+      const expected = RUN.map((b) => b.id);
+      const ok =
+        ids.length === expected.length &&
+        ids.every((id, i) => id === expected[i]);
+      return { ok, ids, expected };
+    };
+
+    // ── clean-mount self-check ──────────────────────────────────────────────
+    // An UNEDITED mount must emit NO ops — even though the run contains a MARKED
+    // block (the key-order class of diff bug shows up ONLY with marks). Returns
+    // { clean:true } while window.__ops is still null (nothing edited yet).
+    //
+    //   In chrome-devtools (right after mount, before any edit):
+    //     window.__assertCleanMount()  → { clean: true, ops: null }
+    window.__assertCleanMount = function () {
+      return { clean: window.__ops === null, ops: window.__ops };
+    };
+  </script>
+</body>
+</html>
