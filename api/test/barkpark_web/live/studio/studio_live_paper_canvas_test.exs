@@ -435,6 +435,101 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert html =~ "graph TD"
       assert html =~ "Figure 1."
     end
+
+    test "S3.5: [paragraph, field-string, paragraph] renders ONE canvas run containing the field" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{
+          "id" => "fld-1",
+          "type" => "field-string",
+          "label" => "Title",
+          "fieldName" => "title",
+          "value" => "Hello"
+        },
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-field",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the native
+      # field-string does NOT split it into two canvases with a per-block widget.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The field is NOT rendered as a separate per-block widget — it lives INSIDE
+      # the single run (no edit-block wrapper, no per-block field control with the
+      # BarkparkFieldBlockBridge hook).
+      refute html =~ ~s(data-edit-block-id="fld-1")
+      refute html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+      refute html =~ ~s(id="paper-ed-p-1")
+
+      # The field rides the run's data-canvas-blocks carrier (its id + value +
+      # fieldName are in the Jason-encoded block list on the canvas wrapper).
+      assert html =~ "fld-1"
+      assert html =~ "Hello"
+      assert html =~ "title"
+    end
+
+    test "S3.5: [paragraph, field-image, paragraph] — the field-image is STILL a boundary widget (NOT in the canvas)" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{
+          "id" => "img-1",
+          "type" => "field-image",
+          "label" => "Hero",
+          "value" => ""
+        },
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-field-image",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # The field-image (a PICKER) STILL splits the run: it is its OWN per-block
+      # boundary widget, NOT inside the canvas. So TWO canvas runs flank it (p-1 and
+      # p-2 each on their own), and the field-image keeps its per-block edit wrapper
+      # mounted with the BarkparkFieldBlockBridge hook.
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 2
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-p-2")
+
+      # The field-image is a standalone per-block widget — its edit-block wrapper is
+      # present and it carries the per-block bridge hook + its picker WC.
+      assert html =~ ~s(data-edit-block-id="img-1")
+      assert html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
+    end
   end
 
   # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────

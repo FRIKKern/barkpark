@@ -62,13 +62,31 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # inline body. field-* / sheet STILL split until their own increments.
   @canvas_attr_atom_types ~w(code diagram)
 
+  # S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
+  # nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
+  # in an attr and is edited by a NATIVE HTML control (input / textarea / checkbox /
+  # select / datetime-local / color; run-convert.js CANVAS_FIELD_TYPES). UNLIKE the
+  # code/diagram attr-atoms, the value is COERCED BY FIELD TYPE exactly like the
+  # shipped BarkparkFieldBlockBridge (field-boolean → a BOOLEAN; the rest → a STRING).
+  # These 7 no longer SPLIT a run.
+  #
+  # EXPLICITLY EXCLUDED: field-image (bp-media-picker WC) and field-reference
+  # (bp-reference-picker WC) — those pickers carry their own LiveView event flow and
+  # stay RUN BOUNDARIES (their per-block widgets), as does `sheet`. So the partition
+  # makes the 7 native types canvas-eligible while field-image / field-reference /
+  # sheet STILL split. Keep aligned with run-convert.js CANVAS_FIELD_TYPES and
+  # field-node.js BP_NATIVE_FIELD_TYPES.
+  @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
-  # attr-atoms ∪ canvas content nodes. A run is a maximal contiguous stretch of
-  # these; any other kind is a run boundary. Keep this aligned with run-convert.js
-  # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES)
-  # so the Elixir partition and the JS projection agree on what a run may contain.
+  # attr-atoms ∪ canvas content nodes ∪ canvas field control-atoms. A run is a maximal
+  # contiguous stretch of these; any other kind is a run boundary. Keep this aligned
+  # with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪
+  # CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES) so the Elixir partition and the JS
+  # projection agree on what a run may contain.
   @canvas_types @prose_types ++
-                  @canvas_atom_types ++ @canvas_attr_atom_types ++ @canvas_content_types
+                  @canvas_atom_types ++
+                  @canvas_attr_atom_types ++ @canvas_content_types ++ @canvas_field_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default FALSE.**

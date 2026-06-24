@@ -101,6 +101,38 @@ const CANVAS_ATTR_ATOM_NODE_NAMES = { code: "bpCode", diagram: "bpDiagram" };
 // node).
 const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code", bpDiagram: "diagram" };
 
+// S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
+// nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
+// in an attr and is edited by a NATIVE HTML control (input / textarea / checkbox /
+// select / datetime-local / color; see field-node.js). UNLIKE the code/diagram
+// attr-atoms (one bpType per TipTap node, body text in a free textarea), the field
+// control-atom serves 7 bpTypes through ONE node (`bpField`), the edit surface is a
+// TYPED control, and the value is COERCED BY FIELD TYPE exactly like the shipped
+// BarkparkFieldBlockBridge (field-boolean → a BOOLEAN via control.checked; every
+// other native type → a STRING via control.value).
+//
+// EXPLICITLY OUT: field-image (bp-media-picker WC) and field-reference
+// (bp-reference-picker WC). Those pickers carry their own LiveView event flow and
+// stay RUN BOUNDARIES — they keep their per-block widgets and project to bpOpaque.
+// So the 7 native types are canvas-eligible while field-image/field-reference (and
+// sheet) STILL split. Keep aligned with field-node.js:BP_NATIVE_FIELD_TYPES and
+// paper_canvas.ex:@canvas_field_types.
+const CANVAS_FIELD_TYPES = new Set([
+  "field-string",
+  "field-slug",
+  "field-text",
+  "field-boolean",
+  "field-select",
+  "field-datetime",
+  "field-color",
+]);
+
+// The TipTap NODE name for ALL 7 native field types is the SAME single node
+// `bpField` (UNLIKE code/diagram, which are one-node-per-type). The specific
+// field-* kind rides the node's bpType attr; the node-view dispatches the control
+// by it. Keep aligned with field-node.js:BP_FIELD_NODE_NAME.
+const CANVAS_FIELD_NODE_NAME = "bpField";
+
 function isProseType(type) {
   return PROSE_TYPES.has(type);
 }
@@ -125,6 +157,20 @@ function isCanvasAttrAtomNode(nodeType) {
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE,
     nodeType,
   );
+}
+
+// True when a portable-doc BLOCK type is one of the 7 native field-* control-atoms
+// (S3.5). field-image / field-reference are EXCLUDED (pickers stay boundaries).
+function isCanvasFieldType(type) {
+  return CANVAS_FIELD_TYPES.has(type);
+}
+
+// True when a TipTap NODE type is the canvas field control-atom ("bpField").
+// runToOps reads node.type off a getJSON node (the NODE name); ALL 7 native field
+// types share the single `bpField` node, so the specific kind comes off the bpType
+// attr, not the node type.
+function isCanvasFieldNode(nodeType) {
+  return nodeType === CANVAS_FIELD_NODE_NAME;
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -191,6 +237,17 @@ export function runToTiptap(blocks) {
       // diagram). Dispatch by bpType: code → value/lang; diagram → source/caption.
       if (bpType === "diagram") return diagramBlockToNode(block, bpId, bpType);
       return codeBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasFieldType(bpType)) {
+      // A canvas CONTROL-ATOM node (S3.5: the 7 native field-* types): an atom node
+      // whose VALUE rides in an attr and is edited by a NATIVE control. ALL 7 types
+      // project to the SAME `bpField` node, discriminated by the bpType attr. The
+      // node carries the FULL config (label/options/rows/fieldName) so the round-trip
+      // is byte-identical — UNLIKE code/diagram, a field block has config keys the
+      // canvas must not lose. field-image/field-reference are NOT in this set; they
+      // fall through to bpOpaque below (pickers stay boundaries).
+      return fieldBlockToNode(block, bpId, bpType);
     }
 
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
@@ -490,6 +547,110 @@ function stableDiagramKey(node) {
   });
 }
 
+// ── field ⇄ canvas control-atom node (S3.5) ─────────────────────────────────
+//
+// The 7 NATIVE field blocks { id, type:"field-*", value:<typed>, label?, fieldName?,
+// rows?(text), options?(select) } ⇄ the TipTap `bpField` CONTROL-ATOM node. UNLIKE
+// code/diagram (fully described by value+lang / source+caption), a field block
+// carries CONFIG keys (label / options / rows / fieldName) the canvas must NOT lose,
+// so the node carries the FULL config and fieldNodeToBlock merges the edited `value`
+// over it. The value's TYPE is BOOLEAN for field-boolean, STRING for the rest —
+// COERCED by the node-view exactly like BarkparkFieldBlockBridge (boolean →
+// control.checked; else control.value).
+//
+// node.type is `bpField` (the NODE name) for ALL 7 types; the specific bpType
+// ("field-string" | … | "field-color") rides the node's bpType attr and is what
+// reconstructs block.type.
+
+// Normalize a value to its per-type stored form. A field-boolean coerces to a
+// strict boolean (true ONLY for the boolean true / "true"); every other native
+// type coerces to a string ("" when absent). Mirrors the BarkparkFieldBlockBridge
+// coercion target (boolean vs string) so a round-tripped value matches the
+// per-block path byte-for-byte.
+function normalizeFieldValue(bpType, value) {
+  if (bpType === "field-boolean") {
+    return value === true || value === "true";
+  }
+  if (value == null) return "";
+  return typeof value === "string" ? value : String(value);
+}
+
+// fieldBlockToNode(block) → { type:"bpField", attrs:{ bpId, bpType, value, fieldName?,
+//   label?, options?, rows? } }
+//
+// The editable VALUE → the `value` attr (normalized to its per-type stored form).
+// The CONFIG keys ride attrs ONLY when present so an untouched field block's getJSON
+// re-projection matches and emits zero ops:
+//   * fieldName — only when present + non-empty (an unbound block has no key).
+//   * label     — only when present (label is a string; carry it as-is when set).
+//   * options   — only when present (field-select carries it; others don't).
+//   * rows      — only when present (field-text's optional row count).
+function fieldBlockToNode(block, bpId, bpType) {
+  const attrs = {
+    bpId,
+    bpType,
+    value: normalizeFieldValue(bpType, block && block.value),
+  };
+  if (block && block.fieldName != null && block.fieldName !== "")
+    attrs.fieldName = block.fieldName;
+  if (block && block.label != null) attrs.label = block.label;
+  if (block && block.options != null) attrs.options = block.options;
+  if (block && block.rows != null) attrs.rows = block.rows;
+  return { type: CANVAS_FIELD_NODE_NAME, attrs };
+}
+
+// fieldNodeToBlock(node, id) → { id, type:"field-*", value, fieldName?, label?,
+//   options?, rows? }
+//
+// Reconstruct the portable-doc field block from a bpField NODE (the inverse of
+// fieldBlockToNode). block.type comes off the bpType attr (the specific kind);
+// `value` is normalized to its per-type stored form; config keys are threaded ONLY
+// when present so the reconstructed block is byte-identical to one that round-tripped
+// through the per-block path (no stray fieldName:"" / null options).
+function fieldNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const bpType = attrs.bpType || "field-string";
+  const block = {
+    id,
+    type: bpType,
+    value: normalizeFieldValue(bpType, attrs.value),
+  };
+  if (attrs.fieldName != null && attrs.fieldName !== "")
+    block.fieldName = attrs.fieldName;
+  if (attrs.label != null) block.label = attrs.label;
+  if (attrs.options != null) block.options = attrs.options;
+  if (attrs.rows != null) block.rows = attrs.rows;
+  return block;
+}
+
+// The mutable-fields PATCH for a field block (the analogue of codeNodeToPatch). The
+// ONLY mutable field is `value` — EXACTLY what BarkparkFieldBlockBridge emits
+// ({op:"patch-block", id, patch:{value}}). label/options/rows/fieldName are CONFIG,
+// not edited through the control, so they NEVER ride the patch — matching the
+// per-block bridge byte-for-byte. The value is normalized to its per-type stored
+// form (boolean for field-boolean; string otherwise) so a canvas field edit persists
+// IDENTICALLY to a per-block field edit.
+function fieldNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  const bpType = attrs.bpType || "field-string";
+  return { value: normalizeFieldValue(bpType, attrs.value) };
+}
+
+// True when a field node's VALUE changed (the only mutable datum). Canonical
+// (key-order-insensitive) compare of the normalized value, so a value edit flips it
+// but a pure reorder (or a config-only re-render) does not. The value is normalized
+// to its per-type stored form before comparison so a boolean true and "true", or a
+// null and "" string, compare EQUAL (they persist identically).
+function fieldNodeChanged(prevNode, nextNode) {
+  return stableFieldKey(prevNode) !== stableFieldKey(nextNode);
+}
+
+function stableFieldKey(node) {
+  const a = (node && node.attrs) || {};
+  const bpType = a.bpType || "field-string";
+  return canonicalJSON({ value: normalizeFieldValue(bpType, a.value) });
+}
+
 // ── reverse diff: prev blocks + edited doc → ordered ops ────────────────────
 
 // Strip our { bpId, bpType } stamp back off a prose node so the node is the
@@ -645,12 +806,20 @@ export function runToOps(prevBlocks, nextDoc) {
     // patch (value/lang change); unlike the callout it has no inline body. Detect
     // by the NODE type (e.g. "bpCode"), which differs from the bpType ("code").
     const isAttrAtom = isCanvasAttrAtomNode(node.type);
+    // A canvas CONTROL-ATOM node (S3.5: the 7 native field-* types) is an atom whose
+    // VALUE rides an attr and is edited by a NATIVE control. UNLIKE the attr-atom it
+    // serves 7 bpTypes through the single `bpField` node and coerces by field type;
+    // unlike the divider atom it CAN emit a patch (a value change). Detect by the
+    // NODE type ("bpField"); the specific kind comes off the bpType attr.
+    const isField = isCanvasFieldNode(node.type);
     // For an attr-atom the bpType comes off the attr stamp, falling back to the
-    // node→bpType map (a freshly-typed code node may carry no bpType attr yet).
+    // node→bpType map (a freshly-typed code node may carry no bpType attr yet). For a
+    // field node the bpType attr IS the kind (no node→bpType map — all 7 share one
+    // node), defaulting to field-string if a fresh field node carries none yet.
     const bpType =
       (node.attrs && node.attrs.bpType) ||
       CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
-      node.type;
+      (isField ? "field-string" : node.type);
     const existing = bpId != null && prevIndex.has(bpId);
     const id = existing ? bpId : mintId(taken);
     return {
@@ -662,6 +831,7 @@ export function runToOps(prevBlocks, nextDoc) {
       isAtom,
       isContent,
       isAttrAtom,
+      isField,
     };
   });
 
@@ -792,6 +962,23 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isField) {
+      // Canvas control-atom node (S3.5: the 7 native field-* types): diff the VALUE
+      // (the only mutable datum); emit one patch-block carrying { value } — EXACTLY
+      // the BarkparkFieldBlockBridge shape — when it changed. The value is normalized
+      // to its per-type stored form (boolean for field-boolean; string otherwise) so
+      // a canvas field edit persists IDENTICALLY to a per-block field edit. An
+      // UNCHANGED field emits NO op (canonical compare on the normalized value).
+      if (fieldNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: fieldNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (proseNodeChanged(prevNode, entry.node)) {
       const bpType = entry.bpType || (prevBlock && prevBlock.type);
       ops.push(buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType));
@@ -827,6 +1014,14 @@ function nextNodeToBlock(entry) {
     // code / caption-less diagram has no key). Dispatch by NODE type.
     if (node.type === "bpDiagram") return diagramNodeToBlock(node, entry.id);
     return codeNodeToBlock(node, entry.id);
+  }
+  if (entry.isField) {
+    // Canvas control-atom insert (S3.5: a native field-* block): reconstruct the
+    // full field block (value + carried config) with the minted id. block.type comes
+    // off the bpType attr; config keys (label/options/rows/fieldName) ride only when
+    // present, mirroring the per-type persist default. The value is normalized to its
+    // per-type stored form.
+    return fieldNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.

@@ -19,7 +19,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp list(id), do: %{"id" => id, "type" => "list", "ordered" => false, "items" => []}
   defp callout(id), do: %{"id" => id, "type" => "callout", "tone" => "info"}
   defp divider(id), do: %{"id" => id, "type" => "divider"}
-  defp field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
+  # S3.5: the 7 NATIVE field-* types are now canvas-eligible, so the still-splitting
+  # field BOUNDARY is a PICKER field (field-image / field-reference) — its
+  # bp-media-picker WC carries its own LiveView event flow. `field/1` therefore
+  # produces a field-IMAGE (a boundary); `native_field/1` produces a field-string
+  # (canvas-eligible) for the S3.5 widen tests.
+  defp field(id), do: %{"id" => id, "type" => "field-image", "value" => ""}
+  defp native_field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
   defp sheet(id), do: %{"id" => id, "type" => "sheet", "rows" => []}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
@@ -63,10 +69,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.4: field / sheet STILL split a run (callout/divider/code/diagram aside)" do
-      # divider IS canvas (S3), callout IS canvas (S3.2), code IS canvas (S3.3),
-      # diagram IS canvas (S3.4), so the still-splitting boundaries are field / sheet.
-      for boundary <- [field("b"), sheet("b")] do
+    test "S3.5: field-image / field-reference / sheet STILL split a run (native fields aside)" do
+      # divider/callout/code/diagram IS canvas, and as of S3.5 the 7 NATIVE field-*
+      # types are too — so the still-splitting boundaries are the PICKER fields
+      # (field-image / field-reference; their WCs carry their own LiveView flow) and
+      # sheet.
+      for boundary <- [
+            %{"id" => "b", "type" => "field-image", "value" => ""},
+            %{"id" => "b", "type" => "field-reference", "value" => ""},
+            sheet("b")
+          ] do
         blocks = [para("p1"), boundary, para("p2")]
 
         assert PaperCanvas.partition_runs(blocks) == [
@@ -76,6 +88,49 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
                ],
                "expected #{boundary["type"]} to split the run"
       end
+    end
+
+    # ── S3.5: the 7 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
+
+    test "S3.5: a native field block INSIDE prose keeps the run whole (was split by the field)" do
+      # All 7 native field-* types are canvas-eligible (control-atoms), so each rides
+      # the prose run rather than splitting it.
+      for type <- ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+        fld = %{"id" => "x1", "type" => type, "value" => ""}
+        blocks = [para("p1"), fld, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}],
+               "expected #{type} to ride the run (canvas-eligible)"
+      end
+    end
+
+    test "S3.5: a native field directly between prose joins ONE run; a picker field STILL splits" do
+      # native_field (field-string) is canvas; field/field-reference (pickers) split.
+      blocks = [para("p1"), native_field("n1"), para("p2")]
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+
+      split = [para("p1"), field("img"), para("p2")]
+
+      assert PaperCanvas.partition_runs(split) == [
+               {:run, [para("p1")]},
+               {:block, field("img")},
+               {:run, [para("p2")]}
+             ]
+    end
+
+    test "S3.5: a native field + code + callout + diagram in ONE run (all canvas-eligible)" do
+      blocks = [
+        para("p1"),
+        native_field("n1"),
+        code("k1"),
+        callout("c1"),
+        diagram("g1"),
+        para("p2")
+      ]
+
+      # native field (control-atom) AND code/diagram (attr-atoms) AND callout (content)
+      # are ALL canvas-eligible, so the whole stretch is ONE maximal run — none split.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
     # ── S3.3: the code block is now CANVAS-ELIGIBLE too — it no longer splits ────
@@ -146,9 +201,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.2: a field STILL splits, with a callout riding each surrounding run" do
-      # field-string is still a boundary; the callouts are canvas, so each rides
-      # the prose run on its side of the field.
+    test "S3.2: a picker field STILL splits, with a callout riding each surrounding run" do
+      # field-image (a picker) is still a boundary; the callouts are canvas, so each
+      # rides the prose run on its side of the field.
       blocks = [para("p1"), callout("c1"), field("f1"), callout("c2"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
@@ -228,8 +283,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "canvas?/1 (S3.4: prose ∪ divider ∪ callout ∪ code ∪ diagram)" do
-    test "prose, divider, callout, code AND diagram are canvas-eligible; field/sheet are not" do
+  describe "canvas?/1 (S3.5: prose ∪ divider ∪ callout ∪ code ∪ diagram ∪ native field-*)" do
+    test "prose, divider, callout, code, diagram AND the 7 native field-* types are canvas-eligible; pickers/sheet are not" do
       assert PaperCanvas.canvas?(para("p"))
       assert PaperCanvas.canvas?(heading("h"))
       assert PaperCanvas.canvas?(list("l"))
@@ -243,8 +298,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # S3.4: a diagram block is canvas-eligible (an attr-atom: source/caption in
       # attrs, edited by a non-PM textarea island — mirrors the code shape).
       assert PaperCanvas.canvas?(diagram("g"))
-      # Still boundaries — not yet pulled into the canvas.
+
+      # S3.5: each of the 7 NATIVE field-* types is canvas-eligible (a control-atom:
+      # value in an attr, edited by a native control, coerced by field type).
+      for type <- ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+        assert PaperCanvas.canvas?(%{"id" => "f", "type" => type, "value" => ""}),
+               "expected #{type} to be canvas-eligible"
+      end
+
+      # Still boundaries — PICKER fields (their WCs carry their own LiveView flow)
+      # and sheet stay run boundaries.
       refute PaperCanvas.canvas?(field("f"))
+      refute PaperCanvas.canvas?(%{"id" => "fr", "type" => "field-reference", "value" => ""})
       refute PaperCanvas.canvas?(sheet("s"))
       refute PaperCanvas.canvas?(%{"id" => "x"})
     end
