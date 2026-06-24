@@ -111,13 +111,22 @@ const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code", bpDiagram: "diagram" 
 // BarkparkFieldBlockBridge (field-boolean → a BOOLEAN via control.checked; every
 // other native type → a STRING via control.value).
 //
-// EXPLICITLY OUT: field-image (bp-media-picker WC) and field-reference
-// (bp-reference-picker WC). Those pickers carry their own LiveView event flow and
-// stay RUN BOUNDARIES — they keep their per-block widgets and project to bpOpaque.
-// So the 7 native types are canvas-eligible while field-image/field-reference (and
-// sheet) STILL split. Keep aligned with field-node.js:BP_NATIVE_FIELD_TYPES and
-// paper_canvas.ex:@canvas_field_types.
-const CANVAS_FIELD_TYPES = new Set([
+// RUN-SPLITTER TAIL (part 1): field-image (bp-media-picker WC) and field-reference
+// (bp-reference-picker WC) now ALSO ride the canvas through the SAME `bpField` atom —
+// the PICKER variant. The pickers are CLIENT-SIDE (no LiveView dependency), so they
+// mount inside the node-view exactly like a native control; the edit surface is the WC,
+// and on its `bp-change` the node-view writes the new `value` back IDENTICALLY to the
+// per-block bridge. From run-convert's POV the picker types are diffed/folded EXACTLY
+// like the native types (value is the only mutable datum, patch is { value }), with two
+// extra OPTIONAL config keys carried verbatim: refType (field-reference's target schema)
+// and dataset (a per-block fetch-scope override). Keep CANVAS_FIELD_TYPES = native ∪
+// picker aligned with field-node.js:(BP_NATIVE_FIELD_TYPES ∪ BP_PICKER_FIELD_TYPES) and
+// paper_canvas.ex:(@canvas_field_types ∪ @canvas_picker_field_types).
+//
+// STILL OUT (separate nested-structure increment): section / composite / object /
+// arrayOf / codelist / localizedText. Those are NOT in any canvas-field set and STILL
+// split a run.
+const CANVAS_NATIVE_FIELD_TYPES = new Set([
   "field-string",
   "field-slug",
   "field-text",
@@ -125,6 +134,11 @@ const CANVAS_FIELD_TYPES = new Set([
   "field-select",
   "field-datetime",
   "field-color",
+]);
+const CANVAS_PICKER_FIELD_TYPES = new Set(["field-image", "field-reference"]);
+const CANVAS_FIELD_TYPES = new Set([
+  ...CANVAS_NATIVE_FIELD_TYPES,
+  ...CANVAS_PICKER_FIELD_TYPES,
 ]);
 
 // The TipTap NODE name for ALL 7 native field types is the SAME single node
@@ -653,6 +667,13 @@ function fieldBlockToNode(block, bpId, bpType) {
   if (block && block.label != null) attrs.label = block.label;
   if (block && block.options != null) attrs.options = block.options;
   if (block && block.rows != null) attrs.rows = block.rows;
+  // PICKER config (field-image / field-reference) carried verbatim so the round-trip is
+  // byte-identical: refType (field-reference's target schema) + dataset (a per-block
+  // fetch-scope override). Carried ONLY when present so an untouched picker's getJSON
+  // re-projection matches and emits zero ops (a field-reference's default refType is ""
+  // — present and kept; an unset dataset has no key).
+  if (block && block.refType != null) attrs.refType = block.refType;
+  if (block && block.dataset != null) attrs.dataset = block.dataset;
   return { type: CANVAS_FIELD_NODE_NAME, attrs };
 }
 
@@ -677,6 +698,12 @@ function fieldNodeToBlock(node, id) {
   if (attrs.label != null) block.label = attrs.label;
   if (attrs.options != null) block.options = attrs.options;
   if (attrs.rows != null) block.rows = attrs.rows;
+  // PICKER config (field-image / field-reference): refType + dataset threaded ONLY when
+  // present so the reconstructed block is byte-identical to one that round-tripped
+  // through the per-block path (no stray refType/dataset on a native field). The inverse
+  // of fieldBlockToNode.
+  if (attrs.refType != null) block.refType = attrs.refType;
+  if (attrs.dataset != null) block.dataset = attrs.dataset;
   return block;
 }
 

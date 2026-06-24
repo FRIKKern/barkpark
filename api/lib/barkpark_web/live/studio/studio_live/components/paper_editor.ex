@@ -169,7 +169,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <%= for segment <- @segments do %>
           <%= case segment do %>
             <% {:run, run_blocks, run_ordinal} -> %>
-              <.canvas_run run_blocks={run_blocks} run_ordinal={run_ordinal} />
+              <.canvas_run
+                run_blocks={run_blocks}
+                run_ordinal={run_ordinal}
+                dataset={@dataset}
+                api_token_raw={@api_token_raw}
+              />
             <% {:block, block, index} -> %>
               <.edit_block
                 block={block}
@@ -342,6 +347,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # push_canvas_echo keys each run by the SAME ordinal so it routes to this wrapper.
   attr(:run_blocks, :list, required: true)
   attr(:run_ordinal, :integer, required: true)
+  # The picker FETCH-SCOPE for any field-image / field-reference riding this run. The
+  # canvas mounts those pickers (bp-media-picker / bp-reference-picker) as control-atom
+  # node-views; each WC fetches its own data over HTTP scoped by a dataset (+ a bearer
+  # token for media uploads). We carry the SAME scope the per-block picker render uses
+  # (paper_editor.ex:820/831/832 — dataset + data-token={@api_token_raw}) on the canvas
+  # HOST element via data-dataset / data-token, so a picker inside the run fetches /
+  # uploads exactly as it does in the per-block path. A run with NO picker carries them
+  # harmlessly (the canvas reads them only when mounting a picker node-view).
+  attr(:dataset, :string, default: "production")
+  attr(:api_token_raw, :string, default: "")
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.run_ordinal))
@@ -353,6 +368,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       phx-hook="BarkparkPaperCanvas"
       class="bp-paper-edit-canvas"
       data-canvas-blocks={Jason.encode!(@run_blocks)}
+      data-canvas-dataset={@dataset}
+      data-canvas-token={@api_token_raw}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>

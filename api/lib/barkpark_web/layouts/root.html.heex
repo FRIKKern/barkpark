@@ -3563,7 +3563,25 @@
             // than throw out of the hook's mount.
           }
         };
+        // PICKER FETCH-SCOPE (run-splitter tail): a field-image / field-reference
+        // riding this run mounts its client-side picker WC (bp-media-picker /
+        // bp-reference-picker) inside a canvas node-view; the node-view reads the
+        // dataset + bearer token off the <bp-paper-canvas> HOST element (data-dataset
+        // / data-token) — the SAME scope the per-block picker render uses
+        // (dataset + data-token={@api_token_raw}). Stamp them from the wrapper's
+        // data-canvas-dataset / data-canvas-token so the picker fetches / uploads
+        // exactly as it does in the per-block path. (scope-prefix is intentionally
+        // unset — the per-block picker render omits it too, defaulting to the flat
+        // surface.) A run with no picker carries them harmlessly.
+        const seedScope = (el) => {
+          if (!el) return;
+          const ds = this.el.dataset.canvasDataset;
+          const tok = this.el.dataset.canvasToken;
+          if (ds != null) el.setAttribute("data-dataset", ds);
+          if (tok != null) el.setAttribute("data-token", tok);
+        };
         const wc = this.el.querySelector("bp-paper-canvas");
+        seedScope(wc);
         seedBlocks(wc);
 
         // P4 [[ wikilink + # tag autocomplete: inject the SAME async candidate
@@ -3596,6 +3614,7 @@
         customElements.whenDefined("bp-paper-canvas").then(() => {
           const el = this.el.querySelector("bp-paper-canvas");
           if (el) {
+            seedScope(el);
             seedBlocks(el);
             wireWikilinkSource(el);
             wireTagSource(el);

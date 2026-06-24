@@ -21,13 +21,22 @@
 //   field-datetime→ <input type=datetime-local>value: string
 //   field-color   → <input type=color>         value: string
 //
-// EXPLICITLY OUT OF S3.5 (a documented known limitation): field-image (the
-// bp-media-picker WC) and field-reference (the bp-reference-picker WC). Those two
-// pickers carry their own LiveView event flow (a bubbling `bp-change` CustomEvent
-// the per-block BarkparkFieldBlockBridge forwards) and stay RUN BOUNDARIES — they
-// keep their existing per-block widgets and project to bpOpaque in the canvas. So
-// the partition makes the 7 native types canvas-eligible while field-image /
-// field-reference (and sheet) STILL split.
+// PHASE-4 RUN-SPLITTER TAIL (part 1): field-image (the bp-media-picker WC) and
+// field-reference (the bp-reference-picker WC) now ALSO ride the canvas as CONTROL-ATOM
+// node-views — the SAME `bpField` atom shape as the 7 native types, but the edit surface
+// is the EXISTING PICKER Web Component instead of a native HTML control. The pickers are
+// CLIENT-SIDE (bp-media-picker.js / bp-reference-picker.js fetch their own data over HTTP;
+// no pushEvent / phx- / liveSocket — NO LiveView dependency), so they mount inside a
+// node-view exactly like a native control. Each emits a bubbling `bp-change` CustomEvent
+// ({detail:{value}}) on selection/clear — the per-block BarkparkFieldBlockBridge coerces
+// that to the block `value` IDENTITY (push(e.detail.value) → {op:"patch-block", id,
+// patch:{value}}). We LIFT that exact identity coercion (coercePickerValue) so a canvas
+// picker edit persists the SAME `value` the per-block path does. The picker's own DOM is
+// a non-PM island (stopEvent/ignoreMutation) so its clicks/fetches never become PM
+// transactions / split the doc.
+//
+// section/composite/object/arrayOf/codelist/localizedText STILL split (a separate,
+// nested-structure increment) — they are NOT in any canvas-field set.
 //
 // ── CONTENT MODEL (resolved against the live persist code — cite file:line) ───
 //
@@ -106,9 +115,9 @@ import { DEBOUNCE_MS } from "../contract.js";
 // StarterKit node is disabled for it.
 export const BP_FIELD_NODE_NAME = "bpField";
 
-// The 7 NATIVE-CONTROL field-* bpTypes this node-view owns. field-image /
-// field-reference are EXCLUDED (pickers stay boundaries). Keep aligned with
-// run-convert.js:CANVAS_FIELD_TYPES and paper_canvas.ex:@canvas_field_types.
+// The 7 NATIVE-CONTROL field-* bpTypes this node-view owns through a native HTML
+// control. Keep aligned with run-convert.js:CANVAS_NATIVE_FIELD_TYPES and
+// paper_canvas.ex:@canvas_field_types.
 export const BP_NATIVE_FIELD_TYPES = [
   "field-string",
   "field-slug",
@@ -119,6 +128,28 @@ export const BP_NATIVE_FIELD_TYPES = [
   "field-color",
 ];
 
+// The 2 PICKER field-* bpTypes this node-view owns through a client-side WC (the
+// run-splitter tail, part 1). field-image mounts <bp-media-picker>; field-reference
+// mounts <bp-reference-picker>. Both ride the SAME `bpField` atom shape as the native
+// types — value in an attr, a stopEvent/ignoreMutation island, coerced/patched as
+// { value } — but the edit surface is the EXISTING picker WC, not a native control.
+// Keep aligned with run-convert.js:CANVAS_PICKER_FIELD_TYPES and
+// paper_canvas.ex:@canvas_picker_field_types.
+export const BP_PICKER_FIELD_TYPES = ["field-image", "field-reference"];
+
+// True when a bpType is a PICKER field (mounts a WC) rather than a native control.
+function isPickerFieldType(bpType) {
+  return bpType === "field-image" || bpType === "field-reference";
+}
+
+// The picker WC tag name for a picker bpType. field-image → bp-media-picker;
+// field-reference → bp-reference-picker. MIRRORS the per-block render
+// (paper_editor.ex:813-835) so the canvas mounts the SAME element the per-block path does.
+const PICKER_TAG = {
+  "field-image": "bp-media-picker",
+  "field-reference": "bp-reference-picker",
+};
+
 // ── THE COERCION (lifted verbatim from BarkparkFieldBlockBridge) ──────────────
 //
 // Read the control's value coerced by field type, EXACTLY as the per-block bridge:
@@ -128,6 +159,21 @@ export const BP_NATIVE_FIELD_TYPES = [
 export function coerceFieldValue(fieldType, control) {
   if (fieldType === "field-boolean") return !!(control && control.checked);
   return control ? control.value : "";
+}
+
+// ── THE PICKER COERCION (lifted verbatim from BarkparkFieldBlockBridge) ───────
+//
+// The pickers (bp-media-picker / bp-reference-picker) own their own DOM and emit a
+// bubbling `bp-change` CustomEvent({detail:{value}}) on selection/clear — a plain
+// STRING (a media id/url for image; a doc id for reference). The per-block bridge's
+// picker branch (root.html.heex:3677-3683) is pure IDENTITY: push(e.detail.value),
+// i.e. {op:"patch-block", id, patch:{value: e.detail.value}}. coercePickerValue LIFTS
+// that exact identity so a canvas picker edit persists the SAME `value` the per-block
+// path does. A missing detail/value coerces to "" (the empty/cleared value).
+// Exported so __smoke.mjs can assert fidelity against the bridge.
+export function coercePickerValue(detail) {
+  const v = detail && detail.value;
+  return v == null ? "" : v;
 }
 
 // The field types whose control commits on `input` (debounced), mirroring
@@ -268,6 +314,37 @@ export const Field = Node.create({
         renderHTML: (attrs) =>
           attrs.rows != null ? { "data-field-rows": String(attrs.rows) } : {},
       },
+      // refType — field-reference's target schema (config; the `ref-type` attr the
+      // bp-reference-picker reads to scope its typeahead). OPTIONAL (an unscoped
+      // reference browses all types). Carried VERBATIM so the round-trip preserves it.
+      // null/absent for non-reference types. data-field-ref-type.
+      refType: {
+        default: null,
+        parseHTML: (el) =>
+          el.hasAttribute("data-field-ref-type")
+            ? el.getAttribute("data-field-ref-type")
+            : null,
+        renderHTML: (attrs) =>
+          attrs.refType != null
+            ? { "data-field-ref-type": attrs.refType }
+            : {},
+      },
+      // dataset — a per-block dataset override for the picker's data fetches (config).
+      // OPTIONAL; absent → the picker falls back to the canvas-host dataset (the same
+      // `Map.get(@block, "dataset", @dataset)` precedence the per-block render uses,
+      // paper_editor.ex:820/831). Carried VERBATIM so a block that pinned a dataset
+      // round-trips it. data-field-dataset.
+      dataset: {
+        default: null,
+        parseHTML: (el) =>
+          el.hasAttribute("data-field-dataset")
+            ? el.getAttribute("data-field-dataset")
+            : null,
+        renderHTML: (attrs) =>
+          attrs.dataset != null
+            ? { "data-field-dataset": attrs.dataset }
+            : {},
+      },
     };
   },
 
@@ -307,6 +384,14 @@ export const Field = Node.create({
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const fieldType = (node.attrs && node.attrs.bpType) || "field-string";
+
+      // PICKER field types (field-image / field-reference) mount the existing
+      // client-side WC instead of a native control — a separate node-view variant
+      // (buildPickerNodeView) that mirrors the per-block picker render + lifts the
+      // BarkparkFieldBlockBridge identity coercion. Native types fall through.
+      if (isPickerFieldType(fieldType)) {
+        return buildPickerNodeView({ node, editor, getPos, fieldType });
+      }
 
       const dom = document.createElement("div");
       dom.className = "bp-canvas-field";
@@ -430,6 +515,160 @@ export const Field = Node.create({
     };
   },
 });
+
+// ── the PICKER NodeView: a frame wrapping the non-PM client-side PICKER WC ─────
+//
+// The picker variant of the control-atom (field-image / field-reference). It mounts
+// the EXISTING <bp-media-picker> / <bp-reference-picker> Web Component — client-side,
+// no LiveView dependency — exactly the way the per-block editor does
+// (paper_editor.ex:813-835), seeded with `value` (+ the dataset/refType/token scope),
+// listens for the picker's bubbling `bp-change` CustomEvent, and on selection writes
+// the new value back via setNodeMarkup → onUpdate → run-convert emits a patch-block
+// carrying ONLY { value } (the exact bridge op shape). The picker's own DOM is a non-PM
+// island (stopEvent/ignoreMutation) so its clicks/typeahead-fetches never become PM
+// transactions / split the doc.
+//
+// SCOPE: a picker fetches against a dataset (+ a scope-prefix on the scoped surface,
+// + a bearer token for media uploads). Per-block precedence is
+// `Map.get(@block, "dataset", @dataset)` — a block-pinned dataset wins, else the
+// canvas-host dataset. We mirror it: the block-pinned `dataset` rides the node attr;
+// the host dataset / scope-prefix / token ride data-* on the <bp-paper-canvas> host
+// (read once via canvasScope below). The picker still RENDERS without scope (it
+// defaults dataset="production" and an empty token just disables upload) — so the
+// pure-Node harness, which never mounts a node-view, is unaffected.
+function buildPickerNodeView({ node, editor, getPos, fieldType }) {
+  const tag = PICKER_TAG[fieldType] || "bp-media-picker";
+  const scope = canvasScope(editor);
+
+  const dom = document.createElement("div");
+  dom.className = "bp-canvas-field bp-canvas-field-picker";
+  dom.setAttribute("data-bp-type", "field");
+  dom.setAttribute("data-field-type", fieldType);
+
+  // The human label (a non-PM, non-editable caption beside the picker) — same as the
+  // native variant + the per-block render (paper_editor.ex:816/828).
+  const labelEl = document.createElement("label");
+  labelEl.className = "bp-canvas-field-label";
+  labelEl.textContent = (node.attrs && node.attrs.label) || "";
+
+  // The picker WC — the EDIT island PM does NOT manage. Seed value + scope as
+  // ATTRIBUTES, mirroring the per-block <bp-media-picker>/<bp-reference-picker> render
+  // EXACTLY (value / dataset / data-token / ref-type / scope-prefix).
+  const picker = document.createElement(tag);
+  picker.className = "bp-canvas-field-control";
+  picker.setAttribute("contenteditable", "false");
+  picker.setAttribute("data-test-id", "paper-field-" + fieldType);
+
+  const value = node.attrs && node.attrs.value;
+  picker.setAttribute("value", value == null ? "" : String(value));
+
+  // dataset precedence: block-pinned attr wins, else the canvas-host dataset (the same
+  // `Map.get(@block, "dataset", @dataset)` order the per-block render uses). Omit the
+  // attr entirely when neither is set so the WC keeps its own "production" default.
+  const ds = (node.attrs && node.attrs.dataset) || scope.dataset;
+  if (ds) picker.setAttribute("dataset", ds);
+  // scope-prefix ("" on the flat surface) — byte-identical fetch paths when empty, so
+  // only set it when non-empty.
+  if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
+
+  if (fieldType === "field-image") {
+    // The media picker reads the raw bearer token from data-token (empty disables
+    // upload; browse + select still work). Per-block: data-token={@api_token_raw}.
+    if (scope.token) picker.setAttribute("data-token", scope.token);
+  } else {
+    // The reference picker reads its target schema from ref-type (empty browses all
+    // types). Per-block: ref-type={Map.get(@block, "refType", "")}.
+    picker.setAttribute("ref-type", (node.attrs && node.attrs.refType) || "");
+  }
+
+  dom.appendChild(labelEl);
+  dom.appendChild(picker);
+
+  // Write the COERCED value back to the node's `value` attr. setNodeMarkup changes ONLY
+  // the attr (the node stays the same atom in the same place), so onUpdate → run-convert
+  // emits a single patch-block carrying { value }. UNLIKE the native types there is NO
+  // debounce: the picker only fires `bp-change` on a discrete selection/clear (not per
+  // keystroke), so each change is committed immediately — matching the per-block bridge
+  // (which forwards the picker's bp-change straight through, undebounced).
+  const commit = (nextValue) => {
+    if (!editor.isEditable) return;
+    if (typeof getPos !== "function") return;
+    const pos = getPos();
+    if (pos == null) return;
+    const cur = editor.state.doc.nodeAt(pos);
+    if (!cur) return;
+    if (cur.attrs.value === nextValue) return; // nothing changed — emit nothing
+    editor
+      .chain()
+      .command(({ tr }) => {
+        tr.setNodeMarkup(pos, undefined, { ...cur.attrs, value: nextValue });
+        return true;
+      })
+      .run();
+  };
+
+  // LIFT the BarkparkFieldBlockBridge picker branch: the picker's bp-change detail.value
+  // IS the new value (identity), forwarded as a patch-block{value}.
+  const onChange = (e) => commit(coercePickerValue(e.detail));
+  picker.addEventListener("bp-change", onChange);
+
+  // Keep the seeded picker in sync with an EXTERNAL attr change (an echo, an undo) — the
+  // WC exposes a `value` PROPERTY setter (bp-media-picker.js:108 / bp-reference-picker.js
+  // :516) that re-renders its preview/pill. Only write when it differs so we never
+  // re-render the picker the user is mid-interaction with, and never re-fire bp-change
+  // (the setter does not emit).
+  const paint = (n) => {
+    const v = n.attrs && n.attrs.value;
+    const str = v == null ? "" : String(v);
+    if (picker.value !== str) picker.value = str;
+    labelEl.textContent = (n.attrs && n.attrs.label) || "";
+  };
+
+  return {
+    dom,
+    // NO contentDOM — an atom; the picker WC is NOT a PM content hole. The value lives
+    // in the `value` attr, edited entirely outside ProseMirror.
+    update: (updated) => {
+      if (updated.type.name !== BP_FIELD_NODE_NAME) return false;
+      const nextType = (updated.attrs && updated.attrs.bpType) || "field-string";
+      if (nextType !== fieldType) return false; // type swap → full rebuild
+      paint(updated);
+      return true;
+    },
+    // THE ISLAND CONTRACT: PM must NOT turn the picker's events into transactions — a
+    // click / typeahead keystroke / fetch never becomes a PM split/mutation/caret jump.
+    stopEvent: () => true,
+    // PM must NOT read the picker's DOM mutations back into the document — the picker
+    // renders its own preview/dropdown DOM outside any contentDOM.
+    ignoreMutation: () => true,
+    destroy: () => {
+      picker.removeEventListener("bp-change", onChange);
+    },
+  };
+}
+
+// Read the canvas-host scope (dataset / scope-prefix / bearer token) for the pickers.
+// The host <bp-paper-canvas> carries data-dataset / data-scope-prefix / data-token
+// (stamped by the BarkparkPaperCanvas hook from the run wrapper). The node-view reaches
+// it via editor.options.element (the mount .bp-paper-editor-body) → closest(
+// "bp-paper-canvas"). All optional — a missing host or missing attr yields "" so the
+// picker keeps its own defaults (dataset="production", no token → upload disabled).
+function canvasScope(editor) {
+  const empty = { dataset: "", scopePrefix: "", token: "" };
+  try {
+    const mount = editor && editor.options && editor.options.element;
+    if (!mount || typeof mount.closest !== "function") return empty;
+    const host = mount.closest("bp-paper-canvas");
+    if (!host || typeof host.getAttribute !== "function") return empty;
+    return {
+      dataset: host.getAttribute("data-dataset") || "",
+      scopePrefix: host.getAttribute("data-scope-prefix") || "",
+      token: host.getAttribute("data-token") || "",
+    };
+  } catch (_e) {
+    return empty;
+  }
+}
 
 // Build the native HTML control for a field type, seeded with the node's value.
 // MIRRORS the per-block controls (paper_editor.ex:735-787) so the canvas control

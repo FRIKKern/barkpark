@@ -26,8 +26,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       `CANVAS_FIELD_TYPES` / `CANVAS_READONLY_ATOM_TYPES`), so none SPLIT a run
       anymore. A run of
       one-or-more adjacent canvas blocks becomes one `{:run, [block, …]}`; every
-      block that is NOT canvas-eligible (the picker fields `field-image` /
-      `field-reference` / a composite / …) is a run boundary emitted as
+      block that is NOT canvas-eligible (a nested-structure field — `composite` /
+      `arrayOf` / `codelist` / `localizedText` / `section` / …) is a run boundary
+      emitted as
       `{:block, block}`. The segment order matches the input order exactly. Pure:
       no socket, no I/O.
 
@@ -74,13 +75,25 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # shipped BarkparkFieldBlockBridge (field-boolean → a BOOLEAN; the rest → a STRING).
   # These 7 no longer SPLIT a run.
   #
-  # EXPLICITLY EXCLUDED: field-image (bp-media-picker WC) and field-reference
-  # (bp-reference-picker WC) — those pickers carry their own LiveView event flow and
-  # stay RUN BOUNDARIES (their per-block widgets), as does `sheet`. So the partition
-  # makes the 7 native types canvas-eligible while field-image / field-reference /
-  # sheet STILL split. Keep aligned with run-convert.js CANVAS_FIELD_TYPES and
+  # Keep aligned with run-convert.js CANVAS_NATIVE_FIELD_TYPES and
   # field-node.js BP_NATIVE_FIELD_TYPES.
   @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color)
+
+  # RUN-SPLITTER TAIL (part 1): the 2 PICKER field-* block kinds the canvas now handles
+  # as CONTROL-ATOM nodes mounting the EXISTING client-side picker Web Components —
+  # field-image → <bp-media-picker>, field-reference → <bp-reference-picker>. The pickers
+  # are CLIENT-SIDE (they fetch their own data over HTTP; no pushEvent / phx- / liveSocket
+  # — NO LiveView dependency), so they mount inside a canvas node-view exactly like a
+  # native control. Each emits a bubbling `bp-change` CustomEvent the node-view coerces to
+  # the block `value` IDENTICALLY to the per-block BarkparkFieldBlockBridge, so a canvas
+  # picker edit persists the SAME { value } the per-block path does. These 2 no longer
+  # SPLIT a run. Keep aligned with run-convert.js CANVAS_PICKER_FIELD_TYPES and
+  # field-node.js BP_PICKER_FIELD_TYPES.
+  #
+  # STILL EXCLUDED (a separate nested-structure increment): section / composite / object /
+  # arrayOf / codelist / localizedText — those are NOT in any canvas-field set and STILL
+  # split a run.
+  @canvas_picker_field_types ~w(field-image field-reference)
 
   # S3.6: the READ-ONLY ATOM block kinds the canvas handles as read-only atom nodes —
   # atom nodes (no PM-managed body, like the divider/code/field) that are REFERENCES,
@@ -93,24 +106,29 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # the editor — but they ARE canvas-eligible (no split) and DO participate in
   # structural ops. These two no longer SPLIT a run.
   #
-  # After S3.6 the ONLY remaining run boundaries are the PICKER fields (field-image /
-  # field-reference; their WCs carry their own LiveView event flow) and any
-  # composite/object/arrayOf/codelist/localizedText — so a typical paper's run now
+  # After the run-splitter tail (part 1) the picker fields (field-image / field-reference)
+  # ALSO ride the canvas (their WCs are client-side, no LiveView dependency), so the ONLY
+  # remaining run boundaries are the NESTED-STRUCTURE fields
+  # (composite/object/arrayOf/codelist/localizedText/section) — a typical paper's run now
   # spans the WHOLE doc. Keep aligned with run-convert.js CANVAS_READONLY_ATOM_TYPES
   # and embed-node.js BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME.
   @canvas_readonly_atom_types ~w(sheet embed)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
-  # attr-atoms ∪ canvas content nodes ∪ canvas field control-atoms ∪ canvas read-only
-  # atoms. A run is a maximal contiguous stretch of these; any other kind is a run
-  # boundary. Keep this aligned with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪
-  # CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES ∪
-  # CANVAS_READONLY_ATOM_TYPES) so the Elixir partition and the JS projection agree on
-  # what a run may contain.
+  # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
+  # PICKER field control-atoms ∪ canvas read-only atoms. A run is a maximal contiguous
+  # stretch of these; any other kind is a run boundary. Keep this aligned with
+  # run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪
+  # CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES)
+  # so the Elixir partition and the JS projection agree on what a run may contain. The
+  # ONLY remaining run boundaries are the nested-structure fields (section / composite /
+  # object / arrayOf / codelist / localizedText).
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
-                  @canvas_content_types ++ @canvas_field_types ++ @canvas_readonly_atom_types
+                  @canvas_content_types ++
+                  @canvas_field_types ++
+                  @canvas_picker_field_types ++ @canvas_readonly_atom_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default FALSE.**
