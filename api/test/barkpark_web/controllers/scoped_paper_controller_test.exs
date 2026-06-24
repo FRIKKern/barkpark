@@ -143,6 +143,62 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     end
   end
 
+  describe "GET /w/:ws/p/:project/papers/:slug — 'Linked mentions' backlinks section" do
+    test "renders the section listing a paper that wikilinks to this one", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      # A second paper whose blocks carry a wikilink pinned (docId) to the
+      # target slug "shared-paper". A heading block gives it a real title
+      # (paper_title derives the title from the first heading block).
+      {:ok, _src} =
+        Content.upsert_paper(%{
+          "slug" => "linking-paper",
+          "dataset" => @dataset,
+          "workspace_id" => ws.id,
+          "project_id" => project.id,
+          "blocks" => [
+            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"},
+            %{
+              "id" => "b1",
+              "type" => "paragraph",
+              "content" => [
+                %{"type" => "text", "value" => "As covered in "},
+                %{"type" => "wikilink", "docId" => "shared-paper", "children" => []},
+                %{"type" => "text", "value" => " earlier."}
+              ]
+            }
+          ]
+        })
+
+      conn = get(conn, paper_path(ws, project, "shared-paper"))
+      body = html_response(conn, 200)
+
+      assert body =~ "Linked mentions"
+      assert body =~ "The Linking Paper"
+      assert body =~ ~s(href="/papers/linking-paper")
+      assert body =~ "As covered in"
+    end
+
+    test "omits the section entirely when nothing links to the paper", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      # No other paper links to "shared-paper" → no section.
+      conn = get(conn, paper_path(ws, project, "shared-paper"))
+      body = html_response(conn, 200)
+
+      assert body =~ "Hello Shared Paper"
+      refute body =~ "Linked mentions"
+    end
+  end
+
   describe "GET /w/:ws/p/:project/papers/:slug — non-shared path stays the normal gated request" do
     test "a workspace MEMBER reads their own paper via the membership gate (no share)", %{
       conn: conn,

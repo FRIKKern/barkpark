@@ -132,10 +132,43 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:simplify?, paper_goal_id(paper) != nil)
       |> assign(:pending_simplify, nil)
       |> assign(:last_simplify, nil)
+      # "Linked mentions" — papers that wikilink TO this one. Server-side, scoped
+      # to the SAME tenant the reader resolved (so the scan never surfaces a
+      # backlink from a paper the reader can't see). Pre-rendered to an HTML
+      # string at mount; `""` when nothing links here → the template omits the
+      # section. NOT flag-gated: it reads the stored blocks + wikilink nodes (the
+      # system of record), so it works regardless of the canvas flag.
+      |> assign(:backlinks_html, backlinks_section_html(paper, reader_scope, dataset))
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
   end
+
+  # Render the "Linked mentions" section for a paper. Empty string (no markup)
+  # when the paper is absent or nothing links to it.
+  #
+  # The backlink scan MUST be scoped exactly like the paper read (else it could
+  # surface a backlink from a paper the reader can't see, or — on the public
+  # surface — leak a cross-workspace link). So we reuse the paper's OWN resolved
+  # `workspace_id` / `project_id` as the scan scope: for the tenant-scoped
+  # reader that equals `reader_scope`; for the public reader it equals the
+  # seeded Default workspace `get_public_paper/2` resolved into. A legacy
+  # NULL-workspace paper scans unscoped (back-compat, mirrors its own read).
+  defp backlinks_section_html(nil, _scope, _dataset), do: ""
+
+  defp backlinks_section_html(%{} = paper, _reader_scope, dataset) do
+    scan_scope =
+      []
+      |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
+      |> maybe_scope(:project_id, Map.get(paper, :project_id))
+
+    paper
+    |> Content.backlinks_for(dataset, scan_scope)
+    |> BarkparkWeb.PaperBacklinks.section_html()
+  end
+
+  defp maybe_scope(opts, _key, nil), do: opts
+  defp maybe_scope(opts, key, value), do: Keyword.put(opts, key, value)
 
   # ── P6.U5 action buttons ──────────────────────────────────────────────────
 
@@ -751,6 +784,13 @@ defmodule BarkparkWeb.BulldocsLive do
           <%!-- HTML-only (legacy): whole opaque body, re-assigned on update. --%>
           <article id="paper-body" data-rev={@rev}>{raw(@html)}</article>
       <% end %>
+
+      <%!-- "Linked mentions" (Phase-3 backlinks). Papers that wikilink TO this
+            one, server-rendered AFTER the body as a section (NOT an inline
+            node). `@backlinks_html` is the full <section> or "" — empty string
+            ⇒ no markup ⇒ the section is hidden when nothing links here. Not
+            flag-gated: derived from the stored blocks + wikilink nodes. --%>
+      {raw(@backlinks_html)}
 
       <%!-- P6.U2 goal-path rail. Rendered ONLY when there are events for the
             paper's goal (empty list → no rail, article column unchanged).

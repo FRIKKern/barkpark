@@ -4,4 +4,8 @@
         no LiveView. --%>
   <div id="paper-sentinel" data-slug={@slug} hidden></div>
   <article id="paper-body">{raw(@body_html)}</article>
+  <%!-- "Linked mentions" — papers that wikilink TO this one, server-rendered
+        after the body. Empty string (and so no markup) when nothing links here;
+        @backlinks_html already carries the full <section> or "". --%>
+  {raw(@backlinks_html)}
 </main>
