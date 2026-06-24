@@ -23,10 +23,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   # field BOUNDARY is a PICKER field (field-image / field-reference) — its
   # bp-media-picker WC carries its own LiveView event flow. `field/1` therefore
   # produces a field-IMAGE (a boundary); `native_field/1` produces a field-string
-  # (canvas-eligible) for the S3.5 widen tests.
+  # (canvas-eligible) for the S3.5 widen tests. `field_ref/1` is the SECOND picker
+  # boundary (field-reference), used where a non-field boundary is needed now that
+  # S3.6 made sheet/embed canvas-eligible.
   defp field(id), do: %{"id" => id, "type" => "field-image", "value" => ""}
+  defp field_ref(id), do: %{"id" => id, "type" => "field-reference", "value" => ""}
   defp native_field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
-  defp sheet(id), do: %{"id" => id, "type" => "sheet", "rows" => []}
+  # S3.6: sheet AND embed are now canvas-eligible READ-ONLY atoms (they carry the whole
+  # block verbatim and never emit a value/content op), so they NO LONGER split a run.
+  defp sheet(id), do: %{"id" => id, "type" => "sheet", "ref" => "doc/grid", "snapshot" => %{"rows" => []}}
+  defp embed(id), do: %{"id" => id, "type" => "embed", "target" => "Some Note"}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
 
@@ -41,13 +47,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "no canvas blocks → every block is its own boundary segment" do
-      # divider IS canvas (S3) and callout IS canvas (S3.2), so this all-boundary
-      # case uses field + sheet, which STILL split until their own S3 increments.
-      blocks = [field("f1"), sheet("s1")]
+      # divider/callout/code/field IS canvas, and as of S3.6 sheet/embed are too, so
+      # this all-boundary case uses the two PICKER fields (field-image /
+      # field-reference) — the only remaining run boundaries.
+      blocks = [field("f1"), field_ref("r1")]
 
       assert PaperCanvas.partition_runs(blocks) == [
                {:block, field("f1")},
-               {:block, sheet("s1")}
+               {:block, field_ref("r1")}
              ]
     end
 
@@ -69,15 +76,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3.5: field-image / field-reference / sheet STILL split a run (native fields aside)" do
-      # divider/callout/code/diagram IS canvas, and as of S3.5 the 7 NATIVE field-*
-      # types are too — so the still-splitting boundaries are the PICKER fields
-      # (field-image / field-reference; their WCs carry their own LiveView flow) and
-      # sheet.
+    test "S3.6: ONLY the PICKER fields (field-image / field-reference) STILL split a run" do
+      # divider/callout/code/diagram IS canvas, the 7 NATIVE field-* types are (S3.5),
+      # and as of S3.6 sheet/embed are too — so the ONLY still-splitting boundaries are
+      # the PICKER fields (field-image / field-reference; their WCs carry their own
+      # LiveView flow). sheet/embed have moved OUT of this list (now canvas-eligible).
       for boundary <- [
             %{"id" => "b", "type" => "field-image", "value" => ""},
-            %{"id" => "b", "type" => "field-reference", "value" => ""},
-            sheet("b")
+            %{"id" => "b", "type" => "field-reference", "value" => ""}
           ] do
         blocks = [para("p1"), boundary, para("p2")]
 
@@ -88,6 +94,56 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
                ],
                "expected #{boundary["type"]} to split the run"
       end
+    end
+
+    # ── S3.6: sheet AND embed are now CANVAS-ELIGIBLE read-only atoms — no split ──
+
+    test "S3.6: a sheet INSIDE prose keeps the run whole (was split by the sheet)" do
+      blocks = [para("p1"), sheet("s1"), para("p2")]
+
+      # All three are canvas-eligible (prose ∪ sheet read-only atom) ⇒ ONE maximal run.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "S3.6: an embed INSIDE prose keeps the run whole (was split by the embed)" do
+      blocks = [para("p1"), embed("e1"), para("p2")]
+
+      # All three are canvas-eligible (prose ∪ embed read-only atom) ⇒ ONE maximal run.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "S3.6: [paragraph, sheet, embed, paragraph] is ONE run (both read-only atoms ride)" do
+      blocks = [para("p1"), sheet("s1"), embed("e1"), para("p2")]
+
+      # sheet AND embed are both canvas-eligible read-only atoms, so the whole stretch
+      # is ONE maximal run — neither splits.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "S3.6: field-image/field-reference STILL split a run while sheet+embed ride it" do
+      # A picker field between two prose+sheet+embed runs is the ONLY split point.
+      blocks = [para("p1"), sheet("s1"), field("img"), embed("e1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1"), sheet("s1")]},
+               {:block, field("img")},
+               {:run, [embed("e1"), para("p2")]}
+             ]
+    end
+
+    test "S3.6: mixed sheet + embed + code + callout in ONE run (all canvas-eligible)" do
+      blocks = [
+        para("p1"),
+        sheet("s1"),
+        embed("e1"),
+        code("k1"),
+        callout("c1"),
+        para("p2")
+      ]
+
+      # sheet/embed (read-only atoms) AND code (attr-atom) AND callout (content) are ALL
+      # canvas-eligible, so the whole stretch is ONE maximal run — none split.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
     # ── S3.5: the 7 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
@@ -245,12 +301,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "two non-canvas boundaries between two runs do NOT merge into one run" do
-      # sheet + field — both still boundaries (callout/divider are canvas now).
-      blocks = [para("p1"), sheet("s1"), field("f1"), para("p2")]
+      # field-reference + field-image — both still PICKER boundaries (callout/divider/
+      # sheet/embed are all canvas now).
+      blocks = [para("p1"), field_ref("r1"), field("f1"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
                {:run, [para("p1")]},
-               {:block, sheet("s1")},
+               {:block, field_ref("r1")},
                {:block, field("f1")},
                {:run, [para("p2")]}
              ]
@@ -283,8 +340,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "canvas?/1 (S3.5: prose ∪ divider ∪ callout ∪ code ∪ diagram ∪ native field-*)" do
-    test "prose, divider, callout, code, diagram AND the 7 native field-* types are canvas-eligible; pickers/sheet are not" do
+  describe "canvas?/1 (S3.6: prose ∪ divider ∪ callout ∪ code ∪ diagram ∪ native field-* ∪ sheet ∪ embed)" do
+    test "prose, divider, callout, code, diagram, the 7 native field-* types AND sheet/embed are canvas-eligible; pickers are not" do
       assert PaperCanvas.canvas?(para("p"))
       assert PaperCanvas.canvas?(heading("h"))
       assert PaperCanvas.canvas?(list("l"))
@@ -306,11 +363,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
                "expected #{type} to be canvas-eligible"
       end
 
-      # Still boundaries — PICKER fields (their WCs carry their own LiveView flow)
-      # and sheet stay run boundaries.
+      # S3.6: sheet AND embed are canvas-eligible (read-only atoms carrying the whole
+      # block verbatim; they never emit a value/content op).
+      assert PaperCanvas.canvas?(sheet("s"))
+      assert PaperCanvas.canvas?(embed("e"))
+
+      # Still boundaries — only the PICKER fields (their WCs carry their own LiveView
+      # flow) stay run boundaries.
       refute PaperCanvas.canvas?(field("f"))
-      refute PaperCanvas.canvas?(%{"id" => "fr", "type" => "field-reference", "value" => ""})
-      refute PaperCanvas.canvas?(sheet("s"))
+      refute PaperCanvas.canvas?(field_ref("fr"))
       refute PaperCanvas.canvas?(%{"id" => "x"})
     end
   end

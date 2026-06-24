@@ -17,6 +17,16 @@ import { runToTiptap, runToOps } from "./canvas/run-convert.js";
 // can assert the canvas field coercion matches the per-block bridge byte-for-byte
 // (boolean → control.checked; every other native type → control.value).
 import { coerceFieldValue, BP_NATIVE_FIELD_TYPES } from "./canvas/field-node.js";
+// S3.6: the read-only-atom chip label helpers — imported so the smoke can assert the
+// read-only REPRESENTATION (the sheet summary chip "Sheet · <ref> · NxM"; the embed
+// reference chip "↪ <target>") matches the read-only render choice, in pure Node (these
+// helpers reference NO DOM — the NodeView that uses them never runs here).
+import {
+  sheetChipLabel,
+  embedChipLabel,
+  BP_SHEET_NODE_NAME,
+  BP_EMBED_NODE_NAME,
+} from "./canvas/embed-node.js";
 import { Wikilink, Blockref, Tag } from "./marks.js";
 import { CONTRACT_VERSION } from "./contract.js";
 
@@ -2481,6 +2491,313 @@ check("S0 runToOps: reorder-only [a,b,c] → [c,a,b] folds, no inserts/patches",
   // FOLD GATE: folds to [c, a, b].
   const folded = assertFolds(blocks, doc, ops, "S0-k reorder-only");
   assert.deepEqual(folded.map((b) => b.id), ["c", "a", "b"]);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase-4 Stage S3.6 — the sheet + embed blocks as canvas READ-ONLY ATOM nodes
+// (run-convert.js + embed-node.js). A sheet/embed in a run is NO LONGER opaque:
+// runToTiptap emits a native { type:"bpSheet"|"bpEmbed", attrs:{bpId,bpType,bpBlock} }
+// READ-ONLY ATOM carrying the WHOLE block VERBATIM on bpBlock (the bpOpaque
+// verbatim-carry, made canvas-eligible), and runToOps reconstructs the carried block
+// verbatim. UNLIKE the field control-atom (whose value IS edited → a patch), a
+// read-only atom NEVER emits a value/content patch — nothing is edited — but it IS
+// canvas-eligible (no split) and DOES participate in structural ops (insert/remove/
+// move by bpId). field-image / field-reference (pickers) STILL project to bpOpaque.
+//
+// The two read-only-atom seeds: a sheet (ref + cached value-grid snapshot) and an
+// embed (a note transclusion target). Both ride the whole block verbatim.
+// ───────────────────────────────────────────────────────────────────────────
+
+const S36_SHEET = {
+  id: "sh-1",
+  type: "sheet",
+  ref: "production/budget",
+  snapshot: {
+    rows: [
+      ["Item", "Cost"],
+      ["Server", "100"],
+      ["Domain", "12"],
+    ],
+    head: ["Item", "Cost"],
+  },
+};
+
+const S36_EMBED = { id: "em-1", type: "embed", target: "Linked Note" };
+
+// The node NAME (bpSheet / bpEmbed) per bpType — the read-only atom maps a block.type
+// to its dedicated NODE, NOT the generic bpOpaque.
+const S36_NODE_NAME = { sheet: BP_SHEET_NODE_NAME, embed: BP_EMBED_NODE_NAME };
+const S36_SEEDS = { sheet: S36_SHEET, embed: S36_EMBED };
+
+// S3.6-a) PROJECTION — a sheet / embed projects to its dedicated READ-ONLY ATOM node
+//   (bpSheet / bpEmbed), NOT the generic bpOpaque, carrying the WHOLE block VERBATIM on
+//   bpBlock (deep-equal but NOT a shared ref). The flanking prose still projects
+//   normally.
+for (const type of ["sheet", "embed"]) {
+  check(`S3.6 runToTiptap: a ${type} block → the READ-ONLY atom node (NOT bpOpaque), carrying bpBlock VERBATIM`, () => {
+    const seed = S36_SEEDS[type];
+    const blocks = [
+      { id: "p-0", type: "paragraph", content: [{ type: "text", value: "before" }] },
+      seed,
+      { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
+    ];
+    const doc = runToTiptap(blocks);
+    assert.equal(doc.content.length, 3);
+
+    const n = doc.content[1];
+    // THE CRUX: it is the dedicated read-only NODE, NOT the generic bpOpaque.
+    assert.equal(n.type, S36_NODE_NAME[type], `${type} projects to its read-only node`);
+    assert.notEqual(n.type, "bpOpaque", `${type} is NOT the generic opaque placeholder`);
+    assert.notEqual(n.type, type, "node name is the bp-prefixed read-only node, not the bpType");
+    assert.equal(n.attrs.bpId, seed.id);
+    assert.equal(n.attrs.bpType, type);
+    // The WHOLE block rides bpBlock VERBATIM — deep-equal, but NOT a shared ref.
+    assert.deepEqual(n.attrs.bpBlock, seed, "the whole block rides bpBlock verbatim");
+    assert.notEqual(n.attrs.bpBlock, seed, "but bpBlock is NOT a shared ref (deep-cloned)");
+    if (seed.snapshot) {
+      assert.notEqual(n.attrs.bpBlock.snapshot, seed.snapshot, "nested snapshot is deep-cloned too (no shared ref)");
+    }
+    // A read-only atom: no content hole, NO individually-mutable value attr.
+    assert.ok(!("content" in n), "read-only atom carries no content");
+    assert.ok(!("value" in n.attrs), "read-only atom carries no editable value attr");
+
+    // The flanking prose still projects normally.
+    assert.equal(doc.content[0].type, "paragraph");
+    assert.equal(doc.content[2].type, "paragraph");
+  });
+}
+
+// S3.6-a2) READ-ONLY REPRESENTATION — the chip label the node-view renders: the sheet
+//   summary "Sheet · <ref> · NxM" (N rows × M cols from the snapshot); the embed
+//   reference "↪ <target>". Purely presentational; the block rides verbatim regardless.
+check("S3.6 read-only representation: sheet → summary chip 'Sheet · <ref> · NxM'", () => {
+  // 3 rows × 2 cols, ref present.
+  assert.equal(sheetChipLabel(S36_SHEET), "Sheet · production/budget · 3×2");
+  // A ref-less / snapshot-less sheet degrades gracefully (0×0, no ref segment).
+  assert.equal(sheetChipLabel({ type: "sheet" }), "Sheet · 0×0");
+  assert.equal(sheetChipLabel({ type: "sheet", ref: "g" }), "Sheet · g · 0×0");
+});
+
+check("S3.6 read-only representation: embed → reference chip '↪ <target>'", () => {
+  assert.equal(embedChipLabel(S36_EMBED), "↪ Linked Note");
+  // A blank target renders "↪ (untitled)" (no dangling trailing space).
+  assert.equal(embedChipLabel({ type: "embed" }), "↪ (untitled)");
+});
+
+// S3.6-b) ROUND-TRIP — an UNTOUCHED sheet / embed survives runToOps with ZERO ops, and
+//   the whole mixed run folds back to the IDENTICAL block list — the carried block is
+//   deep-equal to the original (the verbatim round-trip).
+for (const type of ["sheet", "embed"]) {
+  check(`S3.6 runToOps: an untouched ${type} round-trips with ZERO ops (verbatim, deep-equal)`, () => {
+    const seed = S36_SEEDS[type];
+    const blocks = [
+      { id: "h-1", type: "heading", level: 1, text: "Doc" },
+      seed,
+      { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
+    ];
+    const doc = runToTiptap(blocks);
+
+    // Simulate the live editor's getJSON attr key order (reordered) — change detection
+    // must be key-order-safe (here: trivially so, since a read-only atom never patches).
+    const n = doc.content[1];
+    n.attrs = { bpBlock: n.attrs.bpBlock, bpType: type, bpId: seed.id };
+
+    const ops = runToOps(blocks, doc);
+    assert.equal(ops.length, 0, `an untouched ${type} run emits ZERO ops`);
+
+    // FOLD GATE: folds back to the identical block list; the read-only block survives
+    // VERBATIM (deep-equal), and the prose is untouched.
+    const folded = assertFolds(blocks, doc, ops, `S3.6-b ${type} round-trip`);
+    assert.deepEqual(folded.map((b) => b.id), ["h-1", seed.id, "p-1"]);
+    assert.deepEqual(folded[1], seed, `${type} folds back byte-identical (verbatim)`);
+  });
+}
+
+// S3.6-c) READ-ONLY NEVER PATCHES — even if some attr on the read-only atom is TOUCHED,
+//   runToOps emits ZERO ops for it (it is a reference; nothing is editable). We mutate a
+//   non-bp attr on the node and assert no patch lands. (The node-view never writes such
+//   an attr; this proves the diff path itself never emits a value/content patch.)
+for (const type of ["sheet", "embed"]) {
+  check(`S3.6 runToOps: a ${type} NEVER emits a value patch even if an attr is touched (read-only)`, () => {
+    const seed = S36_SEEDS[type];
+    const blocks = [
+      { id: "p-0", type: "paragraph", content: [{ type: "text", value: "x" }] },
+      seed,
+    ];
+    const doc = runToTiptap(blocks);
+    // Touch an attr on the read-only node — a read-only atom must still emit NOTHING.
+    doc.content[1] = {
+      ...doc.content[1],
+      attrs: { ...doc.content[1].attrs, somethingTouched: "ignored" },
+    };
+
+    const ops = runToOps(blocks, doc);
+    assert.equal(
+      ops.filter((o) => o.op === "patch-block" && o.id === seed.id).length,
+      0,
+      `a ${type} never emits a value/content patch (read-only)`,
+    );
+    assert.equal(ops.length, 0, "no ops at all — the read-only atom is inert to edits");
+  });
+}
+
+// S3.6-d) INSERT — a NEW sheet / embed (no bpId) between two surviving prose blocks →
+//   an insert-after carrying the VERBATIM block (the whole block off bpBlock) with a
+//   client-minted id, and NO patch on the read-only atom. The fold lands it between the
+//   prose.
+for (const type of ["sheet", "embed"]) {
+  check(`S3.6 runToOps: inserting a ${type} → insert-after carrying the VERBATIM block`, () => {
+    const seed = S36_SEEDS[type];
+    const blocks = [
+      { id: "p-1", type: "paragraph", content: [{ type: "text", value: "before" }] },
+      { id: "p-2", type: "paragraph", content: [{ type: "text", value: "after" }] },
+    ];
+    const doc = runToTiptap(blocks);
+    // Splice a NEW read-only atom (bpId null → minted) between p-1 and p-2, carrying the
+    // whole block verbatim on bpBlock (id stripped — it is minted on insert).
+    const carried = { ...seed };
+    delete carried.id;
+    doc.content = [
+      doc.content[0], // p-1
+      {
+        type: S36_NODE_NAME[type],
+        attrs: { bpId: null, bpType: type, bpBlock: carried },
+      },
+      doc.content[1], // p-2
+    ];
+
+    const ops = runToOps(blocks, doc);
+    const ins = ops.find(
+      (o) => (o.op === "insert-after" || o.op === "append-block") && o.block.type === type,
+    );
+    assert.ok(ins, `a ${type} block is inserted`);
+    assert.equal(ins.block.type, type, `the inserted block carries bpType '${type}' (not the node name)`);
+    assert.ok(
+      ins.block.id != null && ins.block.id !== "p-1" && ins.block.id !== "p-2",
+      "the minted id avoids the surviving prev ids",
+    );
+    // The carried block is VERBATIM (every non-id field of the seed survives).
+    for (const k of Object.keys(seed)) {
+      if (k === "id") continue;
+      assert.deepEqual(ins.block[k], seed[k], `${type} insert carries ${k} verbatim`);
+    }
+    // No separate interior patch for a read-only insert (it never patches).
+    assert.equal(
+      ops.filter((o) => o.op === "patch-block" && o.id === ins.block.id).length,
+      0,
+      "an inserted read-only atom emits no interior patch",
+    );
+
+    // FOLD GATE: the read-only block lands at slot 1, between the two surviving prose,
+    // VERBATIM (minus its now-minted id).
+    const folded = assertFolds(blocks, doc, ops, `S3.6-d ${type} insert`);
+    assert.equal(folded[0].id, "p-1");
+    assert.equal(folded[1].type, type);
+    assert.equal(folded[2].id, "p-2");
+    // The carried block survived verbatim under the minted id.
+    const landed = { ...folded[1] };
+    delete landed.id;
+    const expected = { ...seed };
+    delete expected.id;
+    assert.deepEqual(landed, expected, `${type} landed verbatim (sans id)`);
+  });
+}
+
+// S3.6-e) REMOVE — deleting a sheet / embed → a remove-block keyed by its id; the
+//   surrounding prose is untouched. The fold drops it. (Backspace on the selected atom
+//   maps to this remove-block — the structural delete affordance.)
+for (const type of ["sheet", "embed"]) {
+  check(`S3.6 runToOps: removing a ${type} → remove-block (Backspace deletes the atom)`, () => {
+    const seed = S36_SEEDS[type];
+    const blocks = [
+      { id: "p-1", type: "paragraph", content: [{ type: "text", value: "before" }] },
+      seed,
+      { id: "p-2", type: "paragraph", content: [{ type: "text", value: "after" }] },
+    ];
+    const doc = runToTiptap(blocks);
+    doc.content = [doc.content[0], doc.content[2]]; // Backspace-deletes the read-only atom
+
+    const ops = runToOps(blocks, doc);
+    assert.deepEqual(
+      ops.filter((o) => o.op === "remove-block"),
+      [{ op: "remove-block", id: seed.id }],
+      `exactly one remove-block for the ${type}`,
+    );
+    assert.equal(ops.filter((o) => o.op === "patch-block").length, 0, "no prose patches");
+
+    const folded = assertFolds(blocks, doc, ops, `S3.6-e ${type} remove`);
+    assert.deepEqual(folded.map((b) => b.id), ["p-1", "p-2"]);
+  });
+}
+
+// S3.6-f) NON-INTERFERENCE — a sheet / embed between two prose blocks does not perturb
+//   the prose diff: editing BOTH prose blocks (leaving the read-only atom untouched)
+//   emits exactly their two patches and NONE for the read-only atom.
+for (const type of ["sheet", "embed"]) {
+  check(`S3.6 runToOps: a ${type} between edited prose emits only the prose patches (none for the ${type})`, () => {
+    const seed = S36_SEEDS[type];
+    const blocks = [
+      { id: "p-1", type: "paragraph", content: [{ type: "text", value: "one" }] },
+      seed,
+      { id: "p-2", type: "paragraph", content: [{ type: "text", value: "two" }] },
+    ];
+    const doc = runToTiptap(blocks);
+    doc.content[0] = { ...doc.content[0], content: [{ type: "text", text: "ONE!" }] };
+    doc.content[2] = { ...doc.content[2], content: [{ type: "text", text: "TWO!" }] };
+
+    const ops = runToOps(blocks, doc);
+    const patches = ops.filter((o) => o.op === "patch-block");
+    assert.equal(patches.length, 2, `exactly the two prose patches, none for the ${type}`);
+    assert.deepEqual(patches.map((o) => o.id).sort(), ["p-1", "p-2"]);
+    assert.equal(
+      ops.filter((o) => o.op === "patch-block" && o.id === seed.id).length,
+      0,
+      `the ${type} emits no patch`,
+    );
+
+    // FOLD GATE: both prose blocks carry their new content; the read-only atom survives
+    // untouched at slot 1 (verbatim).
+    const folded = assertFolds(blocks, doc, ops, `S3.6-f ${type} non-interference`);
+    assert.deepEqual(folded[0].content, [{ type: "text", value: "ONE!" }]);
+    assert.deepEqual(folded[1], seed, `${type} survives untouched (verbatim)`);
+    assert.deepEqual(folded[2].content, [{ type: "text", value: "TWO!" }]);
+  });
+}
+
+// S3.6-g) A sheet AND an embed in the SAME run round-trip together with ZERO ops — the
+//   run can now span [p, sheet, embed, p] without splitting (completing S3).
+check("S3.6 runToOps: [paragraph, sheet, embed, paragraph] round-trips with ZERO ops (one run, no split)", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "before" }] },
+    S36_SHEET,
+    S36_EMBED,
+    { id: "p-2", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+
+  // Both project to their dedicated read-only nodes (NOT bpOpaque).
+  assert.equal(doc.content[1].type, BP_SHEET_NODE_NAME);
+  assert.equal(doc.content[2].type, BP_EMBED_NODE_NAME);
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 0, "an untouched [p, sheet, embed, p] run emits ZERO ops");
+
+  const folded = assertFolds(blocks, doc, ops, "S3.6-g sheet+embed one run");
+  assert.deepEqual(folded.map((b) => b.id), ["p-1", "sh-1", "em-1", "p-2"]);
+  assert.deepEqual(folded[1], S36_SHEET, "sheet survives verbatim");
+  assert.deepEqual(folded[2], S36_EMBED, "embed survives verbatim");
+});
+
+// S3.6-h) STILL-OPAQUE — a PICKER field (field-reference), still a boundary, is STILL
+//   carried opaquely (NOT a read-only atom). After S3.6 sheet/embed are canvas-eligible,
+//   but the pickers stay boundaries — their WCs carry their own LiveView event flow.
+check("S3.6 runToTiptap: a field-reference (picker) is STILL opaque (sheet/embed became read-only atoms, pickers did not)", () => {
+  const picker = { id: "fr-1", type: "field-reference", value: "" };
+  const doc = runToTiptap([picker]);
+  assert.equal(doc.content[0].type, "bpOpaque", "field-reference stays opaque");
+  assert.notEqual(doc.content[0].type, BP_SHEET_NODE_NAME);
+  assert.notEqual(doc.content[0].type, BP_EMBED_NODE_NAME);
+  assert.deepEqual(doc.content[0].attrs.bpBlock, picker);
 });
 
 if (failures > 0) {

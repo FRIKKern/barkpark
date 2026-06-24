@@ -530,6 +530,97 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert html =~ ~s(data-edit-block-id="img-1")
       assert html =~ ~s(phx-hook="BarkparkFieldBlockBridge")
     end
+
+    test "S3.6: [paragraph, sheet, paragraph] renders ONE canvas run containing the (read-only) sheet" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{
+          "id" => "sh-1",
+          "type" => "sheet",
+          "ref" => "production/budget",
+          "snapshot" => %{"rows" => [["A", "B"], ["1", "2"]]}
+        },
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-sheet",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — as of S3.6 the
+      # sheet is a READ-ONLY atom that rides the run, NOT a boundary widget between two
+      # canvases.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The sheet is NOT a separate per-block widget — it lives INSIDE the single run
+      # (no edit-block wrapper, no per-block sheet form).
+      refute html =~ ~s(data-edit-block-id="sh-1")
+      refute html =~ ~s(data-block-type="sheet")
+      refute html =~ ~s(id="paper-ed-p-1")
+
+      # The sheet rides the run's data-canvas-blocks carrier VERBATIM (its id + ref +
+      # snapshot are in the Jason-encoded block list on the canvas wrapper), so the
+      # read-only atom round-trips the whole block.
+      assert html =~ "sh-1"
+      assert html =~ "production/budget"
+    end
+
+    test "S3.6: [paragraph, embed, paragraph] renders ONE canvas run containing the (read-only) embed" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{"id" => "em-1", "type" => "embed", "target" => "Linked Note"},
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-embed",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the embed is a
+      # READ-ONLY atom that rides the run.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The embed is NOT a separate per-block widget — it lives INSIDE the single run.
+      refute html =~ ~s(data-edit-block-id="em-1")
+      refute html =~ ~s(data-block-type="embed")
+
+      # The embed rides the run's data-canvas-blocks carrier VERBATIM (its id + target
+      # are in the Jason-encoded block list on the canvas wrapper).
+      assert html =~ "em-1"
+      assert html =~ "Linked Note"
+    end
   end
 
   # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────
