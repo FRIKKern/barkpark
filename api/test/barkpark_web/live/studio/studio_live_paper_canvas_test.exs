@@ -742,6 +742,349 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     end
   end
 
+  # ── 2b. FLAG-ON — full server-side E2E loop ─────────────────────────────────
+  #
+  # The continuous-canvas edit→persist→echo→reload loop, driven through the REAL
+  # LiveView handler (not a unit of the partitioner). Each case pushes the same
+  # `paper-ops` event the JS canvas hook forwards (`render_hook(view, "paper-ops",
+  # %{"ops" => [...]})`), then asserts the WHOLE loop:
+  #
+  #   1. PERSIST — re-read the paper's stored blocks (Content.paper_blocks/2, the
+  #      same read sync_paper_edit_doc uses) and assert the mutation landed on disk.
+  #   2. ECHO    — assert_push_event "bp:canvas-update" carries the CONFIRMED run(s)
+  #      keyed by ORDINAL run_id, with the edit applied.
+  #   3. RELOAD  — (case 7) re-mount live/2 for the same paper and assert the canvas
+  #      run renders the EDITED blocks — the strongest "it really persisted" proof.
+  #
+  # This is the server-side proxy for the real-Studio cutover E2E: the canvas has
+  # only been harness-verified client-side; this closes the live-integration gap
+  # WITHOUT a browser by exercising paper_ops/2 → apply_paper_block_ops →
+  # sync_paper_edit_doc → push_canvas_echo end-to-end.
+  describe "flag ON — full server-side E2E loop" do
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    # The seed paper is ONE maximal run (heading+paragraph+callout+paragraph+divider
+    # are all canvas-eligible), so its echo is a single entry keyed "run-0".
+    @seed_order ["h-1", "p-intro", "c-note", "p-after", "d-end"]
+
+    # Mount the Studio paper editor flag-ON for the seed paper and open the editor.
+    defp mount_canvas_editor(conn, slug \\ @slug) do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{slug}"))
+      open_editor(view)
+      view
+    end
+
+    # Re-read the persisted block ids in stored order — the on-disk truth.
+    defp persisted_ids(slug \\ @slug) do
+      Content.paper_blocks(slug, @dataset) |> Enum.map(& &1["id"])
+    end
+
+    defp persisted_block(id, slug \\ @slug) do
+      Content.paper_blocks(slug, @dataset) |> Enum.find(&(&1["id"] == id))
+    end
+
+    # ── 1. PATCH round-trip ───────────────────────────────────────────────────
+    test "PATCH: patch-block persists the new content, echoes the confirmed run, ordinal keying holds",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Patched intro."}]}
+          }
+        ]
+      })
+
+      # (a) the PERSISTED paper reflects the new content (re-read from disk).
+      assert persisted_block("p-intro")["content"] ==
+               [%{"type" => "text", "value" => "Patched intro."}]
+
+      # The other blocks are untouched and order is preserved.
+      assert persisted_ids() == @seed_order
+      assert persisted_block("h-1")["text"] == "Canvas Paper"
+
+      # (b) the echo carries the CONFIRMED run with the edit; (c) keyed by ordinal.
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert Enum.map(blocks, & &1["id"]) == @seed_order
+
+      intro = Enum.find(blocks, &(&1["id"] == "p-intro"))
+      assert intro["content"] == [%{"type" => "text", "value" => "Patched intro."}]
+    end
+
+    # ── 2. INSERT mid-run ─────────────────────────────────────────────────────
+    test "INSERT: insert-after a client-minted block lands at the right position, survivors intact, echo carries it",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      new_block = %{
+        "id" => "p-fresh",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Freshly inserted."}]
+      }
+
+      # insert-after uses "afterId" (NOT "after" — that key is move-block's). Insert
+      # directly after p-intro → it lands at index 2, between p-intro and c-note.
+      render_hook(view, "paper-ops", %{
+        "ops" => [%{"op" => "insert-after", "afterId" => "p-intro", "block" => new_block}]
+      })
+
+      # Persisted at the right position with its client-minted id; survivors intact.
+      assert persisted_ids() == ["h-1", "p-intro", "p-fresh", "c-note", "p-after", "d-end"]
+
+      assert persisted_block("p-fresh")["content"] ==
+               [%{"type" => "text", "value" => "Freshly inserted."}]
+
+      # Echo: still ONE run (the inserted paragraph is canvas-eligible), and the new
+      # block rides it in position.
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+
+      assert Enum.map(blocks, & &1["id"]) ==
+               ["h-1", "p-intro", "p-fresh", "c-note", "p-after", "d-end"]
+    end
+
+    # ── 3. REMOVE ─────────────────────────────────────────────────────────────
+    test "REMOVE: remove-block deletes it from disk, survivors keep ids/order, echo reflects it",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [%{"op" => "remove-block", "id" => "c-note"}]
+      })
+
+      # Gone from disk; the survivors keep their ids AND their relative order.
+      assert persisted_ids() == ["h-1", "p-intro", "p-after", "d-end"]
+      assert persisted_block("c-note") == nil
+
+      # Echo: still ONE run, now without c-note.
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "p-after", "d-end"]
+    end
+
+    # ── 4. MOVE ───────────────────────────────────────────────────────────────
+    test "MOVE: move-block re-orders the persisted blocks, echo reflects the new order",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      # move-block uses "after" (the anchor id). Move p-after to just after h-1 — it
+      # jumps from index 3 to index 1.
+      render_hook(view, "paper-ops", %{
+        "ops" => [%{"op" => "move-block", "id" => "p-after", "after" => "h-1"}]
+      })
+
+      assert persisted_ids() == ["h-1", "p-after", "p-intro", "c-note", "d-end"]
+
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-after", "p-intro", "c-note", "d-end"]
+    end
+
+    # ── 5. BATCH — patch + insert + remove in one ordered atomic fold ──────────
+    test "BATCH: one paper-ops with patch+insert+remove composes exactly, a SINGLE echo fires",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      inserted = %{
+        "id" => "p-batch",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Batch inserted."}]
+      }
+
+      # An ordered batch: patch h-1's text, insert a paragraph after p-intro, remove
+      # the divider. The fold applies them in order; the persisted result is the
+      # COMPOSED effect of all three.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{"op" => "patch-block", "id" => "h-1", "patch" => %{"text" => "Batched Heading"}},
+          %{"op" => "insert-after", "afterId" => "p-intro", "block" => inserted},
+          %{"op" => "remove-block", "id" => "d-end"}
+        ]
+      })
+
+      # Composed end-state: heading text patched, p-batch inserted at index 2, d-end gone.
+      assert persisted_ids() == ["h-1", "p-intro", "p-batch", "c-note", "p-after"]
+      assert persisted_block("h-1")["text"] == "Batched Heading"
+
+      assert persisted_block("p-batch")["content"] ==
+               [%{"type" => "text", "value" => "Batch inserted."}]
+
+      # Cross-check against the pure batch primitive over the seed: same end-state.
+      {:ok, expected} =
+        Barkpark.PortableDoc.Patch.apply_patches(seed_blocks(), [
+          %{"op" => "patch-block", "id" => "h-1", "patch" => %{"text" => "Batched Heading"}},
+          %{"op" => "insert-after", "afterId" => "p-intro", "block" => inserted},
+          %{"op" => "remove-block", "id" => "d-end"}
+        ])
+
+      assert Content.paper_blocks(@slug, @dataset) == expected
+
+      # Exactly ONE echo for the whole batch (NOT one per op).
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "p-batch", "c-note", "p-after"]
+
+      # No SECOND echo leaked from the same batch.
+      refute_push_event(view, "bp:canvas-update", %{}, 50)
+    end
+
+    # ── 6. INCREMENTAL after echo — the loop is repeatable ────────────────────
+    test "INCREMENTAL: a SECOND edit after a batch+echo persists (the baseline advanced)",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      # First batch + its echo.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Round one."}]}
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{runs: [%{run_id: "run-0"}]})
+      assert persisted_block("p-intro")["content"] == [%{"type" => "text", "value" => "Round one."}]
+
+      # SECOND, independent edit on the same still-mounted view — drives the loop again.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-after",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Round two."}]}
+          }
+        ]
+      })
+
+      # Both edits persisted — the loop advanced, it is not stuck on the first batch.
+      assert persisted_block("p-intro")["content"] == [%{"type" => "text", "value" => "Round one."}]
+      assert persisted_block("p-after")["content"] == [%{"type" => "text", "value" => "Round two."}]
+
+      # The second edit produced its OWN echo carrying BOTH confirmed edits.
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert Enum.find(blocks, &(&1["id"] == "p-after"))["content"] ==
+               [%{"type" => "text", "value" => "Round two."}]
+    end
+
+    # ── 7. RELOAD round-trip — the strongest "it really persisted" check ──────
+    test "RELOAD: after edits, a fresh live/2 mount renders the EDITED blocks in the canvas",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      # A unique sentinel so we can assert it shows up in the re-mounted canvas HTML.
+      sentinel = "Survives-a-reload-#{System.unique_integer([:positive])}"
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{"content" => [%{"type" => "text", "value" => sentinel}]}
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{runs: _})
+      assert persisted_block("p-intro")["content"] == [%{"type" => "text", "value" => sentinel}]
+
+      # RE-MOUNT a FRESH LiveView for the same paper (flag still ON via this
+      # describe's setup) and open the editor — the canvas run must carry the
+      # EDITED block. The sentinel rides the run's data-canvas-blocks carrier
+      # (Jason-encoded), so it appears in the re-mounted editor HTML.
+      {:ok, reloaded, _html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+      reload_html = open_editor(reloaded)
+
+      assert reload_html =~ ~s(id="paper-canvas-run-0")
+      assert reload_html =~ "data-canvas-blocks"
+      # The edit survived persistence into a brand-new mount's canvas.
+      assert reload_html =~ sentinel
+    end
+
+    # ── 8. Idempotent-remove safety (audit Bug #1b) at the LiveView level ──────
+    test "BATCH with a stale remove of an ALREADY-absent id + a real patch — the patch STILL applies (no Edit failed)",
+         %{conn: conn} do
+      view = mount_canvas_editor(conn)
+
+      # A batch the canvas can legitimately send when an echo crosses a re-send in
+      # flight: it removes "ghost-id" (never existed / already gone) AND patches a
+      # real block. Without the idempotent-remove fix in patch.ex, the remove of an
+      # absent id would HALT the atomic fold with {:block_not_found}, the whole batch
+      # would error → "Edit failed" flash → the real patch would be LOST.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{"op" => "remove-block", "id" => "ghost-id"},
+          %{
+            "op" => "patch-block",
+            "id" => "p-after",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Patched past a ghost."}]}
+          }
+        ]
+      })
+
+      # The real patch landed despite the no-op remove riding the same batch.
+      assert persisted_block("p-after")["content"] ==
+               [%{"type" => "text", "value" => "Patched past a ghost."}]
+
+      # The seed order is intact (nothing was actually removed; ghost-id never existed).
+      assert persisted_ids() == @seed_order
+
+      # The handler did NOT flash "Edit failed" — the batch succeeded end-to-end, so
+      # an echo fired carrying the confirmed patch.
+      refute render(view) =~ "Edit failed"
+
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert Enum.find(blocks, &(&1["id"] == "p-after"))["content"] ==
+               [%{"type" => "text", "value" => "Patched past a ghost."}]
+    end
+  end
+
+  # The seed blocks, verbatim — shared by the batch cross-check (it folds the pure
+  # primitive over these and asserts the persisted result equals it).
+  defp seed_blocks do
+    [
+      %{"id" => "h-1", "type" => "heading", "text" => "Canvas Paper", "level" => 1},
+      %{
+        "id" => "p-intro",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "First run, paragraph one."}]
+      },
+      %{
+        "id" => "c-note",
+        "type" => "callout",
+        "tone" => "info",
+        "content" => [%{"type" => "text", "value" => "A boundary callout."}]
+      },
+      %{
+        "id" => "p-after",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Second run, paragraph two."}]
+      },
+      %{"id" => "d-end", "type" => "divider"}
+    ]
+  end
+
   # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────
 
   test "paper-ops folds a batch through apply_patches + persists identically to per-block",
