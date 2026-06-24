@@ -11,6 +11,11 @@ import {
   blockToTiptap,
   tiptapToFullBlock,
   buildPatchBlockOp,
+  // Phase-6 fuzz: the SAME inline serializer/deserializer the projector uses, so
+  // the generator can canonicalize random inline spans into projection
+  // fixed-point stored shapes (a real stored run is always a prior projection).
+  inlineArrayToTiptap,
+  tiptapInlineToPd,
 } from "./convert.js";
 import {
   runToTiptap,
@@ -3265,6 +3270,589 @@ check("S-slash: slashTriggerAllowsParent rejects a callout body, accepts prose",
   // Defensive: a future inline-content node-view (any non-prose parent type) is rejected
   // even at depth 1.
   assert.equal(slashTriggerAllowsParent(1, "tableCell"), false, "non-prose depth-1 parent rejected");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase-6 cutover regression gate — SEEDED PROPERTY/FUZZ over the FULL canvas
+// block vocabulary. The per-class tests above pin FIXED examples; this proves
+// the projection+diff engine is LOSSLESS over RANDOM stress.
+//
+//   PROPERTY 1 — LOAD IDENTITY: for any stored run, projecting it to the canvas
+//     doc and diffing back yields ZERO ops, and every block reconstructs from
+//     its projected node deep-equal to the original (canonical, key-order-safe).
+//   PROPERTY 2 — EDIT FOLD: for any stored run, a random STABLE-ID mutation
+//     (edit content / edit attr / remove / move — never minting a new id) emits
+//     ops that, folded through applyOps, reconstruct the mutated run EXACTLY.
+//
+// DETERMINISTIC: a mulberry32 PRNG seeded from BASE_SEED + iteration index, so
+// any failure repros from its printed seed (same seed → same run → same result).
+// No Math.random in the generator. Pure Node, no DOM, no server.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── mulberry32 — a tiny pure deterministic PRNG ─────────────────────────────
+// 32-bit state in, a float in [0,1) out, advancing the state. Reproducible: the
+// SAME seed yields the SAME stream forever. (We never touch Math.random here.)
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// rng helpers built on a mulberry32 stream.
+const rint = (rng, lo, hi) => lo + Math.floor(rng() * (hi - lo + 1)); // inclusive
+const rpick = (rng, arr) => arr[rint(rng, 0, arr.length - 1)];
+const rbool = (rng) => rng() < 0.5;
+
+// canonicalEqual — key-order-insensitive deep compare, reusing the projector's
+// own canonicalJSON semantics (recursively sorts OBJECT keys; ARRAY order is
+// significant). A stored block and its project→reconstruct twin compare EQUAL
+// despite differing key order, but a real content/order difference does not.
+function canonicalJSON_local(value) {
+  if (Array.isArray(value)) return "[" + value.map(canonicalJSON_local).join(",") + "]";
+  if (value && typeof value === "object") {
+    return (
+      "{" +
+      Object.keys(value)
+        .sort()
+        .map((k) => JSON.stringify(k) + ":" + canonicalJSON_local(value[k]))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value);
+}
+const canonicalEqual = (a, b) => canonicalJSON_local(a) === canonicalJSON_local(b);
+
+// normalizeCanvasDoc — a FAITHFUL copy of canvas/index.js's live-doc normalizer
+// (the production load path runs getJSON() through this before runToOps). On a
+// FRESH runToTiptap projection it is effectively identity (no phantom nested
+// null-bp attrs, no duplicate top-level ids), but PROPERTY 1 asserts the EXACT
+// production formula `runToOps(run, normalizeCanvasDoc(runToTiptap(run))) === 0`,
+// so we model it here verbatim. (Pure: it mutates+returns a doc, DOM-free.)
+function normalizeCanvasDoc(doc) {
+  const hasOnlyBpKeys = (attrs) =>
+    Object.keys(attrs).every((k) => k === "bpId" || k === "bpType");
+  const stripNested = (node) => {
+    if (node && node.attrs) {
+      const a = node.attrs;
+      if (a.bpId == null && a.bpType == null && hasOnlyBpKeys(a)) {
+        delete node.attrs;
+      } else {
+        if (a.bpId == null) delete a.bpId;
+        if (a.bpType == null) delete a.bpType;
+      }
+    }
+    if (node && node.content) node.content.forEach(stripNested);
+  };
+  (doc.content || []).forEach((top) => {
+    (top.content || []).forEach(stripNested);
+  });
+  const seen = new Set();
+  (doc.content || []).forEach((top) => {
+    const id = top.attrs && top.attrs.bpId;
+    if (id == null) return;
+    if (seen.has(id)) top.attrs = { ...top.attrs, bpId: null };
+    else seen.add(id);
+  });
+  return doc;
+}
+
+// reconstructBlock(block) — reconstruct a block from its PROJECTED node through
+// the PUBLIC engine path, exercising the private nextNodeToBlock exactly as a
+// real insert does. We project the single block, null its top-level bpId so the
+// diff treats it as NEW, then read the carried block off the emitted insert op
+// (minus its minted id). The result is the project→reconstruct twin of `block`.
+function reconstructBlock(block) {
+  const node = runToTiptap([block]).content[0];
+  // Null the top-level bpId → runToOps mints an id and carries the reconstructed
+  // block in an append-block (empty prev → no anchor).
+  const fresh = { ...node, attrs: { ...(node.attrs || {}), bpId: null } };
+  const ops = runToOps([], { type: "doc", content: [fresh] });
+  const ins = ops.find((o) => o.op === "append-block" || o.op === "insert-after");
+  if (!ins) throw new Error("reconstructBlock: no insert op emitted");
+  const { id: _mintedId, ...rest } = ins.block;
+  return rest;
+}
+
+// ── the generator vocabulary ────────────────────────────────────────────────
+
+const FUZZ_TEXTS = [
+  "hello", "world", "lorem ipsum", "a b c", "", "  spaces  ",
+  "ångström café naïve", "日本語テキスト", "emoji 🚀✨", "tab\tafter",
+  "less < greater > amp & quote \" apos '", "<script>alert(1)</script>",
+  "trailing space ", " leading space", "line", "x = 1 + 2",
+];
+const FUZZ_LANGS = ["", "js", "elixir", "ruby", "sh", "python", "ts", "rust"];
+const FUZZ_TONES = ["info", "warning", "danger", "success", "note", "tip"];
+const FUZZ_MERMAID = [
+  "graph TD\n  A-->B", "graph LR\n  X-->Y\n  Y-->Z",
+  "sequenceDiagram\n  Alice->>Bob: hi", "flowchart\n  a & b > c", "",
+];
+const FUZZ_CAPTIONS = ["", "Figure 1.", "The flow", "café & co. <x>"];
+const FUZZ_TITLES = [null, "", "Heads up", "Note <b>", "Café"];
+const FUZZ_COLORS = ["#000000", "#3b82f6", "#ef4444", "#ffffff", "#0a0a0a"];
+const FUZZ_DATETIMES = ["2026-06-24T10:00", "2026-01-01T00:00", "2025-12-31T23:59"];
+const FUZZ_TARGETS = ["intro-to-x", "setup", "Linked Note", "café-note", "a/b/c"];
+const FUZZ_SLUGS = ["hello-world", "a-b-c", "café", "x"];
+
+// genInlineSpans(rng, n) → a flat array of raw {text, marks} spans. Each span is
+// then PROJECTED and DESERIALIZED to canonical portable-doc inline form (so the
+// stored content is always a projection fixed-point — empty text dropped, marks
+// re-nested in MARK_ORDER, blockref/tag tokens synthesized; exactly what a real
+// stored run looks like). Mark kinds cover bold/italic/underline/strike/code/
+// link/wikilink/tag — the full inline vocabulary.
+function genInlineSpans(rng, n) {
+  const spans = [];
+  for (let i = 0; i < n; i++) {
+    const kind = rint(rng, 0, 9);
+    const text = rpick(rng, FUZZ_TEXTS);
+    if (kind === 0) spans.push({ type: "text", value: text });
+    else if (kind === 1) spans.push({ type: "strong", children: [{ type: "text", value: text }] });
+    else if (kind === 2) spans.push({ type: "em", children: [{ type: "text", value: text }] });
+    else if (kind === 3) spans.push({ type: "underline", children: [{ type: "text", value: text }] });
+    else if (kind === 4) spans.push({ type: "strikethrough", children: [{ type: "text", value: text }] });
+    else if (kind === 5) spans.push({ type: "code", value: text });
+    else if (kind === 6) {
+      const lk = { type: "link", href: "https://" + rpick(rng, FUZZ_SLUGS), children: [{ type: "text", value: text }] };
+      spans.push(lk);
+    } else if (kind === 7) {
+      const wk = { type: "wikilink", target: rpick(rng, FUZZ_TARGETS), children: [{ type: "text", value: text || "link" }] };
+      if (rbool(rng)) wk.alias = rpick(rng, FUZZ_TEXTS);
+      if (rbool(rng)) wk.docId = "doc-" + rint(rng, 1, 99);
+      spans.push(wk);
+    } else if (kind === 8) {
+      spans.push({ type: "tag", name: rpick(rng, FUZZ_SLUGS) });
+    } else {
+      // nested: bold > strikethrough (locks MARK_ORDER nesting)
+      spans.push({ type: "strong", children: [{ type: "strikethrough", children: [{ type: "text", value: text || "x" }] }] });
+    }
+  }
+  // Canonicalize through the SAME inline serializer/deserializer the projector
+  // uses, so the stored content is a projection fixed-point (a real stored shape).
+  return tiptapInlineToPd(inlineArrayToTiptap(spans));
+}
+
+// genInline(rng) → a non-trivially-sized canonical inline array (may be []).
+function genInline(rng) {
+  return genInlineSpans(rng, rint(rng, 0, 4));
+}
+
+// genBlock(rng, id) → one random block of a random canvas-eligible kind, carrying
+// the given stable id. Covers EVERY canvas vocabulary kind + empty/present
+// variants for each optional/chrome field.
+const FUZZ_BLOCK_KINDS = [
+  "paragraph", "heading", "list", "divider", "callout", "code", "diagram",
+  "field-string", "field-slug", "field-text", "field-boolean", "field-select",
+  "field-datetime", "field-color", "sheet", "embed",
+];
+
+function genBlock(rng, id) {
+  const kind = rpick(rng, FUZZ_BLOCK_KINDS);
+  return genBlockOfKind(rng, id, kind);
+}
+
+function genBlockOfKind(rng, id, kind) {
+  switch (kind) {
+    case "paragraph":
+      return { id, type: "paragraph", content: genInline(rng) };
+    case "heading":
+      return { id, type: "heading", level: rint(rng, 1, 3), text: rpick(rng, FUZZ_TEXTS) };
+    case "list": {
+      const ordered = rbool(rng);
+      const nItems = rint(rng, 1, 3);
+      const items = [];
+      for (let i = 0; i < nItems; i++) items.push(genInlineSpans(rng, rint(rng, 1, 3)));
+      return { id, type: "list", ordered, items };
+    }
+    case "divider":
+      return { id, type: "divider" };
+    case "callout": {
+      const b = { id, type: "callout", tone: rpick(rng, FUZZ_TONES), content: genInline(rng) };
+      const title = rpick(rng, FUZZ_TITLES);
+      if (title != null) b.title = title; // present-or-absent
+      if (rbool(rng)) {
+        b.collapsible = true;
+        if (rbool(rng)) b.collapsed = true;
+      }
+      return b;
+    }
+    case "code": {
+      const b = { id, type: "code", value: rpick(rng, FUZZ_TEXTS) + (rbool(rng) ? "\nline2\n  indent" : "") };
+      const lang = rpick(rng, FUZZ_LANGS);
+      if (lang !== "") b.lang = lang; // present-or-absent
+      return b;
+    }
+    case "diagram": {
+      const b = { id, type: "diagram", source: rpick(rng, FUZZ_MERMAID) };
+      const cap = rpick(rng, FUZZ_CAPTIONS);
+      if (cap !== "") b.caption = cap; // present-or-absent
+      return b;
+    }
+    case "field-string":
+    case "field-slug":
+    case "field-datetime":
+    case "field-color":
+    case "field-text": {
+      const b = { id, type: kind, value: fieldValueFor(rng, kind) };
+      if (rbool(rng)) b.label = rpick(rng, ["Title", "Slug", "Body", ""]);
+      if (rbool(rng)) b.fieldName = rpick(rng, FUZZ_SLUGS);
+      if (kind === "field-text" && rbool(rng)) b.rows = rint(rng, 1, 10);
+      return b;
+    }
+    case "field-boolean": {
+      const b = { id, type: "field-boolean", value: rbool(rng) }; // a REAL boolean
+      if (rbool(rng)) b.label = "Featured";
+      if (rbool(rng)) b.fieldName = "featured";
+      return b;
+    }
+    case "field-select": {
+      const options = [
+        { value: "draft", label: "Draft" },
+        { value: "published", label: "Published" },
+      ];
+      const b = {
+        id,
+        type: "field-select",
+        value: rbool(rng) ? rpick(rng, ["draft", "published"]) : "",
+        options,
+      };
+      if (rbool(rng)) b.label = "Status";
+      if (rbool(rng)) b.fieldName = "status";
+      return b;
+    }
+    case "sheet": {
+      const b = { id, type: "sheet" };
+      if (rbool(rng)) b.ref = rpick(rng, ["production/budget", "a/b", "x"]);
+      if (rbool(rng)) {
+        const nRows = rint(rng, 0, 3);
+        const nCols = rint(rng, 1, 3);
+        const rows = [];
+        for (let r = 0; r < nRows; r++) {
+          const row = [];
+          for (let c = 0; c < nCols; c++) row.push(rpick(rng, FUZZ_TEXTS));
+          rows.push(row);
+        }
+        b.snapshot = { rows };
+        if (rbool(rng) && rows.length) b.snapshot.head = rows[0].slice();
+      }
+      return b;
+    }
+    case "embed": {
+      const b = { id, type: "embed", target: rpick(rng, FUZZ_TARGETS) };
+      return b;
+    }
+    default:
+      return { id, type: "paragraph", content: genInline(rng) };
+  }
+}
+
+// A VALID value of the right JS type for a string-valued native field.
+function fieldValueFor(rng, kind) {
+  if (kind === "field-color") return rpick(rng, FUZZ_COLORS);
+  if (kind === "field-datetime") return rpick(rng, FUZZ_DATETIMES);
+  if (kind === "field-slug") return rpick(rng, FUZZ_SLUGS);
+  if (kind === "field-text") return rpick(rng, FUZZ_TEXTS) + (rbool(rng) ? "\nsecond" : "");
+  return rpick(rng, FUZZ_TEXTS); // field-string and the fall-through
+}
+
+// genRun(rng) → an array of 1..8 random blocks with stable, unique ids "b0".."bN".
+function genRun(rng) {
+  const n = rint(rng, 1, 8);
+  const run = [];
+  for (let i = 0; i < n; i++) run.push(genBlock(rng, "b" + i));
+  return run;
+}
+
+// ── PROPERTY 2 mutation — a random STABLE-ID change (never mints a new id) ────
+//
+//   editContent — edit one block's mutable content/attrs to another VALID value
+//                 of the SAME type (same id, so no mint).
+//   remove      — drop a random block.
+//   move        — lift a random block to a random position.
+//
+// The mutation re-projects the WHOLE run with runToTiptap, so the mutated doc is
+// a faithful canvas projection of the mutated run — exactly what the editor holds
+// after the edit. assertFolds then proves the emitted ops fold to the mutated run.
+function mutateRun(rng, run) {
+  // editContent is only valid for a block with a MUTABLE interior. The
+  // read-only atoms (sheet/embed) and the divider ATOM are INERT to edits — the
+  // editor can never write a value back, so re-randomizing them would be an
+  // INVALID mutation (not something the diff engine could ever observe). Only
+  // offer editContent when at least one editable block exists.
+  const editableIdx = run
+    .map((b, i) => (isEditableKind(b.type) ? i : -1))
+    .filter((i) => i !== -1);
+
+  const kinds = [];
+  if (editableIdx.length >= 1) kinds.push("editContent");
+  if (run.length >= 1) kinds.push("remove");
+  if (run.length >= 2) kinds.push("move");
+  const kind = rpick(rng, kinds);
+
+  if (kind === "remove") {
+    const at = rint(rng, 0, run.length - 1);
+    return run.filter((_b, i) => i !== at);
+  }
+  if (kind === "move") {
+    const from = rint(rng, 0, run.length - 1);
+    const copy = run.slice();
+    const [moved] = copy.splice(from, 1);
+    const to = rint(rng, 0, copy.length);
+    copy.splice(to, 0, moved);
+    return copy;
+  }
+  // editContent: mutate ONE editable block's MUTABLE fields to another valid
+  // value, holding its id AND its immutable config constant (the stable-id rule
+  // — same kind, new value through the SAME surface the editor edits, never a
+  // new id and never a config change the control can't make).
+  const at = rpick(rng, editableIdx);
+  const mutated = genMutatedContent(rng, run[at]);
+  return run.map((b, i) => (i === at ? mutated : b));
+}
+
+// True when a block kind has a MUTABLE interior the editor can change (prose
+// content, callout body/chrome, code/diagram body, field VALUE). False for the
+// INERT kinds (divider ATOM, sheet/embed READ-ONLY atoms) whose interior the
+// editor never writes back — a value change there is not an observable edit.
+function isEditableKind(type) {
+  return type !== "divider" && type !== "sheet" && type !== "embed";
+}
+
+// genMutatedContent(rng, block) → a block of the SAME type + SAME id with its
+// MUTABLE fields re-randomized but its IMMUTABLE config held constant. For a
+// field-* block ONLY `value` is mutable (label/options/rows/fieldName are CONFIG
+// the control cannot edit — runToOps' fieldNodeToPatch emits ONLY {value}); for
+// every other editable kind the whole interior is fair game.
+function genMutatedContent(rng, block) {
+  const id = block.id;
+  const type = block.type;
+  if (isCanvasFieldKindLocal(type)) {
+    // Mutate ONLY the value; carry the config keys VERBATIM (immutable through
+    // the control). The value stays the right JS type per kind.
+    const next = { ...block };
+    next.value =
+      type === "field-boolean"
+        ? !block.value
+        : type === "field-select"
+        ? rpick(rng, [...(block.options || []).map((o) => o.value), ""])
+        : fieldValueFor(rng, type);
+    return next;
+  }
+  // Prose / callout / code / diagram: re-roll the whole interior of the SAME kind.
+  return genBlockOfKind(rng, id, type);
+}
+
+// The 7 native field-* kinds (mirrors run-convert.js CANVAS_FIELD_TYPES) — used
+// by the mutation to restrict a field edit to the VALUE only.
+function isCanvasFieldKindLocal(type) {
+  return (
+    type === "field-string" ||
+    type === "field-slug" ||
+    type === "field-text" ||
+    type === "field-boolean" ||
+    type === "field-select" ||
+    type === "field-datetime" ||
+    type === "field-color"
+  );
+}
+
+// ── PROPERTY 1 — LOAD IDENTITY (the core gate) ──────────────────────────────
+const FUZZ_BASE_SEED = 0x5eed1; // a fixed base so the whole suite is reproducible.
+const FUZZ_ITERS = 1000;
+
+check(`FUZZ property-1 LOAD IDENTITY: ${FUZZ_ITERS} random runs project→diff to ZERO ops + block round-trip`, () => {
+  for (let i = 0; i < FUZZ_ITERS; i++) {
+    const seed = (FUZZ_BASE_SEED + i) >>> 0;
+    const rng = mulberry32(seed);
+    const run = genRun(rng);
+
+    // (1a) The production load formula: project → normalize → diff back === [].
+    let ops;
+    try {
+      ops = runToOps(run, normalizeCanvasDoc(runToTiptap(run)));
+    } catch (e) {
+      throw new Error(
+        `LOAD IDENTITY THREW at seed=${seed}: ${e.message}\nrun=${JSON.stringify(run)}`,
+      );
+    }
+    if (ops.length !== 0) {
+      const min = minimizeRun(run, (r) => {
+        try {
+          return runToOps(r, normalizeCanvasDoc(runToTiptap(r))).length !== 0;
+        } catch {
+          return true;
+        }
+      });
+      throw new Error(
+        `LOAD IDENTITY FAILED (spurious ops on load) at seed=${seed}\n` +
+          `  emitted ops: ${JSON.stringify(ops)}\n` +
+          `  full run:    ${JSON.stringify(run)}\n` +
+          `  MINIMAL run: ${JSON.stringify(min)}\n` +
+          `  minimal ops: ${JSON.stringify(runToOps(min, normalizeCanvasDoc(runToTiptap(min))))}`,
+      );
+    }
+
+    // (1b) Every block reconstructs from its projected node deep-equal (canonical)
+    //      to the original — the project→reconstruct round-trip is the identity.
+    for (const block of run) {
+      const back = reconstructBlock(block);
+      const { id: _id, ...origRest } = block;
+      const { id: _bid, ...backRest } = back;
+      if (!canonicalEqual(backRest, origRest)) {
+        throw new Error(
+          `BLOCK ROUND-TRIP FAILED at seed=${seed}\n` +
+            `  original: ${JSON.stringify(block)}\n` +
+            `  reconstructed: ${JSON.stringify(back)}`,
+        );
+      }
+    }
+  }
+});
+
+// ── PROPERTY 2 — EDIT FOLD (the diff gate) ──────────────────────────────────
+check(`FUZZ property-2 EDIT FOLD: ${FUZZ_ITERS} random stable-id mutations fold back EXACTLY`, () => {
+  for (let i = 0; i < FUZZ_ITERS; i++) {
+    // Offset the seed space from property-1 so the two properties exercise
+    // DIFFERENT random runs (still fully reproducible from the printed seed).
+    const seed = (FUZZ_BASE_SEED + 1000000 + i) >>> 0;
+    const rng = mulberry32(seed);
+    const run = genRun(rng);
+    const mutated = mutateRun(rng, run);
+    const mutatedDoc = normalizeCanvasDoc(runToTiptap(mutated));
+
+    let ops, folded;
+    try {
+      ops = runToOps(run, mutatedDoc);
+      folded = assertFolds(run, mutatedDoc, ops, `fuzz-2 seed=${seed}`);
+    } catch (e) {
+      const min = minimizeMutation(rng, run, mutated);
+      throw new Error(
+        `EDIT FOLD FAILED at seed=${seed}: ${e.message}\n` +
+          `  prev run:    ${JSON.stringify(run)}\n` +
+          `  mutated run: ${JSON.stringify(mutated)}\n` +
+          `  MINIMAL prev:    ${JSON.stringify(min.prev)}\n` +
+          `  MINIMAL mutated: ${JSON.stringify(min.next)}`,
+      );
+    }
+
+    // assertFolds proves the id ORDER + survival structure. Now assert the folded
+    // result is the mutated run EXACTLY (canonical, key-order-safe) — every
+    // surviving block's content/attrs reconstruct to the mutated value, and the
+    // sequence matches the mutated run block-for-block (minted ids aside).
+    if (folded.length !== mutated.length) {
+      throw new Error(
+        `EDIT FOLD length mismatch at seed=${seed}: folded ${folded.length} !== mutated ${mutated.length}\n` +
+          `  prev: ${JSON.stringify(run)}\n  mutated: ${JSON.stringify(mutated)}\n  ops: ${JSON.stringify(ops)}`,
+      );
+    }
+    for (let j = 0; j < mutated.length; j++) {
+      // Compare in the engine's CANONICAL stored form (id excluded). The JS
+      // reference fold (applyOps) faithfully mirrors patch.ex's SHALLOW merge,
+      // which keeps a patch's removal-safe EXPLICIT optionals (callout
+      // collapsed:false / title:null, code lang:"" / diagram caption:"") rather
+      // than dropping them the way compose.ex's maybe_put would on the server. So
+      // a folded block can carry an explicit collapsed:false where the mutated
+      // stored block has it absent — render-IDENTICAL, and the projector's own
+      // canonical compare (stableCalloutKey/stableCodeKey) treats them EQUAL,
+      // which is precisely why the NEXT load round-trips to zero ops. We
+      // normalize BOTH sides through reconstructBlock (project→reconstruct), which
+      // collapses every absent-when-empty optional to its canonical form on both
+      // sides, then compare. This asserts the fold reconstructs the mutated run
+      // EXACTLY up to the documented ""/null/absent optional normalization.
+      const foldedCanon = reconstructBlock(folded[j]);
+      const mutatedCanon = reconstructBlock(mutated[j]);
+      const { id: _fid, ...foldedRest } = foldedCanon;
+      const { id: _mid, ...mutatedRest } = mutatedCanon;
+      if (!canonicalEqual(foldedRest, mutatedRest)) {
+        throw new Error(
+          `EDIT FOLD content mismatch at seed=${seed} slot ${j}\n` +
+            `  expected (canonical): ${JSON.stringify(mutatedCanon)}\n` +
+            `  folded   (canonical): ${JSON.stringify(foldedCanon)}\n` +
+            `  expected (raw): ${JSON.stringify(mutated[j])}\n` +
+            `  folded   (raw): ${JSON.stringify(folded[j])}\n` +
+            `  prev: ${JSON.stringify(run)}\n  ops: ${JSON.stringify(ops)}`,
+        );
+      }
+    }
+  }
+});
+
+// ── delta-debug minimizers (only invoked on a real failure) ─────────────────
+//
+// minimizeRun — shrink a failing run to the smallest sub-list that still fails
+// `predicate`. Greedy single-block removal to a fixed point. Pure, deterministic.
+function minimizeRun(run, predicate) {
+  let best = run.slice();
+  let shrank = true;
+  while (shrank && best.length > 1) {
+    shrank = false;
+    for (let i = 0; i < best.length; i++) {
+      const candidate = best.filter((_b, idx) => idx !== i);
+      if (candidate.length >= 1 && predicate(candidate)) {
+        best = candidate;
+        shrank = true;
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+// minimizeMutation — shrink a failing (prev, mutated) pair by dropping the SAME
+// trailing/leading blocks from BOTH while the fold still throws. Best-effort: we
+// only drop a block id present in BOTH (so the mutation relationship survives).
+function minimizeMutation(_rng, prev, mutated) {
+  const foldThrows = (p, m) => {
+    try {
+      const doc = normalizeCanvasDoc(runToTiptap(m));
+      assertFolds(p, doc, runToOps(p, doc), "min");
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  let bp = prev.slice();
+  let bm = mutated.slice();
+  let shrank = true;
+  while (shrank) {
+    shrank = false;
+    // Try removing each prev id from BOTH lists (when present in both).
+    for (const block of bp) {
+      const id = block.id;
+      const np = bp.filter((b) => b.id !== id);
+      const nm = bm.filter((b) => b.id !== id);
+      if (np.length >= 1 && foldThrows(np, nm)) {
+        bp = np;
+        bm = nm;
+        shrank = true;
+        break;
+      }
+    }
+  }
+  return { prev: bp, next: bm };
+}
+
+// ── determinism guard — the SAME seed yields the SAME run + SAME ops ─────────
+check("FUZZ determinism: same seed → identical run, ops, and fold (reproducible)", () => {
+  const seed = (FUZZ_BASE_SEED + 42) >>> 0;
+  const runA = genRun(mulberry32(seed));
+  const runB = genRun(mulberry32(seed));
+  assert.deepEqual(runA, runB, "same seed must yield the byte-identical run");
+
+  const opsA = runToOps(runA, normalizeCanvasDoc(runToTiptap(runA)));
+  const opsB = runToOps(runB, normalizeCanvasDoc(runToTiptap(runB)));
+  assert.deepEqual(opsA, opsB, "same run must yield the byte-identical ops");
+  assert.equal(opsA.length, 0, "and the load-identity run emits ZERO ops");
+
+  // A different seed must (with overwhelming probability) differ — sanity that
+  // the PRNG is actually advancing per seed, not returning a constant.
+  const runC = genRun(mulberry32((seed + 1) >>> 0));
+  assert.notDeepEqual(runA, runC, "a different seed yields a different run");
 });
 
 if (failures > 0) {
