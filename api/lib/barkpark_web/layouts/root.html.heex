@@ -3507,8 +3507,41 @@
         };
         const wc = this.el.querySelector("bp-paper-canvas");
         seedBlocks(wc);
+
+        // P4 [[ wikilink + # tag autocomplete: inject the SAME async candidate
+        // sources the per-block BarkparkPaperEditor hook injects (copied verbatim).
+        // The canvas WC owns the popups + all trigger detection (parseOpenWikilink
+        // / parseOpenTag); this hook only supplies candidates by round-tripping the
+        // live query to the SERVER's existing `paper-wikilink-search` /
+        // `paper-tag-search` reply-events (which return {results:[{title,id,type}]}
+        // and {results:[name…]} respectively — reused verbatim, no new handlers).
+        // The `wikilinkSource` / `tagSource` WC properties are the injectable async
+        // sources; when unset the popups never open. Set them whether or not the tag
+        // has upgraded (the WC's _upgradeProperty reclaims a pre-upgrade assignment),
+        // and again via whenDefined so the assignment lands without assuming order.
+        const wireWikilinkSource = (el) => {
+          el.wikilinkSource = (query) =>
+            new Promise((resolve) =>
+              this.pushEvent("paper-wikilink-search", { query }, (reply) =>
+                resolve((reply && reply.results) || [])));
+        };
+        const wireTagSource = (el) => {
+          el.tagSource = (query) =>
+            new Promise((resolve) =>
+              this.pushEvent("paper-tag-search", { query }, (reply) =>
+                resolve((reply && reply.results) || [])));
+        };
+        if (wc) {
+          wireWikilinkSource(wc);
+          wireTagSource(wc);
+        }
         customElements.whenDefined("bp-paper-canvas").then(() => {
-          seedBlocks(this.el.querySelector("bp-paper-canvas"));
+          const el = this.el.querySelector("bp-paper-canvas");
+          if (el) {
+            seedBlocks(el);
+            wireWikilinkSource(el);
+            wireTagSource(el);
+          }
         });
 
         // Outbound: the canvas's debounced op batch → the server's paper-ops
