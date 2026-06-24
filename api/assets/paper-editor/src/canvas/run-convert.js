@@ -38,11 +38,24 @@
 import { blockToTiptap, buildPatchBlockOp } from "../convert.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
-// switch). Anything not in this set is carried opaquely.
+// switch). These project to a native ProseMirror textblock and diff via
+// buildPatchBlockOp.
 const PROSE_TYPES = new Set(["paragraph", "heading", "list"]);
+
+// S3: non-prose block kinds the canvas handles as ATOM nodes — leaf nodes that
+// live INSIDE the canvas document (not run boundaries, not opaque carry-through).
+// The divider is the first: a leaf with no content, so it NEVER reports an
+// interior change. As later increments land callout/code/field/sheet atoms they
+// join this set. A node is "canvas-handled" if it is PROSE or a canvas ATOM;
+// only a truly-unknown non-prose kind stays bpOpaque.
+const CANVAS_ATOM_TYPES = new Set(["divider"]);
 
 function isProseType(type) {
   return PROSE_TYPES.has(type);
+}
+
+function isCanvasAtomType(type) {
+  return CANVAS_ATOM_TYPES.has(type);
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -63,7 +76,12 @@ function deepClone(value) {
 //   PROSE block → blockToTiptap(block).content[0] (the single prose node),
 //     with { bpId, bpType } MERGED into its attrs (preserving any attrs
 //     blockToTiptap already set, e.g. heading level).
-//   NON-PROSE block → an opaque placeholder:
+//   CANVAS ATOM block (S3: divider) → a native leaf node of that type carrying
+//     ONLY { bpId, bpType } attrs — e.g. { type:"divider", attrs:{bpId,bpType} }.
+//     No bpBlock: a divider is a content-free leaf, fully described by its type +
+//     id, so it round-trips through the canvas schema's own node (divider-node.js)
+//     rather than as an opaque blob.
+//   OTHER NON-PROSE block → an opaque placeholder:
 //       { type:"bpOpaque", attrs:{ bpId, bpType, bpBlock:<deep-cloned block> } }
 //     carrying the original block JSON verbatim so it round-trips untouched.
 export function runToTiptap(blocks) {
@@ -77,6 +95,14 @@ export function runToTiptap(blocks) {
       const node = blockToTiptap(block).content[0];
       const attrs = { ...(node.attrs || {}), bpId, bpType };
       return { ...node, attrs };
+    }
+
+    if (isCanvasAtomType(bpType)) {
+      // A canvas atom (divider): a native leaf node of that type, stamped with
+      // bpId/bpType only. The canvas schema (divider-node.js) declares the node,
+      // so getJSON() round-trips it. No content, no bpBlock — a leaf is fully
+      // described by type + id.
+      return { type: bpType, attrs: { bpId, bpType } };
     }
 
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
@@ -231,10 +257,14 @@ export function runToOps(prevBlocks, nextDoc) {
   const nextSeq = nextNodes.map((node) => {
     const bpId = node.attrs && node.attrs.bpId;
     const isOpaque = node.type === "bpOpaque";
+    // A canvas atom (S3: divider) is a content-free leaf — like opaque, it never
+    // emits an interior patch, but unlike opaque it reconstructs as a real block
+    // of its type (not a carried bpBlock). Detect by the node TYPE itself.
+    const isAtom = isCanvasAtomType(node.type);
     const bpType = (node.attrs && node.attrs.bpType) || node.type;
     const existing = bpId != null && prevIndex.has(bpId);
     const id = existing ? bpId : mintId(taken);
-    return { id, bpType, node, isNew: !existing, isOpaque };
+    return { id, bpType, node, isNew: !existing, isOpaque, isAtom };
   });
 
   const nextIds = new Set(nextSeq.map((e) => e.id));
@@ -310,8 +340,10 @@ export function runToOps(prevBlocks, nextDoc) {
   //
   // Byte-identical to the per-block editor's patch-block (buildPatchBlockOp).
   // A surviving opaque node is a no-op in v1 (opaque blocks just round-trip).
+  // A surviving canvas ATOM (S3: divider) is likewise a no-op: a leaf has no
+  // interior to change, so it NEVER reports an interior patch.
   for (const entry of nextSeq) {
-    if (entry.isNew || entry.isOpaque) continue;
+    if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
     if (proseNodeChanged(prevNode, entry.node)) {
@@ -325,11 +357,18 @@ export function runToOps(prevBlocks, nextDoc) {
 
 // Reconstruct a portable-doc block from a NEW nextSeq entry, carrying its
 // CLIENT-MINTED id. PROSE → the convert.js patch fields plus { id, type };
-// OPAQUE → its carried bpBlock verbatim, with the minted id stamped on (so
-// move-block / later folds can key it). Every inserted block carries an id —
-// that is what makes a front-insert / reorder expressible via move-block.
+// CANVAS ATOM (S3: divider) → a bare { id, type } leaf block (no body); the id
+// is minted on insert and the leaf carries no other fields. OPAQUE → its carried
+// bpBlock verbatim, with the minted id stamped on (so move-block / later folds
+// can key it). Every inserted block carries an id — that is what makes a
+// front-insert / reorder expressible via move-block.
 function nextNodeToBlock(entry) {
   const node = entry.node;
+  if (entry.isAtom) {
+    // Canvas atom insert (divider): a content-free leaf, fully described by its
+    // type + the minted id. No body fields to reconstruct.
+    return { id: entry.id, type: entry.bpType || node.type };
+  }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.
     const block = deepClone((node.attrs && node.attrs.bpBlock) || {});

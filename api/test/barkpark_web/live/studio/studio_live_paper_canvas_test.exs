@@ -169,20 +169,28 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       edit_html = open_editor(view)
 
-      # Two prose runs → two canvases, KEYED by each run's first block id.
+      # Two canvas runs → two canvases, KEYED by each run's first block id. The
+      # callout is the only boundary; the trailing divider (S3) now rides the
+      # SECOND run (p-after) rather than splitting off its own boundary.
       assert edit_html =~ ~s(id="paper-canvas-h-1")
       assert edit_html =~ ~s(id="paper-canvas-p-after")
       assert edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
       assert edit_html =~ ~s(phx-update="ignore")
       assert edit_html =~ ~s(<bp-paper-canvas)
 
-      # Exactly two canvas wrappers (the two prose runs), no more.
+      # Exactly two canvas wrappers (the two runs), no more — the divider did NOT
+      # add a third boundary/widget.
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, edit_html)) == 2
 
-      # The non-prose callout is a run boundary rendered by its EXISTING per-block
-      # widget (still has its edit-block wrapper + delete control), NOT a canvas.
+      # The non-canvas callout is a run boundary rendered by its EXISTING per-block
+      # widget (still has its edit-block wrapper), NOT a canvas.
       assert edit_html =~ ~s(data-edit-block-id="c-note")
       assert edit_html =~ ~s(data-block-type="callout")
+
+      # S3: the divider is INSIDE the canvas now, NOT a standalone per-block
+      # widget — so its edit-block wrapper must be ABSENT (it lives in the run's
+      # data-canvas-blocks carrier instead, asserted in its own test below).
+      refute edit_html =~ ~s(data-edit-block-id="d-end")
 
       # The per-block <bp-paper-editor> WC is NOT used on the ON path — the prose
       # blocks live inside the canvases instead.
@@ -235,14 +243,57 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert carrier_at < first_canvas_at
     end
 
-    test "a divider trailing the second run is its own boundary (not swallowed into a run)",
+    test "S3: a divider trailing a run rides that run's canvas (NOT its own boundary widget)",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       edit_html = open_editor(view)
 
-      # The divider renders via its existing read-only per-block widget.
-      assert edit_html =~ ~s(data-edit-block-id="d-end")
-      assert edit_html =~ ~s(data-block-type="divider")
+      # The seed's trailing divider (d-end) follows p-after with no boundary
+      # between them, so it joins the p-after run. It is NOT a standalone
+      # per-block widget — its edit-block wrapper is gone.
+      refute edit_html =~ ~s(data-edit-block-id="d-end")
+      refute edit_html =~ ~s(data-block-type="divider")
+
+      # Instead it rides the second run's data-canvas-blocks carrier (Jason-
+      # encoded, so its id appears inside the p-after canvas wrapper's attribute).
+      assert edit_html =~ "d-end"
+    end
+
+    test "S3: [heading, divider, paragraph] renders ONE canvas run containing the divider" do
+      blocks = [
+        %{"id" => "h-1", "type" => "heading", "text" => "Doc", "level" => 1},
+        %{"id" => "d-1", "type" => "divider"},
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "body"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-div",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (the heading) —
+      # the divider does NOT split it into two canvases with a widget between.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-h-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The divider is NOT rendered as a separate per-block widget between two
+      # canvases — it lives INSIDE the single run.
+      refute html =~ ~s(data-edit-block-id="d-1")
+      refute html =~ ~s(id="paper-ed-h-1")
+
+      # The divider rides the run's data-canvas-blocks carrier (its id is in the
+      # Jason-encoded block list on the canvas wrapper).
+      assert html =~ "d-1"
     end
   end
 
