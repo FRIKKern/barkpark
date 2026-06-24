@@ -417,6 +417,11 @@ defmodule Barkpark.Plugins.Capabilities do
       },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
       %{
+        "name" => "token",
+        "summary" => "Mint read-only, workspace-bound API tokens.",
+        "plugin" => nil
+      },
+      %{
         "name" => "plugin",
         "summary" => "Installed plugins and their settings.",
         "plugin" => nil
@@ -622,6 +627,26 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("name", true, "string", "Project name.")],
         writes: true,
         default_output: "minimal"
+      ),
+      core_cmd(
+        "token.create",
+        "token",
+        "create",
+        "Mint a read-only, workspace-bound API token (public-read/read only).",
+        "POST",
+        "/v1/tokens",
+        "scoped_admin",
+        args: [arg("label", true, "string", "Human label for the minted token.")],
+        flags: [
+          flag("permissions", "string",
+            "Comma list — public-read|read ONLY (default public-read).",
+            default: "public-read"
+          ),
+          flag("dataset", "string", "Dataset to bind.", default: "production")
+        ],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.ls",

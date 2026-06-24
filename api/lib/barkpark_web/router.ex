@@ -1075,6 +1075,16 @@ defmodule BarkparkWeb.Router do
     delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end
 
+  # Scoped token mint (admin) — mints a READ-ONLY, workspace-bound token. Same
+  # :scoped_admin gate as schema management (owner/admin role in the resolved
+  # workspace). The controller hard-restricts the mintable permission set to a
+  # read-only allowlist (public-read/read) so this can never be a privilege-mint.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    post("/v1/tokens", TokenController, :create)
+  end
+
   # Scoped webhooks (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])

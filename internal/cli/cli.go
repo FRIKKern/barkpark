@@ -127,6 +127,14 @@ func Execute(args []string) int {
 		// pipeline the generic command runner knows nothing about; it resolves the
 		// target server/token/scope through the saved-server config like the rest.
 		return runPaper(out, g, rest[1:])
+	case "vercel":
+		// `bp vercel quick-setup …` — stand up a new Barkpark-backed site and
+		// ship it to Vercel in one shot. A built-in (not a manifest command)
+		// because it composes a multi-step provisioning + deploy pipeline (and a
+		// shell-out to the `vercel` binary) the generic command runner knows
+		// nothing about; it resolves the target server + admin token through the
+		// saved-server config like the rest.
+		return runVercel(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}

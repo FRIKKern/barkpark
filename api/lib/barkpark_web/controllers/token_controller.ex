@@ -1,0 +1,125 @@
+defmodule BarkparkWeb.TokenController do
+  @moduledoc """
+  Admin-gated mint of a READ-ONLY, workspace-bound API token.
+
+  `POST /w/:workspace_slug/p/:project_slug/v1/tokens` — wired under the
+  `:scoped_admin` pipeline (RequireToken + RequireWorkspaceRole), so only an
+  owner/admin of the resolved `current_workspace` can reach it. The endpoint
+  exists to mint the `public-read` token a new site needs (see
+  `templates/DEPLOYING.md` — non-Default workspaces 403 anonymous reads, so the
+  Next.js app needs a token holding a `workspace_membership` row for THIS
+  workspace). It replaces the old ssh `mix run --no-start` mint.
+
+  SECURITY — this is NOT a privilege-mint. The mintable permission set is a
+  fixed, READ-ONLY allowlist (`public-read`, `read`). Any request asking for
+  `write`/`admin`/`ops` — or any permission outside the allowlist — is rejected
+  with `422` BEFORE a token is created. Combined with the `:scoped_admin` gate
+  (admin authority is the membership ROLE, not the token's global perms), a
+  workspace member cannot mint here, and an admin cannot escalate beyond
+  read-only.
+
+  The plaintext token is returned ONCE in the 201 body and is never recoverable
+  after (only its SHA256 hash is persisted). The raw token is NEVER logged.
+  """
+  use BarkparkWeb, :controller
+
+  alias Barkpark.Auth
+
+  # The ONLY permissions this endpoint will mint. Read-only by construction —
+  # anything else (write/admin/ops/…) is a 422, never silently dropped.
+  @allowed_permissions ~w(public-read read)
+
+  @doc """
+  Mint a read-only token bound to the resolved workspace.
+
+  Body: `{"label": string, "permissions": ["public-read"], "dataset": "production"}`.
+
+    * `label` is required and must be a non-empty string.
+    * `permissions` defaults to `["public-read"]`; every entry must be in
+      `#{inspect(@allowed_permissions)}` or the request 422s.
+    * `dataset` defaults to `"production"`.
+
+  201 → `{"token": raw, "label": ..., "permissions": [...], "dataset": ...,
+  "workspace": <workspace_slug>}`.
+  """
+  def create(conn, params) do
+    workspace = conn.assigns[:current_workspace]
+
+    with {:ok, label} <- fetch_label(params),
+         {:ok, perms} <- fetch_permissions(params),
+         dataset when is_binary(dataset) <- fetch_dataset(params),
+         %{id: ws_id, slug: ws_slug} <- workspace do
+      raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+      case Auth.create_token(raw, label, dataset, perms, ws_id) do
+        {:ok, _token} ->
+          conn
+          |> put_status(:created)
+          |> json(%{
+            token: raw,
+            label: label,
+            permissions: perms,
+            dataset: dataset,
+            workspace: ws_slug
+          })
+
+        {:error, _reason} ->
+          unprocessable(conn, "could not mint token")
+      end
+    else
+      {:error, :missing_label} ->
+        unprocessable(conn, "label is required and must be a non-empty string")
+
+      {:error, {:forbidden_permissions, bad}} ->
+        unprocessable(
+          conn,
+          "permissions #{inspect(bad)} not allowed — this endpoint mints read-only " <>
+            "tokens only (#{Enum.join(@allowed_permissions, ", ")})"
+        )
+
+      nil ->
+        # current_workspace assign missing — the scoped pipeline should have set
+        # it; fail closed rather than mint an unbound token.
+        unprocessable(conn, "workspace could not be resolved")
+    end
+  end
+
+  defp fetch_label(%{"label" => label}) when is_binary(label) do
+    case String.trim(label) do
+      "" -> {:error, :missing_label}
+      trimmed -> {:ok, trimmed}
+    end
+  end
+
+  defp fetch_label(_), do: {:error, :missing_label}
+
+  # Default to ["public-read"]; reject any permission outside the read-only
+  # allowlist. A non-list `permissions` value collapses to the forbidden path.
+  defp fetch_permissions(%{"permissions" => perms}) when is_list(perms) do
+    perms = perms |> Enum.map(&to_string/1) |> Enum.uniq()
+
+    case Enum.reject(perms, &(&1 in @allowed_permissions)) do
+      [] when perms == [] -> {:ok, ["public-read"]}
+      [] -> {:ok, perms}
+      bad -> {:error, {:forbidden_permissions, bad}}
+    end
+  end
+
+  defp fetch_permissions(%{"permissions" => _}), do: {:error, {:forbidden_permissions, [:invalid]}}
+  defp fetch_permissions(_), do: {:ok, ["public-read"]}
+
+  defp fetch_dataset(%{"dataset" => dataset}) when is_binary(dataset) do
+    case String.trim(dataset) do
+      "" -> "production"
+      trimmed -> trimmed
+    end
+  end
+
+  defp fetch_dataset(_), do: "production"
+
+  defp unprocessable(conn, message) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: "unprocessable", message: message}})
+  end
+end
