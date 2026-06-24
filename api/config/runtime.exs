@@ -20,6 +20,16 @@ if System.get_env("PHX_SERVER") do
   config :barkpark, BarkparkWeb.Endpoint, server: true
 end
 
+# Continuous-canvas editor cutover: ON by default in PRODUCTION (the unified
+# <bp-paper-canvas> Obsidian-style editor). Dev/test stay OFF (the per-block
+# <bp-paper-editor>) so the flag-OFF byte-identical guarantee and its tests hold.
+# PaperCanvas.paper_canvas_enabled?/0 reads BARKPARK_PAPER_CANVAS at request time, so
+# this is an overridable DEFAULT — set BARKPARK_PAPER_CANVAS=0 in the prod env to roll
+# back instantly (no code redeploy); flag-off is byte-identical, no data migration.
+if config_env() == :prod and System.get_env("BARKPARK_PAPER_CANVAS") in [nil, ""] do
+  System.put_env("BARKPARK_PAPER_CANVAS", "1")
+end
+
 config :barkpark, BarkparkWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
