@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
+  alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
 
@@ -201,7 +202,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   """
   def paper_unbind_property(%{"id" => id}, socket) when is_binary(id) and id != "" do
     {:noreply,
-     Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => %{"fieldName" => nil}})}
+     Shared.paper_op(socket, %{
+       "op" => "patch-block",
+       "id" => id,
+       "patch" => %{"fieldName" => nil}
+     })}
   end
 
   def paper_unbind_property(_params, socket), do: {:noreply, socket}
@@ -228,5 +233,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       end
 
     {:noreply, Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+  end
+
+  @doc """
+  Typeahead candidate search for the [[ wikilink autocomplete popup.
+
+  Blank query or query exceeding 100 chars → empty result (short-circuit
+  before hitting the DB). Otherwise delegates to `Content.search_papers/3`
+  (which is already capped at 20 results) using the same dataset + scope
+  that every other paper handler reads from socket assigns.
+
+  Returns `{:reply, %{results: [%{title, id, type}]}, socket}` — LiveView
+  forwards the map to the client's pushEvent callback, which resolves the
+  Promise exposed on `el.wikilinkSource`.
+  """
+  def paper_wikilink_search(q, socket)
+      when not is_binary(q) or byte_size(q) == 0 or byte_size(q) > 100 do
+    {:reply, %{results: []}, socket}
+  end
+
+  def paper_wikilink_search(q, socket) do
+    dataset = socket.assigns.dataset
+    opts = ScopeHelpers.scope_opts(socket)
+
+    results =
+      Content.search_papers(q, dataset, opts)
+      |> Enum.map(fn %{id: id, title: title} ->
+        %{title: title, id: to_string(id), type: "paper"}
+      end)
+
+    {:reply, %{results: results}, socket}
   end
 end

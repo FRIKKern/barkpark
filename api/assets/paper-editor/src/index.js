@@ -22,6 +22,8 @@ import Typography from "@tiptap/extension-typography";
 
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
+import { WikilinkMenu } from "./wikilink-menu.js";
+import { parseOpenWikilink, wikilinkReplaceRange } from "./wikilink-trigger.js";
 import { FormatBubble } from "./format-bubble.js";
 import { normalizeTone } from "./tone.js";
 // Internal-link marks (wikilink/blockref/tag) — schema registration only, so
@@ -65,6 +67,11 @@ class BpPaperEditor extends HTMLElement {
     this._debounceTimer = null;
     this._slash = null; // SlashMenu instance (lazy, created on first trigger)
     this._bubble = null; // FormatBubble instance (selection format toolbar)
+    // `[[` wikilink autocomplete (Studio-only — see set wikilinkSource below).
+    this._wikilink = null; // WikilinkMenu instance (lazy, created on first trigger)
+    this._wlSeq = 0; // monotonic open/query counter — stale async-result guard
+    this._wikilinkSource = null; // injected async (query) => [{ title, id, type }]
+    this._wlRange = null; // { from, to } PM range to replace on the current pick
     // Read-mode flag. Defaults TRUE (current edit behavior). Only the literal
     // attribute value editable="false" disables editing — a presence-boolean
     // can't express default-true, hence the by-value convention.
@@ -75,6 +82,14 @@ class BpPaperEditor extends HTMLElement {
     if (this._editor) return; // double-mount guard
 
     ensureStyles();
+
+    // Upgrade-safe property reclaim: a host may set `el.wikilinkSource = …` or
+    // `el.block = …` BEFORE the custom-element definition upgrades this node. In
+    // that window the assignment lands as a plain own-property that would shadow
+    // the prototype accessor once it exists. Delete + re-assign each so the
+    // value flows back through the real setter.
+    this._upgradeProperty("wikilinkSource");
+    this._upgradeProperty("block");
 
     // Default true; only the literal string "false" disables. This mount-time
     // read is authoritative — attributeChangedCallback only handles later toggles.
@@ -148,7 +163,17 @@ class BpPaperEditor extends HTMLElement {
         // tokens are already disjoint ('>' vs '/'), but the explicit `consumed`
         // gate makes the contract code-enforced, not incidental.
         const consumed = this._maybeCalloutShorthand();
-        if (!consumed) this._maybeSlash();
+        if (!consumed) {
+          // `[[` wikilink and leading `/` slash are mutually exclusive popups:
+          // run the wikilink detector first; if IT opened, force the slash menu
+          // shut and skip _maybeSlash so only one popup is ever live. The two
+          // triggers are already disjoint, but the gate makes that code-enforced.
+          if (this._maybeWikilink()) {
+            this._closeSlash();
+          } else {
+            this._maybeSlash();
+          }
+        }
         if (this._bubble) this._bubble.update();
       },
       // Selection-only changes (drag-select, shift-arrow, click-place) don't
@@ -203,6 +228,10 @@ class BpPaperEditor extends HTMLElement {
     if (this._slash) {
       this._slash.destroy();
       this._slash = null;
+    }
+    if (this._wikilink) {
+      this._wikilink.destroy();
+      this._wikilink = null;
     }
     if (this._bubble) {
       this._bubble.destroy();
@@ -375,9 +404,31 @@ class BpPaperEditor extends HTMLElement {
     }
   }
 
-  // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when
-  // the menu is open; otherwise returns false so TipTap handles the key.
+  // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when a
+  // popup is open; otherwise returns false so TipTap handles the key. The
+  // wikilink menu is checked FIRST — the two popups are mutually exclusive, so
+  // at most one branch ever owns the keystroke.
   _onKeyDown(event) {
+    if (this._wikilink && this._wikilink.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._wikilink.move(1);
+          return true;
+        case "ArrowUp":
+          this._wikilink.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._wikilink.choose();
+          return true;
+        case "Escape":
+          this._dismissWikilink();
+          return true;
+        default:
+          return false;
+      }
+    }
+
     if (!this._slash || !this._slash.isOpen()) return false;
 
     switch (event.key) {
@@ -436,6 +487,131 @@ class BpPaperEditor extends HTMLElement {
   _dismissSlash() {
     this._closeSlash();
     this._editor.commands.focus();
+  }
+
+  // ── `[[` wikilink autocomplete ─────────────────────────────────────────
+  //
+  // Obsidian-parity inline page-link picker. Studio-only by construction: it
+  // is gated on `this._editable` (read-mode embeds never run onUpdate) AND on
+  // an injected `this._wikilinkSource` (unset → the popup never opens). On each
+  // onUpdate we re-run the PURE parseOpenWikilink seam against the block-local
+  // text + caret offset; an open trigger opens/refreshes the menu at the caret
+  // and fires the async source. The result list is server-scoped and rendered
+  // verbatim (no local filtering). On a pick we replace the typed "[[query"
+  // span with the chosen title carrying a `wikilink` mark — no literal brackets
+  // remain in the document.
+  //
+  // Returns true iff the menu is (now) open, so onUpdate can force the slash
+  // menu shut and skip _maybeSlash (mutual exclusion).
+  _maybeWikilink() {
+    if (!this._editable || !this._wikilinkSource) return false;
+    if (!this._editor) return false;
+
+    // Block-LOCAL text + offset must share one coordinate frame. `$from.parent`
+    // is the current textblock (a paragraph — including the one nested inside a
+    // list item), so its `textContent` pairs exactly with `parentOffset`. Using
+    // `getText()` here would join EVERY textblock with "\n\n" and desync from the
+    // block-local `parentOffset`, so a `[[` typed in the 2nd-or-later list item
+    // would never open the popup. parseOpenWikilink's contract is block-local text.
+    const $from = this._editor.state.selection.$from;
+    const blockLocalText = $from.parent.textContent;
+    const caretOffset = $from.parentOffset;
+    const hit = parseOpenWikilink(blockLocalText, caretOffset);
+    if (!hit) {
+      this._closeWikilink();
+      return false;
+    }
+
+    // Open (or refresh, as the query grows) the popup at the live caret rect,
+    // and remember the PM range to replace on pick — anchored to the DOCUMENT
+    // position (selection.from), not the block-local offset hit carries.
+    this._openWikilink(this._caretRect(), hit.query);
+    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query);
+
+    // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
+    // resolved batch is dropped unless it is still the latest request AND the
+    // menu is still open — so an out-of-order or post-close response is ignored.
+    const seq = ++this._wlSeq;
+    Promise.resolve(this._wikilinkSource(hit.query))
+      .then((list) => {
+        if (seq !== this._wlSeq || !this._wikilink || !this._wikilink.isOpen()) {
+          return;
+        }
+        this._wikilink.setResults(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {});
+    return true;
+  }
+
+  _openWikilink(rect, query = "") {
+    if (!this._wikilink) {
+      this._wikilink = new WikilinkMenu({
+        onChoose: (c) => this._chooseWikilink(c),
+        onDismiss: () => this._dismissWikilink(),
+      });
+    }
+    this._wikilink.open(rect, query);
+  }
+
+  _closeWikilink() {
+    if (this._wikilink && this._wikilink.isOpen()) this._wikilink.close();
+  }
+
+  // User picked a candidate: replace the typed "[[query" span with the chosen
+  // title carrying a `wikilink` mark { target: title }, plus a trailing UNMARKED
+  // space so typing continues OUTSIDE the link (the mark is inclusive:false, but
+  // the space guarantees it across browsers). _wlRange was captured in
+  // _maybeWikilink at the moment the menu opened/refreshed.
+  _chooseWikilink(candidate) {
+    const range = this._wlRange;
+    if (!range) {
+      this._closeWikilink();
+      return;
+    }
+    this._editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, [
+        {
+          type: "text",
+          text: candidate.title,
+          marks: [{ type: "wikilink", attrs: { target: candidate.title } }],
+        },
+        { type: "text", text: " " },
+      ])
+      .run();
+    this._closeWikilink();
+  }
+
+  // Esc / outside-click: close the menu but LEAVE the typed "[[query" in place —
+  // the user may want to keep editing it. Mirrors _dismissSlash.
+  _dismissWikilink() {
+    this._closeWikilink();
+    this._editor.commands.focus();
+  }
+
+  // Writable property so the Studio LiveView hook can inject the async page
+  // search: `el.wikilinkSource = (query) => Promise<[{ title, id, type }]>`.
+  // Unset → _maybeWikilink early-returns, so the popup NEVER opens (graceful
+  // no-op for the standalone embedder and the read-mode web embed).
+  set wikilinkSource(fn) {
+    this._wikilinkSource = fn;
+  }
+
+  get wikilinkSource() {
+    return this._wikilinkSource;
+  }
+
+  // Upgrade-safe property reclaim (called from connectedCallback). If a value
+  // was assigned to `name` before this element upgraded, it sits as an own
+  // property shadowing the prototype accessor; delete it and re-assign so it
+  // flows through the real setter.
+  _upgradeProperty(name) {
+    if (Object.prototype.hasOwnProperty.call(this, name)) {
+      const value = this[name];
+      delete this[name];
+      this[name] = value;
+    }
   }
 
   // Property setter so LiveView / a parent can assign `el.block = {...}` before

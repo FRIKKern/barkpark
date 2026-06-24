@@ -11,7 +11,7 @@
 // Run: node src/__wikilink.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
-import { parseOpenWikilink } from "./wikilink-trigger.js";
+import { parseOpenWikilink, wikilinkReplaceRange } from "./wikilink-trigger.js";
 
 let failures = 0;
 function check(name, fn) {
@@ -83,6 +83,34 @@ check("non-string / non-number args => null", () => {
 check("caretOffset is clamped into range", () => {
   // Offset past the end clamps to text.length (caret at end).
   assert.deepEqual(parseOpenWikilink("[[ab", 99), { query: "ab", from: 0, to: 4 });
+});
+
+// ── replace-range PM-position mapping (pick seam) ──────────────────────────
+
+check("caretPos 7, query 'abc' => { from: 2, to: 7 }", () => {
+  // The typed span "[[abc" ends at the caret: 2 brackets + 3 query chars back.
+  assert.deepEqual(wikilinkReplaceRange(7, "abc"), { from: 2, to: 7 });
+});
+
+check("empty query => from = caretPos - 2 (just the `[[`)", () => {
+  assert.deepEqual(wikilinkReplaceRange(2, ""), { from: 0, to: 2 });
+});
+
+check("mid-doc caret keeps the to anchored at caretPos", () => {
+  // "see [[No" with the block starting at doc pos 1: caret 9, query "No" (len 2)
+  // → from 9-2-2 = 5 (the "[[").
+  assert.deepEqual(wikilinkReplaceRange(9, "No"), { from: 5, to: 9 });
+});
+
+check("from is clamped at 0 (never negative)", () => {
+  // Degenerate caretPos < 2 cannot subtract below the doc start.
+  assert.deepEqual(wikilinkReplaceRange(1, ""), { from: 0, to: 1 });
+  assert.deepEqual(wikilinkReplaceRange(0, "x"), { from: 0, to: 0 });
+});
+
+check("non-number caretPos / non-string query degrade safely", () => {
+  assert.deepEqual(wikilinkReplaceRange(undefined, "ab"), { from: 0, to: 0 });
+  assert.deepEqual(wikilinkReplaceRange(5, null), { from: 3, to: 5 });
 });
 
 if (failures > 0) {

@@ -44,3 +44,25 @@ export function parseOpenWikilink(text, caretOffset) {
 
   return { query: between, from: open, to: off };
 }
+
+/**
+ * Map a live `[[query` trigger to the ProseMirror document positions to replace
+ * on pick. The typed span is `"[[" + query` ending exactly AT the caret, so the
+ * replace range runs from `caretPos - query.length - 2` (the `[[`) up to
+ * `caretPos`. Isolated here as a unit-testable seam so the off-by-one (the two
+ * `[` chars) lives in ONE provable place rather than inline in index.js.
+ *
+ * `caretPos` is a ProseMirror document position (`selection.from`), NOT a
+ * block-local offset — feed it `this._editor.state.selection.from`. `from` is
+ * clamped to `>= 0` so a malformed call can never produce a negative position.
+ *
+ * @param {number} caretPos
+ * @param {string} query
+ * @returns {{from: number, to: number}}
+ */
+export function wikilinkReplaceRange(caretPos, query) {
+  const to = typeof caretPos === "number" ? caretPos : 0;
+  const len = typeof query === "string" ? query.length : 0;
+  const from = Math.max(0, to - len - 2);
+  return { from, to };
+}

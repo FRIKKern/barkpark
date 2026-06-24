@@ -163,3 +163,114 @@ article code[style*="background:#f3f4f6"] {
   background: var(--paper-bg-deep) !important;
   color: var(--paper-ink) !important;
 }
+
+/* ── Wikilink autocomplete popup (`[[` trigger). ────────────────────────────
+ * Rendered into <body> by WikilinkMenu (src/wikilink-menu.js) and positioned
+ * fixed at the caret. Mirrors the slash-menu popup chrome exactly — same
+ * fixed-popup frame, same token bindings, same eyebrow + scrollable list +
+ * footer kbd-hint structure — but with a flat (group-free) candidate list and
+ * a type badge replacing the slash menu's hint glyph + desc pair.
+ *
+ * The --paper-* tokens are re-bound on the popup element directly (just like
+ * .bp-slash-menu in root.html.heex) so the popup stays warm in both themes
+ * even though it lives outside any .bp-paper-surface ancestor. */
+
+/* Pre-paint / no-theme fallback — warm light defaults. */
+.bp-wikilink-menu {
+  --paper-bg:           #fbfaf6;
+  --paper-ink:          #1f1a14;
+  --paper-ink-soft:     #5b524a;
+  --paper-ink-faint:    #8a8278;
+  --paper-rule:         rgba(31, 26, 20, 0.08);
+  --paper-rule-soft:    rgba(31, 26, 20, 0.04);
+  --paper-accent:       #a23925;
+  --paper-accent-soft:  rgba(162, 57, 37, 0.10);
+  --paper-chrome-bg:    #fefdf9;
+  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  --paper-font-sans:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --paper-font-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  position: fixed; z-index: 200;
+  width: 280px;
+  display: flex; flex-direction: column;
+  padding: 6px 0 4px;
+  background: var(--paper-chrome-bg);
+  border: 1px solid var(--paper-chrome-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  font-family: var(--paper-font-sans);
+  animation: bp-wikilink-fade 0.12s ease-out;
+}
+/* Dark companion — keyed on the host's [data-theme="dark"]. */
+:root[data-theme="dark"] .bp-wikilink-menu,
+html[data-theme="dark"] .bp-wikilink-menu {
+  --paper-bg:           #1b1815;
+  --paper-ink:          #ece6dc;
+  --paper-ink-soft:     #b8ad9e;
+  --paper-ink-faint:    #7f7568;
+  --paper-rule:         rgba(236, 230, 220, 0.10);
+  --paper-rule-soft:    rgba(236, 230, 220, 0.05);
+  --paper-accent:       #d97a5f;
+  --paper-accent-soft:  rgba(217, 122, 95, 0.14);
+  --paper-chrome-bg:    #221e1a;
+  --paper-chrome-border: rgba(236, 230, 220, 0.14);
+}
+@keyframes bp-wikilink-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Eyebrow — uppercase letter-spaced "Link to page" header. Mirrors
+ * .bp-slash-eyebrow exactly (same font-size, spacing, color). */
+.bp-wikilink-menu__eyebrow {
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--paper-ink-faint); padding: 6px 14px;
+}
+/* Scrollable list region — eyebrow + footer stay pinned above/below. */
+.bp-wikilink-list {
+  display: block; padding: 2px 6px;
+  max-height: 320px; overflow-y: auto;
+}
+/* Candidate row — flex, title left + type badge right. No hint glyph column
+ * (the [[wikilink trigger has no icon, unlike slash-menu block types). */
+.bp-wikilink-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 5px 8px;
+  background: transparent; border: none; border-radius: 4px;
+  color: var(--paper-ink); font-family: inherit; font-size: 13px;
+  line-height: 1.2; text-align: left; cursor: pointer;
+  transition: background 0.08s ease-out;
+}
+.bp-wikilink-item:hover,
+.bp-wikilink-item.is-active { background: var(--paper-accent-soft); }
+/* Bold page title — fills the remaining space after the badge. */
+.bp-wikilink-title {
+  flex: 1 1 auto; min-width: 0;
+  font-weight: 600; letter-spacing: 0.005em;
+}
+/* Muted right-aligned type badge — mirrors .bp-slash-desc. */
+.bp-wikilink-type-badge {
+  flex: 0 0 auto; margin-left: auto; padding-left: 8px;
+  color: var(--paper-ink-faint); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100px;
+}
+/* Non-selectable "Searching…" / "No matching pages" row. */
+.bp-wikilink-empty {
+  padding: 6px 8px;
+  color: var(--paper-ink-faint); font-size: 12px;
+  font-style: italic;
+}
+/* Footer hint bar with <kbd> chips for the keyboard contract. Mirrors
+ * .bp-slash-foot / .bp-slash-foot kbd verbatim. */
+.bp-wikilink-foot {
+  border-top: 1px solid var(--paper-rule-soft);
+  margin-top: 4px; padding: 8px 14px 4px;
+  font-size: 10.5px; color: var(--paper-ink-faint); letter-spacing: 0.04em;
+}
+.bp-wikilink-foot-sep { opacity: 0.6; margin: 0 2px; }
+.bp-wikilink-foot kbd {
+  font-family: var(--paper-font-mono); font-size: 10px;
+  background: var(--paper-bg); border: 1px solid var(--paper-rule);
+  border-radius: 3px; padding: 0 4px; color: var(--paper-ink-soft);
+  margin: 0 1px;
+}
