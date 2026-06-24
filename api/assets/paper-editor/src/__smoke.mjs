@@ -12,6 +12,7 @@ import {
   tiptapToFullBlock,
   buildPatchBlockOp,
 } from "./convert.js";
+import { runToTiptap, runToOps } from "./canvas/run-convert.js";
 import { Wikilink, Blockref, Tag } from "./marks.js";
 import { CONTRACT_VERSION } from "./contract.js";
 
@@ -356,6 +357,556 @@ check("blockToTiptap is identical regardless of editability", () => {
     ],
   };
   assert.deepEqual(blockToTiptap(sample), blockToTiptap(sample));
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase-4 Stage S0 — the headless blocks⇄one-doc⇄ops projector (run-convert.js).
+// Ships DARK; pin its projection + reverse-diff against the EXACT op vocabulary.
+// ───────────────────────────────────────────────────────────────────────────
+
+// ── THE SAFETY NET: a pure-JS reference fold mirroring patch.ex ──────────────
+//
+// applyOps(prevBlocks, ops) folds the emitted op list through the SAME
+// semantics api/lib/barkpark/portable_doc/patch.ex implements, so a test can
+// PROVE that runToOps's output reproduces nextDoc — not merely that each op has
+// the right SHAPE. The original S0 tests asserted only shape, which is why two
+// real fold bugs (a front-insert landing at END; an insert stranded by a later
+// move) passed green. Faithful op semantics (top-level only — S0 has no
+// sections):
+//   append-block  → concat block at END (dup id is an error)
+//   insert-after  → splice block immediately after afterId (absent → error;
+//                   dup block id → error)
+//   remove-block  → drop the block by id (absent → error)
+//   move-block    → lift the block by id, splice after `after` (or head when
+//                   null); after===id or already-in-place is a no-op
+//   patch-block   → shallow-merge patch into the block by id, re-pin id+type
+function applyOps(prevBlocks, ops) {
+  let blocks = (prevBlocks || []).map((b) => ({ ...b }));
+  const idAt = (id) => blocks.findIndex((b) => b && b.id === id);
+
+  for (const op of ops) {
+    switch (op.op) {
+      case "append-block": {
+        if (op.block && op.block.id != null && idAt(op.block.id) !== -1) {
+          throw new Error(`append-block: duplicate id ${op.block.id}`);
+        }
+        blocks = [...blocks, { ...op.block }];
+        break;
+      }
+      case "insert-after": {
+        if (op.block && op.block.id != null && idAt(op.block.id) !== -1) {
+          throw new Error(`insert-after: duplicate id ${op.block.id}`);
+        }
+        const at = idAt(op.afterId);
+        if (at === -1) throw new Error(`insert-after: afterId not found ${op.afterId}`);
+        blocks.splice(at + 1, 0, { ...op.block });
+        break;
+      }
+      case "remove-block": {
+        const at = idAt(op.id);
+        if (at === -1) throw new Error(`remove-block: id not found ${op.id}`);
+        blocks.splice(at, 1);
+        break;
+      }
+      case "move-block": {
+        const at = idAt(op.id);
+        if (at === -1) throw new Error(`move-block: id not found ${op.id}`);
+        if (op.after === op.id) break; // after-itself: no-op
+        if (op.after != null && idAt(op.after) === -1) {
+          throw new Error(`move-block: after not found ${op.after}`);
+        }
+        const [moved] = blocks.splice(at, 1);
+        if (op.after == null) {
+          blocks.unshift(moved);
+        } else {
+          const dest = idAt(op.after);
+          blocks.splice(dest + 1, 0, moved);
+        }
+        break;
+      }
+      case "patch-block": {
+        const at = idAt(op.id);
+        if (at === -1) throw new Error(`patch-block: id not found ${op.id}`);
+        const target = blocks[at];
+        // Shallow-merge, then re-pin id + type (patch.ex merge_block).
+        blocks[at] = { ...target, ...op.patch, id: target.id, type: target.type };
+        break;
+      }
+      default:
+        throw new Error(`applyOps: unknown op ${JSON.stringify(op)}`);
+    }
+  }
+  return blocks;
+}
+
+// Assert that folding runToOps(prev, nextDoc) through applyOps yields a block
+// list whose ID ORDER === the id order of nextDoc's nextSeq (existing bpIds in
+// place; a stable client-minted id for every new node), and that every
+// SURVIVING block carries the patched content. This is the fold gate the
+// original shape-only tests lacked.
+function assertFolds(prev, nextDoc, ops, label) {
+  const result = applyOps(prev, ops);
+
+  // Expected id order: existing bpId where present, else SOME minted id. We
+  // can't predict minted ids, so we assert structurally: result length ===
+  // next length, every surviving bpId sits at its next index, and every NEW
+  // slot (next node without a surviving bpId) holds a block that is NOT a prev
+  // id (i.e. a freshly-minted/new block).
+  const prevIds = new Set((prev || []).map((b) => b && b.id));
+  const nextNodes = (nextDoc && nextDoc.content) || [];
+  assert.equal(
+    result.length,
+    nextNodes.length,
+    `${label}: folded length ${result.length} !== next length ${nextNodes.length}`,
+  );
+  nextNodes.forEach((node, i) => {
+    const bpId = node.attrs && node.attrs.bpId;
+    const folded = result[i];
+    const survives = bpId != null && prevIds.has(bpId);
+    if (survives) {
+      assert.equal(
+        folded.id,
+        bpId,
+        `${label}: slot ${i} expected surviving id ${bpId}, got ${folded && folded.id}`,
+      );
+    } else {
+      // A new slot: the folded block must NOT be a pre-existing prev id (it is a
+      // freshly-inserted, client-minted block), and it must carry a non-null id.
+      assert.ok(
+        folded && folded.id != null && !prevIds.has(folded.id),
+        `${label}: slot ${i} expected a fresh (minted) id, got ${folded && folded.id}`,
+      );
+    }
+  });
+  return result;
+}
+
+// S0-a) runToTiptap projects a block list to one doc, one top-level node per
+//       block IN ORDER, each stamped attrs.bpId/bpType; heading keeps its level.
+check("S0 runToTiptap: 3 blocks → 3 stamped nodes in order", () => {
+  const heading = { id: "h-1", type: "heading", level: 2, text: "Status" };
+  const paragraph = {
+    id: "p-1",
+    type: "paragraph",
+    content: [{ type: "text", value: "Body text" }],
+  };
+  const list = {
+    id: "l-1",
+    type: "list",
+    ordered: false,
+    items: [[{ type: "text", value: "one" }]],
+  };
+  const doc = runToTiptap([heading, paragraph, list]);
+
+  assert.equal(doc.type, "doc");
+  assert.equal(doc.content.length, 3);
+
+  // order + stamp preserved
+  assert.equal(doc.content[0].attrs.bpId, "h-1");
+  assert.equal(doc.content[0].attrs.bpType, "heading");
+  assert.equal(doc.content[0].type, "heading");
+  assert.equal(doc.content[0].attrs.level, 2); // heading level survives the merge
+
+  assert.equal(doc.content[1].attrs.bpId, "p-1");
+  assert.equal(doc.content[1].attrs.bpType, "paragraph");
+  assert.equal(doc.content[1].type, "paragraph");
+
+  assert.equal(doc.content[2].attrs.bpId, "l-1");
+  assert.equal(doc.content[2].attrs.bpType, "list");
+  assert.equal(doc.content[2].type, "bulletList");
+});
+
+// S0-b) an interior text edit of the MIDDLE node → EXACTLY one patch-block,
+//       byte-identical to buildPatchBlockOp on that single block (pinned against
+//       the case-5 fixture shape: { op:"patch-block", id, patch:{ content:[…] } }).
+check("S0 runToOps: interior edit → one patch-block (byte-identical)", () => {
+  const blocks = [
+    { id: "h-1", type: "heading", level: 1, text: "Title" },
+    { id: "p-9", type: "paragraph", content: [{ type: "text", value: "Hello " }] },
+    { id: "p-3", type: "paragraph", content: [{ type: "text", value: "tail" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  // Edit only the middle node's content: "Hello " → "Hello **world**".
+  doc.content[1] = {
+    ...doc.content[1],
+    content: [
+      { type: "text", text: "Hello " },
+      { type: "text", text: "world", marks: [{ type: "bold" }] },
+    ],
+  };
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1, "exactly one op for a lone interior edit");
+
+  // Byte-identical to the per-block path (mirrors case-5 fixture shape).
+  const expected = buildPatchBlockOp(
+    blockToTiptap({
+      id: "p-9",
+      type: "paragraph",
+      content: [
+        { type: "text", value: "Hello " },
+        { type: "strong", children: [{ type: "text", value: "world" }] },
+      ],
+    }),
+    "p-9",
+    "paragraph",
+  );
+  assert.deepEqual(ops[0], expected);
+  assert.deepEqual(ops[0], {
+    op: "patch-block",
+    id: "p-9",
+    patch: {
+      content: [
+        { type: "text", value: "Hello " },
+        { type: "strong", children: [{ type: "text", value: "world" }] },
+      ],
+    },
+  });
+
+  // FOLD GATE: a pure interior edit emits ZERO moves and folds to the same
+  // order with the patched content landing on p-9.
+  const folded = assertFolds(blocks, doc, ops, "S0-b interior edit");
+  assert.equal(ops.filter((o) => o.op === "move-block").length, 0, "no moves");
+  assert.deepEqual(folded[1].content, [
+    { type: "text", value: "Hello " },
+    { type: "strong", children: [{ type: "text", value: "world" }] },
+  ]);
+});
+
+// S0-c) split: one node becomes two, the new one has no bpId → the projector
+//       CLIENT-MINTS its id and emits [insert-after{afterId:p-1, block w/ minted
+//       id}, patch-block{p-1}]. (The old design emitted an idless block and
+//       relied on a server mint; client-minting is what lets a front-insert /
+//       reorder be expressed at all — see S0-g..k.)
+check("S0 runToOps: split → insert-after(minted id) then patch-block", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "alpha beta" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  // p-1 keeps "alpha"; a NEW (no bpId) paragraph "beta" lands after it.
+  doc.content = [
+    {
+      type: "paragraph",
+      attrs: { bpId: "p-1", bpType: "paragraph" },
+      content: [{ type: "text", text: "alpha" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" }, // new → client-minted id
+      content: [{ type: "text", text: "beta" }],
+    },
+  ];
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 2, "one insert + one interior patch");
+
+  // insert-after first (anchored to the surviving sibling). The new block now
+  // carries a CLIENT-MINTED id (it cannot collide with p-1) and the "beta" body.
+  assert.equal(ops[0].op, "insert-after");
+  assert.equal(ops[0].afterId, "p-1");
+  assert.equal(ops[0].block.type, "paragraph");
+  assert.deepEqual(ops[0].block.content, [{ type: "text", value: "beta" }]);
+  assert.ok(
+    ops[0].block.id != null && ops[0].block.id !== "p-1",
+    "split insert carries a fresh client-minted id (not the prev id)",
+  );
+
+  // then the interior patch on the shrunk first block.
+  assert.deepEqual(ops[1], {
+    op: "patch-block",
+    id: "p-1",
+    patch: { content: [{ type: "text", value: "alpha" }] },
+  });
+
+  // FOLD GATE: p-1 shrinks to "alpha"; the minted block holds "beta" at slot 1.
+  const folded = assertFolds(blocks, doc, ops, "S0-c split");
+  assert.deepEqual(folded[0].content, [{ type: "text", value: "alpha" }]);
+  assert.deepEqual(folded[1].content, [{ type: "text", value: "beta" }]);
+});
+
+// S0-d) merge: two nodes → one → [remove-block{id:secondId}, patch-block{firstId}].
+check("S0 runToOps: merge → remove-block then patch-block", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "alpha" }] },
+    { id: "p-2", type: "paragraph", content: [{ type: "text", value: "beta" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  // p-2 deleted; p-1 absorbs both → "alpha beta".
+  doc.content = [
+    {
+      type: "paragraph",
+      attrs: { bpId: "p-1", bpType: "paragraph" },
+      content: [{ type: "text", text: "alpha beta" }],
+    },
+  ];
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 2);
+  assert.deepEqual(ops[0], { op: "remove-block", id: "p-2" });
+  assert.deepEqual(ops[1], {
+    op: "patch-block",
+    id: "p-1",
+    patch: { content: [{ type: "text", value: "alpha beta" }] },
+  });
+
+  // FOLD GATE: result is a single block p-1 carrying the merged content.
+  const folded = assertFolds(blocks, doc, ops, "S0-d merge");
+  assert.equal(folded.length, 1);
+  assert.equal(folded[0].id, "p-1");
+  assert.deepEqual(folded[0].content, [{ type: "text", value: "alpha beta" }]);
+});
+
+// S0-e) reorder two nodes (no content change) → [move-block{…}] with the right
+//       id/after. Swap [p-1, p-2] → [p-2, p-1]: move p-1 after p-2.
+check("S0 runToOps: reorder → single move-block, no patches", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "alpha" }] },
+    { id: "p-2", type: "paragraph", content: [{ type: "text", value: "beta" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  doc.content = [doc.content[1], doc.content[0]]; // [p-2, p-1]
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1, "a pure reorder is one move, no patch");
+  // The swap [p-1,p-2]→[p-2,p-1] is a single move-block. The left-to-right
+  // permutation walk fixes the FIRST out-of-place slot, so it moves p-2 to the
+  // head (move-block{id:p-2, after:null}); an equally-valid one-move solution
+  // would move p-1 after p-2. We assert the SHAPE (one move, both ids known)
+  // and let the fold gate prove correctness — minimality is secondary.
+  assert.equal(ops[0].op, "move-block");
+  assert.ok(
+    (ops[0].id === "p-2" && ops[0].after === null) ||
+      (ops[0].id === "p-1" && ops[0].after === "p-2"),
+    "a single move-block that effects the swap",
+  );
+
+  // FOLD GATE: folds to [p-2, p-1] with no content change.
+  const folded = assertFolds(blocks, doc, ops, "S0-e reorder");
+  assert.deepEqual(folded.map((b) => b.id), ["p-2", "p-1"]);
+  assert.equal(ops.filter((o) => o.op === "patch-block").length, 0, "no patches");
+});
+
+// S0-f) mixed list with a NON-PROSE block (callout) → runToTiptap emits a
+//       bpOpaque node carrying the block JSON VERBATIM, and runToOps round-trips
+//       it with NO op (the opaque block is deep-equal to the original).
+check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => {
+  const callout = {
+    id: "c-1",
+    type: "callout",
+    variant: "info",
+    content: [{ type: "text", value: "heads up" }],
+  };
+  const blocks = [
+    { id: "h-1", type: "heading", level: 1, text: "Doc" },
+    callout,
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+
+  // The callout projects to an opaque placeholder carrying the block verbatim.
+  const opaque = doc.content[1];
+  assert.equal(opaque.type, "bpOpaque");
+  assert.equal(opaque.attrs.bpId, "c-1");
+  assert.equal(opaque.attrs.bpType, "callout");
+  assert.deepEqual(opaque.attrs.bpBlock, callout); // verbatim, deep-equal
+  assert.notEqual(opaque.attrs.bpBlock, callout); // but NOT a shared ref
+
+  // An untouched round-trip emits NO ops at all (opaque is not edited in S0).
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 0, "untouched mixed list round-trips with zero ops");
+
+  // FOLD GATE: zero ops fold to the identical block list (order + content).
+  const folded = assertFolds(blocks, doc, ops, "S0-f opaque round-trip");
+  assert.deepEqual(folded.map((b) => b.id), ["h-1", "c-1", "p-1"]);
+  assert.deepEqual(folded[1], callout);
+});
+
+// S0-g) FRONT INSERT — a NEW block at position 0. This is the bug the old
+//       append-anchored design got WRONG: a front-insert landed at END. The
+//       projector must client-mint the new id and, since there is no prepend op,
+//       express the front placement via a move-block to the head. Folding MUST
+//       put the new block at slot 0.
+check("S0 runToOps: front insert → folds to position 0 (was: landed at END)", () => {
+  const blocks = [
+    { id: "a", type: "paragraph", content: [{ type: "text", value: "A" }] },
+    { id: "b", type: "paragraph", content: [{ type: "text", value: "B" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  // New paragraph "N" at the FRONT: [N(new), a, b].
+  doc.content = [
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" },
+      content: [{ type: "text", text: "N" }],
+    },
+    doc.content[0], // a
+    doc.content[1], // b
+  ];
+
+  const ops = runToOps(blocks, doc);
+  // The new block is grafted in (insert-after a surviving anchor) then moved to
+  // the head — there is no prepend op, so a move-block{after:null} is mandatory.
+  assert.ok(
+    ops.some((o) => o.op === "insert-after" || o.op === "append-block"),
+    "the new block is inserted",
+  );
+  assert.ok(
+    ops.some((o) => o.op === "move-block" && o.after === null),
+    "front placement requires a move to the head",
+  );
+
+  // FOLD GATE: the new (minted) block lands at slot 0; a, b follow in order.
+  const folded = assertFolds(blocks, doc, ops, "S0-g front insert");
+  assert.deepEqual(folded.map((b) => b.content), [
+    [{ type: "text", value: "N" }],
+    [{ type: "text", value: "A" }],
+    [{ type: "text", value: "B" }],
+  ]);
+  assert.equal(folded[1].id, "a");
+  assert.equal(folded[2].id, "b");
+  assert.ok(folded[0].id !== "a" && folded[0].id !== "b", "front block is freshly minted");
+});
+
+// S0-h) INSERT + REORDER together — [a,b] → [c(new), b, a]. The canonical bug:
+//       inserts emitted before moves, so a later move stranded the insert
+//       (c-NEW-a-b folded to c-a-b-NEW). With client-minted ids the moves pass
+//       permutes ALL of {c, a, b} into [c, b, a] regardless of where the insert
+//       grafted c. The fold MUST equal [c, b, a].
+check("S0 runToOps: insert + reorder → [c(new), b, a] folds correctly", () => {
+  const blocks = [
+    { id: "a", type: "paragraph", content: [{ type: "text", value: "A" }] },
+    { id: "b", type: "paragraph", content: [{ type: "text", value: "B" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  const aNode = doc.content[0];
+  const bNode = doc.content[1];
+  doc.content = [
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" },
+      content: [{ type: "text", text: "C" }],
+    },
+    bNode, // b
+    aNode, // a
+  ];
+
+  const ops = runToOps(blocks, doc);
+
+  // FOLD GATE: the only correctness contract — fold to [c(minted), b, a].
+  const folded = assertFolds(blocks, doc, ops, "S0-h insert + reorder");
+  assert.deepEqual(folded.map((b) => b.content), [
+    [{ type: "text", value: "C" }],
+    [{ type: "text", value: "B" }],
+    [{ type: "text", value: "A" }],
+  ]);
+  assert.equal(folded[1].id, "b");
+  assert.equal(folded[2].id, "a");
+  assert.ok(folded[0].id !== "a" && folded[0].id !== "b", "c is freshly minted");
+});
+
+// S0-i) TWO CONSECUTIVE new blocks at the FRONT — [a] → [n1(new), n2(new), a].
+//       Both must mint distinct ids that don't collide with each other or `a`,
+//       and the fold must place them in order ahead of `a`.
+check("S0 runToOps: two consecutive new front blocks fold in order", () => {
+  const blocks = [
+    { id: "a", type: "paragraph", content: [{ type: "text", value: "A" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  const aNode = doc.content[0];
+  doc.content = [
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" },
+      content: [{ type: "text", text: "N1" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" },
+      content: [{ type: "text", text: "N2" }],
+    },
+    aNode, // a
+  ];
+
+  const ops = runToOps(blocks, doc);
+
+  // FOLD GATE: [n1, n2, a] in order, two distinct minted ids, neither === "a".
+  const folded = assertFolds(blocks, doc, ops, "S0-i two front inserts");
+  assert.deepEqual(folded.map((b) => b.content), [
+    [{ type: "text", value: "N1" }],
+    [{ type: "text", value: "N2" }],
+    [{ type: "text", value: "A" }],
+  ]);
+  assert.equal(folded[2].id, "a");
+  assert.notEqual(folded[0].id, folded[1].id, "the two minted ids are distinct");
+  assert.ok(folded[0].id !== "a" && folded[1].id !== "a", "minted ids avoid prev id");
+});
+
+// S0-j) EMPTY PREV → all-new (the append path). No surviving anchor exists, so
+//       the first new block APPENDS and the rest insert-after it; the fold must
+//       reproduce all three in order.
+check("S0 runToOps: empty prev → all-new appends fold in order", () => {
+  const blocks = [];
+  const doc = {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        attrs: { bpId: null, bpType: "paragraph" },
+        content: [{ type: "text", text: "X" }],
+      },
+      {
+        type: "paragraph",
+        attrs: { bpId: null, bpType: "paragraph" },
+        content: [{ type: "text", text: "Y" }],
+      },
+      {
+        type: "paragraph",
+        attrs: { bpId: null, bpType: "paragraph" },
+        content: [{ type: "text", text: "Z" }],
+      },
+    ],
+  };
+
+  const ops = runToOps(blocks, doc);
+  assert.ok(
+    ops.some((o) => o.op === "append-block"),
+    "with no surviving anchor the first insert appends",
+  );
+
+  // FOLD GATE: [X, Y, Z] in order, three distinct minted ids.
+  const folded = assertFolds(blocks, doc, ops, "S0-j empty prev");
+  assert.deepEqual(folded.map((b) => b.content), [
+    [{ type: "text", value: "X" }],
+    [{ type: "text", value: "Y" }],
+    [{ type: "text", value: "Z" }],
+  ]);
+  const ids = folded.map((b) => b.id);
+  assert.equal(new Set(ids).size, 3, "all three minted ids are distinct");
+});
+
+// S0-k) REORDER-ONLY across three blocks (no inserts) — [a,b,c] → [c,a,b] still
+//       folds to the new order, emitting only moves and no inserts/patches.
+check("S0 runToOps: reorder-only [a,b,c] → [c,a,b] folds, no inserts/patches", () => {
+  const blocks = [
+    { id: "a", type: "paragraph", content: [{ type: "text", value: "A" }] },
+    { id: "b", type: "paragraph", content: [{ type: "text", value: "B" }] },
+    { id: "c", type: "paragraph", content: [{ type: "text", value: "C" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  const [aNode, bNode, cNode] = doc.content;
+  doc.content = [cNode, aNode, bNode]; // [c, a, b]
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(
+    ops.filter((o) => o.op === "insert-after" || o.op === "append-block").length,
+    0,
+    "a pure reorder emits no inserts",
+  );
+  assert.equal(ops.filter((o) => o.op === "patch-block").length, 0, "no patches");
+
+  // FOLD GATE: folds to [c, a, b].
+  const folded = assertFolds(blocks, doc, ops, "S0-k reorder-only");
+  assert.deepEqual(folded.map((b) => b.id), ["c", "a", "b"]);
 });
 
 if (failures > 0) {
