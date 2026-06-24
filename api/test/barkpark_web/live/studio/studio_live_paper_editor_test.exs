@@ -1638,4 +1638,61 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
       assert results == []
     end
   end
+
+  # ── paper_tag_search handler ──────────────────────────────────────────────────
+
+  describe "paper_tag_search/2 — handler unit" do
+    setup do
+      # Tags live in `content["tags"]` (JSONB string array). Seed two papers so
+      # the DISTINCT unnest has a duplicate to collapse.
+      {:ok, _} =
+        Content.create_document(
+          "paper",
+          %{"_id" => "tag-paper-a", "title" => "Tag Paper A", "tags" => ["design", "obsidian"]},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("tag-paper-a", "paper", @dataset)
+
+      {:ok, _} =
+        Content.create_document(
+          "paper",
+          %{"_id" => "tag-paper-b", "title" => "Tag Paper B", "tags" => ["design", "draft"]},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("tag-paper-b", "paper", @dataset)
+
+      :ok
+    end
+
+    test "blank query returns empty results without hitting the DB" do
+      socket = bare_socket(@dataset)
+      assert {:reply, %{results: []}, _socket} = Paper.paper_tag_search("", socket)
+    end
+
+    test "oversized query (> 100 chars) returns empty results" do
+      socket = bare_socket(@dataset)
+      long_q = String.duplicate("x", 101)
+      assert {:reply, %{results: []}, _socket} = Paper.paper_tag_search(long_q, socket)
+    end
+
+    test "matching query returns DISTINCT tag-name strings" do
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: results}, _socket} = Paper.paper_tag_search("des", socket)
+
+      assert results == ["design"]
+      assert Enum.all?(results, &is_binary/1)
+    end
+
+    test "non-matching query returns empty list" do
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: results}, _socket} =
+        Paper.paper_tag_search("zzzzzzzz-nomatch", socket)
+
+      assert results == []
+    end
+  end
 end

@@ -158,6 +158,17 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  DISTINCT tag NAMES across papers in `dataset` whose name matches `query`
+  (case-insensitive substring) — the typeahead candidate read for the `#tag`
+  autocomplete. Returns plain strings (name-ordered), capped at 20. Blank
+  query → the top distinct tags. The inverse of `papers_with_tag/3`.
+  """
+  @spec search_tags(String.t(), String.t(), keyword()) :: [String.t()]
+  def search_tags(query, dataset \\ @paper_default_dataset, opts \\ []) when is_binary(query) do
+    Content.search_tags_for_type(query, @paper_type, dataset, opts)
+  end
+
+  @doc """
   Pre-resolve every wikilink target in a block list into the render-opts map
   `%{raw_target => %{id, title}}` that `Render.render_html/2` threads onto the
   palette (so `walk/3` emits a navigable `<a>` for resolved targets).

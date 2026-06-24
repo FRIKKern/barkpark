@@ -516,9 +516,17 @@ defmodule Barkpark.Content do
   def search_papers(query, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.search_papers(query, dataset, opts)
 
+  @doc "DISTINCT tag names across papers matching a substring (#tag typeahead). See `Content.Papers`."
+  def search_tags(query, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    do: Papers.search_tags(query, dataset, opts)
+
   @doc "Documents of a type whose title matches a substring. See `Content.Query`."
   def search_documents_by_title(query, type, dataset, opts \\ [], limit_n \\ 20),
     do: Query.search_documents_by_title(query, type, dataset, opts, limit_n)
+
+  @doc "DISTINCT tag values of a type matching a substring (the inverse of docs_with_tag). See `Content.Query`."
+  def search_tags_for_type(query, type, dataset, opts \\ [], limit_n \\ 20),
+    do: Query.search_tags_for_type(query, type, dataset, opts, limit_n)
 
   @doc "Resolve a doc by title|alias within scope (the wikilink read). See `Content.Query`."
   def resolve_doc_by_title_or_alias(target, type, dataset, opts \\ []),

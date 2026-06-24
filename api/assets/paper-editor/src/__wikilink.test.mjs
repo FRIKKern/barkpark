@@ -11,7 +11,12 @@
 // Run: node src/__wikilink.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
-import { parseOpenWikilink, wikilinkReplaceRange } from "./wikilink-trigger.js";
+import {
+  parseOpenWikilink,
+  wikilinkReplaceRange,
+  parseOpenTag,
+  tagReplaceRange,
+} from "./wikilink-trigger.js";
 
 let failures = 0;
 function check(name, fn) {
@@ -111,6 +116,133 @@ check("from is clamped at 0 (never negative)", () => {
 check("non-number caretPos / non-string query degrade safely", () => {
   assert.deepEqual(wikilinkReplaceRange(undefined, "ab"), { from: 0, to: 0 });
   assert.deepEqual(wikilinkReplaceRange(5, null), { from: 3, to: 5 });
+});
+
+// ── `#` tag trigger — what opens the popup ─────────────────────────────────
+
+check("opens on `#des` with caret at end => query 'des'", () => {
+  assert.deepEqual(parseOpenTag("#des", 4), { query: "des", from: 0, to: 4 });
+});
+
+check("a bare `#` (empty query) does NOT open — needs a letter", () => {
+  assert.equal(parseOpenTag("#", 1), null);
+});
+
+check("a pure-numeric `#5` does NOT open (Obsidian tags need a letter)", () => {
+  assert.equal(parseOpenTag("#5", 2), null);
+  assert.equal(parseOpenTag("issue #42", 9), null);
+});
+
+check("a numeric-led tag with a letter `#2024-recap` opens", () => {
+  assert.deepEqual(parseOpenTag("#2024-recap", 11), {
+    query: "2024-recap",
+    from: 0,
+    to: 11,
+  });
+});
+
+check("opens MID-PROSE after whitespace (sigil after a space)", () => {
+  assert.deepEqual(parseOpenTag("see #des", 8), { query: "des", from: 4, to: 8 });
+});
+
+check("opens after a newline (newline is whitespace => sigil)", () => {
+  assert.deepEqual(parseOpenTag("a\n#des", 6), { query: "des", from: 2, to: 6 });
+});
+
+check("nested tag `#a/b` => query 'a/b' (slash allowed)", () => {
+  assert.deepEqual(parseOpenTag("#a/b", 4), { query: "a/b", from: 0, to: 4 });
+});
+
+check("digits / dash / underscore are valid query chars", () => {
+  assert.deepEqual(parseOpenTag("#v2_x-y", 7), { query: "v2_x-y", from: 0, to: 7 });
+});
+
+check("caret inside the query yields the prefix only", () => {
+  assert.deepEqual(parseOpenTag("#abcd", 3), { query: "ab", from: 0, to: 3 });
+});
+
+check("nearest sigil `#` wins after an earlier completed tag", () => {
+  // "#one two #de" — caret at end picks the LATER `#` (preceded by a space).
+  assert.deepEqual(parseOpenTag("#one two #de", 12), { query: "de", from: 9, to: 12 });
+});
+
+// ── `#` tag trigger — what keeps it closed ─────────────────────────────────
+
+check("a trailing space ends the query => null", () => {
+  assert.equal(parseOpenTag("#des ", 5), null);
+});
+
+check("mid-word `#` (C# / C-sharp) => null", () => {
+  assert.equal(parseOpenTag("C#", 2), null);
+});
+
+check("mid-word `#` with a query after it => null", () => {
+  // "issue5#tag" — the `#` is glued to "5", not a sigil.
+  assert.equal(parseOpenTag("issue5#tag", 10), null);
+});
+
+check("`##` (heading shorthand) never triggers => null", () => {
+  assert.equal(parseOpenTag("##", 2), null);
+});
+
+check("`##h` (heading + text) never triggers => null", () => {
+  assert.equal(parseOpenTag("##h", 3), null);
+});
+
+check("an embedded space in the span => null", () => {
+  // "#a b" caret at end: the space is an invalid query char.
+  assert.equal(parseOpenTag("#a b", 4), null);
+});
+
+check("an embedded newline in the span => null", () => {
+  assert.equal(parseOpenTag("#a\nb", 4), null);
+});
+
+check("non-tag punctuation in the span => null", () => {
+  assert.equal(parseOpenTag("#a.b", 4), null);
+});
+
+check("no `#` at all => null", () => {
+  assert.equal(parseOpenTag("plain prose", 11), null);
+});
+
+check("caret BEFORE the `#` => null", () => {
+  assert.equal(parseOpenTag("x #des", 1), null);
+});
+
+check("non-string / non-number args => null", () => {
+  assert.equal(parseOpenTag(null, 2), null);
+  assert.equal(parseOpenTag("#a", "2"), null);
+});
+
+check("caretOffset is clamped into range", () => {
+  assert.deepEqual(parseOpenTag("#des", 99), { query: "des", from: 0, to: 4 });
+});
+
+// ── `#` tag replace-range PM-position mapping (pick seam) ───────────────────
+
+check("tag: caretPos 5, query 'des' => { from: 1, to: 5 }", () => {
+  // The typed span "#des" ends at the caret: 1 hash + 3 query chars back.
+  assert.deepEqual(tagReplaceRange(5, "des"), { from: 1, to: 5 });
+});
+
+check("tag: empty query => from = caretPos - 1 (just the `#`)", () => {
+  assert.deepEqual(tagReplaceRange(1, ""), { from: 0, to: 1 });
+});
+
+check("tag: mid-doc caret keeps `to` anchored at caretPos", () => {
+  // "see #de" at doc offset: caret 8, query "de" (len 2) → from 8-2-1 = 5.
+  assert.deepEqual(tagReplaceRange(8, "de"), { from: 5, to: 8 });
+});
+
+check("tag: from is clamped at 0 (never negative)", () => {
+  assert.deepEqual(tagReplaceRange(0, "x"), { from: 0, to: 0 });
+  assert.deepEqual(tagReplaceRange(1, "abc"), { from: 0, to: 1 });
+});
+
+check("tag: non-number caretPos / non-string query degrade safely", () => {
+  assert.deepEqual(tagReplaceRange(undefined, "ab"), { from: 0, to: 0 });
+  assert.deepEqual(tagReplaceRange(5, null), { from: 4, to: 5 });
 });
 
 if (failures > 0) {
