@@ -426,6 +426,7 @@ export function ListingsMap({
     const list = listingsRef.current;
     const { w, h } = sizeRef.current;
     if (w === 0 || h === 0) return;
+    setSelected(null); // the view is about to move — drop any stale popover
 
     if (list.length === 0) {
       viewRef.current = { lng: 10.5, lat: 64.5, zoom: 3.4 };
@@ -598,6 +599,7 @@ export function ListingsMap({
 
   const zoomBy = useCallback(
     (delta: number, ax?: number, ay?: number) => {
+      setSelected(null); // zooming moves every pin — drop any stale popover
       const { w, h } = sizeRef.current;
       const mx = ax ?? w / 2;
       const my = ay ?? h / 2;
@@ -634,6 +636,7 @@ export function ListingsMap({
     const ro = new ResizeObserver(() => {
       measure();
       maybeFit(); // covers a 0-size first measure (fit lands when size arrives)
+      setSelected(null); // pins reproject on resize — drop any stale popover
       scheduleDraw();
     });
     if (wrapRef.current) ro.observe(wrapRef.current);
@@ -649,7 +652,6 @@ export function ListingsMap({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = cv.getBoundingClientRect();
-      if (selectedRef.current) setSelected(null);
       zoomBy(-e.deltaY * 0.0025, e.clientX - rect.left, e.clientY - rect.top);
     };
     cv.addEventListener("wheel", onWheel, { passive: false });
