@@ -161,9 +161,15 @@ export function ListingsMap({
         .replace("{s}", "abc"[(x + y) % 3]);
       // Redraw when a tile lands so the basemap fills in progressively.
       img.onload = () => scheduleDraw();
-      // On error keep the (broken) entry so we don't refetch every frame; the
-      // draw loop simply skips images that never became complete.
-      img.onerror = () => {};
+      // On error tombstone briefly (no per-frame refetch), then evict so a
+      // transient blip — OSM rate-limit, a momentary offline — doesn't leave a
+      // permanent gray square for the whole session; the next draw that needs
+      // this tile re-creates the request once.
+      img.onerror = () => {
+        setTimeout(() => {
+          if (tilesRef.current.get(key) === img) tilesRef.current.delete(key);
+        }, 5000);
+      };
       img.src = url;
 
       // Bound the cache so a long pan session can't leak Image objects.
@@ -317,7 +323,10 @@ export function ListingsMap({
       // Only treat the search as a map filter when it actually overlaps the
       // listings. Otherwise — e.g. the finder reads a different source than the
       // map, as with the bundled sample data — a search would gray out EVERY
-      // pin. No overlap ⇒ ignore the filter and keep all pins lit.
+      // pin. No overlap ⇒ ignore the filter and keep all pins lit. (A genuinely
+      // empty result against a SHARED source therefore also stays lit rather
+      // than dimming everything; acceptable until a real shared source is wired,
+      // at which point pass an explicit "bridge is live" signal to distinguish.)
       const matchMap =
         rawMatch && list.some((l) => rawMatch.has(l.id)) ? rawMatch : null;
       const { lng, lat, zoom } = viewRef.current;
@@ -604,23 +613,23 @@ export function ListingsMap({
       const mx = ax ?? w / 2;
       const my = ay ?? h / 2;
       const v = viewRef.current;
-      const toLngLat = (zoom: number) => {
-        const tz = clamp(Math.round(zoom), MIN_ZOOM, MAX_ZOOM);
-        const scale = 2 ** (zoom - tz);
-        const cx = lngToWorldX(v.lng, tz);
-        const cy = latToWorldY(v.lat, tz);
-        return {
-          lng: worldXToLng(cx + (mx - w / 2) / scale, tz),
-          lat: worldYToLat(cy + (my - h / 2) / scale, tz),
-        };
-      };
-      const before = toLngLat(v.zoom);
       const zoom = clamp(v.zoom + delta, MIN_ZOOM, MAX_ZOOM);
-      const after = toLngLat(zoom);
+      // Hold the geographic point under (mx,my) fixed on screen. Do the whole
+      // correction in WORLD-PIXEL space (linear) and unproject only at the end:
+      // adding a lng/lat-space delta drifts on the non-linear latitude axis
+      // (~50px per zoom burst at the Nordic latitudes the data lives at).
+      const tz0 = clamp(Math.round(v.zoom), MIN_ZOOM, MAX_ZOOM);
+      const s0 = 2 ** (v.zoom - tz0);
+      const gLng = worldXToLng(lngToWorldX(v.lng, tz0) + (mx - w / 2) / s0, tz0);
+      const gLat = worldYToLat(latToWorldY(v.lat, tz0) + (my - h / 2) / s0, tz0);
+      const tz1 = clamp(Math.round(zoom), MIN_ZOOM, MAX_ZOOM);
+      const s1 = 2 ** (zoom - tz1);
+      const ncx = lngToWorldX(gLng, tz1) - (mx - w / 2) / s1;
+      const ncy = latToWorldY(gLat, tz1) - (my - h / 2) / s1;
       viewRef.current = {
         zoom,
-        lng: v.lng + (before.lng - after.lng),
-        lat: clampLat(v.lat + (before.lat - after.lat)),
+        lng: worldXToLng(ncx, tz1),
+        lat: clampLat(worldYToLat(ncy, tz1)),
       };
       scheduleDraw();
     },
