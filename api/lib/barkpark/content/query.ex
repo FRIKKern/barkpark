@@ -357,6 +357,54 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  DISTINCT tag VALUES of `type` whose name matches `query` (case-insensitive
+  substring) — the inverse of `docs_with_tag/4`. Where `docs_with_tag` fans a
+  tag OUT to the papers carrying it, this gathers the tag NAMES themselves
+  across the corpus, for the `#tag` autocomplete popup.
+
+  Implemented by unnesting each row's `content["tags"]` JSONB string array with
+  `jsonb_array_elements_text`, filtering the unnested value by `ilike("%v%")`,
+  and taking it `DISTINCT` — name-ordered, capped at `limit_n` (default 20) so
+  an unbounded tag vocabulary can never flood a typeahead. Scoping is the same
+  `get_document/4` P0 leak guard (dataset + tenant). A blank `query` yields the
+  top distinct tags (no `ilike` filter); a no-match yields `[]`.
+  """
+  @spec search_tags_for_type(String.t(), String.t(), String.t(), keyword(), pos_integer()) ::
+          [String.t()]
+  def search_tags_for_type(query, type, dataset, opts \\ [], limit_n \\ 20)
+      when is_binary(query) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    trimmed = String.trim(query)
+
+    # The set-returning `jsonb_array_elements_text` is illegal in WHERE, so the
+    # unnest happens in an inner subquery (scoped) and the ILIKE filter is applied
+    # in the OUTER query against the materialised `tag` column.
+    unnested =
+      Document
+      |> where([d], d.type == ^type)
+      |> scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(workspace_id, project_id)
+      |> select([d], %{tag: fragment("jsonb_array_elements_text(?->'tags')", d.content)})
+
+    outer =
+      from(t in subquery(unnested),
+        distinct: true,
+        order_by: [asc: t.tag],
+        limit: ^limit_n,
+        select: t.tag
+      )
+
+    outer =
+      case trimmed do
+        "" -> outer
+        q -> where(outer, [t], ilike(t.tag, ^"%#{q}%"))
+      end
+
+    Repo.all(outer)
+  end
+
+  @doc """
   Batch sibling of `get_document/4`: load many documents by `doc_id` in ONE
   scoped query, returned as a `%{doc_id => %Document{}}` map.
 

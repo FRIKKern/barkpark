@@ -23,7 +23,12 @@ import Typography from "@tiptap/extension-typography";
 import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
 import { WikilinkMenu } from "./wikilink-menu.js";
-import { parseOpenWikilink, wikilinkReplaceRange } from "./wikilink-trigger.js";
+import {
+  parseOpenWikilink,
+  wikilinkReplaceRange,
+  parseOpenTag,
+  tagReplaceRange,
+} from "./wikilink-trigger.js";
 import { FormatBubble } from "./format-bubble.js";
 import { normalizeTone } from "./tone.js";
 // Internal-link marks (wikilink/blockref/tag) — schema registration only, so
@@ -72,6 +77,12 @@ class BpPaperEditor extends HTMLElement {
     this._wlSeq = 0; // monotonic open/query counter — stale async-result guard
     this._wikilinkSource = null; // injected async (query) => [{ title, id, type }]
     this._wlRange = null; // { from, to } PM range to replace on the current pick
+    // `#` tag autocomplete (Studio-only — see set tagSource below). Mirrors the
+    // wikilink popup exactly; REUSES WikilinkMenu via a { title, id, type } adapter.
+    this._tag = null; // WikilinkMenu instance reused for tags (lazy)
+    this._tagSeq = 0; // monotonic open/query counter — stale async-result guard
+    this._tagSource = null; // injected async (query) => [ "design", "obsidian", … ]
+    this._tagRange = null; // { from, to } PM range to replace on the current pick
     // Read-mode flag. Defaults TRUE (current edit behavior). Only the literal
     // attribute value editable="false" disables editing — a presence-boolean
     // can't express default-true, hence the by-value convention.
@@ -89,6 +100,7 @@ class BpPaperEditor extends HTMLElement {
     // the prototype accessor once it exists. Delete + re-assign each so the
     // value flows back through the real setter.
     this._upgradeProperty("wikilinkSource");
+    this._upgradeProperty("tagSource");
     this._upgradeProperty("block");
 
     // Default true; only the literal string "false" disables. This mount-time
@@ -164,11 +176,17 @@ class BpPaperEditor extends HTMLElement {
         // gate makes the contract code-enforced, not incidental.
         const consumed = this._maybeCalloutShorthand();
         if (!consumed) {
-          // `[[` wikilink and leading `/` slash are mutually exclusive popups:
-          // run the wikilink detector first; if IT opened, force the slash menu
-          // shut and skip _maybeSlash so only one popup is ever live. The two
-          // triggers are already disjoint, but the gate makes that code-enforced.
+          // `[[` wikilink, `#` tag, and leading `/` slash are mutually exclusive
+          // popups — AT MOST ONE opens per mutation. Chain by priority: run the
+          // wikilink detector first; if it did NOT open, run the tag detector; if
+          // NEITHER opened, run the slash detector. Whichever opens forces the
+          // others shut so a stale popup never lingers. The triggers are already
+          // disjoint by leading token ("[[" vs "#" vs "/"), but the gate makes
+          // the single-popup invariant code-enforced rather than incidental.
           if (this._maybeWikilink()) {
+            this._closeTag();
+            this._closeSlash();
+          } else if (this._maybeTag()) {
             this._closeSlash();
           } else {
             this._maybeSlash();
@@ -232,6 +250,10 @@ class BpPaperEditor extends HTMLElement {
     if (this._wikilink) {
       this._wikilink.destroy();
       this._wikilink = null;
+    }
+    if (this._tag) {
+      this._tag.destroy();
+      this._tag = null;
     }
     if (this._bubble) {
       this._bubble.destroy();
@@ -429,6 +451,29 @@ class BpPaperEditor extends HTMLElement {
       }
     }
 
+    // `#` tag menu owns the nav keys while open — same contract as the wikilink
+    // branch above. The two are mutually exclusive (only one ever open), so the
+    // order here is immaterial, but tag follows wikilink for symmetry.
+    if (this._tag && this._tag.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._tag.move(1);
+          return true;
+        case "ArrowUp":
+          this._tag.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._tag.choose();
+          return true;
+        case "Escape":
+          this._dismissTag();
+          return true;
+        default:
+          return false;
+      }
+    }
+
     if (!this._slash || !this._slash.isOpen()) return false;
 
     switch (event.key) {
@@ -603,6 +648,124 @@ class BpPaperEditor extends HTMLElement {
 
   get wikilinkSource() {
     return this._wikilinkSource;
+  }
+
+  // ── `#` tag autocomplete ───────────────────────────────────────────────
+  //
+  // Obsidian-parity inline tag picker — the `#` analogue of the `[[` wikilink
+  // popup, sharing the WikilinkMenu DOM via a thin adapter. Studio-only by
+  // construction: gated on `this._editable` AND on an injected `this._tagSource`
+  // (unset → never opens). On each onUpdate we re-run the PURE parseOpenTag seam
+  // (block-local text + caret offset); an open trigger opens/refreshes the menu
+  // at the caret and fires the async source. The string[] of tag names is mapped
+  // to WikilinkMenu's { title, id, type } row shape — "#"+name as the visible
+  // title, the bare name as the id we map back on pick. On a pick we replace the
+  // typed "#query" span with "#"+name carrying a `tag` mark { name }.
+  //
+  // Returns true iff the menu is (now) open, so onUpdate's mutual-exclusion chain
+  // can force the slash menu shut and skip _maybeSlash.
+  _maybeTag() {
+    if (!this._editable || !this._tagSource) return false;
+    if (!this._editor) return false;
+
+    // Block-LOCAL text + offset must share one coordinate frame — identical
+    // rationale to _maybeWikilink: `$from.parent.textContent` pairs exactly with
+    // `parentOffset`, so a `#` typed in the 2nd-or-later list item still opens.
+    const $from = this._editor.state.selection.$from;
+    const blockLocalText = $from.parent.textContent;
+    const caretOffset = $from.parentOffset;
+    const hit = parseOpenTag(blockLocalText, caretOffset);
+    if (!hit) {
+      this._closeTag();
+      return false;
+    }
+
+    // Open (or refresh as the query grows) the popup at the live caret rect, and
+    // remember the PM range to replace on pick — anchored to the DOCUMENT
+    // position (selection.from), not the block-local offset hit carries.
+    this._openTag(this._caretRect(), hit.query);
+    this._tagRange = tagReplaceRange(this._editor.state.selection.from, hit.query);
+
+    // Async source with a STALE GUARD (own _tagSeq, independent of _wlSeq): each
+    // open/keystroke bumps the counter; a resolved batch is dropped unless it is
+    // still the latest request AND the menu is still open. The source returns a
+    // string[] of tag NAMES; adapt each to WikilinkMenu's row shape here.
+    const seq = ++this._tagSeq;
+    Promise.resolve(this._tagSource(hit.query))
+      .then((list) => {
+        if (seq !== this._tagSeq || !this._tag || !this._tag.isOpen()) {
+          return;
+        }
+        const rows = (Array.isArray(list) ? list : []).map((name) => ({
+          title: "#" + name,
+          id: name,
+          type: "tag",
+        }));
+        this._tag.setResults(rows);
+      })
+      .catch(() => {});
+    return true;
+  }
+
+  _openTag(rect, query = "") {
+    if (!this._tag) {
+      this._tag = new WikilinkMenu({
+        onChoose: (c) => this._chooseTag(c),
+        onDismiss: () => this._dismissTag(),
+      });
+    }
+    this._tag.open(rect, query);
+  }
+
+  _closeTag() {
+    if (this._tag && this._tag.isOpen()) this._tag.close();
+  }
+
+  // User picked a tag: replace the typed "#query" span with "#"+name carrying a
+  // `tag` mark { name }, plus a trailing UNMARKED space so typing continues
+  // OUTSIDE the tag (mark is inclusive:false; the space guarantees it across
+  // browsers). The candidate is a WikilinkMenu row whose `id` is the bare tag
+  // name; map it back here. _tagRange was captured in _maybeTag when the menu
+  // opened/refreshed. Mirrors _chooseWikilink.
+  _chooseTag(candidate) {
+    const range = this._tagRange;
+    if (!range) {
+      this._closeTag();
+      return;
+    }
+    const name = candidate && candidate.id != null ? candidate.id : "";
+    this._editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, [
+        {
+          type: "text",
+          text: "#" + name,
+          marks: [{ type: "tag", attrs: { name } }],
+        },
+        { type: "text", text: " " },
+      ])
+      .run();
+    this._closeTag();
+  }
+
+  // Esc / outside-click: close the menu but LEAVE the typed "#query" in place —
+  // the user may want to keep editing it. Mirrors _dismissWikilink.
+  _dismissTag() {
+    this._closeTag();
+    this._editor.commands.focus();
+  }
+
+  // Writable property so the Studio LiveView hook can inject the async tag
+  // search: `el.tagSource = (query) => Promise<string[]>`. Unset → _maybeTag
+  // early-returns, so the popup NEVER opens (graceful no-op for the standalone
+  // embedder and the read-mode web embed). Mirrors wikilinkSource exactly.
+  set tagSource(fn) {
+    this._tagSource = fn;
+  }
+
+  get tagSource() {
+    return this._tagSource;
   }
 
   // Upgrade-safe property reclaim (called from connectedCallback). If a value

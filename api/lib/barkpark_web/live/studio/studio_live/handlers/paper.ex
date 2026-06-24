@@ -264,4 +264,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
     {:reply, %{results: results}, socket}
   end
+
+  @doc """
+  Typeahead candidate search for the `#tag` autocomplete popup — the tag-name
+  sibling of `paper_wikilink_search/2`.
+
+  Blank query or query exceeding 100 chars → empty result (short-circuit
+  before hitting the DB). The `#tag` trigger (parseOpenTag) only fires once the
+  query contains a letter, so a blank `q` never arrives from the editor — this
+  guard is defensive for malformed input, NOT the "top distinct tags" discovery
+  path that `Content.search_tags/3` itself offers on a blank query. Otherwise
+  delegates to `Content.search_tags/3` (DISTINCT tag names, capped at 20) using
+  the same dataset + scope that every other paper handler reads from socket
+  assigns.
+
+  Returns `{:reply, %{results: ["design", "obsidian", …]}, socket}` — plain
+  strings, which the client's pushEvent callback resolves onto the Promise
+  exposed by `el.tagSource`.
+  """
+  def paper_tag_search(q, socket)
+      when not is_binary(q) or byte_size(q) == 0 or byte_size(q) > 100 do
+    {:reply, %{results: []}, socket}
+  end
+
+  def paper_tag_search(q, socket) do
+    dataset = socket.assigns.dataset
+    opts = ScopeHelpers.scope_opts(socket)
+
+    results = Content.search_tags(q, dataset, opts)
+
+    {:reply, %{results: results}, socket}
+  end
 end

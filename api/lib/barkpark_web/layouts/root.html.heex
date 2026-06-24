@@ -3426,12 +3426,28 @@
               this.pushEvent("paper-wikilink-search", { query }, (reply) =>
                 resolve((reply && reply.results) || [])));
         };
+        // #tag autocomplete (P3.x): same shape as wikilinkSource, mirrored.
+        // The WC owns the # popup + all trigger detection (the tag sigil-
+        // boundary check); this hook only supplies candidates by round-tripping
+        // the live query to `paper-tag-search`, which replies {results:[name…]}
+        // (plain tag-name strings). `el.tagSource` is the injectable async
+        // source; unset → the popup never opens (read-mode / web embed).
+        const wireTagSource = (el) => {
+          el.tagSource = (query) =>
+            new Promise((resolve) =>
+              this.pushEvent("paper-tag-search", { query }, (reply) =>
+                resolve((reply && reply.results) || [])));
+        };
         if (wc) {
           wireWikilinkSource(wc);
+          wireTagSource(wc);
         }
         customElements.whenDefined("bp-paper-editor").then(() => {
           const el = this.el.querySelector("bp-paper-editor");
-          if (el) wireWikilinkSource(el);
+          if (el) {
+            wireWikilinkSource(el);
+            wireTagSource(el);
+          }
         });
 
         // Inbound bridge: external broadcasts → in-place editor re-mount.

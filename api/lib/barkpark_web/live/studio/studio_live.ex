@@ -232,6 +232,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-wikilink-search", %{"query" => q}, socket),
     do: Paper.paper_wikilink_search(q, socket)
 
+  def handle_event("paper-tag-search", %{"query" => q}, socket),
+    do: Paper.paper_tag_search(q, socket)
+
   def handle_event("paper-add-property", params, socket),
     do: Paper.paper_add_property(params, socket)
 
