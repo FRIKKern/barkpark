@@ -46,9 +46,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Shares
   }
 
-  # The in-Studio paper view / Beta editor / per-block-field function
-  # components live in StudioLive.Components; import so the `<.studio_paper_view
-  # ...>` / `<.paper_block_editor ...>` call sites in render/1 resolve verbatim.
+  # The in-Studio paper view + Studio shell function components live in
+  # StudioLive.Components; importing it makes the `<.studio_paper_view ...>` /
+  # `<.studio_live_shell ...>` call sites in render/1 resolve verbatim. The Beta
+  # paper-editor cluster (paper_block_editor, editor_mode_toggle,
+  # properties_panel, paper_block_fields) lives in Components.PaperEditor, which
+  # Components itself imports — those components are rendered only from inside
+  # Components' templates, so StudioLive does not import PaperEditor directly.
   import BarkparkWeb.Studio.StudioLive.Components
 
   @impl true
