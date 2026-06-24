@@ -139,7 +139,7 @@ defmodule Barkpark.Content.Papers do
   def resolve_wikilinks_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
       when is_list(blocks) do
     blocks
-    |> collect_wikilink_targets([])
+    |> collect_link_targets([])
     |> Enum.uniq()
     |> Enum.reduce(%{}, fn target, acc ->
       case resolve_wikilink(target, dataset, opts) do
@@ -149,21 +149,23 @@ defmodule Barkpark.Content.Papers do
     end)
   end
 
-  # Deep walk: collect the `target` of every `wikilink`-typed inline node, no
-  # matter how deeply nested (marks carry `children`; list items are nested
-  # lists). Pure structural recursion over maps + lists.
-  defp collect_wikilink_targets(%{"type" => "wikilink", "target" => t} = node, acc)
-       when is_binary(t) and t != "" do
-    Enum.reduce(Map.values(node), [t | acc], &collect_wikilink_targets/2)
+  # Deep walk: collect the `target` of every internal-link inline node. BOTH
+  # `wikilink` and `blockref` resolve their `target` by title/alias (a blockref
+  # adds an `anchor` for the in-doc block, but the doc itself resolves the same
+  # way), so they share one resolution map. Recurses arbitrarily-nested structure
+  # (marks carry `children`; list items are nested lists). Pure over maps + lists.
+  defp collect_link_targets(%{"type" => type, "target" => t} = node, acc)
+       when type in ["wikilink", "blockref"] and is_binary(t) and t != "" do
+    Enum.reduce(Map.values(node), [t | acc], &collect_link_targets/2)
   end
 
-  defp collect_wikilink_targets(node, acc) when is_map(node),
-    do: Enum.reduce(Map.values(node), acc, &collect_wikilink_targets/2)
+  defp collect_link_targets(node, acc) when is_map(node),
+    do: Enum.reduce(Map.values(node), acc, &collect_link_targets/2)
 
-  defp collect_wikilink_targets(list, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &collect_wikilink_targets/2)
+  defp collect_link_targets(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_link_targets/2)
 
-  defp collect_wikilink_targets(_other, acc), do: acc
+  defp collect_link_targets(_other, acc), do: acc
 
   @doc """
   Resolve a paper for the PUBLIC, unauthenticated `/papers/:slug` surface.
