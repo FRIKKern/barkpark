@@ -184,12 +184,18 @@ function editorHasCommand(editor, name) {
   }
 }
 
-// buildCommandRegistry(editor?) → the full command list. `editor` is OPTIONAL: when
-// absent (pure test build) the full canvas StarterKit command set is assumed; when
-// present, each command is filtered to one the editor can actually run (so a host
+// buildCommandRegistry(editor?, opts?) → the full command list. `editor` is OPTIONAL:
+// when absent (pure test build) the full canvas StarterKit command set is assumed;
+// when present, each command is filtered to one the editor can actually run (so a host
 // that omitted, say, the strike mark never shows a dead Strike row, and underline
 // shows up only if registered).
-export function buildCommandRegistry(editor) {
+//
+// `opts.onToggleSource` is the canvas's toggleSourceMode method (the WC owns the rich/
+// source swap, not the editor). When provided, a "View" group is appended with a
+// "Toggle Markdown source" command whose run() flips the mode — the SAME method the
+// Mod-Shift-m shortcut calls. Absent in the pure test build (no canvas), so the View
+// group simply does not appear there; the registry stays well-formed either way.
+export function buildCommandRegistry(editor, opts) {
   const cmds = [];
 
   // INSERT — one per canvas-insertable type; run() reuses the slash insert seam.
@@ -256,6 +262,20 @@ export function buildCommandRegistry(editor) {
       group: "Turn into",
       hint: t.hint,
       run: t.run,
+    });
+  }
+
+  // VIEW — the markdown source-mode toggle. Only when the canvas wired an
+  // onToggleSource callback (it owns the rich⇄source swap, not the editor). run()
+  // ignores the editor arg and calls the canvas toggle — the SAME method Mod-Shift-m
+  // calls — so both triggers are identical. Omitted in the pure test build (no canvas).
+  if (opts && typeof opts.onToggleSource === "function") {
+    cmds.push({
+      id: "view-toggle-source",
+      label: "Toggle Markdown source",
+      group: "View",
+      hint: "</>",
+      run: () => opts.onToggleSource(),
     });
   }
 

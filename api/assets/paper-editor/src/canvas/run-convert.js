@@ -850,6 +850,75 @@ function stableProseKey(node) {
   });
 }
 
+// classifyNode(node) → { node, bpType, isOpaque, isAtom, isContent, isAttrAtom,
+//   isField, isReadOnlyAtom }
+//
+// The PURE per-node classification both runToOps (op-emission) and docToBlocks
+// (live-doc → blocks projection) share — the SINGLE place a getJSON node is
+// mapped to its canvas KIND + resolved bpType. Factored out so the two callers
+// agree byte-for-byte on what a node IS (an own-echo stamp and a source-mode
+// baseline must classify a node identically). It does NOT resolve the id — that
+// is the caller's job (runToOps keys against prev ids + mints; docToBlocks reads
+// the live bpId + mints) — because id resolution is the ONE thing that differs.
+function classifyNode(node) {
+  const isOpaque = node.type === "bpOpaque";
+  const isAtom = isCanvasAtomType(node.type);
+  const isContent = isCanvasContentType(node.type);
+  const isAttrAtom = isCanvasAttrAtomNode(node.type);
+  const isField = isCanvasFieldNode(node.type);
+  const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
+  const bpType =
+    (node.attrs && node.attrs.bpType) ||
+    CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
+    CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
+    (isField ? "field-string" : node.type);
+  return {
+    node,
+    bpType,
+    isOpaque,
+    isAtom,
+    isContent,
+    isAttrAtom,
+    isField,
+    isReadOnlyAtom,
+  };
+}
+
+// docToBlocks(doc) → [ block, … ]
+//
+// Project an EDITED canvas doc (the getJSON shape, after normalizeCanvasDoc) BACK
+// to a portable-doc block LIST — the SAME node→block path runToOps uses internally
+// (classifyNode + nextNodeToBlock), exposed so a caller can derive the LIVE run
+// from the live editor. This is what source-mode needs for its baseline: the diff
+// baseline (this._blocks) is ECHO-CONFIRMED and LAGS the live doc by the round-trip
+// to the server; the LIVE doc (getJSON) carries the user's just-typed,
+// not-yet-confirmed edits. docToBlocks(normalizeCanvasDoc(getJSON())) is exactly the
+// run _emitOps diffs the live doc to internally (runToOps maps each node via the
+// same classify + nextNodeToBlock), so the markdown the user sees in source mode
+// reflects everything on screen, not the stale confirmed run.
+//
+// A node that already carries a bpId keeps it; a freshly-typed / split node
+// (bpId:null) is CLIENT-MINTED a unique id here (so blocksToMarkdown has a stable
+// key and the exit realign can donate it back). The `taken` set guards uniqueness
+// within the call. PURE, DOM-free — like runToOps it touches no editor.
+export function docToBlocks(doc) {
+  const nodes = (doc && doc.content) || [];
+  const taken = new Set();
+  // Seed `taken` with every id ALREADY on a node so a mint can never collide with a
+  // surviving id (two nodes can't legitimately share an id post-normalize, but a
+  // belt-and-braces seed keeps minting collision-free regardless).
+  for (const node of nodes) {
+    const id = node && node.attrs && node.attrs.bpId;
+    if (id != null) taken.add(id);
+  }
+  return nodes.map((node) => {
+    const cls = classifyNode(node);
+    const bpId = node.attrs && node.attrs.bpId;
+    const id = bpId != null ? bpId : mintId(taken);
+    return nextNodeToBlock({ ...cls, id, isNew: bpId == null });
+  });
+}
+
 // runToOps(prevBlocks, nextDoc) → [ op, … ] (ordered)
 //
 // Diff the ORIGINAL block list against the edited doc (the runToTiptap shape
@@ -892,58 +961,17 @@ export function runToOps(prevBlocks, nextDoc) {
   const taken = new Set();
   prevById.forEach((_block, id) => taken.add(id));
 
+  // Classify each node into its canvas KIND + resolved bpType via the SHARED
+  // classifyNode (the same path docToBlocks uses), then resolve the id HERE: a
+  // surviving prev id keeps its id (existing); anything else (a split / typed /
+  // paste node with bpId:null, or a bpId not in prev) is CLIENT-MINTED. This is
+  // the one piece runToOps owns over docToBlocks — id resolution is keyed against
+  // the PREV run, not just the live bpId.
   const nextSeq = nextNodes.map((node) => {
     const bpId = node.attrs && node.attrs.bpId;
-    const isOpaque = node.type === "bpOpaque";
-    // A canvas atom (S3: divider) is a content-free leaf — like opaque, it never
-    // emits an interior patch, but unlike opaque it reconstructs as a real block
-    // of its type (not a carried bpBlock). Detect by the node TYPE itself.
-    const isAtom = isCanvasAtomType(node.type);
-    // A canvas CONTENT node (S3.2: callout) HAS an editable interior — unlike the
-    // atom it CAN emit a patch on a body/chrome change, and unlike opaque it
-    // reconstructs as a real block of its type via calloutNodeToBlock.
-    const isContent = isCanvasContentType(node.type);
-    // A canvas ATTR-ATOM node (S3.3: code) is an atom whose value/lang ride attrs
-    // and are edited by a non-PM control. UNLIKE the divider atom it CAN emit a
-    // patch (value/lang change); unlike the callout it has no inline body. Detect
-    // by the NODE type (e.g. "bpCode"), which differs from the bpType ("code").
-    const isAttrAtom = isCanvasAttrAtomNode(node.type);
-    // A canvas CONTROL-ATOM node (S3.5: the 7 native field-* types) is an atom whose
-    // VALUE rides an attr and is edited by a NATIVE control. UNLIKE the attr-atom it
-    // serves 7 bpTypes through the single `bpField` node and coerces by field type;
-    // unlike the divider atom it CAN emit a patch (a value change). Detect by the
-    // NODE type ("bpField"); the specific kind comes off the bpType attr.
-    const isField = isCanvasFieldNode(node.type);
-    // A canvas READ-ONLY ATOM node (S3.6: bpSheet / bpEmbed) is a REFERENCE, NOT
-    // editable text — it carries the WHOLE block verbatim on bpBlock and NEVER emits a
-    // value/content patch (like the divider atom, but a richer carry). It IS
-    // canvas-eligible (no split) and DOES participate in structural ops. Detect by the
-    // NODE type ("bpSheet"/"bpEmbed"); the bpType comes off the attr / the node map.
-    const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
-    // For an attr-atom the bpType comes off the attr stamp, falling back to the
-    // node→bpType map (a freshly-typed code node may carry no bpType attr yet). For a
-    // field node the bpType attr IS the kind (no node→bpType map — all 7 share one
-    // node), defaulting to field-string if a fresh field node carries none yet. For a
-    // read-only atom the bpType comes off the attr / the bpSheet|bpEmbed→bpType map.
-    const bpType =
-      (node.attrs && node.attrs.bpType) ||
-      CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
-      CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
-      (isField ? "field-string" : node.type);
     const existing = bpId != null && prevIndex.has(bpId);
     const id = existing ? bpId : mintId(taken);
-    return {
-      id,
-      bpType,
-      node,
-      isNew: !existing,
-      isOpaque,
-      isAtom,
-      isContent,
-      isAttrAtom,
-      isField,
-      isReadOnlyAtom,
-    };
+    return { ...classifyNode(node), id, isNew: !existing };
   });
 
   const nextIds = new Set(nextSeq.map((e) => e.id));

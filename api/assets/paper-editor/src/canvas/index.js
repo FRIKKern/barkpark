@@ -45,7 +45,16 @@ import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 // bpId:null node as a wildcard matching the server-minted id at that index, so a
 // NEW-block echo (Enter-split / paste / typed paragraph) is recognized as an own
 // echo and yields the id-writebacks that make the next diff incremental.
-import { runToTiptap, runToOps, reconcileServerEcho } from "./run-convert.js";
+// docToBlocks (P5 source-mode): the LIVE-doc → blocks projection — the SAME node→
+// block path runToOps diffs against internally (classify + nextNodeToBlock). Source
+// mode derives its baseline from the LIVE doc (getJSON), NOT the echo-confirmed,
+// LAGGING this._blocks, so the markdown reflects the user's just-typed edits.
+import {
+  runToTiptap,
+  runToOps,
+  reconcileServerEcho,
+  docToBlocks,
+} from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
@@ -143,6 +152,22 @@ import {
   buildCommandRegistry,
   insertSlashTypeAtSelection,
 } from "./command-palette.js";
+// P5 MARKDOWN SOURCE-MODE: the merged, PURE, dependency-free blocks⇄markdown
+// converter (../markdown.js). The "source mode" toggle swaps the rich ProseMirror
+// editor for a Markdown <textarea> (the Obsidian source-mode analog): on ENTER we
+// serialize the run to markdown (blocksToMarkdown), on EXIT we parse the edited
+// markdown back (markdownToBlocks) and update the editor so the existing _emitOps
+// diff path emits exactly the user's source-mode edits. Canvas-only; this import is
+// what pulls markdown.js INTO the committed bundle for the first time (it was
+// previously test-only). <bp-paper-editor> (src/index.js) is byte-unchanged.
+import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
+// The PURE id-realigner + deep-cloner for the exit-source diff (split into its own
+// module so it unit-tests in plain Node — canvas/index.js itself calls
+// customElements.define at load and can't be imported DOM-free). On EXIT we parse the
+// edited markdown (markdownToBlocks → fresh minted ids), then realign those ids onto
+// the source baseline so a surviving block keeps its id and runToOps emits a PATCH
+// (not remove+insert) for an in-place edit. See ./source-realign.js.
+import { realignBlockIds, deepCloneBlocks } from "./source-realign.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -315,6 +340,27 @@ class BpPaperCanvas extends HTMLElement {
     // a pick it runs the command's run(editor), closes, and refocuses the editor; the
     // command then emits the normal bp-canvas-ops via the onUpdate path.
     this._palette = null; // CommandPalette instance (lazy)
+    // P5 MARKDOWN SOURCE-MODE — the Obsidian "source mode" analog. "rich" = the
+    // ProseMirror editor (this._mount) is live; "source" = the rich editor is
+    // hidden and a Markdown <textarea> (this._sourceEl) owns input. The toggle
+    // (Mod-Shift-m or the "Toggle Markdown source" palette command) flips between
+    // them. Both never co-exist; the textarea owns ALL input while in source mode,
+    // so the [[ / # / slash / palette / format-bubble seams no-op there.
+    this._mode = "rich"; // "rich" | "source"
+    this._sourceEl = null; // the <textarea class="bp-canvas-source"> (source mode only)
+    // The blocks the source markdown was serialized FROM (a deep clone captured on
+    // ENTER). On EXIT the markdown is parsed back to blocks whose ids are REALIGNED
+    // against this baseline so a surviving block keeps its id → runToOps emits a
+    // PATCH (not remove+insert) for an in-place text edit. The NO-EDIT exit short-
+    // circuits before any of this (md unchanged → restore untouched, ZERO ops).
+    this._sourceBaselineBlocks = null;
+    // The exact markdown shown on ENTER (blocksToMarkdown of the baseline). The
+    // NO-EDIT guard compares the textarea value against THIS string verbatim: equal
+    // → the toggle is provably op-free (no re-parse, no setContent, no caret churn).
+    this._sourceOriginalMd = "";
+    // Bound listener for the textarea's own Mod-Shift-m (toggle BACK to rich) +
+    // Escape — kept as a field so the exact identity is removed on cleanup.
+    this._onSourceKeyDown = null;
   }
 
   connectedCallback() {
@@ -558,6 +604,13 @@ class BpPaperCanvas extends HTMLElement {
       this._bubble.destroy();
       this._bubble = null;
     }
+    // P5 source-mode: tear down the markdown textarea + its keydown listener if the
+    // element disconnects while in source mode (so neither the node nor the listener
+    // leaks). Reset the mode bookkeeping; the editor.destroy() below frees the rest.
+    this._teardownSourceEl();
+    this._sourceBaselineBlocks = null;
+    this._sourceOriginalMd = "";
+    this._mode = "rich";
     if (this._editor) {
       this._editor.destroy();
       this._editor = null;
@@ -587,7 +640,17 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
     const ops = runToOps(this._blocks, nextDoc);
-    if (!ops.length) return;
+    this._dispatchOps(ops);
+  }
+
+  // Dispatch an op array as the bp-canvas-ops the LiveView hook folds. Factored out
+  // of _emitOps so the source-mode edited exit can emit its OWN diff (runToOps(L0,L1))
+  // directly — the SAME wire shape the debounced path uses — without re-running
+  // _emitOps (which diffs from this._blocks/C and would re-emit the in-flight
+  // pre-source edits L0−C as duplicate structural ops). A zero-length array is a
+  // no-op (a no-edit toggle emits nothing).
+  _dispatchOps(ops) {
+    if (!ops || !ops.length) return;
     this.dispatchEvent(
       new CustomEvent("bp-canvas-ops", {
         detail: { ops },
@@ -605,6 +668,26 @@ class BpPaperCanvas extends HTMLElement {
   // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
   // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
+    // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
+    // elsewhere) ENTERS source mode from the rich editor. Detected FIRST, before the
+    // palette/popup branches: it is a deliberately FREE combo (Mod-p = palette, Mod-b
+    // = bold, Mod-i = italic, Mod-Shift-m collides with nothing in StarterKit or the
+    // canvas). Only when editable. preventDefault + return true so ProseMirror does
+    // not also act on the key. The toggle-BACK (source → rich) is handled by the
+    // textarea's own keydown listener (_onSourceKeyDown), since while in source mode
+    // ProseMirror's handleKeyDown never fires (the textarea owns input).
+    if (
+      this._editable &&
+      (event.metaKey || event.ctrlKey) &&
+      event.shiftKey &&
+      !event.altKey &&
+      (event.key === "m" || event.key === "M")
+    ) {
+      event.preventDefault();
+      this.toggleSourceMode();
+      return true;
+    }
+
     // P5 command palette — Mod-p (Cmd-P on mac / Ctrl-P elsewhere) OPENS the palette.
     // Detected here, BEFORE the popup-routing branches, so the mutual-exclusion guard
     // can see whether any text-triggered popup is open. NOT shift (Cmd-Shift-P stays
@@ -1204,16 +1287,20 @@ class BpPaperCanvas extends HTMLElement {
   // bp-canvas-ops via the onUpdate path (insert → insert-after; format → patch-block).
   _openPalette() {
     if (!this._editable || !this._editor) return;
+    // The View-group "Toggle Markdown source" command calls back into the WC's
+    // toggle (the canvas owns the rich⇄source swap, not the editor) — the SAME method
+    // Mod-Shift-m calls, so both triggers are identical.
+    const registryOpts = { onToggleSource: () => this.toggleSourceMode() };
     if (!this._palette) {
       this._palette = new CommandPalette({
-        commands: buildCommandRegistry(this._editor),
+        commands: buildCommandRegistry(this._editor, registryOpts),
         onChoose: (cmd) => this._choosePaletteCommand(cmd),
         onDismiss: () => this._dismissPalette(),
       });
     } else {
       // Rebuild the registry against the LIVE editor on each open so command
       // availability (e.g. underline only if registered) reflects the current state.
-      this._palette.setCommands(buildCommandRegistry(this._editor));
+      this._palette.setCommands(buildCommandRegistry(this._editor, registryOpts));
     }
     // The rect is ignored by CommandPalette._position (centered modal); pass the
     // caret rect anyway for API symmetry with the slash popup. Empty initial query.
@@ -1248,6 +1335,241 @@ class BpPaperCanvas extends HTMLElement {
   _dismissPalette() {
     this._closePalette();
     this._editor.commands.focus();
+  }
+
+  // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──
+  //
+  // The Obsidian "source mode" analog: swap the rich ProseMirror editor for a plain
+  // Markdown <textarea> and back. The SAME toggle method is bound to both triggers
+  // (the keyboard shortcut in _onKeyDown and the palette command in
+  // buildCommandRegistry → run()), so they are guaranteed identical.
+  //
+  //   rich → source : serialize the run to markdown (blocksToMarkdown of the diff
+  //                   baseline this._blocks — the echo-advanced confirmed run), stash
+  //                   the original md + a deep clone of those baseline blocks, hide
+  //                   the rich editor, close any open popup, show a focused textarea.
+  //   source → rich : read the textarea. If the markdown is UNCHANGED (=== the stashed
+  //                   original) restore the rich editor UNTOUCHED — NO re-parse, NO
+  //                   setContent, ZERO ops (a no-op toggle never perturbs the doc or
+  //                   the diff baseline). If EDITED, parse it back (markdownToBlocks),
+  //                   REALIGN the parsed blocks' ids against the baseline (so a
+  //                   surviving block keeps its id and a single in-place edit emits ONE
+  //                   patch-block, not remove+insert), then setContent → onUpdate →
+  //                   the existing _emitOps path diffs this._blocks → the new doc and
+  //                   emits the bp-canvas-ops for exactly the user's source-mode edits.
+  toggleSourceMode() {
+    if (!this._editor || !this._editable) return;
+    if (this._mode === "rich") this._enterSourceMode();
+    else this._exitSourceMode();
+  }
+
+  // ENTER source mode. Capture the baseline (the live diff baseline this._blocks)
+  // and its markdown, hide the rich editor + close any popup, mount a focused
+  // textarea sized to its content. Idempotent: a second enter while already in
+  // source mode is a no-op.
+  _enterSourceMode() {
+    if (this._mode === "source" || !this._editor || !this._mount) return;
+
+    // Flush any pending debounced emit FIRST so the live doc's just-typed edits are
+    // EMITTED normally (they ride to the server and echo back to advance this._blocks
+    // on their own clock). This does NOT change the baseline we capture below — the
+    // baseline comes from the LIVE doc, not this._blocks — it only ensures the
+    // pre-source edits are in flight rather than stuck behind the debounce.
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+      this._emitOps();
+    }
+
+    // Close any open popup — in source mode the textarea owns input, so a lingering
+    // [[ / # / slash / palette popup would float over a now-hidden editor.
+    this._closeWikilink();
+    this._closeTag();
+    this._closeSlash();
+    this._closePalette();
+
+    // THE BASELINE — derived from the LIVE doc (L0), NOT this._blocks (C).
+    //
+    //   C  = this._blocks  — the ECHO-CONFIRMED baseline. It advances ASYNC, only when
+    //        the server echoes bp:canvas-update → applyServerBlocks. After the user
+    //        types, C LAGS the live doc by ~300ms + network until the echo lands.
+    //   L0 = the LIVE doc projected back to blocks — docToBlocks(normalizeCanvasDoc(
+    //        getJSON())), the SAME projection _emitOps diffs against. It includes the
+    //        user's just-typed, not-yet-confirmed edits.
+    //
+    // Capturing from C would show STALE markdown (missing the just-typed edits) and,
+    // on an edited exit, a setContent built from C would DELETE those edits. So the
+    // baseline + textarea MUST come from L0. We deep-clone L0 so a later parse +
+    // realign never mutates it.
+    const liveDoc = normalizeCanvasDoc(this._editor.getJSON());
+    const L0 = docToBlocks(liveDoc);
+    this._sourceBaselineBlocks = deepCloneBlocks(L0);
+    const md0 = blocksToMarkdown(this._sourceBaselineBlocks);
+    this._sourceOriginalMd = md0;
+
+    // The textarea — monospace, full-width, themed by the --paper-* tokens (styled
+    // in root.html.heex next to .bp-cmd-*). Mount it as a sibling of the rich body
+    // inside the WC so the same surface tokens cascade in.
+    const ta = document.createElement("textarea");
+    ta.className = "bp-canvas-source";
+    ta.value = md0;
+    ta.setAttribute("aria-label", "Markdown source");
+    ta.spellcheck = false;
+    ta.autocapitalize = "off";
+    ta.autocomplete = "off";
+    ta.setAttribute("autocorrect", "off");
+    // The textarea owns its own toggle-back (Mod-Shift-m) + Escape, since the rich
+    // editor's handleKeyDown does NOT fire while source mode is up.
+    this._onSourceKeyDown = (e) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key === "m" || e.key === "M")
+      ) {
+        e.preventDefault();
+        this.toggleSourceMode();
+        return;
+      }
+      if (e.key === "Escape" || e.key === "Esc") {
+        e.preventDefault();
+        this.toggleSourceMode();
+      }
+    };
+    ta.addEventListener("keydown", this._onSourceKeyDown);
+    // Auto-grow to the content on input so the source never scrolls internally.
+    ta.addEventListener("input", () => this._sizeSourceTextarea());
+
+    // Hide the rich editor (kept mounted so its state survives a no-op toggle) and
+    // show the textarea in its place.
+    this._mount.style.display = "none";
+    this.appendChild(ta);
+    this._sourceEl = ta;
+    this._mode = "source";
+
+    // Size + focus after attach (offsetHeight/scrollHeight need layout).
+    this._sizeSourceTextarea();
+    try {
+      ta.focus();
+      // Caret at the start, no selection — Obsidian lands the cursor at doc top.
+      ta.setSelectionRange(0, 0);
+    } catch (_e) {
+      // focus is best-effort (e.g. a detached test env).
+    }
+    // The editor just lost focus to the textarea — drive the format bubble's own
+    // hide path (update() hides when !view.hasFocus()) so no stale bubble lingers
+    // over the now-hidden editor.
+    if (this._bubble) this._bubble.update();
+  }
+
+  // EXIT source mode → back to the rich editor.
+  //   NO EDIT  (textarea value === the stashed original md): restore the rich editor
+  //            UNTOUCHED — no re-parse, no setContent, ZERO ops. The diff baseline and
+  //            caret are exactly as they were before entering.
+  //   EDITED   : parse the markdown back to blocks (L1), REALIGN ids against the LIVE
+  //            baseline (L0) so surviving blocks keep their ids, then:
+  //              (1) apply L1 to the editor via setContent(runToTiptap(L1), FALSE) —
+  //                  the `false` means NO auto-emit (so onUpdate → _emitOps does NOT
+  //                  fire and re-diff from this._blocks/C); and
+  //              (2) dispatch ONLY the source-mode diff = runToOps(L0, L1) ourselves.
+  //            This is the crux: the pre-source edits (L0−C) are ALREADY in flight
+  //            (emitted on enter / by the debounce). Re-running _emitOps would diff
+  //            from C and re-emit L0−C as DUPLICATE structural ops (a re-emitted
+  //            insert-after for an already-inserted id can double-insert). By diffing
+  //            L0→L1 explicitly and suppressing the auto-emit, only the GENUINE source
+  //            edits go out. this._blocks (C) is left alone; the echoes (pre-source +
+  //            source) advance it normally on their own clock.
+  // Either way the textarea + its listener are torn down and the rich editor reshown.
+  _exitSourceMode() {
+    if (this._mode === "source" && this._sourceEl) {
+      const md = this._sourceEl.value;
+      const edited = md !== this._sourceOriginalMd;
+
+      // Tear down the textarea + listener and reveal the rich editor FIRST so the
+      // setContent (edited path) and the refocus land on the visible editor.
+      this._teardownSourceEl();
+      if (this._mount) this._mount.style.display = "";
+      this._mode = "rich";
+
+      if (edited) {
+        // L1 = the blocks after the user edited the markdown: parse it (fresh minted
+        // ids) then REALIGN against L0 (the live-doc baseline) so a surviving block
+        // keeps its id → runToOps emits a PATCH (not remove+insert) for an in-place
+        // edit. L0 = this._sourceBaselineBlocks (captured from the LIVE doc on enter).
+        const L0 = this._sourceBaselineBlocks;
+        const L1 = realignBlockIds(L0, markdownToBlocks(md));
+        // ONE projection of L1, used for BOTH the editor content and the emitted diff,
+        // so the rich editor and the ops it sends are derived from the exact same doc.
+        const L1Doc = runToTiptap(L1);
+
+        // (1) Apply L1 to the editor WITHOUT auto-emit (setContent second arg = false).
+        // The rich editor now shows L1; onUpdate does NOT fire, so _emitOps never runs
+        // and never re-diffs from C. addToHistory:false so the source-mode reflow is
+        // not a separate undo step on top of the user's own edits.
+        this._editor
+          .chain()
+          .setContent(L1Doc, false)
+          .command(({ tr }) => {
+            tr.setMeta("addToHistory", false);
+            return true;
+          })
+          .run();
+
+        // (2) Dispatch ONLY the source-mode diff (L0 → L1). The pre-source edits
+        // (L0−C) are already in flight; this emits exactly what the user changed in
+        // the textarea — an unchanged block → no op; a changed heading → ONE
+        // patch-block (against its L0 id); an added/removed block → insert/remove,
+        // survivors untouched. A no-edit-equivalent reflow (md changed but blocks
+        // identical) → ZERO ops. this._blocks (C) is NOT advanced here.
+        this._dispatchOps(runToOps(L0, L1Doc));
+      }
+      // else NO EDIT: the rich editor was never touched — the live doc, the diff
+      // baseline, and the caret are exactly as they were. ZERO ops by construction.
+
+      this._sourceBaselineBlocks = null;
+      this._sourceOriginalMd = "";
+      try {
+        this._editor.commands.focus();
+      } catch (_e) {
+        // focus is best-effort.
+      }
+
+      // MAJOR (source-mode external-edit queue): while we were in source mode an
+      // external echo may have been QUEUED (applyServerBlocks saw _isEditingNow() ===
+      // true because the mode was 'source'). Now that we are back in rich, flush it so
+      // the queued external edit lands — the SAME flush the blur / compositionend path
+      // runs. Re-applying L1's own diff above does not conflict: the external content
+      // is the server-confirmed state and supersedes. We flush AFTER setContent so the
+      // external apply is the last word.
+      this._flushPendingServerBlocks();
+    }
+  }
+
+  // Grow the source textarea to fit its content (no internal scroll). Best-effort —
+  // a detached test env has no layout, so scrollHeight is 0 and we leave the rows.
+  _sizeSourceTextarea() {
+    const ta = this._sourceEl;
+    if (!ta) return;
+    try {
+      ta.style.height = "auto";
+      const h = ta.scrollHeight;
+      if (h > 0) ta.style.height = h + "px";
+    } catch (_e) {
+      // no layout (test env): leave the default rows.
+    }
+  }
+
+  // Remove the source textarea + its keydown listener (the exact bound identity).
+  // Called on exit AND on disconnect so a teardown mid-source-mode leaks nothing.
+  _teardownSourceEl() {
+    const ta = this._sourceEl;
+    if (!ta) return;
+    if (this._onSourceKeyDown) {
+      ta.removeEventListener("keydown", this._onSourceKeyDown);
+      this._onSourceKeyDown = null;
+    }
+    if (ta.parentNode) ta.parentNode.removeChild(ta);
+    this._sourceEl = null;
   }
 
   // S4a: ECHO-DRIVEN BASELINE — the server's confirmed-blocks echo lands here.
@@ -1355,11 +1677,21 @@ class BpPaperCanvas extends HTMLElement {
     view.dispatch(tr);
   }
 
-  // True when the editor is actively being edited and a setContent would yank
-  // the caret: it has focus, OR ProseMirror is mid-IME-composition. Either is a
-  // reason to DEFER an external re-render to the next blur / compositionend.
+  // True when the editor is actively being edited and a setContent would yank the
+  // caret OR clobber an unseen edit: it has focus, OR ProseMirror is mid-IME-
+  // composition, OR we are in SOURCE mode. Each is a reason to DEFER an external
+  // re-render.
+  //
+  // SOURCE mode is the MAJOR case: the rich editor is HIDDEN and a Markdown textarea
+  // owns input. If applyServerBlocks applied an external echo now, it would setContent
+  // on the hidden editor — and the subsequent source-exit setContent (L1) would then
+  // CLOBBER that external edit (the user never sees it; it's lost). So source mode is
+  // "busy" exactly like focus/IME: the external blocks are QUEUED (_pendingServerBlocks)
+  // and flushed on exit (_exitSourceMode → _flushPendingServerBlocks), so the queued
+  // external edit lands once the user is back in rich.
   _isEditingNow() {
     if (!this._editor) return false;
+    if (this._mode === "source") return true;
     const composing = !!(this._editor.view && this._editor.view.composing);
     return this._editor.isFocused || composing;
   }
@@ -1388,13 +1720,7 @@ class BpPaperCanvas extends HTMLElement {
     this._pendingServerBlocks = blocks;
     if (this._onBlurFlush) return; // listeners already armed
 
-    const flush = () => {
-      // Still mid-composition? Wait for the next release.
-      if (this._editor && this._editor.view && this._editor.view.composing) return;
-      const pending = this._pendingServerBlocks;
-      this._clearPendingServerBlocks();
-      if (pending) this._applyExternalContent(pending);
-    };
+    const flush = () => this._flushPendingServerBlocks();
 
     this._onBlurFlush = flush;
     this._onComposeEnd = flush;
@@ -1405,6 +1731,21 @@ class BpPaperCanvas extends HTMLElement {
       this._mount.addEventListener("blur", this._onBlurFlush, true);
       this._mount.addEventListener("compositionend", this._onComposeEnd, true);
     }
+  }
+
+  // Apply the queued external-edit echo, if one is pending and the user is no longer
+  // mid-edit. Called by the blur / compositionend release listeners AND by the
+  // source-mode exit (so a queued external edit lands once the user is back in rich).
+  // Idempotent + guarded: a still-composing editor waits for the next release; a
+  // still-in-source mode (e.g. a spurious call) waits for exit; an empty queue no-ops.
+  _flushPendingServerBlocks() {
+    if (!this._pendingServerBlocks) return;
+    // Still mid-composition or still in source mode? Wait for the real release.
+    if (this._editor && this._editor.view && this._editor.view.composing) return;
+    if (this._mode === "source") return;
+    const pending = this._pendingServerBlocks;
+    this._clearPendingServerBlocks();
+    if (pending) this._applyExternalContent(pending);
   }
 
   // Tear down any queued external-edit echo + its release listeners.
