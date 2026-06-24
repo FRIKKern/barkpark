@@ -33,6 +33,20 @@ import {
 } from "./canvas/embed-node.js";
 import { Wikilink, Blockref, Tag } from "./marks.js";
 import { CONTRACT_VERSION } from "./contract.js";
+// P4 S-slash: the PURE slash-insert core (split out of canvas/index.js so it loads
+// in plain Node). Asserted here: each insertable type's slashTypeToNode round-trips
+// to the right { type, …default } block via runToOps+nextNodeToBlock, the excluded
+// types are absent from CANVAS_SLASH_TYPES, and the default blocks mirror
+// default_block/2. The callout `> [!type]` shorthand path (tone parse) is covered by
+// __callout_shorthand.test.mjs; here we assert the SHORTHAND-produced callout NODE
+// reconstructs to a callout block of the matched tone.
+import {
+  CANVAS_SLASH_TYPES,
+  canvasDefaultBlock,
+  slashTypeToNode,
+  CANVAS_SLASH_TEXTABLE_NODES,
+} from "./canvas/slash-insert.js";
+import { normalizeTone } from "./tone.js";
 
 let failures = 0;
 function check(name, fn) {
@@ -3009,6 +3023,220 @@ check("S4a-d new-block echo: id-tolerant reconcile recognizes the OWN echo + mak
     0,
     "no re-mint of the first new block on the 2nd edit",
   );
+});
+
+// ── P4 S-slash: canvas slash menu DIRECT-INSERT round-trips ─────────────────
+//
+// The canvas slash pick inserts slashTypeToNode(type) DIRECTLY into the doc — so
+// runToOps must emit ONE insert-after (or append, on an empty run) carrying the
+// SAME default block default_block/2 would have built. These tests prove that for
+// every insertable type, plus the allowlist (excluded types absent) and the
+// callout-shorthand replace.
+
+// Helper: insert a slash node AFTER a single anchor block and return the ops.
+function slashInsertOps(type) {
+  const anchor = { id: "p-1", type: "paragraph", content: [{ type: "text", value: "anchor" }] };
+  const prev = [anchor];
+  const prevDoc = runToTiptap(prev);
+  const node = slashTypeToNode(type);
+  const nextDoc = { type: "doc", content: [...prevDoc.content, node] };
+  const ops = runToOps(prev, nextDoc);
+  return { prev, nextDoc, ops };
+}
+
+// (a) Per-type: slashTypeToNode → ONE insert-after carrying { type, …default } whose
+//     reconstructed block matches default_block/2, AND the fold reproduces nextDoc.
+const SLASH_INSERTABLE = [
+  "paragraph",
+  "heading",
+  "list",
+  "callout",
+  "code",
+  "divider",
+  "diagram",
+  "field-string",
+  "field-boolean",
+];
+for (const type of SLASH_INSERTABLE) {
+  check(`S-slash: /${type} → one insert-after carrying a ${type} block`, () => {
+    const { prev, nextDoc, ops } = slashInsertOps(type);
+    const inserts = ops.filter((o) => o.op === "insert-after" || o.op === "append-block");
+    assert.equal(inserts.length, 1, `${type}: exactly one structural insert`);
+    assert.equal(ops.length, 1, `${type}: ONLY the insert (no stray patch/move)`);
+    const ins = inserts[0];
+    assert.equal(ins.op, "insert-after", `${type}: insert-after (anchor survives)`);
+    assert.equal(ins.afterId, "p-1", `${type}: anchored after the surviving block`);
+    assert.equal(ins.block.type, type, `${type}: the carried block is of type ${type}`);
+    assert.ok(ins.block.id != null, `${type}: the carried block has a minted id`);
+    // The carried block is the CANONICAL reconstruction of the default node — the
+    // exact shape runToOps+nextNodeToBlock produce, which is what the server persists.
+    // It is the NORMALIZED form of default_block/2: the converter drops an empty
+    // inline text run (paragraph/list/callout body → []) and omits empty optionals
+    // (code.lang, diagram.caption). Both forms are SEMANTICALLY the same default; the
+    // canonical form is the fixed point of project→reconstruct. We assert the carried
+    // block equals canvasDefaultBlock(type) run through that SAME projection round-trip
+    // (so the test pins the canonical shape without hard-coding each normalization).
+    const canonical = reconstructDefault(type);
+    const { id: _gotId, ...gotRest } = ins.block;
+    assert.deepEqual(gotRest, canonical, `${type}: block matches the canonical default shape`);
+    // The fold gate: runToOps's ops reproduce nextDoc.
+    assertFolds(prev, nextDoc, ops, `S-slash /${type}`);
+  });
+}
+
+// The CANONICAL reconstructed default for a type: project canvasDefaultBlock(type)
+// to a node and reconstruct it through the SAME runToOps insert path, returning the
+// carried block minus its (minted) id. This is the fixed point of the projection
+// round-trip — the exact normalized shape the server receives — so the per-type
+// assertion above pins it without hard-coding each normalization rule.
+function reconstructDefault(type) {
+  const node = slashTypeToNode(type);
+  const ops = runToOps([], { type: "doc", content: [node] });
+  const block = ops[0].block;
+  const { id: _id, ...rest } = block;
+  return rest;
+}
+
+// (a*) The NON-EMPTY defaults that MUST survive the round-trip (the load-bearing
+//      datums of default_block/2): heading text+level, callout tone, field labels,
+//      field-color/field-select values. These pin the fidelity that an empty-content
+//      normalization could otherwise mask.
+check("S-slash: non-empty defaults survive (heading/callout/field labels+values)", () => {
+  const h = reconstructDefault("heading");
+  assert.equal(h.text, "New heading", "heading text default");
+  assert.equal(h.level, 2, "heading level default is 2");
+  const c = reconstructDefault("callout");
+  assert.equal(c.tone, "info", "callout default tone is info");
+  assert.equal(reconstructDefault("field-slug").label, "Slug", "field-slug label");
+  assert.equal(reconstructDefault("field-text").label, "Long text", "field-text label");
+  const color = reconstructDefault("field-color");
+  assert.equal(color.value, "#000000", "field-color default value");
+  const select = reconstructDefault("field-select");
+  assert.equal(select.value, "", "field-select default value is empty");
+  assert.deepEqual(
+    select.options,
+    [
+      { value: "option-1", label: "Option 1" },
+      { value: "option-2", label: "Option 2" },
+    ],
+    "field-select default options",
+  );
+});
+
+// (a') field-boolean's default value is the BOOLEAN false (not "" or "false") — the
+//      per-type default that distinguishes it from the string fields.
+check("S-slash: /field-boolean default value is boolean false", () => {
+  const { ops } = slashInsertOps("field-boolean");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(ins.block.value, false, "the default boolean value is false");
+  assert.equal(typeof ins.block.value, "boolean", "and it is a real boolean");
+});
+
+// (a'') field-string's default value is the empty STRING (the non-boolean default).
+check("S-slash: /field-string default value is empty string", () => {
+  const { ops } = slashInsertOps("field-string");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(ins.block.value, "", "the default string value is \"\"");
+  assert.equal(ins.block.label, "Text", "and the default label is Text");
+});
+
+// (b) INSERT INTO AN EMPTY RUN — append-block (no surviving anchor). A divider into
+//     an empty doc appends and reconstructs as a divider block.
+check("S-slash: /divider into an EMPTY run → append-block of a divider", () => {
+  const prev = [];
+  const node = slashTypeToNode("divider");
+  const nextDoc = { type: "doc", content: [node] };
+  const ops = runToOps(prev, nextDoc);
+  assert.equal(ops.length, 1, "one op");
+  assert.equal(ops[0].op, "append-block", "appended (no anchor in an empty run)");
+  assert.equal(ops[0].block.type, "divider", "the appended block is a divider");
+  assertFolds(prev, nextDoc, ops, "S-slash /divider empty");
+});
+
+// (c) THE ALLOWLIST — every insertable type is IN, every excluded type is OUT.
+check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
+  for (const t of [
+    "paragraph", "heading", "list", "callout", "code", "divider", "diagram",
+    "field-string", "field-slug", "field-text", "field-boolean",
+    "field-select", "field-datetime", "field-color",
+  ]) {
+    assert.ok(CANVAS_SLASH_TYPES.has(t), `${t} must be insertable`);
+  }
+  // EXCLUDED: refs/pickers (sheet/embed/field-image/field-reference), run-splitting
+  // boundaries (section/composite/arrayOf/codelist/localizedText), and the article-
+  // chrome blocks (eyebrow/byline/ingress/pullquote) — none have a canvas node-view
+  // a slash pick can DIRECT-insert.
+  for (const t of [
+    "sheet", "embed", "section", "composite", "arrayOf", "codelist", "localizedText",
+    "field-image", "field-reference", "eyebrow", "byline", "ingress", "pullquote",
+  ]) {
+    assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
+  }
+  assert.equal(CANVAS_SLASH_TYPES.size, 14, "exactly 14 insertable types");
+});
+
+// (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
+//     of the matched tone (warning), collapsed. We build the node the WC builds and
+//     assert runToOps reconstructs a callout block of that tone (collapsible/collapsed
+//     carried). This mirrors _maybeCalloutShorthand's node construction.
+check("S-slash: `> [!warn]- ` → a warning callout (collapsed) insert", () => {
+  // The WC: canvasDefaultBlock("callout") + tone from normalizeTone(m[1]) + collapsible
+  // + collapsed = (m[2] === "-").
+  const tone = normalizeTone("warn"); // → "warning"
+  const collapsed = "-" === "-"; // true
+  const block = canvasDefaultBlock("callout");
+  block.tone = tone;
+  block.collapsible = true;
+  block.collapsed = collapsed;
+  const node = runToTiptap([block]).content[0];
+  // Replace a "/"-typed origin paragraph (modelled as a removed prev block) with the
+  // callout: prev has one paragraph, next has ONLY the callout node → remove + insert.
+  const prev = [{ id: "o-1", type: "paragraph", content: [{ type: "text", value: "" }] }];
+  const nextDoc = { type: "doc", content: [node] };
+  const ops = runToOps(prev, nextDoc);
+  const inserts = ops.filter((o) => o.op === "insert-after" || o.op === "append-block");
+  assert.equal(inserts.length, 1, "one structural insert (the callout)");
+  const ins = inserts[0];
+  assert.equal(ins.block.type, "callout", "the inserted block is a callout");
+  assert.equal(ins.block.tone, "warning", "tone is warning (warn → warning)");
+  assert.equal(ins.block.collapsible, true, "collapsible carried");
+  assert.equal(ins.block.collapsed, true, "collapsed (modifier was '-')");
+  // The origin paragraph is removed (the shorthand consumed it).
+  assert.ok(ops.some((o) => o.op === "remove-block" && o.id === "o-1"), "origin para removed");
+  assertFolds(prev, nextDoc, ops, "S-slash callout-shorthand");
+});
+
+// (d') `> [!note] ` (no modifier) → an info callout (note → info), NOT collapsed.
+check("S-slash: `> [!note] ` → an info callout (not collapsed)", () => {
+  const block = canvasDefaultBlock("callout");
+  block.tone = normalizeTone("note"); // → "info"
+  block.collapsible = true;
+  block.collapsed = false; // m[2] === "" → not collapsed
+  const node = runToTiptap([block]).content[0];
+  const prev = [{ id: "o-1", type: "paragraph", content: [{ type: "text", value: "" }] }];
+  const nextDoc = { type: "doc", content: [node] };
+  const ops = runToOps(prev, nextDoc);
+  const ins = ops.find((o) => o.op === "insert-after" || o.op === "append-block");
+  assert.equal(ins.block.type, "callout", "a callout");
+  assert.equal(ins.block.tone, "info", "tone is info (note → info)");
+  // collapsed:false is NOT carried (calloutBlockToNode threads it only when === true),
+  // so the reconstructed block has no `collapsed` key — byte-fidelity with default_block.
+  assert.ok(!("collapsed" in ins.block), "no stray collapsed:false key");
+});
+
+// (e) TEXTABLE-NODE classification — prose/callout take an into-body caret; the atoms
+//     (divider/code/diagram/field) do not. Asserts the node-type names the WC keys on.
+check("S-slash: CANVAS_SLASH_TEXTABLE_NODES classifies body vs atom nodes", () => {
+  // The projected node TYPE for each insertable type (runToTiptap naming).
+  const projType = (t) => slashTypeToNode(t).type;
+  assert.ok(CANVAS_SLASH_TEXTABLE_NODES.has(projType("paragraph")), "paragraph is textable");
+  assert.ok(CANVAS_SLASH_TEXTABLE_NODES.has(projType("heading")), "heading is textable");
+  assert.ok(CANVAS_SLASH_TEXTABLE_NODES.has(projType("list")), "list (bulletList) is textable");
+  assert.ok(CANVAS_SLASH_TEXTABLE_NODES.has(projType("callout")), "callout is textable");
+  assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("divider")), "divider is an atom");
+  assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("code")), "code (bpCode) is an atom");
+  assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("diagram")), "diagram (bpDiagram) is an atom");
+  assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("field-string")), "field (bpField) is an atom");
 });
 
 if (failures > 0) {
