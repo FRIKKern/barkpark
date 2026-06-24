@@ -36,6 +36,7 @@ import { normalizeTone } from "./tone.js";
 // in the DOM-free marks.js so the smoke harness can assert their schema.
 import { Wikilink, Blockref, Tag } from "./marks.js";
 import { CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } from "./contract.js";
+import "./canvas/index.js";
 
 // One-shot, id-guarded self-inject of the standalone stylesheet so a bare
 // embedder (no Studio inline rules) renders the editor STYLED. Gated by

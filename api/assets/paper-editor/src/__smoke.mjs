@@ -721,6 +721,62 @@ check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => 
   assert.deepEqual(folded[1], callout);
 });
 
+// S0-mark) KEY-ORDER ROBUSTNESS — a live editor's getJSON() serializes a marked
+//          text node as {type, marks, text}, but runToTiptap builds it as
+//          {type, text, marks}. Change-detection MUST be key-order-insensitive,
+//          or EVERY marked block looks "edited" on every keystroke (N+1 spurious
+//          patches, breaking single-block isolation). Simulate getJSON's order
+//          and assert ZERO ops on an unedited mount, exactly ONE on a real edit.
+check("S0 runToOps: marked blocks are NOT spuriously patched (key-order robust)", () => {
+  const blocks = [
+    { id: "h-1", type: "heading", level: 1, text: "Title" },
+    {
+      id: "p-1",
+      type: "paragraph",
+      content: [
+        { type: "text", value: "Hello " },
+        { type: "strong", children: [{ type: "text", value: "world" }] },
+      ],
+    },
+  ];
+
+  // Rewrite every node's keys into ProseMirror getJSON order (type, attrs,
+  // marks, content/text) — semantically identical, different key order. This is
+  // exactly what the live editor feeds runToOps.
+  const reorder = (node) => {
+    if (!node || typeof node !== "object") return node;
+    const out = {};
+    if ("type" in node) out.type = node.type;
+    if ("attrs" in node) out.attrs = node.attrs;
+    if ("marks" in node) out.marks = (node.marks || []).map(reorder);
+    if ("content" in node) out.content = (node.content || []).map(reorder);
+    if ("text" in node) out.text = node.text;
+    for (const k of Object.keys(node)) if (!(k in out)) out[k] = node[k];
+    return out;
+  };
+  const live = { type: "doc", content: runToTiptap(blocks).content.map(reorder) };
+
+  // UNEDITED mount: ZERO ops, despite the key-order difference AND the mark.
+  assert.equal(
+    runToOps(blocks, live).length,
+    0,
+    "an unedited marked run must emit ZERO ops (key-order robust)",
+  );
+
+  // A real single-block edit (heading text) → exactly ONE patch-block, for the
+  // heading only — the marked paragraph is NOT spuriously patched.
+  const edited = { type: "doc", content: live.content.slice() };
+  edited.content[0] = reorder({
+    type: "heading",
+    attrs: { bpId: "h-1", bpType: "heading", level: 1 },
+    content: [{ type: "text", text: "Title!" }],
+  });
+  const ops = runToOps(blocks, edited);
+  assert.equal(ops.length, 1, "single edit on a marked run → exactly one op");
+  assert.equal(ops[0].op, "patch-block");
+  assert.equal(ops[0].id, "h-1");
+});
+
 // S0-g) FRONT INSERT — a NEW block at position 0. This is the bug the old
 //       append-anchored design got WRONG: a front-insert landed at END. The
 //       projector must client-mint the new id and, since there is no prepend op,
