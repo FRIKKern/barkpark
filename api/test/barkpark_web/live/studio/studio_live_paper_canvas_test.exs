@@ -581,6 +581,93 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert html =~ "production/budget"
     end
 
+    # ── S4a: the ECHO push_event ────────────────────────────────────────────
+    #
+    # After apply_paper_block_ops persists a batch, paper_ops/2 re-reads the paper
+    # and pushes `bp:canvas-update` carrying the CONFIRMED blocks, partitioned into
+    # prose runs keyed by first-block id ("paper-canvas-"<>id). The canvas hook
+    # routes each run to its <bp-paper-canvas> and calls applyServerBlocks — an
+    # own-echo resets the baseline (no caret move), an external edit re-renders.
+    test "S4a: a paper-ops batch pushes bp:canvas-update with the confirmed run blocks (flag ON)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      # The seed [heading, paragraph, callout, paragraph, divider] is ONE maximal
+      # run keyed by its first block id (h-1). Edit the intro paragraph.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Echoed back."}]}
+          }
+        ]
+      })
+
+      # ONE bp:canvas-update push carrying ONE run (the whole seed is a single run),
+      # keyed by the first block id, carrying the CONFIRMED post-apply blocks —
+      # including the edit we just made (the echo the canvas resets its baseline to).
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: "h-1", blocks: blocks}] = runs
+
+      # The run blocks are the confirmed blocks IN ORDER, edit applied.
+      assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "c-note", "p-after", "d-end"]
+
+      intro = Enum.find(blocks, &(&1["id"] == "p-intro"))
+      assert intro["content"] == [%{"type" => "text", "value" => "Echoed back."}]
+    end
+
+    test "S4a: a batch spanning TWO runs (a picker field splits them) pushes ONE entry per run",
+         %{conn: conn} do
+      # A paper whose field-image PICKER splits two prose runs. partition_runs →
+      # [{:run,[p-a]}, {:block, img}, {:run,[p-b]}], so the echo carries TWO runs
+      # (the boundary block has no canvas to update).
+      split_slug = "2026-06-23-canvas-split"
+
+      blocks = [
+        %{
+          "id" => "p-a",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "run one"}]
+        },
+        %{"id" => "img-1", "type" => "field-image", "label" => "Hero", "value" => ""},
+        %{
+          "id" => "p-b",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "run two"}]
+        }
+      ]
+
+      {:ok, _} = Content.upsert_paper(%{slug: split_slug, dataset: @dataset, blocks: blocks})
+
+      {:ok, view, _html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{split_slug}"))
+
+      open_editor(view)
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-b",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "run two edited"}]}
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+
+      # TWO runs (the field-image boundary is NOT echoed — it has no canvas),
+      # keyed by each run's first block id.
+      assert [%{run_id: "p-a", blocks: run_a}, %{run_id: "p-b", blocks: run_b}] = runs
+      assert Enum.map(run_a, & &1["id"]) == ["p-a"]
+      assert Enum.map(run_b, & &1["id"]) == ["p-b"]
+
+      # The echoed p-b run carries the confirmed edit.
+      assert hd(run_b)["content"] == [%{"type" => "text", "value" => "run two edited"}]
+    end
+
     test "S3.6: [paragraph, embed, paragraph] renders ONE canvas run containing the (read-only) embed" do
       blocks = [
         %{
@@ -652,6 +739,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     # No remount — the batch went through the canonical persist path.
     assert view.pid == pid_before
     assert Process.alive?(view.pid)
+
+    # S4a flag-OFF guard: with the canvas flag UNSET (the suite baseline), the
+    # echo path pushes NOTHING — no <bp-paper-canvas> is mounted to receive it,
+    # and push_canvas_echo/1 gates on paper_canvas_enabled?(). The flag-OFF path
+    # stays byte-identical (no new push_event leaks into the per-block render).
+    refute_push_event(view, "bp:canvas-update", %{}, 50)
   end
 
   test "paper-ops persists a MULTI-op batch atomically (matches apply_patches)",

@@ -1103,6 +1103,144 @@ export function runToOps(prevBlocks, nextDoc) {
   return ops;
 }
 
+// ── echo reconciliation: server-confirmed blocks ⇄ live doc (S4a) ────────────
+//
+// reconcileServerEcho(serverBlocks, liveContent) → { ownEcho, idWrites }
+//
+// THE PROBLEM this solves. When the canvas emits an `insert-after` for a NEW
+// block (Enter-split / paste / typed paragraph), the live ProseMirror node has
+// bpId:null (a freshly-typed block has no id yet). The server mints an id (say
+// "srv-9") and echoes the confirmed blocks carrying it. A naive own-echo gate —
+// runToOps(serverBlocks, liveDoc).length === 0 — MISDETECTS this as an external
+// edit: the live new-block node still has bpId:null while the confirmed block
+// has "srv-9", so runToOps mints a FRESH id for the null node and reports
+// remove-block("srv-9") + insert-after(fresh) — a non-empty diff. Worse, because
+// the live node never learns "srv-9", every later batch re-mints it: the op size
+// never shrinks and the server block-id churns.
+//
+// THE FIX. Treat a live bpId:null at index i as a WILDCARD that matches
+// serverBlocks[i].id. We build serverDoc = runToTiptap(serverBlocks) (the
+// canonical node shape per kind) and compare it to the live doc node-by-node:
+//
+//   ownEcho IFF liveContent.length === serverBlocks.length AND for every i:
+//     • the live node and the server node are the SAME node KIND/type, AND
+//     • the live node's bpId === server id  OR  the live node's bpId == null
+//       (a just-minted block at that position), AND
+//     • the block's mutable content matches per kind — the SAME stable/canonical
+//       comparison runToOps uses (prose/heading/list/callout/code/diagram/field/
+//       read-only-atom/opaque), so an own echo carrying an UNRELATED content
+//       change still falls through to the external path.
+//
+//   idWrites — for every live node whose bpId == null AND that passed the match,
+//     { index, id: serverBlocks[index].id, bpType: serverBlocks[index].type }.
+//     applyServerBlocks stamps these onto the live nodes (an ATTR-ONLY change PM
+//     maps the selection through → the caret does NOT move) so the echo no-ops
+//     AND the NEXT diff is truly incremental.
+//
+// Precise, not over-matching: a length mismatch, a kind/type mismatch, a real
+// content change, or a bpId that is neither the server id nor null → ownEcho
+// false (external path). Pure, DOM-free, testable without an editor.
+export function reconcileServerEcho(serverBlocks, liveContent) {
+  const server = serverBlocks || [];
+  const live = liveContent || [];
+
+  // Length mismatch → structurally different → external.
+  if (live.length !== server.length) return { ownEcho: false, idWrites: [] };
+
+  // Canonical server node shapes (one top-level node per block, per kind).
+  const serverNodes = runToTiptap(server).content;
+
+  const idWrites = [];
+  for (let i = 0; i < live.length; i++) {
+    const liveNode = live[i];
+    const serverNode = serverNodes[i];
+    const serverBlock = server[i];
+    const serverId = serverBlock && serverBlock.id;
+    const liveId = liveNode && liveNode.attrs && liveNode.attrs.bpId;
+
+    // The id wildcard: the live id must EQUAL the server id, or be null (a
+    // just-minted block at this position whose id we will stamp).
+    const idOk = liveId == null || liveId === serverId;
+    if (!idOk) return { ownEcho: false, idWrites: [] };
+
+    // Same node KIND/type (and same mutable content per kind). bpId is excluded
+    // from every comparison below (the stable-key fns ignore it), so the null
+    // wildcard never trips the content check.
+    if (!nodeContentEqual(serverNode, liveNode)) {
+      return { ownEcho: false, idWrites: [] };
+    }
+
+    // A matched, just-minted live node → record the id (and bpType) to stamp.
+    if (liveId == null) {
+      idWrites.push({
+        index: i,
+        id: serverId,
+        bpType: liveNode && liveNode.attrs && liveNode.attrs.bpType == null
+          ? serverBlock && serverBlock.type
+          : undefined,
+      });
+    }
+  }
+
+  return { ownEcho: true, idWrites };
+}
+
+// True when two top-level canvas nodes are the SAME kind AND carry the SAME
+// MUTABLE content — bpId/bpType EXCLUDED. Dispatches by node kind exactly as
+// runToOps's patch pass does, reusing the SAME stable-key change-detection so an
+// own echo is recognized despite live-editor vs projector key-order differences,
+// and an UNRELATED content change is NOT.
+function nodeContentEqual(serverNode, liveNode) {
+  if (!serverNode || !liveNode) return false;
+  // Kind/type must match first (a paragraph echo onto a heading is external).
+  if (serverNode.type !== liveNode.type) return false;
+  const type = serverNode.type;
+
+  // Callout (content node): tone/title/collapsible/collapsed/body.
+  if (isCanvasContentType(type)) {
+    return !calloutNodeChanged(serverNode, liveNode);
+  }
+  // Code / diagram (attr-atom): value+lang / source+caption.
+  if (isCanvasAttrAtomNode(type)) {
+    if (type === "bpDiagram") return !diagramNodeChanged(serverNode, liveNode);
+    return !codeNodeChanged(serverNode, liveNode);
+  }
+  // Field (control-atom): the normalized value.
+  if (isCanvasFieldNode(type)) {
+    return !fieldNodeChanged(serverNode, liveNode);
+  }
+  // Divider (content-free atom leaf): same type with no interior → equal.
+  if (isCanvasAtomType(type)) {
+    return true;
+  }
+  // Read-only atom (sheet / embed): the whole carried block, id excluded.
+  if (isCanvasReadOnlyAtomNode(type)) {
+    return carriedBlockEqual(serverNode, liveNode);
+  }
+  // Opaque carry-through: the whole carried block, id excluded.
+  if (type === "bpOpaque") {
+    return carriedBlockEqual(serverNode, liveNode);
+  }
+  // Prose (paragraph / heading / list nodes): type + level + content.
+  return !proseNodeChanged(serverNode, liveNode);
+}
+
+// Compare the WHOLE block carried on a read-only-atom / opaque node's bpBlock
+// attr, with `id` excluded (a just-minted live node carries no id yet). Canonical
+// so key order never trips it.
+function carriedBlockEqual(serverNode, liveNode) {
+  const sb = serverNode && serverNode.attrs && serverNode.attrs.bpBlock;
+  const lb = liveNode && liveNode.attrs && liveNode.attrs.bpBlock;
+  return canonicalJSON(stripId(sb)) === canonicalJSON(stripId(lb));
+}
+
+// A shallow clone of a block with `id` removed, for id-insensitive comparison.
+function stripId(block) {
+  if (!block || typeof block !== "object") return block;
+  const { id: _id, ...rest } = block;
+  return rest;
+}
+
 // Reconstruct a portable-doc block from a NEW nextSeq entry, carrying its
 // CLIENT-MINTED id. PROSE → the convert.js patch fields plus { id, type };
 // CANVAS ATOM (S3: divider) → a bare { id, type } leaf block (no body); the id
