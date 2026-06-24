@@ -58,6 +58,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
+  # Phase-4 S2: fold an ORDERED ARRAY of ops (one bp-canvas-ops batch from a
+  # <bp-paper-canvas> run) through the PAPER-PANE persist + sync path —
+  # specifically paper_pane_op/2's (NOT the full paper_op/2, which also has a
+  # document_op branch for the Beta per-document editor). That is safe because
+  # the canvas is gated to the paper pane only (paper_block_editor canvas_eligible
+  # — see components/paper_editor.ex), so a batch never originates in the
+  # document editor. Only the batch primitive differs from the per-block path:
+  # apply_paper_block_ops/4 vs apply_paper_block_op/3 (both atomic, both folding
+  # via Patch.apply_patch). No new model / schema / storage. Guards a non-list or
+  # empty batch — and a nil paper_doc — as a no-op so a stray event never writes.
+  # Mirrors paper_pane_op/2's load (current paper_doc slug), apply (atomic fold),
+  # persist (one Repo.update), and re-sync (sync_paper_edit_doc → View re-streams).
+  def paper_ops(socket, ops) when is_list(ops) and ops != [] do
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+    dataset = socket.assigns.dataset
+
+    cond do
+      is_nil(slug) ->
+        socket
+
+      true ->
+        case Content.apply_paper_block_ops(slug, ops, dataset) do
+          {:ok, _result} ->
+            sync_paper_edit_doc(socket)
+
+          {:error, _reason} ->
+            put_flash(socket, :error, "Edit failed")
+        end
+    end
+  end
+
+  def paper_ops(socket, _ops), do: socket
+
+  @doc false
   def document_op(socket, op) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]

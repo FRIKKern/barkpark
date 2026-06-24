@@ -124,6 +124,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   paper_rev={@paper_rev}
                   dataset={@dataset}
                   api_token_raw={@api_token_raw}
+                  canvas_eligible={true}
                 />
               <% @paper_block_mode -> %>
                 <%!-- Block-backed: each top-level block is its own keyed stream
