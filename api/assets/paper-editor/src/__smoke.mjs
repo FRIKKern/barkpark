@@ -686,30 +686,31 @@ check("S0 runToOps: reorder → single move-block, no patches", () => {
   assert.equal(ops.filter((o) => o.op === "patch-block").length, 0, "no patches");
 });
 
-// S0-f) mixed list with a NON-PROSE block (callout) → runToTiptap emits a
-//       bpOpaque node carrying the block JSON VERBATIM, and runToOps round-trips
-//       it with NO op (the opaque block is deep-equal to the original).
+// S0-f) mixed list with a still-OPAQUE non-prose block (field-string) →
+//       runToTiptap emits a bpOpaque node carrying the block JSON VERBATIM, and
+//       runToOps round-trips it with NO op (the opaque block is deep-equal to the
+//       original). (S3.2 pulled the callout INTO the canvas, so this case now
+//       uses a field-string — still opaque until its own S3 increment.)
 check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => {
-  const callout = {
-    id: "c-1",
-    type: "callout",
-    variant: "info",
-    content: [{ type: "text", value: "heads up" }],
+  const field = {
+    id: "f-1",
+    type: "field-string",
+    value: "heads up",
   };
   const blocks = [
     { id: "h-1", type: "heading", level: 1, text: "Doc" },
-    callout,
+    field,
     { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
   ];
   const doc = runToTiptap(blocks);
 
-  // The callout projects to an opaque placeholder carrying the block verbatim.
+  // The field projects to an opaque placeholder carrying the block verbatim.
   const opaque = doc.content[1];
   assert.equal(opaque.type, "bpOpaque");
-  assert.equal(opaque.attrs.bpId, "c-1");
-  assert.equal(opaque.attrs.bpType, "callout");
-  assert.deepEqual(opaque.attrs.bpBlock, callout); // verbatim, deep-equal
-  assert.notEqual(opaque.attrs.bpBlock, callout); // but NOT a shared ref
+  assert.equal(opaque.attrs.bpId, "f-1");
+  assert.equal(opaque.attrs.bpType, "field-string");
+  assert.deepEqual(opaque.attrs.bpBlock, field); // verbatim, deep-equal
+  assert.notEqual(opaque.attrs.bpBlock, field); // but NOT a shared ref
 
   // An untouched round-trip emits NO ops at all (opaque is not edited in S0).
   const ops = runToOps(blocks, doc);
@@ -717,8 +718,8 @@ check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => 
 
   // FOLD GATE: zero ops fold to the identical block list (order + content).
   const folded = assertFolds(blocks, doc, ops, "S0-f opaque round-trip");
-  assert.deepEqual(folded.map((b) => b.id), ["h-1", "c-1", "p-1"]);
-  assert.deepEqual(folded[1], callout);
+  assert.deepEqual(folded.map((b) => b.id), ["h-1", "f-1", "p-1"]);
+  assert.deepEqual(folded[1], field);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -885,18 +886,354 @@ check("S3 runToOps: a divider between edited prose emits only the prose patches"
   assert.deepEqual(folded[2].content, [{ type: "text", value: "TWO!" }]);
 });
 
-// S3-f) STILL-OPAQUE — a NON-divider, non-prose block (callout) is STILL carried
-//       opaquely, unchanged from S0. Only the divider was pulled into the canvas.
-check("S3 runToTiptap: a callout is STILL opaque (only divider became canvas-handled)", () => {
+// S3-f) STILL-OPAQUE — a non-divider, non-callout, non-prose block (field-string)
+//       is STILL carried opaquely. Only divider (S3) and callout (S3.2) were
+//       pulled into the canvas; field/sheet/code remain opaque boundaries.
+check("S3 runToTiptap: a field-string is STILL opaque (only divider + callout became canvas-handled)", () => {
+  const field = {
+    id: "f-1",
+    type: "field-string",
+    value: "note",
+  };
+  const doc = runToTiptap([field]);
+  assert.equal(doc.content[0].type, "bpOpaque", "field-string stays opaque");
+  assert.deepEqual(doc.content[0].attrs.bpBlock, field);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase-4 Stage S3.2 — the callout as a canvas CONTENT node (run-convert.js).
+// A callout in a run is NO LONGER opaque: runToTiptap emits a native
+// { type:"callout", attrs:{bpId,bpType,tone,title?,collapsible?,collapsed?},
+//   content:[inline…] } node, and runToOps reconstructs a callout block via
+// calloutNodeToBlock. Unlike the divider ATOM, a callout HAS an editable body, so
+// a body/chrome edit → exactly one patch-block; an untouched callout → ZERO ops.
+// ───────────────────────────────────────────────────────────────────────────
+
+// S3.2-a) PROJECTION — a callout in a run projects to a native callout CONTENT
+//   node (NOT bpOpaque): body→content (inline), tone/title/collapsible→attrs.
+check("S3.2 runToTiptap: a callout → { type:'callout', content:[…], attrs:{tone,title,collapsible} } (NOT bpOpaque)", () => {
+  const blocks = [
+    { id: "p-0", type: "paragraph", content: [{ type: "text", value: "before" }] },
+    {
+      id: "c-1",
+      type: "callout",
+      tone: "warning",
+      title: "Heads up",
+      collapsible: true,
+      content: [
+        { type: "text", value: "Be " },
+        { type: "strong", children: [{ type: "text", value: "careful" }] },
+      ],
+    },
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  assert.equal(doc.content.length, 3);
+
+  const c = doc.content[1];
+  assert.equal(c.type, "callout", "callout projects to a native callout node");
+  assert.notEqual(c.type, "bpOpaque", "callout is NOT carried opaquely");
+  assert.equal(c.attrs.bpId, "c-1");
+  assert.equal(c.attrs.bpType, "callout");
+  // Chrome rides attrs.
+  assert.equal(c.attrs.tone, "warning");
+  assert.equal(c.attrs.title, "Heads up");
+  assert.equal(c.attrs.collapsible, true);
+  assert.ok(!("collapsed" in c.attrs), "absent collapsed is NOT projected (byte-fidelity)");
+  assert.ok(!("bpBlock" in c.attrs), "callout carries no opaque bpBlock");
+  // Body is editable inline content — reuses the shared inline serializer, so the
+  // bold mark round-trips exactly as a paragraph's would.
+  assert.deepEqual(c.content, [
+    { type: "text", text: "Be " },
+    { type: "text", text: "careful", marks: [{ type: "bold" }] },
+  ]);
+
+  // The flanking prose still projects normally.
+  assert.equal(doc.content[0].type, "paragraph");
+  assert.equal(doc.content[2].type, "paragraph");
+});
+
+// S3.2-b) ROUND-TRIP — an UNTOUCHED callout survives runToOps with ZERO ops
+//   (canonical compare), and the whole mixed run folds back to the identical
+//   block list (body inline + chrome fields all preserved, absent fields absent).
+check("S3.2 runToOps: an untouched callout round-trips with ZERO ops (canonical compare)", () => {
   const callout = {
     id: "c-1",
     type: "callout",
-    variant: "info",
+    tone: "info",
     content: [{ type: "text", value: "note" }],
   };
-  const doc = runToTiptap([callout]);
-  assert.equal(doc.content[0].type, "bpOpaque", "callout stays opaque");
-  assert.deepEqual(doc.content[0].attrs.bpBlock, callout);
+  const blocks = [
+    { id: "h-1", type: "heading", level: 1, text: "Doc" },
+    callout,
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+
+  // Simulate the live editor's getJSON key order on the callout's body text node
+  // (type, marks, text) AND its attrs — change-detection must be key-order-safe.
+  const c = doc.content[1];
+  c.attrs = { bpType: "callout", tone: "info", bpId: "c-1" }; // reordered keys
+  c.content = [{ text: "note", type: "text" }]; // reordered keys
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 0, "an untouched callout run emits ZERO ops");
+
+  // FOLD GATE: folds back to the identical block list; the callout survives with
+  // its tone + body, and NO stray title/collapsible/collapsed.
+  const folded = assertFolds(blocks, doc, ops, "S3.2-b callout round-trip");
+  assert.deepEqual(folded.map((b) => b.id), ["h-1", "c-1", "p-1"]);
+  assert.deepEqual(folded[1], callout);
+});
+
+// S3.2-c) BODY EDIT — editing the callout's BODY → exactly one patch-block for
+//   the callout carrying the new content (and tone), no prose perturbation.
+check("S3.2 runToOps: editing the callout BODY → one patch-block with the new content", () => {
+  const blocks = [
+    { id: "p-0", type: "paragraph", content: [{ type: "text", value: "before" }] },
+    {
+      id: "c-1",
+      type: "callout",
+      tone: "info",
+      content: [{ type: "text", value: "old body" }],
+    },
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  // Edit ONLY the callout body (live-editor key order).
+  doc.content[1] = {
+    ...doc.content[1],
+    content: [{ type: "text", text: "new body!" }],
+  };
+
+  const ops = runToOps(blocks, doc);
+  const patches = ops.filter((o) => o.op === "patch-block");
+  assert.equal(patches.length, 1, "exactly one patch-block, for the callout");
+  assert.equal(patches[0].id, "c-1");
+  assert.deepEqual(patches[0].patch.content, [{ type: "text", value: "new body!" }]);
+  assert.equal(patches[0].patch.tone, "info", "tone is carried in the patch");
+  // The patch carries the chrome fields EXPLICITLY (removal-safe over the shallow
+  // merge): a title-less callout patches title:null, which compose drops — so the
+  // stored callout stays title-less.
+  assert.equal(patches[0].patch.title, null, "explicit title:null (removal-safe)");
+  assert.equal(patches[0].patch.collapsible, false);
+  assert.equal(patches[0].patch.collapsed, false);
+
+  // FOLD GATE: the callout carries its new body; the prose is untouched.
+  const folded = assertFolds(blocks, doc, ops, "S3.2-c callout body edit");
+  assert.deepEqual(folded[1].content, [{ type: "text", value: "new body!" }]);
+  assert.deepEqual(folded[0].content, [{ type: "text", value: "before" }]);
+  assert.deepEqual(folded[2].content, [{ type: "text", value: "after" }]);
+});
+
+// S3.2-d) CHROME EDIT — changing tone / title / collapsed → a patch-block
+//   carrying that field. Three sub-cases, each emitting exactly one patch.
+check("S3.2 runToOps: changing tone → a patch-block carrying the new tone", () => {
+  const blocks = [
+    { id: "c-1", type: "callout", tone: "info", content: [{ type: "text", value: "x" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  doc.content[0] = {
+    ...doc.content[0],
+    attrs: { ...doc.content[0].attrs, tone: "danger" },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].op, "patch-block");
+  assert.equal(ops[0].id, "c-1");
+  assert.equal(ops[0].patch.tone, "danger");
+
+  const folded = assertFolds(blocks, doc, ops, "S3.2-d tone change");
+  assert.equal(folded[0].tone, "danger");
+});
+
+check("S3.2 runToOps: changing title → a patch-block carrying the new title", () => {
+  const blocks = [
+    { id: "c-1", type: "callout", tone: "info", title: "Old", content: [{ type: "text", value: "x" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  doc.content[0] = {
+    ...doc.content[0],
+    attrs: { ...doc.content[0].attrs, title: "New title" },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].patch.title, "New title");
+
+  const folded = assertFolds(blocks, doc, ops, "S3.2-d title change");
+  assert.equal(folded[0].title, "New title");
+});
+
+check("S3.2 runToOps: toggling the fold (collapsed) → a patch-block carrying collapsed", () => {
+  const blocks = [
+    {
+      id: "c-1",
+      type: "callout",
+      tone: "info",
+      collapsible: true,
+      content: [{ type: "text", value: "x" }],
+    },
+  ];
+  const doc = runToTiptap(blocks);
+  // The fold toggle flips collapsed false→true on the node attrs.
+  doc.content[0] = {
+    ...doc.content[0],
+    attrs: { ...doc.content[0].attrs, collapsed: true },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].op, "patch-block");
+  assert.equal(ops[0].patch.collapsed, true);
+  assert.equal(ops[0].patch.collapsible, true, "collapsible is carried alongside");
+
+  const folded = assertFolds(blocks, doc, ops, "S3.2-d fold toggle");
+  assert.equal(folded[0].collapsed, true);
+});
+
+// S3.2-d2) REMOVAL DIRECTIONS — patch-block is a SHALLOW merge that cannot delete
+//   a key, so EXPANDING a collapsed callout (collapsed true→false) and CLEARING a
+//   title (set→null) must emit the field EXPLICITLY or the stale value survives the
+//   merge and the edit silently reverts on reload. These fold through the real
+//   shallow-merge (applyOps) — they FAIL if calloutNodeToPatch omits false/null.
+check("S3.2 runToOps: EXPANDING a collapsed callout (true→false) actually persists", () => {
+  const blocks = [
+    {
+      id: "c-1",
+      type: "callout",
+      tone: "info",
+      collapsible: true,
+      collapsed: true,
+      content: [{ type: "text", value: "x" }],
+    },
+  ];
+  const doc = runToTiptap(blocks);
+  // Fold button expands it: collapsed true→false on the node attrs.
+  doc.content[0] = {
+    ...doc.content[0],
+    attrs: { ...doc.content[0].attrs, collapsed: false },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].patch.collapsed, false, "explicit collapsed:false in the patch");
+
+  // FOLD GATE through the shallow merge: the stored callout is now EXPANDED.
+  const folded = assertFolds(blocks, doc, ops, "S3.2-d2 expand");
+  assert.equal(folded[0].collapsed, false, "expand persists (no stale collapsed:true)");
+});
+
+check("S3.2 runToOps: CLEARING a title (set→null) actually persists", () => {
+  const blocks = [
+    {
+      id: "c-1",
+      type: "callout",
+      tone: "info",
+      title: "Old title",
+      content: [{ type: "text", value: "x" }],
+    },
+  ];
+  const doc = runToTiptap(blocks);
+  // Clear the title: set→null on the node attrs.
+  doc.content[0] = {
+    ...doc.content[0],
+    attrs: { ...doc.content[0].attrs, title: null },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].patch.title, null, "explicit title:null in the patch");
+
+  // FOLD GATE: the stored callout's title is gone (compose drops a null title).
+  const folded = assertFolds(blocks, doc, ops, "S3.2-d2 title clear");
+  assert.equal(folded[0].title, null, "title cleared (no stale old title)");
+});
+
+// S3.2-e) INSERT — a NEW callout (no bpId) between two surviving prose blocks →
+//   an insert-after carrying a { type:"callout", … } block with a client-minted
+//   id, body + chrome reconstructed. The fold lands it between the prose.
+check("S3.2 runToOps: inserting a callout → insert-after with a {type:'callout'} block", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "before" }] },
+    { id: "p-2", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  doc.content = [
+    doc.content[0], // p-1
+    {
+      type: "callout",
+      attrs: { bpId: null, bpType: "callout", tone: "success", title: "Done" },
+      content: [{ type: "text", text: "shipped" }],
+    },
+    doc.content[1], // p-2
+  ];
+
+  const ops = runToOps(blocks, doc);
+  const ins = ops.find(
+    (o) => (o.op === "insert-after" || o.op === "append-block") && o.block.type === "callout",
+  );
+  assert.ok(ins, "a callout block is inserted");
+  assert.equal(ins.block.type, "callout");
+  assert.ok(ins.block.id != null && ins.block.id !== "p-1" && ins.block.id !== "p-2", "minted id avoids prev ids");
+  assert.equal(ins.block.tone, "success");
+  assert.equal(ins.block.title, "Done");
+  assert.deepEqual(ins.block.content, [{ type: "text", value: "shipped" }]);
+  // No separate interior patch for a fresh insert (the body rode the insert).
+  assert.equal(
+    ops.filter((o) => o.op === "patch-block" && o.id === ins.block.id).length,
+    0,
+    "an inserted callout emits no extra interior patch",
+  );
+
+  // FOLD GATE: the callout lands at slot 1, between the two surviving prose.
+  const folded = assertFolds(blocks, doc, ops, "S3.2-e callout insert");
+  assert.equal(folded[0].id, "p-1");
+  assert.equal(folded[1].type, "callout");
+  assert.equal(folded[2].id, "p-2");
+});
+
+// S3.2-f) REMOVE — deleting a callout → a remove-block keyed by its id; the
+//   surrounding prose is untouched. The fold drops it.
+check("S3.2 runToOps: removing a callout → remove-block", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "before" }] },
+    { id: "c-1", type: "callout", tone: "info", content: [{ type: "text", value: "x" }] },
+    { id: "p-2", type: "paragraph", content: [{ type: "text", value: "after" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  doc.content = [doc.content[0], doc.content[2]]; // delete the callout
+
+  const ops = runToOps(blocks, doc);
+  assert.deepEqual(
+    ops.filter((o) => o.op === "remove-block"),
+    [{ op: "remove-block", id: "c-1" }],
+    "exactly one remove-block for the callout",
+  );
+  assert.equal(ops.filter((o) => o.op === "patch-block").length, 0, "no prose patches");
+
+  const folded = assertFolds(blocks, doc, ops, "S3.2-f callout remove");
+  assert.deepEqual(folded.map((b) => b.id), ["p-1", "p-2"]);
+});
+
+// S3.2-g) NON-INTERFERENCE — a callout between two prose blocks does not perturb
+//   the prose diff: editing BOTH prose blocks (leaving the callout untouched)
+//   emits exactly their two patches and NONE for the callout.
+check("S3.2 runToOps: a callout between edited prose emits only the prose patches", () => {
+  const blocks = [
+    { id: "p-1", type: "paragraph", content: [{ type: "text", value: "one" }] },
+    { id: "c-1", type: "callout", tone: "info", content: [{ type: "text", value: "mid" }] },
+    { id: "p-2", type: "paragraph", content: [{ type: "text", value: "two" }] },
+  ];
+  const doc = runToTiptap(blocks);
+  doc.content[0] = { ...doc.content[0], content: [{ type: "text", text: "ONE!" }] };
+  doc.content[2] = { ...doc.content[2], content: [{ type: "text", text: "TWO!" }] };
+
+  const ops = runToOps(blocks, doc);
+  const patches = ops.filter((o) => o.op === "patch-block");
+  assert.equal(patches.length, 2, "exactly the two prose patches, none for the callout");
+  assert.deepEqual(patches.map((o) => o.id).sort(), ["p-1", "p-2"]);
+
+  const folded = assertFolds(blocks, doc, ops, "S3.2-g callout non-interference");
+  assert.deepEqual(folded[0].content, [{ type: "text", value: "ONE!" }]);
+  assert.deepEqual(folded[1], blocks[1], "callout untouched");
+  assert.deepEqual(folded[2].content, [{ type: "text", value: "TWO!" }]);
 });
 
 // S0-mark) KEY-ORDER ROBUSTNESS — a live editor's getJSON() serializes a marked

@@ -35,7 +35,12 @@
 // list (convert.js:257-288 — the switch in blockToTiptap). Everything else is
 // non-prose and is carried as an OPAQUE placeholder node, verbatim.
 
-import { blockToTiptap, buildPatchBlockOp } from "../convert.js";
+import {
+  blockToTiptap,
+  buildPatchBlockOp,
+  inlineArrayToTiptap,
+  tiptapInlineToPd,
+} from "../convert.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
 // switch). These project to a native ProseMirror textblock and diff via
@@ -50,12 +55,28 @@ const PROSE_TYPES = new Set(["paragraph", "heading", "list"]);
 // only a truly-unknown non-prose kind stays bpOpaque.
 const CANVAS_ATOM_TYPES = new Set(["divider"]);
 
+// S3.2: non-prose block kinds the canvas handles as CONTENT nodes — nodes with an
+// EDITABLE interior (a contentDOM) living INSIDE the canvas document, NOT atoms
+// and NOT opaque. The callout is the first: its body is an editable inline region
+// (compose.ex:155 feeds callout `content` through compose_inline_children → ONE
+// inline PdText), so unlike the divider ATOM it CAN report an interior change and
+// emits a patch-block on a body/tone/title/collapsed edit. As later increments
+// land sheet/code/field as content node-views they join this set.
+//
+// A node is "canvas-handled" if it is PROSE, a canvas ATOM, or a canvas CONTENT
+// node; only a truly-unknown non-prose kind stays bpOpaque.
+const CANVAS_CONTENT_TYPES = new Set(["callout"]);
+
 function isProseType(type) {
   return PROSE_TYPES.has(type);
 }
 
 function isCanvasAtomType(type) {
   return CANVAS_ATOM_TYPES.has(type);
+}
+
+function isCanvasContentType(type) {
+  return CANVAS_CONTENT_TYPES.has(type);
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -105,6 +126,14 @@ export function runToTiptap(blocks) {
       return { type: bpType, attrs: { bpId, bpType } };
     }
 
+    if (isCanvasContentType(bpType)) {
+      // A canvas CONTENT node (S3.2: callout): a native node of that type whose
+      // BODY is editable inline content and whose chrome (tone/title/collapsible/
+      // collapsed) rides node attrs. The canvas schema (callout-node.js) declares
+      // it, so getJSON() round-trips both the body and the chrome attrs.
+      return calloutBlockToNode(block, bpId, bpType);
+    }
+
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
     return {
       type: "bpOpaque",
@@ -113,6 +142,115 @@ export function runToTiptap(blocks) {
   });
 
   return { type: "doc", content };
+}
+
+// ── callout ⇄ canvas content node (S3.2) ────────────────────────────────────
+//
+// convert.js has NO callout path (it only round-trips paragraph|heading|list), so
+// the callout block ⇄ TipTap-node mapping lives HERE, mirroring how blockToTiptap
+// /tiptapToBlock handle inline — REUSING convert.js's exported inlineArrayToTiptap
+// /tiptapInlineToPd verbatim for the body (the body IS inline runs; do not
+// reinvent inline serialization).
+//
+// The chrome rides node.attrs:
+//   tone        — string, defaults "info" (compose.ex:157 `tone || "info"`)
+//   title       — optional; ABSENT (null) round-trips as no `title` field
+//   collapsible — boolean; ABSENT (false) → no `collapsible` field
+//   collapsed   — boolean; ABSENT (false) → no `collapsed` field
+// Omitting absent chrome fields is the byte-fidelity contract: compose.ex
+// maybe_put / maybe_put_true only thread these when present, so a callout that
+// never had a title must round-trip WITHOUT a title key (not title:"").
+
+// calloutBlockToNode(block) → { type:"callout", attrs:{…}, content:[inline…] }
+//
+// The body inline array (block.content) → TipTap inline nodes via the shared
+// serializer. Chrome fields → attrs (only the present ones; tone always present
+// with its "info" default so a tone swap is always diffable).
+function calloutBlockToNode(block, bpId, bpType) {
+  const attrs = {
+    bpId,
+    bpType,
+    tone: (block && block.tone) || "info",
+  };
+  // Only carry title/collapsible/collapsed when PRESENT in the source block, so
+  // an untouched callout's getJSON re-projection matches and emits zero ops.
+  if (block && block.title != null) attrs.title = block.title;
+  if (block && block.collapsible === true) attrs.collapsible = true;
+  if (block && block.collapsed === true) attrs.collapsed = true;
+
+  const node = { type: bpType || "callout", attrs };
+  const inline = inlineArrayToTiptap((block && block.content) || []);
+  if (inline.length) node.content = inline;
+  return node;
+}
+
+// calloutNodeToBlock(node, id) → { id, type:"callout", tone, title?, collapsible?,
+//   collapsed?, content:[inline…] }
+//
+// Reconstruct the portable-doc callout block from a callout NODE (the inverse of
+// calloutBlockToNode). Body inline ← tiptapInlineToPd (the shared deserializer).
+// Chrome fields read off node.attrs, threaded ONLY when present/true so the
+// reconstructed block is byte-identical to one that round-tripped through
+// compose.ex (no stray title:"" / collapsible:false).
+function calloutNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = {
+    id,
+    type: "callout",
+    tone: attrs.tone || "info",
+    content: tiptapInlineToPd((node && node.content) || []),
+  };
+  if (attrs.title != null) block.title = attrs.title;
+  if (attrs.collapsible === true) block.collapsible = true;
+  if (attrs.collapsed === true) block.collapsed = true;
+  return block;
+}
+
+// The mutable-fields PATCH for a callout (the analogue of buildPatchBlockOp's
+// patch map for prose). It is calloutNodeToBlock MINUS id/type — patch.ex re-pins
+// those (the same contract tiptapToBlock follows).
+//
+// CRITICAL: the patch emits the chrome fields (title/collapsible/collapsed)
+// EXPLICITLY even when false/null. patch-block is a SHALLOW Map.merge (patch.ex
+// merge_block) that can REPLACE or PRESERVE a key but never DELETE one — so
+// OMITTING a now-false/null field would leave the STALE old value, silently
+// reverting an EXPAND (collapsed true→false via the fold button), a TITLE-CLEAR
+// (set→null), or a collapsible-off on persist/reload. An explicit collapsible/
+// collapsed:false round-trips byte-identically (compose.ex), and title:null is
+// dropped by compose maybe_put. The INSERT path (calloutNodeToBlock) correctly
+// OMITS absent fields — only the patch is explicit, so removals actually land.
+function calloutNodeToPatch(node) {
+  const block = calloutNodeToBlock(node, null);
+  const attrs = (node && node.attrs) || {};
+  return {
+    tone: block.tone,
+    content: block.content,
+    title: attrs.title == null ? null : attrs.title,
+    collapsible: attrs.collapsible === true,
+    collapsed: attrs.collapsed === true,
+  };
+}
+
+// True when a callout node's body OR chrome changed (an interior edit). We
+// compare the canonical (key-order-insensitive) projection of the diff-relevant
+// fields — tone, title, collapsible, collapsed, content — so a tone swap, title
+// edit, fold toggle, or body edit flips it, but a pure reorder (bpId/bpType only)
+// does not. Uses the SAME canonicalJSON the prose path uses, so a node serialized
+// by calloutBlockToNode and the SAME node from the live editor's getJSON compare
+// EQUAL despite differing attr/text key order.
+function calloutNodeChanged(prevNode, nextNode) {
+  return stableCalloutKey(prevNode) !== stableCalloutKey(nextNode);
+}
+
+function stableCalloutKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    tone: a.tone || "info",
+    title: a.title == null ? null : a.title,
+    collapsible: a.collapsible === true,
+    collapsed: a.collapsed === true,
+    content: node.content || null,
+  });
 }
 
 // ── reverse diff: prev blocks + edited doc → ordered ops ────────────────────
@@ -261,10 +399,14 @@ export function runToOps(prevBlocks, nextDoc) {
     // emits an interior patch, but unlike opaque it reconstructs as a real block
     // of its type (not a carried bpBlock). Detect by the node TYPE itself.
     const isAtom = isCanvasAtomType(node.type);
+    // A canvas CONTENT node (S3.2: callout) HAS an editable interior — unlike the
+    // atom it CAN emit a patch on a body/chrome change, and unlike opaque it
+    // reconstructs as a real block of its type via calloutNodeToBlock.
+    const isContent = isCanvasContentType(node.type);
     const bpType = (node.attrs && node.attrs.bpType) || node.type;
     const existing = bpId != null && prevIndex.has(bpId);
     const id = existing ? bpId : mintId(taken);
-    return { id, bpType, node, isNew: !existing, isOpaque, isAtom };
+    return { id, bpType, node, isNew: !existing, isOpaque, isAtom, isContent };
   });
 
   const nextIds = new Set(nextSeq.map((e) => e.id));
@@ -336,16 +478,33 @@ export function runToOps(prevBlocks, nextDoc) {
     running.splice(dest, 0, id);
   }
 
-  // ── 4) PATCHES — surviving prose whose content changed ─────────────────────
+  // ── 4) PATCHES — surviving prose / content nodes whose interior changed ─────
   //
-  // Byte-identical to the per-block editor's patch-block (buildPatchBlockOp).
-  // A surviving opaque node is a no-op in v1 (opaque blocks just round-trip).
+  // PROSE → byte-identical to the per-block editor's patch-block (buildPatchBlockOp).
+  // CANVAS CONTENT (S3.2: callout) → a patch-block carrying the changed body/chrome
+  //   fields (calloutNodeToPatch), keyed by id. An UNCHANGED callout emits NO op
+  //   (canonical key-order-insensitive compare, same as prose).
+  // A surviving opaque node is a no-op (opaque blocks just round-trip).
   // A surviving canvas ATOM (S3: divider) is likewise a no-op: a leaf has no
   // interior to change, so it NEVER reports an interior patch.
   for (const entry of nextSeq) {
     if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
+
+    if (entry.isContent) {
+      // Canvas content node (callout): diff body + chrome; emit one patch-block
+      // carrying ONLY the mutable fields when anything changed.
+      if (calloutNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: calloutNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (proseNodeChanged(prevNode, entry.node)) {
       const bpType = entry.bpType || (prevBlock && prevBlock.type);
       ops.push(buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType));
@@ -368,6 +527,11 @@ function nextNodeToBlock(entry) {
     // Canvas atom insert (divider): a content-free leaf, fully described by its
     // type + the minted id. No body fields to reconstruct.
     return { id: entry.id, type: entry.bpType || node.type };
+  }
+  if (entry.isContent) {
+    // Canvas content insert (callout): reconstruct the full callout block from
+    // the node (body + chrome) with the minted id, via the dedicated mapper.
+    return calloutNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.
