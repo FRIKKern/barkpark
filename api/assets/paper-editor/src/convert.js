@@ -73,6 +73,7 @@ function inlineToTiptapNodes(node, marks, out) {
       // optional ([[target|alias]]). Children carry the rendered label text.
       const attrs = { target: node.target || "" };
       if (node.alias != null) attrs.alias = node.alias;
+      if (node.docId != null) attrs.docId = node.docId;
       const next = [...marks, { type: "wikilink", attrs }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
@@ -152,6 +153,9 @@ function markToPd(mark) {
       // Only carry `alias` when present — a stray `alias:undefined` would fail
       // the byte-exact round-trip for a plain (no-alias) wikilink.
       if (mark.attrs && mark.attrs.alias != null) w.alias = mark.attrs.alias;
+      // Likewise the pinned `docId` (picked-paper id) only when present — a
+      // typed-not-picked wikilink has none and must round-trip byte-identically.
+      if (mark.attrs && mark.attrs.docId != null) w.docId = mark.attrs.docId;
       return w;
     }
     case "blockref":
@@ -201,6 +205,7 @@ function tiptapTextNodeToPd(tnode) {
     } else if (w.kind === "wikilink") {
       node = { type: "wikilink", target: w.target, children: [node] };
       if (w.alias != null) node.alias = w.alias;
+      if (w.docId != null) node.docId = w.docId;
     } else {
       node = { type: w.kind, children: [node] };
     }

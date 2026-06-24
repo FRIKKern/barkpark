@@ -558,9 +558,12 @@ class BpPaperEditor extends HTMLElement {
   }
 
   // User picked a candidate: replace the typed "[[query" span with the chosen
-  // title carrying a `wikilink` mark { target: title }, plus a trailing UNMARKED
-  // space so typing continues OUTSIDE the link (the mark is inclusive:false, but
-  // the space guarantees it across browsers). _wlRange was captured in
+  // title carrying a `wikilink` mark { target: title, docId: id }, plus a
+  // trailing UNMARKED space so typing continues OUTSIDE the link (the mark is
+  // inclusive:false, but the space guarantees it across browsers). The pinned
+  // `docId` is the picked paper's EXACT id — render resolves to that doc, closing
+  // the title-collision hole (a typed-not-picked wikilink carries no docId and
+  // keeps the existing lower(title) resolution). _wlRange was captured in
   // _maybeWikilink at the moment the menu opened/refreshed.
   _chooseWikilink(candidate) {
     const range = this._wlRange;
@@ -575,7 +578,7 @@ class BpPaperEditor extends HTMLElement {
         {
           type: "text",
           text: candidate.title,
-          marks: [{ type: "wikilink", attrs: { target: candidate.title } }],
+          marks: [{ type: "wikilink", attrs: { target: candidate.title, docId: candidate.id } }],
         },
         { type: "text", text: " " },
       ])

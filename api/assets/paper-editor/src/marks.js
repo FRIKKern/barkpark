@@ -33,6 +33,7 @@ export function internalLinkMark(name, attrs) {
 export const Wikilink = internalLinkMark("wikilink", {
   target: { default: "" },
   alias: { default: null },
+  docId: { default: null },
 });
 export const Blockref = internalLinkMark("blockref", {
   target: { default: "" },

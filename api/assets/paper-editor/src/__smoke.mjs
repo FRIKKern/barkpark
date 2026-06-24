@@ -197,6 +197,51 @@ check("paragraph round-trip (wikilink, no alias)", () => {
   );
 });
 
+// 10a) wikilink WITH docId (picked-paper id pin) round-trips carrying
+//      target + docId — the id resolves render to the EXACT paper, closing the
+//      title-collision hole. Mirrors the alias guard.
+check("paragraph round-trip (wikilink + docId)", () => {
+  const sample = {
+    id: "p-10wd",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "see " },
+      {
+        type: "wikilink",
+        target: "intro-to-x",
+        docId: "doc-7",
+        children: [{ type: "text", value: "intro-to-x" }],
+      },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-10wd", "paragraph");
+  assert.deepEqual(back, sample);
+  assert.equal(back.content[1].docId, "doc-7");
+});
+
+// 10b) wikilink WITHOUT docId round-trips byte-exact — no stray `docId` key.
+//      (The byte-exact gate for every existing / typed-not-picked wikilink:
+//      docId:undefined must never leak into the node.)
+check("paragraph round-trip (wikilink, no docId)", () => {
+  const sample = {
+    id: "p-10wnd",
+    type: "paragraph",
+    content: [
+      {
+        type: "wikilink",
+        target: "setup",
+        children: [{ type: "text", value: "setup" }],
+      },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-10wnd", "paragraph");
+  assert.deepEqual(back, sample);
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(back.content[0], "docId"),
+    "plain wikilink must not gain a docId key",
+  );
+});
+
 // 11) blockref leaf round-trips (target/anchor ride the mark, not the text).
 check("paragraph round-trip (blockref)", () => {
   const sample = {
@@ -276,6 +321,7 @@ check("editor mark schemas match convert.js attrs", () => {
   assert.equal(Wikilink.name, "wikilink");
   assert.deepEqual(Object.keys(Wikilink.config.addAttributes()).sort(), [
     "alias",
+    "docId",
     "target",
   ]);
   assert.equal(Blockref.name, "blockref");

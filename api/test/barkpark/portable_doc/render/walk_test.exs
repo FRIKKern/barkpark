@@ -109,6 +109,60 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ ~s(href="/papers/doc-42")
       assert html =~ "<a "
     end
+
+    test "id-pin: a carried doc_id resolves to /papers/:id with an EMPTY :wikilinks palette" do
+      # Proves the id-pin bypasses title resolution — the palette has no entry
+      # for "Setup" (in fact it has no entries at all), yet the pin still links.
+      pal = Map.put(@email, :wikilinks, %{})
+
+      node = %{
+        "kind" => "PdWikilink",
+        "target" => "Setup",
+        "doc_id" => "p-pinned-99",
+        "children" => ["Setup"]
+      }
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ~s(href="/papers/p-pinned-99")
+      assert html =~ ~s(data-wikilink="Setup")
+      assert html =~ "text-decoration:none"
+      refute html =~ "dotted"
+    end
+
+    test "id-pin: doc_id wins over a clashing title entry (duplicate-title hole)" do
+      # Two papers share the title "Setup"; the palette resolves the title to
+      # the WRONG one. The pinned doc_id must override and link the picked paper.
+      pal = Map.put(@email, :wikilinks, %{"Setup" => %{id: "wrong-doc"}})
+
+      node = %{
+        "kind" => "PdWikilink",
+        "target" => "Setup",
+        "doc_id" => "right-doc",
+        "children" => ["Setup"]
+      }
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ~s(href="/papers/right-doc")
+      refute html =~ "wrong-doc"
+    end
+
+    test "no doc_id: empty/missing pin is byte-identical to the pre-pin render" do
+      # A typed-not-picked wikilink (no doc_id) must round-trip exactly as
+      # before — resolved via palette, dotted span when absent, and an empty
+      # "" doc_id must NOT trigger the fast path.
+      node = %{"kind" => "PdWikilink", "target" => "Home", "children" => ["Home"]}
+      node_empty = Map.put(node, "doc_id", "")
+      pal = Map.put(@email, :wikilinks, %{"Home" => %{id: "doc-42"}})
+
+      # Resolved-via-palette path is untouched whether doc_id is absent or "".
+      assert Walk.render_body(node, @width, pal) == Walk.render_body(node_empty, @width, pal)
+      assert Walk.render_body(node, @width, pal) =~ ~s(href="/papers/doc-42")
+
+      # Unresolved (empty palette) still degrades to the dotted span.
+      bare = Map.put(@email, :wikilinks, %{})
+      assert Walk.render_body(node, @width, bare) =~ "text-decoration:underline dotted"
+      assert Walk.render_body(node_empty, @width, bare) == Walk.render_body(node, @width, bare)
+    end
   end
 
   describe "render_body/3 — PdHeading (article only)" do
